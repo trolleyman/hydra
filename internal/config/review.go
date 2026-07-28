@@ -55,7 +55,7 @@ func reviewFieldLines(r ReviewConfig) []string {
 }
 
 // Review provider / auth / action constants. The string values are the config
-// spellings (see NON_LOCAL_INTEGRATION.md 3.2).
+// spellings (see docs/non-local-integration.md).
 const (
 	ReviewProviderAuto   = "auto"
 	ReviewProviderGitHub = "github"
@@ -82,7 +82,7 @@ const (
 // ReviewConfig configures how Hydra talks to a forge (GitHub/GitLab) and supplies
 // defaults for the Create MR dialog. There is deliberately no "mode" switch: the
 // head<->MR link is per-head, so this section only supplies defaults and forge
-// connection details (NON_LOCAL_INTEGRATION.md 3.2). All fields follow the
+// connection details (docs/non-local-integration.md). All fields follow the
 // nil-means-default pointer convention so an unset value inherits the built-in
 // default and a lower config layer's value.
 type ReviewConfig struct {
@@ -121,7 +121,7 @@ type ReviewConfig struct {
 }
 
 // JiraConfig configures ticket-key extraction and the JIRA base URL, used for
-// {ticket} templating and (later) spawn-from-ticket (NON_LOCAL_INTEGRATION.md 3.6).
+// {ticket} templating and (later) spawn-from-ticket (docs/non-local-integration.md).
 type JiraConfig struct {
 	// URL is the JIRA base URL, e.g. "https://mycorp.atlassian.net". nil/"" = unset.
 	URL *string `toml:"url"`
@@ -339,7 +339,7 @@ var branchPlaceholderRe = regexp.MustCompile(`\{[a-zA-Z_]+\}`)
 // {ticket}, {base}) into a concrete downstream branch name using vals. A
 // placeholder that expands to nothing collapses its adjacent separator characters
 // ('-', '_', '/') and empty path segments are dropped, so "feat/{ticket}-{id}"
-// with no ticket yields "feat/<id>" (NON_LOCAL_INTEGRATION.md 3.2). Unknown
+// with no ticket yields "feat/<id>" (docs/non-local-integration.md). Unknown
 // placeholders are treated as empty. There is deliberately no ${x:-fallback}
 // syntax - the collapse rule covers the real cases.
 func ExpandBranchTemplate(tmpl string, vals map[string]string) string {
@@ -419,7 +419,7 @@ func RemoteHost(remoteURL string) string {
 }
 
 // BrowseURL derives the forge's https browse URL for a repository from its git
-// remote URL, so the UI can link out to it with no forge API call (3.8). Returns
+// remote URL, so the UI can link out to it with no forge API call. Returns
 // "" when the URL can't be parsed. Both SSH and HTTPS forms map to
 // "https://<host>/<org>/<repo>" with any trailing ".git" stripped.
 func BrowseURL(remoteURL string) string {

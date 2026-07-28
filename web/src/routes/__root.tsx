@@ -268,7 +268,7 @@ function RootLayout() {
   // store (the agent page and settings load it too - ensureReviewConfig dedupes
   // concurrent fetches, so only one request runs). The sidebar uses its
   // browse_url for the forge web link next to Repository
-  // (NON_LOCAL_INTEGRATION.md 3.8).
+  // (docs/non-local-integration.md).
   const reviewConfig = useProjectStore((s) => (currentProjectId ? s.reviewConfigs[currentProjectId] : undefined))
   useEffect(() => {
     // Unconditional: the store may hold a persisted snapshot (rendered
@@ -794,7 +794,7 @@ function RootLayout() {
         >
           {/* Repository view + Sync - above the spawn box, adjacent to the project
               selector it describes: context (repo/branch/sync) -> action (spawn)
-              -> results (agents list). NON_LOCAL_INTEGRATION.md 3.8. */}
+              -> results (agents list). See docs/non-local-integration.md */}
           <div className="px-2 pt-2 pb-1 border-b border-gray-100 dark:border-gray-700">
             {currentProjectId ? (
               (() => {
@@ -863,7 +863,7 @@ function RootLayout() {
                         )}
                       </Link>
                       {/* Forge web link, derived from the remote URL (read-only, no
-                          auth - NON_LOCAL_INTEGRATION.md 3.8). Hidden when there is
+                          auth - docs/non-local-integration.md). Hidden when there is
                           no remote or no https browse URL could be derived. */}
                       {reviewConfig?.browse_url && (
                         <Tooltip

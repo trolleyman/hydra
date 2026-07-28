@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -179,55 +180,133 @@ func (p *gitlabProvider) Merge(ctx context.Context, repoDir, _ string, id string
 	return errtrace.Wrap(err)
 }
 
-// glabDiscussion mirrors the GitLab discussions API shape.
+// glabDiscussion mirrors the GitLab discussions API shape. A discussion IS the
+// thread; its notes carry the position (file/line) and resolution state.
 type glabDiscussion struct {
-	ID    string `json:"id"`
-	Notes []struct {
-		ID       int    `json:"id"`
-		Body     string `json:"body"`
-		System   bool   `json:"system"`
-		Resolved bool   `json:"resolved"`
-		Author   struct {
-			Username string `json:"username"`
-		} `json:"author"`
-		Position *struct {
-			NewPath string `json:"new_path"`
-			NewLine int    `json:"new_line"`
-		} `json:"position"`
-	} `json:"notes"`
+	ID    string     `json:"id"`
+	Notes []glabNote `json:"notes"`
 }
 
-func (p *gitlabProvider) Discussions(ctx context.Context, repoDir, _ string, id string) ([]Discussion, error) {
-	// glab api hits the GitLab REST API with glab's auth. CURRENT_PROJECT is a glab
+type glabNote struct {
+	ID        int    `json:"id"`
+	Body      string `json:"body"`
+	System    bool   `json:"system"`
+	Resolved  bool   `json:"resolved"`
+	CreatedAt string `json:"created_at"`
+	Author    struct {
+		Username string `json:"username"`
+	} `json:"author"`
+	Position *struct {
+		NewPath string `json:"new_path"`
+		NewLine int    `json:"new_line"`
+	} `json:"position"`
+}
+
+func (p *gitlabProvider) Threads(ctx context.Context, repoDir, _ string, id string) ([]Thread, error) {
+	// glab api hits the GitLab REST API with glab's auth. :id is a glab
 	// placeholder for the resolved project path.
 	out, err := p.run(ctx, repoDir, "glab", "api", "projects/:id/merge_requests/"+id+"/discussions", "--paginate")
 	if err != nil {
-		// Fall back gracefully: no discussions rather than a hard error.
 		return nil, errtrace.Wrap(err)
 	}
 	var discussions []glabDiscussion
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &discussions); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	var res []Discussion
+	webURL := p.mrWebURL(ctx, repoDir, id)
+	threads := make([]Thread, 0, len(discussions))
 	for _, d := range discussions {
+		t := Thread{ID: d.ID}
 		for _, n := range d.Notes {
-			if n.System || n.Resolved {
-				continue // skip system notes and already-resolved threads
+			if n.System {
+				continue // "changed the description", "added 1 commit", ... - not a conversation
 			}
-			disc := Discussion{
-				ID:     d.ID,
-				Author: n.Author.Username,
-				Body:   n.Body,
+			// Resolution is per-note on GitLab but is really a thread property; any
+			// resolved note means the thread is resolved.
+			if n.Resolved {
+				t.Resolved = true
 			}
-			if n.Position != nil {
-				disc.Path = n.Position.NewPath
-				disc.Line = n.Position.NewLine
+			if n.Position != nil && t.Path == "" {
+				t.Path, t.Line = n.Position.NewPath, n.Position.NewLine
 			}
-			res = append(res, disc)
+			note := Note{
+				ID: strconv.Itoa(n.ID), Author: n.Author.Username,
+				Body: n.Body, CreatedAt: n.CreatedAt,
+			}
+			if webURL != "" {
+				note.URL = webURL + "#note_" + note.ID
+			}
+			t.Notes = append(t.Notes, note)
 		}
+		if len(t.Notes) == 0 {
+			continue // a purely system discussion
+		}
+		t.URL = t.Notes[0].URL
+		threads = append(threads, t)
 	}
-	return res, nil
+	return threads, nil
+}
+
+// mrWebURL resolves the MR's web URL so notes can carry deep links. Best-effort:
+// an error just means notes render without a link.
+func (p *gitlabProvider) mrWebURL(ctx context.Context, repoDir, id string) string {
+	out, err := p.run(ctx, repoDir, "glab", "api", "projects/:id/merge_requests/"+id)
+	if err != nil {
+		return ""
+	}
+	var mr struct {
+		WebURL string `json:"web_url"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(out)), &mr) != nil {
+		return ""
+	}
+	return mr.WebURL
+}
+
+func (p *gitlabProvider) ReplyToThread(ctx context.Context, repoDir, _ string, id, threadID, body string) error {
+	if strings.TrimSpace(body) == "" {
+		return errtrace.Wrap(errors.New("reply body is empty"))
+	}
+	_, err := p.run(ctx, repoDir, "glab", "api", "-X", "POST",
+		"projects/:id/merge_requests/"+id+"/discussions/"+threadID+"/notes",
+		"-f", "body="+body)
+	return errtrace.Wrap(err)
+}
+
+func (p *gitlabProvider) CommentOnLine(ctx context.Context, repoDir, _ string, id string, c NewLineComment) error {
+	if strings.TrimSpace(c.Body) == "" {
+		return errtrace.Wrap(errors.New("comment body is empty"))
+	}
+	// A positioned discussion needs the MR's three diff refs; GitLab rejects a
+	// position without them, so they are read fresh rather than cached.
+	out, err := p.run(ctx, repoDir, "glab", "api", "projects/:id/merge_requests/"+id)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	var mr struct {
+		DiffRefs struct {
+			BaseSha  string `json:"base_sha"`
+			StartSha string `json:"start_sha"`
+			HeadSha  string `json:"head_sha"`
+		} `json:"diff_refs"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &mr); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if mr.DiffRefs.HeadSha == "" {
+		return errtrace.Wrap(fmt.Errorf("could not resolve the diff refs of MR %s", id))
+	}
+	_, err = p.run(ctx, repoDir, "glab", "api", "-X", "POST",
+		"projects/:id/merge_requests/"+id+"/discussions",
+		"-f", "body="+c.Body,
+		"-f", "position[position_type]=text",
+		"-f", "position[base_sha]="+mr.DiffRefs.BaseSha,
+		"-f", "position[start_sha]="+mr.DiffRefs.StartSha,
+		"-f", "position[head_sha]="+mr.DiffRefs.HeadSha,
+		"-f", "position[new_path]="+c.Path,
+		"-f", "position[old_path]="+c.Path,
+		"-F", "position[new_line]="+strconv.Itoa(c.Line))
+	return errtrace.Wrap(err)
 }
 
 // glabMRRef is the subset of `glab mr {list,view} -F json` fields needed to

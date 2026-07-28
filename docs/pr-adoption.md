@@ -9,8 +9,39 @@ below describe how it works.
 
 Known follow-ups (not blockers): the `gh --json` fork-detection field names want
 a live-auth verification pass (see the CAVEAT in step 4); token/REST forge auth
-is still CLI-only; and the fetch-fresh spawn base (NON_LOCAL_INTEGRATION.md 3.6)
+is still CLI-only; and the fetch-fresh spawn base (non-local-integration.md)
 that keeps an adopted head's diff crisp remains unbuilt.
+
+### The review file must be seeded AT SPAWN, not by the watcher
+
+The first cut let the review watcher populate the head's review file on its next
+tick. That is up to 30s away, and an adopted head's first question is invariably
+"what are the review comments?" - in practice ~4s after spawn. The agent read the
+empty `{"linked":false}` seed, was told it had no PR, tried `gh` (unauthenticated
+in the sandbox, by design) and gave up.
+
+So `resolveAdoptSpec` now also fetches `Status` + `Discussions` while it has the
+provider in hand (`adoptReviewSnapshot`), hands them to `SpawnHead` on
+`AdoptSpec.Review`, and the spawn writes the review file **before the sandbox is
+built** (`heads.WriteReviewSnapshot`, shared with the watcher). `seedHead` only
+creates the empty file when none exists, so it leaves the seeded snapshot alone.
+The write truncates in place - the file is bind-mounted into the sandbox by
+inode, so a write-and-rename would leave the agent reading a stale copy forever.
+
+The seed covers the first turn; freshness after that is the review tools'
+own job - each call now asks the daemon to re-read the MR from the forge
+(`internal/reviewq`, non-local-integration.md) before answering, so an
+agent that pushes a fix and asks again sees the new comments rather than the
+30s watcher's last cache.
+
+Two supporting changes:
+
+- an adopted head's system prompt gains a note naming the PR, its target branch,
+  its push access and the review tools (`adoptedPrePromptNote`), so the agent
+  knows what it is sitting on before it calls anything;
+- the "not linked" answer from `get_review_status` / `get_review_comments` now
+  explains *why* (not adopted, not published) and that `gh`/`glab` cannot help
+  from inside the sandbox, so the agent asks the user instead of flailing.
 
 ## Problem
 
@@ -65,7 +96,7 @@ Setting `BaseBranch` to the PR's target branch is what makes the diff viewer sho
 **the whole PR** (target...`hydra/<id>`), your edits included, which is the right
 default for reviewing-and-fixing. It relies on the local target branch being
 reasonably fresh; the pre-existing "fetch-fresh spawn base" gap
-(NON_LOCAL_INTEGRATION.md 3.6) applies here too and is worth doing first or at the
+(non-local-integration.md) applies here too and is worth doing first or at the
 same time.
 
 ## Design
@@ -192,6 +223,14 @@ badge** when `CanPush` is false. `ReviewControls.tsx` should label an adopted he
 adopted rather than showing "Create MR", and hide `DownstreamBranchEditor` (the branch
 name is the PR's, not ours).
 
+The picker lives in the spawn-options popover, first of its four sections (pull
+request -> base branch -> run mode -> git isolation), ordered widest-effect
+first: adopting a PR chooses the base branch for you, which is why the base
+section hides while one is selected. It started out inline in the composer
+footer, but the chip plus the picker trigger overflowed that row; the Spawn
+button switching to "Adopt PR #n" is what keeps the choice visible without
+opening the cog.
+
 ## Rejected alternatives
 
 - **Check out the PR's real branch name instead of `hydra/<id>`.** Rejected: it
@@ -262,6 +301,6 @@ Each step is independently useful and independently shippable.
 5. **Web: PR picker + adopted-head labelling** in `SpawnForm.tsx` / `ReviewControls.tsx`.
 
 Steps 1-4 are roughly a day; step 5 is a modest component. Worth folding in the
-pre-existing **fetch-fresh spawn base** gap (NON_LOCAL_INTEGRATION.md 3.6) around step
+pre-existing **fetch-fresh spawn base** gap (non-local-integration.md) around step
 3, since an adopted head's diff quality depends directly on the local target branch not
 being stale.

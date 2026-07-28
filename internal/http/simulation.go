@@ -940,6 +940,128 @@ func (s *SimulationServer) ListReviews(w http.ResponseWriter, r *http.Request, p
 	})
 }
 
+// simThreadMu guards the simulation's in-memory review threads, so replies made
+// in the UI stick for the rest of the run (the fixtures are seeded lazily on
+// first read).
+var (
+	simThreadMu      sync.Mutex
+	simThreadsByHead map[string][]api.ReviewThread
+)
+
+// simSeedThreads builds the fixture review conversations for a head. They anchor
+// to lines that really exist in the simulated diff (internal/heads/heads.go 5 and
+// 45), so the diff viewer renders them inline, and cover the three shapes worth
+// looking at: a plain forge thread, a thread with an agent's local-only reply,
+// and a resolved one.
+func simSeedThreads(id string) []api.ReviewThread {
+	if id != "agent-1" {
+		return nil
+	}
+	return []api.ReviewThread{
+		{
+			Id: "701", Path: "internal/heads/heads.go", Line: 5,
+			Resolved: ptr(false), Outdated: ptr(false),
+			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701"),
+			Notes: []api.ReviewThreadNote{
+				{Id: "701", Author: ptr("priya"), Body: "Is `errors` still used after the refactor? If not this import can go.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:12:00Z"), Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701")},
+			},
+		},
+		{
+			Id: "702", Path: "internal/heads/heads.go", Line: 45,
+			Resolved: ptr(false), Outdated: ptr(false),
+			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_702"),
+			Notes: []api.ReviewThreadNote{
+				{Id: "702", Author: ptr("sam"), Body: "Threading a `*db.Store` through here couples spawn to the DB - can we pass the narrower interface instead?", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:20:00Z")},
+				{Id: "703", Author: ptr("priya"), Body: "Agreed, and it would make this testable without a temp DB.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:26:00Z")},
+				{Id: "local-1", Author: ptr("agent"), Body: "Narrowed it to a `HeadStore` interface in 4f21ac9 - spawn now takes just `CreateAgent`/`GetAgent`.", Origin: api.LocalOnly, CreatedAt: ptr("2026-07-28T09:41:00Z")},
+			},
+		},
+		{
+			Id: "704", Path: "web/src/components/AgentDetail.tsx", Line: 46,
+			Resolved: ptr(true), Outdated: ptr(false),
+			Notes: []api.ReviewThreadNote{
+				{Id: "704", Author: ptr("sam"), Body: "Nit: this could use the shared formatter.", Origin: api.Forge, CreatedAt: ptr("2026-07-27T16:02:00Z")},
+			},
+		},
+	}
+}
+
+// simThreads returns the head's threads, seeding the fixtures on first use.
+func simThreads(id string) []api.ReviewThread {
+	simThreadMu.Lock()
+	defer simThreadMu.Unlock()
+	if simThreadsByHead == nil {
+		simThreadsByHead = map[string][]api.ReviewThread{}
+	}
+	if _, ok := simThreadsByHead[id]; !ok {
+		simThreadsByHead[id] = simSeedThreads(id)
+	}
+	return simThreadsByHead[id]
+}
+
+// simThreadsResponse wraps the head's threads in the API envelope. agent-1 is the
+// linked head in the fixtures; everything else reports unlinked, which is what
+// makes the diff viewer show local comments only.
+func simThreadsResponse(id string) api.ReviewThreadsResponse {
+	threads := simThreads(id)
+	resp := api.ReviewThreadsResponse{Threads: threads, Linked: id == "agent-1"}
+	if resp.Threads == nil {
+		resp.Threads = []api.ReviewThread{}
+	}
+	if resp.Linked {
+		resp.Provider = ptr(forge.ProviderGitLab)
+		resp.MrUrl = ptr("https://gitlab.example.com/team/repo/-/merge_requests/42")
+		resp.FetchedAt = ptr(time.Now().Format(time.RFC3339))
+	}
+	return resp
+}
+
+func (s *SimulationServer) GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteJSON(w, http.StatusOK, simThreadsResponse(id))
+}
+
+func (s *SimulationServer) CreateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var body api.NewReviewCommentRequest
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	simThreads(id) // seed
+	simThreadMu.Lock()
+	newID := fmt.Sprintf("sim-%d", len(simThreadsByHead[id])+800)
+	simThreadsByHead[id] = append(simThreadsByHead[id], api.ReviewThread{
+		Id: newID, Path: body.Path, Line: body.Line,
+		Resolved: ptr(false), Outdated: ptr(false),
+		Notes: []api.ReviewThreadNote{{
+			Id: newID, Author: ptr("you"), Body: body.Body, Origin: api.Forge,
+			CreatedAt: ptr(time.Now().Format(time.RFC3339)),
+		}},
+	})
+	simThreadMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, simThreadsResponse(id))
+}
+
+func (s *SimulationServer) ReplyToReviewThread(w http.ResponseWriter, r *http.Request, projectId string, id string, threadId string) {
+	var body api.ReviewReplyRequest
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	simThreads(id) // seed
+	origin := api.Forge
+	author := "you"
+	if body.Local != nil && *body.Local {
+		origin = api.LocalOnly
+	}
+	simThreadMu.Lock()
+	for i := range simThreadsByHead[id] {
+		if simThreadsByHead[id][i].Id != threadId {
+			continue
+		}
+		simThreadsByHead[id][i].Notes = append(simThreadsByHead[id][i].Notes, api.ReviewThreadNote{
+			Id:     fmt.Sprintf("sim-reply-%d", len(simThreadsByHead[id][i].Notes)+900),
+			Author: ptr(author), Body: body.Body, Origin: origin,
+			CreatedAt: ptr(time.Now().Format(time.RFC3339)),
+		})
+	}
+	simThreadMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, simThreadsResponse(id))
+}
+
 func (s *SimulationServer) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1134,6 +1256,13 @@ func (s *SimulationServer) MarkAgentUnread(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GenerateAgentTitle fakes the title model with a fixed answer, after a short
+// delay so the button's in-flight state is actually visible in the simulator.
+func (s *SimulationServer) GenerateAgentTitle(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	time.Sleep(1500 * time.Millisecond)
+	api.WriteJSON(w, http.StatusOK, api.GeneratedTitleResponse{Title: "Simulated generated title"})
+}
+
 func (s *SimulationServer) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1142,10 +1271,89 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 	if id == "agent-1" {
 		resp := api.GetAgentCommits200JSONResponse{
 			{
-				Sha:         "abcd1234efgh5678ijkl9012mnop3456qrst7890",
-				ShortSha:    "abcd123",
-				Subject:     ptr("Add feature X"),
-				Message:     "Add feature X\n\nMore details about feature X",
+				// A deliberately HUGE message: taller than any viewport, so the
+				// hover card's height cap has to bite and the card has to scroll
+				// rather than run off the screen. Also the only fixture with
+				// nested lists, a fenced block and a table in a commit message.
+				Sha:      "9f8e7d6c5b4a39281706fedcba9876543210abcd",
+				ShortSha: "9f8e7d6",
+				Subject:  ptr("Rework the artifact pipeline end to end"),
+				Message: "Rework the artifact pipeline end to end\n\n" +
+					"The generator, the uploader and the viewer each had their own\n" +
+					"idea of what an artifact was, so a run could produce a file the\n" +
+					"viewer refused to show and the uploader happily stored. They\n" +
+					"now share one manifest, written once by the generator and\n" +
+					"treated as read-only downstream.\n\n" +
+					"What moved:\n\n" +
+					"- `internal/artifacts/manifest.go` is new and owns the schema.\n" +
+					"  Every producer writes through it; nothing else constructs a\n" +
+					"  manifest literal any more.\n" +
+					"  - The `kind` field is a closed set (`image`, `log`, `server`)\n" +
+					"    rather than a free string, so an unknown kind is a load\n" +
+					"    error instead of a blank card three screens later.\n" +
+					"  - Dimensions are recorded at generation time. The viewer used\n" +
+					"    to decode every PNG just to lay out a grid.\n" +
+					"- `internal/artifacts/upload.go` retries transport errors and\n" +
+					"  5xx with a jittered exponential backoff, and gives up loudly.\n" +
+					"- The viewer reads the manifest and nothing else. It no longer\n" +
+					"  stats the directory, which is what made a half-written run\n" +
+					"  render as a wall of broken tiles.\n\n" +
+					"```go\n" +
+					"// The one constructor. Everything else is a method on it.\n" +
+					"m, err := artifacts.NewManifest(runID, artifacts.KindImage)\n" +
+					"if err != nil {\n" +
+					"\treturn errtrace.Wrap(err)\n" +
+					"}\n" +
+					"```\n\n" +
+					"| Stage     | Before            | After                |\n" +
+					"| --------- | ----------------- | -------------------- |\n" +
+					"| Generate  | ad-hoc JSON       | `NewManifest`        |\n" +
+					"| Upload    | fail on first 5xx | 5 tries, jittered    |\n" +
+					"| View      | stat the dir      | read the manifest    |\n\n" +
+					"Migration: an old run has no manifest, so the loader synthesises\n" +
+					"one from the directory listing the first time it is opened and\n" +
+					"writes it back. That path is deliberately lossy - it cannot\n" +
+					"recover the tags a run was generated with - and it will be\n" +
+					"removed once no live project has a pre-manifest run left.\n\n" +
+					"Not done here, on purpose:\n\n" +
+					"- Per-artifact retention. The manifest has the field, nothing\n" +
+					"  reads it yet, and the sweeper is its own change.\n" +
+					"- Content-addressed storage. Tempting, and it would kill the\n" +
+					"  duplicate screenshots entirely, but it changes the on-disk\n" +
+					"  layout for every existing project at once.\n\n" +
+					"Design decision (no user input): the synthesised manifest is\n" +
+					"written back rather than kept in memory, so the lossy path runs\n" +
+					"once per run instead of once per page load. It means opening an\n" +
+					"old run mutates its directory, which is worth saying out loud.",
+				AuthorName:  "Agent Claude",
+				AuthorEmail: "claude@hydra.ai",
+				Timestamp:   simNow().Add(-5 * time.Minute).Format(time.RFC3339),
+			},
+			{
+				// A long, hard-wrapped, bulleted message - the shape agents
+				// actually write. It is what exercises the commit hover card in
+				// the selectors: markdown body, paragraph reflow (no <br> per
+				// wrapped line) and the height cap that makes a tall card scroll
+				// instead of running off the bottom of the screen.
+				Sha:      "abcd1234efgh5678ijkl9012mnop3456qrst7890",
+				ShortSha: "abcd123",
+				Subject:  ptr("Add feature X"),
+				Message: "Add feature X\n\n" +
+					"The uploader had no way to express \"retry this, but not\n" +
+					"forever\", so a flaky object store took the whole run down with\n" +
+					"it. `Put` now retries a failed upload up to `maxAttempts`\n" +
+					"times, sleeping a jittered exponential delay between tries.\n\n" +
+					"- The delay is 100ms doubled per attempt, +/- 50% jitter, so a\n" +
+					"  fleet of heads retrying at once does not synchronise into a\n" +
+					"  thundering herd.\n" +
+					"- Only transport errors and 5xx are retried; a 4xx is the\n" +
+					"  caller's bug and fails immediately.\n" +
+					"- The last error is surfaced once every attempt is exhausted,\n" +
+					"  rather than a generic \"upload failed\".\n\n" +
+					"Design decision (no user input): the cap lives on the uploader\n" +
+					"rather than in config - callers that want a different budget\n" +
+					"already pass a context deadline, and two knobs for one\n" +
+					"behaviour is how they end up disagreeing.",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
 				Timestamp:   simNow().Add(-10 * time.Minute).Format(time.RFC3339),

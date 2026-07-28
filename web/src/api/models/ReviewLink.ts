@@ -4,7 +4,7 @@
 /* eslint-disable */
 import type { ReviewState } from './ReviewState';
 /**
- * The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
+ * The per-head link to a forge MR/PR (docs/non-local-integration.md). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
  */
 export type ReviewLink = {
     /**

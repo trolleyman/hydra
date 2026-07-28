@@ -68,6 +68,12 @@ export const StorageKeys = {
   // a wrapped long line apart from a genuinely new one. Client-only, global
   // (localStorage, like Theme). See lib/chatPrefs.
   chatCodeLineNumbers: 'hydra-chat-code-line-numbers',
+  // Spaces the shell-command formatter indents a block body by when it lays a
+  // one-line for/while/if/case out over several lines - in the chat transcript
+  // and on the security approval card. A bare number ('0' = flush left); absent
+  // = the built-in 4. Client-only, global (localStorage, like Theme). See
+  // lib/chatPrefs + lib/bashFormat.
+  chatBashIndent: 'hydra-chat-bash-indent',
   // '1' when the user has opted in to desktop (browser) notifications for agent
   // transitions (needs_input / approval / finished) that happen while this tab is
   // backgrounded or unfocused. Absent = off (the default; enabling requires an
@@ -213,6 +219,15 @@ export const reviewDraftKey = (projectId: string | null, agentId: string): strin
 export const LINE_DRAFT_PREFIX = 'hydra-line-draft-'
 export const lineDraftKey = (projectId: string | null, agentId: string): string =>
   `${LINE_DRAFT_PREFIX}${projectId ?? '_'}-${agentId}`
+
+// In-progress replies to a FORGE review thread (docs/review-threads.md), one
+// entry per project + agent holding a map of thread-id -> the half-written text.
+// Same lifecycle as LINE_DRAFT, kept separate so a reply the user is part-way
+// through survives scrolling the thread out of view or reloading, and so the two
+// prune independently. projectId may be null -> '_'.
+export const THREAD_DRAFT_PREFIX = 'hydra-thread-draft-'
+export const threadDraftKey = (projectId: string | null, agentId: string): string =>
+  `${THREAD_DRAFT_PREFIX}${projectId ?? '_'}-${agentId}`
 
 // Whether the sidebar's "Archived" section is collapsed, per project. Absent =
 // collapsed (the default - archived history is rarely wanted, so it stays out of

@@ -119,6 +119,12 @@ const (
 	RepositoryArtifactResponseStatusReady      RepositoryArtifactResponseStatus = "ready"
 )
 
+// Defines values for ReviewThreadNoteOrigin.
+const (
+	Forge     ReviewThreadNoteOrigin = "forge"
+	LocalOnly ReviewThreadNoteOrigin = "local_only"
+)
+
 // Defines values for ServiceStatusState.
 const (
 	Down       ServiceStatusState = "down"
@@ -293,10 +299,10 @@ type AgentResponse struct {
 	ProjectPath string  `json:"project_path"`
 	Prompt      string  `json:"prompt"`
 
-	// PublishWhenGreen True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See NON_LOCAL_INTEGRATION.md 3.5.
+	// PublishWhenGreen True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See docs/non-local-integration.md
 	PublishWhenGreen *bool `json:"publish_when_green,omitempty"`
 
-	// Review The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
+	// Review The per-head link to a forge MR/PR (docs/non-local-integration.md). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
 	Review *ReviewLink `json:"review,omitempty"`
 
 	// SessionPid PID of the running sandbox session, or 0 if not running
@@ -748,6 +754,12 @@ type ErrorResponse struct {
 // ErrorResponseError Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
 type ErrorResponseError string
 
+// GeneratedTitleResponse defines model for GeneratedTitleResponse.
+type GeneratedTitleResponse struct {
+	// Title The generated title. Not persisted - the client offers it as a draft.
+	Title string `json:"title"`
+}
+
 // ListReviewsResponse The open PRs/MRs available to adopt, plus the forge auth state so the picker can show a "run gh/glab auth login" hint (docs/pr-adoption.md).
 type ListReviewsResponse struct {
 	// AuthStatus Live auth status line, when not authenticated / configured.
@@ -818,6 +830,15 @@ type NetworkConfig struct {
 
 // NetworkConfigMode Egress posture: "off" (no network), "unrestricted" (network, no host filtering), "advisory" (proxy-only host filtering - every honest client is filtered, but escapable), or "hard" (inescapable pasta+nft netns, failing closed - no network - when the boundary can't be built; "on" is a synonym for "hard"). Null/unset = default ("hard"). Supersedes the legacy enabled/filter_enabled booleans.
 type NetworkConfigMode string
+
+// NewReviewCommentRequest defines model for NewReviewCommentRequest.
+type NewReviewCommentRequest struct {
+	Body string `json:"body"`
+
+	// Line NEW-side line number, as anchored in the diff viewer.
+	Line int    `json:"line"`
+	Path string `json:"path"`
+}
 
 // PolicyConfig Per-agent security-gate policy. The decision-capable gate can deny (or park for approval) tool calls even under skip-permissions.
 type PolicyConfig struct {
@@ -1147,7 +1168,7 @@ type ReviewConfig struct {
 	Squash             *bool   `json:"squash"`
 }
 
-// ReviewConfigResponse Resolved [review] config for a project plus live forge auth status (NON_LOCAL_INTEGRATION.md 3.2).
+// ReviewConfigResponse Resolved [review] config for a project plus live forge auth status (docs/non-local-integration.md).
 type ReviewConfigResponse struct {
 	// Auth Auth method ("cli" | "token").
 	Auth string `json:"auth"`
@@ -1187,7 +1208,7 @@ type ReviewConfigResponse struct {
 	Squash            *bool   `json:"squash,omitempty"`
 }
 
-// ReviewLink The per-head link to a forge MR/PR (NON_LOCAL_INTEGRATION.md 3.3). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
+// ReviewLink The per-head link to a forge MR/PR (docs/non-local-integration.md). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
 type ReviewLink struct {
 	// Adopted True when this head was spawned ON an existing PR/MR Hydra did not create (docs/pr-adoption.md). Such a head has no "Create MR" affordance and its downstream branch (the PR author's source branch) is not editable.
 	Adopted *bool `json:"adopted,omitempty"`
@@ -1247,6 +1268,14 @@ type ReviewRef struct {
 	Url          string `json:"url"`
 }
 
+// ReviewReplyRequest defines model for ReviewReplyRequest.
+type ReviewReplyRequest struct {
+	Body string `json:"body"`
+
+	// Local Keep the reply inside Hydra instead of posting it to the forge.
+	Local *bool `json:"local,omitempty"`
+}
+
 // ReviewState Cached forge MR state from the lifecycle watcher (Phase 3). Absent until the watcher has polled.
 type ReviewState struct {
 	Approvals         *int `json:"approvals,omitempty"`
@@ -1259,6 +1288,59 @@ type ReviewState struct {
 	// State Normalized MR state (draft | open | merged | closed).
 	State                 string `json:"state"`
 	UnresolvedDiscussions *int   `json:"unresolved_discussions,omitempty"`
+}
+
+// ReviewThread One review conversation, anchored to a file/line where the forge reports one.
+type ReviewThread struct {
+	// Id Thread handle used for replies (GitHub - the root comment id; GitLab - the discussion id).
+	Id string `json:"id"`
+
+	// Line NEW-side line the thread anchors to (0 when the forge reports none).
+	Line  int                `json:"line"`
+	Notes []ReviewThreadNote `json:"notes"`
+
+	// Outdated The anchor line no longer exists in the MR's diff.
+	Outdated *bool   `json:"outdated,omitempty"`
+	Path     string  `json:"path"`
+	Resolved *bool   `json:"resolved,omitempty"`
+	Url      *string `json:"url,omitempty"`
+}
+
+// ReviewThreadNote One comment in a review thread. Local notes never reach the forge.
+type ReviewThreadNote struct {
+	Author    *string `json:"author,omitempty"`
+	Body      string  `json:"body"`
+	CreatedAt *string `json:"created_at,omitempty"`
+	Id        string  `json:"id"`
+
+	// Origin "forge" - on the PR for everyone to see; "local_only" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants.
+	Origin ReviewThreadNoteOrigin `json:"origin"`
+	Url    *string                `json:"url,omitempty"`
+}
+
+// ReviewThreadNoteOrigin "forge" - on the PR for everyone to see; "local_only" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants.
+type ReviewThreadNoteOrigin string
+
+// ReviewThreadsResponse The review conversations on a head's MR, forge threads and Hydra's local-only notes merged (docs/review-threads.md).
+type ReviewThreadsResponse struct {
+	// Error Why the live read failed (present with stale=true).
+	Error *string `json:"error,omitempty"`
+
+	// FetchedAt RFC3339 time the threads were read from the forge.
+	FetchedAt *string `json:"fetched_at,omitempty"`
+
+	// Linked False when the head has no MR - the diff viewer then shows local comments only.
+	Linked bool `json:"linked"`
+
+	// MrUrl The MR/PR the threads belong to.
+	MrUrl *string `json:"mr_url,omitempty"`
+
+	// Provider "github" | "gitlab" - drives the origin badge on forge threads.
+	Provider *string `json:"provider,omitempty"`
+
+	// Stale True when the live forge read failed and these are the last cached threads.
+	Stale   *bool          `json:"stale,omitempty"`
+	Threads []ReviewThread `json:"threads"`
 }
 
 // SandboxConfig User-editable sandbox policy, additive on top of baked-in defaults
@@ -1877,6 +1959,12 @@ type SendAgentInputJSONRequestBody = AgentInputRequest
 // PublishAgentJSONRequestBody defines body for PublishAgent for application/json ContentType.
 type PublishAgentJSONRequestBody PublishAgentJSONBody
 
+// CreateReviewCommentJSONRequestBody defines body for CreateReviewComment for application/json ContentType.
+type CreateReviewCommentJSONRequestBody = NewReviewCommentRequest
+
+// ReplyToReviewThreadJSONRequestBody defines body for ReplyToReviewThread for application/json ContentType.
+type ReplyToReviewThreadJSONRequestBody = ReviewReplyRequest
+
 // SaveConfigJSONRequestBody defines body for SaveConfig for application/json ContentType.
 type SaveConfigJSONRequestBody = ConfigResponse
 
@@ -1948,6 +2036,9 @@ type ServerInterface interface {
 	// Set a head's downstream branch name (the name it is pushed AS)
 	// (PATCH /api/projects/{project_id}/agents/{id}/downstream-branch)
 	SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Generate a title for an agent from its task prompt
+	// (POST /api/projects/{project_id}/agents/{id}/generate-title)
+	GenerateAgentTitle(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Send text input to an agent's terminal stdin
 	// (POST /api/projects/{project_id}/agents/{id}/input)
 	SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -1999,6 +2090,15 @@ type ServerInterface interface {
 	// Resume an archived (killed/merged) agent, restoring its conversation
 	// (POST /api/projects/{project_id}/agents/{id}/resume)
 	ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// The review threads on this head's MR, for the diff viewer
+	// (GET /api/projects/{project_id}/agents/{id}/review/threads)
+	GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Start a new review thread on a line of this head's MR
+	// (POST /api/projects/{project_id}/agents/{id}/review/threads)
+	CreateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Reply to a review thread on this head's MR
+	// (POST /api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply)
+	ReplyToReviewThread(w http.ResponseWriter, r *http.Request, projectId string, id string, threadId string)
 	// Get the test-runner verdict(s) for a head's branch
 	// (GET /api/projects/{project_id}/agents/{id}/tests)
 	GetAgentTests(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentTestsParams)
@@ -2802,6 +2902,40 @@ func (siw *ServerInterfaceWrapper) SetDownstreamBranch(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// GenerateAgentTitle operation middleware
+func (siw *ServerInterfaceWrapper) GenerateAgentTitle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GenerateAgentTitle(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SendAgentInput operation middleware
 func (siw *ServerInterfaceWrapper) SendAgentInput(w http.ResponseWriter, r *http.Request) {
 
@@ -3476,6 +3610,117 @@ func (siw *ServerInterfaceWrapper) ResumeAgent(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ResumeAgent(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReviewThreads operation middleware
+func (siw *ServerInterfaceWrapper) GetReviewThreads(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReviewThreads(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateReviewComment operation middleware
+func (siw *ServerInterfaceWrapper) CreateReviewComment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateReviewComment(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReplyToReviewThread operation middleware
+func (siw *ServerInterfaceWrapper) ReplyToReviewThread(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "thread_id" -------------
+	var threadId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "thread_id", r.PathValue("thread_id"), &threadId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "thread_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReplyToReviewThread(w, r, projectId, id, threadId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4498,6 +4743,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff", wrapper.GetAgentDiff)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff-files", wrapper.GetAgentDiffFiles)
 	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/downstream-branch", wrapper.SetDownstreamBranch)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/generate-title", wrapper.GenerateAgentTitle)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/input", wrapper.SendAgentInput)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.DisarmMergeWhenGreen)
@@ -4515,6 +4761,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart-session", wrapper.RestartAgentSession)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/resume", wrapper.ResumeAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/threads", wrapper.GetReviewThreads)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/threads", wrapper.CreateReviewComment)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply", wrapper.ReplyToReviewThread)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/tests", wrapper.GetAgentTests)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/unread", wrapper.MarkAgentUnread)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
@@ -5269,6 +5518,60 @@ func (response SetDownstreamBranch404JSONResponse) VisitSetDownstreamBranchRespo
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GenerateAgentTitleRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type GenerateAgentTitleResponseObject interface {
+	VisitGenerateAgentTitleResponse(w http.ResponseWriter) error
+}
+
+type GenerateAgentTitle200JSONResponse GeneratedTitleResponse
+
+func (response GenerateAgentTitle200JSONResponse) VisitGenerateAgentTitleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GenerateAgentTitle400JSONResponse ErrorResponse
+
+func (response GenerateAgentTitle400JSONResponse) VisitGenerateAgentTitleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GenerateAgentTitle404JSONResponse ErrorResponse
+
+func (response GenerateAgentTitle404JSONResponse) VisitGenerateAgentTitleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GenerateAgentTitle500JSONResponse ErrorResponse
+
+func (response GenerateAgentTitle500JSONResponse) VisitGenerateAgentTitleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GenerateAgentTitle502JSONResponse ErrorResponse
+
+func (response GenerateAgentTitle502JSONResponse) VisitGenerateAgentTitleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type SendAgentInputRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
@@ -5984,6 +6287,108 @@ type ResumeAgent500JSONResponse ErrorResponse
 func (response ResumeAgent500JSONResponse) VisitResumeAgentResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetReviewThreadsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+}
+
+type GetReviewThreadsResponseObject interface {
+	VisitGetReviewThreadsResponse(w http.ResponseWriter) error
+}
+
+type GetReviewThreads200JSONResponse ReviewThreadsResponse
+
+func (response GetReviewThreads200JSONResponse) VisitGetReviewThreadsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetReviewThreads404JSONResponse ErrorResponse
+
+func (response GetReviewThreads404JSONResponse) VisitGetReviewThreadsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateReviewCommentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Body      *CreateReviewCommentJSONRequestBody
+}
+
+type CreateReviewCommentResponseObject interface {
+	VisitCreateReviewCommentResponse(w http.ResponseWriter) error
+}
+
+type CreateReviewComment200JSONResponse ReviewThreadsResponse
+
+func (response CreateReviewComment200JSONResponse) VisitCreateReviewCommentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateReviewComment400JSONResponse ErrorResponse
+
+func (response CreateReviewComment400JSONResponse) VisitCreateReviewCommentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateReviewComment404JSONResponse ErrorResponse
+
+func (response CreateReviewComment404JSONResponse) VisitCreateReviewCommentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReplyToReviewThreadRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	ThreadId  string `json:"thread_id"`
+	Body      *ReplyToReviewThreadJSONRequestBody
+}
+
+type ReplyToReviewThreadResponseObject interface {
+	VisitReplyToReviewThreadResponse(w http.ResponseWriter) error
+}
+
+type ReplyToReviewThread200JSONResponse ReviewThreadsResponse
+
+func (response ReplyToReviewThread200JSONResponse) VisitReplyToReviewThreadResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReplyToReviewThread400JSONResponse ErrorResponse
+
+func (response ReplyToReviewThread400JSONResponse) VisitReplyToReviewThreadResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReplyToReviewThread404JSONResponse ErrorResponse
+
+func (response ReplyToReviewThread404JSONResponse) VisitReplyToReviewThreadResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -6919,6 +7324,9 @@ type StrictServerInterface interface {
 	// Set a head's downstream branch name (the name it is pushed AS)
 	// (PATCH /api/projects/{project_id}/agents/{id}/downstream-branch)
 	SetDownstreamBranch(ctx context.Context, request SetDownstreamBranchRequestObject) (SetDownstreamBranchResponseObject, error)
+	// Generate a title for an agent from its task prompt
+	// (POST /api/projects/{project_id}/agents/{id}/generate-title)
+	GenerateAgentTitle(ctx context.Context, request GenerateAgentTitleRequestObject) (GenerateAgentTitleResponseObject, error)
 	// Send text input to an agent's terminal stdin
 	// (POST /api/projects/{project_id}/agents/{id}/input)
 	SendAgentInput(ctx context.Context, request SendAgentInputRequestObject) (SendAgentInputResponseObject, error)
@@ -6970,6 +7378,15 @@ type StrictServerInterface interface {
 	// Resume an archived (killed/merged) agent, restoring its conversation
 	// (POST /api/projects/{project_id}/agents/{id}/resume)
 	ResumeAgent(ctx context.Context, request ResumeAgentRequestObject) (ResumeAgentResponseObject, error)
+	// The review threads on this head's MR, for the diff viewer
+	// (GET /api/projects/{project_id}/agents/{id}/review/threads)
+	GetReviewThreads(ctx context.Context, request GetReviewThreadsRequestObject) (GetReviewThreadsResponseObject, error)
+	// Start a new review thread on a line of this head's MR
+	// (POST /api/projects/{project_id}/agents/{id}/review/threads)
+	CreateReviewComment(ctx context.Context, request CreateReviewCommentRequestObject) (CreateReviewCommentResponseObject, error)
+	// Reply to a review thread on this head's MR
+	// (POST /api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply)
+	ReplyToReviewThread(ctx context.Context, request ReplyToReviewThreadRequestObject) (ReplyToReviewThreadResponseObject, error)
 	// Get the test-runner verdict(s) for a head's branch
 	// (GET /api/projects/{project_id}/agents/{id}/tests)
 	GetAgentTests(ctx context.Context, request GetAgentTestsRequestObject) (GetAgentTestsResponseObject, error)
@@ -7643,6 +8060,33 @@ func (sh *strictHandler) SetDownstreamBranch(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// GenerateAgentTitle operation middleware
+func (sh *strictHandler) GenerateAgentTitle(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request GenerateAgentTitleRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GenerateAgentTitle(ctx, request.(GenerateAgentTitleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GenerateAgentTitle")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GenerateAgentTitleResponseObject); ok {
+		if err := validResponse.VisitGenerateAgentTitleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // SendAgentInput operation middleware
 func (sh *strictHandler) SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	var request SendAgentInputRequestObject
@@ -8116,6 +8560,102 @@ func (sh *strictHandler) ResumeAgent(w http.ResponseWriter, r *http.Request, pro
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ResumeAgentResponseObject); ok {
 		if err := validResponse.VisitResumeAgentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetReviewThreads operation middleware
+func (sh *strictHandler) GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request GetReviewThreadsRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetReviewThreads(ctx, request.(GetReviewThreadsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetReviewThreads")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetReviewThreadsResponseObject); ok {
+		if err := validResponse.VisitGetReviewThreadsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateReviewComment operation middleware
+func (sh *strictHandler) CreateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request CreateReviewCommentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	var body CreateReviewCommentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateReviewComment(ctx, request.(CreateReviewCommentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateReviewComment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateReviewCommentResponseObject); ok {
+		if err := validResponse.VisitCreateReviewCommentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReplyToReviewThread operation middleware
+func (sh *strictHandler) ReplyToReviewThread(w http.ResponseWriter, r *http.Request, projectId string, id string, threadId string) {
+	var request ReplyToReviewThreadRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.ThreadId = threadId
+
+	var body ReplyToReviewThreadJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReplyToReviewThread(ctx, request.(ReplyToReviewThreadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReplyToReviewThread")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReplyToReviewThreadResponseObject); ok {
+		if err := validResponse.VisitReplyToReviewThreadResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

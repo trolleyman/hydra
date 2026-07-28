@@ -73,7 +73,7 @@ export type AgentResponse = {
      */
     merge_when_green?: boolean;
     /**
-     * True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See NON_LOCAL_INTEGRATION.md 3.5.
+     * True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See docs/non-local-integration.md
      */
     publish_when_green?: boolean;
     /**

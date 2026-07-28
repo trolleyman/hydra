@@ -66,15 +66,29 @@ func setupLogging() {
 		logDir = filepath.Join(home, ".local", "share", "hydra", "logs")
 	}
 
-	rl, err := common.NewRotatingLogger(filepath.Join(logDir, "hydra.log"), 5*1024*1024, 5)
+	// 4MB x 3 backups caps the directory at ~16MB. Since routine request logging
+	// was quieted (internal/http.LoggingMiddleware) that is days of history
+	// rather than the ~15 minutes it used to buy.
+	logFile = filepath.Join(logDir, "hydra.log")
+	rl, err := common.NewRotatingLogger(logFile, 4*1024*1024, 3)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not set up file logging: %v\n", err)
+		logFile = ""
 		return
 	}
 
 	log.SetOutput(io.MultiWriter(os.Stderr, rl))
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 }
+
+// logFile is where setupLogging tee'd the log, so the server can print it on
+// boot ("" if file logging could not be set up). Everything hydra logs goes
+// here as well as to the terminal, which matters because the daemon is usually
+// not attached to one you still have.
+var logFile string
+
+// LogFilePath returns the file the log is being tee'd to, or "" if none.
+func LogFilePath() string { return logFile }
 
 // prettyPrintErrTrace walks the error chain extracting errtrace frames directly,
 // formatting them Python-style (most recent call last) with colors and source snippets.

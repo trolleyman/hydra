@@ -10,7 +10,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -128,7 +130,22 @@ func RequestBodyLimitMiddleware(maxBytes int64) func(http.Handler) http.Handler 
 	}
 }
 
-// LoggingMiddleware logs each HTTP request with method, path, status code, and duration.
+// slowRequestWarn is how long a request may run before the log says so - both
+// while it is still in flight and again when it finishes. A var so tests can
+// shorten it rather than sleeping through the real threshold.
+var slowRequestWarn = 2 * time.Second
+
+// logAllHTTP restores a line per request in both directions, for when the HTTP
+// layer itself is what you are debugging. Off by default: the UI polls
+// /api/status, /api/projects, .../agents, .../services and friends several
+// times a second per open tab, and logging those was 99.7% of the log by
+// volume - enough to roll the file over every few minutes and throw away the
+// parts anyone would actually want to read.
+var logAllHTTP = os.Getenv("HYDRA_LOG_HTTP") == "1"
+
+// LoggingMiddleware logs each HTTP request with method, path, status code, and
+// duration - but only the ones worth a line: mutations, errors, and anything
+// slow. A fast, successful GET logs nothing.
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -142,19 +159,39 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			uri += "?" + r.URL.RawQuery
 		}
 
-		// Log on receipt (<- ) and again on completion (-> ), so a request
-		// that hangs in its handler is visible in the log before it finishes
-		// (a "<- " line with no matching "-> ").
-		log.Printf("<- %s %s", r.Method, uri)
+		// A websocket is *meant* to sit open for minutes, so neither the
+		// in-flight warning nor the duration on close says anything useful.
+		websocket := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+		// GETs are the poll traffic; everything else changes state and is rare
+		// enough to trace both ways.
+		verbose := logAllHTTP || (r.Method != http.MethodGet && !websocket)
+
+		if verbose {
+			log.Printf("<- %s %s", r.Method, uri)
+		}
+		// The old code logged every request on receipt so that one hanging in its
+		// handler showed up as a "<- " with no matching "-> ". Keep that property
+		// without the volume: only a request that is ACTUALLY stuck says so.
+		// AfterFunc costs a timer, not a goroutine, until it fires.
+		if !websocket && !verbose {
+			stuck := time.AfterFunc(slowRequestWarn, func() {
+				log.Printf("== %s %s still running after %s", r.Method, uri, slowRequestWarn)
+			})
+			defer stuck.Stop()
+		}
 
 		rec := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rec, r)
 
 		// The peer hung up part-way through the response. The handler itself was
 		// fine, so report the disconnect rather than whatever half-written status
-		// happens to be recorded, and skip the 500 stack dump below.
+		// happens to be recorded, and skip the 500 stack dump below. Gated like a
+		// normal response, not like an error: an aborted poll IS poll traffic, and
+		// nothing went wrong server-side.
 		if isClientDisconnect(rec.writeErr) {
-			log.Printf("-> %s %s %d %s (client disconnected)", r.Method, uri, rec.statusCode, time.Since(start).Round(time.Millisecond))
+			if elapsed := time.Since(start); verbose || (!websocket && elapsed >= slowRequestWarn) {
+				log.Printf("-> %s %s %d %s (client disconnected)", r.Method, uri, rec.statusCode, elapsed.Round(time.Millisecond))
+			}
 			return
 		}
 
@@ -172,7 +209,10 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		log.Printf("-> %s %s %d %s%s", r.Method, uri, rec.statusCode, time.Since(start).Round(time.Millisecond), errorSuffix)
+		elapsed := time.Since(start)
+		if verbose || rec.statusCode >= 400 || (!websocket && elapsed >= slowRequestWarn) {
+			log.Printf("-> %s %s %d %s%s", r.Method, uri, rec.statusCode, elapsed.Round(time.Millisecond), errorSuffix)
+		}
 
 		if rec.statusCode == http.StatusInternalServerError {
 			if et.err != nil {

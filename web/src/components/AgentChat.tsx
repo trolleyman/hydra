@@ -65,7 +65,7 @@ import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planS
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatBashIndentStore, useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
 import { providerErrorText } from '../lib/providerError'
 import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval'
 import { selectionToMarkdown } from '../lib/copyMarkdown'
@@ -2150,21 +2150,25 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
 
   if (tool === 'git_commit') {
     const paths = strs('paths')
-    // What the commit captured, stated as fact. Not advice: the reader is looking
-    // at something that already happened, and the agent is not the audience.
+    // What the commit captured, stated as fact - but only when it wasn't the
+    // default. `git add -A` is what the tool does unless told otherwise, so
+    // saying so on every commit is noise; the interesting cases (a path list, or
+    // a pre-built index) still get a line.
     const staging = input.staged === true
       ? 'Committed the already-staged changes; nothing else was staged'
       : paths.length > 0
         ? 'Staged only the paths below, then committed'
-        : 'Staged every change, tracked and untracked'
+        : ''
     return (
       <div className="space-y-1.5">
-        <div className={note}>{staging}</div>
-        <LabeledField label="Message">
-          <pre className={`${PANEL_CLASS} whitespace-pre-wrap break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 ${serif ? 'font-serif' : ''}`}>
-            {str('message')}
-          </pre>
-        </LabeledField>
+        {staging && <div className={note}>{staging}</div>}
+        {/* No label: a commit message is the obvious content of a commit card,
+            and the panel already frames it. Rendered as markdown with paragraph
+            reflow (hardBreaks={false}) - messages are hard-wrapped at ~72
+            columns, so a <br> per source newline would shred every paragraph. */}
+        <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 ${serif ? 'font-serif' : ''}`}>
+          <Markdown text={str('message')} hardBreaks={false} />
+        </div>
         {paths.length > 0 && (
           <div className="space-y-0.5">{paths.map((p) => bullet(p, <span><LowlitPath path={path(p)} /></span>))}</div>
         )}
@@ -2475,8 +2479,9 @@ const ToolCard = memo(function ToolCard({
   // The host command runs in the head's worktree whatever the agent's own cwd
   // was, so a `cd` preamble would be a lie - drop it for a host run.
   const bashSource = hostRunScript ?? command
-  const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd) : ''
-  const executableCommand = isBash ? formatBashForDisplay(bashSource, '') : ''
+  const bashIndent = useChatBashIndentStore((s) => s.indent)
+  const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd, bashIndent) : ''
+  const executableCommand = isBash ? formatBashForDisplay(bashSource, '', bashIndent) : ''
   const interactiveTranscript = isBash && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
   const visibleCommand = interactiveTranscript?.command ?? displayedCommand
   const renderedResult = interactiveTranscript?.output ?? visibleResult

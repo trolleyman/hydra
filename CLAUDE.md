@@ -150,7 +150,15 @@ area; do not re-derive it by reading source. Skip them otherwise.
   [docs/pr-adoption.md](docs/pr-adoption.md) (BUILT; `forge.ListMRs`/`GetMR`,
   `git.PRHeadRefspec`/`FetchRefspec`, `heads.SpawnHeadOptions.Adopt`, the
   `adopt_mr` spawn field + `GET .../reviews`, `web/.../PRPicker.tsx`; the
-  outbound publish flow is NON_LOCAL_INTEGRATION.md)
+  outbound publish flow is docs/non-local-integration.md)
+- **Publishing a head to a forge** (the `[review]` config, Create MR / Push to
+  MR / Pull from MR, the MR lifecycle watcher, publish-when-green, forge auth,
+  the agent's review tools) -> [docs/non-local-integration.md](docs/non-local-integration.md)
+  (BUILT; `internal/forge`, `internal/http/publish.go` + `review_watcher.go`,
+  `internal/reviewq` on-demand refresh, `mcp__hydra__get_review_*`; also lists
+  what is deliberately NOT built)
+- **Review threads in the diff** (forge PR comments inline, replying, local-only
+  notes, the origin badges) -> [docs/review-threads.md](docs/review-threads.md)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
   max via the `[resources]` config table + the Settings "Resource limits" section)
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;

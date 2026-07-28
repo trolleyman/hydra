@@ -7,7 +7,7 @@ import { CrossProjectBanner } from './CrossProjectBanner'
 import { Tooltip } from './Tooltip'
 import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { dropRedundantSemicolons, splitBashChains } from '../lib/bashFormat'
-import { useChatCodeLinesStore } from '../lib/chatPrefs'
+import { useChatBashIndentStore, useChatCodeLinesStore } from '../lib/chatPrefs'
 
 // The rich security-gate approval card (replaces the plain toast body for gated
 // tool calls). It names exactly what's being requested - a whole MCP server, a
@@ -174,6 +174,9 @@ const JsonPreview: React.FC<{ raw: string }> = ({ raw }) => {
 // The mono preview box: the tool call's JSON arguments (mcp_tool) or the full
 // request URL (webfetch). mcp / bash asks have nothing to preview.
 const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
+  // Read unconditionally (only the host_command branch below uses it) so the
+  // hook order does not depend on which kind of ask this is.
+  const bashIndent = useChatBashIndentStore((s) => s.indent)
   if (data.kind === 'mcp_tool') {
     return (
       <pre className="max-h-56 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
@@ -191,17 +194,18 @@ const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
   if (data.kind === 'host_command') {
     // Always show the FULL command (scroll for a long one) - the user is approving
     // arbitrary host code, so nothing may be hidden or truncated in the card. The
-    // command is chain-split (a newline after each top-level ;/&&/||) and bash
-    // syntax-highlighted for readability, exactly like the chat's Bash card. Set
-    // small and tall so a multi-step script fits without scrolling; what runs is
-    // the raw command echoed back on Allow (useAgentNotifications), never this
-    // rendered string.
+    // command is chain-split (a newline after each top-level ;/&&/||, plus an
+    // indented body for a for/while/if/case block) and bash syntax-highlighted
+    // for readability, exactly like the chat's Bash card. Set small and tall so a
+    // multi-step script fits without scrolling; what runs is the raw command
+    // echoed back on Allow (useAgentNotifications), never this rendered string.
     //
     // The only characters the rendering drops are a `;` that a chain split just
-    // moved to the end of a line and the whitespace before it - `cmd;` + newline
-    // is exactly `cmd` + newline in bash, so nothing can hide behind one. Every
-    // other byte of the command is still shown, in order.
-    const split = dropRedundantSemicolons(splitBashChains(data.target))
+    // moved to the end of a line and the whitespace around a break - `cmd;` +
+    // newline is exactly `cmd` + newline in bash, so nothing can hide behind
+    // one. Everything it adds is leading indentation. Every other byte of the
+    // command is still shown, in order.
+    const split = dropRedundantSemicolons(splitBashChains(data.target, bashIndent))
     if (split.includes('\n')) return <CommandLines code={split} />
     const html = highlightBash(split)
     if (html != null) return <pre className={COMMAND_BOX} dangerouslySetInnerHTML={{ __html: html }} />

@@ -14,6 +14,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/gitq"
 	"github.com/trolleyman/hydra/internal/mcpserver"
+	"github.com/trolleyman/hydra/internal/reviewq"
 )
 
 func init() {
@@ -51,6 +52,11 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	// is seeded for every head; the file reports linked=false until published).
 	if os.Getenv("HYDRA_REVIEW_PATH") != "" {
 		deps.GetReview = loadReviewFile
+		// The local-reply tool needs the daemon channel (the note is stored
+		// host-side); without it the tool stays hidden rather than failing on use.
+		if os.Getenv("HYDRA_REVIEW_REQ_DIR") != "" {
+			deps.ReplyLocal = replyLocalToReviewThread
+		}
 	}
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
 }
@@ -122,13 +128,28 @@ func gitOpViaDaemon(dir string, req gitq.Request) gitq.Result {
 	}
 }
 
-// loadReviewFile reads the per-head review snapshot the MR watcher writes. A
+// reviewRefreshPoll / reviewRefreshWait bound the in-sandbox wait for the daemon
+// to re-read the MR from the forge. The wait is a little longer than the host's
+// own forge timeout (reviewRefreshTimeout), so a slow-but-succeeding refresh is
+// used rather than raced past.
+const (
+	reviewRefreshPoll = 200 * time.Millisecond
+	reviewRefreshWait = 25 * time.Second
+)
+
+// loadReviewFile returns this head's review snapshot for the review tools. It
+// first asks the daemon to re-read the MR from the forge (the sandbox has no
+// forge credentials and, under hard egress, no route to the forge - so every
+// forge call is host-side), then reads the file the daemon rewrote. A refresh
+// that fails or times out is not fatal: the last cached snapshot is returned with
+// the reason attached, which beats answering "no comments" from stale state. A
 // missing/unreadable file yields nil (the review tools then report "not linked").
 func loadReviewFile() *mcpserver.ReviewFile {
 	path := os.Getenv("HYDRA_REVIEW_PATH")
 	if path == "" {
 		return nil
 	}
+	staleReason := requestReviewRefresh()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -137,7 +158,58 @@ func loadReviewFile() *mcpserver.ReviewFile {
 	if err := json.Unmarshal(data, &rf); err != nil {
 		return nil
 	}
+	rf.StaleReason = staleReason
 	return &rf
+}
+
+// requestReviewRefresh asks the daemon (over the reviewq file channel) to refresh
+// this head's review file and blocks for the verdict. It returns "" when the
+// snapshot can be trusted as current, else why it can't.
+func requestReviewRefresh() string {
+	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
+	if dir == "" {
+		return "" // older head (seeded before the refresh channel existed) - the 30s watcher is the only writer
+	}
+	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpRefresh})
+	if !ok {
+		return "Hydra did not answer the refresh in time, so this is its last cached state. Ask the user to check the daemon if it keeps happening."
+	}
+	return res.Message
+}
+
+// replyLocalToReviewThread backs the reply_to_review_comment tool: it hands the
+// note to the daemon, which stores it against the thread for the user to read in
+// the diff viewer. Nothing is sent to the forge.
+func replyLocalToReviewThread(threadID, body string) (bool, string) {
+	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
+	if dir == "" {
+		return false, "Replying is not available in this session."
+	}
+	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpNote, ThreadID: threadID, Body: body})
+	if !ok {
+		return false, "Hydra did not confirm the note in time, so it may not have been saved. Ask the user to check the daemon."
+	}
+	return res.OK, res.Message
+}
+
+// reviewRoundTrip submits req to the daemon's review-request watcher and blocks
+// for its result. ok=false means the wait timed out.
+func reviewRoundTrip(dir string, req reviewq.Request) (reviewq.Result, bool) {
+	req.ReqID = strconv.FormatInt(time.Now().UnixNano(), 10)
+	req.TS = time.Now().Format(time.RFC3339Nano)
+	if err := reviewq.WriteRequest(dir, req); err != nil {
+		return reviewq.Result{Message: "Hydra could not be reached (" + err.Error() + ")."}, true
+	}
+	deadline := time.Now().Add(reviewRefreshWait)
+	for {
+		if res, ok, err := reviewq.ReadResult(dir, req.ReqID); err == nil && ok {
+			return res, true
+		}
+		if time.Now().After(deadline) {
+			return reviewq.Result{}, false
+		}
+		time.Sleep(reviewRefreshPoll)
+	}
 }
 
 // loadMCPCatalog reads the seeded catalog of host-configured MCP servers. Missing

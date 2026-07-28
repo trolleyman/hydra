@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, linkOptions, type LinkProps } from '@tanstack/react-router'
 import { highlightLines } from './lib/highlightCore'
@@ -9,7 +9,11 @@ import { ensureLanguage } from './lib/hljsLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
-import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse } from './api'
+import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewThread } from './api'
+import { ReviewThreadCard, type ReviewThreadActions } from './components/ReviewThreadCard'
+import { ProviderIcon } from './components/ReviewControls'
+import { providerLabel } from './lib/forgeDisplay'
+import { ReviewThreadContext, useReviewThreadActions } from './lib/reviewThreadContext'
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
@@ -51,7 +55,7 @@ import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
-import { addReviewComment, removeReviewComment, updateReviewComment, clearReviewDraft, loadReviewDraft, loadLineDraft, saveLineDraft, clearLineDraft, type PendingReviewComment } from './lib/reviewDrafts'
+import { addReviewComment, removeReviewComment, updateReviewComment, clearReviewDraft, loadReviewDraft, loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft, type PendingReviewComment } from './lib/reviewDrafts'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
 import { Markdown } from './lib/MarkdownRenderer'
 import { useCopyFlash } from './lib/useCopyFlash'
@@ -118,12 +122,19 @@ export interface LineDraftApi {
 // entry carries a frozen `stale` flag (its anchoring hunk changed after it was
 // queued). Built in FileDiff from that file's comments; an empty file shares
 // EMPTY_LINE_COMMENTS so the memo'd hunks keep a stable prop.
-type LineCommentEntry = { comment: PendingReviewComment; stale: boolean }
+// An entry is either one of YOUR queued local comments or a forge review thread
+// pulled from the MR - both anchor to a line the same way, so they share one map
+// and one prop through the memo'd hunks.
+type LineCommentEntry =
+  | { kind: 'local'; comment: PendingReviewComment; stale: boolean }
+  | { kind: 'thread'; thread: ReviewThread }
 type LineCommentMap = Map<string, LineCommentEntry[]>
 const EMPTY_LINE_COMMENTS: LineCommentMap = new Map()
 // Shared empty list for files with no queued comments, so FileDiff's fileComments
 // prop keeps a stable identity and its memo isn't busted by a fresh [] each render.
 const EMPTY_FILE_COMMENTS: PendingReviewComment[] = []
+// Same for a file with no forge threads.
+const EMPTY_FILE_THREADS: ReviewThread[] = []
 
 // One queued comment shown inline beneath its diff line: the authored text rendered
 // as markdown (matching how it lands in the agent chat), with edit + remove. A
@@ -183,10 +194,15 @@ function QueuedCommentCard({ comment, stale, onEdit, onRemove }: {
 //     persistence - editing commits straight to the queued comment on save.
 // "Add to review" is synchronous (a localStorage write); the parent closes the row
 // after any action via its own state.
-function CommentRow({ initialText = '', onSubmit, onAddToReview, onSave, onCancel, onDraftChange }: {
+function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, forgeProvider, onSave, onCancel, onDraftChange }: {
   initialText?: string
   onSubmit?: (text: string) => Promise<void>
   onAddToReview?: (text: string) => void
+  // Wired only on a head whose MR is linked, and only for a new-side line: posts
+  // the comment on the pull request itself instead of to the agent.
+  onCommentOnPR?: (text: string) => Promise<void>
+  // "github" | "gitlab", for naming the forge on that button.
+  forgeProvider?: string
   onSave?: (text: string) => void
   onCancel: () => void
   onDraftChange?: (text: string) => void
@@ -220,6 +236,18 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onSave, onCance
     if (!text.trim() || sending || !onSave) return
     onSave(text)
   }
+  const [prError, setPrError] = useState<string | null>(null)
+  const handleCommentOnPR = async () => {
+    if (!text.trim() || sending || !onCommentOnPR) return
+    setSending(true)
+    setPrError(null)
+    try {
+      await onCommentOnPR(text)
+    } catch (e) {
+      setPrError(e instanceof Error ? e.message : String(e))
+    }
+    setSending(false)
+  }
   // Ctrl+Enter fires the primary action for the mode: save when editing, else
   // queue into the review batch when that's available (the common reviewing flow),
   // else send immediately.
@@ -235,7 +263,7 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onSave, onCance
   const placeholder = onSave
     ? 'Edit comment... (Ctrl+Enter to save)'
     : onAddToReview
-      ? 'Write a comment... (Ctrl+Enter to add to review)'
+      ? 'Write a comment... (Ctrl+Enter to add to the agent review)'
       : 'Write a comment... (Ctrl+Enter to submit)'
 
   const btn = 'px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer'
@@ -265,25 +293,46 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onSave, onCance
           </button>
         ) : (
           <>
-            {onAddToReview && (
+            {onCommentOnPR && (
+              <Tooltip content={`Post this as a review comment on the pull request, where the author and reviewers will see it. It does not go to the agent.`} side="top">
+                <button
+                  disabled={!text.trim() || sending}
+                  onClick={() => void handleCommentOnPR()}
+                  className={`${btn} flex items-center gap-1 text-violet-700 dark:text-violet-300 border border-violet-300 dark:border-violet-700 hover:bg-violet-50 dark:hover:bg-violet-900/30 disabled:opacity-50`}
+                >
+                  <ProviderIcon provider={forgeProvider} className="w-3 h-3" />
+                  Comment on {providerLabel(forgeProvider)}
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip content="Send this to the agent on its own, right now." side="top">
               <button
                 disabled={!text.trim() || sending}
-                onClick={handleAdd}
-                className={`${btn} text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50`}
+                onClick={handleSubmit}
+                className={`${btn} flex items-center gap-1 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50`}
               >
-                Add to review
+                <Bot className="w-3 h-3" />
+                {sending ? 'Sending...' : 'Comment to agent'}
               </button>
+            </Tooltip>
+            {onAddToReview && (
+              // The primary action: batching several comments and sending them as
+              // one review is the usual way to brief a head, so it leads.
+              <Tooltip content="Queue this for the agent - the whole batch is sent when you submit the review, and none of it reaches the pull request." side="top">
+                <button
+                  disabled={!text.trim() || sending}
+                  onClick={handleAdd}
+                  className={`${btn} flex items-center gap-1 text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
+                >
+                  <Bot className="w-3 h-3" />
+                  Add to agent review
+                </button>
+              </Tooltip>
             )}
-            <button
-              disabled={!text.trim() || sending}
-              onClick={handleSubmit}
-              className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
-            >
-              {sending ? 'Sending...' : 'Send'}
-            </button>
           </>
         )}
       </div>
+      {prError && <p className="mt-1 text-[10px] text-red-500 break-words">{prError}</p>}
     </div>
   )
 }
@@ -307,24 +356,29 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
   lineDraftApi?: LineDraftApi
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const threadActions = useReviewThreadActions()
   if (!openNew && (!entries || entries.length === 0)) return null
   return (
     <>
-      {entries?.map(({ comment, stale }) =>
-        editingId === comment.id ? (
+      {entries?.map((entry) =>
+        entry.kind === 'thread' ? (
+          threadActions ? (
+            <ReviewThreadCard key={`t:${entry.thread.id}`} thread={entry.thread} actions={threadActions} />
+          ) : null
+        ) : editingId === entry.comment.id ? (
           <CommentRow
-            key={comment.id}
-            initialText={comment.text}
-            onSave={(t) => { onEditComment?.(comment.id, t); setEditingId(null) }}
+            key={entry.comment.id}
+            initialText={entry.comment.text}
+            onSave={(t) => { onEditComment?.(entry.comment.id, t); setEditingId(null) }}
             onCancel={() => setEditingId(null)}
           />
         ) : (
           <QueuedCommentCard
-            key={comment.id}
-            comment={comment}
-            stale={stale}
-            onEdit={() => setEditingId(comment.id)}
-            onRemove={() => onRemoveComment?.(comment.id)}
+            key={entry.comment.id}
+            comment={entry.comment}
+            stale={entry.stale}
+            onEdit={() => setEditingId(entry.comment.id)}
+            onRemove={() => onRemoveComment?.(entry.comment.id)}
           />
         ),
       )}
@@ -339,6 +393,12 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
           }}
           onAddToReview={onAddToReview ? (text) => {
             onAddToReview(lineNum, isNew, text)
+            lineDraftApi?.clear(path, lineNum, isNew)
+            onCloseNew()
+          } : undefined}
+          forgeProvider={threadActions?.provider}
+          onCommentOnPR={threadActions && isNew ? async (text) => {
+            await threadActions.commentOnLine(path, lineNum, text)
             lineDraftApi?.clear(path, lineNum, isNew)
             onCloseNew()
           } : undefined}
@@ -366,6 +426,8 @@ const CommentButton = memo(function CommentButton({ idx, onToggle }: { idx: numb
     <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
       <Tooltip content="Add comment" side="top" className="pointer-events-auto">
         <button
+          type="button"
+          aria-label="Add comment"
           onClick={(e) => { e.stopPropagation(); onToggle(idx) }}
           className="flex items-center justify-center w-4 h-4 rounded bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 shadow-sm hover:bg-blue-50 dark:hover:bg-blue-900/40 cursor-pointer"
         >
@@ -906,7 +968,7 @@ function firstFileLine(file: DiffFile): string | undefined {
   return line.content
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, onEditComment, onRemoveComment, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -925,6 +987,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // Queued review comments anchored to this file, shown inline under their line.
   // A stable empty array when the file has none (keeps the hunks' memo intact).
   fileComments?: PendingReviewComment[]
+  // Forge review threads anchored to this file, rendered inline under their line
+  // alongside the queued comments (docs/review-threads.md).
+  fileThreads?: ReviewThread[]
   onEditComment?: (id: string, text: string) => void
   onRemoveComment?: (id: string) => void
   lineDraftApi?: LineDraftApi
@@ -1116,24 +1181,33 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // warning but still renders. A file with no comments shares EMPTY_LINE_COMMENTS
   // so the memo'd hunks keep a stable `comments` prop and skip re-rendering.
   const commentsByLine = useMemo<LineCommentMap>(() => {
-    if (!fileComments || fileComments.length === 0) return EMPTY_LINE_COMMENTS
+    const noComments = !fileComments || fileComments.length === 0
+    const noThreads = !fileThreads || fileThreads.length === 0
+    if (noComments && noThreads) return EMPTY_LINE_COMMENTS
     const m: LineCommentMap = new Map()
-    for (const c of fileComments) {
+    const push = (key: string, entry: LineCommentEntry) => {
+      const arr = m.get(key)
+      if (arr) arr.push(entry); else m.set(key, [entry])
+    }
+    // Forge threads first, so the conversation that already exists on the PR reads
+    // above your own unsent comments on the same line.
+    for (const t of fileThreads ?? []) {
+      if (!t.line) continue // the forge anchors some threads to the file, not a line
+      push(`new:${t.line}`, { kind: 'thread', thread: t })
+    }
+    for (const c of fileComments ?? []) {
       let stale = false
       if (c.hunkHash) {
         const hunk = findHunkForLine(file, c.lineNum, c.isNew)
         stale = (hunk ? hashHunks([hunk]) : '') !== c.hunkHash
       }
-      const key = `${c.isNew ? 'new' : 'old'}:${c.lineNum}`
-      const entry: LineCommentEntry = { comment: c, stale }
-      const arr = m.get(key)
-      if (arr) arr.push(entry); else m.set(key, [entry])
+      push(`${c.isNew ? 'new' : 'old'}:${c.lineNum}`, { kind: 'local', comment: c, stale })
     }
     return m
     // hunksSig stands in for file.hunks identity (stable across no-op refreshes),
     // so this recomputes staleness only when the comments or the diff truly change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileComments, hunksSig])
+  }, [fileComments, fileThreads, hunksSig])
 
   // Placeholder height while the body is lazy-unmounted. Also used directly as
   // the tween wrapper's height during that phase: bodyH is 0 until the
@@ -1636,15 +1710,39 @@ function formatCommitDate(iso: string): string {
 // stale, lingering boxes behind.
 let activeTooltip: { id: object; hide: () => void } | null = null
 
-function CustomTooltip({ content, children, side = 'bottom', className = 'w-full' }: {
+// Gap between the trigger and the box, and the margin the box keeps from the
+// viewport edges once it has been clamped back on-screen.
+const TIP_GAP = 8
+const TIP_PAD = 8
+// Floor for the height cap, so a trigger wedged against a viewport edge still
+// gets a readable (scrollable) box rather than a sliver.
+const TIP_MIN_HEIGHT = 160
+
+interface TipPos {
+  top: number
+  left: number
+  // Which side we actually opened on: the requested side flips when there is no
+  // room for the measured box there.
+  side: 'bottom' | 'right' | 'top' | 'left'
+  // Height cap for the box (it scrolls past this). 0 on the first, unmeasured
+  // pass, so the natural height can be measured before it is capped.
+  maxHeight: number
+}
+
+function CustomTooltip({ content, children, side = 'bottom', className = 'w-full', width }: {
   content: React.ReactNode
   children: React.ReactNode
   side?: 'bottom' | 'right' | 'top' | 'left'
   className?: string
+  // Fixed box width in px. Omitted, the box sizes to its content.
+  width?: number
 }) {
   const [visible, setVisible] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  // The rendered box, so the position pass can measure it and flip/clamp against
+  // the real geometry instead of guessing.
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<TipPos | null>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // A stable per-instance identity for the "which tooltip is active" singleton, so
   // hideNow can tell if it still owns the slot without referencing itself.
@@ -1663,25 +1761,51 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
     if (activeTooltip?.id === id) activeTooltip = null
   }, [cancelHide, id])
 
+  // Where the box goes: the requested side, flipped to the opposite one when the
+  // measured box doesn't fit there, then clamped back inside the viewport on
+  // both axes. Runs once from show() (before the box exists, so it can only use
+  // the declared `width`) and again from the layout effect below with the real
+  // measurements, before paint.
+  const computePos = useCallback((): TipPos | null => {
+    const el = ref.current
+    if (!el) return null
+    const rect = el.getBoundingClientRect()
+    const box = boxRef.current
+    const w = box?.offsetWidth ?? width ?? 0
+    const h = box?.offsetHeight ?? 0
+    const maxHeight = Math.max(TIP_MIN_HEIGHT, window.innerHeight - 2 * TIP_PAD)
+
+    // Flip only when the other side genuinely has room: the commit selectors sit
+    // near the left edge, where a left-opening box would otherwise be clamped
+    // over its own dropdown.
+    let s = side
+    if (w > 0) {
+      if (s === 'left' && rect.left - TIP_GAP - w < TIP_PAD && rect.right + TIP_GAP + w <= window.innerWidth - TIP_PAD) s = 'right'
+      else if (s === 'right' && rect.right + TIP_GAP + w > window.innerWidth - TIP_PAD && rect.left - TIP_GAP - w >= TIP_PAD) s = 'left'
+    }
+    if (h > 0) {
+      if (s === 'top' && rect.top - TIP_GAP - h < TIP_PAD && rect.bottom + TIP_GAP + h <= window.innerHeight - TIP_PAD) s = 'bottom'
+      else if (s === 'bottom' && rect.bottom + TIP_GAP + h > window.innerHeight - TIP_PAD && rect.top - TIP_GAP - h >= TIP_PAD) s = 'top'
+    }
+
+    // Top-left of the box. Beside the trigger ('left'/'right') it aligns with the
+    // trigger's top; above/below it aligns with its left edge.
+    let left = s === 'right' ? rect.right + TIP_GAP : s === 'left' ? rect.left - TIP_GAP - w : rect.left
+    let top = s === 'top' ? rect.top - TIP_GAP - h : s === 'bottom' ? rect.bottom + TIP_GAP : rect.top
+    if (w > 0) left = Math.min(Math.max(left, TIP_PAD), Math.max(TIP_PAD, window.innerWidth - w - TIP_PAD))
+    if (h > 0) top = Math.min(Math.max(top, TIP_PAD), Math.max(TIP_PAD, window.innerHeight - h - TIP_PAD))
+    return { top, left, side: s, maxHeight }
+  }, [side, width])
+
   const show = useCallback(() => {
     cancelHide()
     // Dismiss any other tooltip before we claim the active slot.
     if (activeTooltip && activeTooltip.id !== id) activeTooltip.hide()
     activeTooltip = { id, hide: hideNow }
-    if (ref.current) {
-      const rect = ref.current.getBoundingClientRect()
-      if (side === 'right') {
-        setPos({ top: rect.top, left: rect.right })
-      } else if (side === 'left') {
-        setPos({ top: rect.top, left: rect.left })
-      } else if (side === 'top') {
-        setPos({ top: rect.top - 8, left: rect.left })
-      } else {
-        setPos({ top: rect.bottom + 6, left: rect.left })
-      }
-    }
+    const p = computePos()
+    if (p) setPos(p)
     setVisible(true)
-  }, [side, cancelHide, hideNow, id])
+  }, [cancelHide, computePos, hideNow, id])
 
   // Hide after a short grace period so the pointer can travel from the trigger
   // into the tooltip (and back) without it disappearing.
@@ -1690,11 +1814,34 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
     hideTimer.current = setTimeout(hideNow, 150)
   }, [cancelHide, hideNow])
 
+  // show()'s pass ran before the box was in the DOM, so it could not measure it.
+  // Re-run now that it is rendered (in a layout effect, so the correction lands
+  // before paint and never flickers).
+  useLayoutEffect(() => {
+    if (!visible) return
+    const p = computePos()
+    // Legitimate measure-then-position pass: the DOM box is the external system,
+    // and the guard below makes it converge in one step (a second run computes
+    // the same position and returns `prev`, so no cascade).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPos((prev) =>
+      prev && p && prev.top === p.top && prev.left === p.left && prev.side === p.side && prev.maxHeight === p.maxHeight
+        ? prev
+        : p,
+    )
+  }, [visible, computePos, content])
+
   // The position is captured once on show, so it goes stale the moment the
-  // page scrolls. Dismiss on scroll rather than leave a detached box floating.
+  // page scrolls. Dismiss on scroll rather than leave a detached box floating -
+  // except when the scroll is the BOX's own: this listener is capture-phase, so
+  // it also sees a tall card being scrolled internally, and dismissing then made
+  // an overflowing card impossible to read past its first screen.
   useEffect(() => {
     if (!visible) return
-    const onScroll = () => hideNow()
+    const onScroll = (e: Event) => {
+      if (e.target instanceof Node && boxRef.current?.contains(e.target)) return
+      hideNow()
+    }
     window.addEventListener('scroll', onScroll, true)
     return () => window.removeEventListener('scroll', onScroll, true)
   }, [visible, hideNow])
@@ -1706,11 +1853,17 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
       {children}
       {visible && pos && (
         <div
-          className="fixed z-[200] bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg px-3 py-2 shadow-xl"
+          ref={boxRef}
+          // Same surface as the shared Tooltip (components/Tooltip.tsx): light in
+          // light mode, dark in dark mode. It used to be dark in both, which made
+          // it look like a stray widget from another app on a light page.
+          className="fixed z-[200] overflow-y-auto overscroll-contain rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 shadow-xl dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
           style={{
             top: pos.top,
             left: pos.left,
-            transform: side === 'left' ? 'translateX(-100%)' : side === 'top' ? 'translateY(-100%)' : undefined
+            width,
+            maxWidth: 'calc(100vw - 1rem)',
+            maxHeight: pos.maxHeight,
           }}
           onMouseEnter={cancelHide}
           onMouseLeave={scheduleHide}
@@ -1722,19 +1875,79 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   )
 }
 
+// commitParts splits a commit message into its subject (first line) and body,
+// the way git itself treats it.
+function commitParts(message: string): { subject: string; body: string } {
+  const nl = message.indexOf('\n')
+  if (nl < 0) return { subject: message.trim(), body: '' }
+  return { subject: message.slice(0, nl).trim(), body: message.slice(nl + 1).trim() }
+}
+
+// The hover card for one commit. Only the sha stays monospace - a commit message
+// is prose, so it is rendered as markdown (bullet lists, `code`, links all show
+// up in the messages agents write) with paragraph reflow rather than a <br> per
+// source newline, since messages are hard-wrapped at ~72 columns.
 function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
+  const { subject, body } = commitParts(commit.message)
   return (
-    <div className="font-mono space-y-0.5 min-w-[260px] max-w-[80ch]">
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-yellow-400">commit</span>
-        <span className="text-gray-300 break-all">{commit.sha}</span>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+        <span className={COMMIT_SHA_CHIP}>{commit.short_sha}</span>
+        <span className="text-gray-600 dark:text-gray-300">{commit.author_name}</span>
+        <span className="text-gray-400 dark:text-gray-500">&middot;</span>
+        <span>{formatCommitDate(commit.timestamp)}</span>
       </div>
-      <div><span className="text-gray-400 w-14 inline-block">Author:</span><span className="text-gray-200">{commit.author_name} &lt;{commit.author_email}&gt;</span></div>
-      <div><span className="text-gray-400 w-14 inline-block">Date:</span><span className="text-gray-200">{formatCommitDate(commit.timestamp)}</span></div>
-      <div className="mt-2 pt-2 border-t border-gray-700 text-gray-100 whitespace-pre-wrap break-words leading-relaxed">
-        {commit.message}
+      {/* The subject is a plain line, not a bolded heading: it is one sentence of
+          the same prose as the body, and weighting it made the card read as a
+          document with a title rather than as a commit message. */}
+      <div className="border-t border-gray-200 pt-2 dark:border-gray-700">
+        <p className="text-[13px] leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>
+        {body && (
+          <Markdown
+            text={body}
+            hardBreaks={false}
+            className="mt-1.5 text-xs leading-relaxed text-gray-600 dark:text-gray-300"
+          />
+        )}
       </div>
     </div>
+  )
+}
+
+// Width of the commit hover card. Wide enough for a wrapped commit body, narrow
+// enough to sit beside the 256px dropdown on a laptop screen.
+const COMMIT_TIP_WIDTH = 440
+
+// Width of a commit dropdown panel (the w-64 below), and the margin it keeps
+// from the window edge.
+const COMMIT_MENU_WIDTH = 256
+const COMMIT_MENU_PAD = 8
+
+// Where a dropdown panel sits, as a px offset from its trigger's left edge (the
+// panel is absolutely positioned inside a wrapper the trigger's size). The
+// selectors sit at the right end of the Changes toolbar, where a panel aligned
+// to its trigger ran off the screen and the "Latest commit" entries were
+// unreachable. Slid back on-screen rather than flipped to right-aligned: a
+// trigger can itself sit flush against the window edge, and right-aligning to it
+// would leave the panel hanging over that same edge.
+function menuOffset(el: HTMLElement | null): number {
+  const rect = el?.getBoundingClientRect()
+  if (!rect) return 0
+  const maxLeft = window.innerWidth - COMMIT_MENU_WIDTH - COMMIT_MENU_PAD
+  return Math.max(COMMIT_MENU_PAD, Math.min(rect.left, maxLeft)) - rect.left
+}
+
+// The short-sha chip, shared by the selector rows and the hover card header.
+const COMMIT_SHA_CHIP =
+  'font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0'
+
+// The shift-click affordance, spelled out at the foot of both commit dropdowns -
+// otherwise nobody would ever find it.
+function ShiftClickHint() {
+  return (
+    <p className="border-t border-gray-100 px-3 py-1.5 text-[10px] leading-snug text-gray-400 dark:border-gray-700 dark:text-gray-500">
+      Shift-click a commit to see just that commit's changes
+    </p>
   )
 }
 
@@ -1743,15 +1956,27 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
 // memo (both selectors): they sit in the always-visible Changes toolbar, whose
 // owner re-renders on every diff/panel state change; their props only change
 // when the commit list or the selection itself does.
-const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, baseBranch, rightSel }: {
+const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, baseBranch, rightSel, onSelectOnly }: {
   commits: CommitInfo[]
   selected: LeftSel
   onChange: (v: LeftSel) => void
   baseBranch: string
   rightSel: RightSel
+  // Shift-click: set BOTH sides to show only this commit (parent -> commit).
+  onSelectOnly: (sha: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  // How far the panel is nudged off its trigger to stay on-screen, decided from
+  // the trigger's position each time the menu opens (see menuOffset). Measured
+  // in the click handler rather than a layout effect: the panel only appears on
+  // that click, so there is nothing to correct afterwards.
+  const [offset, setOffset] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
+
+  const toggle = () => {
+    if (!open) setOffset(menuOffset(ref.current))
+    setOpen((o) => !o)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -1775,7 +2000,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
@@ -1784,7 +2009,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
+        <div style={{ left: offset }} className="absolute top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
           {/* Latest commit at top */}
           {commits.length > 0 && (
             <div className="py-1 border-b border-gray-100 dark:border-gray-700">
@@ -1811,17 +2036,24 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
                 const commitValid = rightSel.type === 'uncommitted' || rightSel.type === 'latest'
                   || (rightIdx !== -1 && cIdx > rightIdx)
                 return (
-                  <CustomTooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
+                  <CustomTooltip key={c.sha} side="left" width={COMMIT_TIP_WIDTH} content={<CommitTooltipContent commit={c} />}>
+                    {/* Not `disabled`: a commit that can't be the left side on its
+                        own is still a legal shift-click target (that sets both
+                        sides), and a disabled button fires no click at all. */}
                     <button
-                      onClick={() => { if (commitValid) { onChange({ type: 'commit', sha: c.sha }); setOpen(false) } }}
-                      disabled={!commitValid}
-                      className={`w-full flex items-start gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : commitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : ''}`}
+                      onClick={(e) => {
+                        if (e.shiftKey) { onSelectOnly(c.sha); setOpen(false); return }
+                        if (commitValid) { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }
+                      }}
+                      aria-disabled={!commitValid}
+                      className={`w-full flex items-baseline gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : commitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : 'opacity-40'}`}
                     >
-                      <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
-                        {c.short_sha}
-                      </span>
-                      <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
-                      {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
+                      {/* items-baseline, not items-start: the sha chip's padding
+                          made a top-aligned chip sit a couple of px low against
+                          the (larger) subject text next to it. */}
+                      <span className={COMMIT_SHA_CHIP}>{c.short_sha}</span>
+                      <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
+                      {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 self-center" />}
                     </button>
                   </CustomTooltip>
                 )
@@ -1840,6 +2072,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
               {selected.type === 'base' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
           </div>
+          {commits.length > 0 && <ShiftClickHint />}
         </div>
       )}
     </div>
@@ -1848,15 +2081,27 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
 
 // ── Right commit selector ─────────────────────────────────────────────────────
 
-const RightSelector = memo(function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
+const RightSelector = memo(function RightSelector({ commits, selected, onChange, left, hasUncommitted, onSelectOnly }: {
   commits: CommitInfo[]
   selected: RightSel
   onChange: (v: RightSel) => void
   left: LeftSel
   hasUncommitted?: boolean
+  // Shift-click: set BOTH sides to show only this commit (parent -> commit).
+  onSelectOnly: (sha: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  // How far the panel is nudged off its trigger to stay on-screen, decided from
+  // the trigger's position each time the menu opens (see menuOffset). Measured
+  // in the click handler rather than a layout effect: the panel only appears on
+  // that click, so there is nothing to correct afterwards.
+  const [offset, setOffset] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
+
+  const toggle = () => {
+    if (!open) setOffset(menuOffset(ref.current))
+    setOpen((o) => !o)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -1882,7 +2127,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
@@ -1894,7 +2139,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
+        <div style={{ left: offset }} className="absolute top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
           <div className="py-1 border-b border-gray-100 dark:border-gray-700">
             <button
               onClick={() => { onChange({ type: 'uncommitted' }); setOpen(false) }}
@@ -1923,22 +2168,24 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
                 Commits · {validCommits.length}
               </p>
               {validCommits.map((c) => (
-                <CustomTooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
+                <CustomTooltip key={c.sha} side="left" width={COMMIT_TIP_WIDTH} content={<CommitTooltipContent commit={c} />}>
                   <button
-                    onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
-                    className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                    onClick={(e) => {
+                      if (e.shiftKey) { onSelectOnly(c.sha); setOpen(false); return }
+                      onChange({ type: 'commit', sha: c.sha }); setOpen(false)
+                    }}
+                    className={`w-full flex items-baseline gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                       }`}
                   >
-                    <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
-                      {c.short_sha}
-                    </span>
-                    <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
-                    {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
+                    <span className={COMMIT_SHA_CHIP}>{c.short_sha}</span>
+                    <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
+                    {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 self-center" />}
                   </button>
                 </CustomTooltip>
               ))}
             </div>
           )}
+          {validCommits.length > 0 && <ShiftClickHint />}
         </div>
       )}
     </div>
@@ -2868,6 +3115,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setLeftSel(newLeft)
   }, [])
 
+  // Shift-click on a commit in either selector: show just that commit's changes
+  // by setting BOTH sides to the adjacent pair (its parent -> itself), the same
+  // selection a commit chip in the chat transcript makes. The list is
+  // newest-first, so the parent is the NEXT entry - or the branch point, for the
+  // oldest commit on the branch.
+  const handleSelectOnly = useCallback((sha: string) => {
+    const idx = commitIdx(sha, commits)
+    if (idx === -1) return
+    setLeftSel(idx + 1 < commits.length ? { type: 'commit', sha: commits[idx + 1].sha } : { type: 'base' })
+    setRightSel({ type: 'commit', sha })
+  }, [commits])
+
   // Correct invalid selection combos DURING RENDER (the adjust-state-during-render
   // idiom) rather than in an effect: React re-renders immediately and the guards make
   // each correction idempotent (it converges in one step), so there's no cascading
@@ -3084,6 +3343,82 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const handleUpdateReviewComment = useCallback((id: string, text: string) => {
     setReviewComments(updateReviewComment(projectId, agent.id, id, text))
   }, [projectId, agent.id])
+
+  // Forge review threads for this head's MR, fetched when the head is linked. The
+  // fetch reads the forge live host-side (~a second), so it runs on mount and
+  // after any write rather than on a timer; the daemon's 30s watcher keeps the
+  // unresolved COUNT on the chip fresh in the meantime.
+  const [threads, setThreads] = useState<ReviewThread[]>([])
+  const linkedMR = !!agent.review?.url
+  const refreshThreads = useCallback(async () => {
+    if (!projectId || !linkedMR) { setThreads([]); return }
+    try {
+      const res = await api.default.getReviewThreads(projectId, agent.id)
+      setThreads(res.threads ?? [])
+      if (res.stale) console.warn('review threads are stale:', res.error)
+    } catch (e) {
+      console.error('Failed to load review threads:', e)
+    }
+  }, [projectId, agent.id, linkedMR])
+  // Deferred (not called synchronously in the effect) so its setState doesn't
+  // cascade during the same render pass - the same pattern as PRPicker's load.
+  useEffect(() => {
+    const t = setTimeout(() => void refreshThreads(), 0)
+    return () => clearTimeout(t)
+  }, [refreshThreads])
+
+  // The thread actions handed to every card by context. Each write returns the
+  // refreshed thread set, so the card re-renders with the reply already in place.
+  const threadActions = useMemo<ReviewThreadActions | null>(() => {
+    if (!projectId || !linkedMR) return null
+    return {
+      provider: agent.review?.provider,
+      reply: async (threadId, body) => {
+        const res = await api.default.replyToReviewThread(projectId, agent.id, threadId, { body })
+        setThreads(res.threads ?? [])
+      },
+      replyLocal: async (threadId, body) => {
+        const res = await api.default.replyToReviewThread(projectId, agent.id, threadId, { body, local: true })
+        setThreads(res.threads ?? [])
+      },
+      commentOnLine: async (path, line, body) => {
+        const res = await api.default.createReviewComment(projectId, agent.id, { path, line, body })
+        setThreads(res.threads ?? [])
+        showSentToast('Comment posted on the pull request')
+      },
+      resolveWithAgent: async (thread) => {
+        const quoted = thread.notes
+          .filter((n) => n.origin === 'forge')
+          .map((n) => `> ${(n.author ? `@${n.author}: ` : '') + n.body.replace(/\n/g, '\n> ')}`)
+          .join('\n>\n')
+        const where = thread.line ? `${thread.path}:${thread.line}` : thread.path
+        await api.default.sendAgentInput(projectId, agent.id, {
+          text: `Address this review comment on ${where} (thread ${thread.id}) and commit the fix:\n\n${quoted}\n\n`
+            + `When you are done, reply to the thread with mcp__hydra__reply_to_review_comment so I can see what you changed.`,
+        })
+        showSentToast('Sent the thread to the agent')
+      },
+      // In-progress replies persist like the line drafts do: a thread card
+      // unmounts when it scrolls out of the virtualised diff, and losing a
+      // half-written reply to a reviewer is worse than losing a note to the agent.
+      draft: {
+        load: (threadId) => loadThreadDraft(projectId, agent.id, threadId),
+        save: (threadId, text) => saveThreadDraft(projectId, agent.id, threadId, text),
+        clear: (threadId) => clearThreadDraft(projectId, agent.id, threadId),
+      },
+    }
+  }, [projectId, agent.id, agent.review?.provider, linkedMR, showSentToast])
+
+  // Threads grouped by file, mirroring commentsByPath so each FileDiff gets only
+  // its own (and files with none keep a stable empty identity for their memo).
+  const threadsByPath = useMemo(() => {
+    const m = new Map<string, ReviewThread[]>()
+    for (const t of threads) {
+      const arr = m.get(t.path)
+      if (arr) arr.push(t); else m.set(t.path, [t])
+    }
+    return m
+  }, [threads])
 
   // Queued comments grouped by file, so each FileDiff gets only its own. Files
   // with none share EMPTY_FILE_COMMENTS (stable identity) so their hunks' memo
@@ -3471,6 +3806,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               onComment={handleComment}
               onAddToReview={handleAddToReview}
               fileComments={commentsByPath.get(diff.files[singleFileIdx].path) ?? EMPTY_FILE_COMMENTS}
+              fileThreads={threadsByPath.get(diff.files[singleFileIdx].path) ?? EMPTY_FILE_THREADS}
               onEditComment={handleUpdateReviewComment}
               onRemoveComment={removeQueuedComment}
               lineDraftApi={lineDraftApi}
@@ -3509,6 +3845,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               onComment={handleComment}
               onAddToReview={handleAddToReview}
               fileComments={commentsByPath.get(f.path) ?? EMPTY_FILE_COMMENTS}
+              fileThreads={threadsByPath.get(f.path) ?? EMPTY_FILE_THREADS}
               onEditComment={handleUpdateReviewComment}
               onRemoveComment={removeQueuedComment}
               lineDraftApi={lineDraftApi}
@@ -3589,11 +3926,15 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   // ── Stacked layout (single-column page AND the split layout's inspector pane) ─
   return (
-    // --sticky-changes-h (the measured Changes-toolbar height) is published here so
-    // the artifacts filter bar and card headers below can dock flush beneath it even
-    // when the toolbar wraps. See the ResizeObserver above.
+    // The forge-thread actions ride a context so the memo'd hunks between here and
+    // the thread cards never see them as props (docs/review-threads.md).
+    //
+    // --sticky-changes-h (the measured Changes-toolbar height) is published on the
+    // div below so the artifacts filter bar and card headers can dock flush beneath
+    // it even when the toolbar wraps. See the ResizeObserver above.
     // In the inspector pane the mt-4 is dropped - the pane's own pt-4 already
     // spaces the bar off the pane top (and -top-4 cancels exactly that padding).
+    <ReviewThreadContext.Provider value={threadActions}>
     <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
@@ -3631,10 +3972,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               never separates from its selectors - the whole "main → Latest commit"
               drops to the next line together when it can't fit beside the stats. */}
           <div className="flex items-center gap-3">
-            <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} />
+            <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} onSelectOnly={handleSelectOnly} />
             <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><ArrowRightLeft className='w-6 h-6' strokeWidth='1.5' /></span>
             <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
-              left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
+              left={leftSel} hasUncommitted={diff?.uncommitted_changes} onSelectOnly={handleSelectOnly} />
           </div>
 
           {resetBtn}
@@ -3718,5 +4059,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         document.body,
       )}
     </div>
+    </ReviewThreadContext.Provider>
   )
 }

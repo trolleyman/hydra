@@ -95,7 +95,7 @@ type publishFailure struct {
 
 // PublishAgent pushes a head's branch to the remote as its downstream branch and
 // creates/updates the forge MR - host-side, with the user's own credentials
-// (NON_LOCAL_INTEGRATION.md 3.3). Thin wrapper over publishHead.
+// (docs/non-local-integration.md). Thin wrapper over publishHead.
 func (s *Server) PublishAgent(ctx context.Context, request api.PublishAgentRequestObject) (api.PublishAgentResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -377,7 +377,7 @@ func (s *Server) PullFromMr(ctx context.Context, request api.PullFromMrRequestOb
 
 // SetDownstreamBranch edits a head's downstream branch. Soft-locked after first
 // publish: on GitLab/GitHub the source branch IS the MR's identity, so renaming
-// orphans the MR - the linked case is rejected with a hint (3.3a).
+// orphans the MR - the linked case is rejected with a hint.
 func (s *Server) SetDownstreamBranch(ctx context.Context, request api.SetDownstreamBranchRequestObject) (api.SetDownstreamBranchResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -533,7 +533,7 @@ func warmAuthStatus(provider string) {
 	}()
 }
 
-// ArmPublishWhenGreen arms publish-when-green for a head (3.5).
+// ArmPublishWhenGreen arms publish-when-green for a head.
 func (s *Server) ArmPublishWhenGreen(ctx context.Context, request api.ArmPublishWhenGreenRequestObject) (api.ArmPublishWhenGreenResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
