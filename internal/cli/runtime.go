@@ -48,6 +48,11 @@ type daemonRuntime struct {
 func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, error) {
 	worktreesDir := paths.GetWorktreesDirFromProjectRoot(projectRoot)
 	log.Printf("Worktrees: %s", worktreesDir)
+	// The daemon usually outlives whatever terminal started it, so say where the
+	// log persists rather than leaving it to be discovered.
+	if p := LogFilePath(); p != "" {
+		log.Printf("Log: %s (set HYDRA_LOG_HTTP=1 for a line per HTTP request)", p)
+	}
 
 	store, err := db.Open(projectRoot)
 	if err != nil {

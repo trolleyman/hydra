@@ -118,12 +118,15 @@ func TestSanitizeGeneratedTitle(t *testing.T) {
 		{"first non-empty line", "\n\nAuth refactor\nignored", "Auth refactor"},
 		{"trailing newline", "Title here\n", "Title here"},
 		{"empty", "", ""},
-		// A refusal/clarifying question is a failed generation, not a title -
-		// callers must keep the prompt-derived title instead.
-		{"refusal", "I need permission to read that file. Could you either:", ""},
-		{"question", "Which file did you mean?", ""},
-		{"apology", "Sorry, I can't help with that", ""},
-		{"rambling sentence", "This task appears to be about fixing the way the main monitor handles scaling on wake", ""},
+		{"whitespace only", "  \n\t\n", ""},
+		// Wording is no longer second-guessed: an odd answer is passed through
+		// (and clamped) rather than silently dropped. See sanitizeGeneratedTitle.
+		{"question is kept", "Which file did you mean?", "Which file did you mean?"},
+		{
+			"long answer is clamped, not rejected",
+			"This task appears to be about fixing the way the main monitor handles scaling on wake",
+			"This task appears to be about fixing the way the main...",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
