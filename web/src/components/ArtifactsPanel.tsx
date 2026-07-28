@@ -1634,8 +1634,12 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
           <p>The filter buttons on this bar narrow the grid: <strong>type</strong> (image / video) and <strong>changes</strong> (added / removed / modified / unchanged - unchanged files are hidden by default), plus a button per tag a script attached. Shift-click a value to isolate it.</p>
           <p className="text-gray-500 dark:text-gray-400">Writing an artifact script - environment variables, streaming markers, tag sidecars, how each format is compared - is covered in <code className="text-blue-300">docs/artifacts.md</code>.</p>
         </InfoTooltip>
+        {/* leading-4, not the inherited 1.5: 11px * 1.5 = 16.5px, a half pixel,
+            which knocks whatever it is the tallest thing in (this bar once it
+            wraps) onto a fractional height - and a box on a fractional height
+            paints 1px taller or shorter depending on its subpixel offset. */}
         {generatingCount > 0 && (
-          <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
+          <span className="flex items-center gap-1.5 text-[11px] leading-4 font-normal text-gray-400 dark:text-gray-500">
             <LoaderCircle className="w-3 h-3 animate-spin" />
             {isSkeleton ? 'Loading' : `Generating ${settledCount}/${displaySets.length}`}
           </span>

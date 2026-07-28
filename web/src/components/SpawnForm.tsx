@@ -599,12 +599,14 @@ export const SpawnForm = memo(function SpawnForm({
     return { id: uploadAttachment(new File([text], filename, { type: extensionMime(ext) })), filename }
   }
 
-  // Insert text into the prompt at the caret, as its own undo step - used for
-  // the "[filename]" paste markers.
-  function insertAtCaret(insert: string) {
+  // Insert "[filename]" markers into the prompt at the caret, as their own undo
+  // step. The text before the caret decides whether they need a leading space;
+  // they never carry a trailing one, so the caret stays against the "]".
+  function insertPasteMarkers(names: string[]) {
     const ta = textareaRef.current
     const start = ta?.selectionStart ?? prompt.length
     const end = ta?.selectionEnd ?? prompt.length
+    const insert = pasteMarkerText(names, prompt.slice(0, start))
     const caret = start + insert.length
     const nextPrompt = prompt.slice(0, start) + insert + prompt.slice(end)
     commit(
@@ -650,7 +652,7 @@ export const SpawnForm = memo(function SpawnForm({
     if (files.length > 0) {
       e.preventDefault()
       const names = addFiles(files)
-      if (pasteMarkers && names.length > 0) insertAtCaret(pasteMarkerText(names))
+      if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
       return
     }
 
@@ -707,7 +709,7 @@ export const SpawnForm = memo(function SpawnForm({
     // First paste of a large block: attach it instead of dumping it in the box.
     e.preventDefault()
     const { id, filename } = attachPastedText(text, e.clipboardData)
-    if (pasteMarkers) insertAtCaret(pasteMarkerText([filename]))
+    if (pasteMarkers) insertPasteMarkers([filename])
     lastPasteRef.current = { text, attachmentId: id, filename, lang: detectCodeLanguage(e.clipboardData) }
   }
 
