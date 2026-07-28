@@ -36,7 +36,7 @@ export type TestRunResult = {
      */
     ref?: string | null;
     /**
-     * Report format parsed (junit | hydra | stdout | exit). Also set while running when the runner's configured type already pins it (type = "stdout"); a file-based runner has none until it settles.
+     * Report format parsed (junit | hydra | stdout | exit). Never set while running - which format a run settles with is only known once its report has been parsed.
      */
     format?: string | null;
     /**

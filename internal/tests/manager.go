@@ -316,7 +316,7 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 		if fg {
 			m.fgWant[dir] = true
 		}
-		rep := Report{Runner: spec.Name, Key: key, Ref: ref, Status: StatusRunning, Format: runningFormat(spec), Progress: m.progress[dir], StartedAt: m.startedAt[dir], Log: append([]LogLine(nil), m.logs[dir]...)}
+		rep := Report{Runner: spec.Name, Key: key, Ref: ref, Status: StatusRunning, Progress: m.progress[dir], StartedAt: m.startedAt[dir], Log: append([]LogLine(nil), m.logs[dir]...)}
 		m.fillRunningLocked(dir, &rep)
 		m.mu.Unlock()
 		if fg {
@@ -382,26 +382,7 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 		}
 	}()
 
-	return Report{Runner: spec.Name, Key: key, Ref: ref, Status: StatusRunning, Format: runningFormat(spec), StartedAt: started}, nil
-}
-
-// runningFormat is the report format an in-flight run will settle with, when the
-// config alone already pins it - so the tests panel can show the same
-// "· <format>" suffix while a runner is running as it does once it finishes,
-// instead of the suffix appearing out of nowhere at the end.
-//
-// Only a streaming runner qualifies: type = "stdout" means the ::hydra:test::
-// markers ARE the report, so nothing has to be parsed to know the format. A
-// file-based runner's format is whatever ParseDir finds in $HYDRA_TEST_OUTPUT
-// (junit vs hydra), which we genuinely don't know until it exits, so it stays
-// blank until then. Either kind still falls back to "exit" when the run produces
-// no report at all - a run that emits zero markers flips stdout -> exit on
-// settle.
-func runningFormat(spec config.TestScript) string {
-	if spec.IsStreaming() {
-		return "stdout"
-	}
-	return ""
+	return Report{Runner: spec.Name, Key: key, Ref: ref, Status: StatusRunning, StartedAt: started}, nil
 }
 
 // Invalidate drops the cached entry so the next Get regenerates it. No-op while a

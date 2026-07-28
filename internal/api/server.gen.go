@@ -1479,7 +1479,7 @@ type TestRunResult struct {
 	Error  *string `json:"error"`
 	Failed *int    `json:"failed,omitempty"`
 
-	// Format Report format parsed (junit | hydra | stdout | exit). Also set while running when the runner's configured type already pins it (type = "stdout"); a file-based runner has none until it settles.
+	// Format Report format parsed (junit | hydra | stdout | exit). Never set while running - which format a run settles with is only known once its report has been parsed.
 	Format *string `json:"format"`
 
 	// Log Captured stdout+stderr lines of the in-flight run. Only while running; once settled fetch log_url.
