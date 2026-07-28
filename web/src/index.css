@@ -302,7 +302,19 @@ body {
    we already used, so the switch between them is a colour change and nothing
    else. Prism ships themes as whole stylesheets that assume they own `pre`/`code`
    (background, padding, font) - we only want the token colours, so the palette
-   lives here rather than as an @import. */
+   lives here rather than as an @import.
+
+   Token spans carry COLOUR, never layout - so pin their display before the
+   palette. Prism's token names are bare words (`table`, `italic`, `url`, ...)
+   and land in the same global class namespace as Tailwind's utilities, so
+   TOML's `table` token (the `<name>` in `[artifacts.<name>]`, class
+   "token table class-name") was picking up `.table { display: table }` and
+   rendering as a block - breaking every TOML table header onto three lines
+   (`[`, the name, `]`) wherever one appeared, in diffs and rendered markdown
+   alike. This rule is un-layered, so it outranks the layered utility without
+   needing !important, and it fixes the whole class of collision rather than
+   just the one name that happens to bite today. */
+.token { display: inline; }
 .token.comment, .token.prolog, .token.doctype, .token.cdata { color: #6a737d; font-style: italic; }
 .token.punctuation { color: #24292e; }
 .token.namespace { opacity: 0.7; }
