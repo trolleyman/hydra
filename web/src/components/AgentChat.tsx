@@ -7592,7 +7592,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // dep so a sub-agent view follows its own live growth too. followBottom
   // glides rather than teleports; the first render of a replayed history is
   // far enough from the bottom to fall into its instant path.
-  useEffect(() => {
+  //
+  // LAYOUT effect, not a passive one: a passive effect runs AFTER the browser
+  // has painted, so growth that should be matched exactly (see followBottom)
+  // was still shown one frame lower before the scroll caught up on the next -
+  // a single-frame flash of the last line and the working indicator dropping,
+  // most visible where a streamed thinking block settles into its card. Running
+  // before paint means the two land in the same frame.
+  useLayoutEffect(() => {
     if (pinnedRef.current) followBottom()
     // followBottom only touches refs, so it isn't a meaningful dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
