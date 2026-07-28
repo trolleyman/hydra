@@ -284,8 +284,8 @@ describe('ToolSearch tool_reference results', () => {
   it('keeps the provider blocks for the Raw panel', () => {
     const item = search([{ type: 'tool_reference', tool_name: 'mcp__hydra__git_commit' }])
     const raw = JSON.parse(toolRawJson(item!.input, item!.rawUse, item!.rawResult, item!.result))
-    expect(raw.tool_use).toMatchObject({ type: 'tool_use', name: 'ToolSearch', input: { query: 'select:mcp__hydra__git_commit' } })
-    expect(raw.tool_result).toMatchObject({ type: 'tool_result', tool_use_id: 'toolu_ts', content: [{ type: 'tool_reference', tool_name: 'mcp__hydra__git_commit' }] })
+    expect(raw.tool_use.message.content[0]).toMatchObject({ type: 'tool_use', name: 'ToolSearch', input: { query: 'select:mcp__hydra__git_commit' } })
+    expect(raw.tool_result.message.content[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'toolu_ts', content: [{ type: 'tool_reference', tool_name: 'mcp__hydra__git_commit' }] })
     // The flattened text is the card's summary, not something the wire carried.
     expect(raw.result).toBeUndefined()
   })
@@ -300,9 +300,11 @@ describe('ToolSearch tool_reference results', () => {
 })
 
 // The Raw panel used to rebuild {input, result} from what the card kept, so it
-// showed the FLATTENED result and no envelope. It now prints the blocks as sent
-// - except an image's base64, which the card already renders and which is
-// megabytes of noise here.
+// showed the FLATTENED result and no envelope. It now prints each block inside
+// the ENTRY the CLI recorded it in - so everything written around the block
+// (uuid, timestamp, cwd, sidechain markers) is visible, rather than only the
+// fields something thought to copy up. An image's base64 is the one exception,
+// since the card already renders it and it is megabytes of noise here.
 describe('toolRawJson', () => {
   const alloc = () => {
     let id = 0
@@ -322,7 +324,7 @@ describe('toolRawJson', () => {
   it('swaps an image payload for its size, keeping the block shape', () => {
     const data = 'A'.repeat(4000)
     const item = reduce('Read', { file_path: 'shot.png' }, [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data } }])
-    const image = raw(item).tool_result.content[0]
+    const image = raw(item).tool_result.message.content[0].content[0]
     expect(image.source.media_type).toBe('image/png')
     expect(image.source.data).toBe('<2.9 KB base64, rendered above>')
     expect(item.resultImages?.[0]).toContain(data)
@@ -377,6 +379,21 @@ describe('toolRawJson', () => {
     expect(json.tool_use).toEqual({ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'a.ts' } })
     expect(json.tool_result.content).toEqual([{ type: 'text', text: 'contents' }])
     expect(JSON.stringify(json)).not.toContain('synthetic')
+  })
+
+  // The backend relays the entry the CLI recorded (minus its content, which the
+  // payload carries) - so Raw shows what was written around the block, `cwd` and
+  // all, without anyone having listed which fields to lift out.
+  it('shows the recorded entry around a normalized block', () => {
+    const item = codexPair(
+      { id: 't2', name: 'Bash', input: { command: 'bun test' }, entry: { type: 'assistant', uuid: 'u1', cwd: '/repo/wt/web', message: { id: 'm1' } } },
+      { id: 't2', content: 'ok', entry: { type: 'user', uuid: 'u2', cwd: '/repo/wt/web' } },
+    )
+    const json = raw(item)
+    expect(json.tool_use).toMatchObject({ type: 'assistant', uuid: 'u1', cwd: '/repo/wt/web' })
+    expect(json.tool_use.message).toMatchObject({ id: 'm1', content: [{ type: 'tool_use', id: 't2', name: 'Bash' }] })
+    expect(json.tool_result).toMatchObject({ type: 'user', cwd: '/repo/wt/web' })
+    expect(json.tool_result.message.content[0]).toMatchObject({ type: 'tool_result', tool_use_id: 't2' })
   })
 
   it('falls back to input/result for a card Hydra synthesized', () => {

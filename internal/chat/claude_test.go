@@ -31,11 +31,14 @@ func TestNormalizeClaudeToolResultAndTurn(t *testing.T) {
 	}
 }
 
-// The Bash tool keeps one shell per session, so where a command ran is only
-// knowable from the `cwd` the CLI records on the entry. It has to survive
-// normalization or the chat is left inferring it from the commands themselves.
-func TestNormalizeClaudeCarriesCwd(t *testing.T) {
-	line := []byte(`{"type":"user","uuid":"u9","cwd":"/repo/wt/web","message":{"content":[{"type":"tool_result","tool_use_id":"tool1","content":"ok"}]}}`)
+// A tool event carries the whole entry the CLI wrote around the block, so the
+// chat's Raw panel can show what was recorded rather than the fields something
+// thought to copy across - and so the `cwd` (the only record of where a command
+// ran, one shell being shared by the whole session) rides along with it. The
+// message content is dropped: the payload already carries it, and a tool result
+// can be a megabyte.
+func TestNormalizeClaudeCarriesTheEntry(t *testing.T) {
+	line := []byte(`{"type":"user","uuid":"u9","cwd":"/repo/wt/web","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool1","content":"ok"}]}}`)
 	got := normalizeClaude(line)
 	if len(got) != 1 {
 		t.Fatalf("events = %+v", got)
@@ -44,8 +47,22 @@ func TestNormalizeClaudeCarriesCwd(t *testing.T) {
 	if !ok {
 		t.Fatalf("payload = %T", got[0].payload)
 	}
-	if cwd, _ := payload["cwd"].(string); cwd != "/repo/wt/web" {
-		t.Errorf("cwd = %q, want /repo/wt/web", cwd)
+	entry, ok := payload["entry"].(map[string]any)
+	if !ok {
+		t.Fatalf("entry = %#v", payload["entry"])
+	}
+	if cwd, _ := entry["cwd"].(string); cwd != "/repo/wt/web" {
+		t.Errorf("entry cwd = %q, want /repo/wt/web", cwd)
+	}
+	msg, ok := entry["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("entry message = %#v", entry["message"])
+	}
+	if _, dup := msg["content"]; dup {
+		t.Error("entry kept the message content, which the payload already carries")
+	}
+	if role, _ := msg["role"].(string); role != "user" {
+		t.Errorf("entry message lost its other fields: %#v", msg)
 	}
 }
 

@@ -418,6 +418,13 @@ interface ProviderEvent {
   // ignored.) Absent from live stdout lines on some CLI versions, in which case
   // the chat infers the directory instead - see lib/shellCwd.
   cwd?: string
+  // Set on the events normalizedToProviderEvents rebuilds from the backend
+  // timeline: THIS object is Hydra's reconstruction, not a line a provider sent,
+  // so Raw must not present it as one. The provider's own entry (the recorded
+  // line minus its message content) rides on `entry` where the backend captured
+  // one - see internal/chat/claude.go.
+  synthesizedEvent?: boolean
+  entry?: unknown
   // stop_reason on a complete assistant message: "end_turn"/"tool_use" are
   // normal, "max_tokens" means the reply was truncated, "refusal" a safety stop
   // - only the abnormal ones are surfaced (item: turn footer).
@@ -635,6 +642,13 @@ function cleanSubagentReport(text: string): string {
     .trimEnd()
 }
 
+// entryString reads one field off a relayed provider entry (see ProviderEvent.entry).
+function entryString(entry: unknown, key: string): string {
+  if (!entry || typeof entry !== 'object') return ''
+  const value = (entry as Record<string, unknown>)[key]
+  return typeof value === 'string' ? value : ''
+}
+
 // Bridge the provider-neutral backend timeline into the mature presentation
 // reducer while Claude's legacy wire format is being retired. Provider details
 // stop at this boundary; paging and live delivery use the same conversion.
@@ -655,7 +669,14 @@ export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyRea
     isSidechain: p.sidechain === true,
     agentId: typeof p.agent_id === 'string' ? p.agent_id : undefined,
     parent_tool_use_id: typeof p.parent_item_id === 'string' ? p.parent_item_id : undefined,
-    cwd: typeof p.cwd === 'string' && p.cwd ? p.cwd : undefined,
+    // The provider's own recorded entry, when the backend captured one. The
+    // fields the presentation needs are read off it rather than being copied up
+    // one by one - `cwd` (see lib/shellCwd) is the first, and whatever a future
+    // CLI adds is already here. `p.cwd` is the older spelling, kept for events
+    // stored before the entry was relayed.
+    entry: p.entry && typeof p.entry === 'object' ? p.entry : undefined,
+    cwd: entryString(p.entry, 'cwd') || (typeof p.cwd === 'string' ? p.cwd : '') || undefined,
+    synthesizedEvent: true,
   }
   const text = typeof p.text === 'string' ? p.text : contentText(p.content)
   const id = typeof p.id === 'string' ? p.id : typeof p.message_id === 'string' ? p.message_id : String(ev.seq)
@@ -1279,11 +1300,39 @@ function keptRawBlock(block: ClaudeContentBlock, value: unknown): unknown {
   delete rest.synthetic
   return rest
 }
-function rawUseBlock(block: ClaudeContentBlock): unknown {
-  return keptRawBlock(block, block)
+
+// inEntry puts a block back inside the ENTRY the CLI recorded it in - the line's
+// envelope (type, uuid, timestamp, cwd, sidechain markers, the message's id and
+// usage) with `message.content` narrowed to this one block.
+//
+// Raw used to show the bare block, which meant everything the CLI wrote around
+// it was invisible: `cwd` - the only record of which directory a command ran in
+// - was there in the transcript all along and could not be seen. Wrapping,
+// rather than copying chosen fields up, keeps Raw honest as the CLI adds fields
+// nobody here has heard of yet.
+//
+// Narrowed to one block because a card is one tool call: an assistant message
+// routinely carries several tool_use blocks (plus its text), and each of those
+// is its own card, showing its own entry.
+function inEntry(entry: unknown, block: unknown): unknown {
+  if (block === undefined || !entry || typeof entry !== 'object') return block
+  const out = { ...(entry as Record<string, unknown>) }
+  const message = out.message && typeof out.message === 'object' ? (out.message as Record<string, unknown>) : {}
+  out.message = { ...message, content: [block] }
+  return out
 }
-function rawResultBlock(block: ClaudeContentBlock): unknown {
-  return keptRawBlock(block, scrubRawImageData(block))
+// providerEntry is the recorded line a card should show its block inside of.
+// An event parsed straight off the wire IS that line; one rebuilt from the
+// backend timeline is not, and carries the real entry separately (or nothing at
+// all, for a provider whose raw shape is handled elsewhere - Codex's `_raw`).
+function providerEntry(ev: ProviderEvent): unknown {
+  return ev.synthesizedEvent ? ev.entry : ev
+}
+function rawUseBlock(block: ClaudeContentBlock, entry?: unknown): unknown {
+  return inEntry(entry, keptRawBlock(block, block))
+}
+function rawResultBlock(block: ClaudeContentBlock, entry?: unknown): unknown {
+  return inEntry(entry, keptRawBlock(block, scrubRawImageData(block)))
 }
 
 // toolRawJson builds the Raw panel's text for a tool card - the provider's own
@@ -4558,7 +4607,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
         if (block.type === 'text' && block.text?.trim()) routeUser(block.text, ev.isMeta)
         else if (block.type === 'tool_result' && block.tool_use_id) {
           const p = parseToolResult(block.content)
-          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images, rawResultBlock(block), ev.cwd)
+          patchTool(block.tool_use_id, p.text, block.is_error === true, p.images, rawResultBlock(block, providerEntry(ev)), ev.cwd)
         }
       }
     } else if (ev.type === 'assistant') {
@@ -4599,7 +4648,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
           // Task* ops fall through to a normal tool card (like any other tool);
           // only the panel state is latest-wins, and that is driven by the live
           // reducer's replay, not this older page.
-          else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, rawUse: rawUseBlock(block) })
+          else push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, rawUse: rawUseBlock(block, providerEntry(ev)) })
         }
       }
       // Turn-footer synthesis (item: historical usage): roll this message's
@@ -5677,7 +5726,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             if (block.type === 'text' && block.text) takePrompt(block.text)
             else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
-              patchSubTool(sub, block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block), ev.cwd)
+              patchSubTool(sub, block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block, providerEntry(ev)), ev.cwd)
             }
           }
       } else if (ev.type === 'assistant') {
@@ -5700,7 +5749,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               const dur = prevTs != null && evTs != null ? Math.max(0, evTs - prevTs) : undefined
               sub.items.push({ kind: 'thinking', id: meta.nextId++, text: block.thinking, durationMs: dur })
             } else if (block.type === 'tool_use' && block.id) {
-              sub.items.push({ kind: 'tool', id: meta.nextId++, toolUseId: block.id, name: block.name ?? 'tool', input: block.input, rawUse: rawUseBlock(block) })
+              sub.items.push({ kind: 'tool', id: meta.nextId++, toolUseId: block.id, name: block.name ?? 'tool', input: block.input, rawUse: rawUseBlock(block, providerEntry(ev)) })
             }
           }
         }
@@ -6227,7 +6276,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '')
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
-              patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block), ev.cwd)
+              patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block, providerEntry(ev)), ev.cwd)
               settleSubagentByToolUse(block.tool_use_id, parsed.text)
               if (block.is_error !== true) reopenMessagedSubagent(block.tool_use_id, parsed.text)
               if (block.is_error !== true) plan.applyTaskResult(block.tool_use_id, parsed.text)
@@ -6330,7 +6379,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     scheduleSubFlush()
                   }
                 }
-                push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, uuid: ev.uuid, rawUse: rawUseBlock(block) })
+                push({ kind: 'tool', toolUseId: block.id, name: block.name ?? 'tool', input: block.input, uuid: ev.uuid, rawUse: rawUseBlock(block, providerEntry(ev)) })
               }
             }
           }

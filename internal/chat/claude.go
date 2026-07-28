@@ -30,20 +30,10 @@ type claudeEnvelope struct {
 	AgentID         string   `json:"agentId,omitempty"`
 	ParentToolUseID string   `json:"parent_tool_use_id,omitempty"`
 	Content         string   `json:"content,omitempty"`
-	// CWD is the working directory the CLI recorded for this entry. The Bash tool
-	// runs ONE shell for the whole session, so a `cd` in an early command is still
-	// in force much later - this is the only place that directory is written down.
-	// Only a tool_result (user) entry's value is trustworthy, where it is the
-	// directory AFTER the command; on an assistant entry it is stamped at flush
-	// time and can land either side of the tool call. So the chat reads a
-	// command's own directory off the PREVIOUS result. Absent on live stdout lines
-	// from some CLI versions, in which case the chat falls back to inferring it
-	// from the commands themselves (web/src/lib/shellCwd.ts).
-	CWD          string  `json:"cwd,omitempty"`
-	DurationMS   int64   `json:"duration_ms,omitempty"`
-	MessageID    string  `json:"message_id,omitempty"`
-	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
-	Message      struct {
+	DurationMS      int64    `json:"duration_ms,omitempty"`
+	MessageID       string   `json:"message_id,omitempty"`
+	TotalCostUSD    float64  `json:"total_cost_usd,omitempty"`
+	Message         struct {
 		ID         string          `json:"id,omitempty"`
 		Content    json.RawMessage `json:"content,omitempty"`
 		StopReason string          `json:"stop_reason,omitempty"`
@@ -68,6 +58,25 @@ type claudeBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+}
+
+// claudeEntry is the CLI's whole entry with the message CONTENT taken out:
+// everything it wrote AROUND the block, with no field picked by hand. The chat's
+// Raw panel puts the block back inside it, so what it shows is the entry as
+// recorded rather than the handful of fields something thought to copy across.
+//
+// Content is dropped because the payload already carries it, and it is the big
+// part - a tool result can be a megabyte of output, and keeping a second copy
+// per block would multiply the stored conversation.
+func claudeEntry(line []byte) map[string]any {
+	var entry map[string]any
+	if json.Unmarshal(bytes.TrimSpace(line), &entry) != nil {
+		return nil
+	}
+	if msg, ok := entry["message"].(map[string]any); ok {
+		delete(msg, "content")
+	}
+	return entry
 }
 
 func normalizeClaude(line []byte) []eventSpec {
@@ -104,7 +113,7 @@ func normalizeClaude(line []byte) []eventSpec {
 			case "thinking":
 				out = append(out, eventSpec{sourceID: source, eventType: "reasoning_completed", payload: richClaudePayload(ev, map[string]any{"message_id": ev.Message.ID, "text": block.Thinking})})
 			case "tool_use":
-				out = append(out, eventSpec{sourceID: source, eventType: "tool_started", payload: richClaudePayload(ev, map[string]any{"id": block.ID, "name": block.Name, "input": block.Input})})
+				out = append(out, eventSpec{sourceID: source, eventType: "tool_started", payload: richClaudePayload(ev, map[string]any{"id": block.ID, "name": block.Name, "input": block.Input, "entry": claudeEntry(line)})})
 			}
 		}
 		return out
@@ -114,7 +123,7 @@ func normalizeClaude(line []byte) []eventSpec {
 			out := make([]eventSpec, 0, len(blocks))
 			for i, block := range blocks {
 				if block.Type == "tool_result" {
-					out = append(out, eventSpec{sourceID: claudeBlockSource(base, i), eventType: "tool_completed", payload: richClaudePayload(ev, map[string]any{"id": block.ToolUseID, "content": cleanClaudeToolResult(block.Content), "is_error": block.IsError})})
+					out = append(out, eventSpec{sourceID: claudeBlockSource(base, i), eventType: "tool_completed", payload: richClaudePayload(ev, map[string]any{"id": block.ToolUseID, "content": cleanClaudeToolResult(block.Content), "is_error": block.IsError, "entry": claudeEntry(line)})})
 				}
 			}
 			if len(out) > 0 {
@@ -250,7 +259,6 @@ func claudeBlockSource(base string, index int) string {
 
 func richClaudePayload(ev claudeEnvelope, payload map[string]any) map[string]any {
 	payload["uuid"] = ev.UUID
-	payload["cwd"] = ev.CWD
 	payload["usage"] = ev.Message.Usage
 	payload["stop_reason"] = ev.Message.StopReason
 	payload["sidechain"] = ev.IsSidechain || ev.ParentToolUseID != ""
