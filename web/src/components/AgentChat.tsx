@@ -276,8 +276,10 @@ type ChatItem =
   | { kind: 'tool'; id: number; toolUseId: string; name: string; input: unknown; result?: string; runningOutput?: string; resultImages?: string[]; isError?: boolean; ended?: boolean; uuid?: string; rawUse?: unknown; rawResult?: unknown; editPatch?: EditHunk[]; cwdAfter?: string }
   // A native AskUserQuestion tool call. requestId arrives with the paired
   // can_use_tool control_request (the channel the answer goes back on);
-  // result is the tool_result once answered.
-  | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string; uuid?: string }
+  // result is the tool_result once answered. expired: the turn that raised the
+  // question ended without an answer, so that channel is gone (see
+  // expireQuestions) - the card stays but answers it as a plain message.
+  | { kind: 'question'; id: number; toolUseId: string; input: unknown; specs: QuestionSpec[]; requestId?: string; result?: string; expired?: boolean; uuid?: string }
   | { kind: 'result'; id: number; isError: boolean; durationMs?: number; costUsd?: number; usage?: TokenUsage; stopReason?: string; errorText?: string }
   // A sub-agent (Task tool) whose meta carried no parent tool_use id, so it has
   // no Task card to fold into and renders as a standalone card in the flow. The
@@ -1554,10 +1556,13 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
   const allDone = total > 0 && done === total
   // Completed items fold behind a "(N completed)" toggle so the in-progress /
   // pending work sits in view without scrolling past the done ones. Collapsed by
-  // default; irrelevant when everything's done (the whole panel is collapsed then).
+  // default - except when everything's done, where folding them away would leave
+  // a card the user just expanded with nothing in it. That is only the DEFAULT:
+  // the toggle still folds them away by hand, and closing + reopening the card
+  // starts over from the default (see the header button).
   const completed = todos.filter((t) => t.status === 'completed')
   const active = todos.filter((t) => t.status !== 'completed')
-  const [showDone, setShowDone] = useState(false)
+  const [showDone, setShowDone] = useState(allDone)
   // Default collapsed when the pane is too narrow to sit a card alongside the
   // transcript, or when every item is checked off (a finished plan is just
   // noise expanded).
@@ -1565,11 +1570,14 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
   // Follow the narrow/wide flip and the all-done flip (collapse when it gets
   // tight or the plan completes, re-open when it widens or work resumes) while
   // still letting the user toggle in between - a render-phase sync like the
-  // settings fields use.
+  // settings fields use. The all-done flip also flips the completed section, so
+  // expanding a finished plan shows the checked-off items rather than an empty
+  // body, and resuming work puts the active ones back in view.
   const [prevNarrow, setPrevNarrow] = useState(narrow)
   const [prevAllDone, setPrevAllDone] = useState(allDone)
   if (prevNarrow !== narrow || prevAllDone !== allDone) {
     setPrevNarrow(narrow)
+    if (prevAllDone !== allDone) setShowDone(allDone)
     setPrevAllDone(allDone)
     setOpen(!narrow && !allDone)
   }
@@ -1601,7 +1609,14 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
         <ChevronRight className="w-3 h-3 shrink-0" />
       </div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          // Reopening starts the completed section from its default again
+          // (open when the plan is finished), so a fold the user did last time
+          // doesn't leave the reopened card empty. Reset on the way OPEN, not
+          // on close - reshuffling the body mid-close animation shows.
+          if (!open) setShowDone(allDone)
+          setOpen((o) => !o)
+        }}
         className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
       >
         <ListChecks className={`w-3.5 h-3.5 shrink-0 ${allDone ? 'text-emerald-500' : 'text-[#c96442]'}`} />
@@ -2689,6 +2704,8 @@ const ToolCard = memo(function ToolCard({
   const [open, setOpen] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [imgLightbox, setImgLightbox] = useState<number | null>(null)
+  // The thumbnail clicked, so the lightbox flies the picture out of it.
+  const [imgOrigin, setImgOrigin] = useState<Element | null>(null)
   // Eagerly decode result images (the card mounts collapsed the moment the
   // result lands), so opening later measures the true expanded height.
   const imageDims = useImageDims(item.resultImages)
@@ -3096,7 +3113,7 @@ const ToolCard = memo(function ToolCard({
                             width={logical?.w}
                             height={logical?.h}
                             alt="Tool output image"
-                            onClick={() => setImgLightbox(i)}
+                            onClick={(e) => { setImgOrigin(e.currentTarget); setImgLightbox(i) }}
                             // A ring, NOT a border: with border-box sizing (the
                             // Tailwind default) a 1px border eats 2px out of the
                             // content box the width attr set, so a 420px shot was
@@ -3142,6 +3159,7 @@ const ToolCard = memo(function ToolCard({
         <ImageLightbox
           images={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0, dpi: imageDensity }))}
           index={Math.min(imgLightbox, item.resultImages.length - 1)}
+          origin={imgOrigin}
           onIndexChange={setImgLightbox}
           onClose={() => setImgLightbox(null)}
         />
@@ -4240,11 +4258,17 @@ function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected
 function QuestionCard({
   specs,
   disabled,
+  expired,
   answeredText,
   onSubmit,
 }: {
   specs: QuestionSpec[]
   disabled: boolean
+  // The turn that asked ended without an answer, so the CLI is no longer
+  // listening on the control channel. The card stays fillable - onSubmit posts
+  // the answers as a normal message instead - but says so, rather than offering
+  // a Submit that quietly goes nowhere.
+  expired?: boolean
   // Set once the head has recorded an answer (the tool_result text) - renders
   // the card settled even across a reconnect, where local state is lost.
   answeredText?: string
@@ -4257,8 +4281,18 @@ function QuestionCard({
   // derived from the text) so a typed-but-then-rejected free text can stay in
   // the box while a real option is picked instead.
   const [otherSel, setOtherSel] = useState<boolean[]>(() => specs.map(() => false))
+  // Two ways a card settles locally, kept apart because one of them can be
+  // taken back: `submitted` is an answer handed to the CLI's control channel
+  // (optimistic - the daemon can still come back and say that request was
+  // already retired), `sent` is answers posted as an ordinary message, which
+  // is simply gone.
   const [submitted, setSubmitted] = useState(false)
-  const answered = submitted || answeredText != null
+  const [sent, setSent] = useState(false)
+  // `submitted` stops counting the moment the card is known expired: that is
+  // the daemon reporting it never delivered the answer (question_expired), so
+  // the optimistic "Answered" was a lie and the card unlocks for the message
+  // route. `sent` and a recorded result are final either way.
+  const answered = (submitted && !expired) || sent || answeredText != null
 
   // On a resume the card mounts already-answered with no local selection - and
   // the same holds if it was answered in another tab. Recover the chosen
@@ -4321,7 +4355,9 @@ function QuestionCard({
       if (otherSel[i] && other[i].trim()) labels.push(other[i].trim())
       answers[q.question] = labels.join(', ')
     }
-    if (onSubmit(answers)) setSubmitted(true)
+    if (!onSubmit(answers)) return
+    if (expired) setSent(true)
+    else setSubmitted(true)
   }
 
   return (
@@ -4445,6 +4481,12 @@ function QuestionCard({
           </div>
         </div>
       ))}
+      {expired && !answered && (
+        <div className="text-[11px] text-stone-500 dark:text-stone-400">
+          This turn ended before the question was answered, so the agent is no longer waiting on it - your answer goes
+          back as an ordinary message instead.
+        </div>
+      )}
       <div className="flex items-center justify-end gap-2">
         {answeredText != null && (
           <span className="min-w-0 truncate text-[11px] italic text-stone-400 dark:text-stone-500">{answeredText}</span>
@@ -4460,7 +4502,15 @@ function QuestionCard({
                 : 'bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
           }`}
         >
-          {answered ? 'Answered' : specs.length > 1 ? 'Submit all' : 'Submit'}
+          {expired
+            ? sent
+              ? 'Sent'
+              : 'Send as message'
+            : answered
+              ? 'Answered'
+              : specs.length > 1
+                ? 'Submit all'
+                : 'Submit'}
         </button>
       </div>
     </div>
@@ -4487,6 +4537,8 @@ const ChatUserMessage = memo(function ChatUserMessage({
 }) {
   const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // The chip clicked, so the picture flies out of it instead of fading in.
+  const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   // Nothing left after stripping the CLI's image placeholder (item 41) - don't
   // render an empty bubble.
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
@@ -4504,7 +4556,10 @@ const ChatUserMessage = memo(function ChatUserMessage({
             attachments={attachments}
             size="sm"
             className={body ? 'mt-2' : ''}
-            onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+            onOpenImage={(id, origin) => {
+              setLightboxOrigin(origin)
+              setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+            }}
           />
         )}
       </div>
@@ -4515,6 +4570,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
         <ImageLightbox
           images={lightboxImages}
           index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+          origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
         />
@@ -4852,7 +4908,12 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
         else if (block.type === 'tool_use' && block.id) {
           const specs = block.name === 'AskUserQuestion' ? parseQuestionSpecs(block.input) : null
           const todos = block.name === 'TodoWrite' ? parseTodos(block.input) : null
-          if (specs) push({ kind: 'question', toolUseId: block.id, input: block.input, specs })
+          // A page of older history is settled by definition, so a question in
+          // it that still has no answer never got one and its request is long
+          // gone - mark it expired up front (this reducer carries no
+          // control_request state at all, so it could never be answered here
+          // anyway; the flag is what tells the card to say so).
+          if (specs) push({ kind: 'question', toolUseId: block.id, input: block.input, specs, expired: true })
           else if (todos) { /* older plan state - the panel already shows the latest */ }
           // Task* ops fall through to a normal tool card (like any other tool);
           // only the panel state is latest-wins, and that is driven by the live
@@ -5241,6 +5302,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Composer attachments live in the undo history (`present.attachments`, above)
   // so a paste-turned-chip is undoable together with its text marker.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // The chip clicked, so the picture flies out of it instead of fading in.
+  const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Current model, fed live by the event stream (system:init / set_model
@@ -5411,11 +5474,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // pinned to its own render) to decide at replay_done whether a still-"working"
   // sub-agent is genuinely live or just stale replayed history (item 5).
   const isTurnRunningRef = useRef(isTurnRunning)
+  // Whether an unanswered question replayed from history could still be live.
+  // A head blocked on an AskUserQuestion is NOT "running": the elicitation
+  // fires a Notification hook that parks it in needs_input (see
+  // cli/trigger_hook.go), which is precisely the state a reload during a
+  // pending question lands in. Any other resting state means the turn behind
+  // the question is over and its answer channel with it (see expireQuestions).
+  const questionMayBeLiveRef = useRef(false)
   const smoothStreamRef = useRef(smoothStream)
   useEffect(() => {
     onStatusUpdateRef.current = onStatusUpdate
     onDiffRefreshRef.current = onDiffRefresh
     isTurnRunningRef.current = isTurnRunning
+    questionMayBeLiveRef.current = isTurnRunning || status === AgentStatus.NEEDS_INPUT
     smoothStreamRef.current = smoothStream
   })
 
@@ -5464,6 +5535,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // state update, instead of a render per event. Live events after that
     // flush per microtask batch.
     let replaying = true
+    // The request ids the daemon says the CLI is STILL blocked on, from the
+    // pending_questions frame it sends just before replay_done - the authority
+    // on which replayed question cards are answerable (see expireQuestions).
+    // null means it didn't say (a driver-backed provider, or the simulation),
+    // and the head-status heuristic decides instead.
+    let livePendingQuestions: Set<string> | null = null
     // Assistant events arrive one content block per event but share the API
     // message id; if a CLI version ever re-emits blocks cumulatively, this
     // per-message seen-set keeps the reducer idempotent.
@@ -6068,6 +6145,26 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         prev.some((it) => it.kind === 'tool' && it.result === undefined && !it.ended)
           ? prev.map((it) => (it.kind === 'tool' && it.result === undefined && !it.ended ? { ...it, ended: true } : it))
           : prev,
+      )
+    }
+
+    // expireQuestions kills the answer channel of every question card still
+    // waiting for one. The CLI's can_use_tool request lives only as long as the
+    // turn that raised it: end that turn with the question unanswered (a
+    // mid-question /model switch, an interrupt, a process restart) and a
+    // control_response quoting its request_id is silently discarded. The
+    // request_id itself is durable - it is replayed out of the stored
+    // interaction_requested event on every reload - so without this the dead
+    // card came back looking perfectly live, and "Submit" did nothing at all.
+    // `only` narrows it to particular cards (the daemon naming the requests it
+    // is still blocked on, or rejecting one answer); by default every
+    // unanswered one goes.
+    const expireQuestions = (only?: (it: Extract<ChatItem, { kind: 'question' }>) => boolean) => {
+      const stale = (it: ChatItem) =>
+        it.kind === 'question' && it.result === undefined && !it.expired && (!only || only(it))
+      for (const it of pending) if (stale(it)) (it as Extract<ChatItem, { kind: 'question' }>).expired = true
+      setItems((prev) =>
+        prev.some(stale) ? prev.map((it) => (stale(it) ? { ...it, expired: true } : it)) : prev,
       )
     }
 
@@ -6730,6 +6827,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (changed) scheduleSubFlush()
           clearStream()
           endPendingTools()
+          // The turn is over, so any question it left unanswered can no longer
+          // be answered through the CLI (see expireQuestions).
+          expireQuestions()
           return
         }
         default:
@@ -6909,6 +7009,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         normalizedEvents?: NormalizedChatEvent[]
         id?: string
         chunk?: string
+        // pending_questions / question_expired: the daemon's word on which
+        // AskUserQuestion requests the CLI is still blocked on (see below).
+        requests?: { requestId?: string; toolUseId?: string }[]
+        requestId?: string
       }
       try {
         msg = JSON.parse(e.data)
@@ -7202,6 +7306,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           }
           return
         }
+        case 'pending_questions':
+          // Sent once per connection, immediately before replay_done: the
+          // requests the CLI is still blocked on right now. An empty list is a
+          // definite "none" (every replayed question card is dead); the frame
+          // not arriving at all leaves the fallback in place.
+          livePendingQuestions = new Set(
+            (msg.requests ?? []).map((r) => r.requestId).filter((id): id is string => !!id),
+          )
+          return
+        case 'question_expired':
+          // The daemon refused to forward an answer: that request was already
+          // retired, so the card must stop claiming it was answered and offer
+          // the message route instead.
+          if (msg.requestId) {
+            const dead = msg.requestId
+            expireQuestions((it) => it.requestId === dead)
+          }
+          return
         case 'replay_done':
           // History that ends on a completed turn (no trailing user message to
           // settle it, and no result event in the replay to supersede it) gets
@@ -7212,6 +7334,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // Any tool from the replayed history with no result isn't running
           // anymore (its turn is over) - don't leave it stuck "running" (item 42).
           endPendingTools()
+          // Same for a question the history left unanswered: keep only the ones
+          // the daemon says the CLI is still blocked on. Where it couldn't say,
+          // fall back to the head's status - still working, or parked on
+          // needs_input, is the one situation a reload during a genuinely
+          // pending question lands in. (The turn-end path above only catches
+          // the ones whose `result` line made it into the replay window.)
+          if (livePendingQuestions) {
+            const live = livePendingQuestions
+            expireQuestions((it) => it.requestId == null || !live.has(it.requestId))
+          } else if (!questionMayBeLiveRef.current) {
+            expireQuestions()
+          }
           // A BACKGROUND sub-agent settles only off its <task-notification>. That
           // record lives in the main transcript, which the backfill replays
           // BEFORE the sub is rebuilt from its sidecar - so handleTaskNotification
@@ -8636,18 +8770,23 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         if (sub.toolUseId && taskToolByUse[sub.toolUseId]) return null
         return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
       }
-      case 'question':
+      case 'question': {
+        // Its control_request channel dies with the turn that raised it, and
+        // the request_id outlives it in the transcript - so an expired card
+        // would otherwise still look answerable and swallow the answer (see
+        // expireQuestions). Expired, it stays fillable but sends the answers as
+        // an ordinary message, which is the only thing the agent can still read.
+        const expired = item.result == null && item.expired === true
         return (
           <QuestionCard
             specs={item.specs}
-            // Interactive only while its control_request channel is live; a
-            // question replayed from the transcript alone (the process has
-            // since restarted, killing the pending turn) renders inert.
-            disabled={!connected || item.requestId == null}
+            disabled={!connected || (!expired && item.requestId == null)}
+            expired={expired}
             answeredText={item.result}
-            onSubmit={(answers) => answerQuestion(item, answers)}
+            onSubmit={(answers) => (expired ? sendAnswersAsText(answers) : answerQuestion(item, answers))}
           />
         )
+      }
       case 'result':
         if (item.isError) {
           return (
@@ -9065,7 +9204,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               size="sm"
               className="px-3 pt-2.5"
               onRemove={removeAttachment}
-              onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+              onOpenImage={(id, origin) => {
+                setLightboxOrigin(origin)
+                setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+              }}
             />
             <HighlightedTextarea
               ref={textareaRef}
@@ -9207,6 +9349,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         <ImageLightbox
           images={lightboxImages}
           index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+          origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
         />

@@ -162,7 +162,7 @@ func TestParseToolPermissionRequest(t *testing.T) {
 	if !ok {
 		t.Fatalf("ParseToolPermissionRequest ok=false, want true")
 	}
-	if req.RequestID != "req_7" || req.ToolName != "ExitPlanMode" {
+	if req.RequestID != "req_7" || req.ToolName != "ExitPlanMode" || req.ToolUseID != "t9" {
 		t.Errorf("parsed %+v", req)
 	}
 	if string(req.Input) != `{"plan":"do the thing"}` {
@@ -238,6 +238,65 @@ func TestRingFilterOnPlanApproval(t *testing.T) {
 	f.Filter([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"))
 	if len(got) != 1 || got[0] != "req_1" {
 		t.Fatalf("OnPlanApproval fired %v, want [req_1]", got)
+	}
+}
+
+// The pending-ask set is what tells a live question card from a dead one whose
+// request_id merely replayed with the transcript, so each way a request can die
+// has to actually retire it.
+func TestRingFilterPendingAsks(t *testing.T) {
+	ask := func(reqID, useID string) []byte {
+		return []byte(`{"type":"control_request","request_id":"` + reqID + `","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","tool_use_id":"` + useID + `","input":{}}}` + "\n")
+	}
+	ids := func(f *RingFilter) []string {
+		var out []string
+		for _, a := range f.PendingAsks() {
+			out = append(out, a.RequestID+"/"+a.ToolUseID)
+		}
+		return out
+	}
+
+	f := &RingFilter{}
+	if got := f.PendingAsks(); got != nil {
+		t.Fatalf("fresh filter has %v pending", got)
+	}
+	f.Filter(ask("req_1", "toolu_1"))
+	f.Filter([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"))
+	if got := ids(f); len(got) != 1 || got[0] != "req_1/toolu_1" {
+		t.Fatalf("after ask: %v", got)
+	}
+
+	// Answered: the tool_result quoting its tool_use_id retires just that one.
+	f.Filter(ask("req_2", "toolu_2"))
+	f.Filter([]byte(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"The user answered..."}]}}` + "\n"))
+	if got := ids(f); len(got) != 1 || got[0] != "req_2/toolu_2" {
+		t.Fatalf("after answer: %v", got)
+	}
+
+	// The turn ending takes the rest with it - the case that used to leave a
+	// dead card looking answerable (a /model switch mid-question aborts the turn).
+	f.Filter([]byte(`{"type":"result","subtype":"success","is_error":false}` + "\n"))
+	if got := ids(f); got != nil {
+		t.Fatalf("after turn end: %v", got)
+	}
+
+	// A can_use_tool request for another tool isn't a question, and neither is a
+	// request with no tool_use_id to hang a card on.
+	f.Filter([]byte(`{"type":"control_request","request_id":"req_3","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","tool_use_id":"toolu_3","input":{}}}` + "\n"))
+	f.Filter([]byte(`{"type":"control_request","request_id":"req_4","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{}}}` + "\n"))
+	if got := ids(f); got != nil {
+		t.Fatalf("non-question requests tracked: %v", got)
+	}
+}
+
+func TestControlResponseRequestID(t *testing.T) {
+	if got := ControlResponseRequestID(json.RawMessage(`{"subtype":"success","request_id":"req_9","response":{"behavior":"allow"}}`)); got != "req_9" {
+		t.Errorf("ControlResponseRequestID = %q, want req_9", got)
+	}
+	for _, bad := range []string{`{"subtype":"success"}`, `[1,2]`, `{"broken"`} {
+		if got := ControlResponseRequestID(json.RawMessage(bad)); got != "" {
+			t.Errorf("ControlResponseRequestID(%s) = %q, want empty", bad, got)
+		}
 	}
 }
 

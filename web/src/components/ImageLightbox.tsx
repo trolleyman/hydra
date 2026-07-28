@@ -1,12 +1,17 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot } from 'lucide-react'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff, LightboxDiffControls } from './LightboxDiff'
 import { makeAuxOpen } from './artifactDiffShared'
+import { CheckerLayer } from './CheckerLayer'
 import { applyABShortcut } from '../lib/abShortcuts'
 import { ZoomPan } from './ZoomPan'
 import { Tooltip } from './Tooltip'
+import {
+  canFlip, findLightboxOrigin, mediaRectOf, playFlip, rectOf,
+  whenMediaLaidOut, FLIP_NAV_MS, FLIP_OPEN_MS, LIGHTBOX_MEDIA_CLASS, type Rect,
+} from '../lib/lightboxFlip'
 
 export interface LightboxImage {
   url: string
@@ -59,17 +64,46 @@ function formatBytes(n: number): string {
 // blending into the dark backdrop. Shared by the main image and the side previews.
 const CHECKER = 'repeating-conic-gradient(#bfbfbf 0% 25%, #f5f5f5 0% 50%) 0 0 / 20px 20px'
 
+// The lightbox's checkerboard, as a layer behind the picture (see CheckerLayer for
+// why it isn't a background on the <img>). It carries the chrome's fade so a picture
+// flying out of a thumbnail that had no checkerboard doesn't snap one on as it lands.
+function LightboxChecker({ className }: { className?: string }) {
+  return <CheckerLayer className={className} style={{ background: CHECKER }} />
+}
+
+// The resting opacity of an edge preview (matches the `opacity-40` on it below).
+// A picture flying in from the edge fades up from it, and the one it replaces fades
+// down to it as it flies out there.
+const PEEK_OPACITY = 0.4
+
+// How the picture shown for the current index should arrive.
+//
+//   flip  - it is already on screen somewhere (a thumbnail in the page on open, or
+//           the sibling peeking in at the edge on ←/→) and travels from that exact
+//           box to its place in the lightbox. `outgoing` is the counter-flight: on
+//           navigation the picture being replaced flies out to the edge preview it
+//           becomes, so the pair swaps places rather than one blinking out.
+//   slide - nothing to fly from (no thumbnail on screen, no edge previews below
+//           `lg`, or reduced motion): the old directional slide+fade.
+type Entrance =
+  | { kind: 'flip'; from: Rect; outgoing?: { side: 'prev' | 'next'; from: Rect } }
+  | { kind: 'slide'; dir: -1 | 0 | 1 }
+
 // A Slack-style fullscreen image viewer: a blurred dark backdrop with the image
 // centered, optional prev/next arrows when there's more than one image, and
 // keyboard support (Esc closes, ←/→ navigate). Clicking the backdrop closes it.
 export function ImageLightbox({
   images,
   index,
+  origin,
   onIndexChange,
   onClose,
 }: {
   images: LightboxImage[]
   index: number
+  // The thumbnail the lightbox was opened from, when the opener supplied one - the
+  // picture flies out of its box on open and back into it on close. See lightboxFlip.
+  origin?: Element | null
   onIndexChange: (i: number) => void
   onClose: () => void
 }) {
@@ -80,11 +114,52 @@ export function ImageLightbox({
   // endless carousel.
   const hasPrev = index > 0
   const hasNext = index < count - 1
-  // The direction of the last navigation (+1 next, -1 prev, 0 on open), so the new
-  // image can slide in from the matching side - see the keyed wrapper below.
-  const [dir, setDir] = useState(0)
-  const prev = useCallback(() => { if (index > 0) { setDir(-1); onIndexChange(index - 1) } }, [index, onIndexChange])
-  const next = useCallback(() => { if (index < count - 1) { setDir(1); onIndexChange(index + 1) } }, [index, count, onIndexChange])
+
+  // The wrapper the shown media sits in (keyed by index, so it is a fresh node per
+  // navigation) and the two edge previews - the endpoints every flight measures.
+  const mediaRef = useRef<HTMLDivElement | null>(null)
+  const prevPeekRef = useRef<HTMLImageElement | null>(null)
+  const nextPeekRef = useRef<HTMLImageElement | null>(null)
+  const peekRef = (side: 'prev' | 'next') => (side === 'prev' ? prevPeekRef : nextPeekRef)
+
+  // The thumbnail this lightbox was opened from, resolved once at mount (the page
+  // hasn't moved yet, and this is the only moment `origin` is certain to match what
+  // is shown). Null → nothing to fly from, so the lightbox fades in as it used to.
+  const [opening] = useState(() => (canFlip() ? findLightboxOrigin(images[index]?.url ?? '', origin) : null))
+  const openedIndexRef = useRef(index)
+  const [entrance, setEntrance] = useState<Entrance>(() => (
+    opening ? { kind: 'flip', from: opening.rect } : { kind: 'slide', dir: 0 }
+  ))
+
+  // Closing plays out too - the picture flies back into its thumbnail while the
+  // darkness lifts - so onClose is deferred until the flight lands. The ref is the
+  // one the handlers test (state would be a render behind).
+  const [closing, setClosing] = useState(false)
+  const closingRef = useRef(false)
+
+  // Step to the neighbouring image, flying BOTH pictures: the one arriving comes from
+  // the edge preview it was peeking out of, and the one leaving goes to the preview on
+  // the opposite side, which is exactly where it now belongs. Without both endpoints
+  // on screen (small screens hide the previews, reduced motion skips flights) it falls
+  // back to the directional slide.
+  const step = useCallback((delta: -1 | 1) => {
+    if (closingRef.current) return
+    const i = index + delta
+    if (i < 0 || i >= count) return
+    const side = delta < 0 ? 'prev' : 'next'
+    const peek = peekRef(side).current
+    // mediaRectOf on the preview <img> is just its own box (it has nothing inside),
+    // and null while it is display:none - which is how the small-screen fallback and
+    // the "no preview at this end" case are caught in one test.
+    const from = canFlip() && peek ? mediaRectOf(peek) : null
+    const outgoing = mediaRef.current ? mediaRectOf(mediaRef.current) : null
+    setEntrance(from && outgoing
+      ? { kind: 'flip', from, outgoing: { side: side === 'prev' ? 'next' : 'prev', from: outgoing } }
+      : { kind: 'slide', dir: delta })
+    onIndexChange(i)
+  }, [index, count, onIndexChange])
+  const prev = useCallback(() => step(-1), [step])
+  const next = useCallback(() => step(1), [step])
   // Natural pixel dimensions of the current image: seeded from the entry's own
   // metadata when it carries one (artifact entries do), refined by the measured
   // size once the image loads. Seeding means the caption's "W × H" doesn't blink
@@ -139,6 +214,91 @@ export function ImageLightbox({
     return () => opener?.focus()
   }, [])
 
+  // Play the entrance flight for whatever is now shown. A layout effect, because the
+  // whole point is to measure the media AFTER React has put it in its final place -
+  // but the media only HAS a place once its frame has settled (a fresh ZoomPan measures
+  // itself with a ResizeObserver, so it reports zero and then a not-quite-final size
+  // for a frame or two), so it stays hidden until whenMediaLaidOut says there is a box
+  // to fly to. Hiding it is what keeps the picture from flashing at its destination for
+  // a frame before setting off.
+  //
+  // The cleanup CANCELS the flight, which matters more than it looks: React runs a
+  // mount effect twice under StrictMode, and a second run that measured the element
+  // mid-flight would read the animated box as its resting place - computing a flight
+  // from nonsense (that was the "opens huge for a moment, then shrinks into place"
+  // bug, worst when the window had been resized so the two boxes differ most).
+  // Cancelling first puts the element back at rest, so the re-run measures the truth.
+  useLayoutEffect(() => {
+    if (entrance.kind !== 'flip') return
+    const wrapper = mediaRef.current
+    if (!wrapper) return
+    const out = entrance.outgoing
+    const outgoingEl = out ? peekRef(out.side).current : null
+    let flights: Animation[] = []
+    wrapper.style.opacity = '0'
+    if (outgoingEl) outgoingEl.style.opacity = '0'
+    const cancel = whenMediaLaidOut(wrapper, (to) => {
+      wrapper.style.opacity = ''
+      if (outgoingEl) outgoingEl.style.opacity = ''
+      if (!to) return
+      const duration = out ? FLIP_NAV_MS : FLIP_OPEN_MS
+      const flight = playFlip(wrapper, {
+        from: entrance.from,
+        to,
+        rest: 'to',
+        duration,
+        // Arriving from an edge preview means arriving from 40% opacity; arriving
+        // from a page thumbnail is one continuous picture, so opacity stays put.
+        opacity: out ? [PEEK_OPACITY, 1] : undefined,
+      })
+      // The counter-flight: the picture just replaced travels out to the edge preview
+      // it has become (that preview element IS it, already re-sourced and parked in
+      // its slot - so this is a real FLIP, not a ghost chasing it).
+      const counter = out && outgoingEl
+        ? playFlip(outgoingEl, { from: out.from, to: rectOf(outgoingEl), rest: 'to', duration, opacity: [1, PEEK_OPACITY] })
+        : null
+      flights = [flight, counter].filter((a): a is Animation => !!a)
+    })
+    return () => {
+      cancel()
+      flights.forEach((a) => a.cancel())
+      wrapper.style.opacity = ''
+      if (outgoingEl) outgoingEl.style.opacity = ''
+    }
+  }, [index, entrance])
+
+  // Close by flying the picture back into the thumbnail it belongs to while the
+  // darkness lifts, THEN unmounting. With no thumbnail to land on (scrolled away, a
+  // gallery entry with nothing on the page, reduced motion) it just closes at once.
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return
+    const wrapper = mediaRef.current
+    const url = images[index]?.url
+    const from = wrapper && url && canFlip() ? mediaRectOf(wrapper) : null
+    // Prefer the element the lightbox was opened from, but only while we are still on
+    // the image it was opened at - after ←/→ the right target is whatever thumbnail on
+    // the page shows THIS image.
+    const target = from && url
+      ? findLightboxOrigin(url, index === openedIndexRef.current ? opening?.el : null)
+      : null
+    const flight = wrapper && from && target
+      ? playFlip(wrapper, { from, to: target.rect, rest: 'from', duration: FLIP_OPEN_MS })
+      : null
+    if (!flight || !target) { onClose(); return }
+    closingRef.current = true
+    setClosing(true)
+    let landed = false
+    const land = () => {
+      if (landed) return
+      landed = true
+      onClose()
+    }
+    flight.onfinish = land
+    // A backgrounded tab pauses the animation, so onfinish alone can leave the
+    // lightbox stuck open; the timer is the floor under it.
+    window.setTimeout(land, FLIP_OPEN_MS + 250)
+  }, [images, index, opening, onClose])
+
   // X/B/A/H - the shared comparator shortcuts (see applyABShortcut) - drive a diff
   // entry's before/after view + highlight. Held here (with the state above) so they
   // persist across navigation; non-diff (plain image) entries ignore them.
@@ -158,13 +318,14 @@ export function ImageLightbox({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (closingRef.current) return // the exit flight is under way - ignore the lot
+      if (e.key === 'Escape') requestClose()
       else if (e.key === 'ArrowLeft') prev()
       else if (e.key === 'ArrowRight') next()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [prev, next, onClose])
+  }, [prev, next, requestClose])
 
   // Whether the current pointer press STARTED on the backdrop itself. Closing on
   // backdrop click must ignore a drag that merely ENDS there - panning a zoomed
@@ -184,6 +345,15 @@ export function ImageLightbox({
   // arrows have gutter room beside the peek (both dropped below `lg`).
   const hasSiblings = count > 1
   const figureWidth = hasSiblings ? 'max-w-[90vw] lg:max-w-[80vw]' : 'max-w-[90vw]'
+  // Everything that ISN'T the picture - the darkness, the arrows, the caption - fades
+  // in on open and back out on close, around a picture that travels instead. (An
+  // element that only appears later, like the "previous" preview once you leave the
+  // first image, fades in when it mounts, which is the right treatment for it too.)
+  const chromeFade = closing ? 'lightbox-fade-out' : 'lightbox-fade-in'
+  // The picture's own drop shadow is chrome too, but it can't ride an opacity fade
+  // (that would fade the picture with it), so it gets the same timing as its own
+  // box-shadow animation - see index.css.
+  const shadowFade = closing ? 'lightbox-shadow-out' : 'lightbox-shadow-in'
   const sidePreview = (dir: 'prev' | 'next') => {
     // Only rendered when a sibling exists in that direction (no wrap), so the index
     // is always in range.
@@ -203,9 +373,12 @@ export function ImageLightbox({
         tabIndex={-1}
         onClick={(e) => { e.stopPropagation(); onClick() }}
         aria-hidden="true"
-        className={`group hidden lg:block absolute top-1/2 -translate-y-1/2 ${dir === 'prev' ? 'left-0' : 'right-0'} ${slide} transition-transform duration-200 cursor-pointer`}
+        className={`group hidden lg:block absolute top-1/2 -translate-y-1/2 ${dir === 'prev' ? 'left-0' : 'right-0'} ${slide} transition-transform duration-200 cursor-pointer ${chromeFade}`}
       >
         <img
+          // The flight endpoint for ←/→: the picture arriving comes from this box, and
+          // the one leaving flies INTO this element once it takes its place here.
+          ref={(el) => { peekRef(dir).current = el }}
           src={images[i].url}
           alt=""
           style={{ background: CHECKER }}
@@ -224,11 +397,14 @@ export function ImageLightbox({
       // z-[100] keeps the lightbox BELOW the approval toasts (z-[110]): a passive
       // image viewer must not hide an incoming security-gate approval. Focused
       // modal dialogs sit above the toasts instead (z-[120]).
-      className="fixed inset-0 z-[100] overflow-hidden flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-150 outline-none"
+      className="fixed inset-0 z-[100] overflow-hidden flex items-center justify-center outline-none"
+      // Marks this subtree as the lightbox's own, so the search for the thumbnail to
+      // fly from/to (lib/lightboxFlip) never picks one of the images in here.
+      data-lightbox-root=""
       onPointerDownCapture={(e) => { pressOnBackdrop.current = e.target === e.currentTarget }}
       // Close only when the press and the click BOTH land on the backdrop - see
       // pressOnBackdrop above for why a click alone isn't enough.
-      onClick={(e) => { if (pressOnBackdrop.current && e.target === e.currentTarget) onClose() }}
+      onClick={(e) => { if (pressOnBackdrop.current && e.target === e.currentTarget) requestClose() }}
       role="dialog"
       aria-modal="true"
       // Click-focusable (not tabbable) so the focus-steal above can land here, and
@@ -236,12 +412,17 @@ export function ImageLightbox({
       tabIndex={-1}
       ref={rootRef}
     >
+      {/* The darkness, as its own layer rather than a background on the root: it fades
+          in and out on its own timing while the picture travels, and pointer-events-none
+          leaves the backdrop click (and its press bookkeeping) on the root. */}
+      <div aria-hidden className={`absolute inset-0 bg-black/70 backdrop-blur-md pointer-events-none ${chromeFade}`} />
+
       {/* Close button */}
       <button
         type="button"
-        onClick={onClose}
+        onClick={requestClose}
         aria-label="Close"
-        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer"
+        className={`absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer ${chromeFade}`}
       >
         <X className="w-5 h-5" />
       </button>
@@ -257,25 +438,35 @@ export function ImageLightbox({
           aria-label="Previous image"
           // Sits at the edge on small screens; on `lg` it moves inward to clear the
           // peeking preview, landing in the gutter beside it.
-          className="absolute left-4 lg:left-[4.5vw] p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer"
+          className={`absolute left-4 lg:left-[4.5vw] p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer ${chromeFade}`}
         >
           <ChevronLeft className="w-7 h-7" />
         </button>
       )}
 
-      {/* Image (or diff comparator) + caption (clicks here don't close) */}
+      {/* Image (or diff comparator) + caption (clicks here don't close). `relative` so
+          it paints above the (positioned) backdrop layer. The zoom-in is only for the
+          fade fallback - when the picture flies in from a thumbnail, scaling the figure
+          around it as well would fight the flight. */}
       <figure
-        className={`flex flex-col items-center gap-3 ${current.diff ? 'max-w-[94vw]' : figureWidth} max-h-[90vh] animate-in zoom-in-95 duration-150`}
+        className={`relative flex flex-col items-center gap-3 ${current.diff ? 'max-w-[94vw]' : figureWidth} max-h-[90vh] ${opening ? '' : 'animate-in zoom-in-95 duration-150'}`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Keyed by index so the media remounts on each navigation and replays the
+        {/* Keyed by index so the media remounts on each navigation - which is both what
+            re-runs the entrance flight and, in the fallback, what replays the
             directional slide+fade (lightbox-slide; defined in index.css). The CSS var
-            sets which side it enters from - the side you're heading toward - so ←/→
-            feel like moving through a strip rather than the picture blinking in place. */}
+            sets which side it slides in from - the side you're heading toward - so ←/→
+            feel like moving through a strip rather than the picture blinking in place.
+            The flight transform is applied to this wrapper rather than the picture
+            itself: it shares the picture's centre (so the maths is the same) but isn't
+            clipped by the zoom frame the picture sits inside. */}
         <div
           key={index}
-          className="lightbox-slide flex justify-center items-center w-full min-h-0"
-          style={{ ['--lb-from' as string]: dir < 0 ? '-2rem' : dir > 0 ? '2rem' : '0rem' }}
+          ref={mediaRef}
+          className={`${entrance.kind === 'slide' ? 'lightbox-slide' : ''} flex justify-center items-center w-full min-h-0`}
+          style={entrance.kind === 'slide'
+            ? { ['--lb-from' as string]: entrance.dir < 0 ? '-2rem' : entrance.dir > 0 ? '2rem' : '0rem' }
+            : undefined}
         >
           {current.diff ? (
             // A before/after pair: render the fullscreen comparator. Its control
@@ -304,25 +495,30 @@ export function ImageLightbox({
             // frame never overflows the figure.
             <ZoomPan
               minimapSrc={current.url}
-              className="rounded-lg shadow-2xl"
+              // LIGHTBOX_MEDIA_CLASS marks the frame as the picture's own box (it hugs
+              // the image exactly at rest), so a flight measures the picture rather
+              // than the full-width wrapper it is centred in.
+              className={`${LIGHTBOX_MEDIA_CLASS} rounded-lg shadow-2xl ${shadowFade}`}
               maxWidth={hasSiblings ? '80vw' : '90vw'}
               maxHeight="85vh"
               onVerticalSlide={followFrameSlide}
             >
-              <img
-                src={current.url}
-                alt={current.filename}
-                onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-                // Middle-click opens the raw image file in a new browser tab.
-                onAuxClick={makeAuxOpen(() => current.url)}
-                draggable={false}
-                // Checkerboard behind the image so transparent PNGs (e.g. an icon)
-                // read as transparent rather than blending into the dark backdrop. The
-                // <img> sizes to the image's own aspect ratio, so this sits exactly
-                // behind the picture; opaque images simply cover it.
-                style={{ background: CHECKER }}
-                className={`max-h-[85vh] ${figureWidth} object-contain block`}
-              />
+              {/* The wrapper hugs the image (shrink-to-fit inside ZoomPan's content
+                  box), so the checkerboard layer behind it lines up with the picture. */}
+              <div className="relative">
+                <LightboxChecker className={chromeFade} />
+                <img
+                  src={current.url}
+                  alt={current.filename}
+                  onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                  // Middle-click opens the raw image file in a new browser tab.
+                  onAuxClick={makeAuxOpen(() => current.url)}
+                  draggable={false}
+                  // relative so the picture paints ABOVE the checkerboard layer behind
+                  // it (a positioned element beats a static one in the same stack).
+                  className={`relative max-h-[85vh] ${figureWidth} object-contain block`}
+                />
+              </div>
             </ZoomPan>
           )}
         </div>
@@ -331,17 +527,19 @@ export function ImageLightbox({
             doesn't get shoved as it re-appears. State is held up here anyway (it
             survives navigation); only the picture slides. */}
         {current.diff && (
-          <LightboxDiffControls
-            mode={diffMode}
-            onModeChange={setDiffMode}
-            view={abView}
-            onViewChange={setAbView}
-            highlight={highlight}
-            onHighlightChange={setHighlight}
-            canDiff={!!current.diff.left && !!current.diff.right}
-          />
+          <div className={chromeFade}>
+            <LightboxDiffControls
+              mode={diffMode}
+              onModeChange={setDiffMode}
+              view={abView}
+              onViewChange={setAbView}
+              highlight={highlight}
+              onHighlightChange={setHighlight}
+              canDiff={!!current.diff.left && !!current.diff.right}
+            />
+          </div>
         )}
-        <figcaption ref={captionRef} className="flex items-center gap-2 text-xs font-mono">
+        <figcaption ref={captionRef} className={`flex items-center gap-2 text-xs font-mono ${chromeFade}`}>
           {[
             <span key="name" className="flex items-center gap-1.5 text-white/70">
               {current.filename}
@@ -373,7 +571,7 @@ export function ImageLightbox({
           type="button"
           onClick={(e) => { e.stopPropagation(); next() }}
           aria-label="Next image"
-          className="absolute right-4 lg:right-[4.5vw] p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer"
+          className={`absolute right-4 lg:right-[4.5vw] p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer ${chromeFade}`}
         >
           <ChevronRight className="w-7 h-7" />
         </button>

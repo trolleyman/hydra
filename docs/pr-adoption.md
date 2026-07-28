@@ -259,9 +259,26 @@ opening the cog.
 - **Never force-push an adopted head.** The `--force-with-lease` path in `PushRefspec`
   is safe for a branch we own; on someone else's PR it must be opt-in and loud. Plain
   FF push only by default.
-- **`publish_when_green` must default off** for adopted heads. `autoPublish`
-  (`review_watcher.go:244`) currently auto-pushes any linked armed head - auto-pushing
-  into someone else's PR is rude, and the arming UI should refuse it or warn.
+- **`publish_when_green` must default off** for adopted heads, but it is *arrivable at*
+  on purpose. `autoPublish` (`review_watcher.go`) would otherwise auto-push any linked
+  armed head, and auto-pushing into someone else's PR by default is rude. The rule is
+  therefore "never implicitly", not "never":
+  - `SpawnHead` skips the `[review] publish_when_green` arm when `opts.Adopt != nil` - a
+    project-wide default is not a decision about one particular foreign PR.
+  - `ArmPublishWhenGreen` refuses an adopted head with a 400 unless the caller passes
+    `acknowledge_adopted=true` (`adoptedArmRefusal` in `publish.go`). The acknowledgement
+    is what makes it deliberate, and it lives in the API so a non-UI client can't skip it.
+  - A **read-only** adopted PR (no maintainer edits) is refused even with the
+    acknowledgement, and `autoPublish` disarms one it finds - no push to it can succeed,
+    so an arm would only fail later, out of sight.
+  - The UI collects that acknowledgement in a warning dialog naming the PR and the
+    stickiness ("keeps doing so until you stop it"), then arms with the flag
+    (`AgentDetail.tsx`). Disarming is offered whatever the head is, so a stale arm can
+    always be cleared.
+  - `autoPublish` compares an adopted head against the PR's local head pseudo-ref
+    (`git.PRHeadRefspec`), not `<remote>/<downstream>` - a fork's head branch isn't on the
+    configured remote, so the in-sync short-circuit would otherwise never fire and every
+    tick would push.
 - **`publishHead` must never run for an adopted head** - `EnsureMR` on a PR we did not
   create is at best a no-op and at worst opens a duplicate. Guard on `ReviewAdopted`.
 - **Creation-time `[review]` settings must not leak onto an adopted MR**: `squash`,

@@ -140,10 +140,64 @@ body {
   .animate-status-pulse { animation: none; }
 }
 
-/* Image lightbox: when you step to the next/previous image, the new media slides
-   in from the side you're heading toward (--lb-from, set per navigation) and fades
-   up, so a gallery reads as a strip you move along rather than the picture blinking
-   in place. The wrapper is keyed by index so this replays on every step. */
+/* Image lightbox: the picture itself TRAVELS - it flies from the thumbnail you
+   clicked (or from the sibling peeking in at the edge) to its place in the lightbox,
+   and back again on close. That's a measured FLIP done in JS (lib/lightboxFlip.ts);
+   what's left for CSS is everything around it.
+
+   The darkness and the chrome (arrows, close, caption) just fade, so nothing competes
+   with the picture's flight for attention. */
+@keyframes lightbox-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes lightbox-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+.lightbox-fade-in {
+  animation: lightbox-fade-in 200ms ease-out;
+}
+
+/* forwards: the exit is held at 0 until the lightbox actually unmounts, which happens
+   a beat later - when the picture has finished flying home (FLIP_OPEN_MS). */
+.lightbox-fade-out {
+  animation: lightbox-fade-out 240ms ease-in forwards;
+}
+
+/* The lifted-off-the-page shadow belongs to the lightbox, not to the thumbnail the
+   picture flew out of - so it fades with the darkness rather than snapping on the
+   instant the flight starts (and off again the instant it ends). It can't ride the
+   opacity fade above, which would take the picture with it, so the shadow itself is
+   animated: box-shadow interpolates, so this is just the same shadow at zero alpha.
+   The end value matches Tailwind's shadow-2xl, which the element keeps wearing once
+   the animation hands back over. */
+@keyframes lightbox-shadow-in {
+  from { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0); }
+  to   { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); }
+}
+
+@keyframes lightbox-shadow-out {
+  from { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); }
+  to   { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0); }
+}
+
+.lightbox-shadow-in {
+  animation: lightbox-shadow-in 200ms ease-out;
+}
+
+.lightbox-shadow-out {
+  animation: lightbox-shadow-out 240ms ease-in forwards;
+}
+
+/* The fallback when there is nothing on screen to fly from or to - no thumbnail in
+   view, no edge previews (they're dropped below `lg`), or reduced motion: the media
+   slides in from the side you're heading toward (--lb-from, set per navigation) and
+   fades up, so a gallery still reads as a strip you move along rather than the
+   picture blinking in place. The wrapper is keyed by index so this replays on every
+   step. */
 @keyframes lightbox-slide-in {
   from { opacity: 0; transform: translateX(var(--lb-from, 0)); }
   to   { opacity: 1; transform: translateX(0); }
@@ -154,7 +208,9 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lightbox-slide { animation: none; }
+  .lightbox-slide,
+  .lightbox-shadow-in,
+  .lightbox-fade-in { animation: none; }
 }
 
 /* Toasts (bottom-right notifications). They slide up + in from the right and fade
