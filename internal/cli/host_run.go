@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/gate"
 )
@@ -31,7 +32,7 @@ const hostRunExitDenied = 77
 // mirrors as its own exit code. This is a deliberate, heavily-gated last resort -
 // the pre-prompt tells agents it is for extremely rare cases only.
 var hostRunCmd = &cobra.Command{
-	Use:   "host-run [-- ] <command>...",
+	Use:   "host-run [--why <text>] [--] <command>...",
 	Short: "Request the user's approval to run a command on the host (outside the sandbox)",
 	Long: `Ask the user to run a single command on the HOST, outside your sandbox, in your
 worktree. The command is shown to the user for approval; nothing runs unless they
@@ -39,12 +40,55 @@ allow it. This is an escape hatch of last resort - almost everything belongs
 inside the sandbox. Use it only when a task genuinely cannot proceed otherwise,
 and expect most requests to be denied.
 
+If you have the mcp__hydra__host_run TOOL, use that instead of this command. It
+takes the same request as structured arguments, so your own shell never gets to
+mangle the command on the way through (see "How the command is parsed" below,
+which is the trap this CLI cannot close). This CLI exists for agents with no
+Hydra MCP server, and for humans.
+
+Pass --why "<text>" to say what you are doing and why it cannot run inside the
+sandbox. It is shown at the top of the approval card, above the command, and is
+the main thing the user judges the request on - a request that only shows a shell
+script makes them reverse-engineer your intent, and is far more likely to be
+denied. Write it for a human: what you are trying to achieve, and which sandbox
+limitation blocks it (e.g. "the merge has to write .git, which is read-only in my
+sandbox under git_isolation=readonly").
+
+Ask ONCE for the whole job, with the SHORTEST command that does it. Two things
+to minimise, pulling in opposite directions: the number of requests (each one
+interrupts the user) and the length of each one (they must read and understand
+every character before allowing it - a long script is where something nasty
+would hide, and it gets denied for being unreadable). Fold the steps that
+genuinely must run outside the sandbox into one command and leave out everything
+else: do the preparation, checking and reporting yourself, in the sandbox. If the
+job really is ` + "`git merge --no-edit main`" + `, ask for exactly that - not the same
+thing wrapped in conditionals, fallbacks and echoes.
+
+How the command is parsed: the argv left after --why/-- is joined into ONE script
+and run on the host with ` + "`bash -lc <script>`" + `, in your worktree. Your OWN shell
+parses your command line first, so any pipe, redirection or chaining you write
+unquoted is consumed by the SANDBOX shell and never reaches the host:
+
+    host-run -- ss -Hltn | head        # ` + "`ss -Hltn`" + ` on the host, ` + "`head`" + ` in the sandbox
+    host-run -- 'ss -Hltn | head'      # the whole pipeline on the host
+    host-run -- bash -c 'a && b'       # same (the bash -c wrapper is unwrapped)
+
+So quote the whole script whenever it contains shell syntax. What the user
+approves is what runs: the approval card shows the joined script exactly.
+
 The command's stdout and stderr are relayed back to you, and this command exits
 with the host command's own exit code (or ` + strconv.Itoa(hostRunExitDenied) + ` if the request is denied or
 times out).`,
 	Args:               cobra.MinimumNArgs(1),
 	DisableFlagParsing: true, // the whole argv after `host-run` is the command
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Flag parsing is off, so cobra never gets to handle -h/--help itself -
+		// without this `host-run --help` parks an approval asking the user to run
+		// a host command literally named `--help`. Anyone typing it wants the
+		// usage text, and an escape-hatch prompt is an expensive way to find out.
+		if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+			return errtrace.Wrap(cmd.Help())
+		}
 		code := runHostRun(args)
 		os.Exit(code)
 		return nil
@@ -56,6 +100,13 @@ times out).`,
 // stdout/stderr here (this is a leaf CLI the agent reads directly), unlike the
 // gate/mcp hooks which speak a machine protocol.
 func runHostRun(args []string) int {
+	// Flag parsing is disabled (the argv after `host-run` is the command
+	// verbatim), so --why is peeled off by hand ahead of the separator.
+	why, args, err := takeWhyFlag(args)
+	if err != "" {
+		fmt.Fprintln(os.Stderr, "host-run: "+err)
+		return hostRunExitDenied
+	}
 	// A leading "--" is a conventional separator; drop one if present.
 	if len(args) > 0 && args[0] == "--" {
 		args = args[1:]
@@ -65,54 +116,176 @@ func runHostRun(args []string) int {
 		fmt.Fprintln(os.Stderr, "host-run: no command given")
 		return hostRunExitDenied
 	}
+	if why == "" {
+		// Not fatal - an un-explained request still goes through, since refusing
+		// would strand an agent that just didn't know about the flag. But the card
+		// is much weaker without it, so say so where the agent will read it.
+		fmt.Fprintln(os.Stderr, `host-run: no --why given. Pass --why "<what this does and why it can't run in the sandbox>" - the user sees it above the command and is far more likely to allow a request that explains itself.`)
+	}
 
+	fmt.Fprintln(os.Stderr, "host-run: waiting for the user to approve running this command on the host...")
+	outcome := requestHostRun(command, why)
+	if outcome.Refusal != hostRunRan {
+		fmt.Fprintln(os.Stderr, "host-run: "+outcome.Refused())
+		return hostRunExitDenied
+	}
+	return relayHostRunResult(outcome.Result)
+}
+
+// hostRunRefusal says WHY a request never produced a host command run. The
+// distinctions matter to the caller: a denial is the user's answer and must not
+// be retried, a timeout is nobody's answer and might be worth raising again, and
+// a missing channel is an environment fault the agent can do nothing about.
+type hostRunRefusal string
+
+const (
+	hostRunRan        hostRunRefusal = ""            // it ran; see Result
+	hostRunDenied     hostRunRefusal = "denied"      // the user said no
+	hostRunNoDecision hostRunRefusal = "no_decision" // nobody answered in time
+	hostRunNoChannel  hostRunRefusal = "no_channel"  // no approval channel in this session
+	hostRunSubmitFail hostRunRefusal = "submit_failed"
+	hostRunNoResult   hostRunRefusal = "no_result" // allowed, but never came back
+)
+
+// hostRunOutcome is one host-command request's result. Refusal is hostRunRan
+// when the command actually ran (Result then carries what it did); otherwise it
+// says why it did not, with Detail carrying any extra explanation.
+type hostRunOutcome struct {
+	Refusal hostRunRefusal
+	Detail  string
+	Result  gate.HostRunResult
+}
+
+// Refused renders the refusal as one line for the CLI's stderr.
+func (o hostRunOutcome) Refused() string {
+	switch o.Refusal {
+	case hostRunRan:
+		return ""
+	case hostRunDenied:
+		return "the user denied this command; it did not run."
+	case hostRunNoDecision:
+		return "the request timed out without a decision, so it was withdrawn; nothing ran."
+	case hostRunNoChannel:
+		return "no approval channel is available, so a host command can't be requested right now."
+	case hostRunNoResult:
+		return "approved, but the host command did not return in time."
+	default:
+		return "the request could not be submitted: " + o.Detail
+	}
+}
+
+// requestHostRun parks a host-command approval and blocks for the outcome. It is
+// the shared core behind BOTH front ends - the `hydra host-run` CLI and the
+// host_run MCP tool - so the two cannot drift on what gets parked, how long the
+// wait is, or how the head's status is maintained during it.
+func requestHostRun(command, why string) hostRunOutcome {
 	dir := os.Getenv(gate.EnvApprovalDir)
 	if dir == "" {
-		fmt.Fprintln(os.Stderr, "host-run: no approval channel is available, so a host command can't be requested right now.")
-		return hostRunExitDenied
+		return hostRunOutcome{Refusal: hostRunNoChannel}
 	}
 
 	reqid := strconv.FormatInt(time.Now().UnixNano(), 10)
+	// The summary is the one-liner that reaches the surfaces with no room for the
+	// card - the OS notification, the head's last_message - so fold the agent's
+	// explanation in when it gave one.
 	summary := "wants to run a command on the host"
+	if why != "" {
+		summary += ": " + summaryWhy(why)
+	}
 	req := gate.Request{
-		ReqID:   reqid,
-		Tool:    "host-run",
-		Kind:    "host_command",
-		Target:  command,
-		Reason:  "the agent asked to run a command outside its sandbox, on the host",
-		Summary: summary,
-		TS:      time.Now().Format(time.RFC3339Nano),
+		ReqID:       reqid,
+		Tool:        "host-run",
+		Kind:        "host_command",
+		Target:      command,
+		Reason:      "the agent asked to run a command outside its sandbox, on the host",
+		Summary:     summary,
+		Description: why,
+		TS:          time.Now().Format(time.RFC3339Nano),
 	}
 	if err := gate.WriteRequest(dir, req); err != nil {
-		fmt.Fprintf(os.Stderr, "host-run: failed to submit the request: %v\n", err)
-		return hostRunExitDenied
+		return hostRunOutcome{Refusal: hostRunSubmitFail, Detail: err.Error()}
 	}
 	// Retire the request/decision/result files once we're done, so a resolved
 	// approval stops being surfaced and the dir doesn't accumulate.
 	defer gate.RemoveRequest(dir, reqid)
 
-	fmt.Fprintln(os.Stderr, "host-run: waiting for the user to approve running this command on the host...")
-
 	deadline := time.Now().Add(askTimeout)
 	for {
-		// Keep the approval card visible: no Claude hook fires while this CLI blocks,
+		// Keep the approval card visible: no Claude hook fires while this blocks,
 		// so nothing else re-stamps the status.
 		writeApprovalStatus(summary)
 		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
 			if d.Decision != gate.Allow {
-				fmt.Fprintln(os.Stderr, "host-run: the user denied this command.")
 				writeRunningStatus("host command denied")
-				return hostRunExitDenied
+				return hostRunOutcome{Refusal: hostRunDenied}
 			}
 			return awaitHostRunResult(dir, reqid, deadline)
 		}
 		if time.Now().After(deadline) {
-			fmt.Fprintln(os.Stderr, "host-run: the request timed out without a decision.")
 			writeRunningStatus("host command request timed out")
-			return hostRunExitDenied
+			return hostRunOutcome{Refusal: hostRunNoDecision}
 		}
 		time.Sleep(askPollInterval)
 	}
+}
+
+// maxWhyLen caps the stored explanation. It is rendered in an approval card and
+// an OS notification, both of which a wall of text would swamp - and an
+// explanation that long is a sign the request should have been a conversation.
+const maxWhyLen = 600
+
+// takeWhyFlag peels a leading --why/--description (in either `--why <text>` or
+// `--why=<text>` form) off the argv, returning the text and the remaining args.
+// It only looks at the front: past the first non-flag word every byte belongs to
+// the command, so a `--why` appearing there is the command's own argument and is
+// left alone. A non-empty error string is a usage mistake to report.
+func takeWhyFlag(args []string) (why string, rest []string, errMsg string) {
+	for len(args) > 0 {
+		a := args[0]
+		name, value, hasValue := strings.Cut(a, "=")
+		if name != "--why" && name != "--description" {
+			break
+		}
+		if hasValue {
+			why, args = value, args[1:]
+			continue
+		}
+		if len(args) < 2 {
+			return "", nil, name + " needs a value: --why \"<what this does and why it can't run in the sandbox>\""
+		}
+		why, args = args[1], args[2:]
+	}
+	why = strings.TrimSpace(why)
+	if len(why) > maxWhyLen {
+		why = strings.TrimSpace(why[:maxWhyLen]) + "..."
+	}
+	return why, args, ""
+}
+
+// maxSummaryWhyLen caps how much of the explanation rides in the summary. The
+// full text goes in Description and is shown in the card; the summary is for the
+// one-line surfaces (the OS notification body, the head's last_message), where a
+// paragraph reads as a wall.
+const maxSummaryWhyLen = 120
+
+// summaryWhy condenses the explanation to one short line for those surfaces.
+func summaryWhy(s string) string {
+	line := firstLine(s)
+	if len(line) <= maxSummaryWhyLen {
+		return line
+	}
+	// Prefer breaking at a space so the cut doesn't land mid-word.
+	cut := line[:maxSummaryWhyLen]
+	if i := strings.LastIndexByte(cut, ' '); i > maxSummaryWhyLen/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ,;:-") + "..."
+}
+
+// firstLine is the leading line of s.
+func firstLine(s string) string {
+	head, _, _ := strings.Cut(s, "\n")
+	return strings.TrimSpace(head)
 }
 
 // hostRunCommandText renders the argv left after `--` as the single shell script
@@ -186,20 +359,18 @@ func shellQuote(s string) string {
 }
 
 // awaitHostRunResult waits for the daemon to run the approved command host-side
-// and write its result, then relays output + exit code. The daemon executes
-// promptly on approval, but the command itself may run a while, so this keeps
-// polling to the same overall deadline.
-func awaitHostRunResult(dir, reqid string, deadline time.Time) int {
+// and write its result. The daemon executes promptly on approval, but the command
+// itself may run a while, so this keeps polling to the same overall deadline.
+func awaitHostRunResult(dir, reqid string, deadline time.Time) hostRunOutcome {
 	writeRunningStatus("running approved host command")
 	for {
 		if r, ok, err := gate.ReadHostRunResult(dir, reqid); err == nil && ok {
 			writeRunningStatus("host command finished")
-			return relayHostRunResult(r)
+			return hostRunOutcome{Result: r}
 		}
 		if time.Now().After(deadline) {
-			fmt.Fprintln(os.Stderr, "host-run: approved, but the host command did not return in time.")
 			writeRunningStatus("host command did not return in time")
-			return hostRunExitDenied
+			return hostRunOutcome{Refusal: hostRunNoResult}
 		}
 		time.Sleep(askPollInterval)
 	}

@@ -372,7 +372,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	go heads.RunJSONStatusPoller(ctx, store, roots, eventHub, func(projectRoot, headID string) {
 		go server.PrefetchHeadNow(server.BackgroundCtx, projectRoot, headID)
 	})
-	go runStoragePruner(ctx, artifactReg, roots)
+	go runStoragePruner(ctx, artifactReg, testReg, roots)
 	// Proactively pre-generate artifacts for settled heads so they're ready
 	// before a user clicks in, instead of starting the work only on view.
 	go server.RunArtifactPrefetcher(ctx, roots)
@@ -504,11 +504,11 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	return mux
 }
 
-// runStoragePruner periodically evicts stale/oversized diff artifacts and
-// aged-out prompt uploads across every registered project (roots is
-// re-evaluated each cycle). The first cycle runs immediately; thereafter once
+// runStoragePruner periodically evicts stale/oversized diff artifacts and test
+// verdicts, plus aged-out prompt uploads, across every registered project (roots
+// is re-evaluated each cycle). The first cycle runs immediately; thereafter once
 // an hour until ctx is done.
-func runStoragePruner(ctx context.Context, artifactReg *artifacts.Registry, roots func() []string) {
+func runStoragePruner(ctx context.Context, artifactReg *artifacts.Registry, testReg *hydratests.Registry, roots func() []string) {
 	prune := func() {
 		// Artifacts: prune only projects with a live Manager (lazily created on
 		// first artifact request). Reusing the live managers keeps in-flight
@@ -516,6 +516,14 @@ func runStoragePruner(ctx context.Context, artifactReg *artifacts.Registry, root
 		for root, mgr := range artifactReg.Snapshot() {
 			if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes); err != nil {
 				log.Printf("warn: prune artifacts (%s): %v", root, err)
+			}
+		}
+		// Test verdicts accumulate one entry per tested commit per runner and are
+		// never superseded in place, so they need the same bound (same live-Manager
+		// reasoning as artifacts above).
+		for root, mgr := range testReg.Snapshot() {
+			if err := mgr.PruneStale(hydratests.DefaultMaxAge, hydratests.DefaultMaxBytes); err != nil {
+				log.Printf("warn: prune tests (%s): %v", root, err)
 			}
 		}
 		// Uploads are a plain per-project directory, so prune every project.

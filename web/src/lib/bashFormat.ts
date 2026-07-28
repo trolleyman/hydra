@@ -371,20 +371,77 @@ export function dropRedundantSemicolons(cmd: string): string {
 // (`/tmp/hydra-internal`, a worktree-local `./hydra`, a bare `hydra`).
 const HOST_RUN = /^\s*(?:[\w./-]*\/)?hydra(?:-internal)?\s+host-run\s+(?:--\s+)?([\s\S]+)$/
 
+// hostRunArgv trims `rest` to the part the SANDBOX shell actually hands to
+// host-run as argv: everything up to the first unquoted control operator
+// (`|`, `||`, `&&`, `;`, `&`, newline) or redirection (`2>&1`, `> log`), which
+// the shell consumes itself and never passes on.
+//
+// Without this the chat card read `host-run --help 2>&1 | head -20` as a host
+// command of `--help 2>&1 | head -20` while the approval card - built from the
+// CLI's real argv - said `--help`. The card was right: the pipe runs INSIDE the
+// sandbox, against host-run's own output. Two surfaces disagreeing about what
+// will run on the host is the one thing this feature cannot afford.
+function hostRunArgv(rest: string): string {
+  let quote: "'" | '"' | null = null
+  let escaped = false
+  let tokenStart = 0
+  for (let i = 0; i < rest.length; i++) {
+    const ch = rest[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (ch === '\\') {
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch
+      continue
+    }
+    if (/\s/.test(ch)) {
+      tokenStart = i + 1
+      continue
+    }
+    // A control operator ends the invocation; everything after is the sandbox's.
+    if (ch === '|' || ch === '&' || ch === ';' || ch === '\n') return rest.slice(0, i)
+    // A redirection takes its whole token with it - `2>&1` starts at the `2`, so
+    // cut back to where the current word began rather than at the `>`.
+    if (ch === '<' || ch === '>') return rest.slice(0, tokenStart)
+  }
+  return rest
+}
+
 // parseHostRunScript returns the command a `hydra host-run` invocation is asking
 // the user to run on the host, or null when the command isn't a host-run at all.
-// The `bash -c '<script>'` wrapper agents habitually add is unwrapped, and a
-// whole script passed as one quoted argument is unquoted - both mirror what the
-// CLI itself does when it renders the request for the approval card, so the chat
-// shows the same text the card asks about.
+// Shell syntax the sandbox consumes is dropped (see hostRunArgv), the
+// `bash -c '<script>'` wrapper agents habitually add is unwrapped, and a whole
+// script passed as one quoted argument is unquoted - all three mirror what the
+// CLI does when it renders the request, so the chat shows the same text the
+// approval card asks about.
 export function parseHostRunScript(command: string): string | null {
   const match = command.match(HOST_RUN)
   if (!match) return null
-  const rest = match[1].trim()
+  const rest = stripHostRunFlags(hostRunArgv(match[1]).trim())
   if (!rest) return null
   const unwrapped = unwrapBashLoginCommand(rest)
   if (unwrapped !== rest) return unwrapped
   return parseOneShellWord(rest) ?? rest
+}
+
+// HOST_RUN_WHY matches the leading `--why`/`--description` option (in either the
+// `--why <text>` or `--why=<text>` form) and the `--` separator that may follow
+// it. The explanation is the agent's prose, shown in its own right by the
+// approval card - it is not part of the command, so it never belongs in the box
+// labelled "command to run on the host". Mirrors takeWhyFlag in internal/cli.
+const HOST_RUN_WHY = /^(?:--(?:why|description)(?:=(?:'[^']*'|"[^"]*"|\S*)|\s+(?:'[^']*'|"[^"]*"|\S+))\s*)+(?:--\s+)?/
+
+function stripHostRunFlags(rest: string): string {
+  return rest.replace(HOST_RUN_WHY, '').trim()
 }
 
 // dropNoopCd removes a leading `cd .` (or `cd ./`, quoted or not) together with

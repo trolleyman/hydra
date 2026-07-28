@@ -21,7 +21,20 @@ export const ToolApproval: React.FC<{ approval: ApprovalRequest }> = ({ approval
     <div className="rounded-md border border-amber-300/70 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/10 px-2.5 py-2 space-y-1.5">
       <div className="flex items-start gap-1.5 text-[11px] leading-snug text-amber-800 dark:text-amber-200">
         <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-px" />
-        <span>{approval.reason || 'This call is waiting for your approval.'}</span>
+        {/* The agent's own explanation (host-run --why) leads when there is one:
+            it says what this call is FOR, which is what the decision turns on.
+            The gate's reason is generic by comparison, so it drops to a muted
+            second line rather than displacing it. */}
+        {approval.description ? (
+          <span className="space-y-0.5">
+            <span className="block whitespace-pre-wrap">{approval.description}</span>
+            <span className="block text-amber-700/70 dark:text-amber-200/60">
+              {approval.reason || 'This call is waiting for your approval.'}
+            </span>
+          </span>
+        ) : (
+          <span>{approval.reason || 'This call is waiting for your approval.'}</span>
+        )}
       </div>
       <div className="flex items-center gap-1.5">
         <button

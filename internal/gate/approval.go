@@ -90,6 +90,11 @@ type Request struct {
 	URL string `json:"url,omitempty"`
 	// ArgsPreview is a compact one-line preview of an mcp_tool call's arguments.
 	ArgsPreview string `json:"args_preview,omitempty"`
+	// Description is the agent's own explanation of what it is asking for and why
+	// it needs to happen outside the sandbox (`host-run --why`). Shown in the
+	// approval card and toast above the command, so the user is judging a stated
+	// intent rather than reverse-engineering one from a shell script.
+	Description string `json:"description,omitempty"`
 	TS          string `json:"ts"`
 }
 

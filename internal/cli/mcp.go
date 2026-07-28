@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"braces.dev/errtrace"
@@ -48,6 +49,11 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 		RequestAccess: func(name string) (bool, string) { return requestMCPAccess(agentType, name) },
 		GitOp:         gitOpFromMCP,
 	}
+	// The escape hatch needs the gate's approval channel; without one it could only
+	// ever fail, so hide it rather than advertise a tool that cannot work.
+	if os.Getenv(gate.EnvApprovalDir) != "" {
+		deps.HostRun = hostRunFromMCP
+	}
 	// Wire the review tools only when this head has a review file (HYDRA_REVIEW_PATH
 	// is seeded for every head; the file reports linked=false until published).
 	if os.Getenv("HYDRA_REVIEW_PATH") != "" {
@@ -59,6 +65,66 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
+}
+
+// hostRunFromMCP backs the host_run MCP tool: it parks the approval and blocks
+// for the outcome exactly as `hydra host-run` does (both go through
+// requestHostRun), then renders the result as tool output instead of relaying it
+// to stdout and an exit code.
+//
+// The command is taken verbatim from the tool argument - no shell of the agent's
+// stands between it and the approval card - which is the whole reason this tool
+// exists alongside the CLI.
+func hostRunFromMCP(req mcpserver.HostRunRequest) mcpserver.HostRunResult {
+	return renderHostRunOutcome(requestHostRun(req.Command, req.Why))
+}
+
+// renderHostRunOutcome turns a host-run outcome into the tool's result. Split
+// out from the request itself so the wording - which is the agent's only account
+// of what happened - is testable without an approval channel.
+func renderHostRunOutcome(outcome hostRunOutcome) mcpserver.HostRunResult {
+	// Every one of these is "nothing ran", but WHY decides what the agent should
+	// do next, so each says so in its own words rather than sharing one blanket
+	// failure line. A denial in particular has to be unmistakable: it is the
+	// user's answer, not a glitch to route around by asking again.
+	switch outcome.Refusal {
+	case hostRunDenied:
+		return mcpserver.HostRunResult{Failed: true, Message: "DENIED by the user. The command did NOT run and nothing on the host was changed. This is their decision - do not re-request the same command, and do not look for another way to do it outside the sandbox. If you are stuck, say what you needed and why, and ask them how to proceed."}
+	case hostRunNoDecision:
+		return mcpserver.HostRunResult{Failed: true, Message: "TIMED OUT waiting for the user to answer, so the request was withdrawn. The command did NOT run and nothing on the host was changed. The user may simply have been away - if this is still needed, say so in your reply rather than silently asking again."}
+	case hostRunNoChannel:
+		return mcpserver.HostRunResult{Failed: true, Message: "UNAVAILABLE: this session has no approval channel, so a host command cannot be requested at all. The command did NOT run. Nothing you can do will change that - tell the user what you needed."}
+	case hostRunNoResult:
+		return mcpserver.HostRunResult{Failed: true, Message: "The user ALLOWED the command, but it did not return in time, so its outcome is unknown. It may still be running on the host, and it may have changed things. Do not re-run it blindly - check the state first, and tell the user."}
+	case hostRunSubmitFail:
+		return mcpserver.HostRunResult{Failed: true, Message: "The request could not be submitted to Hydra, so the user never saw it and the command did NOT run: " + outcome.Detail}
+	}
+	r := outcome.Result
+	if r.Error != "" {
+		return mcpserver.HostRunResult{Failed: true, Message: "The user allowed the command, but the host could not run it: " + r.Error}
+	}
+	var b strings.Builder
+	switch {
+	case r.TimedOut:
+		b.WriteString("FAILED on the host: killed at the execution timeout, so it has no exit status. Anything it had already done still happened.\n")
+	case r.ExitCode == 0:
+		b.WriteString("Ran on the host; exit status 0.\n")
+	default:
+		fmt.Fprintf(&b, "FAILED on the host: exit status %d.\n", r.ExitCode)
+	}
+	if r.Truncated {
+		b.WriteString("(output truncated to its final portion)\n")
+	}
+	if strings.TrimSpace(r.Output) == "" {
+		b.WriteString("\n(no output)")
+	} else {
+		b.WriteString("\n" + r.Output)
+	}
+	// A non-zero exit is a failed tool call, matching the Bash tool - a command
+	// on the host is still a command, and the agent should not have to parse the
+	// status line out of the output to notice it failed. The chat marks the card
+	// failed on the same signal, so the two read alike.
+	return mcpserver.HostRunResult{Failed: r.TimedOut || r.ExitCode != 0, Message: b.String()}
 }
 
 // gitOpPollInterval / gitOpTimeout bound the in-sandbox wait for a host-mediated
@@ -90,6 +156,8 @@ func gitOpFromMCP(req mcpserver.GitOpRequest) mcpserver.GitOpResult {
 		Add:    add,
 		Commit: req.Commit,
 		Base:   req.Base, Plan: plan,
+		Ref: req.Ref, NoFF: req.NoFF,
+		Stash: req.Stash, StashRef: req.StashRef, IncludeUntracked: req.IncludeUntracked,
 	})
 	return mcpserver.GitOpResult{OK: res.OK, Message: res.Message}
 }

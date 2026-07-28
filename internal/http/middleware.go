@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"braces.dev/errtrace"
@@ -49,11 +51,32 @@ func RecordError(r *http.Request, err error) {
 	}
 }
 
+// isClientDisconnect reports whether err is the peer hanging up mid-response
+// rather than anything going wrong server-side: the browser aborting a fetch
+// (navigation, a cancelled react-query, a StrictMode double-render) shows up as
+// EPIPE/ECONNRESET on the response write, and a cancelled request context as
+// context.Canceled. Neither is a server fault, so callers neither write an error
+// body (the status line is already on the wire) nor log a 500.
+func isClientDisconnect(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, http.ErrAbortHandler)
+}
+
 // statusRecorder wraps http.ResponseWriter to capture the status code and body on error.
 type statusRecorder struct {
 	http.ResponseWriter
 	statusCode int
 	body       bytes.Buffer
+	// writeErr is the first error returned by the underlying writer. A
+	// client disconnect lands here, and LoggingMiddleware reports it as such
+	// instead of as a server error.
+	writeErr error
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
@@ -65,7 +88,11 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	if r.statusCode >= 400 {
 		r.body.Write(b)
 	}
-	return errtrace.Wrap2(r.ResponseWriter.Write(b))
+	n, err := r.ResponseWriter.Write(b)
+	if err != nil && r.writeErr == nil {
+		r.writeErr = err
+	}
+	return n, errtrace.Wrap(err)
 }
 
 // Unwrap returns the underlying ResponseWriter, allowing the standard library
@@ -155,6 +182,18 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 
 		rec := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(rec, r)
+
+		// The peer hung up part-way through the response. The handler itself was
+		// fine, so report the disconnect rather than whatever half-written status
+		// happens to be recorded, and skip the 500 stack dump below. Gated like a
+		// normal response, not like an error: an aborted poll IS poll traffic, and
+		// nothing went wrong server-side.
+		if isClientDisconnect(rec.writeErr) {
+			if elapsed := time.Since(start); verbose || (!websocket && elapsed >= slowRequestWarn) {
+				log.Printf("-> %s %s %d %s (client disconnected)", r.Method, uri, rec.statusCode, elapsed.Round(time.Millisecond))
+			}
+			return
+		}
 
 		var errorSuffix string
 		if rec.statusCode >= 400 {
