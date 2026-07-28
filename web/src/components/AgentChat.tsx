@@ -4446,6 +4446,95 @@ export function QuestionCard({
     (_, i) => selected[i].size > 0 || (otherSel[i] && other[i].trim() !== '') || note[i].trim() !== '',
   )
 
+  // The row a note belongs to: the last option picked, or "Other" when that is
+  // what is selected. Nothing picked means nothing to qualify, so no note.
+  function noteAnchor(qi: number): number | 'other' | null {
+    if (showOtherSel[qi]) return 'other'
+    const picked = [...showSelected[qi]]
+    return picked.length > 0 ? Math.max(...picked) : null
+  }
+
+  // The corner trigger that opens (or discards) the note on a row. Hidden until
+  // the row is hovered or the trigger itself is focused, so an untouched card
+  // is still just a list of options - but it is a real button in the tab order
+  // either way, since a control that only exists on hover is unreachable by
+  // keyboard.
+  function noteTrigger(qi: number, at: number | 'other') {
+    if (answered) return null
+    const open = noteAnchor(qi) === at && (noteOpen[qi] || showNote[qi] !== '')
+    return (
+      <Tooltip content={open ? 'Discard note' : 'Add a note'} side="top">
+        <button
+          type="button"
+          aria-label={open ? 'Discard note' : 'Add a note'}
+          onClick={(e) => {
+            e.stopPropagation()
+            snapshotRows(e.currentTarget)
+            if (open) {
+              // Closing has to clear the text: a note left in state but out of
+              // sight would still be submitted.
+              setNote((prev) => prev.map((p, i) => (i === qi ? '' : p)))
+              setNoteOpen((prev) => prev.map((v, i) => (i === qi ? false : v)))
+              return
+            }
+            // Opening from a row that is not the picked one picks it first, so
+            // the note lands where you asked for it.
+            if (at === 'other') selectOther(e.currentTarget, qi)
+            else if (!selected[qi].has(at)) toggleOption(e.currentTarget, qi, at)
+            setNoteOpen((prev) => prev.map((v, i) => (i === qi ? true : v)))
+          }}
+          className={`absolute right-1 top-1 flex h-5 w-5 cursor-pointer items-center justify-center rounded text-stone-400 opacity-0 transition-opacity hover:bg-black/[0.04] hover:text-stone-600 focus-visible:opacity-100 group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-white/10 dark:hover:text-stone-300 ${
+            open ? 'opacity-100' : ''
+          }`}
+        >
+          {open ? <X className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
+        </button>
+      </Tooltip>
+    )
+  }
+
+  // The note itself, rendered inside the row it qualifies - under a hairline,
+  // and indented to the row's LABEL rather than its edge (ml-8 = the px-2.5
+  // padding plus the dot and its gap), so it reads as part of what that option
+  // says rather than as another row that happens to share the box.
+  function noteBody(qi: number) {
+    if (!noteOpen[qi] && showNote[qi] === '') return null
+    return (
+      <div className="mb-1.5 ml-8 mr-2.5 flex items-start gap-2 border-t border-dashed border-[#c96442]/30 pt-1 dark:border-[#e0a184]/25">
+        <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+        {/* Auto-grows the same way the "Other" box does - an invisible span in
+            the same grid cell drives the height. */}
+        <div className="grid min-w-0 flex-1">
+          <span aria-hidden className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4">
+            {showNote[qi] + ' '}
+          </span>
+          <textarea
+            rows={1}
+            autoFocus={noteOpen[qi] && note[qi] === '' && !answered}
+            value={showNote[qi]}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const v = e.target.value
+              setNote((prev) => prev.map((p, i) => (i === qi ? v : p)))
+            }}
+            onKeyDown={(e) => {
+              // Enter submits, as in the "Other" box; shift+Enter is a newline,
+              // which a note wants more often than an option label does.
+              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+              e.preventDefault()
+              e.stopPropagation()
+              submit()
+            }}
+            disabled={answered}
+            placeholder="Note to go with your answer..."
+            aria-label="Note to go with your answer"
+            className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+          />
+        </div>
+      </div>
+    )
+  }
+
   function submit() {
     if (!complete || answered || disabled) return
     const answers: Record<string, string> = {}
@@ -4464,46 +4553,49 @@ export function QuestionCard({
   return (
     <div className="max-w-xl rounded-xl border border-stone-200 dark:border-white/[0.08] bg-white/70 dark:bg-white/[0.03] p-3 space-y-3">
       {specs.map((q, qi) => {
-        const hasNote = showNote[qi] !== ''
-        const noteVisible = noteOpen[qi] || hasNote
-        // The note - link and box alike - trails the last row you picked, so
-        // the offer to qualify an answer sits with the answer it would qualify.
-        // Nothing picked means there is nothing to qualify yet, so there is no
-        // link at all until you choose; "Other" is the last row, so a note on
-        // it lands at the foot anyway.
-        const picked = [...showSelected[qi]]
-        const anchor = !showOtherSel[qi] && picked.length > 0 ? Math.max(...picked) : null
-        const noteOffered = anchor !== null || showOtherSel[qi]
+        // The note lives INSIDE the row you picked, so a caveat is visibly part
+        // of the answer it qualifies rather than a separate thing below it.
+        const anchor = noteAnchor(qi)
         const rows: ReactNode[] = []
         const options = q.options.map((o, oi) => {
               const isSel = showSelected[qi].has(oi)
+              // The border, background and rounding belong to a wrapper, not to
+              // the clickable button: a <textarea> cannot live inside a
+              // <button>, so the note has to be the button's SIBLING while
+              // still sitting inside the same box.
               return (
-                <button
+                <div
                   key={oi}
-                  onClick={(e) => toggleOption(e.currentTarget, qi, oi)}
-                  disabled={answered}
-                  className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${
-                    answered ? 'cursor-default' : 'cursor-pointer'
-                  } ${
+                  className={`group relative rounded-lg border transition-colors ${
                     isSel
                       ? 'border-[#c96442]/60 bg-[#c96442]/[0.07]'
                       : 'border-stone-200 dark:border-white/[0.07] hover:border-stone-300 dark:hover:border-white/[0.15]'
                   } ${answered && !isSel ? 'opacity-50' : ''}`}
                 >
-                  <span
-                    className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
-                      q.multiSelect ? 'rounded' : 'rounded-full'
-                    } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'}`}
+                  <button
+                    onClick={(e) => toggleOption(e.currentTarget, qi, oi)}
+                    disabled={answered}
+                    className={`flex w-full items-start gap-2 px-2.5 py-1.5 pr-7 text-left ${
+                      answered ? 'cursor-default' : 'cursor-pointer'
+                    }`}
                   >
-                    {isSel && <Check className="h-2.5 w-2.5 text-white" />}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-medium">{o.label}</span>
-                    {o.description && (
-                      <span className="block text-[11px] text-stone-500 dark:text-stone-400">{o.description}</span>
-                    )}
-                  </span>
-                </button>
+                    <span
+                      className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
+                        q.multiSelect ? 'rounded' : 'rounded-full'
+                      } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'}`}
+                    >
+                      {isSel && <Check className="h-2.5 w-2.5 text-white" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium">{o.label}</span>
+                      {o.description && (
+                        <span className="block text-[11px] text-stone-500 dark:text-stone-400">{o.description}</span>
+                      )}
+                    </span>
+                  </button>
+                  {noteTrigger(qi, oi)}
+                  {anchor === oi && noteBody(qi)}
+                </div>
               )
             })
         // "Other" renders as one more option row: it has its own dot and is
@@ -4515,7 +4607,7 @@ export function QuestionCard({
                 <div
                   key="other"
                   onClick={(e) => selectOther(e.currentTarget, qi)}
-                  className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
+                  className={`group relative w-full rounded-lg border transition-colors ${
                     answered ? 'cursor-default' : 'cursor-text'
                   } ${
                     isSel
@@ -4523,6 +4615,7 @@ export function QuestionCard({
                       : 'border-stone-200 dark:border-white/[0.07] hover:border-stone-300 dark:hover:border-white/[0.15]'
                   } ${answered && !isSel ? 'opacity-50' : ''}`}
                 >
+                  <div className="flex items-start gap-2 px-2.5 py-1.5 pr-7">
                   <button
                     type="button"
                     disabled={answered}
@@ -4578,83 +4671,14 @@ export function QuestionCard({
                       className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
                     />
                   </div>
+                  </div>
+                  {noteTrigger(qi, 'other')}
+                  {anchor === 'other' && noteBody(qi)}
                 </div>
               )
             })()
-        // The note is ONE row that moves, never a row destroyed here and rebuilt
-        // there: same key, same box metrics whether it holds the "Add a note"
-        // link or the open note, so the swap costs no height and the slide is
-        // pure translation. An answered card with no note drops the row instead
-        // of leaving a dead gap.
-        const noteRow =
-          (answered && !hasNote) || (!noteOffered && !hasNote) ? null : (
-            <div
-              key="note"
-              className={`flex w-full items-start gap-2 rounded-lg border border-dashed px-2.5 py-1.5 transition-colors ${
-                !noteVisible
-                  ? 'border-transparent'
-                  : hasNote
-                    ? 'border-stone-300 dark:border-white/20'
-                    : 'border-stone-200 dark:border-white/[0.07]'
-              }`}
-            >
-              {!noteVisible ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    snapshotRows(e.currentTarget)
-                    setNoteOpen((prev) => prev.map((v, i) => (i === qi ? true : v)))
-                  }}
-                  className="flex cursor-pointer items-start gap-2 text-[11px] text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200"
-                >
-                  <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span className="leading-4">Add a note</span>
-                </button>
-              ) : (
-                <>
-                  <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
-                  {/* Auto-grows the same way the "Other" box does - an invisible
-                      span in the same grid cell drives the height. */}
-                  <div className="grid min-w-0 flex-1">
-                    <span
-                      aria-hidden
-                      className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4"
-                    >
-                      {showNote[qi] + ' '}
-                    </span>
-                    <textarea
-                      rows={1}
-                      autoFocus={noteOpen[qi] && note[qi] === '' && !answered}
-                      value={showNote[qi]}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        setNote((prev) => prev.map((p, i) => (i === qi ? v : p)))
-                      }}
-                      onKeyDown={(e) => {
-                        // Enter submits, as in the "Other" box; shift+Enter is a
-                        // newline, which a note wants more often than an option
-                        // label does.
-                        if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-                        e.preventDefault()
-                        e.stopPropagation()
-                        submit()
-                      }}
-                      disabled={answered}
-                      placeholder="Note to go with your answer..."
-                      aria-label="Note to go with your answer"
-                      className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-          )
-        options.forEach((row, oi) => {
-          rows.push(row)
-          if (anchor === oi) rows.push(noteRow)
-        })
+        options.forEach((row) => rows.push(row))
         rows.push(other)
-        if (anchor === null) rows.push(noteRow)
         return (
           <div key={qi} className="space-y-1.5">
             <div className="flex items-baseline gap-1.5">

@@ -18,19 +18,23 @@ const SPECS = [
   },
 ]
 
+const rows = () => Array.from(document.querySelector('[data-question-rows]')!.children)
+const rowIndex = (label: string) => rows().findIndex((r) => r.textContent?.startsWith(label))
+// The row holding the open note - the note lives INSIDE the row it qualifies.
+const notedRow = () => rows().findIndex((r) => r.querySelector('textarea[aria-label="Note to go with your answer"]'))
+// Each row carries its own corner trigger; clicking one picks that row.
+const trigger = (label: string) =>
+  rows()[rowIndex(label)].querySelector('button[aria-label="Add a note"]') as HTMLElement
+const noteBox = () => screen.getByLabelText('Note to go with your answer')
+
 describe('QuestionCard notes', () => {
   it('sends a note alongside the picked option, in annotations', () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={onSubmit} />)
 
-    // Nothing picked yet, so there is nothing to qualify and no note on offer.
-    expect(screen.queryByRole('button', { name: 'Add a note' })).toBeNull()
-
     fireEvent.click(screen.getByText('Postgres'))
-    fireEvent.click(screen.getByRole('button', { name: 'Add a note' }))
-    fireEvent.change(screen.getByLabelText('Note to go with your answer'), {
-      target: { value: 'but keep the schema in one file' },
-    })
+    fireEvent.click(trigger('Postgres'))
+    fireEvent.change(noteBox(), { target: { value: 'but keep the schema in one file' } })
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
 
     expect(onSubmit).toHaveBeenCalledWith(
@@ -58,10 +62,8 @@ describe('QuestionCard notes', () => {
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={onSubmit} />)
 
     fireEvent.click(screen.getByText('Postgres'))
-    fireEvent.click(screen.getByRole('button', { name: 'Add a note' }))
-    fireEvent.change(screen.getByLabelText('Note to go with your answer'), {
-      target: { value: 'neither - use the file store' },
-    })
+    fireEvent.click(trigger('Postgres'))
+    fireEvent.change(noteBox(), { target: { value: 'neither - use the file store' } })
     // Selecting "Other" takes the pick away in a single-select, leaving the
     // note as the only thing said - and an empty "Other" contributes no label.
     fireEvent.click(screen.getByRole('button', { name: 'Select Other' }))
@@ -76,35 +78,47 @@ describe('QuestionCard notes', () => {
   })
 })
 
-// A note reads as a caveat on the choice it qualifies, so it - and the link
-// offering it - sit directly under the row you picked rather than at the foot
-// of the card.
+// A note reads as a caveat on the choice it qualifies, so it renders inside
+// that row rather than as a row of its own beneath it.
 describe('QuestionCard note placement', () => {
-  const rows = () => Array.from(document.querySelector('[data-question-rows]')!.children)
-  const noteIndex = () => rows().findIndex((r) => r.querySelector('textarea[aria-label="Note to go with your answer"]'))
-  const linkIndex = () => rows().findIndex((r) => r.textContent === 'Add a note')
-  const optionIndex = (label: string) => rows().findIndex((r) => r.textContent?.startsWith(label))
-
-  it('offers no note until something is picked, then puts the link under the pick', () => {
+  it('opens the note inside the row whose trigger was used, picking it on the way', () => {
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
-    expect(linkIndex()).toBe(-1)
+    // Nothing picked, and the trigger on an unpicked row picks it first so the
+    // note lands where it was asked for.
+    expect(notedRow()).toBe(-1)
 
-    fireEvent.click(screen.getByText('Postgres'))
-    expect(linkIndex()).toBe(optionIndex('Postgres') + 1)
+    fireEvent.click(trigger('SQLite'))
+    expect(notedRow()).toBe(rowIndex('SQLite'))
+    expect(screen.getByText('SQLite').closest('[data-question-rows] > div')).toContainElement(noteBox())
   })
 
-  it('moves the open note under whichever option you pick', () => {
+  it('moves the note into whichever row you pick', () => {
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
     fireEvent.click(screen.getByText('Postgres'))
-    fireEvent.click(screen.getByRole('button', { name: 'Add a note' }))
-    expect(noteIndex()).toBe(optionIndex('Postgres') + 1)
+    fireEvent.click(trigger('Postgres'))
+    expect(notedRow()).toBe(rowIndex('Postgres'))
 
     fireEvent.click(screen.getByText('SQLite'))
-    expect(noteIndex()).toBe(optionIndex('SQLite') + 1)
+    expect(notedRow()).toBe(rowIndex('SQLite'))
 
-    // "Other" is the last row, so a note qualifying it lands at the foot.
+    // Selecting "Other" carries the note into the "Other" row.
     fireEvent.focus(screen.getByPlaceholderText('Other...'))
-    expect(noteIndex()).toBe(rows().length - 1)
+    expect(notedRow()).toBe(rows().length - 1)
+  })
+
+  // Closing has to clear the text: a note kept in state but out of sight would
+  // still be submitted.
+  it('discards the note text when the note is closed again', () => {
+    const onSubmit = vi.fn(() => true)
+    render(<QuestionCard specs={SPECS} disabled={false} onSubmit={onSubmit} />)
+    fireEvent.click(trigger('Postgres'))
+    fireEvent.change(noteBox(), { target: { value: 'never mind' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard note' }))
+    expect(notedRow()).toBe(-1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
+    expect(onSubmit).toHaveBeenCalledWith({ 'Which database?': 'Postgres' }, {})
   })
 })
 
