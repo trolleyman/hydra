@@ -2628,6 +2628,14 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
 // hands us a structurally-new `agent` object, so a plain memo() would never
 // hold. Comparing just the consumed fields keeps the whole diff subtree
 // (toolbar, tests/preview/artifact panels, file list) out of those ticks.
+//
+// EVERY field the body reads must be listed here, or the body never sees it
+// change. review.url/provider are here because they gate the forge review
+// threads (docs/review-threads.md): the first paint of a project comes from the
+// localStorage agent cache (lib/agentCache.ts), which can predate the head's
+// link to a PR, and the link can also land while the page is open. Without
+// these two lines the diff mounts unlinked and stays that way for the life of
+// the mount - the header chip shows the MR, but the diff shows no threads.
 export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.projectId === next.projectId &&
   prev.externalRefreshTrigger === next.externalRefreshTrigger &&
@@ -2640,6 +2648,8 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
   prev.agent.worktree_path === next.agent.worktree_path &&
+  prev.agent.review?.url === next.agent.review?.url &&
+  prev.agent.review?.provider === next.agent.review?.provider &&
   prev.agent.agent_status?.status === next.agent.agent_status?.status)
 
 // inspector: renders in the new two-pane layout's right pane. Same stacked
