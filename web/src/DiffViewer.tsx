@@ -2592,7 +2592,7 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
             ? <FolderOpen className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
             : <Folder className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
           }
-          <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate">{node.name}</span>
+          <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate optical-center">{node.name}</span>
           <ChevronDown className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
         </button>
         {/* Children stay mounted and their height animates via the grid-rows

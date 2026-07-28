@@ -43,7 +43,7 @@ export function ProjectPathLabel({ path, title }: { path: string; title?: string
   return (
     // overflow-hidden as a sub-pixel safety net; the fit itself keeps the text
     // within the span's width.
-    <span ref={ref} title={title ?? path} className="flex-1 min-w-0 whitespace-nowrap overflow-hidden">
+    <span ref={ref} title={title ?? path} className="flex-1 min-w-0 whitespace-nowrap overflow-hidden optical-center">
       {text}
     </span>
   )
