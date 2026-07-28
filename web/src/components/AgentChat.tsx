@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   Archive,
   ArrowDown,
@@ -74,9 +74,11 @@ import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planS
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments, isImageResizeNotice } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatBashIndentStore, useChatCodeLinesStore, useChatFontStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatBashIndentStore, useChatCodeLinesStore, useChatFontStore, useChatStepsStore, useChatStreamStore } from '../lib/chatPrefs'
 import { providerErrorText } from '../lib/providerError'
 import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval'
+import { approvalMatchesTool } from '../lib/approvalMatch'
+import { useApprovalStore } from '../stores/approvalStore'
 import { selectionToMarkdown } from '../lib/copyMarkdown'
 import { claimOrphanResult, newToolResultLink, stashOrphanResult } from '../lib/toolResultLink'
 import type { ToolResultLink } from '../lib/toolResultLink'
@@ -1751,6 +1753,23 @@ function useDelayedUnmount(open: boolean, ms = 250): boolean {
     return () => clearTimeout(t)
   }, [open, ms])
   return open || mounted
+}
+
+// A step folding away shrinks the transcript by its own height, which clamps
+// scrollTop down - and a scrollTop that drops on its own is exactly what a user
+// scrolling up looks like. onScroll already forgives a shrink it can SEE
+// (scrollHeight went down between two scroll events), but a fold overlaps with
+// the next step arriving, so the two height changes can coalesce into one event
+// where the height is unchanged and only scrollTop moved: read as a scroll-up,
+// which unpinned the view and stopped the chat following a live turn from the
+// first fold onwards. So a fold declares itself for the length of its animation
+// and onScroll trusts that over the geometry.
+let selfReflowUntil = 0
+function markSelfReflow(ms = 400) {
+  selfReflowUntil = Math.max(selfReflowUntil, Date.now() + ms)
+}
+function inSelfReflow(): boolean {
+  return Date.now() < selfReflowUntil
 }
 
 // Expandable animates its child open/closed by transitioning a MEASURED
@@ -3578,48 +3597,69 @@ function SubagentTimeline({
   serif,
   skipId,
   links,
+  // Whether this timeline may fold its own runs of steps. Off inside a folded
+  // SubagentCard: that card ALREADY hides the whole timeline behind its own
+  // "N steps" disclosure, so grouping inside it stacked a second fold with the
+  // same word on it - you clicked "4 steps" and were handed "3 steps". One fold
+  // per level. The full sub-agent chat view has no outer fold, so it groups.
+  fold = false,
 }: {
   sub: SubagentView
   worktree: string | null
   serif: boolean
   skipId?: number
   links?: SubagentLinks
+  fold?: boolean
 }) {
   const cwds = useMemo(() => shellCwdsFor(sub.items, worktree), [sub.items, worktree])
+  // A sub-agent's own steps fold exactly like the main transcript's (see
+  // planStepRows) - its inner runs are the same wall, one level down.
+  const grouped = useChatStepsStore((s) => s.grouped)
+  const rows = planStepRows(
+    sub.items.filter((it) => it.id !== skipId),
+    links?.subByToolUse ?? {},
+    fold && grouped,
+  )
+  const renderItem = (it: ChatItem) => {
+    if (it.kind === 'thinking') return <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
+    if (it.kind === 'tool') {
+      // A tool_use that spawned a sub-agent of THIS sub-agent (a nested
+      // spawn): upgrade it into the spawned agent's own card, exactly like
+      // the main flow upgrades its Task cards - instead of leaking the raw
+      // prompt JSON + launch boilerplate as a plain tool card.
+      const nested = links?.subByToolUse[it.toolUseId]
+      if (links && nested && nested.agentId !== sub.agentId)
+        return (
+          <SubagentCard
+            key={it.id}
+            sub={nested}
+            tool={it}
+            worktree={worktree}
+            serif={serif}
+            links={links}
+            onOpenChat={() => links.openSubView(nested.agentId)}
+          />
+        )
+      if (it.name === 'ExitPlanMode') return <PlanCard key={it.id} item={it} />
+      return <ToolCard key={it.id} item={it} worktree={worktree} shellCwd={cwds.get(it.toolUseId) ?? null} />
+    }
+    if (it.kind === 'assistant')
+      return (
+        <div key={it.id} className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+          <Markdown text={it.text} />
+        </div>
+      )
+    return null
+  }
   return (
     <>
-      {sub.items.map((it) => {
-        if (it.id === skipId) return null
-        if (it.kind === 'thinking') return <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
-        if (it.kind === 'tool') {
-          // A tool_use that spawned a sub-agent of THIS sub-agent (a nested
-          // spawn): upgrade it into the spawned agent's own card, exactly like
-          // the main flow upgrades its Task cards - instead of leaking the raw
-          // prompt JSON + launch boilerplate as a plain tool card.
-          const nested = links?.subByToolUse[it.toolUseId]
-          if (links && nested && nested.agentId !== sub.agentId)
-            return (
-              <SubagentCard
-                key={it.id}
-                sub={nested}
-                tool={it}
-                worktree={worktree}
-                serif={serif}
-                links={links}
-                onOpenChat={() => links.openSubView(nested.agentId)}
-              />
-            )
-          if (it.name === 'ExitPlanMode') return <PlanCard key={it.id} item={it} />
-          return <ToolCard key={it.id} item={it} worktree={worktree} shellCwd={cwds.get(it.toolUseId) ?? null} />
-        }
-        if (it.kind === 'assistant')
-          return (
-            <div key={it.id} className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
-              <Markdown text={it.text} />
-            </div>
-          )
-        return null
-      })}
+      {rows.map((r) =>
+        r.row === 'item' ? (
+          renderItem(r.item)
+        ) : (
+          <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={null} renderRow={renderItem} />
+        ),
+      )}
     </>
   )
 }
@@ -4063,7 +4103,7 @@ function SubagentChatView({
         </div>
       )}
       <div className="flex flex-col gap-3 text-xs">
-        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
+        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} fold />
       </div>
       {report && <SubagentReport report={report} serif={serif} />}
       {/* whitespace-nowrap for the same reason as the main working line: the
@@ -5419,6 +5459,255 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
   return items
 }
 
+// ── Step folding ────────────────────────────────────────────────────────────
+// A turn's machinery - the thoughts it had and the tool calls it made - is what
+// turns a long transcript into a wall: a dozen one-line cards around each thing
+// the agent actually SAID. So a run of consecutive machinery items folds into
+// one quiet line ("12 steps · Bash, Read, Edit") that expands in place.
+//
+// The RUNNING step folds in too, and that is what makes a live turn calm rather
+// than merely tidy: with it left outside, every step grew a card and then took
+// it away again a second later, so the transcript pulsed all turn. Folded in,
+// the group is one line from beginning to end - the count ticks up and the
+// header says what it is doing. Nothing below it moves.
+//
+// A Task card that upgraded into a SubagentCard is a conversation of its own
+// rather than a step, so it breaks the run.
+function isFoldableStep(it: ChatItem, subByToolUse: Record<string, SubagentView>): boolean {
+  if (it.kind === 'thinking') return true
+  if (it.kind !== 'tool') return false
+  if (subByToolUse[it.toolUseId]) return false
+  // Two tools are addressed to the READER rather than to the machine: a plan
+  // put up for approval, and a command run outside the sandbox on the user's
+  // own machine. Neither is a step to skim past, so neither folds.
+  if (it.name === 'ExitPlanMode' || it.name === 'mcp__hydra__host_run') return false
+  return true
+}
+
+// A row of the transcript: either one item as before, or a folded run of them.
+export type StepRow = { row: 'item'; item: ChatItem } | { row: 'group'; id: number; items: ChatItem[] }
+
+// planStepRows splits the item list into rows, folding each qualifying run.
+// A run earns a group only once it holds two or more tool calls: one card (with
+// or without the thought that led to it) is not a wall, and hiding it behind
+// "1 step" costs more than it saves.
+// eslint-disable-next-line react-refresh/only-export-components
+export function planStepRows(items: ChatItem[], subByToolUse: Record<string, SubagentView>, grouped: boolean): StepRow[] {
+  if (!grouped) return items.map((item) => ({ row: 'item', item }))
+  const rows: StepRow[] = []
+  let run: ChatItem[] = []
+  const flush = () => {
+    if (run.length === 0) return
+    if (run.filter((it) => it.kind === 'tool').length >= 2) rows.push({ row: 'group', id: run[0].id, items: run })
+    else for (const it of run) rows.push({ row: 'item', item: it })
+    run = []
+  }
+  for (const it of items) {
+    if (isFoldableStep(it, subByToolUse)) {
+      run.push(it)
+      continue
+    }
+    flush()
+    rows.push({ row: 'item', item: it })
+  }
+  flush()
+  return rows
+}
+
+// stepSummary describes a folded run in the collapsed header: how many tool
+// calls, which tools (most-used first, so the shape of the run reads at a
+// glance), how long it spent thinking, and how many steps failed. The tool list
+// is capped at three names - past that it stops being a summary.
+//
+// The failure count is the one thing a fold must not swallow: a red card that
+// scrolled past is how you notice the agent hit a wall and went around it, so
+// the header says so and expanding shows which.
+// eslint-disable-next-line react-refresh/only-export-components
+export function stepSummary(items: ChatItem[]): {
+  label: string
+  tools: string
+  thinkingMs: number
+  failed: number
+  // The step in flight right now, named, so a folded group can say what it is
+  // doing instead of only that it is doing something.
+  running: string
+} {
+  const counts = new Map<string, number>()
+  let thinkingMs = 0
+  let failed = 0
+  let running = ''
+  for (const it of items) {
+    if (it.kind === 'thinking') {
+      thinkingMs += it.durationMs ?? 0
+      continue
+    }
+    if (it.kind !== 'tool') continue
+    if (it.isError) failed++
+    if (it.result === undefined && !it.ended) running = displayToolName(it.name)
+    const name = displayToolName(it.name)
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  const total = [...counts.values()].reduce((a, b) => a + b, 0)
+  // The WHOLE list, most-used first, and no "+N more": the header clips it with
+  // a CSS ellipsis instead. Two truncations stacked (a cap at three names, then
+  // `truncate` over the top) meant a narrow pane spent its last characters
+  // saying "+2 mo..." rather than naming another tool, and a wide one hid tools
+  // it had room for. Letting the list run costs no layout shift either - it is
+  // the one flexible cell in a row of shrink-0 ones, so its length never moves
+  // anything.
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  const tools = ranked.map(([name, n]) => (n > 1 ? `${name} x${n}` : name)).join(' · ')
+  return { label: `${total} step${total === 1 ? '' : 's'}`, tools, thinkingMs, failed, running }
+}
+
+// GrowIn mounts CLOSED and opens on the next frame, so the "N steps" line grows
+// into place rather than popping in above the steps it now owns. It is the only
+// motion a group makes on its own: nothing ever folds itself while you are
+// looking at it (see StepGroup).
+function GrowIn({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    markSelfReflow()
+    const t = setTimeout(() => setOpen(true), 16)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <Expandable open={open}>
+      <div data-step-grow className="animate-chat-item-in">
+        {children}
+      </div>
+    </Expandable>
+  )
+}
+
+// useGroupApproval reports whether any step in the group is parked on a
+// security-gate approval. Folding the running step away is fine while it is just
+// working, but a step waiting on YOU must never be behind a count: the group
+// opens itself so the card's Allow/Deny row is on screen (see ToolApproval).
+function useGroupApproval(items: ChatItem[]): boolean {
+  const ctx = useContext(ChatApprovalContext)
+  const parked = useApprovalStore((s) => (ctx ? s.pending[ctx.agentId] : undefined))
+  if (!parked?.length) return false
+  return items.some(
+    (it) =>
+      it.kind === 'tool' &&
+      it.result === undefined &&
+      parked.some((a) =>
+        approvalMatchesTool(a, it.name, (typeof it.input === 'object' ? it.input : null) as Record<string, unknown> | null),
+      ),
+  )
+}
+
+// StepGroup is the run itself: one line while closed, the rows it holds while
+// open (rendered by the caller through renderRow).
+//
+// It NEVER folds itself while you are looking at it. A group born while you are
+// watching a turn starts open - you are here to watch the work, and a collapse
+// under your eyes moves the text you are reading (a long run is a 1000px shrink,
+// and the pane deliberately has no browser scroll anchoring). It stays open for
+// the rest of the visit unless you close it yourself.
+//
+// The tidying happens on the way back in: fold state is per-mount, so leaving
+// the page and returning - or a reload - renders every group folded, which is
+// what liveFrom (the transcript's first live item id) distinguishes. A replayed
+// transcript has no live items, so it comes back quiet.
+function StepGroup({
+  items,
+  liveFrom,
+  renderRow,
+}: {
+  items: ChatItem[]
+  liveFrom: number | null
+  renderRow: (item: ChatItem, animate: boolean) => ReactNode
+}) {
+  // Whether the group came into being while the reader was watching, rather than
+  // arriving with a replayed transcript. That decides both how it enters (the
+  // header grows in above steps already on screen) and how it starts: open for a
+  // live run, folded for history.
+  const [bornLive] = useState(() => liveFrom != null && items.some((it) => it.id >= liveFrom))
+  const [open, setOpen] = useState(bornLive)
+  const { label, tools, thinkingMs, failed, running } = stepSummary(items)
+  // A parked approval overrides the fold: the row you have to answer is inside.
+  const needsApproval = useGroupApproval(items)
+  const shown = open || needsApproval
+  // Whether each step gets the entrance fade, decided ONCE - the first time the
+  // group sees it - and then held, so a later render can't strip the class
+  // mid-animation.
+  //
+  // A step fades in if it lands while the group is already open: that is a
+  // message arriving, exactly as it would outside a group. It does NOT fade if
+  // it is on screen because you just opened the group, or because the group was
+  // born around steps that were already there - both are old work being
+  // revealed, and a dozen cards fading in at once reads as a dozen things
+  // happening at once. A step that arrived while the group was folded is old by
+  // the time you open it, so it is settled here too.
+  const [entered, setEntered] = useState<Map<number, boolean>>(() => new Map(items.map((it) => [it.id, false])))
+  const fresh = items.filter((it) => !entered.has(it.id))
+  if (fresh.length > 0) {
+    // Render-phase adjustment (as in useDelayedUnmount): the decision has to be
+    // in place for this render, not a frame later.
+    const next = new Map(entered)
+    for (const it of fresh) next.set(it.id, shown)
+    setEntered(next)
+  }
+  const header = (
+    <button
+      // Closing the group shrinks the transcript, which clamps scrollTop down
+      // and reads like a scroll-up to the pin logic - the same false positive a
+      // fold used to cause (see markSelfReflow).
+      onClick={() => {
+        markSelfReflow()
+        setOpen((o) => !o)
+      }}
+      className="group flex w-full items-center gap-1.5 text-left cursor-pointer"
+      aria-expanded={shown}
+    >
+      <ChevronRight
+        className={`w-3 h-3 shrink-0 text-stone-400/70 dark:text-stone-500/70 transition-transform duration-200 ${shown ? 'rotate-90' : ''}`}
+      />
+      <span className="shrink-0 font-medium text-stone-400 dark:text-stone-500 group-hover:text-stone-600 dark:group-hover:text-stone-300 transition-colors">
+        {label}
+      </span>
+      {!shown && tools && <span className="min-w-0 truncate text-stone-400/80 dark:text-stone-500/80">{tools}</span>}
+      {/* What it THOUGHT about is a settled-run detail: while the group is live
+          the right-hand chip below is saying what it is doing, and a narrow pane
+          has room for one of the two. */}
+      {!shown && thinkingMs > 0 && !running && !needsApproval && (
+        <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">
+          · thought for {formatDuration(Math.max(1000, Math.ceil(thinkingMs / 1000) * 1000))}
+        </span>
+      )}
+      {!shown && failed > 0 && (
+        <span className="shrink-0 text-red-500/80 dark:text-red-400/80">· {failed} failed</span>
+      )}
+      {/* What the group is doing right now, in the ToolCard's own words and
+          colour so a folded step reads like the card it replaces.
+
+          Everything but the count is for the FOLDED state only. Open, the cards
+          are right there saying it themselves - the red one is red, the running
+          one says "running", the parked one carries its own Allow/Deny row - so
+          repeating any of it on the header is just a second voice. */}
+      {!shown && (needsApproval || running) && (
+        <span className="ml-auto pl-1.5 shrink-0 text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">
+          {needsApproval ? 'needs approval' : `running ${running}`}
+        </span>
+      )}
+    </button>
+  )
+  return (
+    <div className="text-xs">
+      {bornLive ? <GrowIn>{header}</GrowIn> : header}
+      {/* The rows sit tighter than the transcript's gap-3 so an expanded run
+          still reads as one block rather than as loose messages. */}
+      <Expandable open={shown}>
+        <div className="flex flex-col gap-2 pt-2">
+          {items.map((it) => renderRow(it, entered.get(it.id) ?? false))}
+        </div>
+      </Expandable>
+    </div>
+  )
+}
+
 // The settled message list, memoized so the live token stream (which updates
 // once per delta, many times a second) doesn't re-render every prior message.
 // While a turn streams, only `stream` changes in ChatPane - none of these props
@@ -5503,11 +5792,19 @@ const SettledRow = memo(
 
 const SettledMessages = memo(
   function SettledMessages({ items, liveItem, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds }: SettledMessagesProps) {
-    const row = (item: ChatItem) => (
+    // Read straight from the store rather than as a prop: a zustand subscription
+    // re-renders this component on its own, so flipping the setting refreshes
+    // the list without threading the value through every memo comparator.
+    const grouped = useChatStepsStore((s) => s.grouped)
+    // animate is the ENTRANCE fade, for a message arriving live. A row inside a
+    // step group is handed the group's own answer for it: a step that lands
+    // while the group is open fades in like any other message, one revealed by
+    // opening the group does not (see StepGroup).
+    const row = (item: ChatItem, animate = true) => (
       <SettledRow
         key={item.id}
         item={item}
-        animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
+        animate={animate && liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
         renderItem={renderItem}
         shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
         serif={serif}
@@ -5523,8 +5820,18 @@ const SettledMessages = memo(
     // back lets it bail on each settled subtree instead of rebuilding an element
     // per row 60 times a second. The deps are exactly this component's memo keys
     // below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `row` is a per-render closure over these same deps
-    const rows = useMemo(() => items.map(row), [items, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds])
+    const rows = useMemo(
+      () =>
+        planStepRows(items, subByToolUse, grouped).map((r) =>
+          r.row === 'item' ? (
+            row(r.item)
+          ) : (
+            <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={row} />
+          ),
+        ),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- `row` is a per-render closure over these same deps
+      [items, grouped, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds],
+    )
     // ONE keyed list, live row included. It has to be the same list the settled
     // row lands in: a separate slot beside it would be a separate position, and
     // React would tear the live node down to build the settled one - which is
@@ -8512,9 +8819,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // the max scroll offset and clamps scrollTop down exactly the same way.
     // Without this the chat came unmoored from the bottom whenever you typed a
     // multi-line message and then deleted it again.
+    // inSelfReflow covers the case the geometry test cannot see: a step folding
+    // away while the next one arrives, where the shrink and the growth land in
+    // one event and only scrollTop looks like it moved (see markSelfReflow).
     const shrank =
       el.scrollHeight < prevScrollHeightRef.current - 1 ||
-      el.clientHeight > prevClientHeightRef.current + 1
+      el.clientHeight > prevClientHeightRef.current + 1 ||
+      inSelfReflow()
     const scrolledUp = !shrank && el.scrollTop < prevScrollTopRef.current - 1
     prevScrollTopRef.current = el.scrollTop
     prevScrollHeightRef.current = el.scrollHeight
