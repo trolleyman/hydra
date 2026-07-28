@@ -4626,6 +4626,42 @@ var simAskImplMarkdown = strings.Join([]string{
 	"me to add hot-reload next, or wire up secrets interpolation first?",
 }, "\n")
 
+// simAskPlanMarkdown is the block agent-ask types out BEFORE it starts working.
+// It exists so the demo turn has real prose above its run of steps: reading it
+// carries you down the pane, and the steps then land off the bottom of what you
+// are reading - which is the case where a fold could shove the text you are
+// mid-sentence in (see the scroll-stability checks on the step group).
+var simAskPlanMarkdown = strings.Join([]string{
+	"Before I touch the loader, here is the shape of the change, so the diff",
+	"doesn't arrive as a surprise.",
+	"",
+	"### Where the layering goes",
+	"",
+	"`Load` is the only entry point that reads config today, and every caller",
+	"passes a project root. That makes it the right seam: it grows an `env`",
+	"argument, reads the base file exactly as it does now, and then hands the",
+	"parsed map to a new `applyEnvOverlay` before anything validates it.",
+	"",
+	"The overlay file is *optional*. A missing `config.<env>.toml` is not an",
+	"error - it means the environment adds nothing, and the base config stands",
+	"on its own. Only a malformed one fails the load.",
+	"",
+	"### The merge rule, precisely",
+	"",
+	"- **Tables merge** field by field, recursively, so an override can set one",
+	"  key of `[network]` without restating the rest of it.",
+	"- **Scalars and arrays replace** wholesale. An `allowed_hosts` in the",
+	"  overlay is the list, not an addition to the base list - the alternative",
+	"  (append) has no way to spell \"remove a host\".",
+	"- **Validation runs once**, on the merged result, so an override is allowed",
+	"  to fill in a key the base leaves out.",
+	"",
+	"That last one is the reason validation moves after the merge rather than",
+	"staying where it is. Everything else is additive.",
+	"",
+	"Let me read the loader and the callers before I start.",
+}, "\n")
+
 // streamSimAskImplementation streams the large, feature-rich turn agent-ask
 // produces once its AskUserQuestion is answered: an opening paragraph, two
 // interleaved tool steps with a thinking block between them, then the long
@@ -4700,7 +4736,8 @@ func streamSimAskImplementation(conn *safeConn, sessionID string) {
 	// A long run of steps on purpose: this is the demo turn for everything that
 	// depends on a turn doing a LOT between two things it says - the folded step
 	// group, its live count, the failed-step marker, the shell cwd tracking.
-	streamText("msg_ask_impl_1", "Locked in. I'll wire the loader to merge the per-environment file over the base and validate the merged result. Let me read the current loader first.", 45*time.Millisecond)
+	streamText("msg_ask_impl_1", "Locked in. I'll wire the loader to merge the per-environment file over the base and validate the merged result.", 45*time.Millisecond)
+	streamText("msg_ask_impl_1b", simAskPlanMarkdown, 30*time.Millisecond)
 	toolStep("msg_ask_impl_2", "toolu_ask_read", "Read",
 		map[string]any{"file_path": "internal/config/load.go"},
 		"func Load(root string) (*Config, error) {\n\treturn parseFile(filepath.Join(root, \"config.toml\"))\n}", 900*time.Millisecond, false)

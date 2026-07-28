@@ -1748,6 +1748,23 @@ function useDelayedUnmount(open: boolean, ms = 250): boolean {
   return open || mounted
 }
 
+// A step folding away shrinks the transcript by its own height, which clamps
+// scrollTop down - and a scrollTop that drops on its own is exactly what a user
+// scrolling up looks like. onScroll already forgives a shrink it can SEE
+// (scrollHeight went down between two scroll events), but a fold overlaps with
+// the next step arriving, so the two height changes can coalesce into one event
+// where the height is unchanged and only scrollTop moved: read as a scroll-up,
+// which unpinned the view and stopped the chat following a live turn from the
+// first fold onwards. So a fold declares itself for the length of its animation
+// and onScroll trusts that over the geometry.
+let selfReflowUntil = 0
+function markSelfReflow(ms = 400) {
+  selfReflowUntil = Math.max(selfReflowUntil, Date.now() + ms)
+}
+function inSelfReflow(): boolean {
+  return Date.now() < selfReflowUntil
+}
+
 // Expandable animates its child open/closed by transitioning a MEASURED
 // max-height (0 <-> content height). We moved off the grid-rows 0fr/1fr trick
 // because, with a nested scroll container inside (a CodePanel's max-h-64 <pre>),
@@ -5018,6 +5035,7 @@ export function stepSummary(items: ChatItem[]): { label: string; tools: string; 
 function FoldingRows({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(true)
   useEffect(() => {
+    markSelfReflow()
     // A frame, not zero: Expandable's first layout effect has to commit the open
     // state before the close can transition from a measured height.
     const t = setTimeout(() => setOpen(false), 16)
@@ -5039,6 +5057,7 @@ function FoldingRows({ children }: { children: ReactNode }) {
 function GrowIn({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
   useEffect(() => {
+    markSelfReflow()
     const t = setTimeout(() => setOpen(true), 16)
     return () => clearTimeout(t)
   }, [])
@@ -8067,9 +8086,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // the max scroll offset and clamps scrollTop down exactly the same way.
     // Without this the chat came unmoored from the bottom whenever you typed a
     // multi-line message and then deleted it again.
+    // inSelfReflow covers the case the geometry test cannot see: a step folding
+    // away while the next one arrives, where the shrink and the growth land in
+    // one event and only scrollTop looks like it moved (see markSelfReflow).
     const shrank =
       el.scrollHeight < prevScrollHeightRef.current - 1 ||
-      el.clientHeight > prevClientHeightRef.current + 1
+      el.clientHeight > prevClientHeightRef.current + 1 ||
+      inSelfReflow()
     const scrolledUp = !shrank && el.scrollTop < prevScrollTopRef.current - 1
     prevScrollTopRef.current = el.scrollTop
     prevScrollHeightRef.current = el.scrollHeight
