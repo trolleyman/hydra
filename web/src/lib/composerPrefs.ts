@@ -34,3 +34,32 @@ export const usePasteMarkersStore = create<PasteMarkersState>()(
     },
   ),
 )
+
+// Whether the composers auto-pair as you type - a typed opener brings its closer
+// with it, a third backtick opens a fenced block, and a mark typed over a
+// selection wraps it (lib/autoPair.ts has the full rules). Absent (or anything
+// but '0') = on, the default.
+export function loadAutoPair(): boolean {
+  return readLocal(StorageKeys.autoPair) !== '0'
+}
+
+interface AutoPairState {
+  enabled: boolean
+  setEnabled: (enabled: boolean) => void
+}
+
+export const useAutoPairStore = create<AutoPairState>()(
+  persist(
+    (set) => ({
+      enabled: loadAutoPair(),
+      setEnabled: (enabled) => set({ enabled }),
+    }),
+    {
+      name: StorageKeys.autoPair,
+      storage: singleFieldStorage('enabled', loadAutoPair, (enabled) =>
+        writeLocal(StorageKeys.autoPair, enabled ? null : '0'),
+      ),
+      partialize: (s) => ({ enabled: s.enabled }),
+    },
+  ),
+)
