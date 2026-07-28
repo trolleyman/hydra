@@ -1,16 +1,17 @@
 import { useState } from 'react'
-import { Check, EllipsisVertical, ExternalLink, Laptop, LoaderCircle, MessageSquare, Sparkles } from 'lucide-react'
+import { Check, Copy, EllipsisVertical, EyeOff, LoaderCircle, MessageSquare, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { Tooltip } from './Tooltip'
 import { ProviderIcon } from './ReviewControls'
+import { providerLabel } from '../lib/forgeDisplay'
 import { formatStartedAgo } from '../lib/agentDisplay'
 
 // The actions a thread card can perform, supplied by the diff viewer through
 // context (see reviewThreadContext) so the memo'd hunks between them never need
 // to thread these props through.
 export interface ReviewThreadActions {
-  // provider drives the origin badge on forge notes ("github" | "gitlab").
+  // provider drives the origin badge + button labels ("github" | "gitlab").
   provider?: string
   // reply posts to the forge as the user; replyLocal keeps the note inside Hydra.
   reply: (threadId: string, body: string) => Promise<void>
@@ -20,6 +21,13 @@ export interface ReviewThreadActions {
   // resolveWithAgent asks the head to address this thread (an agent-pull prompt,
   // the same pattern as "Fix the merge conflicts").
   resolveWithAgent: (thread: ReviewThread) => Promise<void>
+  // draft persists the in-progress reply for a thread, so a card that scrolls out
+  // of view (unmounting it) or a reload doesn't lose a half-written reply.
+  draft: {
+    load: (threadId: string) => string
+    save: (threadId: string, text: string) => void
+    clear: (threadId: string) => void
+  }
 }
 
 // noteAgo renders a note's timestamp as "3h ago". An unparseable/absent stamp
@@ -34,23 +42,50 @@ function noteAgo(createdAt?: string): string {
 // OriginBadge says where a note lives: on the forge for everyone to see, or only
 // in Hydra. It sits at the top right of the note it describes - a thread can mix
 // the two, so the badge is per note, not per thread.
-function OriginBadge({ origin, provider }: { origin: ReviewThreadNote['origin']; provider?: string }) {
-  if (origin === 'local_only') {
+//
+// For a forge note the provider mark IS the link out to that comment (with the
+// URL in its tip, like the sidebar's repository link), so the common "take me to
+// this on GitHub" move needs no menu.
+function OriginBadge({ note, provider }: { note: ReviewThreadNote; provider?: string }) {
+  if (note.origin === 'local_only') {
     return (
-      <Tooltip content="Local to Hydra - only you can see this. It was never posted to the pull request." variant="card">
-        <span className="flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/60 rounded px-1 py-px cursor-help">
-          <Laptop className="w-3 h-3" />
+      <Tooltip content="Kept in Hydra - it was never posted to the pull request, so only you can see it.">
+        <span className="inline-flex items-center gap-1 h-5 px-1 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/60 rounded cursor-help">
+          <EyeOff className="w-3 h-3" />
           private
         </span>
       </Tooltip>
     )
   }
-  const name = provider === 'gitlab' ? 'GitLab' : provider === 'github' ? 'GitHub' : 'the forge'
+  const name = providerLabel(provider)
+  if (!note.url) {
+    return (
+      <Tooltip content={`Posted on ${name} - everyone on the pull request can see this.`}>
+        <span className="inline-flex items-center justify-center w-5 h-5 text-gray-500 dark:text-gray-400 cursor-help">
+          <ProviderIcon provider={provider} className="w-3.5 h-3.5" />
+        </span>
+      </Tooltip>
+    )
+  }
   return (
-    <Tooltip content={`Posted on ${name} - everyone on the pull request can see this.`} variant="card">
-      <span className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400 cursor-help">
-        <ProviderIcon provider={provider} className="w-3 h-3" />
-      </span>
+    <Tooltip
+      content={
+        <>
+          <div>Open on {name}</div>
+          {/* The URL is the useful part - exactly which comment this opens. */}
+          <div className="text-gray-500 dark:text-gray-400 break-all">{note.url}</div>
+        </>
+      }
+    >
+      <a
+        href={note.url}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open this comment on ${name}`}
+        className="inline-flex items-center justify-center w-5 h-5 rounded text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-colors cursor-pointer"
+      >
+        <ProviderIcon provider={provider} className="w-3.5 h-3.5" />
+      </a>
     </Tooltip>
   )
 }
@@ -60,18 +95,28 @@ function OriginBadge({ origin, provider }: { origin: ReviewThreadNote['origin'];
 // that can post to the forge or stay local, and a menu whose main act is handing
 // the thread to the agent. See docs/review-threads.md.
 export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; actions: ReviewThreadActions }) {
-  const [replying, setReplying] = useState(false)
-  const [text, setText] = useState('')
+  const [text, setText] = useState(() => actions.draft.load(thread.id))
+  const [replying, setReplying] = useState(() => !!actions.draft.load(thread.id))
   const [busy, setBusy] = useState<'forge' | 'local' | 'agent' | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const forge = providerLabel(actions.provider)
+
+  const changeText = (v: string) => {
+    setText(v)
+    actions.draft.save(thread.id, v)
+  }
 
   const run = async (kind: 'forge' | 'local' | 'agent', fn: () => Promise<void>) => {
     setBusy(kind)
     setError(null)
     try {
       await fn()
-      if (kind !== 'agent') { setText(''); setReplying(false) }
+      if (kind !== 'agent') {
+        setText('')
+        actions.draft.clear(thread.id)
+        setReplying(false)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -95,16 +140,18 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                 {noteAgo(n.created_at) && (
                   <span className="text-[10px] text-gray-400">{noteAgo(n.created_at)}</span>
                 )}
-                <span className="ml-auto shrink-0 flex items-center gap-1">
-                  <OriginBadge origin={n.origin} provider={actions.provider} />
+                {/* Fixed-height row so the badge and the menu trigger share a
+                    centre line whichever of them renders. */}
+                <span className="ml-auto shrink-0 flex items-center gap-1 h-5">
+                  <OriginBadge note={n} provider={actions.provider} />
                   {i === 0 && (
-                    <div className="relative">
+                    <div className="relative flex items-center">
                       <Tooltip content="Thread actions" side="top">
                         <button
                           type="button"
                           aria-label="Thread actions"
                           onClick={() => setMenuOpen((o) => !o)}
-                          className="p-0.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-violet-100 dark:hover:bg-violet-900/40 cursor-pointer"
+                          className="inline-flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-violet-100 dark:hover:bg-violet-900/40 cursor-pointer"
                         >
                           <EllipsisVertical className="w-3.5 h-3.5" />
                         </button>
@@ -128,16 +175,14 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                               </span>
                             </button>
                             {thread.url && (
-                              <a
-                                href={thread.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={() => setMenuOpen(false)}
+                              <button
+                                type="button"
+                                onClick={() => { setMenuOpen(false); void navigator.clipboard?.writeText(thread.url ?? '') }}
                                 className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer"
                               >
-                                <ExternalLink className="w-3.5 h-3.5 shrink-0 text-gray-400" />
-                                Open on the forge
-                              </a>
+                                <Copy className="w-3.5 h-3.5 shrink-0 text-gray-400" />
+                                Copy link to thread
+                              </button>
                             )}
                           </div>
                         </>
@@ -180,38 +225,39 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
               <textarea
                 autoFocus
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => changeText(e.target.value)}
                 onKeyDown={(e) => {
                   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && text.trim()) {
                     e.preventDefault()
                     void run('forge', () => actions.reply(thread.id, text))
                   } else if (e.key === 'Escape') setReplying(false)
                 }}
-                placeholder="Reply... (Ctrl+Enter to post on the pull request)"
+                placeholder={`Reply... (Ctrl+Enter to post on ${forge})`}
                 className="w-full h-16 p-2 text-xs leading-5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded outline-none focus:ring-1 focus:ring-violet-500"
               />
               <div className="flex justify-end gap-2 mt-1.5">
-                <button type="button" onClick={() => { setReplying(false); setText('') }} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
+                <button type="button" onClick={() => { setReplying(false) }} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
                   Cancel
                 </button>
-                <Tooltip content="Save the reply in Hydra only - the reviewer will not see it." side="top">
+                <Tooltip content="Save the reply in Hydra only - the reviewer will never see it." side="top">
                   <button
                     type="button"
                     disabled={!text.trim() || busy !== null}
                     onClick={() => void run('local', () => actions.replyLocal(thread.id, text))}
                     className={`${btn} flex items-center gap-1 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-900/20`}
                   >
-                    <Laptop className="w-3 h-3" />
-                    {busy === 'local' ? 'Saving...' : 'Keep private'}
+                    <EyeOff className="w-3 h-3" />
+                    {busy === 'local' ? 'Saving...' : 'Note in Hydra'}
                   </button>
                 </Tooltip>
                 <button
                   type="button"
                   disabled={!text.trim() || busy !== null}
                   onClick={() => void run('forge', () => actions.reply(thread.id, text))}
-                  className={`${btn} text-white bg-violet-600 hover:bg-violet-700`}
+                  className={`${btn} flex items-center gap-1 text-white bg-violet-600 hover:bg-violet-700`}
                 >
-                  {busy === 'forge' ? 'Posting...' : 'Reply on PR'}
+                  <ProviderIcon provider={actions.provider} className="w-3 h-3" />
+                  {busy === 'forge' ? 'Posting...' : `Reply on ${forge}`}
                 </button>
               </div>
             </div>

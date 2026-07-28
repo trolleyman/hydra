@@ -11,6 +11,8 @@ import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewThread } from './api'
 import { ReviewThreadCard, type ReviewThreadActions } from './components/ReviewThreadCard'
+import { ProviderIcon } from './components/ReviewControls'
+import { providerLabel } from './lib/forgeDisplay'
 import { ReviewThreadContext, useReviewThreadActions } from './lib/reviewThreadContext'
 import {
   Plus, Calendar, TriangleAlert,
@@ -53,7 +55,7 @@ import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
-import { addReviewComment, removeReviewComment, updateReviewComment, clearReviewDraft, loadReviewDraft, loadLineDraft, saveLineDraft, clearLineDraft, type PendingReviewComment } from './lib/reviewDrafts'
+import { addReviewComment, removeReviewComment, updateReviewComment, clearReviewDraft, loadReviewDraft, loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft, type PendingReviewComment } from './lib/reviewDrafts'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
 import { Markdown } from './lib/MarkdownRenderer'
 import { useCopyFlash } from './lib/useCopyFlash'
@@ -192,13 +194,15 @@ function QueuedCommentCard({ comment, stale, onEdit, onRemove }: {
 //     persistence - editing commits straight to the queued comment on save.
 // "Add to review" is synchronous (a localStorage write); the parent closes the row
 // after any action via its own state.
-function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, onSave, onCancel, onDraftChange }: {
+function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, forgeProvider, onSave, onCancel, onDraftChange }: {
   initialText?: string
   onSubmit?: (text: string) => Promise<void>
   onAddToReview?: (text: string) => void
   // Wired only on a head whose MR is linked, and only for a new-side line: posts
   // the comment on the pull request itself instead of to the agent.
   onCommentOnPR?: (text: string) => Promise<void>
+  // "github" | "gitlab", for naming the forge on that button.
+  forgeProvider?: string
   onSave?: (text: string) => void
   onCancel: () => void
   onDraftChange?: (text: string) => void
@@ -259,7 +263,7 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
   const placeholder = onSave
     ? 'Edit comment... (Ctrl+Enter to save)'
     : onAddToReview
-      ? 'Write a comment... (Ctrl+Enter to add to review)'
+      ? 'Write a comment... (Ctrl+Enter to add to the agent review)'
       : 'Write a comment... (Ctrl+Enter to submit)'
 
   const btn = 'px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer'
@@ -290,35 +294,41 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
         ) : (
           <>
             {onCommentOnPR && (
-              <Tooltip content="Post this as a review comment on the pull request, where the author and reviewers will see it." side="top">
+              <Tooltip content={`Post this as a review comment on the pull request, where the author and reviewers will see it. It does not go to the agent.`} side="top">
                 <button
                   disabled={!text.trim() || sending}
                   onClick={() => void handleCommentOnPR()}
                   className={`${btn} flex items-center gap-1 text-violet-700 dark:text-violet-300 border border-violet-300 dark:border-violet-700 hover:bg-violet-50 dark:hover:bg-violet-900/30 disabled:opacity-50`}
                 >
-                  <MessageSquare className="w-3 h-3" />
-                  Comment on PR
+                  <ProviderIcon provider={forgeProvider} className="w-3 h-3" />
+                  Comment on {providerLabel(forgeProvider)}
                 </button>
               </Tooltip>
             )}
+            <Tooltip content="Send this to the agent on its own, right now." side="top">
+              <button
+                disabled={!text.trim() || sending}
+                onClick={handleSubmit}
+                className={`${btn} flex items-center gap-1 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50`}
+              >
+                <Bot className="w-3 h-3" />
+                {sending ? 'Sending...' : 'Comment to agent'}
+              </button>
+            </Tooltip>
             {onAddToReview && (
-              <Tooltip content="Queue this for the agent - it is sent when you submit the review, and never reaches the pull request." side="top">
+              // The primary action: batching several comments and sending them as
+              // one review is the usual way to brief a head, so it leads.
+              <Tooltip content="Queue this for the agent - the whole batch is sent when you submit the review, and none of it reaches the pull request." side="top">
                 <button
                   disabled={!text.trim() || sending}
                   onClick={handleAdd}
-                  className={`${btn} text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30 disabled:opacity-50`}
+                  className={`${btn} flex items-center gap-1 text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
                 >
-                  Add to review
+                  <Bot className="w-3 h-3" />
+                  Add to agent review
                 </button>
               </Tooltip>
             )}
-            <button
-              disabled={!text.trim() || sending}
-              onClick={handleSubmit}
-              className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
-            >
-              {sending ? 'Sending...' : 'Send'}
-            </button>
           </>
         )}
       </div>
@@ -386,6 +396,7 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
             lineDraftApi?.clear(path, lineNum, isNew)
             onCloseNew()
           } : undefined}
+          forgeProvider={threadActions?.provider}
           onCommentOnPR={threadActions && isNew ? async (text) => {
             await threadActions.commentOnLine(path, lineNum, text)
             lineDraftApi?.clear(path, lineNum, isNew)
@@ -3201,6 +3212,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             + `When you are done, reply to the thread with mcp__hydra__reply_to_review_comment so I can see what you changed.`,
         })
         showSentToast('Sent the thread to the agent')
+      },
+      // In-progress replies persist like the line drafts do: a thread card
+      // unmounts when it scrolls out of the virtualised diff, and losing a
+      // half-written reply to a reviewer is worse than losing a note to the agent.
+      draft: {
+        load: (threadId) => loadThreadDraft(projectId, agent.id, threadId),
+        save: (threadId, text) => saveThreadDraft(projectId, agent.id, threadId, text),
+        clear: (threadId) => clearThreadDraft(projectId, agent.id, threadId),
       },
     }
   }, [projectId, agent.id, agent.review?.provider, linkedMR, showSentToast])

@@ -3,17 +3,17 @@
 Status: **BUILT.** A head linked to a PR/MR shows the forge's review
 conversations inline in Hydra's diff viewer, anchored to the file and line they
 were written against, next to your own local comments. You can reply on the pull
-request, keep a reply private, hand a thread to the agent, or start a new thread
-on a line. The publish/forge machinery underneath is
+request, keep a reply local to Hydra, hand a thread to the agent, or start a new
+thread on a line. The publish/forge machinery underneath is
 [non-local-integration.md](non-local-integration.md); adopting someone's PR as a
 head is [pr-adoption.md](pr-adoption.md).
 
 ## Two kinds of comment, one gutter
 
 The diff viewer already had a comment system before this: **local review
-comments** you write on a line and send to the *agent* (immediately with Send, or
-batched with "Add to review" and "Submit review"). Those never touch the forge -
-they are how you brief the head.
+comments** you write on a line and send to the *agent* (immediately with "Comment
+to agent", or batched with "Add to agent review" and "Submit review"). Those never
+touch the forge - they are how you brief the head.
 
 Forge threads are the other kind, and both now render under the same line:
 
@@ -26,24 +26,40 @@ Forge threads are the other kind, and both now render under the same line:
 
 Telling them apart is the job of the **origin badge** at the top right of each
 note: the provider's mark (GitHub/GitLab) for something that is really on the
-pull request, and an amber `private` chip for a note that only exists in this
-Hydra install. Both carry a card tooltip spelling that out. The badge is per
-NOTE, not per thread, because one thread routinely mixes the two - a reviewer's
-comment, then the agent's local answer.
+pull request, and an amber `private` chip (a crossed-out eye) for a note that
+only exists in this Hydra install. Both carry a tooltip spelling that out. The
+badge is per NOTE, not per thread, because one thread routinely mixes the two -
+a reviewer's comment, then the agent's local answer.
+
+The provider mark is also the **link to that comment on the forge** (with the URL
+in its tooltip, exactly like the sidebar's repository link), so the common "take
+me to this on GitHub" move costs one click and needs no menu entry.
 
 ## What you can do with a thread
 
-- **Reply on PR** - posts as you, host-side via `gh`/`glab`.
-- **Keep private** - stores the reply in Hydra only. Useful for a note to self,
-  or for drafting.
+- **Reply on GitHub / Reply on GitLab** - posts as you, host-side via `gh`/`glab`.
+  Every button naming the forge names it specifically; "the forge" only appears
+  when the provider genuinely could not be resolved.
+- **Note in Hydra** - stores the reply locally. Useful for a note to self, or for
+  drafting. (It was "Keep private", which said what it wasn't rather than where
+  it went.)
 - **Resolve with agent** (the `...` menu) - sends the head a prompt quoting the
   thread and asking it to fix and commit, then to answer the thread. This is the
   agent-*pull* pattern used elsewhere: the agent re-reads the live thread itself,
   so nothing is snapshotted at click time.
-- **Open on the forge** - the deep link to that thread.
-- **Comment on PR** (in the new-comment box on any new-side line) - starts a new
-  review thread instead of writing to the agent. It sits next to "Add to review"
-  so the choice of audience is explicit at the moment of writing.
+- **Copy link to thread** (the `...` menu) - opening it is the icon's job.
+- **Comment on GitHub / GitLab** (in the new-comment box on any new-side line) -
+  starts a new review thread instead of writing to the agent.
+
+That new-comment box now names its audience on every button: **Comment on
+GitHub** (forge mark), **Comment to agent** (bot) for a single immediate
+message, and **Add to agent review** (bot) - the primary, since batching several
+comments into one review is the usual way to brief a head.
+
+An in-progress reply is persisted per thread id (`loadThreadDraft` and friends,
+the same shard-store machinery as the line drafts): a thread card unmounts when
+it scrolls out of the diff, and losing a half-written reply to a reviewer is
+worse than losing a note to the agent.
 
 Resolving a thread is deliberately NOT here: resolution semantics differ between
 the forges and belong to the review UI proper. Hydra shows the resolved state and
