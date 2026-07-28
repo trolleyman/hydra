@@ -5284,6 +5284,17 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("Step 3/3: Launching agent session...\r\n"))
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\x1b[32mSimulated agent ready.\x1b[0m\r\n\r\n"))
 
+	// A bash shell tab also prints an OSC 8 hyperlink, so the terminal's "Open
+	// external link?" confirmation can be looked at without a live agent. It is
+	// deliberately a link whose LABEL disagrees with where it points, which is
+	// the hazard that dialog exists for. Only the shell tabs print it: an agent's
+	// own terminal is captured by the screenshot generator, and a shell tab has
+	// to be opened by hand, so no baseline transcript changes.
+	if r.URL.Query().Get("shell") == "true" {
+		_ = conn.WriteMessage(websocket.BinaryMessage, []byte(
+			"See \x1b]8;;https://docs.anthropic.com.cdn-assets-eu.net/agent-sdk\x1b\\docs.anthropic.com/agent-sdk\x1b]8;;\x1b\\ for the tool reference.\r\n\r\n"))
+	}
+
 	// 2. Transition to Running
 	sendStatusUpdate(conn, "running")
 	_ = conn.WriteMessage(websocket.BinaryMessage, []byte("agent@hydra-sim:~$ \x1b[?25h"))

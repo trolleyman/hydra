@@ -5,6 +5,8 @@ import { InfoTooltip } from '../InfoTooltip'
 import { ShellEditor } from '../ShellEditor'
 import { Markdown } from '../../lib/MarkdownRenderer'
 import { HighlightedTextarea } from '../HighlightedTextarea'
+import { HighlightedInput } from '../HighlightedInput'
+import { HostName } from '../HostName'
 import { ResizeHandle } from '../../lib/ResizeHandle'
 
 // The four egress postures, mirroring sandbox.NetworkMode on the backend.
@@ -78,33 +80,72 @@ function SegmentedControl<T extends string>({ options, labels, value, onChange }
 
 // ── PathListEditor ──────────────────────────────────────────────────────────────
 // Edits a list of filesystem paths (writable / masked / restore-RO / allowed hosts).
+// The row's box model, shared by the plain input and - when an entry is
+// highlighted - by both layers of the HighlightedInput, which only line up if
+// their padding and font metrics are identical.
+const LIST_ROW_TEXT = 'text-sm px-3 py-2 font-mono'
+// The chrome around it. On the highlighted variant this moves to the wrapper
+// (as focus-within:), since the input itself is transparent and sits ON TOP of
+// the backdrop - a focus ring drawn there would frame the text from above.
+const LIST_ROW_CHROME =
+  'rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-inner transition-all'
+const LIST_ROW_PLACEHOLDER = 'placeholder-gray-300 dark:placeholder-gray-600'
+
+// An allow/block-list entry, lowlit like every other host Hydra shows: the
+// subdomain labels fade (as does a leading `*.` wildcard marker) and the
+// registrable domain stays. Reading an entry off this list is the same job as
+// reading a host off an approval card - where the domain ends is the whole
+// content of the line, and it is exactly what a lookalike hides.
+const renderHostEntry = (value: string) => <HostName host={value} />
+
 function PathListEditor({
   paths,
   onChange,
   placeholder,
   addLabel,
+  renderValue,
 }: {
   paths: string[]
   onChange: (paths: string[] | null) => void
   placeholder?: string
   addLabel?: string
+  // Optional highlighting for each entry, rendered behind a transparent input
+  // (see HighlightedInput). Used for the host allow/block lists; the path lists
+  // have nothing to highlight and stay plain inputs.
+  renderValue?: (value: string) => ReactNode
 }) {
   return (
     <div className="space-y-2 pt-0.5">
       {paths.map((p, index) => (
         <div key={index} className="flex items-center gap-2">
-          <input
-            type="text"
-            value={p}
-            onChange={(e) => {
-              const next = [...paths]
-              next[index] = e.target.value
-              onChange(next)
-            }}
-            placeholder={placeholder}
-            spellCheck={false}
-            className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-          />
+          {renderValue ? (
+            <HighlightedInput
+              value={p}
+              onChange={(e) => {
+                const next = [...paths]
+                next[index] = e.target.value
+                onChange(next)
+              }}
+              placeholder={placeholder}
+              spellCheck={false}
+              renderContent={renderValue}
+              textClassName={`${LIST_ROW_TEXT} ${LIST_ROW_PLACEHOLDER}`}
+              wrapperClassName={`flex-1 ${LIST_ROW_CHROME} focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500`}
+            />
+          ) : (
+            <input
+              type="text"
+              value={p}
+              onChange={(e) => {
+                const next = [...paths]
+                next[index] = e.target.value
+                onChange(next)
+              }}
+              placeholder={placeholder}
+              spellCheck={false}
+              className={`flex-1 ${LIST_ROW_TEXT} ${LIST_ROW_CHROME} ${LIST_ROW_PLACEHOLDER} text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500`}
+            />
+          )}
           <button
             onClick={() => {
               const next = paths.filter((_, i) => i !== index)
@@ -438,6 +479,7 @@ export function ConfigForm({
                   onChange={(allowed_hosts) => updateNetwork({ allowed_hosts })}
                   placeholder="e.g. api.internal.example.com"
                   addLabel="Add Host"
+                  renderValue={renderHostEntry}
                 />
               </div>
               <div className="space-y-1">
@@ -447,6 +489,7 @@ export function ConfigForm({
                   onChange={(blocked_hosts) => updateNetwork({ blocked_hosts })}
                   placeholder="e.g. *.tracker.io"
                   addLabel="Block Host"
+                  renderValue={renderHostEntry}
                 />
               </div>
               {mode === 'hard' && (
