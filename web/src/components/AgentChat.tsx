@@ -3600,10 +3600,13 @@ function SubagentChatView({
         <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
       </div>
       {report && <SubagentReport report={report} serif={serif} />}
+      {/* whitespace-nowrap for the same reason as the main working line: the
+          label swaps between "Working..." and the longer "Waiting on
+          sub-agents...", and a wrap there would shift the mark. */}
       {(running || waiting) && (
-        <div className="flex items-center gap-1.5 text-[11px] select-none">
+        <div className="flex items-center gap-1.5 text-[11px] select-none whitespace-nowrap">
           <WorkSpark />
-          <span className="chat-text-shimmer font-medium">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
+          <span className="chat-text-shimmer font-medium min-w-0 truncate">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
         </div>
       )}
     </>
@@ -4999,6 +5002,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Content height at the previous follow, so followBottom can tell a line of
   // streamed text arriving apart from a whole card landing.
   const followPrevHeightRef = useRef(0)
+  // Whether a block is mid-stream, for the same call (which the ResizeObserver
+  // makes too, where there is no other way to know). Mirrored during render
+  // rather than in an effect: followBottom runs from a layout effect and an
+  // observer, both of which can beat a state-syncing effect to it.
+  const streamingRef = useRef(false)
+  streamingRef.current = stream != null
   // The previous scroll event's offset, for telling an UPWARD user scroll apart
   // from our own (possibly lagging) pin-to-bottom writes - see onScroll.
   const prevScrollTopRef = useRef(0)
@@ -7074,18 +7083,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // viewports - that size of jump is a bulk render, not "a new thing
     // arrived", and gliding it would just fling unreadable text past.
     //
-    // Text streaming in is the other instant case, and the important one: a
-    // wrapped line grows the content by ~a line, and easing that gap shut means
-    // the last line and the working indicator under it drop a line and then
-    // crawl back up, over and over, for the whole turn. Matching the growth
-    // exactly instead nails them in place while the text scrolls under them -
-    // which is what the eye is actually tracking. Only genuinely small steps
-    // (see FOLLOW_SNAP_PX) qualify, so a tool card or a message landing still
-    // slides rather than teleports.
+    // Text streaming in is the other instant case, and the important one: the
+    // block grows as it is typed, and easing that gap shut means the last line
+    // and the working indicator under it drop and then crawl back up, over and
+    // over, for the whole turn. Matching the growth exactly instead nails them
+    // in place while the text scrolls under them - which is what the eye is
+    // actually tracking.
+    //
+    // Two ways in. A live stream is followed exactly WHATEVER the step, because
+    // a growing block is not a thing arriving: markdown reparses as delimiters
+    // land, so one token can turn a line into a heading, close a list item or
+    // open a code block - 40-50px in a frame, all of it the same block still
+    // being typed. Off-stream growth qualifies only while small (see
+    // FOLLOW_SNAP_PX), so a tool card or a message landing keeps its slide.
     if (
       instant ||
       !liveUiRef.current ||
       gap > el.clientHeight * 2 ||
+      streamingRef.current ||
       (gap <= FOLLOW_SNAP_PX && grew <= FOLLOW_SNAP_PX) ||
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
     ) {
@@ -8602,13 +8617,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               thinking block streams, "Thinking..." rides inside the brackets here
               (after the duration and tokens) rather than as a separate line above,
               so the reasoning<->working transition doesn't shift the layout. */}
+          {/* One line, always. The bracket grows and shrinks as the turn runs
+              (tokens appear, "Thinking..." comes and goes), and on a narrow pane
+              that made the row wrap to two lines and back. The view is anchored
+              to the BOTTOM, so a second line pushes the row's top - and the mark
+              on it - up ~17px and then back down: exactly the wobble the eased
+              follow was blamed for. Truncating the secondary text instead keeps
+              the mark on one fixed line at any width. */}
           {isTurnRunning && replayDone && !lastIsResult && (
-            <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
+            <div className="flex items-center gap-1.5 text-[11px] select-none whitespace-nowrap animate-chat-item-in">
               <WorkSpark />
-              <span className="chat-text-shimmer font-medium">{turnVerb}...</span>
+              <span className="chat-text-shimmer font-medium shrink-0">{turnVerb}...</span>
               {/* tabular-nums so the ticking elapsed seconds / token count keep a
                   fixed width and the line doesn't jitter horizontally as they change. */}
-              <span className="text-stone-400 dark:text-stone-500 tabular-nums">
+              <span className="min-w-0 truncate text-stone-400 dark:text-stone-500 tabular-nums">
                 ({formatDuration(elapsed * 1000)}
                 {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''}
                 {stream?.kind === 'thinking' ? ' · Thinking...' : ''})
