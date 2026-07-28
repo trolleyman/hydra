@@ -1,6 +1,9 @@
-// Package reviewq is the file-channel a sandboxed head uses to ask the daemon to
-// re-read its MR from the forge NOW, instead of waiting up to 30s for the review
-// watcher's next tick.
+// Package reviewq is the file-channel a sandboxed head uses to ask the daemon
+// for something only the host can answer - originally just "re-read my MR from
+// the forge NOW" instead of waiting up to 30s for the review watcher's next
+// tick, and now also the head's own tests/artifacts/services status, which lives
+// in the daemon's managers (services state is in-memory there, so no amount of
+// disk reading from the sandbox would find it).
 //
 // Every forge call runs host-side with the user's `gh`/`glab` credentials - the
 // sandbox has neither those credentials nor (under hard egress) a route to the
@@ -12,10 +15,12 @@
 // "done" and skipped by ListRequests, which is the idempotency the watcher relies
 // on.
 //
-// The payload is deliberately empty beyond bookkeeping: the head's MR link lives
-// in the daemon's DB, so a request means only "refresh my review file", and the
-// refreshed data arrives out-of-band in the review file itself (the Result just
-// says whether the refresh happened).
+// A refresh request's payload is deliberately empty beyond bookkeeping: the
+// head's MR link lives in the daemon's DB, so the request means only "refresh my
+// review file", and the refreshed data arrives out-of-band in the review file
+// itself (the Result just says whether the refresh happened). The status ops
+// instead answer inline through Result.Message, already rendered for the agent -
+// all the formatting stays host-side next to the managers it describes.
 package reviewq
 
 import (
@@ -43,6 +48,13 @@ const (
 	// forge: an agent has no forge credentials, and Hydra only ever writes to a PR
 	// as an explicit user action (docs/review-threads.md).
 	OpNote Op = "note"
+	// OpHeadStatus returns a rendered summary of this head's own tests, artifacts
+	// and services. Read-only: it never starts a test run or a generation.
+	OpHeadStatus Op = "head_status"
+	// OpTestLogs returns the captured output of one test runner's latest run for
+	// this head, tail-limited. Split from OpHeadStatus so the common "am I green?"
+	// question stays a few hundred tokens and only a real failure pays for a log.
+	OpTestLogs Op = "test_logs"
 )
 
 // Request asks the daemon to do one thing for this head's review state.
@@ -54,6 +66,10 @@ type Request struct {
 	// note
 	ThreadID string `json:"thread_id,omitempty"`
 	Body     string `json:"body,omitempty"`
+
+	// test_logs
+	Runner string `json:"runner,omitempty"`
+	Tail   int    `json:"tail,omitempty"` // lines from the end; 0 = the host's default
 }
 
 // Result is the host's outcome. Refreshed is false when the daemon deliberately

@@ -58,10 +58,14 @@ export function showCopyToast(ok: boolean, text: string, opts: CopyToastOptions)
   useToastStore.getState().show({
     // A clipboard glyph rather than the type's tick/cross: the toast is about
     // the clipboard, and the icon says so at a glance.
-    icon: ok ? <ClipboardCheck className="w-[18px] h-[18px]" /> : <ClipboardX className="w-[18px] h-[18px]" />,
+    icon: ok ? <ClipboardCheck className="w-4 h-4" /> : <ClipboardX className="w-4 h-4" />,
     message: ok ? `Copied ${opts.what}` : `Failed to copy ${opts.what}`,
     code: clampPreview(opts.preview ?? text),
     codeLang: opts.lang,
+    // Nothing here is meant to be read twice - you already know what you copied,
+    // the value is only there to confirm you grabbed the right one. So it takes
+    // the tight size rather than the roomy default.
+    compact: true,
     type: ok ? 'success' : 'error',
     // A confirmation is read in a glance; a failure carries the reason to act
     // on, so it keeps the store's longer error lifetime.

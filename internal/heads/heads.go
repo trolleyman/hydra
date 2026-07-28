@@ -535,6 +535,18 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			HeadStatus:    "idle",
 			CreatedAt:     now,
 		}
+		// Arm publish/sync-when-green from the project's [review] config, so the
+		// Settings toggle ("Arm publish-when-green on new heads") actually applies to
+		// heads as they are spawned rather than only describing an intent. Never for
+		// an adopted PR: pushing into someone else's PR must be deliberate, which is
+		// the same rule ArmPublishWhenGreen enforces (docs/pr-adoption.md).
+		// config.Load is cached, so this re-read costs nothing.
+		if opts.Adopt == nil {
+			if spawnCfg, err := config.Load(projectRoot); err == nil && spawnCfg.Review.IsPublishWhenGreen() {
+				agent.PublishWhenGreen = true
+				agent.PublishWhenGreenAt = now.UTC().Format(time.RFC3339)
+			}
+		}
 		// Pre-link an adopted head to the PR/MR it was spawned onto, so the review
 		// watcher, diff viewer and MCP review file treat it like a published head
 		// from its first tick (docs/pr-adoption.md).

@@ -372,23 +372,32 @@ func (s *Server) GetRepositoryPushStatus(_ context.Context, request api.GetRepos
 // clients to refetch; otherwise it stays silent so an unchanged remote doesn't
 // turn this into a poll. Best-effort: a failed/slow fetch just leaves the cached
 // (possibly stale) counts in place.
+//
+// One fetch serves everything the project tracks on that remote: the sidebar's
+// own ahead/behind AND every linked head's <remote>/<downstream> ref, which is
+// why the review watcher calls this rather than fetching separately (a linked
+// head's "behind" would otherwise never move - see RunReviewWatcher).
 func (s *Server) maybeFetchRemote(projectRoot, remote string) {
+	// Throttle per (root, remote): a project whose review config targets a
+	// different remote than the checkout's must not have its fetch swallowed by
+	// the other one's throttle window.
+	key := projectRoot + "\x00" + remote
 	s.fetchMu.Lock()
 	if s.fetchActive == nil {
 		s.fetchActive = map[string]bool{}
 		s.fetchLast = map[string]time.Time{}
 	}
-	if s.fetchActive[projectRoot] || time.Since(s.fetchLast[projectRoot]) < remoteFetchInterval {
+	if s.fetchActive[key] || time.Since(s.fetchLast[key]) < remoteFetchInterval {
 		s.fetchMu.Unlock()
 		return
 	}
-	s.fetchActive[projectRoot] = true
-	s.fetchLast[projectRoot] = time.Now()
+	s.fetchActive[key] = true
+	s.fetchLast[key] = time.Now()
 	s.fetchMu.Unlock()
 
 	defer func() {
 		s.fetchMu.Lock()
-		s.fetchActive[projectRoot] = false
+		s.fetchActive[key] = false
 		s.fetchMu.Unlock()
 	}()
 

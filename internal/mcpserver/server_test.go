@@ -213,3 +213,52 @@ func TestReviewToolsHiddenWhenUnwired(t *testing.T) {
 		t.Errorf("expected 2 tools without GetReview, got %d", len(tools))
 	}
 }
+
+// The status tools are advertised only when the daemon channel backing them is
+// wired. A head without one must not see a tool that could only ever time out.
+func TestHeadStatusToolsHiddenWithoutDeps(t *testing.T) {
+	resps := runLines(t, Deps{}, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	tools := resps[0]["result"].(map[string]any)["tools"].([]any)
+	for _, tl := range tools {
+		if n := tl.(map[string]any)["name"].(string); n == "get_head_status" || n == "get_test_logs" {
+			t.Errorf("%s advertised with no backing dep", n)
+		}
+	}
+}
+
+func TestHeadStatusTools(t *testing.T) {
+	var gotRunner string
+	var gotTail int
+	deps := Deps{
+		HeadStatus: func() (string, bool) { return "## Tests\n- unit: FAILING", true },
+		TestLogs: func(runner string, tail int) (string, bool) {
+			gotRunner, gotTail = runner, tail
+			return "boom", true
+		},
+	}
+	resps := runLines(t, deps,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_head_status","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_test_logs","arguments":{"runner":"  unit  ","tail":50}}}`,
+		// No runner: a tool error that names the way out, not a silent empty log.
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_test_logs","arguments":{}}}`,
+	)
+	names := map[string]bool{}
+	for _, tl := range resps[0]["result"].(map[string]any)["tools"].([]any) {
+		names[tl.(map[string]any)["name"].(string)] = true
+	}
+	if !names["get_head_status"] || !names["get_test_logs"] {
+		t.Errorf("status tools not advertised: %v", names)
+	}
+	if text := firstText(t, resps[1]); !strings.Contains(text, "unit: FAILING") {
+		t.Errorf("get_head_status relayed %q", text)
+	}
+	// The runner name is trimmed before it reaches the host, so a stray space in
+	// the model's argument doesn't turn into "no such runner".
+	if gotRunner != "unit" || gotTail != 50 {
+		t.Errorf("get_test_logs passed runner=%q tail=%d, want \"unit\"/50", gotRunner, gotTail)
+	}
+	if resps[3]["result"].(map[string]any)["isError"] != true {
+		t.Errorf("get_test_logs with no runner should be a tool error: %v", resps[3])
+	}
+}

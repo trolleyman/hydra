@@ -54,6 +54,23 @@ func (s *Server) pollLinkedReviews(ctx context.Context) {
 	if err != nil || len(linked) == 0 {
 		return
 	}
+	// Refresh the remote-tracking refs first, once per (project, remote). Every
+	// head's ahead/behind is measured against <remote>/<downstream> from cached
+	// refs (downstreamAheadBehind), so without a fetch "behind" only ever moved
+	// when something else happened to fetch - a reviewer's push was invisible
+	// until you tried to pull. This is the same throttled best-effort fetch the
+	// sidebar's push status kicks off, so the two share a window rather than
+	// doubling up on remote traffic.
+	fetched := map[string]bool{}
+	for _, a := range linked {
+		remote := reviewRemote(a.ProjectPath)
+		key := a.ProjectPath + "\x00" + remote
+		if remote == "" || fetched[key] {
+			continue
+		}
+		fetched[key] = true
+		go s.maybeFetchRemote(a.ProjectPath, remote)
+	}
 	for _, a := range linked {
 		st, err := s.refreshHeadReview(ctx, a)
 		if err != nil {
@@ -200,6 +217,12 @@ func (s *Server) handleRemoteMerge(ctx context.Context, projectRoot, headID stri
 // are green and the agent has finished, mirroring the merge-when-green watcher
 // . An unlinked armed head auto-opens a DRAFT MR; a linked one auto-pushes
 // (plain push only - never auto-force).
+//
+// The arm is STICKY: it survives a successful publish/push, so an armed head
+// keeps its MR in sync for the rest of its life rather than syncing once and
+// going quiet. That is the whole point of arming it - a commit the agent makes
+// after the MR opens is exactly the commit that used to sit there unnoticed. It
+// is consumed only on failure (so a broken push can't loop) - see autoPublish.
 func (s *Server) checkPublishWhenGreen(ctx context.Context) {
 	if s.DB == nil || s.Tests == nil {
 		return
@@ -257,27 +280,43 @@ func (s *Server) headTestsGreen(projectRoot string, head heads.Head) bool {
 	return passing == len(runners)
 }
 
-// autoPublish publishes an armed head once, consuming the arm so a failure doesn't
-// loop. Unlinked -> draft MR (via publishHead); linked -> plain push (via
-// pushHeadToMR). Reuses the shared cores so the claim/gate/link logic stays in
-// one place.
+// autoPublish publishes or pushes an armed head. Unlinked -> draft MR (via
+// publishHead); linked -> plain push (via pushHeadToMR). Reuses the shared cores
+// so the claim/gate/link logic stays in one place.
+//
+// The arm is kept on success and consumed on failure. Keeping it is what makes a
+// linked head stay in sync commit after commit; consuming it on failure is what
+// stops a push that can never succeed (bad credentials, a protected branch) from
+// retrying every 30s forever. A linked head with nothing to push does neither -
+// it is a no-op, so an idle armed head costs one local rev-list per tick and no
+// network at all.
 func (s *Server) autoPublish(ctx context.Context, projectRoot string, head heads.Head) {
-	// Consume the arm up front (a failed publish shouldn't retry forever).
-	_ = s.DB.SetPublishWhenGreen(head.ID, false, "")
 	// Never auto-push to a PR Hydra did not create - pushing into someone else's
-	// PR must be an explicit, deliberate action (docs/pr-adoption.md).
+	// PR must be an explicit, deliberate action (docs/pr-adoption.md). Disarm, so
+	// this doesn't re-log every tick.
 	if head.ReviewAdopted {
+		_ = s.DB.SetPublishWhenGreen(head.ID, false, "")
 		log.Printf("review watcher: skipping auto-publish for adopted head %s (push to a foreign PR must be manual)", head.ID)
 		return
 	}
 	if head.IsLinked() {
+		// Nothing to send: stay armed and silent. Checked from cached refs, so this
+		// is the cheap path an already-synced head takes on every tick.
+		if head.Branch != nil {
+			ahead, _, ok := downstreamAheadBehind(projectRoot, *head.Branch, reviewRemote(projectRoot), head.DownstreamBranch)
+			if ok && ahead == 0 {
+				return
+			}
+		}
 		if err := s.pushHeadToMR(ctx, projectRoot, head); err != nil {
-			log.Printf("warn: auto-publish push for %s failed: %v", head.ID, err)
+			_ = s.DB.SetPublishWhenGreen(head.ID, false, "")
+			log.Printf("warn: auto-publish push for %s failed (sync-when-green disarmed): %v", head.ID, err)
 		}
 	} else {
 		draft := true
 		if _, fail := s.publishHead(ctx, projectRoot, head, publishOverrides{Draft: &draft}, false); fail != nil {
-			log.Printf("warn: auto-publish for %s failed: %s", head.ID, fail.detail)
+			_ = s.DB.SetPublishWhenGreen(head.ID, false, "")
+			log.Printf("warn: auto-publish for %s failed (publish-when-green disarmed): %s", head.ID, fail.detail)
 		}
 	}
 	s.notifyAgentsChanged(projectRoot, true)

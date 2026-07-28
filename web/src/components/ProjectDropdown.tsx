@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, ChevronUp, FolderOpen, GripVertical, Pencil, Plus, X } from 'lucide-react'
-import type { ProjectInfo } from '../api'
+import type { ProjectInfo, ResolvedPathResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { useFinePointer } from '../lib/useFinePointer'
@@ -26,6 +26,18 @@ const SWITCH_PROJECT_HINT = 'Hold Ctrl, tap ` to switch · ⇧ for previous'
 // the "one tap = previous project" model it exists for.
 function orderProjects(projects: ProjectInfo[]): ProjectInfo[] {
   return [...projects].sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin))
+}
+
+// What the resolved path preview says about the folder underneath, or null when
+// it is exactly what you want (an existing git repo). Only the server can tell
+// us any of this, hence the resolve call - the browser knows neither the
+// server's home directory nor its filesystem.
+function pathHint(r: ResolvedPathResponse): string | null {
+  if (!r.exists) return 'Does not exist yet - you will be asked to create it.'
+  if (!r.is_dir) return 'Not a folder.'
+  if (!r.is_git_repo) return 'Not a git repository - you will be asked to initialize one.'
+  if (r.repo_root && r.repo_root !== r.path) return `A subfolder of the git repository ${r.repo_root}.`
+  return null
 }
 
 // moveProject returns the project IDs with `id` lifted out and re-inserted at
@@ -215,6 +227,10 @@ export const ProjectDropdown = memo(function ProjectDropdown({
   const [newPath, setNewPath] = useState('')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  // Live preview of where the typed path lands, resolved by the server (see
+  // pathHint). Kept with the input it answers so a result for an older keystroke
+  // is simply ignored rather than flashed against the current text.
+  const [resolved, setResolved] = useState<{ input: string; result: ResolvedPathResponse } | null>(null)
   // Native folder picker: only offered to local clients on a system with a
   // dialog tool (the daemon checks both). `browsing` is true while the OS
   // dialog is open and we're awaiting the user's pick.
@@ -334,6 +350,24 @@ export const ProjectDropdown = memo(function ProjectDropdown({
     }
   }, [showAddInput])
 
+  // Resolve the typed path as the user types, debounced. This is what turns
+  // "~/code/hydra" (or a bare "code/hydra", which resolves against home) into
+  // the absolute path shown under the input - and confirmed in the trust prompt.
+  useEffect(() => {
+    const typed = newPath.trim()
+    if (!typed) return
+    let cancelled = false
+    const t = setTimeout(() => {
+      api.default.resolvePath(typed)
+        .then((result) => { if (!cancelled) setResolved({ input: typed, result }) })
+        .catch(() => { if (!cancelled) setResolved(null) })
+    }, 150)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [newPath])
+
   useEffect(() => {
     let cancelled = false
     void folderPickerAvailable().then((a) => {
@@ -371,6 +405,7 @@ export const ProjectDropdown = memo(function ProjectDropdown({
     try {
       await onAddProject(path)
       setNewPath('')
+      setResolved(null)
       setShowAddInput(false)
       setOpen(false)
     } catch (err) {
@@ -592,10 +627,19 @@ export const ProjectDropdown = memo(function ProjectDropdown({
                   type="text"
                   value={newPath}
                   onChange={(e) => setNewPath(e.target.value)}
-                  placeholder="/absolute/path/to/project"
+                  placeholder="~/code/project or /absolute/path"
                   disabled={adding}
                   className="w-full text-xs font-mono px-2 py-1.5 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-500 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
                 />
+                {/* Where that lands. Shown whenever it differs from what was
+                    typed, so "~/x" and relative paths make it obvious which
+                    folder is about to be opened before the trust prompt. */}
+                {resolved?.input === newPath.trim() && resolved.result.path !== newPath.trim() && (
+                  <p className="text-[10px] font-mono text-gray-500 dark:text-gray-400 mt-1 leading-snug break-all">{resolved.result.path}</p>
+                )}
+                {resolved?.input === newPath.trim() && pathHint(resolved.result) && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-500 mt-0.5 leading-snug">{pathHint(resolved.result)}</p>
+                )}
                 {addError && (
                   <p className="text-[10px] text-red-500 mt-1 leading-snug">{addError}</p>
                 )}
@@ -609,7 +653,7 @@ export const ProjectDropdown = memo(function ProjectDropdown({
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setShowAddInput(false); setNewPath(''); setAddError(null) }}
+                    onClick={() => { setShowAddInput(false); setNewPath(''); setResolved(null); setAddError(null) }}
                     className="text-xs py-1 px-2 rounded border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
                   >
                     Cancel

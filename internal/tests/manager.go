@@ -301,6 +301,31 @@ func (m *Manager) Peek(runner string, v Version) (Report, bool, error) {
 	return rep, ok, nil
 }
 
+// PeekCases returns the cases of the cached report for (runner, v) without
+// starting a run. Peek deliberately reads the summary only - every one of its
+// callers is on a hot path and wants counts - so this is the separate, explicit
+// step for the one caller that needs the case list: the head-status MCP tool,
+// which names the failing tests so the agent knows what to fix. Returns nil when
+// nothing is cached or the run is still in flight (it has no settled cases yet).
+func (m *Manager) PeekCases(runner string, v Version) ([]TestCase, error) {
+	key, _, err := m.versionKey(v)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	dir := m.entryDir(runner, key)
+	m.mu.Lock()
+	_, inFlight := m.gens[dir]
+	m.mu.Unlock()
+	if inFlight {
+		return nil, nil
+	}
+	rep, ok := readReport(dir)
+	if !ok {
+		return nil, nil
+	}
+	return rep.Cases, nil
+}
+
 // Latest returns the most-recently-updated cached report for a runner across all
 // commits, ignoring which version it was computed for. Used to detect a "stale"
 // verdict (a cached result that predates the head's current commit) for the head

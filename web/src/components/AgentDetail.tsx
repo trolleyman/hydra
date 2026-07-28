@@ -537,10 +537,13 @@ const AgentMetaRow = memo(function AgentMetaRow({
   savingBase,
   savingChatMode,
   savingDownstream,
+  publishing,
   onSaveBase,
   onRefreshBranches,
   onSaveChatMode,
   onSaveDownstream,
+  onPushToMR,
+  onPullFromMR,
 }: {
   agent: AgentResponse
   projectId: string | null
@@ -549,10 +552,13 @@ const AgentMetaRow = memo(function AgentMetaRow({
   savingBase: boolean
   savingChatMode: boolean
   savingDownstream: boolean
+  publishing: boolean
   onSaveBase: (name: string) => void
   onRefreshBranches: () => void
   onSaveChatMode: (next: boolean) => void
   onSaveDownstream: (n: string) => void
+  onPushToMR: () => void
+  onPullFromMR: () => void
 }) {
   // Confirm before flipping the terminal/chat mode - switching restarts the
   // Claude process, so an accidental tap on the pill shouldn't do it silently.
@@ -664,9 +670,12 @@ const AgentMetaRow = memo(function AgentMetaRow({
       <span className="shrink-0 inline-flex items-center empty:hidden">
         <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
       </span>
-      {/* Linked-MR state chip (state/CI/approvals/discussions). */}
-      <span className="shrink-0 inline-flex items-center empty:hidden">
-        <MRStateChip agent={agent} />
+      {/* Linked-MR state chip (state/CI/approvals/discussions/ahead-behind). The
+          ahead/behind chips are the click target for Push/Pull to MR, so a commit
+          made after the MR opened is both visible and actionable here rather than
+          only inside the View MR dropdown. */}
+      <span className="shrink-0 inline-flex items-center gap-1.5 empty:hidden">
+        <MRStateChip agent={agent} onPush={onPushToMR} onPull={onPullFromMR} busy={publishing} />
       </span>
       {/* Terminal/chat mode toggle for agents with structured chat transports.
           A confirmation prevents an accidental process restart. */}
@@ -726,10 +735,13 @@ const AgentMetaRow = memo(function AgentMetaRow({
   prev.savingBase === next.savingBase &&
   prev.savingChatMode === next.savingChatMode &&
   prev.savingDownstream === next.savingDownstream &&
+  prev.publishing === next.publishing &&
   prev.onSaveBase === next.onSaveBase &&
   prev.onRefreshBranches === next.onRefreshBranches &&
   prev.onSaveChatMode === next.onSaveChatMode &&
   prev.onSaveDownstream === next.onSaveDownstream &&
+  prev.onPushToMR === next.onPushToMR &&
+  prev.onPullFromMR === next.onPullFromMR &&
   deepEqual(metaRowSignature(prev.agent), metaRowSignature(next.agent)),
 )
 
@@ -976,9 +988,15 @@ export function AgentDetail({
   saveChatModeRef.current = saveChatMode
   const saveDownstreamRef = useRef(saveDownstream)
   saveDownstreamRef.current = saveDownstream
+  const pushToMRRef = useRef(handlePushToMR)
+  pushToMRRef.current = handlePushToMR
+  const pullFromMRRef = useRef(handlePullFromMR)
+  pullFromMRRef.current = handlePullFromMR
   const onSaveBase = useCallback((name: string) => { void saveBaseRef.current(name) }, [])
   const onSaveChatMode = useCallback((next: boolean) => { void saveChatModeRef.current(next) }, [])
   const onSaveDownstream = useCallback((n: string) => { void saveDownstreamRef.current(n) }, [])
+  const onPushToMR = useCallback(() => { void pushToMRRef.current() }, [])
+  const onPullFromMR = useCallback(() => { void pullFromMRRef.current() }, [])
 
   async function handleKill() {
     useDialogStore.getState().show({
@@ -1637,19 +1655,27 @@ export function AgentDetail({
     setSavingDownstream(false)
   }
 
-  // armPublish / disarmPublish toggle publish-when-green (auto-open a draft MR /
-  // auto-push once local tests pass and the head finishes).
+  // armPublish / disarmPublish toggle the publish-when-green arm: an unlinked head
+  // opens a draft MR, a linked one pushes, and the arm is sticky, so it keeps
+  // doing that for every later commit (docs/non-local-integration.md). The toast
+  // names whichever the head is actually armed for, in the same plain terms the
+  // menu uses - "when green" is the code's word for this, not the user's.
   async function armPublish() {
-    await runWithToast(() => api.default.armPublishWhenGreen(projectId ?? '', agent.id), {
-      success: 'Publish when green armed',
+    const linkedNow = !!agent.review
+    const res = await runWithToast(() => api.default.armPublishWhenGreen(projectId ?? '', agent.id), {
+      success: linkedNow ? 'Will push to the MR once tests pass' : 'Will open a draft MR once tests pass',
       errorPrefix: 'Failed to arm',
     })
+    // The arm endpoint returns no body, so refresh to repaint the menu's toggle.
+    if (res.ok) onRefresh?.()
   }
   async function disarmPublish() {
-    await runWithToast(() => api.default.disarmPublishWhenGreen(projectId ?? '', agent.id), {
-      success: 'Publish when green disarmed',
-      errorPrefix: 'Failed to disarm',
+    const linkedNow = !!agent.review
+    const res = await runWithToast(() => api.default.disarmPublishWhenGreen(projectId ?? '', agent.id), {
+      success: linkedNow ? 'No longer pushing automatically' : 'MR no longer queued',
+      errorPrefix: 'Failed to cancel',
     })
+    if (res.ok) onRefresh?.()
   }
 
   // respondToReview sends the agent a one-line canned prompt to fetch and address
@@ -1717,9 +1743,13 @@ export function AgentDetail({
           ] as AgentTopBarMenuItem[]),
         }
 
-  // publishAction is the Create MR / View MR button (docs/non-local-integration.md).
-  // Unlinked: "Create MR" opens the dialog. Linked: "View MR" deep-links to the
-  // forge, with Push to MR / Pull from MR in its dropdown (shown by ahead/behind).
+  // publishAction is the Create MR / Push to MR / View MR button
+  // (docs/non-local-integration.md). Unlinked: "Create MR" opens the dialog.
+  // Linked: the button LEADS with the thing there is to do - "Push to MR (2)"
+  // while the head is ahead, otherwise "View MR" - because the state that used to
+  // be invisible (a commit made after the MR opened) is exactly the state where
+  // there is an action to take. What the button doesn't lead with stays in the
+  // dropdown, so nothing is ever only reachable one way.
   const linked = !!agent.review
   const ahead = agent.review?.ahead ?? 0
   const behind = agent.review?.behind ?? 0
@@ -1727,24 +1757,76 @@ export function AgentDetail({
   // backend rejects a push, so the push affordances are replaced with a disabled
   // note (docs/pr-adoption.md).
   const readOnlyPR = agent.review?.adopted === true && agent.review?.can_push === false
+  const mrNoun = agent.review?.adopted ? 'PR' : 'MR'
+  const canPushToMR = linked && !readOnlyPR
+  const leadWithPush = canPushToMR && ahead > 0
+  const viewMRItem = {
+    label: `View ${mrNoun}`,
+    description: 'Open it on the forge.',
+    icon: <ProviderIcon provider={agent.review?.provider} className="w-4 h-4" />,
+    onClick: () => window.open(agent.review!.url, '_blank', 'noreferrer'),
+    tone: 'neutral' as const,
+  }
+  const pullItem = {
+    label: `Pull from ${mrNoun} (${behind} behind)`,
+    description: `Merge the remote ${mrNoun} branch into this head.`,
+    icon: <Download className="w-4 h-4" />,
+    onClick: () => void handlePullFromMR(),
+    tone: 'neutral' as const,
+    disabled: busy || publishing,
+  }
+  // One armed state with two faces: before the MR exists it opens a draft one,
+  // after it keeps pushing. Same flag, so the label follows whichever the head is
+  // about to do rather than inventing a second toggle. Worded like the merge
+  // button's "Queue merge" - "publish-when-green" is the code's name for this,
+  // and it means nothing to someone reading a menu.
+  const syncWhenGreenItem = agent.publish_when_green
+    ? {
+        label: linked ? 'Stop pushing automatically' : 'Cancel queued MR',
+        description: linked ? `New commits will no longer go to the ${mrNoun} on their own.` : 'No MR will be opened automatically.',
+        icon: <Clock className="w-4 h-4" />,
+        onClick: () => void disarmPublish(),
+        tone: 'neutral' as const,
+        disabled: busy,
+      }
+    : {
+        label: linked ? 'Push automatically' : 'Queue MR',
+        description: linked
+          ? `Pushes each new commit to the ${mrNoun} on its own, once tests pass.`
+          : 'Opens a draft MR on its own once tests pass, then keeps it up to date.',
+        icon: <Clock className="w-4 h-4" />,
+        onClick: () => void armPublish(),
+        tone: 'emerald' as const,
+        disabled: busy || publishing,
+      }
+  const respondItem = {
+    label: 'Respond to review comments',
+    description: 'Ask the agent to fetch and address the unresolved review comments.',
+    icon: <MessageSquare className="w-4 h-4" />,
+    onClick: () => void respondToReview(),
+    tone: 'neutral' as const,
+    disabled: busy,
+  }
   const publishAction: AgentTopBarAction = publishing
     ? { label: 'Publishing...', icon: <LoaderCircle className="w-4 h-4 animate-spin" />, onClick: () => {}, variant: 'muted' }
     : linked
       ? {
-          label: agent.review?.adopted ? 'View PR' : 'View MR',
-          icon: <ProviderIcon provider={agent.review?.provider} className="w-4 h-4" />,
-          onClick: () => window.open(agent.review!.url, '_blank', 'noreferrer'),
-          variant: 'segment',
+          label: leadWithPush ? `Push to ${mrNoun}` : `View ${mrNoun}`,
+          count: leadWithPush ? ahead : undefined,
+          icon: leadWithPush ? <Upload className="w-4 h-4" /> : <ProviderIcon provider={agent.review?.provider} className="w-4 h-4" />,
+          onClick: leadWithPush ? () => void handlePushToMR() : () => window.open(agent.review!.url, '_blank', 'noreferrer'),
+          variant: leadWithPush ? 'blue' : 'segment',
+          disabled: busy || publishing,
           menu: [
+            ...(leadWithPush ? [viewMRItem] : []),
             ...(readOnlyPR
               ? [{ label: 'Read-only PR (no push access)', description: 'The author has not enabled maintainer edits, so commits cannot be pushed to this PR.', icon: <Lock className="w-4 h-4" />, onClick: () => {}, tone: 'neutral' as const, disabled: true }]
-              : [
-                  ...(ahead > 0 ? [{ label: `Push to MR (${ahead} ahead)`, description: 'Push local commits to the MR branch.', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing }] : []),
-                  ...(behind > 0 ? [{ label: `Pull from MR (${behind} behind)`, description: 'Merge the remote MR branch into this head.', icon: <Download className="w-4 h-4" />, onClick: () => void handlePullFromMR(), tone: 'neutral' as const, disabled: busy || publishing }] : []),
-                  { label: 'Push to MR', description: 'Push the local head branch again (idempotent).', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing },
-                ]),
-            ...(behind > 0 && readOnlyPR ? [{ label: `Pull from MR (${behind} behind)`, description: 'Merge the remote PR branch into this head.', icon: <Download className="w-4 h-4" />, onClick: () => void handlePullFromMR(), tone: 'neutral' as const, disabled: busy || publishing }] : []),
-            ...((agent.review?.state?.unresolved_discussions ?? 0) > 0 ? [{ label: 'Respond to review comments', description: 'Ask the agent to fetch and address the unresolved review comments.', icon: <MessageSquare className="w-4 h-4" />, onClick: () => void respondToReview(), tone: 'neutral' as const, disabled: busy }] : []),
+              : leadWithPush
+                ? []
+                : [{ label: `Push to ${mrNoun}`, description: 'Push the local head branch again (idempotent).', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing }]),
+            ...(behind > 0 ? [pullItem] : []),
+            ...(readOnlyPR ? [] : [syncWhenGreenItem]),
+            ...((agent.review?.state?.unresolved_discussions ?? 0) > 0 ? [respondItem] : []),
           ] as AgentTopBarMenuItem[],
         }
       : {
@@ -1753,11 +1835,7 @@ export function AgentDetail({
           onClick: () => void openCreateMR(),
           variant: 'blue',
           disabled: busy || publishing,
-          menu: [
-            agent.publish_when_green
-              ? { label: 'Disarm publish-when-green', description: 'Stop auto-opening a draft MR when tests pass.', icon: <Clock className="w-4 h-4" />, onClick: () => void disarmPublish(), tone: 'neutral' as const, disabled: busy }
-              : { label: 'Publish when green', description: 'Auto-open a draft MR once local tests pass and the head finishes.', icon: <Clock className="w-4 h-4" />, onClick: () => void armPublish(), tone: 'emerald' as const, disabled: busy || publishing },
-          ] as AgentTopBarMenuItem[],
+          menu: [syncWhenGreenItem] as AgentTopBarMenuItem[],
         }
   // Create MR (blue) always leads, to the left of Merge; once linked it becomes
   // the View-MR button, still first.
@@ -1860,10 +1938,13 @@ export function AgentDetail({
                     savingBase={savingBase}
                     savingChatMode={savingChatMode}
                     savingDownstream={savingDownstream}
+                    publishing={publishing}
                     onSaveBase={onSaveBase}
                     onRefreshBranches={refreshBranches}
                     onSaveChatMode={onSaveChatMode}
                     onSaveDownstream={onSaveDownstream}
+                    onPushToMR={onPushToMR}
+                    onPullFromMR={onPullFromMR}
                   />
                 </div>
                 {/* self-start pins the toggle to the toolbar's first line even
@@ -1954,10 +2035,13 @@ export function AgentDetail({
                     savingBase={savingBase}
                     savingChatMode={savingChatMode}
                     savingDownstream={savingDownstream}
+                    publishing={publishing}
                     onSaveBase={onSaveBase}
                     onRefreshBranches={refreshBranches}
                     onSaveChatMode={onSaveChatMode}
                     onSaveDownstream={onSaveDownstream}
+                    onPushToMR={onPushToMR}
+                    onPullFromMR={onPullFromMR}
                   />
                 </div>
                 <Tooltip content={`Show diff (${SHORTCUT_DIFF_SIDEBAR})`}>
