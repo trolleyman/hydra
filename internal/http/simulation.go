@@ -671,6 +671,10 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			resp[i].Review = simReviewLink("open", forge.CISuccess, 2, 0, 1, 0)
 		case "agent-2":
 			resp[i].DownstreamBranch = ptr("feat/small-fix")
+		case "agent-3":
+			// agent-3 is an ADOPTED PR: linked and pushable, but auto-push is off.
+			resp[i].DownstreamBranch = ptr("contrib/auth-packages")
+			resp[i].Review = simAdoptedReviewLink()
 		}
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
@@ -850,16 +854,18 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	if id == "agent-3" {
 		createdAt := simNow().Add(-3 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
-			Id:            "agent-3",
-			Title:         ptr("Refactor auth into nested packages"),
-			AgentType:     "claude",
-			BaseBranch:    "main",
-			BranchName:    ptr("hydra/feat-3"),
-			SessionPid:    1003,
-			SessionStatus: "running",
-			CreatedAt:     &createdAt,
-			Prompt:        "Refactor the auth providers into a deeply nested package layout so the diff tree shows VS Code-style compacted folders.",
-			Tests:         simTestSummary("agent-3"),
+			Id:               "agent-3",
+			Title:            ptr("Refactor auth into nested packages"),
+			AgentType:        "claude",
+			BaseBranch:       "main",
+			BranchName:       ptr("hydra/feat-3"),
+			SessionPid:       1003,
+			SessionStatus:    "running",
+			CreatedAt:        &createdAt,
+			Prompt:           "Refactor the auth providers into a deeply nested package layout so the diff tree shows VS Code-style compacted folders.",
+			Tests:            simTestSummary("agent-3"),
+			DownstreamBranch: ptr("contrib/auth-packages"),
+			Review:           simAdoptedReviewLink(),
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
@@ -931,6 +937,20 @@ func (s *SimulationServer) MergeAgent(w http.ResponseWriter, r *http.Request, pr
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// simAdoptedReviewLink builds a fixture ReviewLink for a head spawned ONTO an
+// existing PR Hydra did not create (docs/pr-adoption.md). Maintainer edits are
+// on, so it can be pushed to by hand - but never automatically, which is what
+// the "Pushes to this PR are manual" note in the MR menu documents.
+func simAdoptedReviewLink() *api.ReviewLink {
+	link := simReviewLink("open", forge.CIRunning, 0, 1, 2, 0)
+	link.Provider = forge.ProviderGitHub
+	link.Url = "https://github.com/team/repo/pull/128"
+	link.Id = "128"
+	link.Adopted = ptr(true)
+	link.CanPush = ptr(true)
+	return link
+}
+
 // simReviewLink builds a fixture ReviewLink for the simulation server.
 func simReviewLink(state, ci string, approvals, unresolved, ahead, behind int) *api.ReviewLink {
 	return &api.ReviewLink{
@@ -961,12 +981,22 @@ func (s *SimulationServer) PublishAgent(w http.ResponseWriter, r *http.Request, 
 func (s *SimulationServer) PushToMr(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	resp := simAgentByID(id)
 	resp.Review = simReviewLink("open", forge.CIRunning, 1, 2, 0, 0)
+	// A push does not un-adopt a head: keep agent-3 on its adopted PR so the menu
+	// it repaints still shows the adopted affordances.
+	if id == "agent-3" {
+		resp.Review = simAdoptedReviewLink()
+		resp.Review.Ahead = ptr(0)
+	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *SimulationServer) PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	resp := simAgentByID(id)
 	resp.Review = simReviewLink("open", forge.CISuccess, 1, 0, 0, 0)
+	if id == "agent-3" {
+		resp.Review = simAdoptedReviewLink()
+		resp.Review.Behind = ptr(0)
+	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
@@ -978,7 +1008,14 @@ func (s *SimulationServer) SetDownstreamBranch(w http.ResponseWriter, r *http.Re
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (s *SimulationServer) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (s *SimulationServer) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.ArmPublishWhenGreenParams) {
+	// Mirror the real gate so the adopted-PR warning dialog is exercisable in the
+	// simulation: agent-3 is the adopted fixture, and arming it without the
+	// acknowledgement is the 400 the dialog exists to prevent.
+	if id == "agent-3" && (params.AcknowledgeAdopted == nil || !*params.AcknowledgeAdopted) {
+		api.WriteError(w, http.StatusBadRequest, "this head is working on a PR Hydra did not create: pass acknowledge_adopted=true to confirm you want every green commit pushed into it")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -4945,13 +4982,30 @@ const simAskQuestionInput = `{"questions":[` +
 	`{"label":"Hot reload","description":"Watch the files and re-apply without a restart."},` +
 	`{"label":"Secrets interpolation","description":"Expand ${VAR} from the process environment."}]}]}`
 
-// simAskEvents is the canned history for agent-ask: the head asked a native
-// AskUserQuestion (tool_use + its paired can_use_tool control_request) and is
-// parked waiting for the answer, so the page renders a live, answerable
-// question card.
+// simExpiredQuestionInput is an EARLIER question in agent-ask's history that
+// never got an answer: the turn behind it ended first (switching model
+// mid-question aborts the turn), which is what kills the CLI's control_request.
+// Its request_id replays with the transcript forever, so this is the case that
+// must render as an expired card rather than a live one.
+const simExpiredQuestionInput = `{"questions":[` +
+	`{"question":"Where should the override file live?","header":"Location","multiSelect":false,"options":[` +
+	`{"label":"Next to config.toml","description":"Same directory, discovered by name."},` +
+	`{"label":"Under .hydra/local/","description":"Alongside the other generated state."}]}]}`
+
+// simAskEvents is the canned history for agent-ask: an expired question from an
+// abandoned turn, then a native AskUserQuestion (tool_use + its paired
+// can_use_tool control_request) the head is parked waiting on - so the page
+// renders one dead card and one live, answerable one.
 var simAskEvents = []string{
 	`{"type":"system","subtype":"init","session_id":"sim-ask","model":"claude-opus-4-8","apiKeySource":"none","slash_commands":["compact","context","cost","init","review","usage"]}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"` + simAgentAskPrompt + `"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_ask_0","content":[{"type":"text","text":"One thing before I start:"}]}}`,
+	`{"type":"assistant","message":{"id":"msg_ask_0","content":[{"type":"tool_use","id":"toolu_ask_0","name":"AskUserQuestion","input":` + simExpiredQuestionInput + `}]}}`,
+	`{"type":"control_request","request_id":"sim-ask-req-0","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":` + simExpiredQuestionInput + `,"tool_use_id":"toolu_ask_0","requires_user_interaction":true}}`,
+	// The turn ends with the question still unanswered - from here on nothing
+	// will ever read a control_response quoting sim-ask-req-0.
+	`{"type":"result","subtype":"success","is_error":false,"duration_ms":9400,"result":""}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Never mind that - just pick something sensible and carry on."}]}}`,
 	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"thinking","thinking":"The loader currently reads one config.toml. Layering strategy and scope of the first cut are product decisions - ask instead of guessing."}]}}`,
 	`{"type":"assistant","message":{"id":"msg_ask_1","content":[{"type":"text","text":"Two decisions are yours before I wire this in - the layering model changes the file layout, and the extras change the loader's surface area. First, a sketch of the override file so we have something concrete to talk about:"}]}}`,
 	// A Write tool call: its content renders as a numbered, syntax-highlighted
@@ -4970,6 +5024,15 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 	for _, line := range simAskEvents {
 		sendSimChatEvent(conn, line)
 	}
+	// Only the second question is still open - the first one's turn ended
+	// without it (see simExpiredQuestionInput), which is exactly the
+	// distinction the real daemon draws from the live stdout stream.
+	if frame, err := json.Marshal(chatPendingQuestionsFrame{
+		terminalEvent: terminalEvent{Type: "pending_questions"},
+		Requests:      []claudestream.PendingAsk{{RequestID: "sim-ask-req-1", ToolUseID: "toolu_ask_1"}},
+	}); err == nil {
+		_ = conn.WriteMessage(websocket.TextMessage, frame)
+	}
 	sendTerminalEvent(conn, "replay_done")
 
 	turn := 0
@@ -4980,6 +5043,17 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 		}
 		switch msg.Type {
 		case "control_response":
+			// An answer to anything but the open question is refused, as the
+			// daemon refuses one for a request the CLI has already retired.
+			if reqID := claudestream.ControlResponseRequestID(msg.Response); reqID != "sim-ask-req-1" {
+				if frame, err := json.Marshal(chatQuestionExpiredFrame{
+					terminalEvent: terminalEvent{Type: "question_expired"},
+					RequestID:     reqID,
+				}); err == nil {
+					_ = conn.WriteMessage(websocket.TextMessage, frame)
+				}
+				continue
+			}
 			// Extract the answers map the question card submitted.
 			var payload struct {
 				Response struct {

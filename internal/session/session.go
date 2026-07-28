@@ -388,6 +388,20 @@ func (s *Session) PlanJSON() string {
 	return s.ringFilter.Plan.JSON()
 }
 
+// PendingAsks returns the AskUserQuestion requests this session's CLI is still
+// blocked on (see claudestream.RingFilter.PendingAsks). ok is false when the
+// session can't answer the question at all - a terminal session, or a chat
+// provider driven through a ChatDriver rather than Claude's stream-json - so
+// callers can say "unknown" instead of "none".
+func (s *Session) PendingAsks() ([]claudestream.PendingAsk, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ringFilter == nil || s.chatDriver != nil {
+		return nil, false
+	}
+	return s.ringFilter.PendingAsks(), true
+}
+
 // alive reports whether the underlying OS process is still running, via a
 // signal-0 probe (side-effect-free; it only checks existence/permission).
 func (s *Session) alive() bool {

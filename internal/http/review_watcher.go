@@ -291,19 +291,31 @@ func (s *Server) headTestsGreen(projectRoot string, head heads.Head) bool {
 // it is a no-op, so an idle armed head costs one local rev-list per tick and no
 // network at all.
 func (s *Server) autoPublish(ctx context.Context, projectRoot string, head heads.Head) {
-	// Never auto-push to a PR Hydra did not create - pushing into someone else's
-	// PR must be an explicit, deliberate action (docs/pr-adoption.md). Disarm, so
-	// this doesn't re-log every tick.
-	if head.ReviewAdopted {
+	// An adopted head can only be armed through an explicit acknowledgement
+	// (ArmPublishWhenGreen; never from the `[review] publish_when_green` default at
+	// spawn), so an armed one here means the user asked for exactly this and we
+	// push. What stays unconditional is a read-only PR: no push to it can ever
+	// succeed, so disarm rather than re-log every tick (docs/pr-adoption.md).
+	if head.ReviewAdopted && !head.ReviewCanPush {
 		_ = s.DB.SetPublishWhenGreen(head.ID, false, "")
-		log.Printf("review watcher: skipping auto-publish for adopted head %s (push to a foreign PR must be manual)", head.ID)
+		log.Printf("review watcher: disarming auto-publish for adopted head %s (read-only PR: no maintainer-edit access)", head.ID)
 		return
 	}
 	if head.IsLinked() {
 		// Nothing to send: stay armed and silent. Checked from cached refs, so this
-		// is the cheap path an already-synced head takes on every tick.
+		// is the cheap path an already-synced head takes on every tick. An adopted
+		// head is tracked by the PR's local head pseudo-ref (its branch may live on a
+		// fork, so <remote>/<downstream> need not exist at all) - the same ref the
+		// agent page's ahead/behind chips read.
 		if head.Branch != nil {
-			ahead, _, ok := downstreamAheadBehind(projectRoot, *head.Branch, reviewRemote(projectRoot), head.DownstreamBranch)
+			var ahead int
+			var ok bool
+			if head.ReviewAdopted {
+				localRef, _ := git.PRHeadRefspec(head.ReviewProvider, head.ReviewID)
+				ahead, _, ok = git.AheadBehind(projectRoot, *head.Branch, localRef)
+			} else {
+				ahead, _, ok = downstreamAheadBehind(projectRoot, *head.Branch, reviewRemote(projectRoot), head.DownstreamBranch)
+			}
 			if ok && ahead == 0 {
 				return
 			}

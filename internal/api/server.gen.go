@@ -1859,6 +1859,12 @@ type PublishAgentParams struct {
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
 }
 
+// ArmPublishWhenGreenParams defines parameters for ArmPublishWhenGreen.
+type ArmPublishWhenGreenParams struct {
+	// AcknowledgeAdopted Acknowledges that this head is working on a PR Hydra did not create, so arming means auto-pushing into someone else's PR on every green commit. Required (true) to arm an adopted head; ignored for any other head. A read-only adopted PR (no maintainer edits) is refused even with it, since no push can succeed.
+	AcknowledgeAdopted *bool `form:"acknowledge_adopted,omitempty" json:"acknowledge_adopted,omitempty"`
+}
+
 // GetAgentTestsParams defines parameters for GetAgentTests.
 type GetAgentTestsParams struct {
 	// HeadRef Commit SHA or ref to test. Defaults to the agent's branch tip.
@@ -2109,7 +2115,7 @@ type ServerInterface interface {
 	DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/publish-when-green)
-	ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string, params ArmPublishWhenGreenParams)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
 	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
 	PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -3476,8 +3482,19 @@ func (siw *ServerInterfaceWrapper) ArmPublishWhenGreen(w http.ResponseWriter, r 
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ArmPublishWhenGreenParams
+
+	// ------------- Optional query parameter "acknowledge_adopted" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "acknowledge_adopted", r.URL.Query(), &params.AcknowledgeAdopted)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "acknowledge_adopted", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ArmPublishWhenGreen(w, r, projectId, id)
+		siw.Handler.ArmPublishWhenGreen(w, r, projectId, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -6110,6 +6127,7 @@ func (response DisarmPublishWhenGreen500JSONResponse) VisitDisarmPublishWhenGree
 type ArmPublishWhenGreenRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
+	Params    ArmPublishWhenGreenParams
 }
 
 type ArmPublishWhenGreenResponseObject interface {
@@ -8517,11 +8535,12 @@ func (sh *strictHandler) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.R
 }
 
 // ArmPublishWhenGreen operation middleware
-func (sh *strictHandler) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string, params ArmPublishWhenGreenParams) {
 	var request ArmPublishWhenGreenRequestObject
 
 	request.ProjectId = projectId
 	request.Id = id
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ArmPublishWhenGreen(ctx, request.(ArmPublishWhenGreenRequestObject))

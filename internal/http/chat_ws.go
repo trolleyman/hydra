@@ -90,6 +90,30 @@ type chatQueueFrame struct {
 	Messages []heads.QueuedMessage `json:"messages"`
 }
 
+// chatPendingQuestionsFrame is the daemon's authoritative answer to "which
+// question cards can still be answered?", sent just before replay_done. A
+// question's request_id is durable - it is stored as an interaction_requested
+// event and replayed into the transcript on every reload - but the CLI's
+// request behind it dies with the turn that raised it, so the client cannot
+// tell a live card from a dead one on its own. The daemon can: it watches the
+// requests come and go on stdout (see claudestream.RingFilter.PendingAsks).
+// The frame is omitted entirely when that isn't knowable (a driver-backed
+// provider), which the client reads as "fall back to your own heuristic" - an
+// empty Requests list means a definite none.
+type chatPendingQuestionsFrame struct {
+	terminalEvent
+	Requests []claudestream.PendingAsk `json:"requests"`
+}
+
+// chatQuestionExpiredFrame tells the client an answer it just sent was dropped:
+// the request had already been retired, so writing it to the CLI's stdin would
+// achieve nothing. The card flips to expired (offering to send the answers as
+// an ordinary message) instead of settling on an "Answered" that never was.
+type chatQuestionExpiredFrame struct {
+	terminalEvent
+	RequestID string `json:"requestId"`
+}
+
 // chatEventFrame is the server -> client wrapper around one stream-json line.
 type chatEventFrame struct {
 	terminalEvent
@@ -178,6 +202,20 @@ func sendSubagentMeta(conn *safeConn, agentID string, meta *claudestream.Subagen
 		return false
 	}
 	return true
+}
+
+// hasPendingAsk reports whether requestID is one of the requests the CLI is
+// still blocked on. The tracked set holds AskUserQuestion requests only, which
+// is sound because a question answer is the only control_response a chat client
+// sends (the other gate, ExitPlanMode, is auto-approved daemon-side and never
+// reaches the client - see claudestream.RingFilter.OnPlanApproval).
+func hasPendingAsk(pending []claudestream.PendingAsk, requestID string) bool {
+	for _, a := range pending {
+		if a.RequestID == requestID {
+			return true
+		}
+	}
+	return false
 }
 
 // chatInterruptSeq numbers control_request interrupts so each request_id is
@@ -280,7 +318,22 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		}
 	case "control_response":
 		// The client answers a CLI control_request (AskUserQuestion) with a
-		// payload the daemon forwards verbatim.
+		// payload the daemon forwards verbatim - unless the request it quotes is
+		// no longer one the CLI is blocked on (its turn ended first), in which
+		// case forwarding it would put a line on stdin that nothing will ever
+		// read. Say so instead, so the card can stop pretending it was answered.
+		if reqID := claudestream.ControlResponseRequestID(msg.Response); reqID != "" {
+			if pending, known := s.Sessions.PendingQuestions(sessionID); known && !hasPendingAsk(pending, reqID) {
+				log.Printf("chat ws: control_response for retired request %q on %q - dropped", reqID, sessionID)
+				if frame, err := json.Marshal(chatQuestionExpiredFrame{
+					terminalEvent: terminalEvent{Type: "question_expired"},
+					RequestID:     reqID,
+				}); err == nil {
+					_ = conn.WriteMessage(websocket.TextMessage, frame)
+				}
+				return
+			}
+		}
 		if err := s.Sessions.RespondChat(sessionID, msg.Response); err != nil {
 			log.Printf("chat ws: write control_response to %q: %v", sessionID, err)
 		}
@@ -931,6 +984,19 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 			return
 		}
 	default:
+	}
+	// Which of the questions just replayed is the CLI actually still blocked on.
+	// Ahead of replay_done, so the client has it when it settles the transcript.
+	if pending, known := s.Sessions.PendingQuestions(agentID); known {
+		if pending == nil {
+			pending = []claudestream.PendingAsk{} // a definite none, not a null
+		}
+		if frame, err := json.Marshal(chatPendingQuestionsFrame{
+			terminalEvent: terminalEvent{Type: "pending_questions"},
+			Requests:      pending,
+		}); err == nil {
+			_ = conn.WriteMessage(websocket.TextMessage, frame)
+		}
 	}
 	sendTerminalEvent(conn, "replay_done")
 

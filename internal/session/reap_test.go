@@ -113,3 +113,15 @@ func TestReapDeadUnknownSession(t *testing.T) {
 		t.Error("ReapDead on unknown id = true, want false")
 	}
 }
+
+// An unregistered session answers an authoritative empty list, not "unknown":
+// a control_request the process that raised it no longer exists to receive is
+// as dead as one that process dropped, and the chat client needs to be told so
+// (its replayed question cards carry live-looking request ids either way).
+func TestPendingQuestionsUnknownSession(t *testing.T) {
+	r := NewRegistry()
+	pending, known := r.PendingQuestions("nope")
+	if !known || len(pending) != 0 {
+		t.Fatalf("PendingQuestions(unknown) = %v, %v; want empty, true", pending, known)
+	}
+}

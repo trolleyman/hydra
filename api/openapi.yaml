@@ -1712,6 +1712,9 @@ paths:
         Arms "publish when green" (docs/non-local-integration.md): once local tests
         settle passing and the agent has finished, an unlinked head auto-opens a
         draft MR and a linked head auto-pushes (plain push only). Idempotent.
+        Arming an ADOPTED PR - one Hydra did not create - additionally requires
+        acknowledge_adopted=true, since it starts pushing into someone else's PR
+        (docs/pr-adoption.md); without it such a head is refused with a 400.
       operationId: armPublishWhenGreen
       parameters:
         - in: path
@@ -1722,11 +1725,21 @@ paths:
           name: id
           required: true
           schema: { type: string }
+        - in: query
+          name: acknowledge_adopted
+          required: false
+          description: >
+            Acknowledges that this head is working on a PR Hydra did not create, so
+            arming means auto-pushing into someone else's PR on every green commit.
+            Required (true) to arm an adopted head; ignored for any other head. A
+            read-only adopted PR (no maintainer edits) is refused even with it, since
+            no push can succeed.
+          schema: { type: boolean }
       responses:
         '204':
           description: No Content (publish-when-green armed)
         '400':
-          description: Bad Request (e.g. an adopted PR, which must not auto-push)
+          description: Bad Request (e.g. an adopted PR without acknowledge_adopted, or a read-only one)
           content:
             application/json:
               schema:

@@ -41,6 +41,34 @@ func TestPushHeadToMRReadOnly(t *testing.T) {
 	}
 }
 
+// Arming publish-when-green on an adopted PR is allowed, but only when the caller
+// acknowledges what it means - and never for a PR that cannot be pushed to at all.
+func TestAdoptedArmRefusal(t *testing.T) {
+	cases := []struct {
+		name    string
+		head    heads.Head
+		ack     bool
+		refused bool
+		hint    string
+	}{
+		{"own head, no ack needed", heads.Head{}, false, false, ""},
+		{"adopted, unacknowledged", heads.Head{ReviewAdopted: true, ReviewCanPush: true}, false, true, "acknowledge_adopted"},
+		{"adopted, acknowledged", heads.Head{ReviewAdopted: true, ReviewCanPush: true}, true, false, ""},
+		{"read-only, acknowledged anyway", heads.Head{ReviewAdopted: true, ReviewCanPush: false}, true, true, "read-only"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			detail, refused := adoptedArmRefusal(tc.head, tc.ack)
+			if refused != tc.refused {
+				t.Fatalf("refused = %v, want %v (detail %q)", refused, tc.refused, detail)
+			}
+			if tc.hint != "" && !strings.Contains(detail, tc.hint) {
+				t.Errorf("detail = %q, want it to mention %q", detail, tc.hint)
+			}
+		})
+	}
+}
+
 func TestMRRefToAPI(t *testing.T) {
 	ref := mrRefToAPI(forge.MRRef{
 		ID: "7", URL: "u", Title: "t", Author: "a", State: forge.StateOpen,
