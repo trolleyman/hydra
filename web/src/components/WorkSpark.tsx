@@ -21,7 +21,8 @@ import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { agentTypeColor } from '../lib/agentDisplay'
 
 type WorkSparkProps = {
-  /** Extra classes. Size, colour and optical offset are all baked in. */
+  /** Extra classes. Size and colour are baked in; optical centring is the
+      label's job, via `.optical-center` (see below). */
   className?: string
   still?: boolean
 }
@@ -44,12 +45,14 @@ export function WorkSpark({ className = '', still = false }: WorkSparkProps) {
       viewBox="0 0 24 24"
       aria-hidden="true"
       fill="none"
-      // -mt-px is optical centring, not a fudge: `items-center` centres the
-      // mark on the text's LINE box, but the eye lines it up against the
-      // glyphs, whose cap-height centre sits ~0.6px higher at 11px/16.5px.
-      // Under align-items:center a negative top margin shrinks the margin box,
-      // so this nudges the mark up by half of it - which is the amount wanted.
-      className={`shrink-0 w-4 h-4 -mt-px ${accent} ${still ? '' : 'work-spark'} ${className}`}
+      // No optical nudge here: the mark is centred honestly, and the LABEL beside
+      // it carries `.optical-center` so the row centres on the text's cap box
+      // rather than its line box. Correcting the text is the metric-independent
+      // half of the pair - it derives the offset from the font's own cap height,
+      // where a fixed px nudge on the mark is tuned to one size and one font
+      // (see CLAUDE.md). So: `.optical-center` on every label sat next to one of
+      // these, and nothing on the spark.
+      className={`shrink-0 w-4 h-4 ${accent} ${still ? '' : 'work-spark'} ${className}`}
     >
       {SPOKE_ANGLES.map((angle, i) => {
         const long = i % 2 === 0

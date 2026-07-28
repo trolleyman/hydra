@@ -71,6 +71,8 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	if os.Getenv("HYDRA_REVIEW_REQ_DIR") != "" {
 		deps.HeadStatus = headStatusFromMCP
 		deps.TestLogs = testLogsFromMCP
+		deps.RunTests = func(runner string) (string, bool) { return runFromMCP(reviewq.OpRunTests, runner) }
+		deps.RunArtifacts = func(name string) (string, bool) { return runFromMCP(reviewq.OpRunArtifacts, name) }
 	}
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
 }
@@ -294,6 +296,25 @@ func testLogsFromMCP(runner string, tail int) (string, bool) {
 	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpTestLogs, Runner: runner, Tail: tail})
 	if !ok {
 		return "Hydra did not answer in time, so the test log could not be read. Ask the user to check the daemon if it keeps happening.", false
+	}
+	return res.Message, res.OK
+}
+
+// runFromMCP backs run_tests / generate_artifacts: it asks the daemon to discard
+// the cached result for this head's branch tip and start a fresh run. The daemon
+// returns as soon as the work is queued - it never waits for a suite to finish -
+// so this round trip stays as short as any other, and the agent learns the
+// outcome from get_head_status.
+func runFromMCP(op reviewq.Op, target string) (string, bool) {
+	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
+	if dir == "" {
+		return "Starting a run is not available in this session.", false
+	}
+	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: op, Runner: target})
+	if !ok {
+		// Ambiguous on purpose: the request may well have been picked up, so the
+		// agent must check rather than fire it again.
+		return "Hydra did not confirm in time, so the run may or may not have started. Call get_head_status to see, rather than asking again.", false
 	}
 	return res.Message, res.OK
 }

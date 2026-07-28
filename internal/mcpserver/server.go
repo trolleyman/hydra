@@ -70,6 +70,13 @@ type Deps struct {
 	// Split from HeadStatus so the common "am I green?" call stays cheap and only a
 	// real failure pays for a log. Nil hides the tool.
 	TestLogs func(runner string, tail int) (message string, ok bool)
+	// RunTests / RunArtifacts discard this head's cached verdicts/outputs for its
+	// branch tip and start fresh runs, returning as soon as the work is queued. The
+	// only tools here that SPEND anything: the daemon declines a run already in
+	// flight or one that just settled, so a loop cannot burn the user's CPU.
+	// Nil hides them.
+	RunTests     func(runner string) (message string, ok bool)
+	RunArtifacts func(name string) (message string, ok bool)
 }
 
 // HostRunRequest is one host_run call: the command to run and the agent's
@@ -310,6 +317,36 @@ func toolDefs(deps Deps) []map[string]any {
 			"annotations": map[string]any{"readOnlyHint": true},
 		})
 	}
+	if deps.RunTests != nil {
+		defs = append(defs, map[string]any{
+			"name": "run_tests",
+			"description": "Re-run YOUR test runners against your branch's latest commit, discarding the cached verdict - use it after committing a fix, when get_head_status still shows the old result. " +
+				"Runs Hydra's own configured runner, which is the one that gates your merge; that is often NOT reproducible with your own shell command (it runs in a separate checkout, and may need host access or network you do not have). " +
+				"Returns as soon as the run STARTS, not when it finishes: call get_head_status a little later for the verdict, and do NOT call this again while it runs. " +
+				"COMMIT FIRST - it tests the latest commit, not your working tree.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"runner": map[string]any{"type": "string", "description": "One runner's name, as reported by get_head_status. Omit to run all of them."},
+				},
+			},
+		})
+	}
+	if deps.RunArtifacts != nil {
+		defs = append(defs, map[string]any{
+			"name": "generate_artifacts",
+			"description": "Regenerate YOUR artifacts (screenshots and other generated outputs) from your branch's latest commit, discarding the cached ones. " +
+				"Useful after a UI change: regenerate, then read the image files get_head_status lists to see what your change actually looks like. " +
+				"Returns as soon as generation STARTS: call get_head_status a little later for the files, and do NOT call this again while it runs. " +
+				"COMMIT FIRST - it builds from the latest commit, not your working tree.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "description": "One artifact set's name, as reported by get_head_status. Omit to regenerate all of them."},
+				},
+			},
+		})
+	}
 	if deps.GetReview != nil {
 		defs = append(defs,
 			map[string]any{
@@ -406,6 +443,19 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 			return textResult("get_test_logs needs a \"runner\". Call get_head_status to see which runners this project configures.", true)
 		}
 		msg, ok := deps.TestLogs(strings.TrimSpace(args.Runner), args.Tail)
+		return textResult(msg, !ok)
+	case "run_tests", "generate_artifacts":
+		fn, argKey := deps.RunTests, "runner"
+		if p.Name == "generate_artifacts" {
+			fn, argKey = deps.RunArtifacts, "name"
+		}
+		if fn == nil {
+			return textResult(p.Name+" is not available in this session.", true)
+		}
+		var args map[string]any
+		_ = json.Unmarshal(p.Arguments, &args)
+		target, _ := args[argKey].(string)
+		msg, ok := fn(strings.TrimSpace(target))
 		return textResult(msg, !ok)
 	case "get_review_status":
 		return textResult(reviewStatusText(deps), false)

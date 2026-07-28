@@ -24,7 +24,9 @@ export const AttachmentChips = memo(function AttachmentChips({
   size: 'sm' | 'md'
   /** Omit to render read-only chips (no remove button), e.g. a submitted prompt. */
   onRemove?: (id: number) => void
-  onOpenImage: (id: number) => void
+  /** `origin` is the chip that was activated - the lightbox flies the picture out of
+   *  its box (and back into it on close) rather than fading in over it. */
+  onOpenImage: (id: number, origin: Element) => void
   className?: string
 }) {
   if (attachments.length === 0) return null
@@ -39,12 +41,14 @@ export const AttachmentChips = memo(function AttachmentChips({
     <div className={`flex flex-wrap gap-1.5 overflow-y-auto overflow-x-hidden ${maxH} ${className ?? ''}`}>
       {attachments.map((a) => {
         const isImage = !!a.previewUrl
-        const open = isImage ? () => onOpenImage(a.id) : undefined
+        const open = isImage
+          ? (e: React.SyntheticEvent<HTMLDivElement>) => onOpenImage(a.id, e.currentTarget)
+          : undefined
         return (
           <div
             key={a.id}
             onClick={open}
-            onKeyDown={open ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() } } : undefined}
+            onKeyDown={open ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e) } } : undefined}
             role={isImage ? 'button' : undefined}
             tabIndex={isImage ? 0 : undefined}
             className={`group relative flex items-center gap-1.5 rounded-md border px-1.5 py-1 ${text} ${isImage ? 'cursor-pointer' : ''} ${a.error ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20' : 'border-stone-200 bg-stone-50 dark:border-stone-600 dark:bg-stone-700/60'}`}

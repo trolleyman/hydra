@@ -92,6 +92,8 @@ const PromptContent = memo(function PromptContent({ prompt, projectId }: { promp
   // Index into the image-only attachments while the lightbox is open; clicking a
   // thumbnail opens it here, mirroring the spawn form.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // The chip clicked, so the picture flies out of it instead of fading in.
+  const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   const imageAttachments = attachments.filter((a) => a.previewUrl)
   const lightboxImages = imageAttachments.map((a) => ({ url: a.previewUrl!, filename: a.filename, size: a.size }))
   return (
@@ -101,12 +103,16 @@ const PromptContent = memo(function PromptContent({ prompt, projectId }: { promp
         attachments={attachments}
         size="md"
         className={text ? 'mt-3' : ''}
-        onOpenImage={(id) => setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))}
+        onOpenImage={(id, origin) => {
+          setLightboxOrigin(origin)
+          setLightboxIndex(imageAttachments.findIndex((img) => img.id === id))
+        }}
       />
       {lightboxIndex !== null && lightboxImages.length > 0 && (
         <ImageLightbox
           images={lightboxImages}
           index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+          origin={lightboxOrigin}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
         />

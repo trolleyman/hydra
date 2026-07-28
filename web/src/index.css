@@ -35,14 +35,23 @@
    Progressive enhancement: unsupported browsers (Firefox as of writing) simply
    ignore it and render exactly as before, so this can never make things worse.
 
-   It SHRINKS the label's box, so only use it where nothing depends on that box's
-   height (see CLAUDE.md for the audit): the container must set its own height
-   (h-7/h-8, like the top-bar buttons), and the label must not clip its overflow -
-   `whitespace-nowrap` is fine, `truncate` is not, because `overflow: hidden` on a
-   cap-trimmed box slices the descenders off ("project" -> "proiect"). Not on
-   running prose either: trimming collapses the leading between lines. */
+   The trimmed box is SMALLER THAN THE INK: a `y`/`p`/`j` now hangs below it and a
+   tall `l`/`d` pokes above it. That is harmless until something clips the box -
+   Tailwind's `truncate` is `overflow: hidden`, which sliced the descenders clean
+   off ("project" rendered as "proiect"). The padding gives those glyphs room
+   inside the clip; the equal negative margin takes it straight back out of the
+   layout, so the box the row sees is still the trimmed one and no row grows.
+   0.35em clears a typical descender (~0.25em) and the ascender-over-cap gap
+   (~0.1em) with room to spare.
+
+   What it does NOT undo: a row whose height comes only from its label still gets
+   a couple of px shorter, because shrinking that box is the entire point. Give
+   the row its own height if that matters. Not for running prose either - trimming
+   a multi-line block collapses the leading between its lines. */
 .optical-center {
   text-box: trim-both cap alphabetic;
+  padding-block: 0.35em;
+  margin-block: -0.35em;
 }
 
 :root {
@@ -131,10 +140,64 @@ body {
   .animate-status-pulse { animation: none; }
 }
 
-/* Image lightbox: when you step to the next/previous image, the new media slides
-   in from the side you're heading toward (--lb-from, set per navigation) and fades
-   up, so a gallery reads as a strip you move along rather than the picture blinking
-   in place. The wrapper is keyed by index so this replays on every step. */
+/* Image lightbox: the picture itself TRAVELS - it flies from the thumbnail you
+   clicked (or from the sibling peeking in at the edge) to its place in the lightbox,
+   and back again on close. That's a measured FLIP done in JS (lib/lightboxFlip.ts);
+   what's left for CSS is everything around it.
+
+   The darkness and the chrome (arrows, close, caption) just fade, so nothing competes
+   with the picture's flight for attention. */
+@keyframes lightbox-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes lightbox-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+.lightbox-fade-in {
+  animation: lightbox-fade-in 200ms ease-out;
+}
+
+/* forwards: the exit is held at 0 until the lightbox actually unmounts, which happens
+   a beat later - when the picture has finished flying home (FLIP_OPEN_MS). */
+.lightbox-fade-out {
+  animation: lightbox-fade-out 240ms ease-in forwards;
+}
+
+/* The lifted-off-the-page shadow belongs to the lightbox, not to the thumbnail the
+   picture flew out of - so it fades with the darkness rather than snapping on the
+   instant the flight starts (and off again the instant it ends). It can't ride the
+   opacity fade above, which would take the picture with it, so the shadow itself is
+   animated: box-shadow interpolates, so this is just the same shadow at zero alpha.
+   The end value matches Tailwind's shadow-2xl, which the element keeps wearing once
+   the animation hands back over. */
+@keyframes lightbox-shadow-in {
+  from { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0); }
+  to   { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); }
+}
+
+@keyframes lightbox-shadow-out {
+  from { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); }
+  to   { box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0); }
+}
+
+.lightbox-shadow-in {
+  animation: lightbox-shadow-in 200ms ease-out;
+}
+
+.lightbox-shadow-out {
+  animation: lightbox-shadow-out 240ms ease-in forwards;
+}
+
+/* The fallback when there is nothing on screen to fly from or to - no thumbnail in
+   view, no edge previews (they're dropped below `lg`), or reduced motion: the media
+   slides in from the side you're heading toward (--lb-from, set per navigation) and
+   fades up, so a gallery still reads as a strip you move along rather than the
+   picture blinking in place. The wrapper is keyed by index so this replays on every
+   step. */
 @keyframes lightbox-slide-in {
   from { opacity: 0; transform: translateX(var(--lb-from, 0)); }
   to   { opacity: 1; transform: translateX(0); }
@@ -145,7 +208,9 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lightbox-slide { animation: none; }
+  .lightbox-slide,
+  .lightbox-shadow-in,
+  .lightbox-fade-in { animation: none; }
 }
 
 /* Toasts (bottom-right notifications). They slide up + in from the right and fade
@@ -335,10 +400,35 @@ body {
    read as bigger text under the old system-serif fallback. A touch larger than
    the 13px pane base, with its own line-height. Code inside keeps its own mono
    class + em sizing. */
+/* Whole-pixel leading for prose that GROWS while a turn streams (agent text at
+   the 13px pane base, sub-agent text in its 12px cards, and .chat-serif below).
+   A ratio-based line box is fractional at these sizes - 13px x 1.625 = 21.125,
+   12px x 1.625 = 19.5, 14px x 1.6 = 22.4 - so every streamed line changes the
+   fractional part of the content height. The browser snaps a scroll offset to
+   the device-pixel grid, so a view pinned to the bottom lands a fraction of a
+   pixel differently each time and the last line - with the working indicator
+   under it - jiggles for the whole turn. A whole-pixel line box keeps that
+   fraction constant, so nothing moves.
+   Deliberately NOT applied to prose that only ever arrives complete (tool
+   results, commit messages, prompts): it cannot jiggle, and leaving it on
+   leading-relaxed keeps their density exactly as it was. Mono runs get their
+   own box because they set an em-relative size (0.85em-0.9em of a fractional
+   parent). The values match what the ratios produced, rounded. */
+.chat-leading {
+  line-height: 21px;
+}
+.chat-leading-xs {
+  line-height: 20px;
+}
 .chat-serif {
   font-family: var(--font-serif);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 22px;
+}
+.chat-leading :is(code, pre, .font-mono),
+.chat-leading-xs :is(code, pre, .font-mono),
+.chat-serif :is(code, pre, .font-mono) {
+  line-height: 18px;
 }
 .chat-serif strong,
 .chat-serif b {

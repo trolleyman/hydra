@@ -7,6 +7,7 @@ import { useImageLightboxStore } from '../stores/imageLightboxStore'
 export function ImageLightboxHost() {
   const images = useImageLightboxStore((s) => s.images)
   const index = useImageLightboxStore((s) => s.index)
+  const origin = useImageLightboxStore((s) => s.origin)
   const setIndex = useImageLightboxStore((s) => s.setIndex)
   const close = useImageLightboxStore((s) => s.close)
   if (!images) return null
@@ -14,6 +15,7 @@ export function ImageLightboxHost() {
     <ImageLightbox
       images={images}
       index={Math.min(index, images.length - 1)}
+      origin={origin}
       onIndexChange={setIndex}
       onClose={close}
     />

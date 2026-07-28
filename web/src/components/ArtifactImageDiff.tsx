@@ -1,9 +1,10 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import {
-  checkerStyle, IMG_CLASS, OVERLAY_CLASS, TAG_CLASS, makeAuxOpen,
+  IMG_CLASS, OVERLAY_CLASS, STACK_CLASS, TAG_CLASS, makeAuxOpen,
   DIFF_COLOR, DIFF_PIXEL_THRESHOLD, DIFF_ALPHA,
 } from './artifactDiffShared'
+import { CheckerLayer } from './CheckerLayer'
 import { ABControlsContext } from './artifactDiffContext'
 import { useImageLightbox } from '../stores/imageLightboxStore'
 import type { LightboxImage } from './ImageLightbox'
@@ -33,22 +34,27 @@ function lightboxImage(url: string, name: string): LightboxImage {
   return { url, filename: name, size: 0 }
 }
 
-type OpenLightbox = (images: LightboxImage[], index?: number) => void
+type OpenLightbox = (images: LightboxImage[], index?: number, origin?: Element | null) => void
 
 // Open this tile's entry in the lightbox. When the grid threaded down its `gallery`
 // (one entry per visible image file, carrying the before/after pair + mode) and this
 // tile's `index`, open the whole gallery there - so ←/→ step between files and the
 // lightbox shows the diff comparison. Otherwise fall back to just this one image
 // (e.g. the unit tests, or any caller that doesn't supply a gallery).
+//
+// `origin` is the tile element the click landed on: the lightbox flies the picture out
+// of that exact box. It's passed even though the tile may be showing the other side of
+// the pair - where the click landed is where the picture should come from.
 function openGalleryAt(
   open: OpenLightbox,
   gallery: LightboxImage[] | undefined,
   index: number | undefined,
   fallbackUrl: string,
   name: string,
+  origin?: Element | null,
 ) {
-  if (gallery && index != null) open(gallery, index)
-  else open([lightboxImage(fallbackUrl, name)])
+  if (gallery && index != null) open(gallery, index, origin)
+  else open([lightboxImage(fallbackUrl, name)], 0, origin)
 }
 
 function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
@@ -78,16 +84,17 @@ function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
         // width (w-full) and its height follows the aspect ratio.
         <button
           type="button"
-          onClick={disableOpen ? undefined : () => openGalleryAt(openImage, gallery, index, url, name)}
+          onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, url, name, e.currentTarget)}
           onAuxClick={makeAuxOpen(() => url)}
-          className={`block w-full ${disableOpen ? 'cursor-default' : 'cursor-zoom-in'}`}
+          className={`relative block w-full ${disableOpen ? 'cursor-default' : 'cursor-zoom-in'}`}
         >
+          <CheckerLayer />
           <img
             src={url}
             loading="lazy"
             draggable={false}
-            style={{ ...checkerStyle, aspectRatio: aspect }}
-            className={IMG_CLASS}
+            style={{ aspectRatio: aspect }}
+            className={`relative ${IMG_CLASS}`}
           />
         </button>
       ) : (
@@ -112,7 +119,7 @@ function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
 // buttons, the slider handle, the opacity blend) when only one side exists.
 function LayerNode({ url, style }: { url?: string | null; style?: React.CSSProperties }) {
   if (url) {
-    return <img src={url} style={{ ...checkerStyle, ...style }} className={OVERLAY_CLASS} draggable={false} />
+    return <img src={url} style={style} className={OVERLAY_CLASS} draggable={false} />
   }
   return (
     <div style={style} className={`${OVERLAY_CLASS} select-none flex flex-col items-center justify-center gap-1 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500`}>
@@ -221,10 +228,12 @@ function ABSwitch({ left, right, name, aspect, gallery, index, disableOpen }: {
           open, so a click flips instead. A middle click opens the currently-shown side's
           raw image file in a new browser tab. */}
       <div
-        className={`relative w-full select-none ${disableOpen ? 'cursor-pointer' : 'cursor-zoom-in'}`}
-        onClick={disableOpen ? flip : () => openGalleryAt(openImage, gallery, index, (view === 'before' ? left : right) || sizer, name)}
+        data-lb-picture
+        className={`relative w-full select-none ${STACK_CLASS} ${disableOpen ? 'cursor-pointer' : 'cursor-zoom-in'}`}
+        onClick={disableOpen ? flip : (e) => openGalleryAt(openImage, gallery, index, (view === 'before' ? left : right) || sizer, name, e.currentTarget)}
         onAuxClick={makeAuxOpen(() => (view === 'before' ? left : right) || sizer)}
       >
+        <CheckerLayer />
         <img src={sizer} style={{ visibility: 'hidden', aspectRatio: aspect }} className={`${IMG_CLASS} block`} draggable={false} />
         <LayerNode url={right} style={{ visibility: view === 'before' ? 'hidden' : 'visible' }} />
         <LayerNode url={left} style={{ visibility: view === 'before' ? 'visible' : 'hidden' }} />
@@ -292,12 +301,14 @@ function SliderCompare({ left, right, name, aspect, gallery, index, disableOpen 
   return (
     <div
       ref={ref}
-      className={`relative w-full select-none ${disableOpen ? '' : 'cursor-zoom-in'}`}
-      onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, sideAt(e.currentTarget, e.clientX), name)}
+      data-lb-picture
+      className={`relative w-full select-none ${STACK_CLASS} ${disableOpen ? '' : 'cursor-zoom-in'}`}
+      onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, sideAt(e.currentTarget, e.clientX), name, e.currentTarget)}
       onAuxClick={makeAuxOpen((e) => sideAt(e.currentTarget, e.clientX))}
     >
       <span className={`${TAG_CLASS} left-1`}>Before</span>
       <span className={`${TAG_CLASS} right-1`}>After</span>
+      <CheckerLayer />
       <img src={sizer} style={{ visibility: 'hidden', aspectRatio: aspect }} className={`${IMG_CLASS} block`} draggable={false} />
       <LayerNode url={right} />
       <LayerNode url={left} style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
@@ -343,10 +354,12 @@ function OnionCompare({ left, right, name, aspect, gallery, index, disableOpen }
   return (
     <div className="min-w-0">
       <div
-        className={`relative w-full select-none ${disableOpen ? '' : 'cursor-zoom-in'}`}
-        onClick={disableOpen ? undefined : () => openGalleryAt(openImage, gallery, index, (opacity >= 50 ? right : left) || sizer, name)}
+        data-lb-picture
+        className={`relative w-full select-none ${STACK_CLASS} ${disableOpen ? '' : 'cursor-zoom-in'}`}
+        onClick={disableOpen ? undefined : (e) => openGalleryAt(openImage, gallery, index, (opacity >= 50 ? right : left) || sizer, name, e.currentTarget)}
         onAuxClick={makeAuxOpen(() => (opacity >= 50 ? right : left) || sizer)}
       >
+        <CheckerLayer />
         <img src={sizer} style={{ visibility: 'hidden', aspectRatio: aspect }} className={`${IMG_CLASS} block`} draggable={false} />
         <LayerNode url={left} />
         <LayerNode url={right} style={{ opacity: opacity / 100 }} />

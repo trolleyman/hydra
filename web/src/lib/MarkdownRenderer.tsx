@@ -195,7 +195,9 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
       data-md-src={src}
       loading="lazy"
       onError={() => setFailedSrc(src ?? null)}
-      onClick={() => openLightbox([{ url, filename: label, size: 0, dpi: density }])}
+      // The <img> itself is handed over as the open origin, so the lightbox flies the
+      // picture out of exactly this box rather than fading in over it.
+      onClick={(e) => openLightbox([{ url, filename: label, size: 0, dpi: density }], 0, e.currentTarget)}
     />
   )
 }
