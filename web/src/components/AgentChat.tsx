@@ -3894,7 +3894,7 @@ function SubagentChatView({
       {(running || waiting) && (
         <div className="flex items-center gap-1.5 text-[11px] select-none">
           <WorkSpark />
-          <span className="chat-text-shimmer font-medium">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
+          <span className="chat-text-shimmer font-medium optical-center">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
         </div>
       )}
     </>
@@ -8668,9 +8668,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return (
             <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 select-none">
               <WorkSpark still />
+              {/* Inline, not a flex row: `.optical-center` trims a block's line
+                  boxes, and a flex container has none - so the separator carries
+                  the spacing that `gap-1.5` used to. */}
               {segs.map((s, i) => (
-                <span key={i} className="flex items-center gap-1.5">
-                  {i > 0 && <span className="text-stone-300 dark:text-stone-600">·</span>}
+                <span key={i} className="optical-center">
+                  {i > 0 && <span className="text-stone-300 dark:text-stone-600 mx-1.5">·</span>}
                   {s}
                 </span>
               ))}
@@ -8911,10 +8914,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           {isTurnRunning && replayDone && !lastIsResult && (
             <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
               <WorkSpark />
-              <span className="chat-text-shimmer font-medium">{turnVerb}...</span>
+              <span className="chat-text-shimmer font-medium optical-center">{turnVerb}...</span>
               {/* tabular-nums so the ticking elapsed seconds / token count keep a
                   fixed width and the line doesn't jitter horizontally as they change. */}
-              <span className="text-stone-400 dark:text-stone-500 tabular-nums">
+              <span className="text-stone-400 dark:text-stone-500 tabular-nums optical-center">
                 ({formatDuration(elapsed * 1000)}
                 {turnTokens > 0 ? ` · ↓ ${formatTokens(turnTokens)} tokens` : ''}
                 {stream?.kind === 'thinking' ? ' · Thinking...' : ''})

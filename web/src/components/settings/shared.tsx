@@ -52,7 +52,7 @@ export function SettingSection({
             <ChevronRight
               className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${collapsed ? '' : 'rotate-90'}`}
             />
-            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 group-hover:text-gray-700 dark:group-hover:text-gray-300">{title}</h2>
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 group-hover:text-gray-700 dark:group-hover:text-gray-300 optical-center">{title}</h2>
           </button>
         ) : (
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h2>

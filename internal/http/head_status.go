@@ -3,8 +3,10 @@ package http
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/config"
@@ -30,6 +32,12 @@ const (
 	caseMessageLines  = 8
 	caseMessageLen    = 600
 	caseMessageBudget = 4000
+	// runCooldown bounds how often an agent may re-run the same runner/script at the
+	// same commit. A run already in flight is a no-op anyway (both managers reuse
+	// it), so this only guards the tight loop of "finished -> immediately re-run",
+	// which would spend the user's CPU to no purpose. Short enough that a genuine
+	// retry of a flaky test just waits a moment.
+	runCooldown = 30 * time.Second
 	// headStatusLogTail is how much of a runner's log get_head_status inlines when
 	// it has no case-level detail to show (a build that died before producing a
 	// report, an `exit`-format runner that parses no cases). Without this the
@@ -394,6 +402,171 @@ func (s *Server) testLogsText(ctx context.Context, id string, req reviewq.Reques
 		b.WriteString("\n")
 	}
 	return reviewq.Result{OK: true, Message: b.String()}
+}
+
+// runTestsText discards this head's cached verdicts for its branch tip and starts
+// fresh runs, for the run_tests tool. It returns as soon as the work is QUEUED:
+// a suite can take minutes, and an agent blocked in a tool call for that long is
+// worse than one that polls get_head_status.
+//
+// This is the one place an agent can spend the user's CPU, so it declines rather
+// than duplicating work: a run already in flight is left alone, and one that
+// settled seconds ago is reported instead of repeated.
+func (s *Server) runTestsText(ctx context.Context, id string, req reviewq.Request) reviewq.Result {
+	head, projectRoot, errMsg := s.headForStatus(ctx, id)
+	if errMsg != "" {
+		return reviewq.Result{Message: errMsg}
+	}
+	if s.Tests == nil || head.Branch == nil {
+		return reviewq.Result{Message: "Tests are not available for this head, so there is nothing to run."}
+	}
+	liveCfg, err := config.Load(projectRoot)
+	if err != nil {
+		return reviewq.Result{Message: "The project config could not be read, so the test runners are unknown."}
+	}
+	v := hydratests.Version{Ref: *head.Branch}
+	runners := s.testRunnersFor(projectRoot, v, liveCfg)
+	if len(runners) == 0 {
+		return reviewq.Result{OK: true, Message: "This project configures no test runners, so there is nothing to run."}
+	}
+	want := strings.TrimSpace(req.Runner)
+	if want != "" && !slices.ContainsFunc(runners, func(r config.TestScript) bool { return r.Name == want }) {
+		return reviewq.Result{Message: fmt.Sprintf("There is no %q runner. This project configures: %s.", want, runnerNames(runners))}
+	}
+
+	mgr := s.Tests.Manager(projectRoot)
+	var started, skipped []string
+	for _, r := range runners {
+		if want != "" && r.Name != want {
+			continue
+		}
+		rep, cached, perr := mgr.Peek(r.Name, v)
+		switch {
+		case perr != nil:
+			skipped = append(skipped, fmt.Sprintf("%s (could not be read: %v)", r.Name, perr))
+			continue
+		case cached && rep.Status == hydratests.StatusRunning:
+			skipped = append(skipped, r.Name+" (already running)")
+			continue
+		case cached && rep.UpdatedAt > 0 && time.Since(time.Unix(rep.UpdatedAt, 0)) < runCooldown:
+			skipped = append(skipped, fmt.Sprintf("%s (just ran - it is %s)", r.Name, rep.Status))
+			continue
+		}
+		if err := mgr.Invalidate(r.Name, v); err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s (could not be reset: %v)", r.Name, err))
+			continue
+		}
+		if _, err := mgr.Get(r, v); err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s (failed to start: %v)", r.Name, err))
+			continue
+		}
+		started = append(started, r.Name)
+	}
+	return reviewq.Result{OK: true, Message: startedText("test runner", started, skipped)}
+}
+
+// runArtifactsText is run_tests' counterpart for [artifacts.<name>] scripts.
+// Server ("preview") scripts are excluded for the same reason get_head_status
+// omits them: they are a live user-facing affordance, not a generated output.
+func (s *Server) runArtifactsText(ctx context.Context, id string, req reviewq.Request) reviewq.Result {
+	head, projectRoot, errMsg := s.headForStatus(ctx, id)
+	if errMsg != "" {
+		return reviewq.Result{Message: errMsg}
+	}
+	if s.Artifacts == nil || head.Branch == nil {
+		return reviewq.Result{Message: "Artifacts are not available for this head, so there is nothing to generate."}
+	}
+	liveCfg, err := config.Load(projectRoot)
+	if err != nil {
+		return reviewq.Result{Message: "The project config could not be read, so the artifact scripts are unknown."}
+	}
+	v := artifacts.Version{Ref: *head.Branch}
+	specs, err := artifactSpecsByName(projectRoot, v, liveCfg)
+	if err != nil {
+		return reviewq.Result{Message: "The artifact scripts could not be resolved: " + err.Error()}
+	}
+	dropServerSpecs(specs)
+	for name := range disabledArtifacts(liveCfg) {
+		delete(specs, name)
+	}
+	if len(specs) == 0 {
+		return reviewq.Result{OK: true, Message: "This project configures no artifacts, so there is nothing to generate."}
+	}
+	want := strings.TrimSpace(req.Runner)
+	if want != "" {
+		if _, ok := specs[want]; !ok {
+			return reviewq.Result{Message: fmt.Sprintf("There is no %q artifact. This project configures: %s.", want, sortedNames(specs))}
+		}
+	}
+
+	mgr := s.Artifacts.Manager(projectRoot)
+	var started, skipped []string
+	for _, name := range sortedKeys(specs) {
+		if want != "" && name != want {
+			continue
+		}
+		meta, cached, perr := mgr.Peek(name, v)
+		switch {
+		case perr != nil:
+			skipped = append(skipped, fmt.Sprintf("%s (could not be read: %v)", name, perr))
+			continue
+		case cached && meta.Status == artifacts.StatusGenerating:
+			skipped = append(skipped, name+" (already generating)")
+			continue
+		case cached && meta.UpdatedAt > 0 && time.Since(time.Unix(meta.UpdatedAt, 0)) < runCooldown:
+			skipped = append(skipped, name+" (just generated)")
+			continue
+		}
+		if err := mgr.Invalidate(name, v); err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s (could not be reset: %v)", name, err))
+			continue
+		}
+		spec := specs[name]
+		if _, err := mgr.Get(spec, v); err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s (failed to start: %v)", name, err))
+			continue
+		}
+		started = append(started, name)
+	}
+	return reviewq.Result{OK: true, Message: startedText("artifact", started, skipped)}
+}
+
+// startedText reports what was kicked off and what was declined. It always tells
+// the agent to poll rather than wait, because nothing here blocks on the work.
+func startedText(kind string, started, skipped []string) string {
+	var b strings.Builder
+	if len(started) > 0 {
+		fmt.Fprintf(&b, "Started %d %s(s): %s.\nThis runs in the background - call get_head_status in a little while for the result; do NOT call this again in the meantime.\n",
+			len(started), kind, strings.Join(started, ", "))
+	}
+	if len(skipped) > 0 {
+		fmt.Fprintf(&b, "Left alone: %s.\n", strings.Join(skipped, "; "))
+	}
+	if b.Len() == 0 {
+		return "Nothing to do."
+	}
+	return b.String()
+}
+
+func runnerNames(runners []config.TestScript) string {
+	names := make([]string, 0, len(runners))
+	for _, r := range runners {
+		names = append(names, r.Name)
+	}
+	return strings.Join(names, ", ")
+}
+
+func sortedKeys(specs map[string]config.ArtifactScript) []string {
+	names := make([]string, 0, len(specs))
+	for name := range specs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedNames(specs map[string]config.ArtifactScript) string {
+	return strings.Join(sortedKeys(specs), ", ")
 }
 
 // headForStatus resolves a head for a status request. The returned string is a

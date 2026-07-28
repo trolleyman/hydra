@@ -161,7 +161,7 @@ export function CollapsibleCard({ icon, name, status, actions, progress, collaps
         >
           <ChevronDown className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none ${collapsed ? '-rotate-90' : ''}`} />
           {icon}
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0">{name}</span>
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate shrink-0 optical-center">{name}</span>
           {status}
         </button>
         {/* Faint icon buttons, vertically centred in the stretch-height header.
