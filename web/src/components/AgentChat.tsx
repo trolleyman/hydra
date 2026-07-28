@@ -3586,7 +3586,7 @@ function SubagentChatView({
       {report && <SubagentReport report={report} serif={serif} />}
       {(running || waiting) && (
         <div className="flex items-center gap-1.5 text-[11px] select-none">
-          <WorkSpark className="w-3.5 h-3.5 text-[#c96442]" />
+          <WorkSpark className="text-[#c96442]" />
           <span className="chat-text-shimmer font-medium">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
         </div>
       )}
@@ -8317,7 +8317,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           )
           return (
             <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 select-none">
-              <WorkSpark className="w-3.5 h-3.5 text-[#c96442]" still />
+              <WorkSpark className="text-[#c96442]" still />
               {segs.map((s, i) => (
                 <span key={i} className="flex items-center gap-1.5">
                   {i > 0 && <span className="text-stone-300 dark:text-stone-600">·</span>}
@@ -8556,7 +8556,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               so the reasoning<->working transition doesn't shift the layout. */}
           {isTurnRunning && replayDone && !lastIsResult && (
             <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
-              <WorkSpark className="w-3.5 h-3.5 text-[#c96442]" />
+              <WorkSpark className="text-[#c96442]" />
               <span className="chat-text-shimmer font-medium">{turnVerb}...</span>
               {/* tabular-nums so the ticking elapsed seconds / token count keep a
                   fixed width and the line doesn't jitter horizontally as they change. */}

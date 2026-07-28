@@ -12,6 +12,7 @@
 // brightness/length travels around the spokes. `still` drops both animations
 // for the settled result line, where nothing is in flight any more.
 type WorkSparkProps = {
+  /** Extra classes - colour, mostly. Size and optical offset are baked in. */
   className?: string
   still?: boolean
 }
@@ -27,13 +28,18 @@ const INNER_Y = 9.2
 const LONG_Y = 3.3
 const SHORT_Y = 5.7
 
-export function WorkSpark({ className = 'w-3.5 h-3.5', still = false }: WorkSparkProps) {
+export function WorkSpark({ className = '', still = false }: WorkSparkProps) {
   return (
     <svg
       viewBox="0 0 24 24"
       aria-hidden="true"
       fill="none"
-      className={`shrink-0 ${still ? '' : 'work-spark'} ${className}`}
+      // -mt-px is optical centring, not a fudge: `items-center` centres the
+      // mark on the text's LINE box, but the eye lines it up against the
+      // glyphs, whose cap-height centre sits ~0.6px higher at 11px/16.5px.
+      // Under align-items:center a negative top margin shrinks the margin box,
+      // so this nudges the mark up by half of it - which is the amount wanted.
+      className={`shrink-0 w-3.5 h-3.5 -mt-px ${still ? '' : 'work-spark'} ${className}`}
     >
       {SPOKE_ANGLES.map((angle, i) => {
         const long = i % 2 === 0
