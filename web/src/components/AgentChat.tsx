@@ -4463,7 +4463,7 @@ export function QuestionCard({
     if (answered) return null
     const open = noteAnchor(qi) === at && (noteOpen[qi] || showNote[qi] !== '')
     return (
-      <Tooltip content={open ? 'Discard note' : 'Add a note'} side="top">
+      <Tooltip content={open ? 'Discard note' : 'Add a note'} side="top" className="absolute right-1 top-1">
         <button
           type="button"
           aria-label={open ? 'Discard note' : 'Add a note'}
@@ -4483,7 +4483,7 @@ export function QuestionCard({
             else if (!selected[qi].has(at)) toggleOption(e.currentTarget, qi, at)
             setNoteOpen((prev) => prev.map((v, i) => (i === qi ? true : v)))
           }}
-          className={`absolute right-1 top-1 flex h-5 w-5 cursor-pointer items-center justify-center rounded text-stone-400 opacity-0 transition-opacity hover:bg-black/[0.04] hover:text-stone-600 focus-visible:opacity-100 group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-white/10 dark:hover:text-stone-300 ${
+          className={`flex h-5 w-5 cursor-pointer items-center justify-center rounded text-stone-400 opacity-0 transition-opacity hover:bg-black/[0.04] hover:text-stone-600 focus-visible:opacity-100 group-hover:opacity-100 dark:text-stone-500 dark:hover:bg-white/10 dark:hover:text-stone-300 ${
             open ? 'opacity-100' : ''
           }`}
         >
