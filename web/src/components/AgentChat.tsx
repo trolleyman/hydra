@@ -4176,6 +4176,9 @@ interface QuestionSpec {
   multiSelect: boolean
   options: QuestionOption[]
 }
+// The free-text notes riding alongside the picked options, keyed by question
+// text - the shape AskUserQuestion's own `annotations` input field takes.
+type QuestionAnnotations = Record<string, { notes: string }>
 
 // parseQuestionSpecs validates a {questions: [...]} value (a native
 // AskUserQuestion input, or a fenced block's parsed JSON), returning null for
@@ -4213,28 +4216,64 @@ function parseQuestionBlock(src: string): QuestionSpec[] | null {
   }
 }
 
-// deriveAnswered reconstructs which options (and any free-text "Other") each
-// question resolved to, from the recorded tool_result text. On a resume the
-// card's local selection state is gone - all we have is the durable result,
-// which embeds the answers as `"<question>"="<comma-joined labels>"` pairs (the
-// shape the real CLI's AskUserQuestion result produces, mirrored by the
-// simulation). Matching those labels back to option indices lets a replayed
-// card highlight the chosen options just as it did right after answering.
-function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected: Set<number>[]; other: string[] } {
+// What the CLI writes in place of the quoted value for a question the user
+// left unpicked but attached a note to, and the marker introducing that note.
+const NO_OPTION_PICKED = '(no option selected)'
+const NOTE_MARKER = ' notes: '
+// The sentences the CLI wraps the answer list in. A note is the last thing in
+// its entry, so recovering one means knowing where the list stops.
+const ANSWER_TAILS = ['. You can now continue with these answers in mind.', '. Read the answers carefully']
+
+// deriveAnswered reconstructs which options (and any free-text "Other", and any
+// note) each question resolved to, from the recorded tool_result text. On a
+// resume the card's local selection state is gone - all we have is the durable
+// result, which embeds the answers as `"<question>"="<comma-joined labels>"`
+// pairs, each optionally trailed by ` notes: <note>` (the shape the real CLI's
+// AskUserQuestion result produces, mirrored by the simulation). Matching those
+// labels back to option indices lets a replayed card highlight the chosen
+// options just as it did right after answering.
+// eslint-disable-next-line react-refresh/only-export-components
+export function deriveAnswered(
+  specs: QuestionSpec[],
+  answeredText: string,
+): { selected: Set<number>[]; other: string[]; notes: string[] } {
   const selected = specs.map(() => new Set<number>())
   const other = specs.map(() => '')
+  const notes = specs.map(() => '')
+  // Where every question's entry begins, so a note - which runs to the end of
+  // its entry - knows to stop at the next question rather than swallowing it.
+  const starts = specs.map((q) => answeredText.indexOf(`"${q.question}"=`))
   specs.forEach((q, qi) => {
-    const needle = `"${q.question}"="`
-    const start = answeredText.indexOf(needle)
+    const start = starts[qi]
     if (start === -1) return
-    const from = start + needle.length
-    const end = answeredText.indexOf('"', from)
-    if (end === -1) return
+    let pos = start + `"${q.question}"=`.length
+    let value = ''
+    if (answeredText[pos] === '"') {
+      const end = answeredText.indexOf('"', pos + 1)
+      if (end === -1) return
+      value = answeredText.slice(pos + 1, end)
+      pos = end + 1
+    } else if (answeredText.startsWith(NO_OPTION_PICKED, pos)) {
+      pos += NO_OPTION_PICKED.length
+    } else {
+      return
+    }
+    if (answeredText.startsWith(NOTE_MARKER, pos)) {
+      // The note ends at whichever comes first: the next question's entry, the
+      // sentence the CLI closes the list with, or the end of the text.
+      const bounds = [
+        ...starts.filter((s) => s > pos),
+        ...ANSWER_TAILS.map((t) => answeredText.indexOf(t, pos)).filter((i) => i !== -1),
+        answeredText.length,
+      ]
+      const end = Math.min(...bounds)
+      notes[qi] = answeredText.slice(pos + NOTE_MARKER.length, end).replace(/,\s*$/, '').trim()
+    }
     // The labels were joined with ", " (see submit()). Consume the value left to
     // right, matching whole option labels (longest first, so a label that itself
     // contains ", " isn't mistaken for two) and dropping anything else into the
     // free-text "Other" field.
-    let rest = answeredText.slice(from, end)
+    let rest = value
     const extras: string[] = []
     while (rest.length > 0) {
       const match = q.options
@@ -4252,10 +4291,10 @@ function deriveAnswered(specs: QuestionSpec[], answeredText: string): { selected
     }
     if (extras.length) other[qi] = extras.join(', ')
   })
-  return { selected, other }
+  return { selected, other, notes }
 }
 
-function QuestionCard({
+export function QuestionCard({
   specs,
   disabled,
   expired,
@@ -4273,10 +4312,19 @@ function QuestionCard({
   // the card settled even across a reconnect, where local state is lost.
   answeredText?: string
   // Returns true when the answers were actually handed to the socket.
-  onSubmit: (answers: Record<string, string>) => boolean
+  onSubmit: (answers: Record<string, string>, annotations: QuestionAnnotations) => boolean
 }) {
   const [selected, setSelected] = useState<Set<number>[]>(() => specs.map(() => new Set<number>()))
   const [other, setOther] = useState<string[]>(() => specs.map(() => ''))
+  // A free-text note that rides ALONGSIDE the picked option rather than
+  // replacing it ("Postgres, but keep the schema in one file") - the CLI's
+  // AskUserQuestion takes these as `annotations[question].notes` and renders
+  // them into the tool result next to the answer.
+  const [note, setNote] = useState<string[]>(() => specs.map(() => ''))
+  // Whether the note box is open, per question. Kept out of the way behind an
+  // "Add a note" link so the common case - just pick an option - stays a card
+  // of options.
+  const [noteOpen, setNoteOpen] = useState<boolean[]>(() => specs.map(() => false))
   // Whether the "Other" row is selected, per question. Explicit state (not
   // derived from the text) so a typed-but-then-rejected free text can stay in
   // the box while a real option is picked instead.
@@ -4304,10 +4352,14 @@ function QuestionCard({
     [specs, answeredText],
   )
   const localEmpty =
-    selected.every((s) => s.size === 0) && other.every((v) => v.trim() === '') && otherSel.every((v) => !v)
+    selected.every((s) => s.size === 0) &&
+    other.every((v) => v.trim() === '') &&
+    otherSel.every((v) => !v) &&
+    note.every((v) => v.trim() === '')
   const showSelected = derived && localEmpty ? derived.selected : selected
   const showOther = derived && localEmpty ? derived.other : other
   const showOtherSel = derived && localEmpty ? derived.other.map((v) => v !== '') : otherSel
+  const showNote = derived && localEmpty ? derived.notes : note
 
   function toggleOption(qi: number, oi: number) {
     if (answered) return
@@ -4343,19 +4395,25 @@ function QuestionCard({
     }
   }
 
+  // A note on its own counts as answering: the CLI records it as
+  // `"<question>"=(no option selected) notes: ...`, so a Submit locked out
+  // until an option is picked would just be refusing to send something it
+  // handles fine.
   const complete = specs.every(
-    (_, i) => selected[i].size > 0 || (otherSel[i] && other[i].trim() !== ''),
+    (_, i) => selected[i].size > 0 || (otherSel[i] && other[i].trim() !== '') || note[i].trim() !== '',
   )
 
   function submit() {
     if (!complete || answered || disabled) return
     const answers: Record<string, string> = {}
+    const annotations: QuestionAnnotations = {}
     for (const [i, q] of specs.entries()) {
       const labels = [...selected[i]].sort((a, b) => a - b).map((oi) => q.options[oi].label)
       if (otherSel[i] && other[i].trim()) labels.push(other[i].trim())
       answers[q.question] = labels.join(', ')
+      if (note[i].trim()) annotations[q.question] = { notes: note[i].trim() }
     }
-    if (!onSubmit(answers)) return
+    if (!onSubmit(answers, annotations)) return
     if (expired) setSent(true)
     else setSubmitted(true)
   }
@@ -4479,6 +4537,68 @@ function QuestionCard({
               )
             })()}
           </div>
+          {/* The note sits below the options, not among them: it qualifies
+              whichever one you picked rather than competing with them, so it
+              gets no dot and stays folded away behind a link until wanted. A
+              recovered note (or one typed here) keeps the box open. */}
+          {(() => {
+            const open = noteOpen[qi] || showNote[qi] !== ''
+            if (!open) {
+              return answered ? null : (
+                <button
+                  type="button"
+                  onClick={() => setNoteOpen((prev) => prev.map((v, i) => (i === qi ? true : v)))}
+                  className="flex cursor-pointer items-center gap-1 text-[11px] text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200"
+                >
+                  <MessageSquare className="h-3 w-3 shrink-0" />
+                  <span className="optical-center">Add a note</span>
+                </button>
+              )
+            }
+            return (
+              <div
+                className={`flex w-full items-start gap-2 rounded-lg border border-dashed px-2.5 py-1.5 ${
+                  showNote[qi] !== ''
+                    ? 'border-stone-300 dark:border-white/20'
+                    : 'border-stone-200 dark:border-white/[0.07]'
+                } ${answered && showNote[qi] === '' ? 'opacity-50' : ''}`}
+              >
+                <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+                {/* Auto-grows the same way the "Other" box does - an invisible
+                    span in the same grid cell drives the height. */}
+                <div className="grid min-w-0 flex-1">
+                  <span
+                    aria-hidden
+                    className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4"
+                  >
+                    {showNote[qi] + ' '}
+                  </span>
+                  <textarea
+                    rows={1}
+                    autoFocus={noteOpen[qi] && note[qi] === '' && !answered}
+                    value={showNote[qi]}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setNote((prev) => prev.map((p, i) => (i === qi ? v : p)))
+                    }}
+                    onKeyDown={(e) => {
+                      // Enter submits, as in the "Other" box; shift+Enter is a
+                      // newline, which a note wants more often than an option
+                      // label does.
+                      if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+                      e.preventDefault()
+                      e.stopPropagation()
+                      submit()
+                    }}
+                    disabled={answered}
+                    placeholder="Note to go with your answer..."
+                    aria-label="Note to go with your answer"
+                    className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+                  />
+                </div>
+              </div>
+            )
+          })()}
         </div>
       ))}
       {expired && !answered && (
@@ -8305,18 +8425,26 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
 
   // answerQuestion replies to a native AskUserQuestion via the control channel
-  // (control_response with the answers merged into updatedInput).
-  function answerQuestion(item: Extract<ChatItem, { kind: 'question' }>, answers: Record<string, string>): boolean {
+  // (control_response with the answers merged into updatedInput). Any notes go
+  // in the tool's own `annotations` field, which the CLI renders into the tool
+  // result next to the answer they qualify.
+  function answerQuestion(
+    item: Extract<ChatItem, { kind: 'question' }>,
+    answers: Record<string, string>,
+    annotations: QuestionAnnotations,
+  ): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN || !item.requestId) return false
     const input = typeof item.input === 'object' && item.input !== null ? (item.input as Record<string, unknown>) : {}
+    const updatedInput: Record<string, unknown> = { ...input, answers }
+    if (Object.keys(annotations).length > 0) updatedInput.annotations = annotations
     ws.send(
       JSON.stringify({
         type: 'control_response',
         response: {
           subtype: 'success',
           request_id: item.requestId,
-          response: { behavior: 'allow', updatedInput: { ...input, answers } },
+          response: { behavior: 'allow', updatedInput },
         },
       }),
     )
@@ -8324,9 +8452,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
 
   // answersAsText renders an answers map as the plain-text reply used by the
-  // fenced ```question fallback (one "<question>: <labels>" line each).
-  function sendAnswersAsText(answers: Record<string, string>): boolean {
-    const lines = Object.entries(answers).map(([q, a]) => `${q}: ${a}`)
+  // fenced ```question fallback (one "<question>: <labels>" line each). There is
+  // no tool result to carry an `annotations` field here, so a note is spelled
+  // out inline instead.
+  function sendAnswersAsText(answers: Record<string, string>, annotations: QuestionAnnotations): boolean {
+    const lines = Object.entries(answers).map(([q, a]) => {
+      const note = annotations[q]?.notes
+      return `${q}: ${a || '(no option selected)'}${note ? ` - note: ${note}` : ''}`
+    })
     return sendUserText(lines.join('\n'))
   }
 
@@ -8783,7 +8916,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             disabled={!connected || (!expired && item.requestId == null)}
             expired={expired}
             answeredText={item.result}
-            onSubmit={(answers) => (expired ? sendAnswersAsText(answers) : answerQuestion(item, answers))}
+            onSubmit={(answers, annotations) =>
+              expired ? sendAnswersAsText(answers, annotations) : answerQuestion(item, answers, annotations)
+            }
           />
         )
       }
