@@ -2050,6 +2050,7 @@ function ReadOutputPanel({ text, lang }: { text: string; lang: string }) {
 // where in the file it sits, and 1..N numbers would be a lie. See lib/editDiff.
 //
 // A "replace all" chip surfaces the replace_all flag.
+const EDIT_NUM_CLASS = 'min-h-4 select-none text-right pr-1.5 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]'
 function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: string; newStr: string; lang: string; replaceAll?: boolean; hunks?: EditHunk[] | null }) {
   const rows = useMemo(() => buildEditRows(oldStr, newStr, hunks), [oldStr, newStr, hunks])
   const numbered = useMemo(() => hasLineNumbers(rows), [rows])
@@ -2101,9 +2102,13 @@ function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: st
               <Fragment key={i}>
                 {numbered && (
                   <>
-                    {/* min-h keeps a blank line one row tall. */}
-                    <span className={`min-h-4 select-none text-right pl-2 pr-1 text-stone-400 dark:text-stone-600 ${bg}`}>{row.oldNum ?? ''}</span>
-                    <span className={`min-h-4 select-none text-right pr-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06] ${bg}`}>{row.newNum ?? ''}</span>
+                    {/* Each number column carries its own right-hand rule, so
+                        the old and new sides are separated the same way the
+                        diff viewer's unified gutter separates them (see
+                        UNIFIED_LINE_NUM_CLASS). min-h keeps a blank line one
+                        row tall. */}
+                    <span className={`${EDIT_NUM_CLASS} pl-2 ${bg}`}>{row.oldNum ?? ''}</span>
+                    <span className={`${EDIT_NUM_CLASS} pl-1.5 ${bg}`}>{row.newNum ?? ''}</span>
                   </>
                 )}
                 <span data-copy-line className={`min-w-0 whitespace-pre-wrap break-words pl-1.5 pr-2 text-stone-800 dark:text-stone-200 ${bg}`}>
