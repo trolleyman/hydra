@@ -615,12 +615,6 @@ const ALIGN_SETTLE_MS = 1_000
 // enough that a tool card landing reads as a slide rather than a jump.
 const FOLLOW_TAU_MS = 70
 
-// Growth at or under this (px) is followed exactly rather than glided (see
-// followBottom): one wrapped line of chat text is ~21px, plus paragraph
-// spacing. Deliberately below the height of the smallest thing that "arrives"
-// - a collapsed tool card row - so those keep their slide.
-const FOLLOW_SNAP_PX = 40
-
 // formatDuration renders a millisecond span compactly, rolling up into
 // m/h/d past a minute so a long turn reads "10m 12s" not "612s" (item 19).
 function formatDuration(ms: number): string {
@@ -5309,15 +5303,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // rAF handle + last frame time for the smooth bottom-follow (see followBottom).
   const followRafRef = useRef<number | null>(null)
   const followPrevTimeRef = useRef(0)
-  // Content height at the previous follow, so followBottom can tell a line of
-  // streamed text arriving apart from a whole card landing.
-  const followPrevHeightRef = useRef(0)
-  // Whether a block is mid-stream, for the same call (which the ResizeObserver
-  // makes too, where there is no other way to know). Mirrored during render
-  // rather than in an effect: followBottom runs from a layout effect and an
-  // observer, both of which can beat a state-syncing effect to it.
-  const streamingRef = useRef(false)
-  streamingRef.current = stream != null
   // The previous scroll event's offset, for telling an UPWARD user scroll apart
   // from our own (possibly lagging) pin-to-bottom writes - see onScroll.
   const prevScrollTopRef = useRef(0)
@@ -7390,33 +7375,22 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const el = scrollRef.current
     if (!el) return
     const gap = el.scrollHeight - el.clientHeight - el.scrollTop
-    const grew = el.scrollHeight - followPrevHeightRef.current
-    followPrevHeightRef.current = el.scrollHeight
     // Jump outright when asked, while the replayed history is still landing
     // (opening a conversation should show its end, not scroll down to it), when
     // the user opted out of motion, and when the gap is more than a couple of
     // viewports - that size of jump is a bulk render, not "a new thing
     // arrived", and gliding it would just fling unreadable text past.
     //
-    // Text streaming in is the other instant case, and the important one: the
-    // block grows as it is typed, and easing that gap shut means the last line
-    // and the working indicator under it drop and then crawl back up, over and
-    // over, for the whole turn. Matching the growth exactly instead nails them
-    // in place while the text scrolls under them - which is what the eye is
-    // actually tracking.
-    //
-    // Two ways in. A live stream is followed exactly WHATEVER the step, because
-    // a growing block is not a thing arriving: markdown reparses as delimiters
-    // land, so one token can turn a line into a heading, close a list item or
-    // open a code block - 40-50px in a frame, all of it the same block still
-    // being typed. Off-stream growth qualifies only while small (see
-    // FOLLOW_SNAP_PX), so a tool card or a message landing keeps its slide.
+    // Streamed growth is deliberately NOT special-cased into an instant match:
+    // the glide is the intended feel for everything that lands, streamed text
+    // included. What used to look like jitter on top of it was two separate
+    // layout bugs - the indicator row wrapping to two lines, and fractional
+    // line boxes moving the bottom by a sub-pixel every line - both fixed at
+    // the source (whitespace-nowrap on the row, .chat-leading in index.css).
     if (
       instant ||
       !liveUiRef.current ||
       gap > el.clientHeight * 2 ||
-      streamingRef.current ||
-      (gap <= FOLLOW_SNAP_PX && grew <= FOLLOW_SNAP_PX) ||
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
     ) {
       stopFollow()
@@ -7594,11 +7568,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // far enough from the bottom to fall into its instant path.
   //
   // LAYOUT effect, not a passive one: a passive effect runs AFTER the browser
-  // has painted, so growth that should be matched exactly (see followBottom)
-  // was still shown one frame lower before the scroll caught up on the next -
-  // a single-frame flash of the last line and the working indicator dropping,
-  // most visible where a streamed thinking block settles into its card. Running
-  // before paint means the two land in the same frame.
+  // has painted, so the glide only STARTED a frame after the content grew - the
+  // view sat at the old offset for one frame, then began easing. Running before
+  // paint means the growth and the first step of the glide land in the same
+  // frame, which is what makes it read as one continuous slide rather than a
+  // stutter then a slide (most visible where a streamed thinking block settles
+  // into its card, a ~22px step).
   useLayoutEffect(() => {
     if (pinnedRef.current) followBottom()
     // followBottom only touches refs, so it isn't a meaningful dependency.
