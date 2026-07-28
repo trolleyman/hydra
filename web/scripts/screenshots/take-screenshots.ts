@@ -41,6 +41,8 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'no
 import { availableParallelism, cpus, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
+import { proxyLaunchOptions } from '../lib/browserProxy.ts'
+import { cacheWebfonts } from '../lib/fontCache.ts'
 
 // Share the app's localStorage key registry rather than re-typing the 'hydra-*'
 // strings: keys are built here in Node and passed into the browser-context init
@@ -436,7 +438,7 @@ try {
     '--hide-scrollbars',
     '--disable-features=PaintHolding',
   ]
-  const browser = await chromium.launch({ headless: true, args: flags })
+  const browser = await chromium.launch({ headless: true, args: flags, ...proxyLaunchOptions() })
   try {
     // `scrollTo` names a section <h2> to pin to the top of its scroll container
     // before a non-fullPage capture - used when the interesting content sits
@@ -951,13 +953,13 @@ try {
       // branch list comes from the simulation server. Scoped to .max-w-4xl so it
       // opens the full-page form's selector, not the compact sidebar box's (both
       // carry the same title).
-      { name: 'spawn-branch-selector', path: '/project/sim-project/', click: '.max-w-4xl button[title^="Base branch"]' },
+      { name: 'spawn-branch-selector', path: '/project/sim-project/', click: '.max-w-4xl button[data-branch-selector]' },
       // The same dropdown opened from the compact spawn box in the top-left
       // sidebar (the mini form rendered on every project page). Scoped to the
       // `aside` so the click lands on the sidebar selector rather than the
       // full-page form's (both carry the same "Base branch" title). Verifies the
       // portal-rendered menu escapes the narrow sidebar's clipping too.
-      { name: 'spawn-branch-selector-mini', path: '/project/sim-project/', click: 'aside button[title^="Base branch"]' },
+      { name: 'spawn-branch-selector-mini', path: '/project/sim-project/', click: 'aside button[data-branch-selector]' },
       // The inline-markdown rendering (the markdown-pass feature). The spawn box
       // is seeded with a markdown draft so the textarea overlay shows live
       // highlighting - `code`, *italic*, **bold**, and a long inline-code
@@ -1144,7 +1146,7 @@ try {
       {
         name: 'repository-branches',
         path: '/project/sim-project/repository/main/internal/server/server.go',
-        click: 'button[title="Switch branch"]',
+        click: 'button[data-branch-selector]',
       },
       // The branch-compare diff view: the diff button (the GitCompare icon beside
       // the branch selector) opens the branch dropdown; picking a branch diffs it
@@ -1157,7 +1159,7 @@ try {
       {
         name: 'repository-diff',
         path: '/project/sim-project/repository',
-        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'],
+        clicks: ['button[aria-label="Compare with another branch"]', 'button:has-text("hydra/add-line-numbers")'],
       },
       // The same diff with the all-files-stacked view (a stored preference,
       // toggled in the diff settings popup): every changed file's diff is shown
@@ -1165,7 +1167,7 @@ try {
       {
         name: 'repository-diff-all',
         path: '/project/sim-project/repository',
-        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'],
+        clicks: ['button[aria-label="Compare with another branch"]', 'button:has-text("hydra/add-line-numbers")'],
         repoDiffSingleFile: false,
       },
       // One file at a time, selecting each change type from the left list (the
@@ -1175,25 +1177,25 @@ try {
       {
         name: 'repository-diff-context',
         path: '/project/sim-project/repository',
-        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("heads.go")'],
+        clicks: ['button[aria-label="Compare with another branch"]', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("heads.go")'],
       },
       // A removed file: the whole file shows as deletions, with the red removed tag.
       {
         name: 'repository-diff-removed',
         path: '/project/sim-project/repository',
-        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("old_helper.go")'],
+        clicks: ['button[aria-label="Compare with another branch"]', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("old_helper.go")'],
       },
       // An added file: the whole file shows as additions, with the green added tag.
       {
         name: 'repository-diff-added',
         path: '/project/sim-project/repository',
-        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("lines.go")'],
+        clicks: ['button[aria-label="Compare with another branch"]', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("lines.go")'],
       },
       // A renamed file: the header shows "old → new" path with the renamed tag.
       {
         name: 'repository-diff-renamed',
         path: '/project/sim-project/repository',
-        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("renderer.go")'],
+        clicks: ['button[aria-label="Compare with another branch"]', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("renderer.go")'],
       },
       // A modified in-tree image: the diff viewer renders the artifacts panel's
       // before/after image differ (ImageDiffView) in place of "Binary file
@@ -1203,7 +1205,7 @@ try {
       {
         name: 'repository-diff-image',
         path: '/project/sim-project/repository',
-        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("diff-banner.png")'],
+        clicks: ['button[aria-label="Compare with another branch"]', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("diff-banner.png")'],
         imageDiffMode: 'side-by-side',
       },
       // An added in-tree image: only the after side exists, so the differ shows
@@ -1211,7 +1213,7 @@ try {
       {
         name: 'repository-diff-image-added',
         path: '/project/sim-project/repository',
-        clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("diff-added.png")'],
+        clicks: ['button[aria-label="Compare with another branch"]', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("diff-added.png")'],
         imageDiffMode: 'side-by-side',
       },
       // The diff branch selector reopened while diffing: the dropdown checkmarks
@@ -1222,7 +1224,7 @@ try {
         name: 'repository-diff-branches',
         path: '/project/sim-project/repository',
         clicks: [
-          'button:has(svg.lucide-git-compare)',
+          'button[aria-label="Compare with another branch"]',
           'button:has-text("hydra/add-line-numbers")',
           // Select the full-context heads.go file so the diff visibly fills the
           // pane behind the dropdown (README's 4-line diff sat entirely under it,
@@ -1276,11 +1278,11 @@ try {
       // (compare → pick branch), then tap a changed file to open its diff
       // full-screen, with the back chevron + file path in the header. Documents
       // the phone drill-down for the compare view.
-      { name: 'repository-mobile-diff', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true, clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("lines.go")'] },
+      { name: 'repository-mobile-diff', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true, clicks: ['button[aria-label="Compare with another branch"]', 'button:has-text("hydra/add-line-numbers")', 'button:has-text("lines.go")'] },
       // Diff mode on a phone *before* picking a file: the changed-files list with
       // the base → head selectors in the header - documenting that the compact
       // selectors fit the narrow header without overflowing.
-      { name: 'repository-mobile-diff-list', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true, clicks: ['button:has(svg.lucide-git-compare)', 'button:has-text("hydra/add-line-numbers")'] },
+      { name: 'repository-mobile-diff-list', path: '/project/sim-project/repository', viewport: { width: 390, height: 844 }, viewportOnly: true, clicks: ['button[aria-label="Compare with another branch"]', 'button:has-text("hydra/add-line-numbers")'] },
       { name: 'repository-mobile-landscape', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 844, height: 390 }, viewportTag: 'mobile-landscape', viewportOnly: true },
       { name: 'repository-tablet', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 834, height: 1112 }, viewportTag: 'tablet', viewportOnly: true },
       { name: 'repository-tablet-landscape', path: '/project/sim-project/repository/main/internal/server/server.go', viewport: { width: 1112, height: 834 }, viewportTag: 'tablet-landscape', viewportOnly: true },
@@ -1878,6 +1880,11 @@ try {
           deviceScaleFactor: dpi,
           colorScheme: theme,
         })
+        // Serve the webfonts from the shared in-process cache: this context has
+        // its own empty HTTP cache, and there are ~80 of them, so without this
+        // every shot refetches Merriweather + Roboto Flex over the egress proxy
+        // while its networkidle wait blocks on them.
+        await cacheWebfonts(ctx)
         // Pin Date/now to a fixed instant (matching the server's simNow) so the
         // UI's "elapsed"/"X ago" labels are byte-stable across the two renders.
         // setFixedTime only freezes the wall clock - timers and requestAnimationFrame

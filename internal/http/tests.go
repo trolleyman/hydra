@@ -223,6 +223,9 @@ func buildTestRunResult(projectID string, mgr *hydratests.Manager, rep hydratest
 		if rep.StartedAt > 0 {
 			res.StartedAt = ptr(rep.StartedAt)
 		}
+		if rep.Queued > 0 {
+			res.Queued = ptr(rep.Queued)
+		}
 		if rep.TotalEstimated {
 			res.TotalEstimated = ptr(true)
 		}

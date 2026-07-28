@@ -5,11 +5,12 @@
 // server as a demo video artifact. Run: node gen-demo-webm.ts
 import { writeFileSync } from 'node:fs'
 import { chromium } from 'playwright'
+import { proxyLaunchOptions } from '../lib/browserProxy.ts'
 
 const W = 280, H = 150, FPS = 12, SECONDS = 2
 
 async function record(variant: 'before' | 'after'): Promise<string> {
-  const browser = await chromium.launch()
+  const browser = await chromium.launch(proxyLaunchOptions())
   const page = await browser.newPage()
   await page.setContent('<canvas id="c" width="' + W + '" height="' + H + '"></canvas>')
   const b64 = await page.evaluate(async ({ W, H, FPS, SECONDS, variant }) => {

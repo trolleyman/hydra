@@ -63,5 +63,9 @@ func (s *genScheduler) Release() { s.release() }
 // Promote raises a still-queued waiter to foreground priority.
 func (s *genScheduler) Promote(key string) { s.promote(key) }
 
+// QueuePosition reports a key's 1-based place in the queue, or 0 when it is not
+// queued (running or unknown).
+func (s *genScheduler) QueuePosition(key string) int { return s.queuePosition(key) }
+
 // SetLimit changes the concurrency cap (0 = unlimited).
 func (s *genScheduler) SetLimit(n int) { s.setLimit(n) }

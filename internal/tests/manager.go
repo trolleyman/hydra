@@ -289,7 +289,7 @@ func (m *Manager) Peek(runner string, v Version) (Report, bool, error) {
 	dir := m.entryDir(runner, key)
 	m.mu.Lock()
 	if _, inFlight := m.gens[dir]; inFlight {
-		rep := Report{Runner: runner, Key: key, Status: StatusRunning, StartedAt: m.startedAt[dir], Progress: m.progress[dir]}
+		rep := Report{Runner: runner, Key: key, Status: StatusRunning, StartedAt: m.startedAt[dir], Progress: m.progress[dir], Queued: m.sched.QueuePosition(dir)}
 		m.fillRunningLocked(dir, &rep)
 		m.mu.Unlock()
 		return rep, true, nil
@@ -408,7 +408,7 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 		if fg {
 			m.fgWant[dir] = true
 		}
-		rep := Report{Runner: spec.Name, Key: key, Ref: ref, Status: StatusRunning, Progress: m.progress[dir], StartedAt: m.startedAt[dir], Log: append([]LogLine(nil), m.logs[dir]...)}
+		rep := Report{Runner: spec.Name, Key: key, Ref: ref, Status: StatusRunning, Progress: m.progress[dir], StartedAt: m.startedAt[dir], Log: append([]LogLine(nil), m.logs[dir]...), Queued: m.sched.QueuePosition(dir)}
 		m.fillRunningLocked(dir, &rep)
 		m.mu.Unlock()
 		if fg {

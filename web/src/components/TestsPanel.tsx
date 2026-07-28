@@ -876,12 +876,18 @@ function RunnerMeta({ runner }: { runner: TestRunResult }) {
     : running && runner.started_at
       ? <ElapsedTime startedAt={runner.started_at} />
       : null
-  if (!format && !time) return null
+  // A runner is marked in-flight before it gets a slot, so "running" covers both
+  // actually-running and waiting-its-turn - and test concurrency defaults to 1,
+  // which makes queueing the NORMAL state for a project with several runners.
+  // Without this the clock beside a queued runner reads as time spent testing.
+  const queued = runner.queued ?? 0
+  if (!format && !time && !queued) return null
   return (
     <span className="ml-auto pl-2 shrink-0 font-mono text-xs text-gray-400">
-      {format}
-      {format && time ? ' · ' : null}
+      {queued > 0 ? (queued === 1 ? 'queued, next' : `queued, ${queued - 1} ahead`) : format}
+      {(queued > 0 || format) && time ? ' · ' : null}
       {time}
+      {queued > 0 && time ? ' waiting' : null}
     </span>
   )
 }

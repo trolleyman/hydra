@@ -391,6 +391,14 @@ func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *c
 	// side is absent on that version (script added/removed) and contributes none.
 	set.LeftProgress = nonEmptyPtr(leftMeta.Progress)
 	set.RightProgress = nonEmptyPtr(rightMeta.Progress)
+	// Queue position, so the card can say "waiting behind other work" instead of
+	// showing a generation that has not started as though it were running.
+	if leftMeta.Queued > 0 {
+		set.LeftQueued = ptr(leftMeta.Queued)
+	}
+	if rightMeta.Queued > 0 {
+		set.RightQueued = ptr(rightMeta.Queued)
+	}
 	set.LeftLog = ptr(toAPILog(leftMeta.Log))
 	set.RightLog = ptr(toAPILog(rightMeta.Log))
 	if t := earliestStart(leftMeta.StartedAt, rightMeta.StartedAt); t > 0 {
