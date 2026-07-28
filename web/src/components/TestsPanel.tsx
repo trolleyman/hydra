@@ -353,8 +353,12 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
           <p>Each runner is a project-defined <code className="text-blue-300">[tests.&lt;name&gt;]</code> command in <code className="text-blue-300">.hydra/config.toml</code>. Hydra runs it against the ref, parses the report it writes to <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code> (JUnit XML or Hydra-JSON; otherwise a plain pass/fail from the exit code), and caches the verdict per commit. The verdict <strong>soft-gates the merge button</strong> - a failing run needs a force-merge.</p>
           <p>Expand a card for its cases as a location tree - <strong>passing and skipped cases are hidden by default</strong> (grouping by result hides nothing; its sections fold them away instead); the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. Node tallies always count everything beneath, filtered or not. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
         </InfoTooltip>
+        {/* leading-4, not the inherited 1.5: 11px * 1.5 = 16.5px, a half pixel,
+            which knocks whatever it is the tallest thing in (this bar once it
+            wraps) onto a fractional height - and a box on a fractional height
+            paints 1px taller or shorter depending on its subpixel offset. */}
         {runningCount > 0 && (
-          <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
+          <span className="flex items-center gap-1.5 text-[11px] leading-4 font-normal text-gray-400 dark:text-gray-500">
             <LoaderCircle className="w-3 h-3 animate-spin" />
             Running {runners.length - runningCount}/{runners.length}
           </span>
