@@ -11,7 +11,9 @@
 // A ToolResultLink is the connection-scoped bridge: `known` is every tool_use
 // id a card was built for, `orphans` the results still waiting for theirs.
 
-export type OrphanResult = { result: string; isError: boolean; images: string[] }
+// `raw` is the provider's own tool_result block, carried alongside the parsed
+// text so a card built by a later page still gets a truthful Raw panel.
+export type OrphanResult = { result: string; isError: boolean; images: string[]; raw?: unknown }
 
 export type ToolResultLink = { known: Set<string>; orphans: Map<string, OrphanResult> }
 
@@ -55,5 +57,6 @@ export function claimOrphanResult<T extends { kind: string; toolUseId?: string }
     result: orphan.result,
     isError: orphan.isError,
     resultImages: orphan.images.length ? orphan.images : undefined,
+    rawResult: orphan.raw,
   }
 }
