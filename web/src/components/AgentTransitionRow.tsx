@@ -35,9 +35,13 @@ export function AgentTransitionRow({ agentName, agentId, projectId, status, befo
           is an inline-block (see the note there) - a flex container would expose
           no baseline at all and this would silently do nothing for the pill. */}
       <div className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
-        {lead && <span>{withBranchPills(lead)}</span>}
+        {/* Trimmed like the title above: with items-baseline the row's height is
+            max-above-baseline + max-below-baseline, and an untrimmed 13px run
+            contributes descender slack the eye doesn't weigh - which is what
+            pushed the whole body's ink above the tile's centre. */}
+        {lead && <span className="optical-center">{withBranchPills(lead)}</span>}
         {badge && <Badge variant="sm" className={badge.className}>{badge.label}</Badge>}
-        {after && <span>{withBranchPills(after)}</span>}
+        {after && <span className="optical-center">{withBranchPills(after)}</span>}
       </div>
     </>
   )

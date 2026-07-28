@@ -137,10 +137,19 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
           <div className={`shrink-0 flex items-center justify-center ${TILE_GLYPH} ${size.tile} ${wrap}`}>
             {iconNode}
           </div>
-          <div className={`min-w-0 flex-1 ${isProse ? 'self-center' : ''}`}>
+          {/* self-center for BOTH shapes, with a free top backstop: a flex item
+              that is taller than the line cannot move, so a body bigger than the
+              tile (a wrapped title) stays exactly where top-alignment put it,
+              while a body smaller than the tile drops to the middle.
+              This only reads right because both shapes are trimmed to their ink
+              (`.optical-center` on the paragraph here, on the title and status
+              runs in AgentTransitionRow). Untrimmed, the box carried ~8.5px of
+              line-box slack below the last baseline and none above it, so
+              centring the BOX still left the ink sitting high. */}
+          <div className="min-w-0 flex-1 self-center">
             {isProse
               ? (
-                <p className={`text-gray-700 dark:text-gray-200 ${size.message}`}>
+                <p className={`optical-center text-gray-700 dark:text-gray-200 ${size.message}`}>
                   {typeof toast.message === 'string' ? withBranchPills(toast.message) : toast.message}
                 </p>
               )
