@@ -19,6 +19,9 @@ import { buildRepoSplat } from './repoSplat'
 // 'doc' variant (README) deliberately omits it and uses standard CommonMark
 // paragraph reflow (single newline -> space), like GitHub renders a README: prose
 // hard-wrapped at ~80 columns reads better reflowed than broken at every line.
+// `hardBreaks` overrides that per call site, for text that wants compact chat
+// styling but document reflow - a commit message, which is hard-wrapped at ~72
+// columns by convention and reads as ragged nonsense with a <br> per line.
 //
 // The editable textarea overlay (renderMarkdownSource in ./markdown) is NOT one
 // of these surfaces: it must keep every source character glyph-for-glyph aligned
@@ -196,10 +199,8 @@ function alignStyle(align?: string | null): React.CSSProperties | undefined {
 // 'chat' honours single newlines as <br> (remark-breaks); 'doc' reflows them
 // (standard CommonMark) - see the file header for why.
 type RemarkPlugins = React.ComponentProps<typeof ReactMarkdown>['remarkPlugins']
-const REMARK_PLUGINS: Record<Variant, RemarkPlugins> = {
-  chat: [remarkGfm, remarkBreaks],
-  doc: [remarkGfm],
-}
+const BREAK_PLUGINS: RemarkPlugins = [remarkGfm, remarkBreaks]
+const REFLOW_PLUGINS: RemarkPlugins = [remarkGfm]
 
 // buildComponents maps markdown elements to the variant's styled React nodes.
 function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
@@ -275,6 +276,10 @@ export interface MarkdownProps {
   linkCtx?: RepoLinkContext
   // Wrapper class (e.g. text colour / max-width) applied to the outer container.
   className?: string
+  // Whether a single source newline is a hard <br>. Defaults to the variant's
+  // own behaviour ('chat' yes, 'doc' no); set it false to keep chat styling but
+  // reflow paragraphs the way CommonMark (and GitHub) do.
+  hardBreaks?: boolean
 }
 
 // Markdown renders read-only markdown for a given surface. Do NOT wrap it in a
@@ -284,7 +289,7 @@ export interface MarkdownProps {
 // memo'd: parsing markdown is not cheap, and a chat transcript can hold hundreds
 // of these. Without memo, typing in the chat composer (a sibling state change)
 // re-parses every rendered message on each keystroke, which is visibly laggy.
-export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className }: MarkdownProps): ReactNode {
+export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className, hardBreaks }: MarkdownProps): ReactNode {
   const components = useMemo(
     () => buildComponents(STYLES[variant], linkCtx),
     [variant, linkCtx],
@@ -303,7 +308,7 @@ export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx
   return (
     <div ref={rootRef} className={className ?? ''} data-md-root="">
       <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS[variant]}
+        remarkPlugins={(hardBreaks ?? variant === 'chat') ? BREAK_PLUGINS : REFLOW_PLUGINS}
         components={components}
       >
         {text}

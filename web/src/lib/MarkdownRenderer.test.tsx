@@ -14,4 +14,18 @@ describe('Markdown', () => {
     const { container } = render(<Markdown text="1. test" />)
     expect(container.querySelector('ol')).not.toHaveAttribute('start')
   })
+
+  // Commit messages are hard-wrapped at ~72 columns, so the surfaces that render
+  // one (the git_commit chat card, the commit hover card) pass hardBreaks={false}
+  // to get CommonMark reflow with the compact chat styling.
+  it('reflows single newlines when hardBreaks is false', () => {
+    const { container } = render(<Markdown text={'one\ntwo'} hardBreaks={false} />)
+    expect(container.querySelectorAll('br')).toHaveLength(0)
+    expect(container.querySelector('p')).toHaveTextContent('one two')
+  })
+
+  it('keeps single newlines as hard breaks by default', () => {
+    const { container } = render(<Markdown text={'one\ntwo'} />)
+    expect(container.querySelectorAll('br')).toHaveLength(1)
+  })
 })

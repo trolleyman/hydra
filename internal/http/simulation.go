@@ -1105,10 +1105,30 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 	if id == "agent-1" {
 		resp := api.GetAgentCommits200JSONResponse{
 			{
-				Sha:         "abcd1234efgh5678ijkl9012mnop3456qrst7890",
-				ShortSha:    "abcd123",
-				Subject:     ptr("Add feature X"),
-				Message:     "Add feature X\n\nMore details about feature X",
+				// A long, hard-wrapped, bulleted message - the shape agents
+				// actually write. It is what exercises the commit hover card in
+				// the selectors: markdown body, paragraph reflow (no <br> per
+				// wrapped line) and the height cap that makes a tall card scroll
+				// instead of running off the bottom of the screen.
+				Sha:      "abcd1234efgh5678ijkl9012mnop3456qrst7890",
+				ShortSha: "abcd123",
+				Subject:  ptr("Add feature X"),
+				Message: "Add feature X\n\n" +
+					"The uploader had no way to express \"retry this, but not\n" +
+					"forever\", so a flaky object store took the whole run down with\n" +
+					"it. `Put` now retries a failed upload up to `maxAttempts`\n" +
+					"times, sleeping a jittered exponential delay between tries.\n\n" +
+					"- The delay is 100ms doubled per attempt, +/- 50% jitter, so a\n" +
+					"  fleet of heads retrying at once does not synchronise into a\n" +
+					"  thundering herd.\n" +
+					"- Only transport errors and 5xx are retried; a 4xx is the\n" +
+					"  caller's bug and fails immediately.\n" +
+					"- The last error is surfaced once every attempt is exhausted,\n" +
+					"  rather than a generic \"upload failed\".\n\n" +
+					"Design decision (no user input): the cap lives on the uploader\n" +
+					"rather than in config - callers that want a different budget\n" +
+					"already pass a context deadline, and two knobs for one\n" +
+					"behaviour is how they end up disagreeing.",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
 				Timestamp:   simNow().Add(-10 * time.Minute).Format(time.RFC3339),

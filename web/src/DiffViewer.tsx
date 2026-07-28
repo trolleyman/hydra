@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, linkOptions, type LinkProps } from '@tanstack/react-router'
 import { highlightLines } from './lib/highlightCore'
@@ -1636,15 +1636,39 @@ function formatCommitDate(iso: string): string {
 // stale, lingering boxes behind.
 let activeTooltip: { id: object; hide: () => void } | null = null
 
-function CustomTooltip({ content, children, side = 'bottom', className = 'w-full' }: {
+// Gap between the trigger and the box, and the margin the box keeps from the
+// viewport edges once it has been clamped back on-screen.
+const TIP_GAP = 8
+const TIP_PAD = 8
+// Floor for the height cap, so a trigger wedged against a viewport edge still
+// gets a readable (scrollable) box rather than a sliver.
+const TIP_MIN_HEIGHT = 160
+
+interface TipPos {
+  top: number
+  left: number
+  // Which side we actually opened on: the requested side flips when there is no
+  // room for the measured box there.
+  side: 'bottom' | 'right' | 'top' | 'left'
+  // Height cap for the box (it scrolls past this). 0 on the first, unmeasured
+  // pass, so the natural height can be measured before it is capped.
+  maxHeight: number
+}
+
+function CustomTooltip({ content, children, side = 'bottom', className = 'w-full', width }: {
   content: React.ReactNode
   children: React.ReactNode
   side?: 'bottom' | 'right' | 'top' | 'left'
   className?: string
+  // Fixed box width in px. Omitted, the box sizes to its content.
+  width?: number
 }) {
   const [visible, setVisible] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  // The rendered box, so the position pass can measure it and flip/clamp against
+  // the real geometry instead of guessing.
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<TipPos | null>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // A stable per-instance identity for the "which tooltip is active" singleton, so
   // hideNow can tell if it still owns the slot without referencing itself.
@@ -1663,25 +1687,51 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
     if (activeTooltip?.id === id) activeTooltip = null
   }, [cancelHide, id])
 
+  // Where the box goes: the requested side, flipped to the opposite one when the
+  // measured box doesn't fit there, then clamped back inside the viewport on
+  // both axes. Runs once from show() (before the box exists, so it can only use
+  // the declared `width`) and again from the layout effect below with the real
+  // measurements, before paint.
+  const computePos = useCallback((): TipPos | null => {
+    const el = ref.current
+    if (!el) return null
+    const rect = el.getBoundingClientRect()
+    const box = boxRef.current
+    const w = box?.offsetWidth ?? width ?? 0
+    const h = box?.offsetHeight ?? 0
+    const maxHeight = Math.max(TIP_MIN_HEIGHT, window.innerHeight - 2 * TIP_PAD)
+
+    // Flip only when the other side genuinely has room: the commit selectors sit
+    // near the left edge, where a left-opening box would otherwise be clamped
+    // over its own dropdown.
+    let s = side
+    if (w > 0) {
+      if (s === 'left' && rect.left - TIP_GAP - w < TIP_PAD && rect.right + TIP_GAP + w <= window.innerWidth - TIP_PAD) s = 'right'
+      else if (s === 'right' && rect.right + TIP_GAP + w > window.innerWidth - TIP_PAD && rect.left - TIP_GAP - w >= TIP_PAD) s = 'left'
+    }
+    if (h > 0) {
+      if (s === 'top' && rect.top - TIP_GAP - h < TIP_PAD && rect.bottom + TIP_GAP + h <= window.innerHeight - TIP_PAD) s = 'bottom'
+      else if (s === 'bottom' && rect.bottom + TIP_GAP + h > window.innerHeight - TIP_PAD && rect.top - TIP_GAP - h >= TIP_PAD) s = 'top'
+    }
+
+    // Top-left of the box. Beside the trigger ('left'/'right') it aligns with the
+    // trigger's top; above/below it aligns with its left edge.
+    let left = s === 'right' ? rect.right + TIP_GAP : s === 'left' ? rect.left - TIP_GAP - w : rect.left
+    let top = s === 'top' ? rect.top - TIP_GAP - h : s === 'bottom' ? rect.bottom + TIP_GAP : rect.top
+    if (w > 0) left = Math.min(Math.max(left, TIP_PAD), Math.max(TIP_PAD, window.innerWidth - w - TIP_PAD))
+    if (h > 0) top = Math.min(Math.max(top, TIP_PAD), Math.max(TIP_PAD, window.innerHeight - h - TIP_PAD))
+    return { top, left, side: s, maxHeight }
+  }, [side, width])
+
   const show = useCallback(() => {
     cancelHide()
     // Dismiss any other tooltip before we claim the active slot.
     if (activeTooltip && activeTooltip.id !== id) activeTooltip.hide()
     activeTooltip = { id, hide: hideNow }
-    if (ref.current) {
-      const rect = ref.current.getBoundingClientRect()
-      if (side === 'right') {
-        setPos({ top: rect.top, left: rect.right })
-      } else if (side === 'left') {
-        setPos({ top: rect.top, left: rect.left })
-      } else if (side === 'top') {
-        setPos({ top: rect.top - 8, left: rect.left })
-      } else {
-        setPos({ top: rect.bottom + 6, left: rect.left })
-      }
-    }
+    const p = computePos()
+    if (p) setPos(p)
     setVisible(true)
-  }, [side, cancelHide, hideNow, id])
+  }, [cancelHide, computePos, hideNow, id])
 
   // Hide after a short grace period so the pointer can travel from the trigger
   // into the tooltip (and back) without it disappearing.
@@ -1689,6 +1739,23 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
     cancelHide()
     hideTimer.current = setTimeout(hideNow, 150)
   }, [cancelHide, hideNow])
+
+  // show()'s pass ran before the box was in the DOM, so it could not measure it.
+  // Re-run now that it is rendered (in a layout effect, so the correction lands
+  // before paint and never flickers).
+  useLayoutEffect(() => {
+    if (!visible) return
+    const p = computePos()
+    // Legitimate measure-then-position pass: the DOM box is the external system,
+    // and the guard below makes it converge in one step (a second run computes
+    // the same position and returns `prev`, so no cascade).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPos((prev) =>
+      prev && p && prev.top === p.top && prev.left === p.left && prev.side === p.side && prev.maxHeight === p.maxHeight
+        ? prev
+        : p,
+    )
+  }, [visible, computePos, content])
 
   // The position is captured once on show, so it goes stale the moment the
   // page scrolls. Dismiss on scroll rather than leave a detached box floating.
@@ -1706,11 +1773,17 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
       {children}
       {visible && pos && (
         <div
-          className="fixed z-[200] bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg px-3 py-2 shadow-xl"
+          ref={boxRef}
+          // Same surface as the shared Tooltip (components/Tooltip.tsx): light in
+          // light mode, dark in dark mode. It used to be dark in both, which made
+          // it look like a stray widget from another app on a light page.
+          className="fixed z-[200] overflow-y-auto overscroll-contain rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 shadow-xl dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
           style={{
             top: pos.top,
             left: pos.left,
-            transform: side === 'left' ? 'translateX(-100%)' : side === 'top' ? 'translateY(-100%)' : undefined
+            width,
+            maxWidth: 'calc(100vw - 1rem)',
+            maxHeight: pos.maxHeight,
           }}
           onMouseEnter={cancelHide}
           onMouseLeave={scheduleHide}
@@ -1722,19 +1795,55 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   )
 }
 
+// commitParts splits a commit message into its subject (first line) and body,
+// the way git itself treats it.
+function commitParts(message: string): { subject: string; body: string } {
+  const nl = message.indexOf('\n')
+  if (nl < 0) return { subject: message.trim(), body: '' }
+  return { subject: message.slice(0, nl).trim(), body: message.slice(nl + 1).trim() }
+}
+
+// The hover card for one commit. Only the sha stays monospace - a commit message
+// is prose, so it is rendered as markdown (bullet lists, `code`, links all show
+// up in the messages agents write) with paragraph reflow rather than a <br> per
+// source newline, since messages are hard-wrapped at ~72 columns.
 function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
+  const { subject, body } = commitParts(commit.message)
   return (
-    <div className="font-mono space-y-0.5 min-w-[260px] max-w-[80ch]">
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-yellow-400">commit</span>
-        <span className="text-gray-300 break-all">{commit.sha}</span>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+        <span className="font-mono rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+          {commit.short_sha}
+        </span>
+        <span className="text-gray-600 dark:text-gray-300">{commit.author_name}</span>
+        <span className="text-gray-400 dark:text-gray-500">&middot;</span>
+        <span>{formatCommitDate(commit.timestamp)}</span>
       </div>
-      <div><span className="text-gray-400 w-14 inline-block">Author:</span><span className="text-gray-200">{commit.author_name} &lt;{commit.author_email}&gt;</span></div>
-      <div><span className="text-gray-400 w-14 inline-block">Date:</span><span className="text-gray-200">{formatCommitDate(commit.timestamp)}</span></div>
-      <div className="mt-2 pt-2 border-t border-gray-700 text-gray-100 whitespace-pre-wrap break-words leading-relaxed">
-        {commit.message}
+      <div className="border-t border-gray-200 pt-2 dark:border-gray-700">
+        <p className="text-[13px] font-semibold leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>
+        {body && (
+          <Markdown
+            text={body}
+            hardBreaks={false}
+            className="mt-1.5 text-xs leading-relaxed text-gray-600 dark:text-gray-300"
+          />
+        )}
       </div>
     </div>
+  )
+}
+
+// Width of the commit hover card. Wide enough for a wrapped commit body, narrow
+// enough to sit beside the 256px dropdown on a laptop screen.
+const COMMIT_TIP_WIDTH = 440
+
+// The shift-click affordance, spelled out at the foot of both commit dropdowns -
+// otherwise nobody would ever find it.
+function ShiftClickHint() {
+  return (
+    <p className="border-t border-gray-100 px-3 py-1.5 text-[10px] leading-snug text-gray-400 dark:border-gray-700 dark:text-gray-500">
+      Shift-click a commit to see just that commit's changes
+    </p>
   )
 }
 
@@ -1743,12 +1852,14 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
 // memo (both selectors): they sit in the always-visible Changes toolbar, whose
 // owner re-renders on every diff/panel state change; their props only change
 // when the commit list or the selection itself does.
-const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, baseBranch, rightSel }: {
+const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, baseBranch, rightSel, onSelectOnly }: {
   commits: CommitInfo[]
   selected: LeftSel
   onChange: (v: LeftSel) => void
   baseBranch: string
   rightSel: RightSel
+  // Shift-click: set BOTH sides to show only this commit (parent -> commit).
+  onSelectOnly: (sha: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1811,16 +1922,22 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
                 const commitValid = rightSel.type === 'uncommitted' || rightSel.type === 'latest'
                   || (rightIdx !== -1 && cIdx > rightIdx)
                 return (
-                  <CustomTooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
+                  <CustomTooltip key={c.sha} side="left" width={COMMIT_TIP_WIDTH} content={<CommitTooltipContent commit={c} />}>
+                    {/* Not `disabled`: a commit that can't be the left side on its
+                        own is still a legal shift-click target (that sets both
+                        sides), and a disabled button fires no click at all. */}
                     <button
-                      onClick={() => { if (commitValid) { onChange({ type: 'commit', sha: c.sha }); setOpen(false) } }}
-                      disabled={!commitValid}
-                      className={`w-full flex items-start gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : commitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : ''}`}
+                      onClick={(e) => {
+                        if (e.shiftKey) { onSelectOnly(c.sha); setOpen(false); return }
+                        if (commitValid) { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }
+                      }}
+                      aria-disabled={!commitValid}
+                      className={`w-full flex items-start gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : commitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : 'opacity-40'}`}
                     >
                       <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
                         {c.short_sha}
                       </span>
-                      <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
+                      <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
                       {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
                     </button>
                   </CustomTooltip>
@@ -1840,6 +1957,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
               {selected.type === 'base' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
           </div>
+          {commits.length > 0 && <ShiftClickHint />}
         </div>
       )}
     </div>
@@ -1848,12 +1966,14 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
 
 // ── Right commit selector ─────────────────────────────────────────────────────
 
-const RightSelector = memo(function RightSelector({ commits, selected, onChange, left, hasUncommitted }: {
+const RightSelector = memo(function RightSelector({ commits, selected, onChange, left, hasUncommitted, onSelectOnly }: {
   commits: CommitInfo[]
   selected: RightSel
   onChange: (v: RightSel) => void
   left: LeftSel
   hasUncommitted?: boolean
+  // Shift-click: set BOTH sides to show only this commit (parent -> commit).
+  onSelectOnly: (sha: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1923,22 +2043,26 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
                 Commits · {validCommits.length}
               </p>
               {validCommits.map((c) => (
-                <CustomTooltip key={c.sha} side="right" content={<CommitTooltipContent commit={c} />}>
+                <CustomTooltip key={c.sha} side="left" width={COMMIT_TIP_WIDTH} content={<CommitTooltipContent commit={c} />}>
                   <button
-                    onClick={() => { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }}
+                    onClick={(e) => {
+                      if (e.shiftKey) { onSelectOnly(c.sha); setOpen(false); return }
+                      onChange({ type: 'commit', sha: c.sha }); setOpen(false)
+                    }}
                     className={`w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                       }`}
                   >
                     <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0 mt-0.5">
                       {c.short_sha}
                     </span>
-                    <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{c.message}</span>
+                    <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
                     {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 mt-0.5" />}
                   </button>
                 </CustomTooltip>
               ))}
             </div>
           )}
+          {validCommits.length > 0 && <ShiftClickHint />}
         </div>
       )}
     </div>
@@ -2868,6 +2992,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setLeftSel(newLeft)
   }, [])
 
+  // Shift-click on a commit in either selector: show just that commit's changes
+  // by setting BOTH sides to the adjacent pair (its parent -> itself), the same
+  // selection a commit chip in the chat transcript makes. The list is
+  // newest-first, so the parent is the NEXT entry - or the branch point, for the
+  // oldest commit on the branch.
+  const handleSelectOnly = useCallback((sha: string) => {
+    const idx = commitIdx(sha, commits)
+    if (idx === -1) return
+    setLeftSel(idx + 1 < commits.length ? { type: 'commit', sha: commits[idx + 1].sha } : { type: 'base' })
+    setRightSel({ type: 'commit', sha })
+  }, [commits])
+
   // Correct invalid selection combos DURING RENDER (the adjust-state-during-render
   // idiom) rather than in an effect: React re-renders immediately and the guards make
   // each correction idempotent (it converges in one step), so there's no cascading
@@ -3631,10 +3767,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               never separates from its selectors - the whole "main → Latest commit"
               drops to the next line together when it can't fit beside the stats. */}
           <div className="flex items-center gap-3">
-            <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} />
+            <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} onSelectOnly={handleSelectOnly} />
             <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><ArrowRightLeft className='w-6 h-6' strokeWidth='1.5' /></span>
             <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
-              left={leftSel} hasUncommitted={diff?.uncommitted_changes} />
+              left={leftSel} hasUncommitted={diff?.uncommitted_changes} onSelectOnly={handleSelectOnly} />
           </div>
 
           {resetBtn}
