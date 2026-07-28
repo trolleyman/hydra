@@ -45,7 +45,7 @@ func adoptedPrePromptNote(a AdoptSpec) string {
 	b.WriteString("\n\nThis head was spawned on an EXISTING pull/merge request - you are working on someone else's PR, not a fresh branch:\n")
 	fmt.Fprintf(&b, "- %s (#%s on %s), targeting `%s`.\n", a.ReviewURL, a.ReviewID, a.Provider, a.TargetBranch)
 	b.WriteString("- Your worktree starts at the PR head, so the diff is the whole PR plus your own edits.\n")
-	b.WriteString("- Read its review comments with the `mcp__hydra__get_review_comments` and `mcp__hydra__get_review_status` tools. `gh`/`glab` are NOT authenticated inside the sandbox - those tools are the only way to reach the forge. Hydra refreshes them every ~30s, so re-run them after a push if you are waiting on new feedback.\n")
+	b.WriteString("- Read its review comments with the `mcp__hydra__get_review_comments` and `mcp__hydra__get_review_status` tools. `gh`/`glab` are NOT authenticated inside the sandbox - those tools are the only way to reach the forge. Each call re-reads the PR from the forge, so re-run them after a push to pick up new feedback.\n")
 	if a.CanPush {
 		b.WriteString("- Commit as usual; the user pushes your commits back to the PR from Hydra's UI.\n")
 	} else {

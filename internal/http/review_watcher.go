@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/forge"
@@ -54,35 +55,45 @@ func (s *Server) pollLinkedReviews(ctx context.Context) {
 		return
 	}
 	for _, a := range linked {
-		projectRoot := a.ProjectPath
-		review := reviewConfigFor(projectRoot)
-		remote := review.GetRemote()
-		remoteURL := git.RemoteURL(projectRoot, remote)
-		provider, err := forge.Resolve(review, remoteURL)
+		st, err := s.refreshHeadReview(ctx, a)
 		if err != nil {
-			continue // provider not resolvable now (CLI missing / auto-detect) - retry
+			continue // provider not resolvable / transient forge error - retry next tick
 		}
-		st, err := provider.Status(ctx, projectRoot, remote, a.ReviewID)
-		if err != nil {
-			continue // transient forge error
-		}
-		// Cache the fresh state on the head (for the UI chip).
-		s.cacheReviewState(projectRoot, a.ID, st)
-
-		// Fetch unresolved discussions only when the status reports some, then write
-		// the per-head review file the agent's mcp__hydra__* tools read (3.5a).
-		var discussions []forge.Discussion
-		if st.UnresolvedDiscussions > 0 {
-			if d, derr := provider.Discussions(ctx, projectRoot, remote, a.ReviewID); derr == nil {
-				discussions = d
-			}
-		}
-		writeReviewFile(projectRoot, a, st, discussions)
-
 		if st.State == forge.StateMerged {
-			s.handleRemoteMerge(ctx, projectRoot, a.ID)
+			s.handleRemoteMerge(ctx, a.ProjectPath, a.ID)
 		}
 	}
+}
+
+// refreshHeadReview re-reads one linked head's MR from the forge and rewrites
+// both the cached UI state and the head's review file (the snapshot the agent's
+// review tools read). Shared by the 30s watcher tick and the on-demand refresh a
+// head requests through reviewq, so both paths produce identical state.
+func (s *Server) refreshHeadReview(ctx context.Context, a db.Agent) (forge.Status, error) {
+	projectRoot := a.ProjectPath
+	review := reviewConfigFor(projectRoot)
+	remote := review.GetRemote()
+	provider, err := forge.Resolve(review, git.RemoteURL(projectRoot, remote))
+	if err != nil {
+		return forge.Status{}, errtrace.Wrap(err)
+	}
+	st, err := provider.Status(ctx, projectRoot, remote, a.ReviewID)
+	if err != nil {
+		return forge.Status{}, errtrace.Wrap(err)
+	}
+	// Cache the fresh state on the head (for the UI chip).
+	s.cacheReviewState(projectRoot, a.ID, st)
+
+	// Fetch unresolved discussions only when the status reports some, then write
+	// the per-head review file the agent's mcp__hydra__* tools read (3.5a).
+	var discussions []forge.Discussion
+	if st.UnresolvedDiscussions > 0 {
+		if d, derr := provider.Discussions(ctx, projectRoot, remote, a.ReviewID); derr == nil {
+			discussions = d
+		}
+	}
+	writeReviewFile(projectRoot, a, st, discussions)
+	return st, nil
 }
 
 // cacheReviewState persists a forge Status onto the head and notifies clients when

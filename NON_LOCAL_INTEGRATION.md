@@ -600,10 +600,22 @@ agent's MCP config (`hydra mcp` - `internal/cli/mcp.go` +
 in as new tools on that existing server, NOT as a generic forge MCP:
 
 - `get_review_status` - is this head linked to an MR? URL, target
-  branch, draft state, CI, approvals, unresolved-discussion count
-  (served from the watcher's cached view, 3.5).
+  branch, draft state, CI, approvals, unresolved-discussion count.
 - `get_review_comments` - the unresolved discussions with file/line
   context, ready to act on.
+
+BUILT, with one change to the plan: the tools do NOT serve the 30s
+watcher's cached view. Each call first asks the daemon to re-read the MR
+from the forge (`internal/reviewq` - the same request/result file channel
+shape as the gate and gitq; `RunReviewRequestWatcher` answers on a 500ms
+cadence) and only then reads the review file the daemon rewrote. A
+refresh that fails or times out is not fatal - the cached snapshot is
+returned with the reason attached, so the agent never reads a stale "no
+comments" as authoritative. Requests from a head whose state was
+refreshed in the last 5s are answered from it, which collapses the
+back-to-back status+comments calls agents actually make into one forge
+round trip. The 30s tick remains for the UI chip and remote-merge
+detection.
 - Write-side, maybe later: `reply_to_review_comment` /
   `resolve_discussion` - gated like any MCP write (parked for approval
   unless allow-listed), since they act as the user on the forge.

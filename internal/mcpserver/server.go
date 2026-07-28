@@ -117,6 +117,11 @@ type ReviewFile struct {
 	Mergeable             bool            `json:"mergeable,omitempty"`
 	Comments              []ReviewComment `json:"comments,omitempty"`
 	UpdatedAt             string          `json:"updated_at,omitempty"`
+	// StaleReason is set by the loader (not persisted) when it could not confirm
+	// this snapshot is current - the on-demand forge refresh failed or timed out.
+	// The tools pass it on so the agent knows to treat the answer as possibly
+	// out of date rather than acting on "no comments".
+	StaleReason string `json:"-"`
 }
 
 // ReviewComment is one unresolved review thread with file/line context.
@@ -233,13 +238,13 @@ func toolDefs(deps Deps) []map[string]any {
 		defs = append(defs,
 			map[string]any{
 				"name":        "get_review_status",
-				"description": "Get the status of YOUR merge/pull request, if this head is linked to one: URL, target branch, draft/open/merged state, CI status, approvals, and the count of unresolved review discussions. Scoped to this head's own MR only.",
+				"description": "Get the status of YOUR merge/pull request, if this head is linked to one: URL, target branch, draft/open/merged state, CI status, approvals, and the count of unresolved review discussions. Reads the MR from the forge on every call (a second or two), so the answer is live - call it again whenever you need current state. Scoped to this head's own MR only.",
 				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 				"annotations": map[string]any{"readOnlyHint": true},
 			},
 			map[string]any{
 				"name":        "get_review_comments",
-				"description": "Get YOUR merge/pull request's unresolved review discussions with file/line context, ready to act on. Use this to address reviewer feedback, then commit your changes.",
+				"description": "Get YOUR merge/pull request's unresolved review discussions with file/line context, ready to act on. Reads the MR from the forge on every call (a second or two), so it picks up comments left while you were working - call it again after a push. Use this to address reviewer feedback, then commit your changes.",
 				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 				"annotations": map[string]any{"readOnlyHint": true},
 			},
@@ -323,12 +328,23 @@ func reviewStatusText(deps Deps) string {
 	}
 	b.WriteString("- Unresolved discussions: " + itoa(rf.UnresolvedDiscussions) + "\n")
 	if rf.UpdatedAt != "" {
-		b.WriteString("- Fetched from the forge at: " + rf.UpdatedAt + " (Hydra re-polls every ~30s, so call again for fresher state)\n")
+		b.WriteString("- Fetched from the forge at: " + rf.UpdatedAt + "\n")
 	}
+	b.WriteString(freshnessNote(rf))
 	if rf.UnresolvedDiscussions > 0 {
 		b.WriteString("Use get_review_comments to read the unresolved discussions.\n")
 	}
 	return b.String()
+}
+
+// freshnessNote tells the agent how much to trust the snapshot's age. Each tool
+// call asks the daemon to re-read the MR first, so the normal case is "this is
+// live"; StaleReason is set only when that refresh could not be completed.
+func freshnessNote(rf *ReviewFile) string {
+	if rf.StaleReason != "" {
+		return "NOTE: " + rf.StaleReason + "\n"
+	}
+	return ""
 }
 
 // reviewCommentsText renders this head's unresolved discussions for
@@ -346,9 +362,10 @@ func reviewCommentsText(deps Deps) string {
 		if rf.UpdatedAt != "" {
 			msg += " as of " + rf.UpdatedAt
 		}
-		return msg + ". Hydra re-polls the forge every ~30s, so call again to pick up newer ones."
+		return msg + ".\n" + freshnessNote(rf)
 	}
 	var b strings.Builder
+	b.WriteString(freshnessNote(rf))
 	b.WriteString("Unresolved review discussions on your MR (address them, then commit):\n\n")
 	for i, c := range rf.Comments {
 		b.WriteString(itoa(i + 1))

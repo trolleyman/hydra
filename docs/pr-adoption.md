@@ -28,6 +28,12 @@ creates the empty file when none exists, so it leaves the seeded snapshot alone.
 The write truncates in place - the file is bind-mounted into the sandbox by
 inode, so a write-and-rename would leave the agent reading a stale copy forever.
 
+The seed covers the first turn; freshness after that is the review tools'
+own job - each call now asks the daemon to re-read the MR from the forge
+(`internal/reviewq`, NON_LOCAL_INTEGRATION.md 3.5a) before answering, so an
+agent that pushes a fix and asks again sees the new comments rather than the
+30s watcher's last cache.
+
 Two supporting changes:
 
 - an adopted head's system prompt gains a note naming the PR, its target branch,

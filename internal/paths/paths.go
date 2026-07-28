@@ -277,6 +277,22 @@ func GetApprovalsDirFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "approvals", id)
 }
 
+// GetReviewReqRootDir returns the parent dir holding every head's review-refresh
+// channel (.hydra/local/review-req). The daemon's review-request watcher scans it
+// to find heads asking for a forge refresh.
+func GetReviewReqRootDir(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-req")
+}
+
+// GetReviewReqDir returns the per-head directory used for the on-demand review
+// refresh round-trip: the in-sandbox review tools write a request here (the dir
+// is made writable at its real host path, like the approvals dir) and the daemon
+// re-reads the MR from the forge, rewrites the head's review file and writes back
+// a result. Lives under .hydra/local/review-req/<id>.
+func GetReviewReqDir(projectRoot, id string) string {
+	return filepath.Join(GetReviewReqRootDir(projectRoot), id)
+}
+
 // GetGitopsRootDir returns the parent dir holding every head's host-mediated git
 // channel (.hydra/local/gitops). The daemon's gitops watcher scans it to find
 // heads with pending git-operation requests.
