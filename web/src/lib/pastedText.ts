@@ -121,10 +121,15 @@ export function extensionMime(ext: string): string {
 // an attachment also inserts "[filename]" into the composer text. These pure
 // helpers build and remove those markers.
 
-// The marker text inserted for a list of attached filenames, with a trailing
-// space so typing continues naturally: "[image1.png] [image2.png] ".
-export function pasteMarkerText(filenames: string[]): string {
-  return filenames.map((n) => `[${n}]`).join(' ') + ' '
+// The marker text inserted for a list of attached filenames:
+// "[image1.png] [image2.png]". No TRAILING space - the caret is left right after
+// the "]" so what you type next isn't pushed away from it. `before` is the text
+// immediately preceding the caret; a LEADING space is added when that text ends
+// in a non-space, so a marker never fuses onto the previous word (or onto the
+// marker a previous paste left behind).
+export function pasteMarkerText(filenames: string[], before = ''): string {
+  const lead = before !== '' && !/\s$/.test(before) ? ' ' : ''
+  return lead + filenames.map((n) => `[${n}]`).join(' ')
 }
 
 // Remove the first "[filename]" marker (with its trailing space, when present)

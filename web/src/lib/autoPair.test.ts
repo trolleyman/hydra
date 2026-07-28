@@ -45,6 +45,18 @@ describe('autoPairEdit: opening', () => {
     expect(type('`', '```sh\n|\n```')).toBeNull()
   })
 
+  it('leaves a backslash-escaped mark as a literal', () => {
+    expect(type('`', '\\|')).toBeNull()
+    expect(type('(', 'a \\|')).toBeNull()
+    expect(type('"', '\\|')).toBeNull()
+  })
+
+  it('pairs again when the backslash is itself escaped', () => {
+    expect(type('`', '\\\\|')).toBe('\\\\`|`')
+    expect(type('`', '\\\\\\\\|')).toBe('\\\\\\\\`|`')
+    expect(type('`', '\\\\\\|')).toBeNull()
+  })
+
   it('ignores keys that are not a single character', () => {
     expect(autoPairEdit('Enter', '', 0, 0)).toBeNull()
     expect(autoPairEdit('ArrowLeft', '', 0, 0)).toBeNull()
@@ -56,6 +68,11 @@ describe('autoPairEdit: stepping over a closer', () => {
     expect(type('`', '`foo|`')).toBe('`foo`|')
     expect(type(')', '(foo|)')).toBe('(foo)|')
     expect(type('"', '"foo|"')).toBe('"foo"|')
+  })
+
+  it('does not step over a closer with an escaped mark', () => {
+    expect(type('`', '`\\|`')).toBeNull()
+    expect(type(')', '(foo\\|)')).toBeNull()
   })
 
   it('leaves a closer with nothing to step over to the browser', () => {
@@ -115,5 +132,10 @@ describe('backspacePairEdit', () => {
     expect(type('Backspace', '(|]')).toBeNull()
     expect(type('Backspace', '|')).toBeNull()
     expect(type('Backspace', '(|a|)')).toBeNull()
+    expect(type('Backspace', '\\`|`')).toBeNull() // escaped: never ours to pair
+  })
+
+  it('still clears a pair after an escaped backslash', () => {
+    expect(type('Backspace', '\\\\`|`')).toBe('\\\\|')
   })
 })

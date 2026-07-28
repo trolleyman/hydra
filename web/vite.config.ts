@@ -66,6 +66,18 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       keepDistGitkeep(),
     ],
+    resolve: {
+      alias: {
+        // Bundle tldts (the Public Suffix List, see src/lib/publicSuffix.ts)
+        // from its own pre-minified ESM bundle rather than its ES6 sources.
+        // Built from source the chunk comes out 259KB / 111KB gzipped, because
+        // the minifier inlines the trie's 65KB label string into each of its
+        // three use sites - three copies of the whole list. The published
+        // bundle has already been minified without that, and re-minifying it
+        // is a no-op: 125KB / 47KB gzipped, the same code.
+        tldts: 'tldts/dist/index.esm.min.js',
+      },
+    },
     clearScreen: false,
     // Emit Web Workers as ES modules (they're instantiated with { type: 'module' }).
     // The default 'iife' worker format can't code-split, so it would inline every

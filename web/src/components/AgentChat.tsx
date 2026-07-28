@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   Archive,
   ArrowDown,
@@ -36,6 +36,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
+import { SiGit } from '@icons-pack/react-simple-icons'
 import { AgentStatus } from '../api'
 import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
@@ -43,6 +44,7 @@ import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { fileViewLineInfo, parseFileViewScript, splitFileViewOutput, type FileViewSection } from '../lib/fileViewCommand'
+import { parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
 import { formatBytes } from '../lib/formatBytes'
 import { highlightHtml, highlightLines } from '../lib/highlightCore'
@@ -61,6 +63,7 @@ import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
 import { ImageLightbox } from './ImageLightbox'
 import { ToolApproval } from './ToolApproval'
+import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { WorkSpark } from './WorkSpark'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
@@ -2154,6 +2157,131 @@ function FileViewSections({ sections }: { sections: FileViewSection[] }) {
   )
 }
 
+// One rendered line of a shell script's sectioned output.
+interface ScriptOutputRow {
+  // The line's number in the file it came from ('' when it has none).
+  num: string
+  // The line's content, already highlighted.
+  html: string
+  // The `path:` a multi-file search printed in front of the line, shown lowlit
+  // so the file it names does not read as part of the line's code.
+  prefix?: string
+  // 'code' is a line of some file, 'marker' a separator the script echoed, and
+  // 'plain' output nothing could be said about.
+  tone: 'code' | 'marker' | 'plain'
+}
+
+// scriptMatchRows renders a search's output: the file line numbers grep printed
+// in the gutter, the rest highlighted as the file it came from. Consecutive
+// lines from the SAME file are highlighted together - a search prints
+// non-contiguous lines, so this is as much context as the highlighter can
+// honestly be given, and it keeps a multi-file search from colouring one file's
+// lines by another's language.
+function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): ScriptOutputRow[] {
+  const only = section.match.paths.length === 1 ? section.match.paths[0] : ''
+  const rows: ScriptOutputRow[] = []
+  let run: MatchLine[] = []
+  let runLang = ''
+  const flush = () => {
+    if (run.length === 0) return
+    const html = highlightLines(run.map((l) => l.text).join('\n'), runLang || 'plaintext')
+    run.forEach((l, i) => rows.push({ num: l.num, html: html[i] ?? '', prefix: l.path || undefined, tone: 'code' }))
+    run = []
+  }
+  for (const line of parseMatchLines(section.lines, section.match.paths)) {
+    if (line.separator) {
+      flush()
+      rows.push({ num: '', html: '', tone: 'plain' })
+      continue
+    }
+    const lang = langFromPath(line.path || only)
+    if (lang !== runLang) flush()
+    runLang = lang
+    run.push(line)
+  }
+  flush()
+  return rows
+}
+
+// scriptOutputRows turns the sections of a shell script's output (lib/
+// shellSections) into the rows the panel below renders: file content highlighted
+// by its own extension and numbered by its own line numbers, the script's `echo`
+// separators coloured as the strings they are, and anything unattributed left as
+// the plain terminal text it was.
+function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
+  const rows: ScriptOutputRow[] = []
+  for (const section of sections) {
+    if (section.kind === 'matches') {
+      rows.push(...scriptMatchRows(section))
+      continue
+    }
+    if (section.kind !== 'view') {
+      // 'plaintext' is not a grammar, so this is just the escaped lines - which
+      // is what both a separator and unattributable output want.
+      const escaped = highlightLines(section.lines.join('\n'), 'plaintext')
+      const marker = section.kind === 'marker'
+      escaped.forEach((html) => rows.push({
+        num: '',
+        html: marker ? `<span class="token string">${html}</span>` : html,
+        tone: marker ? 'marker' : 'plain',
+      }))
+      continue
+    }
+    const view = section.view
+    // A `cat -n` brought its own numbers; a range knows where it started; a
+    // plain `tail` counts back from an end nothing here knows, so it gets the
+    // highlighting without the gutter.
+    const nums: string[] = []
+    const code: string[] = []
+    for (const line of section.lines) {
+      const numbered = view.numbered ? /^\s{0,6}(\d+)\t(.*)$/.exec(line) : null
+      nums.push(numbered ? numbered[1] : view.start != null && !view.numbered ? String(view.start + code.length) : '')
+      code.push(numbered ? numbered[2] : line)
+    }
+    const html = highlightLines(code.join('\n'), langFromPath(view.path) || 'plaintext')
+    nums.forEach((num, i) => rows.push({ num, html: html[i] ?? '', tone: 'code' }))
+  }
+  return rows
+}
+
+// ScriptOutputPanel renders a Bash step's output as the sections its own script
+// produced (see lib/shellSections) instead of as one anonymous wall of terminal
+// text: each stretch highlighted as the file it came from, numbered by that
+// file's line numbers, with the `echo` separators between them coloured as the
+// strings the script printed.
+//
+// It stays ONE panel with one scrollbar - this is still the command's output,
+// read top to bottom - and the gutter column only appears when some line in it
+// actually has a number to show.
+function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
+  const rows = useMemo(() => scriptOutputRows(sections), [sections])
+  const gutter = rows.some((r) => r.num !== '')
+  return (
+    <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
+      {/* data-copy-code / data-copy-line: the rows are grid cells, not block
+          elements, so without them a copy hands over every line run together
+          (see lib/copyMarkdown). */}
+      <div data-copy-code className={`grid ${gutter ? 'grid-cols-[auto_1fr]' : 'grid-cols-[1fr]'} text-[11px] leading-4 font-mono`}>
+        {rows.map((row, i) => (
+          <Fragment key={i}>
+            {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
+            {gutter && (
+              <span className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]">{row.num}</span>
+            )}
+            <span
+              data-copy-line
+              className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
+            >
+              {row.prefix && <span className="text-stone-400 dark:text-stone-500">{row.prefix}:</span>}
+              <span dangerouslySetInnerHTML={{ __html: row.html }} />
+            </span>
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // EditDiffPanel shows an Edit as a unified diff instead of two disembodied
 // blobs: lines the edit leaves alone are context, the rest are -/+ rows, and
 // the characters that actually changed are marked with the same word-diff
@@ -2637,8 +2765,18 @@ function SendMessageOutcome({
   )
 }
 
-// Per-tool icons for the card header; anything unlisted gets the wrench.
-const TOOL_ICONS: Record<string, typeof Wrench> = {
+// GitMark is git's own logo, which lucide does not carry - the simple-icons set
+// does (the same one the forge marks come from, see ProviderIcon). title=""
+// suppresses the SVG <title> ("Git") those marks render by default: that is a
+// native OS tooltip, and the card header it sits in is interactive.
+function GitMark({ className }: { className?: string }) {
+  return <SiGit className={className} title="" aria-hidden />
+}
+
+// Per-tool icons for the card header; anything unlisted gets the wrench. Typed
+// by the props actually passed below rather than as a lucide icon, so a
+// simple-icons mark (GitMark) fits the same map.
+const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   Bash: SquareTerminal,
   Read: FileText,
   Edit: FilePen,
@@ -2656,14 +2794,14 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   UpdatePlan: ListChecks,
   // The git tools are keyed by raw name (see GIT_TOOL_LABELS); a generic wrench
   // gives no hint that the card rewrote the branch.
-  mcp__hydra__git_commit: GitCommitHorizontal,
-  mcp__hydra__git_add: GitCommitHorizontal,
-  mcp__hydra__git_reset: GitCommitHorizontal,
-  mcp__hydra__git_revert: GitCommitHorizontal,
-  mcp__hydra__git_cherry_pick: GitCommitHorizontal,
-  mcp__hydra__git_rebase: GitCommitHorizontal,
-  mcp__hydra__git_rebase_continue: GitCommitHorizontal,
-  mcp__hydra__git_rebase_abort: GitCommitHorizontal,
+  mcp__hydra__git_commit: GitMark,
+  mcp__hydra__git_add: GitMark,
+  mcp__hydra__git_reset: GitMark,
+  mcp__hydra__git_revert: GitMark,
+  mcp__hydra__git_cherry_pick: GitMark,
+  mcp__hydra__git_rebase: GitMark,
+  mcp__hydra__git_rebase_continue: GitMark,
+  mcp__hydra__git_rebase_abort: GitMark,
   mcp__hydra__git_merge: GitMerge,
   mcp__hydra__git_merge_continue: GitMerge,
   mcp__hydra__git_merge_abort: GitMerge,
@@ -2807,6 +2945,23 @@ const ToolCard = memo(function ToolCard({
   const fileViewSections =
     fileViewSteps && renderedResult !== undefined && !item.isError
       ? splitFileViewOutput(fileViewSteps, stripAnsi(renderedResult))
+      : null
+
+  // A script that is not ALL reads still says a great deal about its own output.
+  // The constant `echo`s an agent puts between its steps mark where each
+  // command's output begins, and the command in between names the file its lines
+  // came from - so the wall of terminal text can be given back its structure:
+  // file content highlighted by extension, grep's own line numbers in a gutter,
+  // the separators coloured as strings (see lib/shellSections).
+  //
+  // Only where the Read presentation above did not already claim the output, and
+  // never over ANSI colour (a `grep --color` line is not the file's own text) or
+  // an error (stderr interleaves with stdout in an order no parse of the script
+  // can predict, so every section boundary would be a guess).
+  const scriptSteps = isBash && fileViewSections === null ? parseScriptSteps(unwrapBashLoginCommand(bashSource)) : null
+  const scriptSections =
+    scriptSteps && renderedResult !== undefined && !item.isError && !hasAnsi(renderedResult)
+      ? splitScriptOutput(scriptSteps, renderedResult)
       : null
 
   // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
@@ -3058,7 +3213,7 @@ const ToolCard = memo(function ToolCard({
               ) : isGlob ? (
                 <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-stone-700 dark:text-stone-200`}>{input!.pattern as string}</div>
               ) : isWebFetch ? (
-                <div className={`${PANEL_CLASS} px-2.5 py-1.5 space-y-1.5`}><a href={input!.url as string} target="_blank" rel="noreferrer" className="block break-all text-blue-600 dark:text-blue-400 hover:underline">{input!.url as string}</a>{typeof input!.prompt === 'string' && <div className="text-stone-600 dark:text-stone-300">{input!.prompt as string}</div>}</div>
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 space-y-1.5`}><a href={input!.url as string} target="_blank" rel="noreferrer" className="block break-all text-blue-600 dark:text-blue-400 hover:underline"><UrlText url={input!.url as string} /></a>{typeof input!.prompt === 'string' && <div className="text-stone-600 dark:text-stone-300">{input!.prompt as string}</div>}</div>
               ) : isFileChanges ? (
                 <FileChangesPanel changes={input?.changes} worktree={worktree} />
               ) : isWrite ? (
@@ -3143,6 +3298,8 @@ const ToolCard = memo(function ToolCard({
                           ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
                         : fileViewSections
                           ? <FileViewSections sections={fileViewSections} />
+                        : scriptSections
+                          ? <ScriptOutputPanel sections={scriptSections} />
                         : isRead && !item.isError
 								? <ReadOutputPanel text={renderedResult} lang={outputLang} />
 								: <OutputPanel text={renderedResult} lang={outputLang} isError={item.isError} />
@@ -8449,13 +8606,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     )
   }
 
-  // Insert text into the composer at the caret, as its own undo step - used for
-  // the "[filename]" paste markers, so a single Ctrl+Z removes the marker (and,
-  // paired with the chip's own step, walks the whole paste back).
-  function insertAtCaret(insert: string) {
+  // Insert "[filename]" paste markers into the composer at the caret, as their
+  // own undo step, so a single Ctrl+Z removes them (and, paired with the chip's
+  // own step, walks the whole paste back). The text before the caret decides
+  // whether they need a leading space; they never carry a trailing one, so the
+  // caret stays against the "]".
+  function insertPasteMarkers(names: string[]) {
     const ta = textareaRef.current
     const start = ta?.selectionStart ?? input.length
     const end = ta?.selectionEnd ?? input.length
+    const insert = pasteMarkerText(names, input.slice(0, start))
     const caret = start + insert.length
     commit(
       (prev) => makeSnapshot(prev.prompt.slice(0, start) + insert + prev.prompt.slice(end), prev.attachments, caret, caret),
@@ -8475,7 +8635,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const names = addFiles(files)
     // With the preference on, also reference the pasted attachments in the
     // message text via "[filename]" markers at the caret.
-    if (pasteMarkers && names.length > 0) insertAtCaret(pasteMarkerText(names))
+    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
