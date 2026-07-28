@@ -4065,7 +4065,7 @@ function QuestionCard({
               return (
                 <div
                   onClick={() => selectOther(qi)}
-                  className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
+                  className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
                     answered ? 'cursor-default' : 'cursor-text'
                   } ${
                     isSel
@@ -4083,7 +4083,7 @@ function QuestionCard({
                       e.stopPropagation()
                       selectOther(qi, !otherSel[qi])
                     }}
-                    className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
+                    className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
                       q.multiSelect ? 'rounded' : 'rounded-full'
                     } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'} ${
                       answered ? 'cursor-default' : 'cursor-pointer'
@@ -4091,29 +4091,43 @@ function QuestionCard({
                   >
                     {isSel && <Check className="h-2.5 w-2.5 text-white" />}
                   </button>
-                  <input
-                    type="text"
-                    value={showOther[qi]}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
-                      // Typing claims the selection.
-                      selectOther(qi)
-                    }}
-                    onFocus={() => selectOther(qi)}
-                    onKeyDown={(e) => {
-                      // Enter submits the card, like the composer. Ignored while
-                      // an IME is composing, and a no-op if another question is
-                      // still unanswered (submit() gates on `complete`).
-                      if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-                      e.preventDefault()
-                      e.stopPropagation()
-                      submit()
-                    }}
-                    disabled={answered}
-                    placeholder="Other..."
-                    className="min-w-0 flex-1 bg-transparent text-xs font-medium placeholder-stone-400 dark:placeholder-stone-500 placeholder:font-normal outline-none disabled:opacity-100"
-                  />
+                  {/* A textarea, not an input, so a long custom answer wraps
+                      onto more lines instead of being clipped. It auto-grows
+                      with no JS: an invisible span holding the same text sits
+                      in the same grid cell and drives the height, so it also
+                      re-fits when the pane is resized. */}
+                  <div className="grid min-w-0 flex-1">
+                    <span
+                      aria-hidden
+                      className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4"
+                    >
+                      {showOther[qi] + ' '}
+                    </span>
+                    <textarea
+                      rows={1}
+                      value={showOther[qi]}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
+                        // Typing claims the selection.
+                        selectOther(qi)
+                      }}
+                      onFocus={() => selectOther(qi)}
+                      onKeyDown={(e) => {
+                        // Enter submits the card, like the composer (shift+Enter
+                        // still inserts a newline). Ignored while an IME is
+                        // composing, and a no-op if another question is still
+                        // unanswered (submit() gates on `complete`).
+                        if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        submit()
+                      }}
+                      disabled={answered}
+                      placeholder="Other..."
+                      className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+                    />
+                  </div>
                 </div>
               )
             })()}
