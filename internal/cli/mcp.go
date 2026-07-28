@@ -64,6 +64,14 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 			deps.ReplyLocal = replyLocalToReviewThread
 		}
 	}
+	// The self-status tools ride the same daemon channel: tests/artifacts state
+	// lives in the daemon's managers, and services state ONLY ever exists in daemon
+	// memory, so there is nothing in the sandbox to read. No channel -> hide them
+	// rather than advertise a tool that can only time out.
+	if os.Getenv("HYDRA_REVIEW_REQ_DIR") != "" {
+		deps.HeadStatus = headStatusFromMCP
+		deps.TestLogs = testLogsFromMCP
+	}
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
 }
 
@@ -257,6 +265,37 @@ func replyLocalToReviewThread(threadID, body string) (bool, string) {
 		return false, "Hydra did not confirm the note in time, so it may not have been saved. Ask the user to check the daemon."
 	}
 	return res.OK, res.Message
+}
+
+// headStatusFromMCP backs get_head_status: it asks the daemon for this head's
+// tests/artifacts/services summary and relays the text it rendered. The daemon
+// does the rendering because it owns the state - the sandbox has no view of the
+// test cache or the service supervisors at all.
+func headStatusFromMCP() (string, bool) {
+	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
+	if dir == "" {
+		return "Status is not available in this session.", false
+	}
+	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpHeadStatus})
+	if !ok {
+		return "Hydra did not answer in time, so your status could not be read. Ask the user to check the daemon if it keeps happening.", false
+	}
+	return res.Message, res.OK
+}
+
+// testLogsFromMCP backs get_test_logs. tail is passed through as-is; the daemon
+// applies the default and the cap, so the bound lives in one place next to the
+// log it bounds.
+func testLogsFromMCP(runner string, tail int) (string, bool) {
+	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
+	if dir == "" {
+		return "Test logs are not available in this session.", false
+	}
+	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpTestLogs, Runner: runner, Tail: tail})
+	if !ok {
+		return "Hydra did not answer in time, so the test log could not be read. Ask the user to check the daemon if it keeps happening.", false
+	}
+	return res.Message, res.OK
 }
 
 // reviewRoundTrip submits req to the daemon's review-request watcher and blocks

@@ -447,7 +447,10 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		}, nil
 	}
 
-	projectPath := strings.TrimSpace(request.Body.Path)
+	// Expand what the user typed ("~/code/foo", or "code/foo" relative to home)
+	// before anything stats it - os.Stat has no shell to do this for it, so an
+	// unexpanded "~" used to fail as "directory does not exist".
+	projectPath := paths.ResolveUserPath(request.Body.Path)
 
 	// Handle create_if_missing
 	if request.Body.CreateIfMissing != nil && *request.Body.CreateIfMissing {
@@ -565,7 +568,9 @@ func (s *Server) EnsureTrackRemote(ctx context.Context, request api.EnsureTrackR
 // is added (registering starts its [[services]], which can run code), so nothing
 // runs until the user has trusted it. Read-only - it never executes anything.
 func (s *Server) PreviewConfigToml(_ context.Context, request api.PreviewConfigTomlRequestObject) (api.PreviewConfigTomlResponseObject, error) {
-	path := strings.TrimSpace(request.Params.Path)
+	// Same expansion as AddProject: the trust prompt must preview the config of
+	// the directory that will actually be registered.
+	path := paths.ResolveUserPath(request.Params.Path)
 	if path == "" {
 		return api.PreviewConfigToml400JSONResponse{
 			Code:    400,
@@ -585,6 +590,51 @@ func (s *Server) PreviewConfigToml(_ context.Context, request api.PreviewConfigT
 		Content: string(content),
 		Exists:  exists,
 	}), nil
+}
+
+// resolveProjectPath expands a hand-typed project path the way AddProject will:
+// paths.ResolveUserPath ("~" and relative paths against home) followed by the
+// same absolute/symlink normalization projects.AddProject applies, so the path
+// reported to the UI is the one the project would actually be registered under.
+func resolveProjectPath(typed string) string {
+	resolved := paths.ResolveUserPath(typed)
+	if resolved == "" {
+		return ""
+	}
+	if norm, err := paths.NormalizePath(resolved); err == nil {
+		return norm
+	}
+	return resolved
+}
+
+// ResolvePath tells the web UI what a hand-typed folder path actually means on
+// this machine: the absolute path it expands to, and whether a git repository
+// is there. The browser cannot work any of this out itself - it doesn't know
+// the server's home directory (see displayPathPtr) or its filesystem - so the
+// add-project flow resolves through here before it shows the path back to the
+// user or posts it to AddProject.
+func (s *Server) ResolvePath(_ context.Context, request api.ResolvePathRequestObject) (api.ResolvePathResponseObject, error) {
+	resolved := resolveProjectPath(request.Params.Path)
+	if resolved == "" {
+		return api.ResolvePath400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "path is required",
+		}, nil
+	}
+	resp := api.ResolvedPathResponse{
+		Path:        resolved,
+		DisplayPath: *displayPathPtr(resolved),
+	}
+	if st, err := os.Stat(resolved); err == nil {
+		resp.Exists = true
+		resp.IsDir = st.IsDir()
+	}
+	if root, err := paths.GetProjectRoot(resolved); err == nil {
+		resp.IsGitRepo = true
+		resp.RepoRoot = &root
+	}
+	return api.ResolvePath200JSONResponse(resp), nil
 }
 
 func (s *Server) RemoveProject(_ context.Context, request api.RemoveProjectRequestObject) (api.RemoveProjectResponseObject, error) {

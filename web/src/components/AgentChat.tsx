@@ -61,6 +61,8 @@ import { randomId } from '../lib/uuid'
 import { ImageLightbox } from './ImageLightbox'
 import { ToolApproval } from './ToolApproval'
 import { Tooltip } from './Tooltip'
+import { WorkSpark } from './WorkSpark'
+import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
@@ -3703,7 +3705,7 @@ function SubagentChatView({
       {report && <SubagentReport report={report} serif={serif} />}
       {(running || waiting) && (
         <div className="flex items-center gap-1.5 text-[11px] select-none">
-          <span className="text-[#c96442]">✳</span>
+          <WorkSpark />
           <span className="chat-text-shimmer font-medium">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
         </div>
       )}
@@ -4183,7 +4185,7 @@ function QuestionCard({
               return (
                 <div
                   onClick={() => selectOther(qi)}
-                  className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
+                  className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
                     answered ? 'cursor-default' : 'cursor-text'
                   } ${
                     isSel
@@ -4201,7 +4203,7 @@ function QuestionCard({
                       e.stopPropagation()
                       selectOther(qi, !otherSel[qi])
                     }}
-                    className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
+                    className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border ${
                       q.multiSelect ? 'rounded' : 'rounded-full'
                     } ${isSel ? 'border-[#c96442] bg-[#c96442]' : 'border-stone-300 dark:border-stone-500'} ${
                       answered ? 'cursor-default' : 'cursor-pointer'
@@ -4209,29 +4211,43 @@ function QuestionCard({
                   >
                     {isSel && <Check className="h-2.5 w-2.5 text-white" />}
                   </button>
-                  <input
-                    type="text"
-                    value={showOther[qi]}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
-                      // Typing claims the selection.
-                      selectOther(qi)
-                    }}
-                    onFocus={() => selectOther(qi)}
-                    onKeyDown={(e) => {
-                      // Enter submits the card, like the composer. Ignored while
-                      // an IME is composing, and a no-op if another question is
-                      // still unanswered (submit() gates on `complete`).
-                      if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-                      e.preventDefault()
-                      e.stopPropagation()
-                      submit()
-                    }}
-                    disabled={answered}
-                    placeholder="Other..."
-                    className="min-w-0 flex-1 bg-transparent text-xs font-medium placeholder-stone-400 dark:placeholder-stone-500 placeholder:font-normal outline-none disabled:opacity-100"
-                  />
+                  {/* A textarea, not an input, so a long custom answer wraps
+                      onto more lines instead of being clipped. It auto-grows
+                      with no JS: an invisible span holding the same text sits
+                      in the same grid cell and drives the height, so it also
+                      re-fits when the pane is resized. */}
+                  <div className="grid min-w-0 flex-1">
+                    <span
+                      aria-hidden
+                      className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4"
+                    >
+                      {showOther[qi] + ' '}
+                    </span>
+                    <textarea
+                      rows={1}
+                      value={showOther[qi]}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
+                        // Typing claims the selection.
+                        selectOther(qi)
+                      }}
+                      onFocus={() => selectOther(qi)}
+                      onKeyDown={(e) => {
+                        // Enter submits the card, like the composer (shift+Enter
+                        // still inserts a newline). Ignored while an IME is
+                        // composing, and a no-op if another question is still
+                        // unanswered (submit() gates on `complete`).
+                        if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        submit()
+                      }}
+                      disabled={answered}
+                      placeholder="Other..."
+                      className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+                    />
+                  </div>
                 </div>
               )
             })()}
@@ -8457,7 +8473,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           )
           return (
             <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 select-none">
-              <span className="text-[#c96442]">✳</span>
+              <WorkSpark still />
               {segs.map((s, i) => (
                 <span key={i} className="flex items-center gap-1.5">
                   {i > 0 && <span className="text-stone-300 dark:text-stone-600">·</span>}
@@ -8579,7 +8595,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   return (
     // Every tool card below can pick up a parked security-gate approval for THIS
-    // head and grow its own Allow/Deny row (see ToolApproval).
+    // head and grow its own Allow/Deny row (see ToolApproval). The agent type
+    // rides alongside it so chat chrome (the working spark) can take this head's
+    // brand accent instead of Claude's unconditionally.
+    <ChatAgentTypeContext.Provider value={agentType ?? 'claude'}>
     <ChatApprovalContext.Provider value={approvalCtx}>
     <div
       className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
@@ -8697,7 +8716,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               so the reasoning<->working transition doesn't shift the layout. */}
           {isTurnRunning && replayDone && !lastIsResult && (
             <div className="flex items-center gap-1.5 text-[11px] select-none animate-chat-item-in">
-              <span className="text-[#c96442]">✳</span>
+              <WorkSpark />
               <span className="chat-text-shimmer font-medium">{turnVerb}...</span>
               {/* tabular-nums so the ticking elapsed seconds / token count keep a
                   fixed width and the line doesn't jitter horizontally as they change. */}
@@ -8972,5 +8991,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       )}
     </div>
     </ChatApprovalContext.Provider>
+    </ChatAgentTypeContext.Provider>
   )
 }

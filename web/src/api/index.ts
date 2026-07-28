@@ -58,6 +58,7 @@ export type { RepositoryPushStatus } from './models/RepositoryPushStatus';
 export type { RepositoryTreeResponse } from './models/RepositoryTreeResponse';
 export type { RepositoryUncommittedChanges } from './models/RepositoryUncommittedChanges';
 export type { RepositoryUncommittedFile } from './models/RepositoryUncommittedFile';
+export type { ResolvedPathResponse } from './models/ResolvedPathResponse';
 export type { ResourceLimits } from './models/ResourceLimits';
 export type { ReviewConfig } from './models/ReviewConfig';
 export type { ReviewConfigResponse } from './models/ReviewConfigResponse';

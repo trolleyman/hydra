@@ -7,7 +7,7 @@ export type DialogType = 'info' | 'error' | 'warning' | 'confirm'
 // (an icon tile, a stacked title/description and a details chip) matching the
 // agent-action redesign. They flow through the same store so the single mounted
 // <Dialog/> and every `isOpen` guard around the app keep working unchanged.
-export type DialogVariant = 'generic' | 'merge' | 'kill' | 'restart' | 'updateBase' | 'mergeGate'
+export type DialogVariant = 'generic' | 'merge' | 'kill' | 'restart' | 'updateBase' | 'mergeGate' | 'sendPrompt'
 
 // Extra structured content for the rich variants, filled in (and patched in
 // asynchronously via `update`) by the merge/kill handlers.
@@ -32,6 +32,11 @@ export interface DialogDetails {
   testStatus?: 'failing' | 'errored' | 'running'
   testFailed?: number
   testProgress?: string
+  // sendPrompt: the message that would be sent to the agent, VERBATIM. The panel
+  // shows it in full (scrolling if long) rather than summarising - the whole
+  // point of the confirmation is that you approve the exact text, not a
+  // description of it.
+  prompt?: string
   // mergeGate: when the merge is gated because the AGENT itself hasn't finished
   // (still working, or blocked asking you a question) rather than by a test
   // verdict, this says which - the panel renders that reason instead of a test

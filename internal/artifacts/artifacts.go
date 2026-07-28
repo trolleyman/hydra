@@ -927,6 +927,34 @@ func (m *Manager) Prefetch(spec config.ArtifactScript, v Version) (Meta, error) 
 	return errtrace.Wrap2(m.get(spec, v, false))
 }
 
+// Peek returns the cached entry for (script, v) without starting a generation,
+// plus whether one exists - the artifacts analog of tests.Manager.Peek. Reading
+// a status must never trigger work: the head-status MCP tool answers from this,
+// and an agent asking "how are my screenshots doing?" should not kick off a
+// screenshot run it will then be told is in flight.
+//
+// Files are omitted from the in-flight snapshot (unlike get's, which feeds the
+// live tile grid) - a caller peeking wants the status, not the partial output.
+func (m *Manager) Peek(script string, v Version) (Meta, bool, error) {
+	key, ref, err := m.versionKey(v)
+	if err != nil {
+		return Meta{}, false, errtrace.Wrap(err)
+	}
+	dir := m.entryDir(script, key)
+	m.mu.Lock()
+	if meta, ok := readMeta(dir); ok {
+		m.mu.Unlock()
+		return meta, true, nil
+	}
+	if _, inFlight := m.gens[dir]; inFlight {
+		meta := Meta{Script: script, Key: key, Ref: ref, Status: StatusGenerating, Progress: m.progress[dir], StartedAt: m.startedAt[dir]}
+		m.mu.Unlock()
+		return meta, true, nil
+	}
+	m.mu.Unlock()
+	return Meta{}, false, nil
+}
+
 func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, error) {
 	key, ref, err := m.versionKey(v)
 	if err != nil {

@@ -101,6 +101,36 @@ Keep a card's body short enough to fit a phone screen. The card caps its height
 against the viewport and scrolls, but a card you have to scroll is a sign the
 content belongs in `docs/` with a pointer from the tooltip.
 
+### Labels beside icons: `.optical-center`
+
+A label centred next to an icon with `items-center` reads visibly **high**:
+flexbox centres the label's line box, which reserves room for ascenders and
+descenders the word may not use, so "Rename" is centred as if it had a descender
+it doesn't have (~1.7px high at top-bar size). Put `.optical-center`
+(`web/src/index.css` - `text-box: trim-both cap alphabetic`) on the label span so
+what gets centred is the cap-to-baseline box you actually see. Browsers without
+`text-box` support ignore it and render as before, so it can't regress anything.
+
+**It shrinks the label's box, so it is only safe when nothing depends on that
+box's height.** An audit of every icon+label row in the app found exactly two
+ways this bites, and between them they ruled out every site outside the top bar:
+
+1. **The label truncates.** Tailwind's `truncate` sets `overflow: hidden`, which
+   on a cap-trimmed box slices the descenders clean off - "project" renders as
+   "proiect". This covers the sidebar project row, the repository file tree, the
+   diff file tree, and the preview/service rows.
+2. **The row's height comes from the label.** A row with only `py-*` shrinks and
+   reflows everything under it (the Settings headings go 20px -> 16px).
+
+So: use it on a label inside a container with its OWN height (`h-7`/`h-8` like
+the top-bar buttons) whose label does not clip its overflow - `whitespace-nowrap`
+is fine, `truncate` is not. Not on prose either: trimming a multi-line block
+collapses the leading between its lines.
+
+Where it does apply, reach for it rather than nudging with `relative top-[Npx]` -
+a hardcoded nudge is tuned to whichever font happened to load when you measured
+it, and this UI's font stack resolves differently per OS.
+
 ### No raw control bytes in source
 
 Never embed raw control characters (NUL etc.) in source files - a single raw NUL
@@ -152,10 +182,12 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `adopt_mr` spawn field + `GET .../reviews`, `web/.../PRPicker.tsx`; the
   outbound publish flow is docs/non-local-integration.md)
 - **Publishing a head to a forge** (the `[review]` config, Create MR / Push to
-  MR / Pull from MR, the MR lifecycle watcher, publish-when-green, forge auth,
-  the agent's review tools) -> [docs/non-local-integration.md](docs/non-local-integration.md)
-  (BUILT; `internal/forge`, `internal/http/publish.go` + `review_watcher.go`,
-  `internal/reviewq` on-demand refresh, `mcp__hydra__get_review_*`; also lists
+  MR / Pull from MR, the ahead/behind sync chips, the MR lifecycle watcher,
+  sticky publish/sync-when-green, forge auth, the agent's review AND self-status
+  tools) -> [docs/non-local-integration.md](docs/non-local-integration.md)
+  (BUILT; `internal/forge`, `internal/http/publish.go` + `review_watcher.go` +
+  `head_status.go`, `internal/reviewq` on-demand refresh,
+  `mcp__hydra__get_review_*` / `get_head_status` / `get_test_logs`; also lists
   what is deliberately NOT built)
 - **Review threads in the diff** (forge PR comments inline, replying, local-only
   notes, the origin badges) -> [docs/review-threads.md](docs/review-threads.md)

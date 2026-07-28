@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, linkOptions, type LinkProps } from '@tanstack/react-router'
 import { highlightLines } from './lib/highlightCore'
@@ -17,7 +17,7 @@ import { ReviewThreadContext, useReviewThreadActions } from './lib/reviewThreadC
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Folder, FolderOpen, X, GitMergeConflict, Bot, File, Files as FilesIcon,
+  Folder, FolderOpen, X, GitMergeConflict, Bot, File, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
@@ -63,21 +63,56 @@ import { CopyStateIcon } from './components/CopyStateIcon'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
-function CopyButton({ text }: { text: string }) {
+// CopyButton is the diff header's copy affordance. `what` is the toast's noun
+// phrase ("Copied file path"); `idleLabel` the tooltip while nothing has been
+// copied yet. Both the icon flash AND the toast fire - the flash is the local
+// acknowledgement on the button, the toast is what tells you which of the
+// header's two copy buttons you actually hit.
+function CopyButton({ text, what, idleLabel, idle }: {
+  text: string
+  what: string
+  idleLabel: string
+  idle?: ComponentType<{ className?: string }>
+}) {
   const { state, copy } = useCopyFlash()
   // Reuse the same hint tooltip rather than adding a second one: swap its label
-  // to reflect the copy outcome while the icon flashes, then revert to "Copy path".
-  const label = state === 'ok' ? 'Copied to clipboard' : state === 'err' ? 'Copy failed' : 'Copy path'
+  // to reflect the copy outcome while the icon flashes, then revert to idle.
+  const label = state === 'ok' ? 'Copied to clipboard' : state === 'err' ? 'Copy failed' : idleLabel
   return (
     <Tooltip content={label}>
       <button
-        onClick={(e) => { e.stopPropagation(); void copy(text) }}
+        onClick={(e) => { e.stopPropagation(); void copy(text, { what }) }}
         className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
       >
-        <CopyStateIcon state={state} idleColor="text-gray-400" />
+        <CopyStateIcon state={state} idleColor="text-gray-400" idle={idle} />
       </button>
     </Tooltip>
   )
+}
+
+// fileDiffText renders a whole DiffFile back out as a unified diff, so the header
+// can put the file on the clipboard in the form it's being read in. It's the
+// per-file version of diffContextBlock (which does one hunk for a review
+// comment), minus the markdown fence: rename headers, then each hunk's @@ line
+// and its sign-prefixed lines.
+//
+// This is the DIFF, not the file's current contents - the hunks are all a
+// DiffFile carries. For a file shown expanded that amounts to the same thing
+// (one whole-file hunk); for a windowed one it's the changes plus their context,
+// which is what you'd want to paste anyway.
+function fileDiffText(file: DiffFile): string {
+  const from = file.old_path || file.path
+  const out: string[] = [`--- a/${from}`, `+++ b/${file.path}`]
+  for (const hunk of file.hunks) {
+    if (hunk.header) out.push(hunk.header)
+    for (const l of hunk.lines) {
+      // no_newline is git's "\ No newline at end of file" marker, which carries
+      // no content of its own - skip it rather than emit a bare space line.
+      if (l.type === 'no_newline') continue
+      out.push(`${l.type === 'addition' ? '+' : l.type === 'deletion' ? '-' : ' '}${l.content}`)
+    }
+  }
+  return out.join('\n')
 }
 
 // RepoOpenButton deep-links the file to the repository browser at the agent's
@@ -1387,8 +1422,21 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
             )}
           </span>
           <ChangeTypeIcon type={file.change_type} />
+          {/* Copy-path rides with the path itself rather than sitting out in the
+              header's right-hand action cluster: the flex-1 above pushed it all
+              the way over there, next to buttons that have nothing to do with the
+              path, which is what made "which of these copies what?" ambiguous. */}
+          <CopyButton text={file.path} what="file path" idleLabel="Copy path" />
         </div>
-        <CopyButton text={file.path} />
+        {/* Copy the whole file's diff. A binary file has no text to copy. */}
+        {!file.binary && file.hunks.length > 0 && (
+          <CopyButton
+            text={fileDiffText(file)}
+            what="file diff"
+            idleLabel="Copy file diff"
+            idle={FileDiffIcon}
+          />
+        )}
         {/* A deleted file no longer exists at the branch tip, so a repo-view link
             would 404 - hide it there; every other change type opens fine. */}
         {openInRepo && file.change_type !== 'deleted' && <RepoOpenButton target={openInRepo(file.path)} />}
