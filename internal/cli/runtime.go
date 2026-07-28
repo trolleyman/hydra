@@ -485,6 +485,7 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	mux.HandleFunc("/tests/projects/{project_id}/log", server.HandleTestLog)
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
 	mux.HandleFunc("/repository/projects/{project_id}/agents/{id}/blob", server.HandleAgentBlob)
+	mux.HandleFunc("GET /agent-files/projects/{project_id}/agents/{id}/blob", server.HandleAgentFileBlob)
 	mux.HandleFunc("GET /project-icon/projects/{project_id}", server.HandleProjectIcon)
 	mux.HandleFunc("GET /uploads/projects/{project_id}/blob", server.HandleUploadBlob)
 	mux.HandleFunc("/uploads/projects/{project_id}", server.HandleUpload)

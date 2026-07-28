@@ -51,6 +51,7 @@ var protectedPrefixes = []string{
 	"/shells/",
 	"/artifacts/",
 	"/repository/",
+	"/agent-files/",
 	"/uploads/",
 	"/folder-picker/",
 	"/.well-known/",

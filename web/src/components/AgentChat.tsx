@@ -4807,9 +4807,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const branchName = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
   )
-  const chatLinkCtx = projectId
-    ? { projectId, refStr: branchName, filePath: '', worktreePath: worktreePath ?? undefined }
-    : undefined
+  // memo'd: <Markdown> is memo'd on its props, so a fresh object each render
+  // would re-parse every rendered message on every keystroke in the composer.
+  // agentId lets a markdown image resolve against this head's files.
+  const chatLinkCtx = useMemo(
+    () =>
+      projectId
+        ? { projectId, agentId, refStr: branchName, filePath: '', worktreePath: worktreePath ?? undefined }
+        : undefined,
+    [projectId, agentId, branchName, worktreePath],
+  )
   // The server-persisted plan (AgentResponse.plan). On a fresh browser, this is
   // the only copy of the plan; seed it into localStorage (only when local is
   // empty) so the reconnect effect's loadPlan restores it. Runs when the value

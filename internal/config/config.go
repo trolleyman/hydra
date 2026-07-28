@@ -887,7 +887,10 @@ func RunModeLine(chatMode bool) string {
 	if chatMode {
 		return "- Run mode: chat (stream-json). You are driven through a structured " +
 			"JSON protocol and your replies are rendered as Markdown in Hydra's web " +
-			"chat UI, not written to a terminal.\n"
+			"chat UI, not written to a terminal. To SHOW the user a picture - a " +
+			"screenshot you took, a generated image - embed its path as a markdown " +
+			"image (`![what it shows](/tmp/shot.png)`): Hydra serves image files " +
+			"from your worktree and your /tmp, so they render inline in the chat.\n"
 	}
 	return "- Run mode: terminal. You are attached to an interactive terminal (PTY) " +
 		"session.\n"

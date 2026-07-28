@@ -2893,6 +2893,25 @@ func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.R
 	_, _ = w.Write([]byte(content))
 }
 
+// HandleAgentFileBlob serves the picture behind a markdown image an agent
+// embedded in a chat message. The simulation has no head filesystem to resolve
+// against, so any image-looking path yields the same placeholder PNG - enough to
+// exercise the chat renderer's inline-image path (and the "unresolvable path"
+// fallback, for anything that isn't an image).
+func (s *SimulationServer) HandleAgentFileBlob(w http.ResponseWriter, r *http.Request) {
+	if !agentImageExts[strings.ToLower(path.Ext(r.URL.Query().Get("path")))] {
+		http.NotFound(w, r)
+		return
+	}
+	png, err := base64.StdEncoding.DecodeString(simDiffImageAfterBase64)
+	if err != nil {
+		http.Error(w, "decode error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	_, _ = w.Write(png)
+}
+
 // HandleAgentBlob serves the simulated repo's raw file bytes for an agent diff.
 // The simulation has no real worktree or refs, so it ignores ref/worktree and
 // resolves purely by path - mirroring HandleRepositoryBlob - which is enough to
@@ -3428,6 +3447,11 @@ var simChatEvents = []string{
 	// (items 41, 43).
 	`{"type":"user","uuid":"sim-upload","message":{"role":"user","content":[{"type":"text","text":"Here is the mock, what do you think?\n\n/home/callum/code/hydra/.hydra/local/uploads/1783466659236080610-image1.png\n[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"}]}}`,
 	`{"type":"assistant","message":{"id":"msg_sim_5","content":[{"type":"text","text":"Looks good - the layout reads clearly."}]}}`,
+	// An assistant reply that embeds a screenshot IT took, by the path it wrote it
+	// to (inside the head's private /tmp). The chat markdown renderer resolves that
+	// through the agent-files endpoint and shows the picture inline - see
+	// MarkdownImage / HandleAgentFileBlob.
+	`{"type":"assistant","message":{"id":"msg_sim_shot","content":[{"type":"text","text":"I drove the built app to check it renders:\n\n![The popover, rendered](/tmp/hydra-sim/popover.png)\n\nNo console errors."}]}}`,
 	// A background Bash command plus its completion <task-notification>
 	// bookkeeping records (queue-operation + attachment, the CLI's real shapes,
 	// deduped to ONE notice chip). The notification carries the <output-file>
