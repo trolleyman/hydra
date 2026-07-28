@@ -4676,8 +4676,10 @@ func streamSimAskImplementation(conn *safeConn, sessionID string) {
 		sendSimThinking(conn, msgID, dur.Milliseconds())
 	}
 	// toolStep emits a tool_use card, pauses as if it were running, then lands
-	// its tool_result so the card settles out of the running state.
-	toolStep := func(msgID, toolID, name string, input map[string]any, result string, dur time.Duration) {
+	// its tool_result so the card settles out of the running state. failed marks
+	// the result an error, so the card lands red (and a fold that swallowed it
+	// still reports it - see stepSummary in the chat).
+	toolStep := func(msgID, toolID, name string, input map[string]any, result string, dur time.Duration, failed bool) {
 		use, _ := json.Marshal(map[string]any{
 			"type":       "assistant",
 			"message":    map[string]any{"id": msgID, "content": []map[string]any{{"type": "tool_use", "id": toolID, "name": name, "input": input}}},
@@ -4686,27 +4688,54 @@ func streamSimAskImplementation(conn *safeConn, sessionID string) {
 		sendSimChatEvent(conn, string(use))
 		time.Sleep(dur)
 		res, _ := json.Marshal(map[string]any{
-			"type":       "user",
-			"message":    map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": toolID, "content": result}}},
+			"type": "user",
+			"message": map[string]any{"role": "user", "content": []map[string]any{
+				{"type": "tool_result", "tool_use_id": toolID, "content": result, "is_error": failed},
+			}},
 			"session_id": sessionID,
 		})
 		sendSimChatEvent(conn, string(res))
 	}
 
+	// A long run of steps on purpose: this is the demo turn for everything that
+	// depends on a turn doing a LOT between two things it says - the folded step
+	// group, its live count, the failed-step marker, the shell cwd tracking.
 	streamText("msg_ask_impl_1", "Locked in. I'll wire the loader to merge the per-environment file over the base and validate the merged result. Let me read the current loader first.", 45*time.Millisecond)
 	toolStep("msg_ask_impl_2", "toolu_ask_read", "Read",
 		map[string]any{"file_path": "internal/config/load.go"},
-		"func Load(root string) (*Config, error) {\n\treturn parseFile(filepath.Join(root, \"config.toml\"))\n}", 900*time.Millisecond)
+		"func Load(root string) (*Config, error) {\n\treturn parseFile(filepath.Join(root, \"config.toml\"))\n}", 900*time.Millisecond, false)
 	streamThinking("msg_ask_impl_3", "Load reads a single file today. I'll overlay config.<env>.toml on top via a recursive merge, then validate the merged map against the known keys.", 1600*time.Millisecond)
+	toolStep("msg_ask_impl_3b", "toolu_ask_grep", "Grep",
+		map[string]any{"pattern": "config\\.Load\\(", "path": "internal", "output_mode": "files_with_matches"},
+		"internal/cli/runtime.go\ninternal/heads/seed.go\ninternal/http/server.go", 700*time.Millisecond, false)
 	toolStep("msg_ask_impl_4", "toolu_ask_edit", "Edit",
 		map[string]any{"file_path": "internal/config/load.go", "old_string": "return parseFile(filepath.Join(root, \"config.toml\"))", "new_string": "base, err := parseFile(filepath.Join(root, \"config.toml\"))\nif err != nil {\n\treturn nil, err\n}\nreturn applyEnvOverlay(base, root, env)"},
-		"Applied 1 edit to internal/config/load.go", 1100*time.Millisecond)
-	streamText("msg_ask_impl_5", "That's the merge wired in. Here is the full picture of how a key resolves across the layers:", 45*time.Millisecond)
+		"Applied 1 edit to internal/config/load.go", 1100*time.Millisecond, false)
+	toolStep("msg_ask_impl_4b", "toolu_ask_write", "Write",
+		map[string]any{"file_path": "internal/config/overlay.go", "content": "package config\n\n// applyEnvOverlay merges config.<env>.toml over the base config. Keys present\n// in the overlay win; tables merge recursively, scalars and arrays replace.\nfunc applyEnvOverlay(base *Config, root, env string) (*Config, error) {\n\tif env == \"\" {\n\t\treturn base, nil\n\t}\n\tover, err := parseFile(filepath.Join(root, \"config.\"+env+\".toml\"))\n\tif errors.Is(err, fs.ErrNotExist) {\n\t\treturn base, nil\n\t}\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn mergeConfig(base, over), nil\n}\n"},
+		"File created successfully at: internal/config/overlay.go", 1000*time.Millisecond, false)
+	toolStep("msg_ask_impl_4c", "toolu_ask_test_1", "Bash",
+		map[string]any{"command": "cd internal/config && go test ./...", "description": "Run the config tests"},
+		"\u001b[2m$ go test ./...\u001b[0m\n\u001b[31m--- FAIL: TestApplyEnvOverlay\u001b[0m (0.00s)\n    \u001b[2moverlay_test.go:52:\u001b[0m [network].allowed_hosts: expected the overlay's 1 host, got 3 (merged instead of replaced)\n\u001b[31mFAIL\u001b[0m\texit=1", 1300*time.Millisecond, true)
+	streamThinking("msg_ask_impl_4d", "Arrays merged when they should replace - mergeConfig recurses into every value, including slices. Replace on a slice, recurse only on tables.", 1200*time.Millisecond)
+	toolStep("msg_ask_impl_4e", "toolu_ask_edit_2", "Edit",
+		map[string]any{"file_path": "internal/config/overlay.go", "old_string": "\t\tout[k] = mergeValue(base[k], v)", "new_string": "\t\tif bt, ok := base[k].(map[string]any); ok {\n\t\t\tif ot, ok := v.(map[string]any); ok {\n\t\t\t\tout[k] = mergeTable(bt, ot)\n\t\t\t\tcontinue\n\t\t\t}\n\t\t}\n\t\tout[k] = v"},
+		"Applied 1 edit to internal/config/overlay.go", 900*time.Millisecond, false)
+	toolStep("msg_ask_impl_4f", "toolu_ask_test_2", "Bash",
+		map[string]any{"command": "go test ./... && go vet ./...", "description": "Re-run the config tests"},
+		"\u001b[2m$ go test ./... && go vet ./...\u001b[0m\nok  \tgithub.com/trolleyman/hydra/internal/config\t0.031s", 1200*time.Millisecond, false)
+	toolStep("msg_ask_impl_4g", "toolu_ask_read_2", "Read",
+		map[string]any{"file_path": "docs/configuration.md", "offset": 120, "limit": 40},
+		"## Layering\n\nConfig is read from the project root. Nothing is layered today: the loader\nreads config.toml and stops.", 700*time.Millisecond, false)
+	toolStep("msg_ask_impl_4h", "toolu_ask_edit_3", "Edit",
+		map[string]any{"file_path": "docs/configuration.md", "old_string": "Nothing is layered today: the loader\nreads config.toml and stops.", "new_string": "config.<env>.toml is layered over config.toml when an\nenvironment is named; keys in the overlay win, tables merge, arrays replace."},
+		"Applied 1 edit to docs/configuration.md", 800*time.Millisecond, false)
+	streamText("msg_ask_impl_5", "That's the merge wired in, the array-replace bug fixed, and the doc updated. Here is the full picture of how a key resolves across the layers:", 45*time.Millisecond)
 	streamText("msg_ask_impl_6", simAskImplMarkdown, 70*time.Millisecond)
 
 	result, _ := json.Marshal(map[string]any{
-		"type": "result", "subtype": "success", "duration_ms": 9200, "total_cost_usd": 0.0361,
-		"usage":      map[string]any{"input_tokens": 1400, "output_tokens": 1820, "cache_read_input_tokens": 22400, "cache_creation_input_tokens": 980},
+		"type": "result", "subtype": "success", "duration_ms": 21400, "total_cost_usd": 0.0714,
+		"usage":      map[string]any{"input_tokens": 1400, "output_tokens": 3260, "cache_read_input_tokens": 41800, "cache_creation_input_tokens": 980},
 		"session_id": sessionID,
 	})
 	sendSimChatEvent(conn, string(result))

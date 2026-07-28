@@ -3456,9 +3456,7 @@ function SubagentTimeline({
         r.row === 'item' ? (
           renderItem(r.item)
         ) : (
-          <StepGroup key={`steps-${r.id}`} items={r.items}>
-            {r.items.map(renderItem)}
-          </StepGroup>
+          <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={null} renderRow={renderItem} />
         ),
       )}
     </>
@@ -4988,12 +4986,66 @@ export function stepSummary(items: ChatItem[]): { label: string; tools: string; 
   return { label: `${total} step${total === 1 ? '' : 's'}`, tools: shown.join(' · '), thinkingMs, failed }
 }
 
+// FoldingRows plays the "collapsing away" half of a fold: it mounts OPEN with
+// the rows still at full height, then closes on the next frame, so a step that
+// just finished shrinks up into the count instead of blinking out of existence.
+// Expandable drops the content once the animation has run.
+function FoldingRows({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(true)
+  useEffect(() => {
+    // A frame, not zero: Expandable's first layout effect has to commit the open
+    // state before the close can transition from a measured height.
+    const t = setTimeout(() => setOpen(false), 16)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <Expandable open={open}>
+      <div data-step-fold className="flex flex-col gap-2 pt-2">
+        {children}
+      </div>
+    </Expandable>
+  )
+}
+
 // StepGroup is the folded run itself: one line while closed, the rows it holds
-// (rendered by the caller and handed in as children) while open. Its open state
-// is its own - the group is keyed by its first item's id, so a run that grows as
-// the turn proceeds keeps whatever the reader chose.
-function StepGroup({ items, children }: { items: ChatItem[]; children: ReactNode }) {
+// while open (rendered by the caller through renderRow). Its open state is its
+// own - the group is keyed by its first item's id, so a run that grows as the
+// turn proceeds keeps whatever the reader chose.
+//
+// liveFrom (the transcript's first live item id) drives the fold animation: a
+// step that lands while you are watching collapses into the count, while a
+// transcript replayed on load renders folded from the first frame - a reload
+// should not replay every fold.
+function StepGroup({
+  items,
+  liveFrom,
+  renderRow,
+}: {
+  items: ChatItem[]
+  liveFrom: number | null
+  renderRow: (item: ChatItem) => ReactNode
+}) {
   const [open, setOpen] = useState(false)
+  // `seen` is the steps already behind the count; `arriving` the ones that
+  // landed since the last render and are mid-fold. Both are maintained by
+  // render-phase adjustment (the React-endorsed alternative to a setState
+  // effect, as in useDelayedUnmount): the fold has to start in the same commit
+  // that the step joins the group, or the card blinks out a frame before it.
+  const [fold, setFold] = useState<{ seen: Set<number>; arriving: ChatItem[] }>(() => ({ seen: new Set(), arriving: [] }))
+  const unseen = items.filter((it) => !fold.seen.has(it.id))
+  if (unseen.length > 0) {
+    setFold({
+      seen: new Set(items.map((it) => it.id)),
+      // Nothing folds into an OPEN group (the rows are on screen either way),
+      // and nothing folds on a transcript replayed from history.
+      arriving: open ? [] : unseen.filter((it) => liveFrom != null && it.id >= liveFrom),
+    })
+  } else if (open && fold.arriving.length > 0) {
+    // Opening cancels a pending fold, so closing again animates only what
+    // Expandable is already animating.
+    setFold({ seen: fold.seen, arriving: [] })
+  }
+  const arriving = open ? [] : fold.arriving
   const { label, tools, thinkingMs, failed } = stepSummary(items)
   return (
     <div className="text-xs">
@@ -5021,12 +5073,17 @@ function StepGroup({ items, children }: { items: ChatItem[]; children: ReactNode
           </span>
         )}
       </button>
-      {/* pb keeps the last card clear of the next row when open; the rows sit
-          tighter than the transcript's gap-3 so an expanded run still reads as
-          one block rather than as loose messages. */}
+      {/* The rows sit tighter than the transcript's gap-3 so an expanded run
+          still reads as one block rather than as loose messages. */}
       <Expandable open={open}>
-        <div className="flex flex-col gap-2 pt-2">{children}</div>
+        <div className="flex flex-col gap-2 pt-2">{items.map(renderRow)}</div>
       </Expandable>
+      {/* Steps that landed since the last frame, still at full height for one
+          beat before they fold away under the count above. Keyed by the newest
+          of them so each arrival restarts the animation. */}
+      {arriving.length > 0 && (
+        <FoldingRows key={`fold-${arriving[arriving.length - 1].id}`}>{arriving.map(renderRow)}</FoldingRows>
+      )}
     </div>
   )
 }
@@ -5116,11 +5173,14 @@ const SettledMessages = memo(
     // the list without threading the value through every memo comparator.
     const grouped = useChatStepsStore((s) => s.grouped)
     const rows = planStepRows(items, subByToolUse, grouped)
-    const row = (item: ChatItem) => (
+    // animate is the ENTRANCE fade, for a message arriving live. A row inside a
+    // group never gets it: expanding a fold reveals steps that already happened,
+    // and fading them in reads as a dozen messages landing at once.
+    const row = (item: ChatItem, animate: boolean) => (
       <SettledRow
         key={item.id}
         item={item}
-        animate={liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
+        animate={animate && liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
         renderItem={renderItem}
         shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
         serif={serif}
@@ -5134,11 +5194,9 @@ const SettledMessages = memo(
       <>
         {rows.map((r) =>
           r.row === 'item' ? (
-            row(r.item)
+            row(r.item, true)
           ) : (
-            <StepGroup key={`steps-${r.id}`} items={r.items}>
-              {r.items.map(row)}
-            </StepGroup>
+            <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={(it) => row(it, false)} />
           ),
         )}
       </>
