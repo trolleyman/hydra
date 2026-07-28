@@ -1154,12 +1154,18 @@ function langFromPath(path: string): string {
 // 4). Base64 sources become data URLs; url sources are used verbatim.
 function parseToolResult(content: unknown): { text: string; images: string[] } {
   const images: string[] = []
+  // A ToolSearch result is a list of `tool_reference` blocks - the loaded tool's
+  // NAME and nothing else, no text anywhere - so the card used to render the
+  // whole schema load as "(no output)". They become the one line that says what
+  // the call actually did (namespaced like the header, see mcpToolLabel).
+  const loaded: string[] = []
   const collect = (c: unknown): string => {
     if (typeof c === 'string') return c
     if (Array.isArray(c)) return c.map(collect).filter(Boolean).join('\n')
     if (c && typeof c === 'object') {
       const b = c as ClaudeContentBlock & {
         source?: { type?: string; media_type?: string; data?: string; url?: string }
+        tool_name?: string
       }
       if (b.type === 'image' && b.source) {
         const s = b.source
@@ -1167,11 +1173,20 @@ function parseToolResult(content: unknown): { text: string; images: string[] } {
         else if (s.type === 'url' && s.url) images.push(s.url)
         return ''
       }
+      if (b.type === 'tool_reference' && b.tool_name) {
+        loaded.push(mcpToolLabel(b.tool_name))
+        return ''
+      }
       if (typeof b.text === 'string') return b.text
     }
     return ''
   }
-  return { text: stripToolUseError(collect(content)), images }
+  const text = stripToolUseError(collect(content))
+  if (loaded.length === 0) return { text, images }
+  // One name reads as a sentence; several are worth counting, since a keyword
+  // search returns however many tools matched.
+  const summary = loaded.length === 1 ? `Loaded ${loaded[0]}` : `Loaded ${loaded.length} tools: ${loaded.join(', ')}`
+  return { text: text ? `${summary}\n${text}` : summary, images }
 }
 
 // Decoded intrinsic sizes of tool-result images, cached module-wide so a

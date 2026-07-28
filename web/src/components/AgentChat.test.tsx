@@ -252,3 +252,40 @@ describe('summarizeToolSearchQuery', () => {
     expect(summarizeToolSearchQuery('select:')).toEqual({ text: 'select:', prose: false })
   })
 })
+
+// A ToolSearch result is `tool_reference` blocks carrying only the loaded tool's
+// name - no text - so the card rendered the whole schema load as "(no output)".
+describe('ToolSearch tool_reference results', () => {
+  const alloc = () => {
+    let id = 0
+    return () => ++id
+  }
+  const search = (result: unknown[]) =>
+    reduceHistoryEvents(
+      [
+        { type: 'assistant', message: { id: 'm1', content: [{ type: 'tool_use', id: 'toolu_ts', name: 'ToolSearch', input: { query: 'select:mcp__hydra__git_commit' } }] } },
+        { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_ts', content: result }] } },
+      ],
+      alloc(),
+    ).find((it) => it.kind === 'tool')
+
+  it('names the single tool it loaded', () => {
+    expect(search([{ type: 'tool_reference', tool_name: 'mcp__hydra__git_commit' }])).toMatchObject({ result: 'Loaded hydra::git_commit' })
+  })
+
+  it('counts and lists several', () => {
+    const item = search([
+      { type: 'tool_reference', tool_name: 'mcp__hydra__git_add' },
+      { type: 'tool_reference', tool_name: 'Read' },
+    ])
+    expect(item).toMatchObject({ result: 'Loaded 2 tools: hydra::git_add, Read' })
+  })
+
+  it('keeps any text the result does carry', () => {
+    const item = search([
+      { type: 'text', text: 'No exact match; closest below.' },
+      { type: 'tool_reference', tool_name: 'Read' },
+    ])
+    expect(item).toMatchObject({ result: 'Loaded Read\nNo exact match; closest below.' })
+  })
+})
