@@ -273,6 +273,9 @@ export const SpawnForm = memo(function SpawnForm({
   // Index into the image-only attachment list while the lightbox is open; null
   // when closed.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  // The chip the lightbox was opened from, so the picture flies out of it (and
+  // back into it on close) rather than fading in over the form.
+  const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   // Numbers generically-named pasted images (image.png, image.png, ...) as
   // image1.png, image2.png, ... so each can be referred to distinctly in the
   // prompt (see addFiles - the number is max(current) + 1, so it resets when the
@@ -626,7 +629,8 @@ export const SpawnForm = memo(function SpawnForm({
   // Stable lightbox opener: resolves the clicked chip to its index in the
   // image-only list at click time (via the attachments mirror ref), so the
   // callback identity survives every attachment/typing change.
-  const openImageLightbox = useCallback((id: number) => {
+  const openImageLightbox = useCallback((id: number, origin: Element) => {
+    setLightboxOrigin(origin)
     setLightboxIndex(attachmentsRef.current.filter((a) => a.previewUrl).findIndex((img) => img.id === id))
   }, [])
 
@@ -972,6 +976,7 @@ export const SpawnForm = memo(function SpawnForm({
       <ImageLightbox
         images={lightboxImages}
         index={Math.min(lightboxIndex, lightboxImages.length - 1)}
+        origin={lightboxOrigin}
         onIndexChange={setLightboxIndex}
         onClose={() => setLightboxIndex(null)}
       />
