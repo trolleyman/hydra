@@ -4466,11 +4466,14 @@ export function QuestionCard({
       {specs.map((q, qi) => {
         const hasNote = showNote[qi] !== ''
         const noteVisible = noteOpen[qi] || hasNote
-        // An actual note trails the last row you picked; the "Add a note" link
-        // is a question-level affordance, so it stays at the foot of the list
-        // (and so does a note written before anything was chosen).
+        // The note - link and box alike - trails the last row you picked, so
+        // the offer to qualify an answer sits with the answer it would qualify.
+        // Nothing picked means there is nothing to qualify yet, so there is no
+        // link at all until you choose; "Other" is the last row, so a note on
+        // it lands at the foot anyway.
         const picked = [...showSelected[qi]]
-        const anchor = noteVisible && !showOtherSel[qi] && picked.length > 0 ? Math.max(...picked) : null
+        const anchor = !showOtherSel[qi] && picked.length > 0 ? Math.max(...picked) : null
+        const noteOffered = anchor !== null || showOtherSel[qi]
         const rows: ReactNode[] = []
         const options = q.options.map((o, oi) => {
               const isSel = showSelected[qi].has(oi)
@@ -4584,7 +4587,7 @@ export function QuestionCard({
         // pure translation. An answered card with no note drops the row instead
         // of leaving a dead gap.
         const noteRow =
-          answered && !hasNote ? null : (
+          (answered && !hasNote) || (!noteOffered && !hasNote) ? null : (
             <div
               key="note"
               className={`flex w-full items-start gap-2 rounded-lg border border-dashed px-2.5 py-1.5 transition-colors ${

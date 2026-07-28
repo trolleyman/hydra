@@ -23,6 +23,9 @@ describe('QuestionCard notes', () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={onSubmit} />)
 
+    // Nothing picked yet, so there is nothing to qualify and no note on offer.
+    expect(screen.queryByRole('button', { name: 'Add a note' })).toBeNull()
+
     fireEvent.click(screen.getByText('Postgres'))
     fireEvent.click(screen.getByRole('button', { name: 'Add a note' }))
     fireEvent.change(screen.getByLabelText('Note to go with your answer'), {
@@ -47,20 +50,24 @@ describe('QuestionCard notes', () => {
   })
 
   // The CLI records a note with no pick as `"<q>"=(no option selected) notes: ...`,
-  // so gating Submit on an option would refuse to send something it handles.
+  // so a note left behind after the pick that prompted it was taken away still
+  // answers the question - gating Submit on a selection would refuse to send
+  // something the CLI handles.
   it('accepts a note on its own as an answer', () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={onSubmit} />)
 
-    const submit = screen.getByRole('button', { name: 'Submit' })
-    expect(submit).toBeDisabled()
-
+    fireEvent.click(screen.getByText('Postgres'))
     fireEvent.click(screen.getByRole('button', { name: 'Add a note' }))
     fireEvent.change(screen.getByLabelText('Note to go with your answer'), {
       target: { value: 'neither - use the file store' },
     })
-    expect(submit).not.toBeDisabled()
+    // Selecting "Other" takes the pick away in a single-select, leaving the
+    // note as the only thing said - and an empty "Other" contributes no label.
+    fireEvent.click(screen.getByRole('button', { name: 'Select Other' }))
 
+    const submit = screen.getByRole('button', { name: 'Submit' })
+    expect(submit).not.toBeDisabled()
     fireEvent.click(submit)
     expect(onSubmit).toHaveBeenCalledWith(
       { 'Which database?': '' },
@@ -69,37 +76,35 @@ describe('QuestionCard notes', () => {
   })
 })
 
-// A note reads as a caveat on the choice it qualifies, so it sits directly
-// under that row rather than at the foot of the card. The "Add a note" link is
-// a question-level affordance and stays at the foot until there is a note.
+// A note reads as a caveat on the choice it qualifies, so it - and the link
+// offering it - sit directly under the row you picked rather than at the foot
+// of the card.
 describe('QuestionCard note placement', () => {
   const rows = () => Array.from(document.querySelector('[data-question-rows]')!.children)
   const noteIndex = () => rows().findIndex((r) => r.querySelector('textarea[aria-label="Note to go with your answer"]'))
+  const linkIndex = () => rows().findIndex((r) => r.textContent === 'Add a note')
   const optionIndex = (label: string) => rows().findIndex((r) => r.textContent?.startsWith(label))
 
-  it('moves the note under the option you pick, and back when you unpick', () => {
+  it('offers no note until something is picked, then puts the link under the pick', () => {
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Add a note' }))
-
-    // Nothing picked yet: the note is the last row.
-    expect(noteIndex()).toBe(rows().length - 1)
+    expect(linkIndex()).toBe(-1)
 
     fireEvent.click(screen.getByText('Postgres'))
+    expect(linkIndex()).toBe(optionIndex('Postgres') + 1)
+  })
+
+  it('moves the open note under whichever option you pick', () => {
+    render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
+    fireEvent.click(screen.getByText('Postgres'))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a note' }))
     expect(noteIndex()).toBe(optionIndex('Postgres') + 1)
 
     fireEvent.click(screen.getByText('SQLite'))
     expect(noteIndex()).toBe(optionIndex('SQLite') + 1)
 
-    // "Other" is the last row, so a note qualifying it stays at the foot.
+    // "Other" is the last row, so a note qualifying it lands at the foot.
     fireEvent.focus(screen.getByPlaceholderText('Other...'))
     expect(noteIndex()).toBe(rows().length - 1)
-  })
-
-  it('keeps the collapsed link at the foot even with an option picked', () => {
-    render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
-    fireEvent.click(screen.getByText('Postgres'))
-    const link = rows().findIndex((r) => r.textContent === 'Add a note')
-    expect(link).toBe(rows().length - 1)
   })
 })
 
