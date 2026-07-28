@@ -4648,6 +4648,14 @@ components:
           type: boolean
           nullable: true
           description: True when `total` is an estimated denominator carried over from a prior run (the streaming runner declared no ::hydra:test:total::). Only set while running; the UI shows it as approximate.
+        queued:
+          type: integer
+          nullable: true
+          description: >-
+            The run's 1-based place in the runner queue while it waits for a
+            slot; absent or 0 once it is actually running. Test concurrency
+            defaults to 1, so a project with several runners commonly has some
+            of them queued rather than running.
         passed:
           type: integer
         failed:
@@ -4981,6 +4989,20 @@ components:
           type: string
           nullable: true
           description: As left_progress, for the RIGHT (after) generation.
+        left_queued:
+          type: integer
+          nullable: true
+          description: >-
+            The LEFT (before) generation's 1-based place in the generation queue
+            while it waits for a slot; absent or 0 once it is actually running.
+            An entry is marked in-flight before it acquires a slot, so without
+            this a generation queued behind other work looks identical to a
+            running one - same "generating" status, same ticking started_at, same
+            empty log.
+        right_queued:
+          type: integer
+          nullable: true
+          description: As left_queued, for the RIGHT (after) generation.
         left_log:
           type: array
           nullable: true

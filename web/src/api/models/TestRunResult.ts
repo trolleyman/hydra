@@ -19,6 +19,10 @@ export type TestRunResult = {
      * True when `total` is an estimated denominator carried over from a prior run (the streaming runner declared no ::hydra:test:total::). Only set while running; the UI shows it as approximate.
      */
     total_estimated?: boolean | null;
+    /**
+     * The run's 1-based place in the runner queue while it waits for a slot; absent or 0 once it is actually running. Test concurrency defaults to 1, so a project with several runners commonly has some of them queued rather than running.
+     */
+    queued?: number | null;
     passed?: number;
     failed?: number;
     skipped?: number;

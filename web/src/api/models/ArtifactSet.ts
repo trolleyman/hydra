@@ -39,6 +39,14 @@ export type ArtifactSet = {
      */
     right_progress?: string | null;
     /**
+     * The LEFT (before) generation's 1-based place in the generation queue while it waits for a slot; absent or 0 once it is actually running. An entry is marked in-flight before it acquires a slot, so without this a generation queued behind other work looks identical to a running one - same "generating" status, same ticking started_at, same empty log.
+     */
+    left_queued?: number | null;
+    /**
+     * As left_queued, for the RIGHT (after) generation.
+     */
+    right_queued?: number | null;
+    /**
      * Captured stdout+stderr lines of the in-flight LEFT (before) generation, surfaced as a live log. Only populated while that side is generating; once settled, fetch left_log_url instead.
      */
     left_log?: Array<ArtifactLogLine> | null;

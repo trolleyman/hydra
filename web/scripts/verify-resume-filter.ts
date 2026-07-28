@@ -1,10 +1,11 @@
 import { chromium } from 'playwright'
+import { proxyLaunchOptions } from './lib/browserProxy.ts'
 import { readFileSync } from 'fs'
 
 const port = readFileSync('/tmp/simport', 'utf8').trim()
 const base = `http://localhost:${port}`
 
-const browser = await chromium.launch()
+const browser = await chromium.launch(proxyLaunchOptions())
 const page = await browser.newPage()
 const consoleErrors: string[] = []
 const pageErrors: string[] = []

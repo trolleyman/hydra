@@ -166,6 +166,12 @@ export const BranchSelector = memo(function BranchSelector({
         <Tooltip content={title} className={triggerSize}>
           <button
             type="button"
+            // A stable hook for the screenshot/e2e scripts. This trigger's only
+            // other identity is its icon and its branch name, and both move:
+            // keying on `title="Switch branch"` broke when the tooltip convention
+            // replaced the native title, and keying on a lucide class broke when
+            // GitCompare became GitCompareArrows. Same idea as data-main-scroll.
+            data-branch-selector=""
             onClick={() => setOpen((o) => !o)}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer ${triggerSize} ${open
               ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'

@@ -511,6 +511,9 @@ type ArtifactSet struct {
 	// LeftProgress Latest progress line of the in-flight LEFT (before) generation. Taken from `::hydra:progress::` marker lines the script emits, falling back to the latest stdout line until the first marker is seen. Only set while that side is generating.
 	LeftProgress *string `json:"left_progress"`
 
+	// LeftQueued The LEFT (before) generation's 1-based place in the generation queue while it waits for a slot; absent or 0 once it is actually running. An entry is marked in-flight before it acquires a slot, so without this a generation queued behind other work looks identical to a running one - same "generating" status, same ticking started_at, same empty log.
+	LeftQueued *int `json:"left_queued"`
+
 	// Name The configured artifact script name
 	Name string `json:"name"`
 
@@ -528,6 +531,9 @@ type ArtifactSet struct {
 
 	// RightProgress As left_progress, for the RIGHT (after) generation.
 	RightProgress *string `json:"right_progress"`
+
+	// RightQueued As left_queued, for the RIGHT (after) generation.
+	RightQueued *int `json:"right_queued"`
 
 	// StartedAt Unix time (seconds) the earliest in-flight side started, so the UI can show how long it has been running. Only set while status is "generating".
 	StartedAt *int64            `json:"started_at"`
@@ -1600,6 +1606,9 @@ type TestRunResult struct {
 
 	// Progress Latest progress line of the in-flight run (from ::hydra:progress:: markers, else latest stdout). Only set while running.
 	Progress *string `json:"progress"`
+
+	// Queued The run's 1-based place in the runner queue while it waits for a slot; absent or 0 once it is actually running. Test concurrency defaults to 1, so a project with several runners commonly has some of them queued rather than running.
+	Queued *int `json:"queued"`
 
 	// Ref Resolved commit SHA the run was computed for.
 	Ref     *string `json:"ref"`
