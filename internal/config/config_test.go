@@ -192,16 +192,14 @@ func TestArtifactsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestServerArtifactRoundTrip covers the server-preview fields: type,
-// idle_timeout_sec and ready_timeout_sec must survive a save/load cycle (a
-// dropped field would silently demote a preview to a diffed-media script).
-func TestServerArtifactRoundTrip(t *testing.T) {
+// TestPreviewRoundTrip covers the [previews.<name>] fields: command,
+// idle_timeout_sec and ready_timeout_sec must survive a save/load cycle, and a
+// media artifact saved alongside must stay in the artifacts section.
+func TestPreviewRoundTrip(t *testing.T) {
 	ports := "26610-26620"
 	cfg := Config{
-		Artifacts: []ArtifactScript{
-			{Name: "demo", Type: ArtifactTypeServer, Command: "run-demo.sh", IdleTimeoutSec: 60, ReadyTimeoutSec: 120},
-			{Name: "shots", Command: "bun run shots.ts"},
-		},
+		Artifacts:    []ArtifactScript{{Name: "shots", Command: "bun run shots.ts"}},
+		Previews:     []PreviewScript{{Name: "demo", Command: "run-demo.sh", IdleTimeoutSec: 60, ReadyTimeoutSec: 120}},
 		PreviewPorts: &ports,
 	}
 
@@ -213,18 +211,102 @@ func TestServerArtifactRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFile: %v", err)
 	}
-	if len(loaded.Artifacts) != 2 {
-		t.Fatalf("expected 2 artifacts, got %+v", loaded.Artifacts)
+	if len(loaded.Previews) != 1 {
+		t.Fatalf("expected 1 preview, got %+v", loaded.Previews)
 	}
-	demo := loaded.Artifacts[0]
-	if !demo.IsServer() || demo.IdleTimeoutSec != 60 || demo.ReadyTimeoutSec != 120 {
-		t.Errorf("server artifact mismatch: %+v", demo)
+	demo := loaded.Previews[0]
+	if demo.Command != "run-demo.sh" || demo.IdleTimeoutSec != 60 || demo.ReadyTimeoutSec != 120 {
+		t.Errorf("preview mismatch: %+v", demo)
 	}
-	if loaded.Artifacts[1].IsServer() {
-		t.Errorf("media artifact wrongly server: %+v", loaded.Artifacts[1])
+	if len(loaded.Artifacts) != 1 || loaded.Artifacts[0].Name != "shots" {
+		t.Errorf("artifacts mismatch: %+v", loaded.Artifacts)
 	}
 	if lo, hi := loaded.ResolvePreviewPortRange(); lo != 26610 || hi != 26620 {
 		t.Errorf("preview port range = %d-%d, want 26610-26620", lo, hi)
+	}
+}
+
+// TestServerArtifactUpgradesToPreview covers the back-compat path: a config
+// still spelling a preview as an [artifacts.<name>] with type = "server" is
+// read as a PreviewScript (fields and all), leaves the artifacts list holding
+// only real media scripts, and is rewritten under [previews.<name>] on save.
+func TestServerArtifactUpgradesToPreview(t *testing.T) {
+	const legacy = `
+[artifacts.demo]
+type = "server"
+command = "run-demo.sh"
+idle_timeout_sec = 60
+ready_timeout_sec = 120
+
+[artifacts.shots]
+command = "bun run shots.ts"
+`
+	cfg, err := decodeConfig([]byte(legacy))
+	if err != nil {
+		t.Fatalf("decodeConfig: %v", err)
+	}
+	if len(cfg.Previews) != 1 {
+		t.Fatalf("expected the server artifact to become a preview, got %+v", cfg.Previews)
+	}
+	demo := cfg.Previews[0]
+	if demo.Name != "demo" || demo.Command != "run-demo.sh" || demo.IdleTimeoutSec != 60 || demo.ReadyTimeoutSec != 120 {
+		t.Errorf("upgraded preview mismatch: %+v", demo)
+	}
+	if !cfg.PreviewsNamed {
+		t.Error("PreviewsNamed should follow the artifacts syntax that carried the entry")
+	}
+	if len(cfg.Artifacts) != 1 || cfg.Artifacts[0].Name != "shots" {
+		t.Errorf("server entry left in artifacts: %+v", cfg.Artifacts)
+	}
+
+	// Saving the upgraded config migrates the file.
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := SaveToFile(path, cfg); err != nil {
+		t.Fatalf("SaveToFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	out := string(data)
+	if !strings.Contains(out, "[previews.demo]") {
+		t.Errorf("saved config has no [previews.demo]:\n%s", out)
+	}
+	if strings.Contains(out, "[artifacts.demo]") {
+		t.Errorf("saved config still has [artifacts.demo]:\n%s", out)
+	}
+	// The doc block mentions the legacy spelling, so only an uncommented
+	// assignment counts as "still written".
+	for ln := range strings.SplitSeq(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(ln), "type =") {
+			t.Errorf("saved config still writes the legacy type key: %q\n%s", ln, out)
+		}
+	}
+}
+
+// TestPreviewPatchViaArtifactsEntry covers the layering escape hatch: a later
+// layer disabling a preview writes a plain [artifacts.<name>] table (that is how
+// such overrides were always written), so Merge must route it to the preview of
+// that name rather than dropping it into the artifacts list.
+func TestPreviewPatchViaArtifactsEntry(t *testing.T) {
+	base, err := decodeConfig([]byte("[previews.demo]\ncommand = \"run-demo.sh\"\n"))
+	if err != nil {
+		t.Fatalf("decodeConfig base: %v", err)
+	}
+	over, err := decodeConfig([]byte("[artifacts.demo]\nenabled = false\n"))
+	if err != nil {
+		t.Fatalf("decodeConfig over: %v", err)
+	}
+	base.Merge(over)
+
+	if len(base.Previews) != 1 || base.Previews[0].IsEnabled() {
+		t.Errorf("preview not disabled by the artifacts-shaped override: %+v", base.Previews)
+	}
+	if base.Previews[0].Command != "run-demo.sh" {
+		t.Errorf("override clobbered the inherited command: %+v", base.Previews[0])
+	}
+	if len(base.Artifacts) != 0 {
+		t.Errorf("override leaked into the artifacts list: %+v", base.Artifacts)
 	}
 }
 
@@ -1128,10 +1210,12 @@ func TestCommentedDefaultsForUnsetSettings(t *testing.T) {
 		"# [copilot]",
 		docPrefix + " Codex-specific overrides",
 		"# [codex]",
-		// Artifacts documentation + commented example are always present.
+		// Artifacts + previews documentation and commented examples are always present.
 		docPrefix + " [artifacts.<name>]:",
 		"# [artifacts.screenshots]",
-		`# command = "bun run screenshots.ts"`,
+		"# node scripts/take-screenshots.ts",
+		docPrefix + " [previews.<name>]:",
+		"# [previews.app]",
 	}
 	for _, w := range wants {
 		if !strings.Contains(out, w) {

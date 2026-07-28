@@ -11,6 +11,7 @@ import { ReviewSection } from './ReviewSection'
 import { ResourceLimitsSection } from './ResourceLimitsSection'
 import { ConfigForm } from './ConfigForm'
 import { ArtifactsEditor } from './ArtifactsEditor'
+import { PreviewsEditor } from './PreviewsEditor'
 import { TestsEditor } from './TestsEditor'
 import { ServicesEditor } from './ServicesEditor'
 
@@ -86,7 +87,7 @@ export function FloatingSaveBar({
 // Shared section body + test modal used by both settings pages. `scope` decides
 // which sections are shown:
 //   - "project": project-only concerns - icon, review, agent overrides for this
-//     project, and the [[artifacts]]/[[tests]]/[[services]] commands (those are
+//     project, and the [artifacts]/[previews]/[tests]/[services] commands (those are
 //     replaced wholesale by a project that defines its own, and are read from
 //     the compared ref, so they are inherently project things).
 //   - "local": the untracked per-user .hydra/config.local.toml overlay - agent
@@ -139,13 +140,14 @@ export function SettingsContent({
     return () => window.removeEventListener('keydown', onKey)
   }, [testAgent, onCloseTestAgent])
 
-  // User/local-scope files can still carry [[artifacts]]/[[tests]]/[[services]]
+  // User/local-scope files can still carry [artifacts]/[previews]/[tests]/[services]
   // (user-level ones apply to projects that define none of their own; local ones
   // replace or - with the *_merge opt-ins - patch the project's). The editors are
   // project-scope only, so surface a pointer instead of silently hiding them; the
   // values ride along in `config` untouched, so saving preserves them.
   const offScopeCommandCount =
-    (config.artifacts?.length ?? 0) + (config.tests?.length ?? 0) + (config.services?.length ?? 0)
+    (config.artifacts?.length ?? 0) + (config.previews?.length ?? 0) + (config.tests?.length ?? 0) +
+    (config.services?.length ?? 0)
 
   return (
     <>
@@ -221,6 +223,13 @@ export function SettingsContent({
           </div>
 
           <div className="mt-6">
+            <PreviewsEditor
+              previews={config.previews ?? []}
+              onChange={(previews) => setConfig({ ...config, previews })}
+            />
+          </div>
+
+          <div className="mt-6">
             <TestsEditor
               tests={config.tests ?? []}
               onChange={(tests) => setConfig({ ...config, tests })}
@@ -243,7 +252,7 @@ export function SettingsContent({
 
       {scope !== 'project' && offScopeCommandCount > 0 && (
         <p className="mt-6 text-xs text-gray-500 dark:text-gray-400">
-          This {scope} config also defines {offScopeCommandCount} artifact/test/service command
+          This {scope} config also defines {offScopeCommandCount} artifact/preview/test/service command
           {offScopeCommandCount === 1 ? '' : 's'}. Those sections are edited on the Project tab or by
           hand in {scope === 'user' ? '~/.config/hydra/config.toml' : '.hydra/config.local.toml'};
           saving here leaves them untouched.

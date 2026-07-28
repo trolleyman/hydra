@@ -33,7 +33,7 @@ type slot struct {
 	port int
 
 	mu      sync.Mutex
-	spec    config.ArtifactScript
+	spec    config.PreviewScript
 	active  *instance // front once running; may be starting (cold start) or nil transiently
 	pending *instance // building in the background for a tip hot-swap
 }
@@ -78,7 +78,7 @@ func (s *slot) serveHTTP(w http.ResponseWriter, r *http.Request) {
 // channel is unchanged the current server is kept (a tip whose SHA moved is
 // rebuilt in the background, not here); a different channel swaps the backing
 // server. If start is set (an explicit Start/Open) the front server is spawned.
-func (s *slot) retarget(spec config.ArtifactScript, v Version, start bool) error {
+func (s *slot) retarget(spec config.PreviewScript, v Version, start bool) error {
 	desired := v.channelID()
 
 	s.mu.Lock()
@@ -240,7 +240,7 @@ func (s *slot) promote(p *instance) {
 // worktree channel builds without racing or polluting the agent's live
 // workspace. Caller holds s.mu. The checkout path includes the head so two
 // heads previewing the same script/commit don't collide.
-func (s *slot) newInstance(spec config.ArtifactScript, v Version) (*instance, error) {
+func (s *slot) newInstance(spec config.PreviewScript, v Version) (*instance, error) {
 	in := &instance{
 		mgr:        s.mgr,
 		root:       s.root,

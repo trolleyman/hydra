@@ -34,17 +34,5 @@ export type ArtifactScript = {
      * Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
      */
     enabled?: boolean | null;
-    /**
-     * What the script produces - absent/null/"media" is a run-to-completion generator whose outputs the diff viewer compares; "server" is a live preview whose command starts an HTTP server on 127.0.0.1:$HYDRA_PREVIEW_PORT, proxied by Hydra on demand and never shown in the diff grid.
-     */
-    type?: string | null;
-    /**
-     * (server type) Teardown after this long with zero in-flight proxied requests; open WebSocket/long-poll connections count as in-flight (0 = default 300).
-     */
-    idle_timeout_sec?: number;
-    /**
-     * (server type) Max seconds from spawn to ready, builds included (0 = default 900).
-     */
-    ready_timeout_sec?: number;
 };
 

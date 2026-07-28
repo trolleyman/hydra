@@ -42,6 +42,7 @@ export { MergeConflictError } from './models/MergeConflictError';
 export { NetworkConfig } from './models/NetworkConfig';
 export type { NewReviewCommentRequest } from './models/NewReviewCommentRequest';
 export type { PolicyConfig } from './models/PolicyConfig';
+export type { PreviewScript } from './models/PreviewScript';
 export type { PreviewsResponse } from './models/PreviewsResponse';
 export { PreviewState } from './models/PreviewState';
 export type { PreviewStatus } from './models/PreviewStatus';

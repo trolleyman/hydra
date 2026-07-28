@@ -125,11 +125,6 @@ func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, param
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	// Live server previews (type = "server") have no diffable outputs; they are
-	// surfaced by the previews API, never the diff grid. This is the single
-	// choke point covering the poll handler, the artifacts WS, and prefetch.
-	dropServerSpecs(leftByName)
-	dropServerSpecs(rightByName)
 	if len(leftByName) == 0 && len(rightByName) == 0 {
 		return nil, nil
 	}
@@ -269,20 +264,9 @@ func (p *artifactPlan) invalidateSide(name, side string) {
 // command is forced back into the sandbox. Sandboxed commands need no such gate -
 // the sandbox is the boundary and already runs the checkout's untrusted code.
 func artifactSpecsByName(projectRoot string, v artifacts.Version, liveCfg config.Config) (map[string]config.ArtifactScript, error) {
-	var content []byte
-	if v.WorktreeDir != "" {
-		// Read the worktree's own config so uncommitted [[artifacts]] edits apply.
-		data, err := os.ReadFile(config.GetProjectConfigPath(v.WorktreeDir))
-		if err != nil && !os.IsNotExist(err) {
-			return nil, errtrace.Wrap(err)
-		}
-		content = data // nil when absent → inherits the user config's artifacts
-	} else {
-		data, err := git.ShowFile(projectRoot, v.Ref, ".hydra/config.toml")
-		if err != nil {
-			return nil, errtrace.Wrap(err)
-		}
-		content = data
+	content, err := configTOMLAtVersion(projectRoot, v.WorktreeDir, v.Ref)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
 	}
 
 	specs, err := config.ArtifactsAtProjectTOML(content)
@@ -309,14 +293,20 @@ func artifactSpecsByName(projectRoot string, v artifacts.Version, liveCfg config
 	return byName, nil
 }
 
-// dropServerSpecs removes live-preview scripts (type = "server") from a spec
-// map in place; they run under internal/preview, not the diff pipeline.
-func dropServerSpecs(byName map[string]config.ArtifactScript) {
-	for n, s := range byName {
-		if s.IsServer() {
-			delete(byName, n)
+// configTOMLAtVersion reads .hydra/config.toml as it existed at one side of a
+// comparison: the worktree's own file for an uncommitted working tree (so
+// uncommitted config edits apply), or the file at the committed ref otherwise.
+// A missing worktree file is nil content, which inherits the user config.
+func configTOMLAtVersion(projectRoot, worktreeDir, ref string) ([]byte, error) {
+	if worktreeDir != "" {
+		data, err := os.ReadFile(config.GetProjectConfigPath(worktreeDir))
+		if err != nil && !os.IsNotExist(err) {
+			return nil, errtrace.Wrap(err)
 		}
+		return data, nil
 	}
+	data, err := git.ShowFile(projectRoot, ref, ".hydra/config.toml")
+	return data, errtrace.Wrap(err)
 }
 
 // disabledArtifacts returns the set of script names the live config marks

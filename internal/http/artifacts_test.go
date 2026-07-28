@@ -198,58 +198,79 @@ unsafe_host = true
 	}
 }
 
-// TestHostKeyTypeSensitive guards that a branch flipping the type of a trusted
-// unsafe_host entry (e.g. one-shot media command -> persistent server) loses
-// host access: the trust tuple includes type.
+// TestHostKeyTypeSensitive guards that host trust cannot be spent across the
+// two kinds of script: a branch that turns a trusted one-shot media command
+// into a resident preview loses host access, because the trust tuple includes
+// the kind.
 func TestHostKeyTypeSensitive(t *testing.T) {
 	head := `
-[[artifacts]]
-name = "audited"
-type = "server"
+[previews.audited]
 command = "trusted cmd"
 unsafe_host = true
 `
 	root, _ := artifactRepo(t, "# base\n", head)
 
-	// The live config trusts the same name+command as MEDIA, not server.
+	// The live config trusts the same name+command as a media ARTIFACT.
 	trusted := config.Config{Artifacts: []config.ArtifactScript{
 		{Name: "audited", Command: "trusted cmd", UnsafeHost: true},
 	}}
-	byName, err := artifactSpecsByName(root, artifacts.Version{Ref: "HEAD"}, trusted)
+	byName, err := previewSpecsByName(root, "", "HEAD", trusted)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if byName["audited"].UnsafeHost {
-		t.Error("type flip must strip unsafe_host")
+		t.Error("artifact trust must not authorize a preview")
 	}
 
-	// Trusting it AS a server (and "media" aliasing "") both work.
-	trusted.Artifacts[0].Type = config.ArtifactTypeServer
-	byName, err = artifactSpecsByName(root, artifacts.Version{Ref: "HEAD"}, trusted)
+	// Trusting it as a PREVIEW does authorize it.
+	trusted.Previews = []config.PreviewScript{{Name: "audited", Command: "trusted cmd", UnsafeHost: true}}
+	byName, err = previewSpecsByName(root, "", "HEAD", trusted)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !byName["audited"].UnsafeHost {
-		t.Error("matching server type should keep unsafe_host")
+		t.Error("matching preview trust should keep unsafe_host")
 	}
 	if hostKey("n", "c", "media") != hostKey("n", "c", "") {
 		t.Error(`"media" and "" must key identically`)
 	}
 }
 
-// TestResolveArtifactPlanDropsServerSpecs checks the diff pipeline never sees
-// type = "server" scripts on either side.
-func TestResolveArtifactPlanDropsServerSpecs(t *testing.T) {
-	byName := map[string]config.ArtifactScript{
-		"shots": {Name: "shots", Command: "x"},
-		"demo":  {Name: "demo", Command: "y", Type: config.ArtifactTypeServer},
+// TestLegacyServerArtifactIsAPreview checks that a ref whose config still spells
+// a preview as an artifact with type = "server" resolves as a preview and never
+// reaches the diff pipeline - the upgrade has to apply to ref-sourced config,
+// not just the live file.
+func TestLegacyServerArtifactIsAPreview(t *testing.T) {
+	head := `
+[artifacts.shots]
+command = "x"
+
+[artifacts.demo]
+type = "server"
+command = "y"
+`
+	root, _ := artifactRepo(t, "# base\n", head)
+
+	arts, err := artifactSpecsByName(root, artifacts.Version{Ref: "HEAD"}, config.Config{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	dropServerSpecs(byName)
-	if _, ok := byName["demo"]; ok {
-		t.Error("server spec survived dropServerSpecs")
+	if _, ok := arts["demo"]; ok {
+		t.Error("legacy server artifact reached the diff pipeline")
 	}
-	if _, ok := byName["shots"]; !ok {
-		t.Error("media spec wrongly dropped")
+	if _, ok := arts["shots"]; !ok {
+		t.Error("media artifact wrongly dropped")
+	}
+
+	prevs, err := previewSpecsByName(root, "", "HEAD", config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prevs["demo"].Command != "y" {
+		t.Errorf("legacy server artifact did not resolve as a preview: %+v", prevs)
+	}
+	if _, ok := prevs["shots"]; ok {
+		t.Error("media artifact wrongly resolved as a preview")
 	}
 }
 

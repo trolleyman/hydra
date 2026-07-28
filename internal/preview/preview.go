@@ -1,6 +1,7 @@
-// Package preview runs live "server" artifacts ([[artifacts]] type = "server"):
-// per-project commands that start an HTTP server from a checkout of the
-// repository, exposed to the browser through a stable per-slot reverse-proxy
+// Package preview runs the per-project live-server scripts configured as
+// [previews.<name>] (and, in configs predating that section, as [artifacts.<name>]
+// with type = "server"): commands that start an HTTP server from a checkout of
+// the repository, exposed to the browser through a stable per-slot reverse-proxy
 // port.
 //
 // Unlike the run-to-completion generators in internal/artifacts, a preview has
@@ -200,7 +201,7 @@ func slotKey(root, script, headID string) string {
 // Ensure returns the slot for (root, spec, head), creating its listener on
 // first use, points it at the selected version's channel, and starts the
 // server. The returned Status carries the proxy port the UI should link to.
-func (m *Manager) Ensure(root string, spec config.ArtifactScript, version Version) (Status, error) {
+func (m *Manager) Ensure(root string, spec config.PreviewScript, version Version) (Status, error) {
 	s, err := m.ensureSlot(root, spec, version)
 	if err != nil {
 		return Status{}, errtrace.Wrap(err)
@@ -213,7 +214,7 @@ func (m *Manager) Ensure(root string, spec config.ArtifactScript, version Versio
 
 // Peek returns the current status of the slot's front server without creating
 // or starting anything: no slot yet reports StateStopped with port 0.
-func (m *Manager) Peek(root string, spec config.ArtifactScript, version Version) Status {
+func (m *Manager) Peek(root string, spec config.PreviewScript, version Version) Status {
 	m.mu.Lock()
 	s := m.slots[slotKey(root, spec.Name, version.HeadID)]
 	m.mu.Unlock()
@@ -288,7 +289,7 @@ func (m *Manager) removeSlot(s *slot) {
 // ensureSlot returns the existing slot or creates one: sweep orphans once per
 // project, allocate a listener port from the project's configured range, and
 // start serving. Instances (backing servers) are created later by retarget.
-func (m *Manager) ensureSlot(root string, spec config.ArtifactScript, version Version) (*slot, error) {
+func (m *Manager) ensureSlot(root string, spec config.PreviewScript, version Version) (*slot, error) {
 	key := slotKey(root, spec.Name, version.HeadID)
 	m.mu.Lock()
 	if s := m.slots[key]; s != nil {

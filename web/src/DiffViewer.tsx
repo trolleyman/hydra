@@ -4057,9 +4057,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           configures no [[tests]] runners. */}
       {testsPanelEl}
 
-      {/* Live server previews ([[artifacts]] type = "server") for the selected
-          "after" version - single-sided like the tests above. Renders nothing
-          when the project configures no server scripts. */}
+      {/* Live server previews ([previews.<name>]) for the selected "after"
+          version - single-sided like the tests above. Renders nothing when the
+          project configures no preview scripts. */}
       {previewPanelEl}
 
       {/* Error banner on refresh failure */}

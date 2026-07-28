@@ -959,6 +959,14 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		resp.Artifacts = &arts
 	}
 
+	if len(cfg.Previews) > 0 {
+		prevs := make([]api.PreviewScript, len(cfg.Previews))
+		for i, p := range cfg.Previews {
+			prevs[i] = toAPIPreviewScript(p)
+		}
+		resp.Previews = &prevs
+	}
+
 	if len(cfg.Services) > 0 {
 		svcs := make([]api.ServiceScript, len(cfg.Services))
 		for i, svc := range cfg.Services {
@@ -1020,17 +1028,42 @@ func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
 	if a.CleanIgnored {
 		out.CleanIgnored = &a.CleanIgnored
 	}
-	if a.Type != "" {
-		out.Type = &a.Type
-	}
-	if a.IdleTimeoutSec != 0 {
-		out.IdleTimeoutSec = &a.IdleTimeoutSec
-	}
-	if a.ReadyTimeoutSec != 0 {
-		out.ReadyTimeoutSec = &a.ReadyTimeoutSec
-	}
 	out.Strict = a.Strict
 	out.Enabled = a.Enabled
+	return out
+}
+
+// toAPIPreviewScript converts an internal PreviewScript to the API representation.
+func toAPIPreviewScript(p config.PreviewScript) api.PreviewScript {
+	out := api.PreviewScript{Name: p.Name, Command: p.Command}
+	if p.UnsafeHost {
+		out.UnsafeHost = &p.UnsafeHost
+	}
+	if p.IdleTimeoutSec != 0 {
+		out.IdleTimeoutSec = &p.IdleTimeoutSec
+	}
+	if p.ReadyTimeoutSec != 0 {
+		out.ReadyTimeoutSec = &p.ReadyTimeoutSec
+	}
+	out.Strict = p.Strict
+	out.Enabled = p.Enabled
+	return out
+}
+
+// fromAPIPreviewScript converts an API PreviewScript to the internal representation.
+func fromAPIPreviewScript(p api.PreviewScript) config.PreviewScript {
+	out := config.PreviewScript{Name: p.Name, Command: p.Command}
+	if p.UnsafeHost != nil {
+		out.UnsafeHost = *p.UnsafeHost
+	}
+	if p.IdleTimeoutSec != nil {
+		out.IdleTimeoutSec = *p.IdleTimeoutSec
+	}
+	if p.ReadyTimeoutSec != nil {
+		out.ReadyTimeoutSec = *p.ReadyTimeoutSec
+	}
+	out.Strict = p.Strict
+	out.Enabled = p.Enabled
 	return out
 }
 
@@ -1045,15 +1078,6 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 	}
 	if a.CleanIgnored != nil {
 		out.CleanIgnored = *a.CleanIgnored
-	}
-	if a.Type != nil {
-		out.Type = *a.Type
-	}
-	if a.IdleTimeoutSec != nil {
-		out.IdleTimeoutSec = *a.IdleTimeoutSec
-	}
-	if a.ReadyTimeoutSec != nil {
-		out.ReadyTimeoutSec = *a.ReadyTimeoutSec
 	}
 	out.Strict = a.Strict
 	out.Enabled = a.Enabled
@@ -1377,6 +1401,16 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		newCfg.Artifacts = make([]config.ArtifactScript, 0, len(*request.Body.Artifacts))
 		for _, a := range *request.Body.Artifacts {
 			newCfg.Artifacts = append(newCfg.Artifacts, fromAPIArtifactScript(a))
+		}
+	}
+	// A non-nil previews list (even empty) is authoritative, mirroring artifacts.
+	// Note the pair is what migrates a legacy config: the editor round-trips a
+	// type = "server" artifact as a preview, so saving writes it under
+	// [previews.<name>] and drops it from [artifacts.<name>].
+	if request.Body.Previews != nil {
+		newCfg.Previews = make([]config.PreviewScript, 0, len(*request.Body.Previews))
+		for _, p := range *request.Body.Previews {
+			newCfg.Previews = append(newCfg.Previews, fromAPIPreviewScript(p))
 		}
 	}
 	// A non-nil services list (even empty) is authoritative; a nil list (older

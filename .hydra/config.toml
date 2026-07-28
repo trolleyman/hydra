@@ -5,7 +5,7 @@
 ## configures those agents and the daemon: the default pre-prompt, the sandbox
 ## policy (what agents may read, write and reach over the network), the decision
 ## gate, per-agent ([claude], [gemini], ...) overrides, and the [artifacts.<name>],
-## [services.<name>] and [tests.<name>] commands run per project.
+## [previews.<name>], [services.<name>] and [tests.<name>] commands run per project.
 ##
 ## Reading this file:
 ##   ##  lines are Hydra's own docs and defaults - rewritten on every save, so edit
@@ -49,7 +49,7 @@ artifact_concurrency = 2
 ## re-run a head's test suites in the background when its branch-tip verdict is missing or stale, so it's ready before you open the panel; set false to run only on open / at merge - foreground runs and the concurrency cap still apply (default true).
 # test_prefetch = true
 
-## inclusive "min-max" TCP port range that live server previews ([[artifacts]] type = "server") allocate their listeners from; a fixed range keeps firewall rules simple, and busy ports are skipped (default 26601-26699).
+## inclusive "min-max" TCP port range that the live server previews ([previews.<name>]) allocate their listeners from; a fixed range keeps firewall rules simple, and busy ports are skipped (default 26601-26699).
 # preview_ports = "26601-26699"
 
 [sandbox]
@@ -137,6 +137,9 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 ## enable the decision-capable gate that can deny tool calls (non-allow-listed MCP, credential reads, policy-file writes, global installs) even under skip-permissions (default true).
 # gate_enabled = true
 
+## how much of the repo's shared .git the head may write: "readonly" (default) locks the whole .git read-only so commits go through the mcp__hydra__git_commit tool (anti-rogue); "off" leaves it writable. See docs/git-isolation.md.
+# git_isolation = "readonly"
+
 ## MCP server names the agent may use (whole-server grant covers all its tools); any other server is stripped before launch and denied at runtime (default none).
 # mcp_allowed = []
 
@@ -173,7 +176,9 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 ## screenshots) of a checkout. The diff viewer runs each against both sides of a
 ## comparison and shows the outputs that differ. The <name> table key is the unique
 ## label, also used as the cache directory. Fields:
-##   command      shell command run via `bash -c` in the checkout directory (required).
+##   command      shell script run via `bash -c` in the checkout directory (required).
+##                Write it as a multi-line ''' block - it is a script, not a one-liner:
+##                each step on its own line, comments where a step needs explaining.
 ##   timeout_sec  max seconds the command may run (0 = built-in default).
 ##   unsafe_host  run on the host with NO sandbox - full access to your machine and
 ##                credentials; only for audited, self-contained commands (default false).
@@ -185,21 +190,9 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 ##                and propagates instead of being swallowed (default true; set false
 ##                to run the command exactly as written).
 ##   enabled      set false to skip this script in the diff viewer (default true).
-##   type         "server" makes this a live preview instead of diffed media: the
-##                command must start an HTTP server on the port Hydra hands it.
-##                Hydra proxies a per-instance port to it, spinning it up when the
-##                preview link is opened and tearing it down when idle. Server scripts
-##                get HYDRA_PREVIEW_PORT, HYDRA_PREVIEW_ADDR (the host:port to bind -
-##                0.0.0.0:PORT under network mode hard, else 127.0.0.1:PORT; bind this,
-##                not 127.0.0.1, or hard mode 502s) and HYDRA_PREVIEW_SOURCE (the
-##                checkout dir). They may print ::hydra:server:ready:: on stdout to
-##                declare readiness early (otherwise the first HTTP response counts).
-##                They never appear in the diff grid. Default "" = diffed media.
-##   idle_timeout_sec   (server) teardown after this long with zero in-flight
-##                requests; open WebSocket/long-poll connections count as in-flight
-##                (0 = default 300). The link respawns it on the next visit.
-##   ready_timeout_sec  (server) max seconds from spawn to ready - builds included
-##                (0 = default 900).
+## A live, clickable preview of the app is a [previews.<name>] entry, not an
+## artifact - see that section below. (The old spelling for one, an artifact with
+## type = "server", still parses and is moved to [previews.<name>] on the next save.)
 ## Formats: .png, .jpg and .gif are diffed pixel-by-pixel; .webm video is diffed
 ## frame-by-frame when ffmpeg is installed (otherwise by byte hash). Other types
 ## (.webp .avif .svg .bmp .pdf) are compared by byte hash. Video is .webm ONLY, and
@@ -239,23 +232,81 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 # in bitexact mode) so the video diff viewer is exercised too - see the [artifacts.<name>]
 # docs above on why video must be lossless. Building Go + the frontend is slow, so
 # allow a generous timeout (results are cached per resolved ref).
-command = "cd web && if command -v aube >/dev/null 2>&1; then aube install; else npm install; fi && node scripts/screenshots/take-screenshots.ts"
+command = '''
+cd web
+
+# aube when it is on PATH, npm otherwise - the lockfile is shared.
+if command -v aube >/dev/null 2>&1; then
+  aube install
+else
+  npm install
+fi
+
+node scripts/screenshots/take-screenshots.ts
+'''
 timeout_sec = 900
 
-[artifacts.demo]
-# Live preview (type = "server"): builds the checkout's frontend and boots the
-# simulation server (mock data, no daemon) on the port Hydra hands it, so a
-# head's UI changes can be clicked through at a real rendered app via the
-# Previews row on the agent page. Hydra proxies a dedicated port to it, shows
-# the build log while it starts, and tears it down when idle; the first visit
-# after that transparently respawns it. The frontend build dominates spawn
-# time, hence the generous ready timeout.
+## [previews.<name>]: per-project commands that boot a live, clickable preview of
+## the app at a checkout. Each appears in the Previews row on the agent page; Hydra
+## proxies a dedicated port to it, spawning the server when its link is first
+## opened, keeping it warm while requests flow, and tearing it down once idle (the
+## next visit respawns it). The <name> table key is the unique label. Fields:
+##   command      shell script run via `bash -c` in the checkout directory (required).
+##                It must build/boot a server that listens on $HYDRA_PREVIEW_ADDR and
+##                stay in the foreground. Write it as a multi-line ''' block - it is a
+##                script, not a one-liner: each step on its own line.
+##   unsafe_host  run on the host with NO sandbox - full access to your machine and
+##                credentials. Worse here than for an artifact: a preview runs the
+##                previewed ref's code as a long-lived resident process (default false).
+##   strict       run the command under `set -eo pipefail` so a failing build step
+##                aborts the spawn instead of serving a half-built tree (default true).
+##   enabled      set false to hide this preview from the agent page (default true).
+##   idle_timeout_sec   teardown after this long with zero in-flight requests; open
+##                WebSocket/long-poll connections count as in-flight, so a live app tab
+##                keeps its preview running (0 = default 300).
+##   ready_timeout_sec  max seconds from spawn to ready - builds included (0 = default
+##                900). Ready = the first successful dial of the port, or an explicit
+##                ::hydra:server:ready:: line on stdout, whichever comes first.
+## The command is given: HYDRA_PREVIEW_PORT (the port to listen on), HYDRA_PREVIEW_ADDR
+## (the full host:port to bind - 0.0.0.0:PORT under network mode hard, else
+## 127.0.0.1:PORT; bind THIS, not a hardcoded 127.0.0.1, or hard mode 502s) and
+## HYDRA_PREVIEW_SOURCE (the checkout dir). Print ::hydra:progress:: <text> to set the
+## headline shown while it boots.
+## Which ports the proxy allocates from is preview_ports, above.
+## Layering: [previews.<name>] entries merge by name across config layers (user ->
+## project -> config.local.toml) - set fields patch the same-named inherited entry,
+## new names append.
+## Previews used to be written as [artifacts.<name>] with type = "server". That still
+## parses - such an entry is read as a preview and rewritten here on the next save.
+[previews.demo]
+# Live preview: builds the checkout's frontend and boots the simulation server
+# (mock data, no daemon) on the port Hydra hands it, so a head's UI changes can
+# be clicked through at a real rendered app via the Previews row on the agent
+# page. Hydra proxies a dedicated port to it, shows the build log while it
+# starts, and tears it down when idle; the first visit after that transparently
+# respawns it. The frontend build dominates spawn time, hence the generous ready
+# timeout.
+command = '''
+cd web
+
+if command -v aube >/dev/null 2>&1; then
+  aube install
+else
+  npm install
+fi
+
 # --mode development builds the frontend unminified with sourcemaps (see the
 # isDev switch in web/vite.config.ts), so an error in the previewed app gives a
 # readable stack trace instead of minified chunk soup. The preview exists to
 # inspect and debug UI changes; readable beats small here.
-type = "server"
-command = "cd web && if command -v aube >/dev/null 2>&1; then aube install; else npm install; fi && npm run build -- --mode development && cd .. && HYDRA_API_ADDR=$HYDRA_PREVIEW_ADDR go run ./ server --simulation"
+npm run build -- --mode development
+
+# Bind HYDRA_PREVIEW_ADDR, not a hardcoded 127.0.0.1: under network mode hard
+# the proxy reaches the server from outside its netns, so it must listen on
+# 0.0.0.0 there.
+cd ..
+HYDRA_API_ADDR="$HYDRA_PREVIEW_ADDR" go run ./ server --simulation
+'''
 ready_timeout_sec = 900
 
 ## [services.<name>]: per-project long-running commands the daemon supervises while
@@ -315,9 +366,13 @@ ready_timeout_sec = 900
 ##   ::hydra:test:fail:: auth/rotation.test.ts:48:24 › grace window | expected 3 got 2
 ##   ::hydra:test:warn:: web/src/x.ts:12:5 › no-console | Unexpected console statement
 ##   ::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon
+##   ::hydra:test:pass:38:: internal/artifacts › TestFast       (38 = duration in ms)
 ## The token before the first › is the location (path[:line[:col]] or dotted class),
 ## middle › tokens are scope levels, the last is the test name, text after | is the
-## message. A marker is one line; in the message an escape sequence expands -
+## message. A verb takes an optional :<ms> duration suffix, giving a streamed case
+## the timing a JUnit report carries in its `time` attribute; it rides on the verb
+## (a closed set) so a test name can never be mistaken for it, and omitting it stays
+## valid. A marker is one line; in the message an escape sequence expands -
 ## backslash-n to a newline, backslash-t to a tab, backslash-r to a carriage return
 ## (so a multi-line stack trace fits on the one line) - and a doubled backslash
 ## becomes one literal backslash. Any other escape is left as-is.
@@ -346,7 +401,16 @@ ready_timeout_sec = 900
 # head's live worktree) emits ⚠ warn markers for what `mage tidy` would still
 # change — unwrapped error returns and unused //errtrace:skip directives —
 # informational only; they never gate the merge.
-command = "{ go test -json -list '.*' ./... || true; } | go run ./scripts/gotest-markers -total && go test -json ./... | go run ./scripts/gotest-markers && go run ./scripts/errtrace-report"
+command = '''
+# Count the cases first so the panel has a denominator to tick against.
+{ go test -json -list '.*' ./... || true; } | go run ./scripts/gotest-markers -total
+
+# The real run: each JSON event becomes a ::hydra:test:*:: marker.
+go test -json ./... | go run ./scripts/gotest-markers
+
+# Informational only - warn markers for what `mage tidy` would still change.
+go run ./scripts/errtrace-report
+'''
 timeout_sec = 900
 type = "stdout"
 
@@ -364,7 +428,25 @@ type = "stdout"
 # eslint alone and this runner never compiled — so a head could go green with a
 # frontend that does not build. Only `mage build` caught it, and nothing
 # automated runs that.
-command = "cd web && if command -v aube >/dev/null 2>&1; then PM=aube PX=aubx; else PM=npm PX=npx; fi && $PM install && $PX vitest run --reporter=./scripts/hydra-reporter.ts && node scripts/eslint-report.ts && node scripts/tsc-report.ts"
+command = '''
+cd web
+
+# aube when it is on PATH, npm otherwise; PX is the matching one-off runner.
+if command -v aube >/dev/null 2>&1; then
+  PM=aube PX=aubx
+else
+  PM=npm PX=npx
+fi
+
+$PM install
+
+# Specs first - the merge is already blocked when they fail, so the lint and
+# typecheck passes below only run once they pass.
+$PX vitest run --reporter=./scripts/hydra-reporter.ts
+
+node scripts/eslint-report.ts
+node scripts/tsc-report.ts
+'''
 timeout_sec = 600
 type = "stdout"
 
@@ -395,7 +477,33 @@ type = "stdout"
 # killed by the timeout used to report NOTHING - playwright's junit reporter only
 # writes its file at the end, so a timeout read as a bare red exit code. Streamed
 # cases are kept as they arrive, so a partial run still shows what passed.
-command = "cd web && if command -v aube >/dev/null 2>&1; then PM=aube PX=aubx; else PM=npm PX=npx; fi && $PM install && $PM run build && $PX playwright install chromium && E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})\") CI=1 $PX playwright test --reporter=./e2e/hydra-reporter.ts"
+command = '''
+cd web
+
+if command -v aube >/dev/null 2>&1; then
+  PM=aube PX=aubx
+else
+  PM=npm PX=npx
+fi
+
+$PM install
+
+# serve.ts builds a hydra binary and runs it with --simulation, so web/dist must
+# exist first.
+$PM run build
+
+# A no-op once the browser is in the shared ~/.cache/ms-playwright.
+$PX playwright install chromium
+
+# Pick a free port at run time: the config's default is FIXED, and two heads
+# testing at once would collide on it.
+E2E_PORT="$(node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")"
+export E2E_PORT
+
+# CI=1 turns off playwright's reuseExistingServer, so a stale or concurrent
+# server on that port can never be adopted (it also enables one retry).
+CI=1 $PX playwright test --reporter=./e2e/hydra-reporter.ts
+'''
 timeout_sec = 900
 type = "stdout"
 

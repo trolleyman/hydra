@@ -9,7 +9,7 @@ import type { PreviewState } from './PreviewState';
  */
 export type PreviewStatus = {
     /**
-     * The server artifact script name
+     * The preview script name
      */
     name: string;
     state: PreviewState;

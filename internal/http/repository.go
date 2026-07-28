@@ -814,7 +814,6 @@ func (s *Server) repositoryArtifactNames(projectRoot, ref string) ([]string, err
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	dropServerSpecs(byName) // previews have no generated outputs to browse
 	disabled := disabledArtifacts(liveCfg)
 	names := make([]string, 0, len(byName))
 	for n := range byName {
@@ -874,7 +873,7 @@ func (s *Server) GetRepositoryArtifact(_ context.Context, request api.GetReposit
 		return nil, errtrace.Wrap(err)
 	}
 	spec, ok := byName[request.Name]
-	if !ok || spec.IsServer() || disabledArtifacts(liveCfg)[request.Name] {
+	if !ok || disabledArtifacts(liveCfg)[request.Name] {
 		return notFound, nil
 	}
 

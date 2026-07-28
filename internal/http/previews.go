@@ -10,7 +10,6 @@ import (
 	"braces.dev/errtrace"
 
 	"github.com/trolleyman/hydra/internal/api"
-	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -18,20 +17,85 @@ import (
 )
 
 // previewResolution is everything the three preview endpoints share: the
-// project, the server-type specs defined at the requested version (name-sorted),
-// and the resolved preview version itself.
+// project, the [previews.<name>] specs defined at the requested version
+// (name-sorted), and the resolved preview version itself.
 type previewResolution struct {
 	projectRoot string
-	specs       []config.ArtifactScript
+	specs       []config.PreviewScript
 	version     preview.Version
+}
+
+// previewSpecsByName loads the preview scripts that apply at one version and
+// indexes them by name - artifactSpecsByName's twin for [previews.<name>], and
+// it makes the same trade: the version's own
+// .hydra/config.toml decides which previews exist - so a branch adding one gets
+// it on that branch - while the live config keeps the two human-controlled
+// vetoes. Specs with an empty name or command are dropped; on a duplicate name
+// the first definition wins.
+//
+// Security: a version's config is attacker-controllable, so unsafe_host is
+// honored only when the trusted live config authorizes that exact name+command
+// under the SAME kind of script (see hostKey); otherwise the command is forced
+// back into the sandbox. A preview authorized as a host command is strictly more
+// dangerous than an artifact one - it is resident, not one-shot - which is
+// exactly why the key is kind-scoped and a media artifact's authorization can
+// never be spent on a preview.
+func previewSpecsByName(projectRoot string, worktreeDir, ref string, liveCfg config.Config) (map[string]config.PreviewScript, error) {
+	content, err := configTOMLAtVersion(projectRoot, worktreeDir, ref)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	specs, err := config.PreviewsAtProjectTOML(content)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	trustedHost := trustedHostPreviews(liveCfg)
+	byName := make(map[string]config.PreviewScript, len(specs))
+	for _, spec := range specs {
+		if spec.Name == "" || spec.Command == "" {
+			continue
+		}
+		if _, dup := byName[spec.Name]; dup {
+			continue
+		}
+		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Command, config.ArtifactTypeServer)] {
+			spec.UnsafeHost = false
+		}
+		byName[spec.Name] = spec
+	}
+	return byName, nil
+}
+
+// trustedHostPreviews is trustedHostCommands for [previews.<name>]: the set of
+// name+command pairs the live config authorizes to run unconfined on the host.
+func trustedHostPreviews(cfg config.Config) map[string]bool {
+	trusted := map[string]bool{}
+	for _, p := range cfg.Previews {
+		if p.UnsafeHost && p.Name != "" && p.Command != "" {
+			trusted[hostKey(p.Name, p.Command, config.ArtifactTypeServer)] = true
+		}
+	}
+	return trusted
+}
+
+// disabledPreviews returns the set of preview names the live config marks
+// enabled = false. The live config is human-controlled, so it - not a previewed
+// ref's config - decides whether a preview is offered. Mirrors disabledArtifacts.
+func disabledPreviews(cfg config.Config) map[string]bool {
+	disabled := map[string]bool{}
+	for _, p := range cfg.Previews {
+		if p.Name != "" && !p.IsEnabled() {
+			disabled[p.Name] = true
+		}
+	}
+	return disabled
 }
 
 // resolvePreviews resolves a previews request the same way the artifacts/tests
 // endpoints resolve their right (head) side: the agent's uncommitted worktree
-// when requested, an explicit ref, or the branch tip. Specs are read from the
-// version's own .hydra/config.toml (via artifactSpecsByName, sharing its
-// enabled/unsafe_host trust gating with the diff pipeline) and filtered to
-// type = "server". Returns nil when the agent is unknown.
+// when requested, an explicit ref, or the branch tip. Returns nil when the agent
+// is unknown.
 func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string, headRef *string, includeUncommitted *bool) (*previewResolution, error) {
 	projectRoot, err := s.resolveProjectRoot(projectID)
 	if err != nil {
@@ -45,12 +109,14 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 		return nil, nil
 	}
 
-	var av artifacts.Version
+	// Where the [previews.<name>] tables are read from: a live worktree's own
+	// file, or the config at the resolved commit.
+	var srcWorktree, srcRef string
 	var pv preview.Version
 	uncommitted := includeUncommitted != nil && *includeUncommitted
 	switch {
 	case uncommitted && head.Worktree != nil:
-		av = artifacts.Version{WorktreeDir: *head.Worktree}
+		srcWorktree = *head.Worktree
 		pv = preview.Version{HeadID: head.ID, WorktreeDir: *head.Worktree}
 	case headRef != nil && *headRef != "":
 		// A pinned commit: no Branch, so the slot never follows a moving tip.
@@ -58,7 +124,7 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		av = artifacts.Version{Ref: sha}
+		srcRef = sha
 		pv = preview.Version{HeadID: head.ID, SHA: sha}
 	default:
 		// "Latest commit" = the head's branch tip. Carry the branch so the slot
@@ -70,7 +136,7 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		av = artifacts.Version{Ref: sha}
+		srcRef = sha
 		pv = preview.Version{HeadID: head.ID, SHA: sha, Branch: *head.Branch}
 	}
 
@@ -78,14 +144,14 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 	if err != nil {
 		return &previewResolution{projectRoot: projectRoot, version: pv}, nil //nolint:nilerr // no config -> no previews
 	}
-	byName, err := artifactSpecsByName(projectRoot, av, liveCfg)
+	byName, err := previewSpecsByName(projectRoot, srcWorktree, srcRef, liveCfg)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	disabled := disabledArtifacts(liveCfg)
-	specs := make([]config.ArtifactScript, 0, len(byName))
+	disabled := disabledPreviews(liveCfg)
+	specs := make([]config.PreviewScript, 0, len(byName))
 	for name, spec := range byName {
-		if spec.IsServer() && !disabled[name] {
+		if !disabled[name] {
 			specs = append(specs, spec)
 		}
 	}

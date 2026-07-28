@@ -54,6 +54,7 @@ export function ArtifactsEditor({
             <li><code className="text-blue-300">HYDRA_ARTIFACT_SOURCE</code> - the checkout directory</li>
             <li><code className="text-blue-300">HYDRA_ARTIFACT_REF</code> - the resolved git ref</li>
           </ul>
+          <p className="mt-1.5">The command is a <strong>script</strong>, not a one-liner - put each step on its own line. A live, clickable preview of the app belongs in <strong>Previews</strong> below, not here.</p>
           <p className="mt-1.5"><code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel; <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed (else by byte hash); other types (<code className="text-blue-300">.webp .avif .svg .bmp .pdf</code>) are compared by byte hash. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">libvpx-vp9 -lossless 1</code>) so identical frames stay identical - a lossy encode changes pixels and reads as changed.</p>
         </InfoTooltip>
       </div>
@@ -113,7 +114,6 @@ export function ArtifactsEditor({
           const cleanIgnored = a.clean_ignored === true
           const strict = a.strict !== false
           const enabled = a.enabled !== false
-          const isServer = a.type === 'server'
           return (
             <div key={index} className={`rounded-xl border p-4 space-y-3 transition-colors ${enabled ? 'border-gray-200 dark:border-gray-700 bg-gray-50/40 dark:bg-gray-800/20' : 'border-dashed border-gray-300 dark:border-gray-600 bg-gray-100/70 dark:bg-gray-900/40'}`}>
               <div className="flex items-start gap-2">
@@ -139,24 +139,6 @@ export function ArtifactsEditor({
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
-                        Type
-                        <InfoTooltip title="Artifact type">
-                          <p><strong>media</strong> (the default) runs the command to completion and pixel-diffs the image/video files it writes.</p>
-                          <p className="mt-1.5"><strong>server</strong> is a live preview: the command must start an HTTP server on <code className="text-blue-300">127.0.0.1:$HYDRA_PREVIEW_PORT</code>. Hydra proxies a dedicated port to it, spins it up when its preview link is opened, and tears it down when idle. Server scripts appear in the agent page's Previews row, never the diff grid.</p>
-                        </InfoTooltip>
-                      </label>
-                      <select
-                        value={isServer ? 'server' : 'media'}
-                        onChange={(e) => update(index, { type: e.target.value === 'server' ? 'server' : undefined })}
-                        className="w-28 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                      >
-                        <option value="media">media</option>
-                        <option value="server">server</option>
-                      </select>
-                    </div>
-                    {!isServer && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
                         Timeout (s)
                         <InfoTooltip title="Timeout">
                           <p>Max seconds the command may run. Leave empty (0) for the built-in default.</p>
@@ -171,45 +153,6 @@ export function ArtifactsEditor({
                         className="w-28 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                       />
                     </div>
-                    )}
-                    {isServer && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
-                        Idle timeout (s)
-                        <InfoTooltip title="Idle timeout">
-                          <p>Tear the server down after this long with zero in-flight proxied requests. Open WebSocket / long-poll connections count as in-flight, so a live app tab keeps its preview running.</p>
-                          <p className="mt-1.5">Leave empty for the default (300). The preview link transparently respawns it on the next visit.</p>
-                        </InfoTooltip>
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={a.idle_timeout_sec ?? ''}
-                        onChange={(e) => update(index, { idle_timeout_sec: e.target.value === '' ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0) })}
-                        placeholder="default (300)"
-                        className="w-32 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                      />
-                    </div>
-                    )}
-                    {isServer && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
-                        Ready timeout (s)
-                        <InfoTooltip title="Ready timeout">
-                          <p>Max seconds from spawn to ready, builds included. Readiness is the first successful dial of the server's port, or an explicit <code className="text-blue-300">::hydra:server:ready::</code> line on stdout.</p>
-                          <p className="mt-1.5">Leave empty for the default (900).</p>
-                        </InfoTooltip>
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={a.ready_timeout_sec ?? ''}
-                        onChange={(e) => update(index, { ready_timeout_sec: e.target.value === '' ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0) })}
-                        placeholder="default (900)"
-                        className="w-32 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                      />
-                    </div>
-                    )}
                     <label className="flex items-center gap-2 cursor-pointer h-[38px]">
                       <input
                         type="checkbox"
@@ -225,7 +168,6 @@ export function ArtifactsEditor({
                         </InfoTooltip>
                       </span>
                     </label>
-                    {!isServer && (
                     <label className="flex items-center gap-2 cursor-pointer h-[38px]">
                       <input
                         type="checkbox"
@@ -241,7 +183,6 @@ export function ArtifactsEditor({
                         </InfoTooltip>
                       </span>
                     </label>
-                    )}
                     <label className="flex items-center gap-2 cursor-pointer h-[38px]">
                       <input
                         type="checkbox"
@@ -263,7 +204,7 @@ export function ArtifactsEditor({
                     <ShellEditor
                       value={a.command}
                       onChange={(val) => update(index, { command: val })}
-                      placeholder="# e.g. bun run screenshots.ts"
+                      placeholder={'cd web\nnpm install\nnode scripts/take-screenshots.ts'}
                       rows={6}
                     />
                   </div>

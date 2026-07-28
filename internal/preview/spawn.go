@@ -46,7 +46,7 @@ type instance struct {
 	syncBaseSHA string
 
 	mu        sync.Mutex
-	spec      config.ArtifactScript
+	spec      config.PreviewScript
 	state     State
 	childPort int
 	pid       int
@@ -117,7 +117,7 @@ func (in *instance) status() Status {
 }
 
 // setSpec adopts a possibly-updated spec (timeouts, command) for future spawns.
-func (in *instance) setSpec(spec config.ArtifactScript) {
+func (in *instance) setSpec(spec config.PreviewScript) {
 	in.mu.Lock()
 	in.spec = spec
 	in.mu.Unlock()
@@ -168,7 +168,7 @@ func (in *instance) ensureStarted() {
 // (sandboxed) command, wait for readiness, and settle the state when the
 // process exits. It owns the transitions out of StateStarting while gen is
 // current; stopChild supersedes it by bumping gen.
-func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec config.ArtifactScript, gen int, readyCh chan struct{}) {
+func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec config.PreviewScript, gen int, readyCh chan struct{}) {
 	defer cancel()
 
 	// Worktree channel: bring the own-checkout current with the live worktree
@@ -430,7 +430,7 @@ func (in *instance) teardown() {
 // mirroring internal/artifacts.buildCommandSpec minus the output dir: the
 // command runs in the checkout with the project's sandbox policy, cow mounts,
 // and network access, and is told its port via HYDRA_PREVIEW_PORT.
-func (in *instance) buildSpec(spec config.ArtifactScript, childPort int) (*sandbox.Spec, bool, error) {
+func (in *instance) buildSpec(spec config.PreviewScript, childPort int) (*sandbox.Spec, bool, error) {
 	home, _ := os.UserHomeDir()
 
 	env := append([]string{}, os.Environ()...)

@@ -264,7 +264,6 @@ func (s *Server) headArtifactsText(projectRoot string, head *heads.Head) string 
 	if err != nil {
 		return "The artifact scripts could not be resolved: " + err.Error() + "\n"
 	}
-	dropServerSpecs(specs)
 	for name := range disabledArtifacts(liveCfg) {
 		delete(specs, name)
 	}
@@ -485,7 +484,6 @@ func (s *Server) runArtifactsText(ctx context.Context, id string, req reviewq.Re
 	if err != nil {
 		return reviewq.Result{Message: "The artifact scripts could not be resolved: " + err.Error()}
 	}
-	dropServerSpecs(specs)
 	for name := range disabledArtifacts(liveCfg) {
 		delete(specs, name)
 	}

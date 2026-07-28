@@ -3381,7 +3381,10 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 			},
 		}
 		resp.Artifacts = &[]api.ArtifactScript{
-			{Name: "screenshots", Command: "bun run screenshots.ts", TimeoutSec: ptr(900)},
+			{Name: "screenshots", Command: "cd web\nnpm install\nnode scripts/take-screenshots.ts\n", TimeoutSec: ptr(900)},
+		}
+		resp.Previews = &[]api.PreviewScript{
+			{Name: "demo", Command: "cd web\nnpm install\nnpm run build\ncd ..\ngo run ./ server --simulation --addr \"$HYDRA_PREVIEW_ADDR\"\n", ReadyTimeoutSec: ptr(900)},
 		}
 		resp.Services = &[]api.ServiceScript{
 			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: ptr(true), MaxRestarts: ptr(3)},

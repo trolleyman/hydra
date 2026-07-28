@@ -397,30 +397,28 @@ type ArtifactScript struct {
 	// strict (the safer behavior); a script needing lenient execution sets it
 	// false or leads its command with `set +e`.
 	Strict *bool `toml:"strict"`
-	// Type selects what kind of artifact this script produces. ""/"media" (the
-	// default) is the classic run-to-completion generator whose image/video
-	// outputs the diff viewer compares. "server" is a live preview: the command
-	// starts an HTTP server that binds 127.0.0.1:$HYDRA_PREVIEW_PORT, and Hydra
-	// proxies a per-instance port to it on demand (spun up when the preview link
-	// is opened, torn down when idle). Server scripts never appear in the diff
-	// grid and produce no cached outputs.
+	// Type is LEGACY. Live previews used to be artifacts with type = "server";
+	// they are now their own [previews.<name>] section (see PreviewScript). The
+	// field is still decoded so an older config - or an older git ref's config,
+	// which is read as-is when a diff is generated - keeps working: decodeConfig
+	// moves every type = "server" entry out of Artifacts and into Previews (see
+	// upgradeServerArtifacts). Nothing else reads it, and the renderer never
+	// writes it back, so a save migrates the file to [previews.<name>].
+	// ""/"media" was, and remains, the only artifact behavior: a
+	// run-to-completion generator whose image/video outputs the diff viewer
+	// compares.
 	Type string `toml:"type"`
-	// IdleTimeoutSec (server type only) is how long an instance may sit with zero
-	// in-flight proxied requests before its process is torn down. Open WebSocket
-	// or long-poll connections count as in-flight, so a live app tab keeps its
-	// demo running. 0 = default (see internal/preview). The next visit to the
-	// preview link transparently respawns it.
+	// IdleTimeoutSec is LEGACY, decoded only to carry a type = "server" entry's
+	// value across the upgrade to PreviewScript.IdleTimeoutSec.
 	IdleTimeoutSec int `toml:"idle_timeout_sec"`
-	// ReadyTimeoutSec (server type only) bounds how long a spawn may take to
-	// become ready - the command may build first, so this is generous. Readiness
-	// is a successful TCP dial of the child port, or an explicit
-	// `::hydra:server:ready::` line on stdout, whichever comes first. 0 = default
-	// (see internal/preview).
+	// ReadyTimeoutSec is LEGACY, decoded only to carry a type = "server" entry's
+	// value across the upgrade to PreviewScript.ReadyTimeoutSec.
 	ReadyTimeoutSec int `toml:"ready_timeout_sec"`
 }
 
-// ArtifactTypeServer is the ArtifactScript.Type value selecting the live server
-// preview behavior; "" or "media" select the classic diffed-media behavior.
+// ArtifactTypeServer is the legacy ArtifactScript.Type value that used to select
+// the live server preview behavior, before previews became their own section. It
+// survives as the marker upgradeServerArtifacts matches on.
 const ArtifactTypeServer = "server"
 
 // IsEnabled reports whether the artifact script should run. An absent flag (nil)
@@ -431,9 +429,128 @@ func (a ArtifactScript) IsEnabled() bool { return a.Enabled == nil || *a.Enabled
 // flag (nil) means strict, so a failing step surfaces rather than being swallowed.
 func (a ArtifactScript) IsStrict() bool { return a.Strict == nil || *a.Strict }
 
-// IsServer reports whether this script is a live server preview rather than a
-// diffed-media generator.
+// IsServer reports whether this entry is a legacy type = "server" artifact, i.e.
+// a preview written in the pre-[previews.<name>] syntax. Only the decode-time
+// upgrade should need this: past decodeConfig, Artifacts never holds one.
 func (a ArtifactScript) IsServer() bool { return a.Type == ArtifactTypeServer }
+
+// PreviewScript describes a per-project command that starts a live HTTP server
+// for a checkout of the repository - a "preview" of the head's app that you can
+// click through, as opposed to the still images an ArtifactScript renders. Hydra
+// proxies a dedicated port to it on demand: the server is spawned when the
+// preview link is first opened, kept warm while requests flow, and torn down
+// once idle (the next visit transparently respawns it). See internal/preview for
+// the runner.
+//
+// Contract: the command is run with the checkout directory as its working
+// directory and these environment variables set:
+//   - HYDRA_PREVIEW_PORT:   the TCP port the server must listen on
+//   - HYDRA_PREVIEW_ADDR:   the full host:port to bind - 0.0.0.0:PORT under
+//     network mode hard, else 127.0.0.1:PORT. Bind this rather than hardcoding
+//     127.0.0.1, or the proxy cannot reach the server under hard mode.
+//   - HYDRA_PREVIEW_SOURCE: the checkout directory (same as cwd)
+//
+// Readiness (optional): the command may print `::hydra:server:ready::` on stdout
+// once it is serving; otherwise the first successful dial of the port counts.
+// `::hydra:progress:: <text>` sets the headline shown while it boots.
+//
+// Previews were originally written as [artifacts.<name>] tables with
+// type = "server"; that spelling still parses and is upgraded to this type on
+// load (see upgradeServerArtifacts).
+type PreviewScript struct {
+	// Name uniquely identifies the preview; used as the UI label and instance key.
+	Name string `toml:"name"`
+	// Command is the shell command run (via `bash -c`) in the checkout directory.
+	// It must start a server on $HYDRA_PREVIEW_ADDR and stay in the foreground.
+	Command string `toml:"command"`
+	// UnsafeHost, when true, runs the command directly on the host with NO
+	// sandbox - full access to the user's credentials, network, and machine.
+	// Default false. The same loud caveat as ArtifactScript.UnsafeHost applies,
+	// and doubly so here: a preview runs the *previewed ref's* code, and it runs
+	// it as a long-lived resident process rather than a one-shot render.
+	UnsafeHost bool `toml:"unsafe_host"`
+	// Enabled gates whether the preview is offered at all. nil or true means
+	// active; false hides it from the agent page's Previews row. Like unsafe_host,
+	// the live (human-controlled) config is authoritative - a disabled preview
+	// stays disabled regardless of what a previewed ref's own config claims.
+	Enabled *bool `toml:"enabled"`
+	// Strict runs the command under `set -eo pipefail` so a failing build step
+	// aborts the spawn (surfacing as a preview error) instead of being swallowed
+	// into a server that boots against a half-built tree. nil or true = strict.
+	Strict *bool `toml:"strict"`
+	// IdleTimeoutSec is how long an instance may sit with zero in-flight proxied
+	// requests before its process is torn down. Open WebSocket or long-poll
+	// connections count as in-flight, so a live app tab keeps its preview
+	// running. 0 = default (see internal/preview). The next visit to the preview
+	// link transparently respawns it.
+	IdleTimeoutSec int `toml:"idle_timeout_sec"`
+	// ReadyTimeoutSec bounds how long a spawn may take to become ready - the
+	// command may build first, so this is generous. Readiness is a successful TCP
+	// dial of the child port, or an explicit `::hydra:server:ready::` line on
+	// stdout, whichever comes first. 0 = default (see internal/preview).
+	ReadyTimeoutSec int `toml:"ready_timeout_sec"`
+}
+
+// IsEnabled reports whether the preview should be offered. An absent flag (nil)
+// means enabled, for backward compatibility with pre-flag configs.
+func (p PreviewScript) IsEnabled() bool { return p.Enabled == nil || *p.Enabled }
+
+// IsStrict reports whether the command runs under `set -eo pipefail`. An absent
+// flag (nil) means strict, so a failing build step surfaces as a failed spawn.
+func (p PreviewScript) IsStrict() bool { return p.Strict == nil || *p.Strict }
+
+// previewFromArtifact converts a legacy type = "server" artifact into the
+// PreviewScript it now means. The artifact-only fields (timeout_sec,
+// clean_ignored) never applied to a server entry, so nothing is lost.
+func previewFromArtifact(a ArtifactScript) PreviewScript {
+	return PreviewScript{
+		Name:            a.Name,
+		Command:         a.Command,
+		UnsafeHost:      a.UnsafeHost,
+		Enabled:         a.Enabled,
+		Strict:          a.Strict,
+		IdleTimeoutSec:  a.IdleTimeoutSec,
+		ReadyTimeoutSec: a.ReadyTimeoutSec,
+	}
+}
+
+// upgradeServerArtifacts migrates the pre-[previews.<name>] spelling in place:
+// every artifact with type = "server" is removed from cfg.Artifacts and appended
+// to cfg.Previews as a PreviewScript. It runs at the END of decodeConfig, on ONE
+// config layer, so the rest of the codebase only ever sees the new shape -
+// including specs read from a git ref whose config.toml predates the split.
+//
+// An explicit [previews.<name>] in the same file wins over a same-named legacy
+// artifact (the file's own new-syntax entry is the more deliberate statement);
+// the legacy entry is still dropped from Artifacts, so a half-migrated file
+// cannot end up running the script twice.
+func upgradeServerArtifacts(cfg *Config) {
+	if len(cfg.Artifacts) == 0 {
+		return
+	}
+	byName := make(map[string]bool, len(cfg.Previews))
+	for _, p := range cfg.Previews {
+		byName[p.Name] = true
+	}
+	kept := make([]ArtifactScript, 0, len(cfg.Artifacts))
+	for _, a := range cfg.Artifacts {
+		if !a.IsServer() {
+			kept = append(kept, a)
+			continue
+		}
+		if !byName[a.Name] {
+			cfg.Previews = append(cfg.Previews, previewFromArtifact(a))
+			byName[a.Name] = true
+		}
+		// The artifacts section's syntax decided how this entry layers, so carry
+		// that decision over to the previews section it now belongs to.
+		cfg.PreviewsNamed = cfg.PreviewsNamed || cfg.ArtifactsNamed
+	}
+	// A file that held ONLY server artifacts still declared the section, so keep
+	// the (now empty) non-nil slice: nil means "not declared here", which the
+	// renderer reads as preserve-mode and Merge reads as inherit.
+	cfg.Artifacts = kept
+}
 
 // TestScript describes a per-project command that runs a test suite against a
 // checkout of the repository and writes a machine-readable report. Hydra parses
@@ -566,6 +683,11 @@ type Config struct {
 	Agents map[string]AgentConfig `toml:"agents"`
 	// Artifacts are per-project visual-artifact generation scripts.
 	Artifacts []ArtifactScript `toml:"artifacts"`
+	// Previews are per-project live-server scripts, each proxied on demand as a
+	// clickable preview of the head's app. Populated from [previews.<name>] and,
+	// for configs written before previews were their own section, from legacy
+	// [artifacts.<name>] entries with type = "server" (see upgradeServerArtifacts).
+	Previews []PreviewScript `toml:"previews"`
 	// Services are per-project long-running commands the daemon supervises.
 	Services []ServiceScript `toml:"services"`
 	// Tests are per-project test-runner commands whose pass/fail verdict gates a
@@ -587,7 +709,12 @@ type Config struct {
 	//
 	// Set by decodeConfig, not by a TOML key (toml:"-" keeps a literal
 	// artifacts_named key from masquerading as the real thing).
+	//
+	// PreviewsNamed additionally counts a legacy type = "server" artifact that
+	// was upgraded into Previews: the syntax that carried it selects the merge
+	// behavior, exactly as if it had been written as [previews.<name>].
 	ArtifactsNamed bool `toml:"-"`
+	PreviewsNamed  bool `toml:"-"`
 	ServicesNamed  bool `toml:"-"`
 	TestsNamed     bool `toml:"-"`
 	// Icon is an optional custom project icon shown in the web UI's project
@@ -624,8 +751,8 @@ type Config struct {
 	// ArtifactConcurrency. nil/absent = DefaultTestConcurrency; 0 = unlimited.
 	TestConcurrency *int `toml:"test_concurrency"`
 	// PreviewPorts is the inclusive TCP port range ("min-max", e.g. "26601-26699")
-	// the daemon allocates live server-preview listeners from (see
-	// ArtifactScript.Type = "server" and internal/preview). A fixed, contiguous
+	// the daemon allocates live server-preview listeners from (see PreviewScript
+	// and internal/preview). A fixed, contiguous
 	// range keeps firewall rules simple when the web UI is exposed beyond
 	// localhost; listeners bind the same host as the web server. Ports already in
 	// use are skipped. nil/absent = DefaultPreviewPorts.
@@ -798,6 +925,7 @@ type rawConfig struct {
 	// tables ([tests.go]) and the legacy array-of-tables ([[tests]]) - so they
 	// are captured as primitives and decoded by decodeScriptSection.
 	Artifacts           toml.Primitive  `toml:"artifacts"`
+	Previews            toml.Primitive  `toml:"previews"`
 	Services            toml.Primitive  `toml:"services"`
 	Tests               toml.Primitive  `toml:"tests"`
 	Icon                *string         `toml:"icon"`
@@ -819,7 +947,8 @@ type rawConfig struct {
 // (claude/gemini/bash/copilot/codex).
 var reservedTopLevel = map[string]bool{
 	"defaults": true, "agents": true,
-	"pre_prompt": true, "sandbox": true, "policy": true, "artifacts": true, "services": true,
+	"pre_prompt": true, "sandbox": true, "policy": true, "artifacts": true, "previews": true,
+	"services":      true,
 	"tests":         true,
 	"icon":          true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
@@ -982,6 +1111,12 @@ func decodeConfig(data []byte) (Config, error) {
 	if err != nil {
 		return cfg, errtrace.Wrap(err)
 	}
+	cfg.Previews, cfg.PreviewsNamed, err = decodeScriptSection(md2, raw.Previews, "previews",
+		func(p *PreviewScript) *string { return &p.Name })
+	if err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
+	upgradeServerArtifacts(&cfg)
 	cfg.Services, cfg.ServicesNamed, err = decodeScriptSection(md2, raw.Services, "services",
 		func(s *ServiceScript) *string { return &s.Name })
 	if err != nil {
@@ -1144,11 +1279,39 @@ func (c *Config) Merge(other Config) {
 	// ([tests.go]) merges by name into the inherited list; the legacy array form
 	// ([[tests]]) replaces it wholesale.
 	if other.Artifacts != nil {
+		arts := other.Artifacts
 		if other.ArtifactsNamed {
-			c.Artifacts = mergeByName(c.Artifacts, other.Artifacts,
+			// An [artifacts.<name>] patch aimed at a name this config already knows
+			// as a PREVIEW is redirected there. Only the layer that defines a
+			// preview needs to spell it type = "server" / [previews.<name>]; a
+			// later layer flipping one field (the config.local.toml `enabled =
+			// false` kill-switch) has always been written without a type, so it
+			// would otherwise land in the artifacts list and quietly do nothing.
+			arts = arts[:0:0]
+			var redirected []PreviewScript
+			for _, a := range other.Artifacts {
+				if a.Name != "" && a.Type == "" && c.hasPreview(a.Name) {
+					redirected = append(redirected, previewFromArtifact(a))
+					continue
+				}
+				arts = append(arts, a)
+			}
+			if len(redirected) > 0 {
+				c.Previews = mergeByName(c.Previews, redirected,
+					func(p PreviewScript) string { return p.Name }, patchPreviewScript)
+			}
+			c.Artifacts = mergeByName(c.Artifacts, arts,
 				func(a ArtifactScript) string { return a.Name }, patchArtifactScript)
 		} else {
-			c.Artifacts = other.Artifacts
+			c.Artifacts = arts
+		}
+	}
+	if other.Previews != nil {
+		if other.PreviewsNamed {
+			c.Previews = mergeByName(c.Previews, other.Previews,
+				func(p PreviewScript) string { return p.Name }, patchPreviewScript)
+		} else {
+			c.Previews = other.Previews
 		}
 	}
 	if other.Services != nil {
@@ -1458,6 +1621,41 @@ func patchArtifactScript(b, o ArtifactScript) ArtifactScript {
 	return b
 }
 
+// hasPreview reports whether a preview of this name is already known to the
+// config, used by Merge to redirect a typeless [artifacts.<name>] patch to the
+// preview it is really aiming at.
+func (c *Config) hasPreview(name string) bool {
+	for _, p := range c.Previews {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// patchPreviewScript is patchArtifactScript for [previews.<name>] entries.
+func patchPreviewScript(b, o PreviewScript) PreviewScript {
+	if o.Command != "" {
+		b.Command = o.Command
+	}
+	if o.UnsafeHost {
+		b.UnsafeHost = true
+	}
+	if o.Enabled != nil {
+		b.Enabled = o.Enabled
+	}
+	if o.Strict != nil {
+		b.Strict = o.Strict
+	}
+	if o.IdleTimeoutSec > 0 {
+		b.IdleTimeoutSec = o.IdleTimeoutSec
+	}
+	if o.ReadyTimeoutSec > 0 {
+		b.ReadyTimeoutSec = o.ReadyTimeoutSec
+	}
+	return b
+}
+
 // patchServiceScript is patchArtifactScript for [[services]] entries.
 func patchServiceScript(b, o ServiceScript) ServiceScript {
 	if o.Command != "" {
@@ -1584,6 +1782,30 @@ func ArtifactsAtProjectTOML(content []byte) ([]ArtifactScript, error) {
 	cfg.Merge(projectCfg)
 
 	return cfg.Artifacts, nil
+}
+
+// PreviewsAtProjectTOML resolves the [previews.<name>] scripts that apply when
+// the project's .hydra/config.toml holds the given content, mirroring Load's
+// merge order exactly as ArtifactsAtProjectTOML does for artifacts. A ref whose
+// config still spells its previews as [artifacts.<name>] with type = "server"
+// resolves identically - decodeConfig upgrades them on the way through.
+func PreviewsAtProjectTOML(content []byte) ([]PreviewScript, error) {
+	cfg := LoadInternalDefaults()
+
+	// User config (best-effort, matching Load).
+	if userPath, err := GetUserConfigPath(); err == nil {
+		if userCfg, err := LoadFile(userPath); err == nil && userCfg != nil {
+			cfg.Merge(*userCfg)
+		}
+	}
+
+	projectCfg, err := decodeConfig(content)
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("parse project config: %w", err))
+	}
+	cfg.Merge(projectCfg)
+
+	return cfg.Previews, nil
 }
 
 // TestsAtProjectTOML resolves the [[tests]] scripts that apply when the project's
@@ -2190,7 +2412,9 @@ func artifactsDocLines() []string {
 		docPrefix + " screenshots) of a checkout. The diff viewer runs each against both sides of a",
 		docPrefix + " comparison and shows the outputs that differ. The <name> table key is the unique",
 		docPrefix + " label, also used as the cache directory. Fields:",
-		docPrefix + "   command      shell command run via `bash -c` in the checkout directory (required).",
+		docPrefix + "   command      shell script run via `bash -c` in the checkout directory (required).",
+		docPrefix + "                Write it as a multi-line ''' block - it is a script, not a one-liner:",
+		docPrefix + "                each step on its own line, comments where a step needs explaining.",
 		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
 		docPrefix + "   unsafe_host  run on the host with NO sandbox - full access to your machine and",
 		docPrefix + "                credentials; only for audited, self-contained commands (default false).",
@@ -2202,21 +2426,9 @@ func artifactsDocLines() []string {
 		docPrefix + "                and propagates instead of being swallowed (default true; set false",
 		docPrefix + "                to run the command exactly as written).",
 		docPrefix + "   enabled      set false to skip this script in the diff viewer (default true).",
-		docPrefix + "   type         \"server\" makes this a live preview instead of diffed media: the",
-		docPrefix + "                command must start an HTTP server on the port Hydra hands it.",
-		docPrefix + "                Hydra proxies a per-instance port to it, spinning it up when the",
-		docPrefix + "                preview link is opened and tearing it down when idle. Server scripts",
-		docPrefix + "                get HYDRA_PREVIEW_PORT, HYDRA_PREVIEW_ADDR (the host:port to bind -",
-		docPrefix + "                0.0.0.0:PORT under network mode hard, else 127.0.0.1:PORT; bind this,",
-		docPrefix + "                not 127.0.0.1, or hard mode 502s) and HYDRA_PREVIEW_SOURCE (the",
-		docPrefix + "                checkout dir). They may print ::hydra:server:ready:: on stdout to",
-		docPrefix + "                declare readiness early (otherwise the first HTTP response counts).",
-		docPrefix + "                They never appear in the diff grid. Default \"\" = diffed media.",
-		docPrefix + "   idle_timeout_sec   (server) teardown after this long with zero in-flight",
-		docPrefix + "                requests; open WebSocket/long-poll connections count as in-flight",
-		docPrefix + "                (0 = default 300). The link respawns it on the next visit.",
-		docPrefix + "   ready_timeout_sec  (server) max seconds from spawn to ready - builds included",
-		docPrefix + "                (0 = default 900).",
+		docPrefix + " A live, clickable preview of the app is a [previews.<name>] entry, not an",
+		docPrefix + " artifact - see that section below. (The old spelling for one, an artifact with",
+		docPrefix + " type = \"server\", still parses and is moved to [previews.<name>] on the next save.)",
 		docPrefix + " Formats: .png, .jpg and .gif are diffed pixel-by-pixel; .webm video is diffed",
 		docPrefix + " frame-by-frame when ffmpeg is installed (otherwise by byte hash). Other types",
 		docPrefix + " (.webp .avif .svg .bmp .pdf) are compared by byte hash. Video is .webm ONLY, and",
@@ -2253,7 +2465,11 @@ func artifactsDocLines() []string {
 func artifactsExampleLines() []string {
 	return []string{
 		"# [artifacts.screenshots]",
-		`# command = "bun run screenshots.ts"`,
+		"# command = '''",
+		"# cd web",
+		"# npm install",
+		"# node scripts/take-screenshots.ts",
+		"# '''",
 		"# timeout_sec = 900",
 	}
 }
@@ -2302,18 +2518,13 @@ func emitSectionEntryHeader(out *[]string, section, name string, seen map[string
 // lives in the [artifacts.<name>] header, not a field).
 func artifactFieldLines(a ArtifactScript) []string {
 	var out []string
-	if a.Type != "" {
-		out = append(out, "type = "+tomlStringValue(a.Type))
-	}
+	// type / idle_timeout_sec / ready_timeout_sec are deliberately not rendered:
+	// they only ever meant "this is really a preview", and decodeConfig has
+	// already moved such an entry into [previews.<name>]. Writing the artifacts
+	// section without them is what migrates a legacy file on its next save.
 	out = append(out, "command = "+tomlStringValue(a.Command))
 	if a.TimeoutSec > 0 {
 		out = append(out, fmt.Sprintf("timeout_sec = %d", a.TimeoutSec))
-	}
-	if a.IdleTimeoutSec > 0 {
-		out = append(out, fmt.Sprintf("idle_timeout_sec = %d", a.IdleTimeoutSec))
-	}
-	if a.ReadyTimeoutSec > 0 {
-		out = append(out, fmt.Sprintf("ready_timeout_sec = %d", a.ReadyTimeoutSec))
 	}
 	if a.UnsafeHost {
 		out = append(out, "unsafe_host = true")
@@ -2351,6 +2562,111 @@ func emitArtifactsAuthoritative(out *[]string, arts []ArtifactScript, meta map[s
 	}
 	if rendered == 0 {
 		*out = append(*out, artifactsExampleLines()...)
+	}
+}
+
+// previewsDocLines is the Hydra-owned documentation block emitted before the
+// [previews.<name>] section. Like every doc block it uses docPrefix, so it is
+// replaced (kept current) on each save.
+func previewsDocLines() []string {
+	return []string{
+		docPrefix + " [previews.<name>]: per-project commands that boot a live, clickable preview of",
+		docPrefix + " the app at a checkout. Each appears in the Previews row on the agent page; Hydra",
+		docPrefix + " proxies a dedicated port to it, spawning the server when its link is first",
+		docPrefix + " opened, keeping it warm while requests flow, and tearing it down once idle (the",
+		docPrefix + " next visit respawns it). The <name> table key is the unique label. Fields:",
+		docPrefix + "   command      shell script run via `bash -c` in the checkout directory (required).",
+		docPrefix + "                It must build/boot a server that listens on $HYDRA_PREVIEW_ADDR and",
+		docPrefix + "                stay in the foreground. Write it as a multi-line ''' block - it is a",
+		docPrefix + "                script, not a one-liner: each step on its own line.",
+		docPrefix + "   unsafe_host  run on the host with NO sandbox - full access to your machine and",
+		docPrefix + "                credentials. Worse here than for an artifact: a preview runs the",
+		docPrefix + "                previewed ref's code as a long-lived resident process (default false).",
+		docPrefix + "   strict       run the command under `set -eo pipefail` so a failing build step",
+		docPrefix + "                aborts the spawn instead of serving a half-built tree (default true).",
+		docPrefix + "   enabled      set false to hide this preview from the agent page (default true).",
+		docPrefix + "   idle_timeout_sec   teardown after this long with zero in-flight requests; open",
+		docPrefix + "                WebSocket/long-poll connections count as in-flight, so a live app tab",
+		docPrefix + "                keeps its preview running (0 = default 300).",
+		docPrefix + "   ready_timeout_sec  max seconds from spawn to ready - builds included (0 = default",
+		docPrefix + "                900). Ready = the first successful dial of the port, or an explicit",
+		docPrefix + "                ::hydra:server:ready:: line on stdout, whichever comes first.",
+		docPrefix + " The command is given: HYDRA_PREVIEW_PORT (the port to listen on), HYDRA_PREVIEW_ADDR",
+		docPrefix + " (the full host:port to bind - 0.0.0.0:PORT under network mode hard, else",
+		docPrefix + " 127.0.0.1:PORT; bind THIS, not a hardcoded 127.0.0.1, or hard mode 502s) and",
+		docPrefix + " HYDRA_PREVIEW_SOURCE (the checkout dir). Print ::hydra:progress:: <text> to set the",
+		docPrefix + " headline shown while it boots.",
+		docPrefix + " Which ports the proxy allocates from is preview_ports, above.",
+		docPrefix + " Layering: [previews.<name>] entries merge by name across config layers (user ->",
+		docPrefix + " project -> config.local.toml) - set fields patch the same-named inherited entry,",
+		docPrefix + " new names append.",
+		docPrefix + " Previews used to be written as [artifacts.<name>] with type = \"server\". That still",
+		docPrefix + " parses - such an entry is read as a preview and rewritten here on the next save.",
+	}
+}
+
+// previewsExampleLines is a commented-out example shown when no previews exist.
+func previewsExampleLines() []string {
+	return []string{
+		"# [previews.app]",
+		"# command = '''",
+		"# npm install",
+		"# npm run build",
+		"# npm run serve -- --host \"$HYDRA_PREVIEW_ADDR\"",
+		"# '''",
+		"# ready_timeout_sec = 900",
+	}
+}
+
+// previewFieldLines renders the field assignments of one preview (its name lives
+// in the [previews.<name>] header, not a field).
+func previewFieldLines(p PreviewScript) []string {
+	out := []string{"command = " + tomlStringValue(p.Command)}
+	if p.IdleTimeoutSec > 0 {
+		out = append(out, fmt.Sprintf("idle_timeout_sec = %d", p.IdleTimeoutSec))
+	}
+	if p.ReadyTimeoutSec > 0 {
+		out = append(out, fmt.Sprintf("ready_timeout_sec = %d", p.ReadyTimeoutSec))
+	}
+	if p.UnsafeHost {
+		out = append(out, "unsafe_host = true")
+	}
+	if p.Strict != nil && !*p.Strict {
+		out = append(out, "strict = false")
+	}
+	if p.Enabled != nil && !*p.Enabled {
+		out = append(out, "enabled = false")
+	}
+	return out
+}
+
+// emitPreviewsAuthoritative renders prevs as the source of truth, preserving any
+// hand-written comments matched to an existing preview by name. Comments fall
+// back to the artifacts section's when the preview has none of its own: that is
+// the migration case - the entry was written as [artifacts.<name>] with
+// type = "server", so its notes are filed under the artifact of the same name
+// and would otherwise be dropped by the very save that moves it here.
+func emitPreviewsAuthoritative(out *[]string, prevs []PreviewScript, meta, artMeta map[string]artifactComments) {
+	rendered := 0
+	seen := map[string]bool{}
+	for _, p := range prevs {
+		if p.Name == "" && p.Command == "" {
+			continue
+		}
+		if rendered > 0 {
+			*out = append(*out, "")
+		}
+		rendered++
+		m, ok := meta[p.Name]
+		if !ok {
+			m = artMeta[p.Name]
+		}
+		*out = append(*out, m.leading...)
+		emitSectionEntryHeader(out, "previews", p.Name, seen, m.interior)
+		*out = append(*out, previewFieldLines(p)...)
+	}
+	if rendered == 0 {
+		*out = append(*out, previewsExampleLines()...)
 	}
 }
 
@@ -2562,6 +2878,8 @@ type existingAnalysis struct {
 	keyComments       map[string][]string         // "normTable\x00key" -> preceding user comments
 	artifactBlocks    [][]string                  // verbatim [[artifacts]] blocks, in source order
 	artifactMeta      map[string]artifactComments // artifact name -> preserved comments
+	previewBlocks     [][]string                  // verbatim [previews.<name>] blocks, in source order
+	previewMeta       map[string]artifactComments // preview name -> preserved comments
 	serviceBlocks     [][]string                  // verbatim [[services]] blocks, in source order
 	serviceMeta       map[string]artifactComments // service name -> preserved comments
 	testBlocks        [][]string                  // verbatim [[tests]] blocks, in source order
@@ -2678,6 +2996,7 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		tableComments: map[string][]string{},
 		keyComments:   map[string][]string{},
 		artifactMeta:  map[string]artifactComments{},
+		previewMeta:   map[string]artifactComments{},
 		serviceMeta:   map[string]artifactComments{},
 		testMeta:      map[string]artifactComments{},
 	}
@@ -2725,6 +3044,11 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		block = append(block, lines[artHeaderLine:artLastLine+1]...)
 		meta := artifactComments{leading: userComments(artLeading, keys), interior: artInterior}
 		switch curArray {
+		case "previews":
+			res.previewBlocks = append(res.previewBlocks, block)
+			if artName != "" {
+				res.previewMeta[artName] = meta
+			}
 		case "services":
 			res.serviceBlocks = append(res.serviceBlocks, block)
 			if artName != "" {
@@ -2883,7 +3207,7 @@ func isManagedCommentedAssign(line string, keys map[string]bool) bool {
 // managedArraySections are the array-of-tables ([[name]]) sections Hydra owns and
 // regenerates. When empty, each is rendered as a commented-out example block (a
 // commented "# [[name]]" header followed by commented "# key = value" fields).
-var managedArraySections = []string{"artifacts", "services", "tests"}
+var managedArraySections = []string{"artifacts", "previews", "services", "tests"}
 
 // splitSectionEntry reports whether a normalized table name is a named script
 // entry of one of the managed sections - "tests.go" -> ("tests", "go", true).
@@ -3015,7 +3339,7 @@ func configHeaderLines() []string {
 		docPrefix + " configures those agents and the daemon: the default pre-prompt, the sandbox",
 		docPrefix + " policy (what agents may read, write and reach over the network), the decision",
 		docPrefix + " gate, per-agent ([claude], [gemini], ...) overrides, and the [artifacts.<name>],",
-		docPrefix + " [services.<name>] and [tests.<name>] commands run per project.",
+		docPrefix + " [previews.<name>], [services.<name>] and [tests.<name>] commands run per project.",
 		docPrefix + "",
 		docPrefix + " Reading this file:",
 		docPrefix + "   ##  lines are Hydra's own docs and defaults - rewritten on every save, so edit",
@@ -3037,6 +3361,8 @@ func renderConfig(existing []byte, cfg Config) string {
 	tableComments := prior.tableComments // normalized table -> leading user comments
 	artifactBlocks := prior.artifactBlocks
 	artifactMeta := prior.artifactMeta // name -> preserved comments
+	previewBlocks := prior.previewBlocks
+	previewMeta := prior.previewMeta // name -> preserved comments
 	serviceBlocks := prior.serviceBlocks
 	serviceMeta := prior.serviceMeta // name -> preserved comments
 	testBlocks := prior.testBlocks
@@ -3162,6 +3488,26 @@ func renderConfig(existing []byte, cfg Config) string {
 		// Preserve mode (no explicit list, e.g. a defaults-only save): keep the
 		// existing artifact blocks verbatim.
 		for i, block := range artifactBlocks {
+			if i > 0 {
+				out = append(out, "")
+			}
+			out = append(out, block...)
+		}
+	}
+
+	// Previews: documentation block, then the preview tables. Mirrors artifacts.
+	// A legacy type = "server" artifact has already been folded into cfg.Previews
+	// by decodeConfig, so an authoritative save rewrites it here - and, because
+	// artifactFieldLines no longer emits type, drops it from the artifacts section
+	// above. That pair of omissions IS the migration.
+	out = appendBlank(out)
+	out = append(out, previewsDocLines()...)
+	if cfg.Previews != nil {
+		emitPreviewsAuthoritative(&out, cfg.Previews, previewMeta, artifactMeta)
+	} else if len(previewBlocks) == 0 {
+		out = append(out, previewsExampleLines()...)
+	} else {
+		for i, block := range previewBlocks {
 			if i > 0 {
 				out = append(out, "")
 			}
@@ -3444,7 +3790,7 @@ func emitPreviewPorts(out *[]string, ports *string, keyComments map[string][]str
 	if uc := keyComments["\x00preview_ports"]; len(uc) > 0 {
 		*out = append(*out, uc...)
 	}
-	*out = append(*out, docPrefix+fmt.Sprintf(` inclusive "min-max" TCP port range that live server previews ([[artifacts]] type = "server") allocate their listeners from; a fixed range keeps firewall rules simple, and busy ports are skipped (default %s).`, DefaultPreviewPorts))
+	*out = append(*out, docPrefix+fmt.Sprintf(` inclusive "min-max" TCP port range that the live server previews ([previews.<name>]) allocate their listeners from; a fixed range keeps firewall rules simple, and busy ports are skipped (default %s).`, DefaultPreviewPorts))
 	if ports != nil {
 		*out = append(*out, "preview_ports = "+tomlStringValue(*ports))
 	} else {

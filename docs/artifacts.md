@@ -5,8 +5,11 @@ screenshots, or videos (screen recordings) — of a checkout. The diff viewer ru
 each command against both sides of a comparison (the base ref and the head ref or
 your uncommitted working tree) and shows the outputs that differ, side by side.
 
-Configure them as `[[artifacts]]` blocks in `.hydra/config.toml`, or via the
+Configure them as `[artifacts.<name>]` tables in `.hydra/config.toml`, or via the
 **Diff Artifacts** editor in the web Settings page (which writes the same config).
+
+A **live, clickable preview** of the app is a different thing and lives in its own
+`[previews.<name>]` section — see [Previews](#previews) below.
 
 The same scripts are also browsable **single-sided** in the repository view: a
 dynamic `.hydra/artifacts` folder appears in the file tree (nested under the real
@@ -19,16 +22,24 @@ regenerates, chiefly to retry a cached failure.
 ## Configuring
 
 ```toml
-[[artifacts]]
-name = "screenshots"
-command = "bun run screenshots.ts"
+[artifacts.screenshots]
+command = '''
+cd web
+npm install
+node scripts/take-screenshots.ts
+'''
 timeout_sec = 900
 ```
+
+The command is a **script**, not a one-liner: write it as a multi-line `'''`
+block with one step per line, and comment the steps that need explaining. It is
+run through `bash -c` either way, but a wall of `&&` is unreadable in the config
+file and in the Settings editor alike.
 
 | Field         | Required | Description |
 | ------------- | -------- | ----------- |
 | `name`        | yes      | Unique label, also used as the cache directory. |
-| `command`     | yes      | Shell command, run via `bash -c` in the checkout directory. |
+| `command`     | yes      | Shell script, run via `bash -c` in the checkout directory. |
 | `timeout_sec` | no       | Max seconds the command may run (`0` = built-in default). |
 | `unsafe_host` | no       | Run on the host with **no sandbox** — full access to your machine and credentials. Only for audited, self-contained commands you trust against every ref you compare. Honored only when the trusted live config authorizes that exact command, so a branch cannot grant itself host access. Default `false`. |
 
@@ -140,7 +151,54 @@ above); a non-positive value is ignored with a warning. Both keys are optional �
 omit either, or skip the sidecar entirely. A malformed sidecar is reported as a
 build warning and otherwise ignored.
 
-## Caching (live `type = "server"` previews)
+## Previews
+
+A **preview** is a live, clickable running copy of the app at a checkout, as
+opposed to the still images an artifact renders. Each appears in the Previews row
+on the agent page; Hydra proxies a dedicated port to it, spawning the server when
+its link is first opened, keeping it warm while requests flow, and tearing it
+down once idle (the next visit respawns it). The runner is `internal/preview`.
+
+```toml
+[previews.demo]
+command = '''
+npm install
+npm run build
+npm run serve -- --host "$HYDRA_PREVIEW_ADDR"
+'''
+ready_timeout_sec = 900
+```
+
+| Field               | Required | Description |
+| ------------------- | -------- | ----------- |
+| `name`              | yes      | Unique label, shown in the Previews row (the table key). |
+| `command`           | yes      | Shell script, run via `bash -c` in the checkout directory. It must bind `$HYDRA_PREVIEW_ADDR` and stay in the foreground. |
+| `idle_timeout_sec`  | no       | Teardown after this long with zero in-flight proxied requests; open WebSocket/long-poll connections count as in-flight (`0` = default 300). |
+| `ready_timeout_sec` | no       | Max seconds from spawn to ready, builds included (`0` = default 900). |
+| `unsafe_host`       | no       | Run on the host with **no sandbox**. Worse than for an artifact — a preview runs the previewed ref's code as a long-lived resident process. Gated by the trusted live config, and that authorization is *kind-scoped*: trusting an artifact of the same name+command does not authorize the preview. Default `false`. |
+| `strict`            | no       | Run under `set -eo pipefail` so a failing build step aborts the spawn instead of serving a half-built tree. Default `true`. |
+| `enabled`           | no       | `false` hides the preview from the agent page. Default `true`. |
+
+The command is given:
+
+| Variable               | Value |
+| ---------------------- | ----- |
+| `HYDRA_PREVIEW_ADDR`   | The full `host:port` to bind — `0.0.0.0:PORT` under network mode `hard`, else `127.0.0.1:PORT`. Bind **this**, not a hardcoded `127.0.0.1`, or hard mode 502s. |
+| `HYDRA_PREVIEW_PORT`   | Just the port. |
+| `HYDRA_PREVIEW_SOURCE` | The checkout directory. |
+
+Readiness is the first successful dial of the port, or an explicit
+`::hydra:server:ready::` line on stdout, whichever comes first;
+`::hydra:progress:: <text>` sets the headline shown while it builds. Which ports
+the proxy allocates from is the top-level `preview_ports` range.
+
+Previews used to be written as an `[artifacts.<name>]` table with
+`type = "server"`. That spelling still parses — including at an older git ref,
+whose config Hydra reads as-is when previewing it — and is upgraded to a
+`[previews.<name>]` on read (`upgradeServerArtifacts` in `internal/config`). The
+renderer never writes `type` back, so the next config save migrates the file.
+
+### Previews: caching
 
 Previews mirror a live worktree, so stale caches would defeat their purpose.
 Two layers keep them fresh, and neither needs (or offers) configuration:

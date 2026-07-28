@@ -468,23 +468,14 @@ type ArtifactScript struct {
 	// Enabled Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
 	Enabled *bool `json:"enabled"`
 
-	// IdleTimeoutSec (server type) Teardown after this long with zero in-flight proxied requests; open WebSocket/long-poll connections count as in-flight (0 = default 300).
-	IdleTimeoutSec *int `json:"idle_timeout_sec,omitempty"`
-
 	// Name Unique label, also used as the cache directory
 	Name string `json:"name"`
-
-	// ReadyTimeoutSec (server type) Max seconds from spawn to ready, builds included (0 = default 900).
-	ReadyTimeoutSec *int `json:"ready_timeout_sec,omitempty"`
 
 	// Strict Run the command under `set -eo pipefail` so a failing step aborts and propagates instead of being swallowed into a success (absent/null or true = strict; false = run exactly as written)
 	Strict *bool `json:"strict"`
 
 	// TimeoutSec Max seconds the command may run (0 = built-in default)
 	TimeoutSec *int `json:"timeout_sec,omitempty"`
-
-	// Type What the script produces - absent/null/"media" is a run-to-completion generator whose outputs the diff viewer compares; "server" is a live preview whose command starts an HTTP server on 127.0.0.1:$HYDRA_PREVIEW_PORT, proxied by Hydra on demand and never shown in the diff grid.
-	Type *string `json:"type"`
 
 	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false)
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
@@ -621,6 +612,9 @@ type ConfigResponse struct {
 
 	// McpServers Read-only: candidate MCP servers discovered in the host ~/.claude.json and project .mcp.json, for populating the mcp_allowed picker. Ignored on save.
 	McpServers *[]McpServer `json:"mcp_servers"`
+
+	// Previews Per-project live-server scripts, each proxied on demand as a clickable preview of the head's app ([previews.<name>] in config.toml). A config still spelling one as an [artifacts.<name>] with type = "server" is upgraded on read, so it appears here and not under artifacts.
+	Previews *[]PreviewScript `json:"previews"`
 
 	// Resources The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults - weights on 50/50, hard caps off - are applied only when resolving). Weights are soft (bite only under contention); the hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
 	Resources *ResourceLimits `json:"resources,omitempty"`
@@ -867,6 +861,30 @@ type PolicyConfig struct {
 	McpToolsBlocked *[]string `json:"mcp_tools_blocked"`
 }
 
+// PreviewScript A per-project command that boots a live, clickable preview of the app at a checkout ([previews.<name>] in config.toml). Hydra proxies a dedicated port to it, spawning it when its link is opened and tearing it down when idle.
+type PreviewScript struct {
+	// Command Shell script run via `bash -c` in the checkout directory. It must start a server listening on $HYDRA_PREVIEW_ADDR and stay in the foreground.
+	Command string `json:"command"`
+
+	// Enabled Whether the preview is offered on the agent page (absent/null or true = enabled; false = hidden)
+	Enabled *bool `json:"enabled"`
+
+	// IdleTimeoutSec Teardown after this long with zero in-flight proxied requests; open WebSocket/long-poll connections count as in-flight (0 = default 300).
+	IdleTimeoutSec *int `json:"idle_timeout_sec,omitempty"`
+
+	// Name Unique label, shown in the agent page's Previews row
+	Name string `json:"name"`
+
+	// ReadyTimeoutSec Max seconds from spawn to ready, builds included (0 = default 900)
+	ReadyTimeoutSec *int `json:"ready_timeout_sec,omitempty"`
+
+	// Strict Run the command under `set -eo pipefail` so a failing build step aborts the spawn instead of serving a half-built tree (absent/null or true = strict)
+	Strict *bool `json:"strict"`
+
+	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false)
+	UnsafeHost *bool `json:"unsafe_host,omitempty"`
+}
+
 // PreviewState Preview instance lifecycle state
 type PreviewState string
 
@@ -881,7 +899,7 @@ type PreviewStatus struct {
 	// Message Failure detail when state is "error"
 	Message *string `json:"message,omitempty"`
 
-	// Name The server artifact script name
+	// Name The preview script name
 	Name string `json:"name"`
 
 	// Pid Child process PID while starting/running (0 otherwise)
@@ -2077,7 +2095,7 @@ type ServerInterface interface {
 	// Arm auto-merge - merge this head when its tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
 	ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
-	// List live server previews ([artifacts.<name>] type = "server") for a head
+	// List live server previews ([previews.<name>]) for a head
 	// (GET /api/projects/{project_id}/agents/{id}/previews)
 	GetAgentPreviews(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentPreviewsParams)
 	// Start (or ensure) a live server preview instance
@@ -7438,7 +7456,7 @@ type StrictServerInterface interface {
 	// Arm auto-merge - merge this head when its tests settle passing
 	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
 	ArmMergeWhenGreen(ctx context.Context, request ArmMergeWhenGreenRequestObject) (ArmMergeWhenGreenResponseObject, error)
-	// List live server previews ([artifacts.<name>] type = "server") for a head
+	// List live server previews ([previews.<name>]) for a head
 	// (GET /api/projects/{project_id}/agents/{id}/previews)
 	GetAgentPreviews(ctx context.Context, request GetAgentPreviewsRequestObject) (GetAgentPreviewsResponseObject, error)
 	// Start (or ensure) a live server preview instance
