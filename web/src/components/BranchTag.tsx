@@ -8,16 +8,32 @@ import { CopyStateIcon } from './CopyStateIcon'
 // copy button just after the name (the "B" keyboard shortcut copies the same
 // thing - see AgentDetail).
 //
+// `label` overrides the displayed text without changing what is copied or
+// selected - the agent header shows the bare head id (the branch minus its
+// `hydra/` prefix) while still putting the real branch name on the clipboard.
+// `icon={false}` drops the branch glyph for callers whose row already reads as
+// a branch without it.
+//
 // The onCopy handler exists to strip the trailing newline that browsers append
 // when a flex/block element is fully selected: triple-clicking the tag and
 // hitting Ctrl+C would otherwise yield "hydra/foo\n". We re-serialise the live
 // selection ourselves (trailing whitespace trimmed) so the clipboard carries
 // just the branch name - while still honouring a partial selection.
-export function BranchTag({ branch }: { branch: string }) {
+export function BranchTag({
+  branch,
+  label,
+  icon = true,
+  className = 'text-xs font-mono text-gray-500 dark:text-gray-400',
+}: {
+  branch: string
+  label?: string
+  icon?: boolean
+  className?: string
+}) {
   const { state, flash } = useCopyFlash(1200)
   return (
     <span
-      className="text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1.5"
+      className={`${className} flex items-center gap-1.5 min-w-0`}
       onCopy={(e) => {
         const selected = window.getSelection()?.toString() ?? ''
         const cleaned = selected.replace(/\s+$/, '')
@@ -26,8 +42,10 @@ export function BranchTag({ branch }: { branch: string }) {
         e.clipboardData.setData('text/plain', cleaned)
       }}
     >
-      <GitBranch className="w-3.5 h-3.5" />
-      {branch}
+      {icon && <GitBranch className="w-3.5 h-3.5 shrink-0" />}
+      {/* Native title (not Tooltip): a plain non-interactive span showing text
+          that can truncate - see the tooltip conventions in CLAUDE.md. */}
+      <span className="truncate" title={label != null && label !== branch ? branch : undefined}>{label ?? branch}</span>
       <Tooltip
         content={
           <>
@@ -39,7 +57,7 @@ export function BranchTag({ branch }: { branch: string }) {
         <button
           type="button"
           aria-label="Copy branch name"
-          className="cursor-pointer text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition-colors"
+          className="cursor-pointer shrink-0 text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition-colors"
           onClick={() => { void copyBranchName(branch).then(flash) }}
         >
           <CopyStateIcon state={state} />

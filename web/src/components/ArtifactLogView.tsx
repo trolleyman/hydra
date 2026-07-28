@@ -5,7 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { ArtifactSet, ArtifactLogLine } from '../api'
 import { useIsDark } from '../lib/theme'
 import { useLiveLogLines } from './artifactLogStore'
-import { copyText } from '../lib/clipboard'
+import { copyWithToast } from '../lib/copyToast'
 
 // LOG_SCROLLBACK bounds the xterm scrollback for build logs. The live in-memory
 // log is capped at maxLogLines (5000) backend-side; persisted logs can run longer,
@@ -101,7 +101,7 @@ export function LogView({ log, emptyText = 'Waiting for output...', failed = fal
     // selection so the browser's own handling still applies.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'c' || e.key === 'C') && term.hasSelection()) {
-        void copyText(term.getSelection())
+        void copyWithToast(term.getSelection(), { what: 'log selection' })
         return false
       }
       return true
