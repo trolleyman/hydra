@@ -360,13 +360,18 @@ export const ApprovalCard: React.FC<{
           {data.kind === 'mcp' && (
             <Caption icon={<Shield className="w-3 h-3" />}>You&rsquo;ll still approve individual tools the first time the agent calls them.</Caption>
           )}
+          {/* The network captions warn rather than label: each one is there to say
+              that Allow grants MORE than the line above it asked for - the whole
+              host, not this one URL. Repeating the card's own Globe / Network mark
+              made that read as a restatement of the ask. The alert glyph is the
+              same one the host_command caption wears, for the same job. */}
           {data.kind === 'webfetch' && (
-            <Caption icon={<Globe className="w-3 h-3" />}>
+            <Caption icon={<TriangleAlert className="w-3 h-3" />}>
               Allow trusts the whole host for the rest of this session - every request to <span className="font-mono"><HostName host={data.target} /></span>, including POSTs - not just this URL.
             </Caption>
           )}
           {data.kind === 'egress' && (
-            <Caption icon={<Network className="w-3 h-3" />}>
+            <Caption icon={<TriangleAlert className="w-3 h-3" />}>
               Allow opens <span className="font-mono"><HostName host={data.target} /></span> for the rest of this session; Always allow adds it to the agent&rsquo;s network allow-list.
             </Caption>
           )}
