@@ -56,6 +56,25 @@ type Deps struct {
 	// the sanctioned path - a write can't land on the main repo or a sibling head.
 	// Nil disables all the git_* tools.
 	GitOp func(GitOpRequest) GitOpResult
+	// HostRun asks the user to run one command on the HOST, outside the sandbox,
+	// in the head's worktree, and blocks until they decide (and, on allow, until
+	// the command finishes). The sandbox escape hatch of last resort. Nil - no
+	// approval channel - hides the tool rather than letting it fail on use.
+	HostRun func(HostRunRequest) HostRunResult
+}
+
+// HostRunRequest is one host_run call: the command to run and the agent's
+// explanation of why it cannot run inside the sandbox.
+type HostRunRequest struct {
+	Command string
+	Why     string
+}
+
+// HostRunResult is what came back: Message is the agent-readable outcome (the
+// command's output, or why it never ran), Failed marks it as a tool error.
+type HostRunResult struct {
+	Failed  bool
+	Message string
 }
 
 // GitOpRequest is the union input to the git_* tools. Op selects the operation;
@@ -251,6 +270,9 @@ func toolDefs(deps Deps) []map[string]any {
 	if deps.GitOp != nil {
 		defs = append(defs, gitToolDefs()...)
 	}
+	if deps.HostRun != nil {
+		defs = append(defs, hostRunToolDef())
+	}
 	if deps.GetReview != nil {
 		defs = append(defs,
 			map[string]any{
@@ -318,6 +340,16 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		}
 		r := deps.GitOp(req)
 		return textResult(r.Message, !r.OK)
+	case "host_run":
+		if deps.HostRun == nil {
+			return textResult("host_run is not available in this session (no approval channel).", true)
+		}
+		hr, errMsg := parseHostRun(p.Arguments)
+		if errMsg != "" {
+			return textResult(errMsg, true)
+		}
+		r := deps.HostRun(hr)
+		return textResult(r.Message, r.Failed)
 	case "get_review_status":
 		return textResult(reviewStatusText(deps), false)
 	case "get_review_comments":

@@ -117,10 +117,32 @@ func runHostRun(args []string) int {
 		fmt.Fprintln(os.Stderr, `host-run: no --why given. Pass --why "<what this does and why it can't run in the sandbox>" - the user sees it above the command and is far more likely to allow a request that explains itself.`)
 	}
 
+	fmt.Fprintln(os.Stderr, "host-run: waiting for the user to approve running this command on the host...")
+	outcome := requestHostRun(command, why)
+	if outcome.Refused != "" {
+		fmt.Fprintln(os.Stderr, "host-run: "+outcome.Refused)
+		return hostRunExitDenied
+	}
+	return relayHostRunResult(outcome.Result)
+}
+
+// hostRunOutcome is one host-command request's result. Refused is a non-empty,
+// agent-readable explanation when the command never ran at all (no approval
+// channel, denied, timed out, or the submission itself failed); otherwise Result
+// carries what the host command did.
+type hostRunOutcome struct {
+	Refused string
+	Result  gate.HostRunResult
+}
+
+// requestHostRun parks a host-command approval and blocks for the outcome. It is
+// the shared core behind BOTH front ends - the `hydra host-run` CLI and the
+// host_run MCP tool - so the two cannot drift on what gets parked, how long the
+// wait is, or how the head's status is maintained during it.
+func requestHostRun(command, why string) hostRunOutcome {
 	dir := os.Getenv(gate.EnvApprovalDir)
 	if dir == "" {
-		fmt.Fprintln(os.Stderr, "host-run: no approval channel is available, so a host command can't be requested right now.")
-		return hostRunExitDenied
+		return hostRunOutcome{Refused: "no approval channel is available, so a host command can't be requested right now."}
 	}
 
 	reqid := strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -142,32 +164,27 @@ func runHostRun(args []string) int {
 		TS:          time.Now().Format(time.RFC3339Nano),
 	}
 	if err := gate.WriteRequest(dir, req); err != nil {
-		fmt.Fprintf(os.Stderr, "host-run: failed to submit the request: %v\n", err)
-		return hostRunExitDenied
+		return hostRunOutcome{Refused: "failed to submit the request: " + err.Error()}
 	}
 	// Retire the request/decision/result files once we're done, so a resolved
 	// approval stops being surfaced and the dir doesn't accumulate.
 	defer gate.RemoveRequest(dir, reqid)
 
-	fmt.Fprintln(os.Stderr, "host-run: waiting for the user to approve running this command on the host...")
-
 	deadline := time.Now().Add(askTimeout)
 	for {
-		// Keep the approval card visible: no Claude hook fires while this CLI blocks,
+		// Keep the approval card visible: no Claude hook fires while this blocks,
 		// so nothing else re-stamps the status.
 		writeApprovalStatus(summary)
 		if d, ok, err := gate.ReadDecision(dir, reqid); err == nil && ok {
 			if d.Decision != gate.Allow {
-				fmt.Fprintln(os.Stderr, "host-run: the user denied this command.")
 				writeRunningStatus("host command denied")
-				return hostRunExitDenied
+				return hostRunOutcome{Refused: "the user denied this command."}
 			}
 			return awaitHostRunResult(dir, reqid, deadline)
 		}
 		if time.Now().After(deadline) {
-			fmt.Fprintln(os.Stderr, "host-run: the request timed out without a decision.")
 			writeRunningStatus("host command request timed out")
-			return hostRunExitDenied
+			return hostRunOutcome{Refused: "the request timed out without a decision."}
 		}
 		time.Sleep(askPollInterval)
 	}
@@ -303,20 +320,18 @@ func shellQuote(s string) string {
 }
 
 // awaitHostRunResult waits for the daemon to run the approved command host-side
-// and write its result, then relays output + exit code. The daemon executes
-// promptly on approval, but the command itself may run a while, so this keeps
-// polling to the same overall deadline.
-func awaitHostRunResult(dir, reqid string, deadline time.Time) int {
+// and write its result. The daemon executes promptly on approval, but the command
+// itself may run a while, so this keeps polling to the same overall deadline.
+func awaitHostRunResult(dir, reqid string, deadline time.Time) hostRunOutcome {
 	writeRunningStatus("running approved host command")
 	for {
 		if r, ok, err := gate.ReadHostRunResult(dir, reqid); err == nil && ok {
 			writeRunningStatus("host command finished")
-			return relayHostRunResult(r)
+			return hostRunOutcome{Result: r}
 		}
 		if time.Now().After(deadline) {
-			fmt.Fprintln(os.Stderr, "host-run: approved, but the host command did not return in time.")
 			writeRunningStatus("host command did not return in time")
-			return hostRunExitDenied
+			return hostRunOutcome{Refused: "approved, but the host command did not return in time."}
 		}
 		time.Sleep(askPollInterval)
 	}

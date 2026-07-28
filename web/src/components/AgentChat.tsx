@@ -2504,12 +2504,19 @@ const ToolCard = memo(function ToolCard({
 	}, [rawInput])
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
 	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
-  const isBash = item.name === 'Bash' && command !== ''
-  // `hydra host-run` is the sandbox escape hatch: the agent is not running this
-  // itself, it is asking the USER to run it on the host. Show the command it is
-  // asking for rather than the CLI wrapper it typed, and give the card its own
-  // host identity (see the header) so it never reads as an ordinary Bash step.
-  const hostRunScript = isBash ? parseHostRunScript(command) : null
+  // The host_run MCP tool is the escape hatch's first-class form: its `command`
+  // IS the host command, with no shell of the agent's in between (which is what
+  // the `hydra host-run` CLI spelling could never guarantee). It renders as a
+  // Bash-shaped card because that is what it is - one shell command - it just
+  // runs somewhere else.
+  const isHostRunTool = item.name === 'mcp__hydra__host_run' && command !== ''
+  const isBash = (item.name === 'Bash' && command !== '') || isHostRunTool
+  // `hydra host-run` is the same escape hatch typed into Bash: the agent is not
+  // running this itself, it is asking the USER to run it on the host. Show the
+  // command it is asking for rather than the CLI wrapper it typed, and give the
+  // card its own host identity (see the header) so it never reads as an
+  // ordinary Bash step.
+  const hostRunScript = isHostRunTool ? command : item.name === 'Bash' ? parseHostRunScript(command) : null
   const isHostRun = hostRunScript !== null
   // The host command runs in the head's worktree whatever the agent's own cwd
   // was, so a `cd` preamble would be a lie - drop it for a host run.
@@ -2517,10 +2524,16 @@ const ToolCard = memo(function ToolCard({
   const bashIndent = useChatBashIndentStore((s) => s.indent)
   const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd, bashIndent) : ''
   const executableCommand = isBash ? formatBashForDisplay(bashSource, '', bashIndent) : ''
-  const interactiveTranscript = isBash && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
+  const interactiveTranscript = isBash && !isHostRunTool && visibleResult !== undefined ? interactiveShellTranscript(executableCommand, visibleResult) : null
   const visibleCommand = interactiveTranscript?.command ?? displayedCommand
   const renderedResult = interactiveTranscript?.output ?? visibleResult
-  const description = isBash && typeof input?.description === 'string' ? (input.description as string) : ''
+  const description = isHostRunTool
+    ? typeof input?.why === 'string'
+      ? (input.why as string)
+      : ''
+    : isBash && typeof input?.description === 'string'
+      ? (input.description as string)
+      : ''
 
   // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
   // for auto-memory files, the line range for the header, whether the input is

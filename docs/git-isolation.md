@@ -181,12 +181,13 @@ either route the setup through host-run (below) or set
 
 lfs and submodules need the actual file/submodule *content* to build and run, so they
 can't just be skipped. The intended escape valve is the existing **host-run** hatch
-(`/tmp/hydra-internal host-run -- <cmd>`): `host-run -- git submodule update --init`
-runs host-side against the real writable `.git`, approval-gated. That covers the
-once-per-head setup without building submodule/lfs-specific tooling. Caveats: it is
-approval-gated (a click per op, fine for setup, wrong for a hot loop), and it runs
-**unsandboxed** - so avoid `host-run -- bun install` (that runs all npm postinstall
-scripts on the host, a supply-chain vector); prefer narrow git-only commands.
+(the `mcp__hydra__host_run` tool, or `/tmp/hydra-internal host-run` for agents without
+it): `git submodule update --init` runs host-side against the real writable `.git`,
+approval-gated. That covers the once-per-head setup without building submodule/lfs
+-specific tooling. Caveats: it is approval-gated (a click per op, fine for setup, wrong
+for a hot loop), and it runs **unsandboxed** - so avoid asking for `bun install` (that
+runs all npm postinstall scripts on the host, a supply-chain vector); prefer narrow
+git-only commands.
 
 Do **not** try to fix this by carving `.git/config` read-write out of the readonly
 bind. `.git/config` is a code-execution surface (`core.hooksPath`, `core.fsmonitor`,

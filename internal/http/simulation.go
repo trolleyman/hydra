@@ -4674,10 +4674,10 @@ func simApprovalsEvents(questionToolID, requestID string) []string {
 		"message": map[string]any{"id": "msg_approvals_hostrun", "content": []map[string]any{{
 			"type": "tool_use",
 			"id":   "toolu_approvals_hostrun",
-			"name": "Bash",
+			"name": "mcp__hydra__host_run",
 			"input": map[string]any{
-				"command":     `/tmp/hydra-internal host-run --why "` + simApprovalsHostRunWhy + `" -- bash -c "` + simApprovalsHostRun + `"`,
-				"description": "Check the daemon's listeners on the host",
+				"command": simApprovalsHostRun,
+				"why":     simApprovalsHostRunWhy,
 			},
 		}}},
 	})

@@ -26,6 +26,14 @@ describe('approvalMatchesTool', () => {
     expect(approvalMatchesTool(req({}), 'Bash', { command: 'echo hi' })).toBe(false)
   })
 
+  // The host_run MCP tool passes its command straight through - no shell, no
+  // argv rendering - so the card's own argument is the parked target verbatim.
+  it('matches a host_command to the host_run tool card that asked for it', () => {
+    expect(approvalMatchesTool(req({}), 'mcp__hydra__host_run', { command: 'echo hi' })).toBe(true)
+    expect(approvalMatchesTool(req({}), 'mcp__hydra__host_run', { command: 'rm -rf /' })).toBe(false)
+    expect(approvalMatchesTool(req({}), 'mcp__hydra__host_run', {})).toBe(false)
+  })
+
   it('matches a gated tool call by the tool the gate parked on', () => {
     const a = req({ kind: 'mcp_tool', tool: 'mcp__linear__create_issue', target: 'linear__create_issue' })
     expect(approvalMatchesTool(a, 'mcp__linear__create_issue', {})).toBe(true)

@@ -19,11 +19,14 @@ export function approvalMatchesTool(
   input: Record<string, unknown> | null,
 ): boolean {
   if (approval.kind === 'host_command') {
-    if (toolName !== 'Bash') return false
     const command = typeof input?.command === 'string' ? input.command : ''
+    const target = (approval.target ?? '').trim()
+    // The host_run MCP tool passes the command straight through - no shell, no
+    // argv rendering - so the card's own argument IS the parked target.
+    if (toolName === 'mcp__hydra__host_run') return command.trim() === target
+    if (toolName !== 'Bash') return false
     const script = parseHostRunScript(command)
     if (script === null) return false
-    const target = (approval.target ?? '').trim()
     // The CLI renders the request from the argv it was given, so the script we
     // parse out of the command is normally byte-identical; a differently-quoted
     // rendering still leaves the script text inside the command.

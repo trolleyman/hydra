@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"braces.dev/errtrace"
@@ -48,6 +49,11 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 		RequestAccess: func(name string) (bool, string) { return requestMCPAccess(agentType, name) },
 		GitOp:         gitOpFromMCP,
 	}
+	// The escape hatch needs the gate's approval channel; without one it could only
+	// ever fail, so hide it rather than advertise a tool that cannot work.
+	if os.Getenv(gate.EnvApprovalDir) != "" {
+		deps.HostRun = hostRunFromMCP
+	}
 	// Wire the review tools only when this head has a review file (HYDRA_REVIEW_PATH
 	// is seeded for every head; the file reports linked=false until published).
 	if os.Getenv("HYDRA_REVIEW_PATH") != "" {
@@ -59,6 +65,46 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
+}
+
+// hostRunFromMCP backs the host_run MCP tool: it parks the approval and blocks
+// for the outcome exactly as `hydra host-run` does (both go through
+// requestHostRun), then renders the result as tool output instead of relaying it
+// to stdout and an exit code.
+//
+// The command is taken verbatim from the tool argument - no shell of the agent's
+// stands between it and the approval card - which is the whole reason this tool
+// exists alongside the CLI.
+func hostRunFromMCP(req mcpserver.HostRunRequest) mcpserver.HostRunResult {
+	outcome := requestHostRun(req.Command, req.Why)
+	if outcome.Refused != "" {
+		return mcpserver.HostRunResult{Failed: true, Message: "The command did not run: " + outcome.Refused}
+	}
+	r := outcome.Result
+	if r.Error != "" {
+		return mcpserver.HostRunResult{Failed: true, Message: "The host command could not be run: " + r.Error}
+	}
+	var b strings.Builder
+	switch {
+	case r.TimedOut:
+		b.WriteString("The command was killed at the host execution timeout.\n")
+	case r.ExitCode == 0:
+		b.WriteString("Ran on the host; exit status 0.\n")
+	default:
+		fmt.Fprintf(&b, "Ran on the host; exit status %d.\n", r.ExitCode)
+	}
+	if r.Truncated {
+		b.WriteString("(output truncated to its final portion)\n")
+	}
+	if strings.TrimSpace(r.Output) == "" {
+		b.WriteString("\n(no output)")
+	} else {
+		b.WriteString("\n" + r.Output)
+	}
+	// A non-zero exit is the command's own verdict, not a tool failure - the agent
+	// asked for it to run and it ran. Reporting it as a tool error would make a
+	// deliberate `grep -q` style check look like the escape hatch malfunctioned.
+	return mcpserver.HostRunResult{Message: b.String()}
 }
 
 // gitOpPollInterval / gitOpTimeout bound the in-sandbox wait for a host-mediated
