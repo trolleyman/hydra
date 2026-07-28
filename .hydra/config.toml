@@ -28,6 +28,7 @@ pre_prompt = '''
   - Playwright scripts MUST live under web/ (node resolves node_modules from the script's dir) - write throwaway drivers to web/scripts/ and delete them before committing. Install browsers from web/ with `cd web && aubx playwright install chromium` (playwright is a devDependency, so this runs the pinned local version).
   - The agent page scrolls in an inner pane `[data-main-scroll]`, not the window - scroll via pane.scrollTop. Diff file cards: `div.border.rounded-lg.mb-4`; lazily-unmounted bodies contain `[data-lazy-placeholder]`; code rows match `span.font-mono.text-xs.leading-5` (~4 spans per diff line).
   - Capture page.on('console') and page.on('pageerror') - console cleanliness is often the thing being verified. Known pre-existing sim-server 404 noise to ignore: /uploads/projects/*/blob, /folder-picker/available.
+  - A screenshot you intend to SHOW the user: take it with `deviceScaleFactor: 2` on the browser context and save it as `<name>@2x.png`. The chat lays an image out at its logical size (pixels / the @Nx in its name), so a 2x shot is the same size as a 1x one but stays sharp on a HiDPI display. Measure, don't eyeball: an image is only crisp if its rendered content box is exactly natural px / density (getComputedStyle width vs naturalWidth) - a fractional ratio means it is being resampled.
 '''
 
 ## custom project icon shown in the web UI's project switcher and dropdown: an emoji, a lucide-react icon name (e.g. "Rocket"), or an image path/URL ending in .png/.svg/.ico/.jpg. Empty = the default folder icon.

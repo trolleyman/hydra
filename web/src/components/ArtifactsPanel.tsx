@@ -28,6 +28,7 @@ import { useImageLightboxStore } from '../stores/imageLightboxStore'
 import { applyABShortcut } from '../lib/abShortcuts'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
 import { LiveLogProvider, useLiveLogStore } from './artifactLogStore'
+import { ElapsedTime } from './ElapsedTime'
 
 const CHANGE_LABEL: Record<string, string> = {
   added: 'added',
@@ -828,27 +829,6 @@ const FileGrid = memo(function FileGrid({ files, mode, scale = 1, spans, onSpanC
     </div>
   )
 })
-
-// formatElapsed renders a running duration compactly: "12s", or "1m 05s" once it
-// passes a minute.
-function formatElapsed(secs: number): string {
-  if (secs < 60) return `${secs}s`
-  const m = Math.floor(secs / 60)
-  const s = secs % 60
-  return `${m}m ${s.toString().padStart(2, '0')}s`
-}
-
-// ElapsedTime shows how long an in-flight generation has been running, ticking
-// once a second. startedAt is a Unix time in seconds (from the backend, so it
-// survives reloads/reconnects).
-export function ElapsedTime({ startedAt }: { startedAt: number }) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [])
-  return <>{formatElapsed(Math.max(0, Math.floor(now / 1000 - startedAt)))}</>
-}
 
 // memo: while a script is generating, every streamed progress/log frame
 // replaces just that script's set object - memo confines the re-render to the

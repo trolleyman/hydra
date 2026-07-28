@@ -1844,6 +1844,25 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
 // enough to sit beside the 256px dropdown on a laptop screen.
 const COMMIT_TIP_WIDTH = 440
 
+// Width of a commit dropdown panel (the w-64 below), and the margin it keeps
+// from the window edge.
+const COMMIT_MENU_WIDTH = 256
+const COMMIT_MENU_PAD = 8
+
+// Where a dropdown panel sits, as a px offset from its trigger's left edge (the
+// panel is absolutely positioned inside a wrapper the trigger's size). The
+// selectors sit at the right end of the Changes toolbar, where a panel aligned
+// to its trigger ran off the screen and the "Latest commit" entries were
+// unreachable. Slid back on-screen rather than flipped to right-aligned: a
+// trigger can itself sit flush against the window edge, and right-aligning to it
+// would leave the panel hanging over that same edge.
+function menuOffset(el: HTMLElement | null): number {
+  const rect = el?.getBoundingClientRect()
+  if (!rect) return 0
+  const maxLeft = window.innerWidth - COMMIT_MENU_WIDTH - COMMIT_MENU_PAD
+  return Math.max(COMMIT_MENU_PAD, Math.min(rect.left, maxLeft)) - rect.left
+}
+
 // The short-sha chip, shared by the selector rows and the hover card header.
 const COMMIT_SHA_CHIP =
   'font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0'
@@ -1873,7 +1892,17 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
   onSelectOnly: (sha: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  // How far the panel is nudged off its trigger to stay on-screen, decided from
+  // the trigger's position each time the menu opens (see menuOffset). Measured
+  // in the click handler rather than a layout effect: the panel only appears on
+  // that click, so there is nothing to correct afterwards.
+  const [offset, setOffset] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
+
+  const toggle = () => {
+    if (!open) setOffset(menuOffset(ref.current))
+    setOpen((o) => !o)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -1897,7 +1926,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
@@ -1906,7 +1935,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
+        <div style={{ left: offset }} className="absolute top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
           {/* Latest commit at top */}
           {commits.length > 0 && (
             <div className="py-1 border-b border-gray-100 dark:border-gray-700">
@@ -1988,7 +2017,17 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
   onSelectOnly: (sha: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  // How far the panel is nudged off its trigger to stay on-screen, decided from
+  // the trigger's position each time the menu opens (see menuOffset). Measured
+  // in the click handler rather than a layout effect: the panel only appears on
+  // that click, so there is nothing to correct afterwards.
+  const [offset, setOffset] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
+
+  const toggle = () => {
+    if (!open) setOffset(menuOffset(ref.current))
+    setOpen((o) => !o)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -2014,7 +2053,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
@@ -2026,7 +2065,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
+        <div style={{ left: offset }} className="absolute top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
           <div className="py-1 border-b border-gray-100 dark:border-gray-700">
             <button
               onClick={() => { onChange({ type: 'uncommitted' }); setOpen(false) }}
