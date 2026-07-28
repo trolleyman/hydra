@@ -83,6 +83,85 @@ describe('Codex bash display', () => {
     expect(formatBashForDisplay(command)).toBe(command)
   })
 
+  it('lays a case out with one arm per line', () => {
+    expect(formatBashForDisplay('case $x in a) echo a ;; b|c) echo bc ;; *) echo other ;; esac')).toBe(
+      'case $x in\n    a) echo a ;;\n    b|c) echo bc ;;\n    *) echo other ;;\nesac',
+    )
+  })
+
+  it('indents the rest of a multi-command case arm under its pattern', () => {
+    expect(formatBashForDisplay('case $x in a) echo one; echo two ;; esac')).toBe(
+      'case $x in\n    a) echo one\n        echo two ;;\nesac',
+    )
+  })
+
+  it.each([
+    // A parenthesised pattern, and the `;&` / `;;&` fall-through terminators.
+    ['case $x in (a) echo a ;; esac', 'case $x in\n    (a) echo a ;;\nesac'],
+    ['case $x in a) echo a ;& *) echo b ;; esac', 'case $x in\n    a) echo a ;&\n    *) echo b ;;\nesac'],
+    ['case $x in a) echo a ;;& *) echo b ;; esac', 'case $x in\n    a) echo a ;;&\n    *) echo b ;;\nesac'],
+    // The final `;;` is optional, so `esac` has to close the arm as well.
+    ['case $x in a) echo a; esac', 'case $x in\n    a) echo a\nesac'],
+  ])('formats the case in %j', (command, expected) => {
+    expect(formatBashForDisplay(command)).toBe(expected)
+  })
+
+  it('nests a case inside a loop body', () => {
+    expect(formatBashForDisplay('for f in *; do case $f in *.gz) gunzip $f ;; *) wc -l $f ;; esac; done')).toBe(
+      'for f in *; do\n    case $f in\n        *.gz) gunzip $f ;;\n        *) wc -l $f ;;\n    esac\ndone',
+    )
+  })
+
+  it('does not mistake a subshell or substitution for a case pattern', () => {
+    expect(formatBashForDisplay('(cd web && echo $(date)); echo done')).toBe('(cd web &&\necho $(date))\necho done')
+  })
+
+  it.each([
+    [0, 'for i in 1; do\necho $i\ndone'],
+    [2, 'for i in 1; do\n  echo $i\ndone'],
+    [8, 'for i in 1; do\n        echo $i\ndone'],
+  ])('indents a block body by %i spaces', (indent, expected) => {
+    expect(formatBashForDisplay('for i in 1; do echo $i; done', '', indent)).toBe(expected)
+  })
+
+  it('lays a for loop out over its own indented lines', () => {
+    expect(formatBashForDisplay('cd /path && for i in 1 2 3; do echo $i; done')).toBe(
+      'cd /path &&\nfor i in 1 2 3; do\n    echo $i\ndone',
+    )
+  })
+
+  it('formats an if/else chain', () => {
+    expect(formatBashForDisplay('if [ -f x ]; then echo a; elif [ -f y ]; then echo b; else echo c; fi')).toBe(
+      'if [ -f x ]; then\n    echo a\nelif [ -f y ]; then\n    echo b\nelse\n    echo c\nfi',
+    )
+  })
+
+  it('indents nested blocks one level each', () => {
+    expect(formatBashForDisplay('for a in 1; do for b in 2; do echo $a$b; done; done')).toBe(
+      'for a in 1; do\n    for b in 2; do\n        echo $a$b\n    done\ndone',
+    )
+  })
+
+  it('keeps a block header on one line', () => {
+    expect(formatBashForDisplay('if command -v bun && test -x foo; then echo ok; fi')).toBe(
+      'if command -v bun && test -x foo; then\n    echo ok\nfi',
+    )
+    expect(formatBashForDisplay('for ((i=0;i<3;i++)); do echo $i; done')).toBe('for ((i=0; i<3; i++)); do\n    echo $i\ndone')
+  })
+
+  it('sees a keyword after a pipe but not in an argument', () => {
+    expect(formatBashForDisplay('cat f | while read l; do echo $l; done')).toBe('cat f | while read l; do\n    echo $l\ndone')
+    expect(formatBashForDisplay('echo done; echo then')).toBe('echo done\necho then')
+  })
+
+  it('keeps what follows a closed block on the same chain', () => {
+    expect(formatBashForDisplay('for i in 1; do echo $i; done && echo ok')).toBe('for i in 1; do\n    echo $i\ndone &&\necho ok')
+  })
+
+  it('leaves a keyword inside quotes alone', () => {
+    expect(formatBashForDisplay(`echo 'for i in 1; do x; done'`)).toBe(`echo 'for i in 1; do x; done'`)
+  })
+
   it('renders a bare command as the same shell script', () => {
     expect(formatBashForDisplay('echo 123123')).toBe('echo 123123')
     expect(formatBashForDisplay('/usr/bin/bash -lc "echo 123123"')).toBe('echo 123123')

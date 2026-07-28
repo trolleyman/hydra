@@ -1,44 +1,20 @@
 package common
 
 import (
-	"braces.dev/errtrace"
-	"bufio"
 	"fmt"
-	"log"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"braces.dev/errtrace"
 )
 
-// LoggingMiddleware logs HTTP requests with method, path, status, and duration
-func LoggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		lw := &logResponseWriter{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(lw, r)
-		log.Printf("%s %s %d %s", r.Method, r.URL.Path, lw.status, time.Since(start).Round(time.Microsecond))
-	})
-}
-
-type logResponseWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-func (w *logResponseWriter) WriteHeader(code int) {
-	w.status = code
-	w.ResponseWriter.WriteHeader(code)
-}
-
-// Hijack implements http.Hijacker so WebSocket upgrades work through the logging middleware.
-func (w *logResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return errtrace.Wrap3(w.ResponseWriter.(http.Hijacker).Hijack())
-}
+// (A second, unused LoggingMiddleware used to live here, logging a line per
+// request unconditionally. Both real servers wire internal/http's version, so
+// this one was only ever a trap for anyone reading the two side by side.)
 
 // RotatingLogger is a simple size-based rotating logger.
 type RotatingLogger struct {
@@ -70,6 +46,12 @@ func (r *RotatingLogger) Write(p []byte) (n int, err error) {
 		return 0, errtrace.Wrap(fmt.Errorf("logger file is nil"))
 	}
 
+	// Another hydra process may have rotated the file out from under us since
+	// our last write - see adoptCurrent.
+	if err := r.adoptCurrent(); err != nil {
+		return 0, errtrace.Wrap(err)
+	}
+
 	fi, err := r.file.Stat()
 	if err != nil {
 		return 0, errtrace.Wrap(err)
@@ -82,13 +64,51 @@ func (r *RotatingLogger) Write(p []byte) (n int, err error) {
 	return errtrace.Wrap2(r.file.Write(p))
 }
 
-func (r *RotatingLogger) rotate() error {
-	// Close current
+// adoptCurrent re-opens r.path when the file this logger holds is no longer the
+// one living there. Every hydra process - the CLI, the daemon, a foreground
+// `hydra server` - logs to the same file, each with its own open handle. When
+// one of them rotates, a rename leaves the others writing into the renamed
+// inode, so several "rotated" files keep growing at once and the directory
+// never actually shrinks. Following the path instead makes them all converge on
+// the live file.
+func (r *RotatingLogger) adoptCurrent() error {
+	onDisk, err := os.Stat(r.path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return errtrace.Wrap(err)
+		}
+		return errtrace.Wrap(r.reopen())
+	}
+	mine, err := r.file.Stat()
+	if err != nil || !os.SameFile(onDisk, mine) {
+		return errtrace.Wrap(r.reopen())
+	}
+	return nil
+}
+
+// reopen swaps r.file for a fresh append handle on r.path.
+func (r *RotatingLogger) reopen() error {
 	if r.file != nil {
 		r.file.Close()
 	}
-	// Rename with timestamp
-	ts := time.Now().UTC().Format("20060102T150405Z")
+	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	r.file = f
+	return nil
+}
+
+func (r *RotatingLogger) rotate() error {
+	// Close current before renaming (Windows won't rename an open file).
+	if r.file != nil {
+		r.file.Close()
+		r.file = nil
+	}
+	// Rename with timestamp. Local time, to match the timestamps on the lines
+	// inside the file - a UTC name over local-time contents made the rotated
+	// files look like they held an hour that isn't in them.
+	ts := time.Now().Format("20060102-150405")
 	newName := fmt.Sprintf("%s.%s", r.path, ts)
 	if err := os.Rename(r.path, newName); err != nil {
 		// If rename fails because file doesn't exist, ignore
@@ -97,11 +117,9 @@ func (r *RotatingLogger) rotate() error {
 		}
 	}
 	// Recreate current log file
-	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
+	if err := r.reopen(); err != nil {
 		return errtrace.Wrap(err)
 	}
-	r.file = f
 
 	// Enforce backups limit
 	if err := r.enforceBackups(); err != nil {
@@ -118,21 +136,33 @@ func (r *RotatingLogger) enforceBackups() error {
 		return errtrace.Wrap(err)
 	}
 	// collect rotated files matching base.
-	var candidates []os.DirEntry
+	type backup struct {
+		name string
+		mod  time.Time
+	}
+	var candidates []backup
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasPrefix(name, base+".") {
-			candidates = append(candidates, e)
+		if !strings.HasPrefix(name, base+".") {
+			continue
 		}
+		// Sort on mtime, not name: the rotated-name format has changed over
+		// time (a UTC "...T150405Z" suffix, now a local "...-150405" one) and
+		// those two don't interleave in lexical order, so sorting by name would
+		// happily delete the newest files and keep the stalest.
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		candidates = append(candidates, backup{name: name, mod: info.ModTime()})
 	}
 	if len(candidates) <= r.maxBackups {
 		return nil
 	}
-	// Sort by name (timestamps) ascending
-	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Name() < candidates[j].Name() })
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].mod.Before(candidates[j].mod) })
 	toRemove := len(candidates) - r.maxBackups
 	for i := 0; i < toRemove; i++ {
-		_ = os.Remove(filepath.Join(dir, candidates[i].Name()))
+		_ = os.Remove(filepath.Join(dir, candidates[i].name))
 	}
 	return nil
 }

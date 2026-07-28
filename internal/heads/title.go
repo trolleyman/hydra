@@ -3,6 +3,7 @@ package heads
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"os"
 	"os/exec"
@@ -61,6 +62,38 @@ const titleModel = "haiku"
 // up and keep the prompt-derived title.
 const titleGenTimeout = 25 * time.Second
 
+// ErrNoPrompt is returned by GenerateTitle when the agent has no task text to
+// summarise (a head spawned with an empty prompt).
+var ErrNoPrompt = errors.New("agent has no task prompt to summarise")
+
+// ErrNoTitle is returned by GenerateTitle when the call succeeded but produced
+// nothing usable (empty output). Distinct from a transport failure so a caller
+// can tell "the model said nothing" from "the call never landed".
+var ErrNoTitle = errors.New("the model did not return a usable title")
+
+// GenerateTitle asks the host `claude` CLI (cheapest model, non-interactive) for
+// a concise title summarising a head's task prompt. Blocking and bounded by
+// titleGenTimeout; used both by the background refinement on spawn and by the
+// rename box's "Generate" button.
+func GenerateTitle(ctx context.Context, projectRoot, prompt string) (string, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return "", errtrace.Wrap(ErrNoPrompt)
+	}
+	// The spawn form appends uploaded-file paths to the prompt, so a task whose
+	// real content was pasted in shows up here as a bare path. Inline a snippet
+	// of that text (and shrink image paths to their filename) so the title is
+	// about the task, not a path the model can't read.
+	prompt = inlineUploadRefs(prompt, paths.GetUploadsDirFromProjectRoot(projectRoot))
+	title, err := generateTitle(ctx, prompt)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	if title == "" {
+		return "", errtrace.Wrap(ErrNoTitle)
+	}
+	return title, nil
+}
+
 // generateTitleAsync refines an agent's title in the background by asking the
 // host `claude` CLI (cheapest model, non-interactive) for a concise summary of
 // the prompt, then writing it to the DB for the next poll to pick up. It is
@@ -72,22 +105,17 @@ func generateTitleAsync(ctx context.Context, store *db.Store, projectRoot, id, p
 	if store == nil || strings.TrimSpace(prompt) == "" {
 		return
 	}
-	// The spawn form appends uploaded-file paths to the prompt, so a task whose
-	// real content was pasted in shows up here as a bare path. Inline a snippet
-	// of that text (and shrink image paths to their filename) so the title is
-	// about the task, not a path the model can't read.
-	prompt = inlineUploadRefs(prompt, paths.GetUploadsDirFromProjectRoot(projectRoot))
 	go func() {
-		title, err := generateTitle(ctx, prompt)
+		title, err := GenerateTitle(ctx, projectRoot, prompt)
 		if err != nil {
-			// A cancelled context means the server is shutting down, not a real
-			// failure - don't cry wolf in the log.
+			// A cancelled context means the server is shutting down (typically a
+			// daemon auto-upgrade restart moments after the spawn), not a real
+			// failure - don't cry wolf in the log. Everything else is logged,
+			// including an unusable answer: silence here is what made a head that
+			// kept its derived title impossible to explain after the fact.
 			if ctx.Err() == nil {
 				log.Printf("heads: title generation for %s failed (keeping derived title): %v", id, err)
 			}
-			return
-		}
-		if title == "" {
 			return
 		}
 		if err := store.UpdateAgentTitle(id, title); err != nil {
@@ -219,34 +247,17 @@ func generateTitle(ctx context.Context, prompt string) (string, error) {
 	return sanitizeGeneratedTitle(string(out)), nil
 }
 
-// titleRefusalPrefixes catch the shapes a chatty/refusing model reply takes.
-// A title never starts this way, so treat such output as a failed generation
-// and keep the prompt-derived title rather than showing "I need permission to
-// read that file. Could you..." in the sidebar.
-var titleRefusalPrefixes = []string{
-	"i need", "i can't", "i cannot", "i'm unable", "i am unable", "i don't", "i do not",
-	"i'm sorry", "i am sorry", "sorry", "could you", "can you", "please provide",
-	"it looks like", "i'll need", "i would need", "to summarise", "to summarize",
-}
-
-// isImplausibleTitle reports whether a generated line reads as conversation
-// rather than a title.
-func isImplausibleTitle(line string) bool {
-	lower := strings.ToLower(line)
-	for _, p := range titleRefusalPrefixes {
-		if strings.HasPrefix(lower, p) {
-			return true
-		}
-	}
-	// Titles don't end in a colon or question mark, and don't run to sentences.
-	if strings.HasSuffix(line, ":") || strings.HasSuffix(line, "?") {
-		return true
-	}
-	return len(strings.Fields(line)) > 12
-}
-
 // sanitizeGeneratedTitle reduces raw model output to a single clean title line:
 // first non-empty line, surrounding quotes stripped, length-clamped.
+//
+// It deliberately does NOT second-guess the wording. There used to be an
+// isImplausibleTitle heuristic here that threw away anything opening with a
+// refusal phrase, ending in ":" or "?", or running past 12 words - and it
+// rejected silently, leaving the head on its truncated prompt-derived title
+// with no way to tell that anything had happened. Question-shaped tasks ("...
+// anything to worry about?") are exactly the ones it misfired on. A slightly
+// odd title is a better outcome than a silently-dropped one, and the rename
+// box's Generate button makes a bad one a one-click fix.
 func sanitizeGeneratedTitle(out string) string {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -257,9 +268,6 @@ func sanitizeGeneratedTitle(out string) string {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
-		}
-		if isImplausibleTitle(line) {
-			return ""
 		}
 		return truncateTitle(line)
 	}

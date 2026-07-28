@@ -1757,6 +1757,49 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 	return api.UpdateAgent200JSONResponse(agentResponse(*head)), nil
 }
 
+// GenerateAgentTitle re-runs the spawn flow's one-shot title call against the
+// agent's original task prompt and returns the result WITHOUT persisting it:
+// the rename box drops it in as a draft so the user can edit or discard it
+// before committing. That also makes it a safe retry for the case this exists
+// for - a head whose background title generation failed at spawn (offline, out
+// of credits, or the daemon restarting mid-call) and kept its truncated
+// prompt-derived title.
+func (s *Server) GenerateAgentTitle(ctx context.Context, request api.GenerateAgentTitleRequestObject) (api.GenerateAgentTitleResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.GenerateAgentTitle404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+
+	title, err := heads.GenerateTitle(ctx, projectRoot, head.Prompt)
+	switch {
+	case errors.Is(err, heads.ErrNoPrompt):
+		return api.GenerateAgentTitle400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "this agent has no task prompt to summarise",
+		}, nil
+	case err != nil:
+		log.Printf("api: generate title for %s: %v", request.Id, err)
+		return api.GenerateAgentTitle502JSONResponse{
+			Code:    502,
+			Error:   api.ErrorResponseErrorInternalError,
+			Details: fmt.Sprintf("title generation failed: %v", err),
+		}, nil
+	}
+	return api.GenerateAgentTitle200JSONResponse{Title: title}, nil
+}
+
 func (s *Server) MarkAgentRead(ctx context.Context, request api.MarkAgentReadRequestObject) (api.MarkAgentReadResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {

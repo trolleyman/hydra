@@ -1923,6 +1923,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/generate-title:
+    post:
+      summary: Generate a title for an agent from its task prompt
+      description: >-
+        Asks a cheap one-shot LLM call to summarise the agent's original task
+        prompt into a short title - the same call the spawn flow makes in the
+        background. This only RETURNS the title; it does not persist it, so the
+        rename box can drop it in as a draft the user can edit or discard.
+        Blocking (a few seconds) and best-effort: 502 means the model was
+        unreachable or answered with something that doesn't read as a title.
+      operationId: generateAgentTitle
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedTitleResponse'
+        '400':
+          description: Bad Request (e.g. the agent has no task prompt to summarise)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway (the title model failed or gave an unusable answer)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/config:
     get:
       summary: Get the merged configuration
@@ -2694,6 +2749,14 @@ paths:
 
 components:
   schemas:
+    GeneratedTitleResponse:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: The generated title. Not persisted - the client offers it as a draft.
+
     ErrorResponse:
       type: object
       required: [error, code, details]

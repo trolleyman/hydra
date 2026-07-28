@@ -35,6 +35,7 @@ export type { DiffHunk } from './models/DiffHunk';
 export { DiffLine } from './models/DiffLine';
 export type { DiffResponse } from './models/DiffResponse';
 export { ErrorResponse } from './models/ErrorResponse';
+export type { GeneratedTitleResponse } from './models/GeneratedTitleResponse';
 export type { ListReviewsResponse } from './models/ListReviewsResponse';
 export type { McpServer } from './models/McpServer';
 export { MergeConflictError } from './models/MergeConflictError';
