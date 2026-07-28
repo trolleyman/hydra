@@ -569,13 +569,14 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		if resp[i].Id == "agent-md" || resp[i].Id == "agent-queued" {
 			resp[i].MergeWhenGreen = ptr(true)
 		}
-		// agent-approval demonstrates a linked MR (View MR + state chip); agent-1 a
-		// linked, ahead-by-1 head (Push to MR); agent-2 an unlinked head with a
-		// seeded downstream branch (Create MR).
+		// agent-approval demonstrates a linked MR that is BEHIND its remote branch
+		// (View MR + the amber pull chip); agent-1 a linked, ahead-by-1 head (the
+		// button leads with Push to MR and the sidebar row shows the up-arrow);
+		// agent-2 an unlinked head with a seeded downstream branch (Create MR).
 		switch resp[i].Id {
 		case "agent-approval":
 			resp[i].DownstreamBranch = ptr("feat/mcp-github")
-			resp[i].Review = simReviewLink("open", forge.CIRunning, 1, 2, 0, 0)
+			resp[i].Review = simReviewLink("open", forge.CIRunning, 1, 2, 0, 2)
 		case "agent-1":
 			resp[i].DownstreamBranch = ptr("feat/rate-limit")
 			resp[i].Review = simReviewLink("open", forge.CISuccess, 2, 0, 1, 0)

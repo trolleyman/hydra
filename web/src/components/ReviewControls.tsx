@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { GitPullRequest, GitPullRequestCreate, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink, Lock } from 'lucide-react'
+import { GitPullRequest, GitPullRequestCreate, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink, Lock, ArrowUp, ArrowDown } from 'lucide-react'
 // lucide-react dropped brand glyphs in v1, so the forge icons come from
 // simple-icons instead (@icons-pack/react-simple-icons).
 import { SiGithub, SiGitlab } from '@icons-pack/react-simple-icons'
@@ -65,10 +65,119 @@ function CIChip({ status }: { status?: string }) {
   )
 }
 
+// MRSyncChip is the ahead/behind indicator for a linked head, modelled on the
+// sidebar's repository sync row: down-arrow + count when the MR branch has
+// commits this head lacks, up-arrow + count when this head has commits the MR
+// does not, and a quiet "in sync" when neither. It exists because a commit made
+// after the MR opened used to be visible only as a line inside the View MR
+// dropdown - so the commit just sat there.
+//
+// Each direction is its own chip rather than one combined Sync button: unlike the
+// sidebar's pull-then-push, Push to MR and Pull from MR are separate operations
+// with different consequences (the pull is a merge that can conflict), so one
+// click must never mean both.
+function MRSyncChip({
+  ahead,
+  behind,
+  readOnly,
+  onPush,
+  onPull,
+  disabled,
+}: {
+  ahead?: number
+  behind?: number
+  readOnly?: boolean
+  onPush?: () => void
+  onPull?: () => void
+  disabled?: boolean
+}) {
+  // Both absent means the backend could not measure it (no downstream ref yet) -
+  // say nothing rather than claim "in sync", which would be a guess.
+  if (ahead == null && behind == null) return null
+  const up = ahead ?? 0
+  const down = behind ?? 0
+
+  if (up === 0 && down === 0) {
+    return (
+      <Tooltip content="In sync: this branch and the MR branch have the same commits">
+        <Badge tone="faint">in sync</Badge>
+      </Tooltip>
+    )
+  }
+  return (
+    <>
+      {down > 0 && (
+        <Tooltip content={`Pull ${down} commit${down === 1 ? '' : 's'} from the MR branch (merged into this head)`}>
+          <SyncChipButton onClick={onPull} disabled={disabled} label={`Pull ${down} from the MR branch`}>
+            <Badge tone="yellow" icon={<ArrowDown className="w-3 h-3" />}>
+              {down}
+            </Badge>
+          </SyncChipButton>
+        </Tooltip>
+      )}
+      {up > 0 && (
+        <Tooltip
+          content={
+            readOnly
+              ? `${up} commit${up === 1 ? '' : 's'} not on the MR branch - this PR is read-only, so they cannot be pushed`
+              : `Push ${up} commit${up === 1 ? '' : 's'} to the MR branch`
+          }
+        >
+          <SyncChipButton onClick={readOnly ? undefined : onPush} disabled={disabled} label={`Push ${up} to the MR branch`}>
+            <Badge tone={readOnly ? 'muted' : 'blue'} icon={<ArrowUp className="w-3 h-3" />}>
+              {up}
+            </Badge>
+          </SyncChipButton>
+        </Tooltip>
+      )}
+    </>
+  )
+}
+
+// SyncChipButton makes a sync chip clickable when there is something to click,
+// and leaves it as plain markup when there is not. A real <button> rather than an
+// onClick span so it is keyboard-reachable and announces itself; the accessible
+// name spells the action out, since the chip's own text is just a number.
+function SyncChipButton({
+  onClick,
+  disabled,
+  label,
+  children,
+}: {
+  onClick?: () => void
+  disabled?: boolean
+  label: string
+  children: ReactNode
+}) {
+  if (!onClick) return <>{children}</>
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="inline-flex items-center cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {children}
+    </button>
+  )
+}
+
 // MRStateChip renders the metadata-row summary of a head's linked MR: a state
-// pill (draft/open/merged), CI status, approvals, and unresolved-discussion
-// count. Clicking the state pill opens the forge MR. Shown only for a linked head.
-export function MRStateChip({ agent }: { agent: AgentResponse }) {
+// pill (draft/open/merged), CI status, approvals, unresolved-discussion count
+// and how far ahead/behind the MR branch it is. Clicking the state pill opens the
+// forge MR; clicking an ahead/behind chip pushes/pulls. Shown only for a linked head.
+export function MRStateChip({
+  agent,
+  onPush,
+  onPull,
+  busy,
+}: {
+  agent: AgentResponse
+  onPush?: () => void
+  onPull?: () => void
+  busy?: boolean
+}) {
   const review = agent.review
   if (!review) return null
   const st = review.state
@@ -104,6 +213,14 @@ export function MRStateChip({ agent }: { agent: AgentResponse }) {
           </Badge>
         </Tooltip>
       )}
+      <MRSyncChip
+        ahead={review.ahead}
+        behind={review.behind}
+        readOnly={review.adopted === true && review.can_push === false}
+        onPush={onPush}
+        onPull={onPull}
+        disabled={busy}
+      />
       <CIChip status={st?.ci_status} />
       {st && st.approvals_required != null && st.approvals_required > 0 && (
         <Tooltip content="Approvals">
