@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Settings2, ChevronDown } from 'lucide-react'
+import { Settings2, ChevronDown, Check } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 
 // A small per-section settings popover: a cog button that opens an anchored
@@ -160,6 +160,137 @@ export function SettingsGroupLabel({ children, className = '' }: { children: Rea
     <p className={`text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide ${className}`}>
       {children}
     </p>
+  )
+}
+
+// One choice in a SettingsSelect. `desc` is the second line of the menu row (not
+// shown on the trigger); a disabled option explains itself with `desc`.
+export type SettingsSelectOption = {
+  id: string
+  label: string
+  desc?: string
+  disabled?: boolean
+}
+
+// A compact dropdown for a single-choice setting inside a settings popover: a
+// bordered trigger showing the current label, and a portalled menu of
+// label + description rows. Use it instead of an inline list when the choices
+// carry explanations that would otherwise dominate the popover (the spawn box's
+// git-isolation picker), so the popover stays a short stack of one-line controls.
+//
+// The menu is portalled and `data-portal-menu`-marked for the same reasons as
+// BranchSelector's: it must escape the spawn card's `overflow-hidden`, and the
+// host SettingsPopover treats marked menus as inside itself so picking an option
+// doesn't dismiss the popover.
+export function SettingsSelect({
+  value,
+  options,
+  onChange,
+  label,
+  width = 232,
+}: {
+  value: string
+  options: SettingsSelectOption[]
+  onChange: (id: string) => void
+  // Accessible name for the trigger (the visible text is the current choice).
+  label: string
+  // Menu width in px; the trigger sizes to its own content.
+  width?: number
+}) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
+
+  const reposition = useCallback(() => {
+    const el = anchorRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const pad = 8
+    const left = Math.min(Math.max(pad, r.left), Math.max(pad, window.innerWidth - width - pad))
+    // Flip above when there isn't room below but there is above - this control
+    // sits low in the spawn composer, itself pinned to the bottom of the sidebar.
+    const est = menuRef.current?.offsetHeight ?? 160
+    const spaceBelow = window.innerHeight - r.bottom
+    if (spaceBelow < est + pad && r.top > spaceBelow) {
+      setPos({ left, bottom: window.innerHeight - r.top + 4 })
+    } else {
+      setPos({ left, top: r.bottom + 4 })
+    }
+  }, [width])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    reposition()
+    const onMove = () => reposition()
+    window.addEventListener('scroll', onMove, true)
+    window.addEventListener('resize', onMove)
+    return () => {
+      window.removeEventListener('scroll', onMove, true)
+      window.removeEventListener('resize', onMove)
+    }
+  }, [open, reposition])
+
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) {
+      const t = e.target as Node
+      if (anchorRef.current?.contains(t) || menuRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const active = options.find((o) => o.id === value) ?? options[0]
+
+  return (
+    <div ref={anchorRef} className="relative flex w-fit max-w-full min-w-0">
+      <button
+        type="button"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer w-fit max-w-full min-w-0 ${open
+          ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+          : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+          }`}
+      >
+        <span className="truncate">{active?.label}</span>
+        <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
+      </button>
+      {open && pos && createPortal(
+        <div
+          ref={menuRef}
+          data-portal-menu
+          role="listbox"
+          style={{ left: pos.left, top: pos.top, bottom: pos.bottom, width }}
+          className="fixed max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] py-1"
+        >
+          {options.map((o) => (
+            <button
+              key={o.id || 'default'}
+              type="button"
+              role="option"
+              aria-selected={o.id === value}
+              disabled={o.disabled}
+              onClick={() => { onChange(o.id); setOpen(false) }}
+              className={`w-full flex items-start gap-2 px-2 py-1.5 text-left transition-colors ${o.disabled
+                ? 'opacity-40 cursor-not-allowed'
+                : 'hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer'}`}
+            >
+              <span className="w-3.5 shrink-0 pt-0.5">{o.id === value && <Check className="w-3.5 h-3.5 text-blue-500" />}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-xs text-gray-700 dark:text-gray-200">{o.label}</span>
+                {o.desc && <span className="block text-[10px] text-gray-400 dark:text-gray-500 leading-snug break-words">{o.desc}</span>}
+              </span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
   )
 }
 

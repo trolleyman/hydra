@@ -40,9 +40,8 @@ import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
-import hljs from '../lib/hljs'
 import { formatBashForDisplay, parseHostRunScript } from '../lib/bashFormat'
-import { highlightLines } from '../lib/highlightCore'
+import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
@@ -1462,16 +1461,6 @@ function modelDisplayLabel(model: string): string {
   }
   for (const m of CODEX_MODELS) if (lower.includes(m.id)) return m.label
   return model.replace(/^claude-/, '')
-}
-
-// highlightHtml returns highlight.js token HTML, or null for plain rendering.
-function highlightHtml(code: string, lang: string): string | null {
-  if (!code || !hljs.getLanguage(lang)) return null
-  try {
-    return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
-  } catch {
-    return null
-  }
 }
 
 // useDelayedUnmount keeps collapsed disclosure content mounted just long

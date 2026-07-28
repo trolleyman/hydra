@@ -78,6 +78,19 @@ const SHEBANG_LANG_MAP: Record<string, string> = {
   racket: 'scheme', make: 'makefile',
 }
 
+// interpreterLanguage maps an interpreter command - however it is spelled on a
+// command line or in a shebang (`python3`, `/usr/local/bin/python3.12`) - to a
+// highlight.js language, or null when it names no known interpreter. Shared by
+// shebang detection and the shell embedded-code scanner (lib/shellEmbed), which
+// needs the same "is this word an interpreter?" question answered for a word in
+// the middle of a pipeline.
+export function interpreterLanguage(command: string): string | null {
+  const name = basename(command).toLowerCase()
+  // `python3.12` → `python`, `perl5` → `perl`; try the exact name first so a
+  // legitimately digit-suffixed interpreter still wins.
+  return SHEBANG_LANG_MAP[name] ?? SHEBANG_LANG_MAP[name.replace(/[\d.]+$/, '')] ?? null
+}
+
 // shebangLanguage reads the interpreter out of a `#!` line and maps it to a
 // highlight.js language, or null when there is no shebang / no mapping. Handles
 // the shapes that actually turn up:
@@ -99,10 +112,7 @@ export function shebangLanguage(firstLine: string): string | null {
     if (!arg) return null
     interp = arg
   }
-  const name = basename(interp).toLowerCase()
-  // `python3.12` → `python`, `perl5` → `perl`; try the exact name first so a
-  // legitimately digit-suffixed interpreter still wins.
-  return SHEBANG_LANG_MAP[name] ?? SHEBANG_LANG_MAP[name.replace(/[\d.]+$/, '')] ?? null
+  return interpreterLanguage(interp)
 }
 
 function basename(p: string): string {

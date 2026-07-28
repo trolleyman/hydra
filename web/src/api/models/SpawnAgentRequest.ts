@@ -38,7 +38,7 @@ export type SpawnAgentRequest = {
      */
     ephemeral?: boolean;
     /**
-     * How much of the repo's shared .git this head may write (see docs/git-isolation.md). "off" (default) writable; "readonly" locks the whole .git read-only so commits go through the mcp__hydra__git_commit tool (anti-rogue). Omitted inherits the agent-type policy default.
+     * How much of the repo's shared .git this head may write (see docs/git-isolation.md). "readonly" (default) locks the whole .git read-only so commits go through the mcp__hydra__git_commit tool (anti-rogue); "off" leaves it writable. Omitted inherits the agent-type policy default.
      */
     git_isolation?: string;
     /**
