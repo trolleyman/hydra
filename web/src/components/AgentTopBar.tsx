@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type ReactNode } from 'react'
-import { MoreHorizontal, ChevronDown } from 'lucide-react'
+import { MoreHorizontal, ChevronDown, Sparkles, Loader2 } from 'lucide-react'
 import { useFinePointer } from '../lib/useFinePointer'
 import { Tooltip } from './Tooltip'
 
@@ -58,10 +58,15 @@ export interface AgentTopBarRename {
   editing: boolean
   draft: string
   saving: boolean
+  // True while the "Generate" button's one-shot LLM call is in flight.
+  generating: boolean
   onStart: () => void
   onChange: (value: string) => void
   onSave: () => void
   onCancel: () => void
+  // Ask the backend to summarise the agent's task prompt into a title and drop
+  // it into the draft (not saved until the user confirms).
+  onGenerate: () => void
 }
 
 // gap between toolbar buttons / button groups, in px - used by the fit calc.
@@ -281,10 +286,14 @@ function AdaptiveActions({
   actions,
   title,
   showShortcut,
+  reserve = 0,
 }: {
   actions: AgentTopBarAction[]
   title: string
   showShortcut: boolean
+  // Extra px in the row that isn't the title or the toolbar and must be kept
+  // clear - the rename box's "Generate" button, which only exists while editing.
+  reserve?: number
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const labeledRefs = useRef<(HTMLElement | null)[]>([])
@@ -323,7 +332,7 @@ function AdaptiveActions({
     const titleReserve = Math.min(titleNatural, Math.max(0, cont.clientWidth - more - GAP))
     // Reserve the pill chrome around each contiguous run of segment actions (count
     // derived above) - the measurer sizes members bare, so this keeps a row honest.
-    const budget = Math.max(0, cont.clientWidth - titleReserve - GAP - segmentGroups * SEGMENT_CHROME)
+    const budget = Math.max(0, cont.clientWidth - titleReserve - GAP - reserve - segmentGroups * SEGMENT_CHROME)
     const span = (arr: number[], k: number) => arr.slice(0, k).reduce((a, b) => a + b, 0) + Math.max(0, k - 1) * GAP
     let next: { mode: 'labels' | 'icons'; count: number }
     if (span(labeled, n) <= budget) {
@@ -345,7 +354,7 @@ function AdaptiveActions({
       next = { mode: 'icons', count: k }
     }
     setVis((prev) => (prev.mode === next.mode && prev.count === next.count ? prev : next))
-  }, [n, segmentGroups])
+  }, [n, segmentGroups, reserve])
 
   // Measure + recompute before paint, and on every container resize. This reads
   // the committed layout of the off-screen sizers, so the measure-then-setState
@@ -517,6 +526,10 @@ export function AgentTopBarContent({
   const showShortcut = useFinePointer()
 
   const editing = rename?.editing ?? false
+  // What the title box currently shows: the live draft while editing, else the
+  // saved title. AdaptiveActions still measures the SAVED title, so the toolbar
+  // doesn't re-collapse on every keystroke of a rename.
+  const displayed = editing && rename ? rename.draft : title
 
   // When editing is triggered without a click (F2 / the menu's Rename item),
   // focus + select the field. A click already focuses it and positions the
@@ -530,6 +543,26 @@ export function AgentTopBarContent({
       el.focus()
       el.select()
     }
+  }, [editing])
+
+  // The Generate button lives between the title box and the toolbar, so its
+  // width has to come out of the toolbar's collapse budget or the row would
+  // over-subscribe and eat into the title. Measure it rather than hardcoding a
+  // px guess, since the label's width follows the font.
+  const genRef = useRef<HTMLDivElement>(null)
+  const [genReserve, setGenReserve] = useState(0)
+  useLayoutEffect(() => {
+    const el = genRef.current
+    if (!el) {
+      setGenReserve(0)
+      return
+    }
+    const measure = () => setGenReserve(el.offsetWidth + GAP)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
   }, [editing])
 
   return (
@@ -548,14 +581,20 @@ export function AgentTopBarContent({
           // keeps its full width, clicking places the caret where you click, and
           // the text never shifts between the display and edit states. The bottom
           // border is always reserved (transparent → blue) to avoid any reflow.
-          // The wrapper takes over the row's flex sizing (min-w-0 flex-1); the
-          // input keeps them so it fills the wrapper in turn.
+          //
+          // flex-1: the box claims every px the row has left once the toolbar
+          // (and, while editing, the Generate button) have taken theirs - both of
+          // which are shrink-0, so growing here can never squeeze them out.
+          // size={1} keeps the input's intrinsic 20-character width out of the
+          // row's min-content, so a narrow viewport shrinks the box rather than
+          // overflowing the bar.
           <Tooltip content={editing ? undefined : 'Rename'} side="bottom" className="min-w-0 flex-1">
             <input
               ref={inputRef}
               type="text"
+              size={1}
               aria-label="Agent title"
-              value={editing ? rename.draft : title}
+              value={displayed}
               readOnly={!editing}
               disabled={rename.saving}
               onChange={(e) => rename.onChange(e.target.value)}
@@ -591,8 +630,31 @@ export function AgentTopBarContent({
           </span>
         )}
 
-        {!editing && actions.length > 0 && (
-          <AdaptiveActions actions={actions} title={title} showShortcut={showShortcut} />
+        {rename && editing && (
+          // onMouseDown-preventDefault: the input saves and closes on blur, so
+          // without this the click would commit the rename before it lands.
+          <div ref={genRef} className="shrink-0 flex items-center">
+            <Tooltip content="Write a title from this agent's task" side="bottom" className="shrink-0">
+              <button
+                type="button"
+                disabled={rename.generating || rename.saving}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={rename.onGenerate}
+                className="shrink-0 h-7 inline-flex items-center gap-1.5 px-2.5 rounded-md text-[12.5px] font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+              >
+                {rename.generating ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
+                <span className="whitespace-nowrap">Generate</span>
+              </button>
+            </Tooltip>
+          </div>
+        )}
+
+        {actions.length > 0 && (
+          <AdaptiveActions actions={actions} title={title} showShortcut={showShortcut} reserve={genReserve} />
         )}
       </div>
 
