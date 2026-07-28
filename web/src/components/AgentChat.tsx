@@ -41,7 +41,8 @@ import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
-import { formatBashForDisplay, parseHostRunScript } from '../lib/bashFormat'
+import { formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
+import { fileViewLineInfo, parseFileViewScript, splitFileViewOutput, type FileViewSection } from '../lib/fileViewCommand'
 import { formatBytes } from '../lib/formatBytes'
 import { highlightHtml, highlightLines } from '../lib/highlightCore'
 import { closeWebSocket } from '../lib/ws'
@@ -2004,6 +2005,45 @@ function ReadOutputPanel({ text, lang }: { text: string; lang: string }) {
   return <GutterCodePanel nums={parsed.nums} code={parsed.code} lang={lang} />
 }
 
+// FileViewBody renders one file view's slice of a read-shaped shell command's
+// output (see lib/fileViewCommand): the file's own line numbers in the gutter,
+// highlighted by its extension. A `cat -n` brings its numbers with it, and a
+// plain `tail` knows no line numbers at all - it still gets the highlighting.
+function FileViewBody({ section }: { section: FileViewSection }) {
+  const lang = langFromPath(section.path)
+  const text = section.lines.join('\n')
+  if (section.lines.length === 0) return <OutputPanel text="" lang="" />
+  if (section.numbered) return <ReadOutputPanel text={text} lang={lang} />
+  if (section.start == null) return <OutputPanel text={text} lang={lang} />
+  const start = section.start
+  return <GutterCodePanel nums={section.lines.map((_, i) => String(start + i))} code={section.lines} lang={lang} />
+}
+
+// FileViewSections renders the file content a read-shaped shell command printed,
+// one block per file it looked at. Each block is captioned with the step that
+// produced it: the card header calls this a Read, so the command it is really a
+// Read of belongs where you can see it without opening the Raw JSON - and with
+// several files in one call, that caption is also what tells them apart.
+function FileViewSections({ sections }: { sections: FileViewSection[] }) {
+  return (
+    <div className="space-y-1.5">
+      {sections.map((section, i) => (
+        <div key={i}>
+          {/* Plain non-interactive truncated text: native title is the right
+              tool here (see the tooltip conventions in CLAUDE.md). */}
+          <div
+            className="mb-0.5 truncate font-mono text-[10px] text-stone-400 dark:text-stone-500 select-none"
+            title={section.command}
+          >
+            {section.command}
+          </div>
+          <FileViewBody section={section} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // EditDiffPanel shows an Edit's old_string and new_string as two syntax-
 // highlighted blocks side by side (old left, new right; stacked on a narrow
 // pane), tinted red/green like a diff. No line numbers - the strings are
@@ -2547,6 +2587,35 @@ const ToolCard = memo(function ToolCard({
       ? (input.description as string)
       : ''
 
+  // A Bash step that only LOOKS at files (`sed -n 40,110p f`, `cat f`, `head
+  // -50 f`) is a Read spelled in shell - the shape every agent without a Read
+  // tool has to use. Such a card takes the Read presentation: the file and its
+  // line range in the header, and the output rendered as numbered, syntax-
+  // highlighted source instead of a wall of anonymous terminal text.
+  //
+  // The parse is of the COMMAND alone, so the header settles the moment the call
+  // starts rather than flipping shape when the output lands; the split of the
+  // output is separate, and when it disagrees with the script only the body
+  // falls back to the plain command + output panels (see lib/fileViewCommand).
+  //
+  // Plain consts, not useMemo: both derive from `item`, which the reducer
+  // mutates in place (see the ToolCard memo note), and a manual dependency on a
+  // mutated value makes the React compiler skip optimizing the WHOLE card. It
+  // memoizes these for us instead.
+  const fileViewSteps = isBash && !isHostRun ? parseFileViewScript(unwrapBashLoginCommand(bashSource)) : null
+  const fileViews = fileViewSteps?.flatMap((s) => (s.kind === 'view' ? [s.view] : [])) ?? []
+  const isReadShell = fileViews.length > 0
+  // Deduped: several ranges of ONE file are one file in the header.
+  const readShellPaths: string[] = []
+  for (const view of fileViews) {
+    const path = collapseHome(trimWorktreePaths(view.path, worktree))
+    if (!readShellPaths.includes(path)) readShellPaths.push(path)
+  }
+  const fileViewSections =
+    fileViewSteps && renderedResult !== undefined && !item.isError
+      ? splitFileViewOutput(fileViewSteps, stripAnsi(renderedResult))
+      : null
+
   // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
   // for auto-memory files, the line range for the header, whether the input is
   // "simple" (fully described by the header, so the Input panel is hidden), and
@@ -2569,7 +2638,17 @@ const ToolCard = memo(function ToolCard({
   // Only for the single-file form: ranges pooled across several files would read
   // as one list belonging to none of them.
   const gitAddLines = gitAddSpecList.length === 1 ? gitAddSpecList[0].lines : []
-  const lineInfo = isRead ? readLineInfo(input) : gitAddLines.length > 0 ? `lines ${gitAddLines.join(', ')}` : ''
+  // A read-shaped shell command fills the same slot from its own range. Only
+  // when it looked at ONE file: several ranges pooled in the header would read
+  // as one list belonging to none of them (as for git_add above), and each
+  // section states its own command anyway.
+  const lineInfo = isRead
+    ? readLineInfo(input)
+    : fileViews.length === 1
+      ? fileViewLineInfo(fileViews[0])
+      : gitAddLines.length > 0
+        ? `lines ${gitAddLines.join(', ')}`
+        : ''
   const simpleRead =
     isRead && input != null && Object.keys(input).every((k) => k === 'file_path' || k === 'offset' || k === 'limit')
   const outputLang = isRead ? langFromPath(readPath) : ''
@@ -2623,14 +2702,17 @@ const ToolCard = memo(function ToolCard({
   // description / task subject / prose input field (a ScheduleWakeup prompt)
   // are prose (sans) already.
   const isPathSummary =
-    !isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string')
-  const summaryPaths = isFileChanges
-    ? changedPaths
-    : gitAddPaths.length > 0
-      ? gitAddPaths.map((p) => collapseHome(trimWorktreePaths(p, worktree)))
-      : isPathSummary
-        ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
-        : []
+    isReadShell ||
+    (!isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string'))
+  const summaryPaths = isReadShell
+    ? readShellPaths
+    : isFileChanges
+      ? changedPaths
+      : gitAddPaths.length > 0
+        ? gitAddPaths.map((p) => collapseHome(trimWorktreePaths(p, worktree)))
+        : isPathSummary
+          ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
+          : []
   const summaryMono = !mem && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
@@ -2640,11 +2722,14 @@ const ToolCard = memo(function ToolCard({
   // A single-file git_add is the same case as a plain Read: its header already
   // carries the path and the line ranges, so the panel would only repeat them.
   const gitAddSimple = gitTool === 'git_add' && gitAddPaths.length === 1
-  const hideInput = simpleRead || emptyInput || gitAddSimple
+  // A read-shaped shell command whose output split cleanly needs no Command
+  // panel either: every section is captioned with the step that produced it, so
+  // the panel would print the same script twice.
+  const hideInput = simpleRead || emptyInput || gitAddSimple || fileViewSections !== null
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
-  const hasInput = isBash || !hideInput
-  const Icon = isHostRun ? ShieldAlert : TOOL_ICONS[item.name] ?? Wrench
+  const hasInput = fileViewSections !== null ? false : isBash || !hideInput
+  const Icon = isHostRun ? ShieldAlert : isReadShell ? FileText : TOOL_ICONS[item.name] ?? Wrench
 
   // The security gate may have parked THIS call for the user (a host-run, an
   // unvetted MCP tool, ...). When it has, the card answers for itself instead of
@@ -2696,7 +2781,7 @@ const ToolCard = memo(function ToolCard({
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
           <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : isHostRun ? 'text-red-500/90 dark:text-red-400/90' : 'text-stone-400 dark:text-stone-500'}`} />
-          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : gitTool ? gitToolHeading(gitTool, input) : displayToolName(item.name)}</span>
+          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : isReadShell ? 'Read' : gitTool ? gitToolHeading(gitTool, input) : displayToolName(item.name)}</span>
           {/* A host run leaves the sandbox - say so in the collapsed header, where
               it can't be missed, not only in the body. */}
           {isHostRun && (
@@ -2752,7 +2837,7 @@ const ToolCard = memo(function ToolCard({
             <CodePanel code={rawJson} lang="json" />
           ) : (
             <>
-              {isBash ? (
+              {isBash && !fileViewSections ? (
                 <div>
                   {interactiveTranscript && (
                     <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
@@ -2855,6 +2940,8 @@ const ToolCard = memo(function ToolCard({
                           ? <WebSearchOutput text={renderedResult} serif={serif} />
                         : isWebFetch && !item.isError
                           ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
+                        : fileViewSections
+                          ? <FileViewSections sections={fileViewSections} />
                         : isRead && !item.isError
 								? <ReadOutputPanel text={renderedResult} lang={outputLang} />
 								: <OutputPanel text={renderedResult} lang={outputLang} isError={item.isError} />

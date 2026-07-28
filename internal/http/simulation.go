@@ -3768,6 +3768,17 @@ var simChatEvents = []string{
 	// the heredoc body exactly as written (semicolons and all).
 	`{"type":"assistant","message":{"id":"msg_sim_heredoc","content":[{"type":"tool_use","id":"toolu_sim_heredoc","name":"Bash","input":{"command":"cd /repo/.hydra/local/worktrees/feat-uploader-retry && (fuser -k 26788/tcp >/dev/null 2>&1; true) && cd web && cat > scripts/probe.ts <<'EOF'\nimport { chromium } from 'playwright'\nconst page = await (await chromium.launch()).newPage()\nawait page.goto('http://localhost:26788/')\nconsole.log(await page.title());\nEOF\nnode scripts/probe.ts && echo done","description":"Probe the rendered page with a throwaway script"}}]}}`,
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_heredoc","content":"Hydra\ndone"}]}}`,
+	// A Bash call that is really a Read: the card takes the Read shape (file +
+	// "lines 40-53" in the header) and renders the output as numbered, Go-
+	// highlighted source rather than anonymous terminal text - see
+	// web/src/lib/fileViewCommand.ts.
+	`{"type":"assistant","message":{"id":"msg_sim_sed","content":[{"type":"tool_use","id":"toolu_sim_sed","name":"Bash","input":{"command":"sed -n 40,53p internal/chat/claude.go"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_sed","content":"type claudeMessage struct {\n\tType    string          ` + "`json:\\\"type\\\"`" + `\n\tSubtype string          ` + "`json:\\\"subtype,omitempty\\\"`" + `\n\tMessage json.RawMessage ` + "`json:\\\"message,omitempty\\\"`" + `\n\tUsage   json.RawMessage ` + "`json:\\\"usage,omitempty\\\"`" + `\n}\n\n// isAPIErrorMessage reports whether an assistant event is the CLI's own\n// \"API Error\" placeholder rather than a model reply.\nfunc isAPIErrorMessage(msg claudeMessage) bool {\n\tif msg.Type != \"assistant\" {\n\t\treturn false\n\t}\n\treturn strings.HasPrefix(text(msg), \"API Error\")"}]}}`,
+	// Two reads in one call, separated by the `echo` marker agents use to tell
+	// them apart. The card splits the output back at that marker and gives each
+	// file its own numbered block.
+	`{"type":"assistant","message":{"id":"msg_sim_sed2","content":[{"type":"tool_use","id":"toolu_sim_sed2","name":"Bash","input":{"command":"sed -n 1,4p web/src/lib/lineRange.ts; echo '--- 8< ---'; sed -n 10,16p web/src/lib/lineRange.ts"}}]}}`,
+	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_sed2","content":"// Line-range selection shared by the repository file view and the diff viewer:\n// a URL hash like #L5 (one line) or #L5-L10 (a range), GitHub-style. start is\n// always <= end.\n\n--- 8< ---\nexport function parseLineRange(hash: string): LineRange | null {\n  const m = /^#?L(\\d+)(?:-L?(\\d+))?/.exec(hash || '')\n  if (!m) return null\n  const a = parseInt(m[1], 10)\n  const b = m[2] ? parseInt(m[2], 10) : a\n  return { start: Math.min(a, b), end: Math.max(a, b) }\n}"}]}}`,
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20).
 	`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_sim_2","content":"\u001b[2m$ go vet ./internal/artifacts/ && go test ./internal/artifacts/\u001b[0m\n\u001b[31m--- FAIL: TestPutRetry\u001b[0m (0.02s)\n    \u001b[2mupload_test.go:41:\u001b[0m expected \u001b[1m5\u001b[0m attempts, got \u001b[1m1\u001b[0m\n\u001b[31mFAIL\u001b[0m\texit=1","is_error":true}]}}`,
