@@ -5662,7 +5662,7 @@ function StepGroup({
           has room for one of the two. */}
       {!shown && thinkingMs > 0 && !running && !needsApproval && (
         <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">
-          · thought for {formatDuration(Math.max(1000, Math.ceil(thinkingMs / 1000) * 1000))}
+          · Thought for {formatDuration(Math.max(1000, Math.ceil(thinkingMs / 1000) * 1000))}
         </span>
       )}
       {!shown && failed > 0 && (
