@@ -6,6 +6,7 @@ import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 import { getFileIcon } from '../lib/fileIcons'
 import { useCopyFlash } from '../lib/useCopyFlash'
 import { CopyStateIcon } from './CopyStateIcon'
+import { AnsiText } from './AnsiText'
 
 // CaseTree renders test cases as a collapsible location tree (TESTS_PLAN.md
 // Feature 1), built from each case's structured location:
@@ -454,7 +455,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo }: {
         ) : null}
       </div>
       {showMessage ? (
-        <pre className={`ml-5 text-[11px] font-mono whitespace-pre-wrap border rounded px-2.5 py-1.5 ${msgTone}`}>{c.message}</pre>
+        <AnsiText text={c.message ?? ''} className={`ml-5 text-[11px] font-mono whitespace-pre-wrap border rounded px-2.5 py-1.5 ${msgTone}`} />
       ) : null}
     </div>
   )

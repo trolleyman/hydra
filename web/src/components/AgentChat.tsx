@@ -875,14 +875,59 @@ function trimWorktreePaths(text: string, worktree: string | null): string {
 // or an Agent brief isn't code.
 const PROSE_INPUT_KEYS = new Set(['query', 'subject', 'summary', 'description', 'prompt', 'reason'])
 
+// summarizeGitInput renders an mcp__hydra__git_* call as the action it performs
+// ("hard -> 67b6ffa2", a commit subject) rather than as its arguments. None of
+// these tools carry any of the keys the generic loop below looks for, so without
+// this they all fall through to the JSON.stringify fallback - which dumps a whole
+// escaped commit message, literal \n and all, into a one-line card header.
+// Returns null for a tool with nothing worth previewing.
+function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: string; prose: boolean } | null {
+  const str = (key: string) => (typeof obj[key] === 'string' ? (obj[key] as string) : '')
+  switch (tool) {
+    case 'git_commit':
+      // Subject line only - the rest of the message is prose the agent wrote out,
+      // and it is what renders as a literal \n\n when squeezed onto one line.
+      // --amend rides in the heading; the staging mode is in the body.
+      return { text: str('message').split('\n')[0].trim(), prose: true }
+    case 'git_add': {
+      // Only a fallback: a git_add with a readable path renders as a lowlit path
+      // in the header (isPathSummary), with its ranges in the lineInfo slot.
+      const specs = gitAddSpecs(obj)
+      return { text: specs.length === 1 ? specs[0].path : `${specs.length} files`, prose: specs.length !== 1 }
+    }
+    case 'git_reset': {
+      // The mode is in the heading (gitToolHeading), so the summary is just the
+      // operand: the target commit, or the paths being unstaged.
+      const unstage = Array.isArray(obj.unstage) ? obj.unstage : []
+      if (unstage.length) return { text: unstage.join(', '), prose: false }
+      return { text: str('to') || 'HEAD', prose: false }
+    }
+    case 'git_revert':
+    case 'git_cherry_pick':
+      return { text: str('commit'), prose: false }
+    case 'git_rebase': {
+      const plan = Array.isArray(obj.plan) ? obj.plan : []
+      return { text: `${plan.length} step${plan.length === 1 ? '' : 's'} above ${str('base')}`, prose: true }
+    }
+    default:
+      return null
+  }
+}
+
 // summarizeToolInput produces the one-line preview shown on a collapsed tool
 // card, favouring the fields agent tools actually carry, and reports whether
-// the picked field is prose (see PROSE_INPUT_KEYS).
-function summarizeToolInput(input: unknown): { text: string; prose: boolean } {
+// the picked field is prose (see PROSE_INPUT_KEYS). name is the raw tool name,
+// used to give the git tools an action-shaped summary (see summarizeGitInput).
+function summarizeToolInput(input: unknown, name = ''): { text: string; prose: boolean } {
   if (input == null) return { text: '', prose: false }
   if (typeof input !== 'object') return { text: String(input), prose: false }
   const obj = input as Record<string, unknown>
   if (Object.keys(obj).filter((key) => !key.startsWith('_')).length === 0) return { text: '', prose: false }
+  const gitTool = /^mcp__hydra__(git_.+)$/.exec(name)
+  if (gitTool) {
+    const git = summarizeGitInput(gitTool[1], obj)
+    if (git) return git
+  }
   // A TaskUpdate reads best as "#id -> status: subject" (only the parts present).
   if (typeof obj.taskId === 'string' || typeof obj.taskId === 'number') {
     const status = typeof obj.status === 'string' ? obj.status : ''
@@ -991,9 +1036,46 @@ function parseSendMessageResult(text?: string): SendMessageResult | null {
   }
 }
 
+// GIT_TOOL_LABELS names the mcp__hydra__git_* tools after the action they take.
+// They are Hydra's own git plumbing - the sanctioned replacement for raw git,
+// which is gate-denied - so the generic "MCP hydra::git_cherry_pick" rendering
+// buries the verb behind transport detail that means nothing to the reader.
+// Lowercase and named after the git subcommand they run ("git add", not "Git
+// stage"): these ARE git commands, so the label the reader already knows beats a
+// prettified synonym they have to map back.
+const GIT_TOOL_LABELS: Record<string, string> = {
+  git_commit: 'git commit',
+  git_add: 'git add',
+  git_reset: 'git reset',
+  git_revert: 'git revert',
+  git_cherry_pick: 'git cherry-pick',
+  git_rebase: 'git rebase',
+  git_rebase_continue: 'git rebase --continue',
+  git_rebase_abort: 'git rebase --abort',
+}
+
+// gitToolHeading is GIT_TOOL_LABELS plus the flags this particular call used, so
+// the heading reads as the command that ran ("git reset --hard") instead of
+// making you open the card to find out which variant it was. Only flags that
+// change what the command DOES are promoted; the operands (a target commit, a
+// path list) stay in the summary and body.
+function gitToolHeading(tool: string, input: Record<string, unknown> | null): string {
+  const label = GIT_TOOL_LABELS[tool] ?? tool
+  if (!input) return label
+  if (tool === 'git_reset') {
+    // The path form (`reset -- <paths>`) takes no mode; only the HEAD-moving form
+    // does, and there soft is git's default.
+    if (Array.isArray(input.unstage) && input.unstage.length > 0) return label
+    const mode = typeof input.mode === 'string' && input.mode ? input.mode : 'soft'
+    return `${label} --${mode}`
+  }
+  if (tool === 'git_commit' && input.amend === true) return `${label} --amend`
+  return label
+}
+
 function displayToolName(name: string): string {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
-  if (mcp) return `MCP ${mcp[1]}::${mcp[2]}`
+  if (mcp) return (mcp[1] === 'hydra' ? GIT_TOOL_LABELS[mcp[2]] : '') || `MCP ${mcp[1]}::${mcp[2]}`
   return ({ SendMessage: 'Send Message', ResumeAgent: 'Resume Agent', CloseAgent: 'Close Agent', UpdatePlan: 'Update Plan' } as Record<string, string>)[name] ?? name
 }
 
@@ -1895,6 +1977,148 @@ function TaskToolFields({ input, serif }: { input: Record<string, unknown>; seri
   )
 }
 
+// gitAddSpecs narrows a git_add `files` array to the {path, ranges} entries the
+// tool actually accepts, so both the header summary and the field panel read it
+// the same way.
+function gitAddSpecs(input: Record<string, unknown>): { path: string; lines: string[] }[] {
+  const files = Array.isArray(input.files) ? input.files : []
+  return files.flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return []
+    const spec = raw as Record<string, unknown>
+    const path = typeof spec.path === 'string' ? spec.path : ''
+    if (!path) return []
+    const ranges = Array.isArray(spec.ranges) ? spec.ranges : []
+    const lines = ranges
+      .map((range) => (Array.isArray(range) ? (range[0] === range[1] ? `${range[0]}` : `${range[0]}-${range[1]}`) : ''))
+      .filter(Boolean)
+    return [{ path, lines }]
+  })
+}
+
+// GitToolFields renders an mcp__hydra__git_* input as the operation it describes
+// instead of raw JSON. The commit message gets a real text box - it is prose the
+// agent wrote and the single most-read part of the card - and the staging mode is
+// stated outright, because "which of my changes did that actually capture?" is
+// the question the JSON never answered: `git add -A` is the default, so the
+// interesting cases (a path list, or a pre-built index) have to be visible.
+function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: Record<string, unknown>; serif: boolean; worktree: string | null }) {
+  const str = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '')
+  const strs = (key: string) => (Array.isArray(input[key]) ? (input[key] as unknown[]).filter((v): v is string => typeof v === 'string') : [])
+  const path = (p: string) => collapseHome(trimWorktreePaths(p, worktree))
+  const note = 'text-[11px] text-stone-500 dark:text-stone-400'
+  const sha = (value: string) => <span className="font-mono text-[11px] text-stone-600 dark:text-stone-300">{value}</span>
+
+  // A "- " bulleted path row. LowlitPath is a FRAGMENT of two spans (dir + name),
+  // so it must sit inside its own element: dropping it straight into a flex row
+  // makes the gap apply BETWEEN the directory and the filename.
+  const bullet = (key: string, body: ReactNode) => (
+    <div key={key} className="flex items-baseline gap-1.5">
+      <span className="select-none text-stone-400 dark:text-stone-500">-</span>
+      {body}
+    </div>
+  )
+
+  if (tool === 'git_commit') {
+    const paths = strs('paths')
+    // What the commit captured, stated as fact. Not advice: the reader is looking
+    // at something that already happened, and the agent is not the audience.
+    const staging = input.staged === true
+      ? 'Committed the already-staged changes; nothing else was staged'
+      : paths.length > 0
+        ? 'Staged only the paths below, then committed'
+        : 'Staged every change, tracked and untracked'
+    return (
+      <div className="space-y-1.5">
+        <div className={note}>{staging}</div>
+        <LabeledField label="Message">
+          <pre className={`${PANEL_CLASS} whitespace-pre-wrap break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 ${serif ? 'font-serif' : ''}`}>
+            {str('message')}
+          </pre>
+        </LabeledField>
+        {paths.length > 0 && (
+          <div className="space-y-0.5">{paths.map((p) => bullet(p, <span><LowlitPath path={path(p)} /></span>))}</div>
+        )}
+      </div>
+    )
+  }
+
+  if (tool === 'git_add') {
+    // Multi-file only - a single-file add says everything in its header, so the
+    // card hides this panel entirely rather than repeating it (see gitAddSimple).
+    const specs = gitAddSpecs(input)
+    return (
+      <div className="space-y-0.5">
+        {specs.map((s) =>
+          bullet(
+            s.path,
+            <span>
+              <LowlitPath path={path(s.path)} />
+              {s.lines.length > 0 && (
+                <span className="ml-1.5 font-mono text-[10px] text-stone-500 dark:text-stone-400">lines {s.lines.join(', ')}</span>
+              )}
+            </span>,
+          ),
+        )}
+      </div>
+    )
+  }
+
+  if (tool === 'git_reset') {
+    const unstage = strs('unstage')
+    if (unstage.length > 0) {
+      return (
+        <div className="space-y-1.5">
+          <div className={note}>Unstaged these paths; the branch did not move</div>
+          <div className="space-y-0.5">{unstage.map((p) => bullet(p, <span><LowlitPath path={path(p)} /></span>))}</div>
+        </div>
+      )
+    }
+    const mode = str('mode') || 'soft'
+    const modeNote: Record<string, string> = {
+      soft: 'changes kept, still staged',
+      mixed: 'changes kept, unstaged',
+      hard: 'uncommitted changes discarded',
+    }
+    return (
+      <div className={note}>
+        Moved the branch to {sha(str('to') || 'HEAD')} &middot; {modeNote[mode] ?? mode}
+      </div>
+    )
+  }
+
+  if (tool === 'git_revert' || tool === 'git_cherry_pick') {
+    return (
+      <div className={note}>
+        {tool === 'git_revert' ? <>Added a new commit undoing {sha(str('commit'))}</> : <>Applied {sha(str('commit'))} as a new commit</>}
+      </div>
+    )
+  }
+
+  if (tool === 'git_rebase') {
+    const plan = Array.isArray(input.plan) ? input.plan : []
+    return (
+      <div className="space-y-1.5">
+        <div className={note}>Rewrote {plan.length} commit{plan.length === 1 ? '' : 's'} above {sha(str('base'))}</div>
+        <div className="space-y-0.5">
+          {plan.map((raw, index) => {
+            const step = (raw ?? {}) as Record<string, unknown>
+            const message = typeof step.message === 'string' ? step.message.split('\n')[0] : ''
+            return bullet(
+              `${String(step.commit)}:${index}`,
+              <span className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
+                <span className="font-medium text-stone-600 dark:text-stone-300">{String(step.action ?? '')}</span>
+                {sha(String(step.commit ?? ''))}
+                {message && <span className={`truncate text-stone-500 dark:text-stone-400 ${serif ? 'font-serif' : ''}`}>{message}</span>}
+              </span>,
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+  return null
+}
+
 // AgentChip is the recipient of a SendMessage - the sub-agent's label (and its
 // short id) as a pill that opens that agent's chat when we can resolve it.
 function AgentChip({
@@ -2037,6 +2261,16 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   TaskCreate: ListPlus,
   TaskUpdate: ListChecks,
   UpdatePlan: ListChecks,
+  // The git tools are keyed by raw name (see GIT_TOOL_LABELS); a generic wrench
+  // gives no hint that the card rewrote the branch.
+  mcp__hydra__git_commit: GitCommitHorizontal,
+  mcp__hydra__git_add: GitCommitHorizontal,
+  mcp__hydra__git_reset: GitCommitHorizontal,
+  mcp__hydra__git_revert: GitCommitHorizontal,
+  mcp__hydra__git_cherry_pick: GitCommitHorizontal,
+  mcp__hydra__git_rebase: GitCommitHorizontal,
+  mcp__hydra__git_rebase_continue: GitCommitHorizontal,
+  mcp__hydra__git_rebase_abort: GitCommitHorizontal,
 }
 
 function LowlitPath({ path }: { path: string }) {
@@ -2111,7 +2345,22 @@ const ToolCard = memo(function ToolCard({
   const isRead = item.name === 'Read'
   const readPath = isRead && typeof input?.file_path === 'string' ? (input.file_path as string) : ''
   const mem = isRead ? memoryName(readPath) : null
-  const lineInfo = isRead ? readLineInfo(input) : ''
+  // The bare git_* name for a Hydra git tool ('' for anything else).
+  const gitTool = /^mcp__hydra__(git_.+)$/.exec(item.name)?.[1] ?? ''
+  // A single-file git_add's subject is a file, so it gets the same lowlit-path
+  // treatment as a Read/Edit rather than a flat monospace run - its path just
+  // lives one level down, in files[].path. A multi-file add keeps the plain "N
+  // files" summary instead: listing every path here overflows the header, and
+  // the body's bulleted list is where they belong.
+  const gitAddSpecList = gitTool === 'git_add' && input ? gitAddSpecs(input) : []
+  const gitAddPaths = gitAddSpecList.length === 1 ? [gitAddSpecList[0].path] : []
+  // Read's "lines N-M" slot doubles as git_add's staged line ranges: the path
+  // renders lowlit like any other file, so the ranges ride alongside it rather
+  // than forcing the whole summary back into monospace.
+  // Only for the single-file form: ranges pooled across several files would read
+  // as one list belonging to none of them.
+  const gitAddLines = gitAddSpecList.length === 1 ? gitAddSpecList[0].lines : []
+  const lineInfo = isRead ? readLineInfo(input) : gitAddLines.length > 0 ? `lines ${gitAddLines.join(', ')}` : ''
   const simpleRead =
     isRead && input != null && Object.keys(input).every((k) => k === 'file_path' || k === 'offset' || k === 'limit')
   const outputLang = isRead ? langFromPath(readPath) : ''
@@ -2145,7 +2394,7 @@ const ToolCard = memo(function ToolCard({
   // script itself lives in the expanded card); a memory Read shows "memory
   // <name>"; other tools show their primary argument, worktree-relative and
   // home-collapsed.
-  const summarized = summarizeToolInput(input)
+  const summarized = summarizeToolInput(input, item.name)
   const changedPaths = isFileChanges
     ? (input!.changes as unknown[]).flatMap((raw) => raw && typeof raw === 'object' && typeof (raw as { path?: unknown }).path === 'string' ? [trimWorktreePaths((raw as { path: string }).path, worktree)] : [])
     : []
@@ -2161,19 +2410,24 @@ const ToolCard = memo(function ToolCard({
   // description / task subject / prose input field (a ScheduleWakeup prompt)
   // are prose (sans) already.
   const isPathSummary =
-    !isBash && !mem && !!input && (isFileChanges || typeof input.file_path === 'string' || typeof input.path === 'string')
+    !isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string')
   const summaryPaths = isFileChanges
     ? changedPaths
-    : isPathSummary
-      ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
-      : []
+    : gitAddPaths.length > 0
+      ? gitAddPaths.map((p) => collapseHome(trimWorktreePaths(p, worktree)))
+      : isPathSummary
+        ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
+        : []
   const summaryMono = !mem && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
   // `{}` input, e.g. EnterPlanMode), where a `{}` panel is pure noise. Bash shows
   // its Command panel unlabelled (item 13).
   const emptyInput = input == null || Object.keys(input).length === 0
-  const hideInput = simpleRead || emptyInput
+  // A single-file git_add is the same case as a plain Read: its header already
+  // carries the path and the line ranges, so the panel would only repeat them.
+  const gitAddSimple = gitTool === 'git_add' && gitAddPaths.length === 1
+  const hideInput = simpleRead || emptyInput || gitAddSimple
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
   const hasInput = isBash || !hideInput
@@ -2237,7 +2491,7 @@ const ToolCard = memo(function ToolCard({
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
           <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : isHostRun ? 'text-red-500/90 dark:text-red-400/90' : 'text-stone-400 dark:text-stone-500'}`} />
-          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : displayToolName(item.name)}</span>
+          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : gitTool ? gitToolHeading(gitTool, input) : displayToolName(item.name)}</span>
           {/* A host run leaves the sandbox - say so in the collapsed header, where
               it can't be missed, not only in the body. */}
           {isHostRun && (
@@ -2337,6 +2591,8 @@ const ToolCard = memo(function ToolCard({
                 />
               ) : isTaskTool && input ? (
                 <TaskToolFields input={input} serif={serif} />
+              ) : gitTool && input && !hideInput ? (
+                <GitToolFields tool={gitTool} input={input} serif={serif} worktree={worktree} />
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}

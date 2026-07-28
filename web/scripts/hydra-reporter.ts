@@ -60,7 +60,12 @@ export default class HydraReporter implements Reporter {
     }
     const loc = `web/${testCase.module.relativeModuleId}`
 
-    let line = `::hydra:test:${verb}:: ${[loc, ...scope, testCase.name].join(' › ')}`
+    // Duration rides on the verb as ":<ms>" (see internal/tests/stream.go), so a
+    // streamed case shows its timing like a JUnit one does. It lives on
+    // diagnostic(), NOT result() - the latter carries state/errors only, and
+    // reading duration off it silently yields undefined for every case.
+    const ms = Math.round(testCase.diagnostic()?.duration ?? 0)
+    let line = `::hydra:test:${verb}${ms > 0 ? `:${ms}` : ''}:: ${[loc, ...scope, testCase.name].join(' › ')}`
     if (verb === 'fail') {
       const msg = testCase.result().errors?.[0]?.message
       if (msg) line += ` | ${esc(String(msg))}`

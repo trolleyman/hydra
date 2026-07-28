@@ -20,7 +20,7 @@ pre_prompt = '''
 - Use aube if it is available, otherwise npm. For one-off tools use `aubx <tool>` (aube's npx, short for `aube exec`) when on aube, else `npx <tool>`. Run standalone TypeScript scripts (web/scripts, web/e2e) with `node` directly - Node strips the types; aube is a package manager only and cannot run them.
 - Check using mage build before committing
 - Run `mage tidy` before committing Go changes and fix any warnings it reports
-- After changing web code, run `cd web && aube run lint` (`npm run lint` off aube) and fix the errors AND warnings you introduced
+- After changing web code, run `cd web && aube run lint` (`npm run lint` off aube) and fix the errors AND warnings you introduced. It runs `tsc -b` before eslint, so it typechecks too - eslint alone does NOT, and a type error will otherwise only surface at `mage build`.
 - After changing Go code, run `go test ./...` and make sure it passes
 - Verify web UI changes end-to-end (real rendered app, console + DOM, not just tests) by booting the simulation server and driving it with Playwright:
   - `cd web && aube run build`, then from the repo root `HYDRA_API_ADDR=localhost:<random high port> go run ./ server --simulation`. The go binary embeds web/dist at compile time, so restart it after every frontend rebuild. Simulation serves mock data from internal/http/simulation.go plus all four WS endpoints (events/terminal/tests/artifacts).
@@ -353,12 +353,17 @@ type = "stdout"
 # Frontend vitest suite (type = "stdout": streams per-spec results into the panel
 # live via ::hydra:test:*:: markers) using the scripts/hydra-reporter.ts vitest
 # reporter — it also declares a ::hydra:test:total:: denominator as modules are
-# collected and echoes per-file ok/FAIL lines into the build log — plus an ESLint
-# pass whose findings surface on the same verdict:
+# collected and echoes per-file ok/FAIL lines into the build log — plus ESLint and
+# TypeScript passes whose findings surface on the same verdict:
 # eslint-report.ts emits fail markers for errors (which gate the merge like a
-# failing test) and ⚠ warn markers for warnings (informational only). Lint runs
-# only once the specs pass (the merge is already blocked when they don't).
-command = "cd web && if command -v aube >/dev/null 2>&1; then PM=aube PX=aubx; else PM=npm PX=npx; fi && $PM install && $PX vitest run --reporter=./scripts/hydra-reporter.ts && node scripts/eslint-report.ts"
+# failing test) and ⚠ warn markers for warnings (informational only), and
+# tsc-report.ts does the same for type errors. Both run only once the specs pass
+# (the merge is already blocked when they don't).
+# The tsc pass matters: typechecking used to gate NOTHING — `npm run lint` was
+# eslint alone and this runner never compiled — so a head could go green with a
+# frontend that does not build. Only `mage build` caught it, and nothing
+# automated runs that.
+command = "cd web && if command -v aube >/dev/null 2>&1; then PM=aube PX=aubx; else PM=npm PX=npx; fi && $PM install && $PX vitest run --reporter=./scripts/hydra-reporter.ts && node scripts/eslint-report.ts && node scripts/tsc-report.ts"
 timeout_sec = 600
 type = "stdout"
 
@@ -383,11 +388,15 @@ type = "stdout"
 #              silently test someone else's build. (It also enables one retry,
 #              which is the right call for browser-driven specs.)
 #
-# type is the default "junit": playwright's junit reporter writes the per-spec
-# detail into $HYDRA_TEST_OUTPUT, so failures land in the panel with their
-# assertion rather than as a bare red exit code.
-command = "cd web && if command -v aube >/dev/null 2>&1; then PM=aube PX=aubx; else PM=npm PX=npx; fi && $PM install && $PM run build && $PX playwright install chromium && E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})\") CI=1 PLAYWRIGHT_JUNIT_OUTPUT_NAME=\"$HYDRA_TEST_OUTPUT/e2e.xml\" $PX playwright test --reporter=junit"
+# type = "stdout": e2e/hydra-reporter.ts emits ::hydra:test:*:: markers per spec
+# (with its duration), so counts tick in the panel live instead of appearing all
+# at once at exit. That matters most here: this is the slowest runner, and a run
+# killed by the timeout used to report NOTHING - playwright's junit reporter only
+# writes its file at the end, so a timeout read as a bare red exit code. Streamed
+# cases are kept as they arrive, so a partial run still shows what passed.
+command = "cd web && if command -v aube >/dev/null 2>&1; then PM=aube PX=aubx; else PM=npm PX=npx; fi && $PM install && $PM run build && $PX playwright install chromium && E2E_PORT=$(node -e \"const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})\") CI=1 $PX playwright test --reporter=./e2e/hydra-reporter.ts"
 timeout_sec = 900
+type = "stdout"
 
 ## [review] configures how Hydra talks to a forge (GitHub/GitLab) and the
 ## defaults for the Create MR dialog. There is no mode switch - the head<->MR

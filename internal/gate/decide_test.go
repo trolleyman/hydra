@@ -366,7 +366,11 @@ func TestReadonlyGitRedirect(t *testing.T) {
 
 	bash := func(cmd string) map[string]any { return map[string]any{"command": cmd} }
 
-	// In readonly mode, raw git write-subcommands are redirected to the tools.
+	// In readonly mode raw git writes are ALLOWED to run: .git is read-only, so
+	// the OS refuses them and nothing changes. Denying here used to cost the whole
+	// Bash call - a compound command lost its unrelated work over one git clause -
+	// for no security benefit. The explanation now arrives via GitReadonlyAdvice
+	// after the fact (see TestGitReadonlyAdvice).
 	for _, sub := range []string{
 		"git reset --hard HEAD~1",
 		"git add -p file.go",
@@ -374,10 +378,16 @@ func TestReadonlyGitRedirect(t *testing.T) {
 		"git rebase -i HEAD~3",
 		"git cherry-pick def456",
 		"git commit -m x",
+		"printf 'x' > a.txt && git add a.txt", // the compound case that motivated this
 	} {
-		if d := Decide(ro, "Bash", bash(sub)); d.Decision != Deny {
-			t.Errorf("readonly %q = %v, want Deny (redirect to tool)", sub, d.Decision)
+		if d := Decide(ro, "Bash", bash(sub)); d.Decision != Allow {
+			t.Errorf("readonly %q = %v, want Allow (OS enforces; advice is post-hoc)", sub, d.Decision)
 		}
+	}
+	// The relaxation is scoped to git: readonly does not soften the other
+	// tripwires, which guard things the filesystem does not.
+	if d := Decide(ro, "Bash", bash("git push origin main")); d.Decision != Deny {
+		t.Errorf("readonly git push = %v, want Deny (leaves the sandbox)", d.Decision)
 	}
 	// Reads still work in readonly.
 	for _, sub := range []string{"git status", "git log --oneline", "git diff", "git show HEAD"} {
@@ -395,5 +405,31 @@ func TestReadonlyGitRedirect(t *testing.T) {
 	}
 	if d := Decide(off, "Bash", bash("git commit -m x")); d.Decision != Deny {
 		t.Errorf("off-mode git commit = %v, want Deny (always)", d.Decision)
+	}
+}
+
+func TestGitReadonlyAdvice(t *testing.T) {
+	const roErr = "fatal: cannot lock ref 'refs/heads/x': Unable to create '/repo/.git/refs/heads/x.lock': Read-only file system"
+
+	// A git write that hit the read-only .git gets the matching tool named.
+	if got := GitReadonlyAdvice("git commit -m x", roErr); !strings.Contains(got, "git_commit") {
+		t.Errorf("commit advice should name git_commit, got %q", got)
+	}
+	if got := GitReadonlyAdvice("git cherry-pick abc", roErr); !strings.Contains(got, "git_cherry_pick") {
+		t.Errorf("cherry-pick advice should name git_cherry_pick, got %q", got)
+	}
+	// A git write with no tool equivalent still gets explained - these previously
+	// hit the same wall with no pointer at all.
+	got := GitReadonlyAdvice("git stash", roErr)
+	if !strings.Contains(got, "read-only") || !strings.Contains(got, "mcp__hydra__git_") {
+		t.Errorf("uncovered git write should still be explained, got %q", got)
+	}
+	// Silent when there is nothing to explain: a git command that worked, or a
+	// read-only-filesystem error from something that was not git.
+	if got := GitReadonlyAdvice("git commit -m x", "[main abc1234] x\n 1 file changed"); got != "" {
+		t.Errorf("successful git should get no advice, got %q", got)
+	}
+	if got := GitReadonlyAdvice("touch /etc/passwd", roErr); got != "" {
+		t.Errorf("non-git read-only error should get no git advice, got %q", got)
 	}
 }

@@ -99,14 +99,31 @@ var gitCommitRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-c\s+\S+\s+|
 // leading-flag skipping as gitCommitRe.
 var gitToolSubcmdRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*(commit|add|reset|revert|rebase|cherry-pick)\b`)
 
-// gitReadonlyRedirect returns a redirect message when cmd runs a raw git
-// write-subcommand that a mcp__hydra__git_* tool covers, or "" otherwise. Used
-// only under git_isolation=readonly (HostMediatedGit), where the raw command
-// would otherwise fail at the OS with an unhelpful read-only-filesystem error.
-func gitReadonlyRedirect(cmd string) string {
+// gitInvocationRe matches any git invocation at a command boundary, used to
+// confine the read-only advice below to failures that actually came from git.
+var gitInvocationRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s`)
+
+// readOnlyFSRe matches the OS error a write to the read-only .git produces.
+var readOnlyFSRe = regexp.MustCompile(`(?i)read-only file system`)
+
+// GitReadonlyAdvice returns guidance to attach to a Bash call that already ran
+// and failed because .git is read-only (git_isolation=readonly), or "" when the
+// output shows no such failure. This replaces the pre-execution deny that used
+// to stand here: under readonly the OS is the real boundary, so the command is
+// allowed to run and this explains the wreckage afterwards.
+//
+// Keying off the OUTPUT rather than the command means it also covers the writes
+// no redirect table anticipated (`git stash`, `git tag`, `git worktree add`),
+// which previously hit the same wall with no explanation at all. When the
+// command does map to a git_* tool, the advice names it.
+func GitReadonlyAdvice(cmd, output string) string {
+	if !gitInvocationRe.MatchString(cmd) || !readOnlyFSRe.MatchString(output) {
+		return ""
+	}
+	const why = "This failed because your .git is read-only in the sandbox (git_isolation=readonly), not because of the command itself - nothing was changed. Read-only git (status/diff/log/show) still works in the shell, and you can edit and delete files normally."
 	m := gitToolSubcmdRe.FindStringSubmatch(cmd)
 	if m == nil {
-		return ""
+		return why + " Git writes have to go through the mcp__hydra__git_* tools, which run on your own branch host-side."
 	}
 	sub := strings.ToLower(m[1])
 	tool := map[string]string{
@@ -117,7 +134,7 @@ func gitReadonlyRedirect(cmd string) string {
 		"rebase":      "git_rebase (or git_rebase_continue / git_rebase_abort)",
 		"cherry-pick": "git_cherry_pick",
 	}[sub]
-	return fmt.Sprintf("raw `git %s` won't work here: your .git is read-only in the sandbox (git_isolation=readonly). Use the mcp__hydra__%s tool instead - it runs the operation on your own branch, host-side. Read-only git (status/diff/log/show) still works in the shell; edit and delete files normally (git_commit's `git add -A` picks up the changes).", sub, tool)
+	return fmt.Sprintf("%s Use the mcp__hydra__%s tool instead of `git %s` - it runs the operation on your own branch, host-side.", why, tool, sub)
 }
 
 // heredocStartRe matches the start of a heredoc and captures its delimiter word
@@ -343,16 +360,18 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 				Reason:   "git push is not allowed - it leaves the sandbox and writes to a remote (push deliberately from the host instead)",
 			}
 		}
-		// In readonly mode raw git writes fail at the OS (.git is read-only), so
-		// redirect the ones with a tool to that tool with a helpful message rather
-		// than letting the agent hit a cryptic read-only-filesystem error. Fires
-		// before the commit check so commit gets the readonly-specific message. UX
-		// only - the same string-match bypasses as the commit gate apply, but they
-		// just hit the OS wall (readonly is the actual boundary).
-		if p.HostMediatedGit {
-			if reason := gitReadonlyRedirect(cmd); reason != "" {
-				return Result{Decision: Deny, Reason: reason}
-			}
+		// In readonly mode raw git writes cannot succeed: .git is read-only, so the
+		// OS refuses the ref lock / index write and the branch is untouched. The
+		// deny that used to live here was therefore never a security control - it
+		// only bought a friendlier message than "Read-only file system" - and it
+		// charged the whole Bash call for that nicety: a compound command like
+		// `printf > a && printf > b && git add …` lost its file writes too, because
+		// one clause happened to mention git. So allow it, let the OS refuse it,
+		// and attach the tool pointer to the failure afterwards (GitReadonlyAdvice,
+		// wired as a PostToolUse hook). Fires before the commit check below so a
+		// readonly-mode commit takes this path rather than that hard deny.
+		if p.HostMediatedGit && gitToolSubcmdRe.MatchString(cmd) {
+			return Result{Decision: Allow}
 		}
 		if gitCommitRe.MatchString(cmd) {
 			// Route commits through the mcp__hydra__git_commit tool, which commits onto

@@ -12,6 +12,7 @@ import (
 //
 //	::hydra:test:total:: 4556                          (optional denominator)
 //	::hydra:test:pass:: internal/artifacts › TestGenerateAndCache
+//	::hydra:test:pass:38:: internal/artifacts › TestFast   (38 = duration in ms)
 //	::hydra:test:warn:: web/src/x.ts:12:5 › no-console | Unexpected console statement
 //	::hydra:test:fail:: auth/rotation.test.ts:48:24 › grace window | expected kid-2 to be kid-3
 //	::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon
@@ -21,6 +22,13 @@ import (
 // :line:col-suffixed) or a dotted class chain, routed through the same
 // classifier as JUnit classnames - middle › tokens are extra scope levels, the
 // last is the leaf name, and everything after | is the message.
+//
+// A verb may carry an optional `:<ms>` duration suffix, which JUnit reports
+// already provide via their `time` attribute; without it a streamed case showed
+// no timing at all. It rides on the VERB rather than in the payload because the
+// payload is user text - a test name containing the delimiter would be
+// ambiguous, whereas the verb is a closed set. Omitting it stays valid, so
+// existing runners need no change.
 const TestMarkerPrefix = "::hydra:test:"
 
 // testMarker is one parsed ::hydra:test:*:: line.
@@ -104,6 +112,16 @@ func parseTestMarker(line string, lc *locContext) (testMarker, bool) {
 		}
 		return testMarker{kind: "total", total: n}, true
 	}
+	// An optional ":<ms>" duration suffix rides on the verb (see TestMarkerPrefix).
+	// A malformed or negative duration is dropped rather than rejecting the whole
+	// case - the result matters more than its timing.
+	durationMs := int64(0)
+	if base, dur, hasDur := strings.Cut(verb, ":"); hasDur {
+		verb = base
+		if ms, err := strconv.ParseInt(dur, 10, 64); err == nil && ms >= 0 {
+			durationMs = ms
+		}
+	}
 	status, known := markerStatus[verb]
 	if !known || payload == "" {
 		return testMarker{}, false
@@ -111,7 +129,7 @@ func parseTestMarker(line string, lc *locContext) (testMarker, bool) {
 
 	// Split off the message first (everything after the first " | ").
 	rest2, msg, _ := strings.Cut(payload, " | ")
-	tc := TestCase{Status: status, Message: truncate(unescapeMessage(strings.TrimSpace(msg)), maxCaseMessage)}
+	tc := TestCase{Status: status, DurationMs: durationMs, Message: truncate(unescapeMessage(strings.TrimSpace(msg)), maxCaseMessage)}
 
 	segs := mapTrimSpace(strings.Split(rest2, " › "))
 	tc.Name = segs[len(segs)-1]

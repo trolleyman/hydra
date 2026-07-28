@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -41,6 +42,7 @@ type event struct {
 	Package string
 	Test    string
 	Output  string
+	Elapsed float64 // seconds, on a pass/fail/skip record
 }
 
 func main() {
@@ -168,6 +170,10 @@ func runTests() error {
 // scope levels before the leaf name.
 func emitTest(e event, out []string) {
 	verb := e.Action // pass | fail | skip (already filtered by the caller)
+	// go test -json reports Elapsed in seconds; the marker carries milliseconds.
+	if e.Elapsed > 0 {
+		verb += ":" + strconv.FormatInt(int64(e.Elapsed*1000), 10)
+	}
 	tokens := append([]string{e.Package}, strings.Split(e.Test, "/")...)
 	line := "::hydra:test:" + verb + ":: " + strings.Join(tokens, " › ")
 	if msg := escape(cleanMsg(out)); msg != "" && verb != "pass" {

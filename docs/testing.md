@@ -58,7 +58,41 @@ report at exit (no markers → exit-code fallback). One line per case — locati
 ```bash
 echo "::hydra:test:total:: 4556"                    # optional denominator
 echo "::hydra:test:pass:: internal/artifacts › TestGenerateAndCache"
+echo "::hydra:test:pass:38:: internal/artifacts › TestFast"   # 38 = duration in ms
 echo "::hydra:test:warn:: web/src/x.ts:12:5 › no-console | Unexpected console statement"
 echo "::hydra:test:fail:: auth/rotation.test.ts:48:24 › grace window | expected kid-2 to be kid-3"
 echo "::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon"
 ```
+
+**Durations.** A verb takes an optional `:<ms>` suffix, giving streamed cases the
+timing a JUnit report already carries in its `time` attribute; the panel renders it
+per case. It rides on the *verb* rather than the payload because the payload is user
+text - a test name could contain any delimiter - whereas the verb is a closed set.
+Omitting it stays valid, and a malformed or negative value drops the timing while
+keeping the case.
+
+## Bundled marker emitters
+
+Three reporters in this repo turn a runner's native output into markers; copy one
+when wiring up a new runner:
+
+| Runner | Emitter | Notes |
+| --- | --- | --- |
+| `go test -json` | `scripts/gotest-markers` | package path as location, subtests as scope, `-total` mode counts a `-list` pass for the denominator |
+| vitest | `web/scripts/hydra-reporter.ts` | describe chain as scope, rolling `total` as modules are collected |
+| Playwright | `web/e2e/hydra-reporter.ts` | full spec count known up front, so `total` is declared in `onBegin`; a `flaky` outcome counts as a pass |
+
+Two more emit findings that are not tests at all, onto the same verdict:
+`web/scripts/eslint-report.ts` (lint) and `web/scripts/tsc-report.ts` (type errors).
+Both map errors to `fail` (gates the merge) and warnings to `warn` (informational),
+and both exit 0 - the markers carry the verdict, so only a crash goes non-zero.
+
+`tsc-report.ts` is worth knowing about: typechecking used to gate nothing. `npm run
+lint` was eslint alone and the `[tests.web]` runner never compiled, so a type error
+reached `mage build` and nowhere else. `lint` now runs `tsc -b` first, and the runner
+ends with `tsc-report.ts`.
+
+**Prefer streaming over JUnit for slow suites.** A JUnit reporter writes its file
+only at the end, so a run killed by `timeout_sec` reports *nothing* - the whole suite
+reads as a bare red exit code. Streamed cases are kept as they arrive, so a partial
+run still shows what passed. That is why the e2e suite moved off JUnit.

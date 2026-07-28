@@ -71,6 +71,7 @@ type Request struct {
 	Message string   `json:"message,omitempty"`
 	Paths   []string `json:"paths,omitempty"`
 	Amend   bool     `json:"amend,omitempty"`
+	Staged  bool     `json:"staged,omitempty"` // commit the index as-is, skipping the stage step
 
 	// reset
 	Mode    string   `json:"mode,omitempty"`    // soft | mixed | hard

@@ -37,6 +37,39 @@ func TestParseTestMarker(t *testing.T) {
 			testMarker{kind: "case", c: TestCase{Status: CaseSkipped, Path: "heads/resume_test.go", Name: "TestResumeOnBoot", Message: "needs daemon"}},
 			true,
 		},
+		// An optional ":<ms>" duration suffix on the verb, which JUnit reports
+		// carry via `time`. It rides on the verb (a closed set) rather than in the
+		// payload, so a test name can never be mistaken for a duration.
+		{
+			"::hydra:test:pass:38:: internal/artifacts › TestFast",
+			testMarker{kind: "case", c: TestCase{Status: CasePassed, Path: "internal/artifacts", Name: "TestFast", DurationMs: 38}},
+			true,
+		},
+		{
+			"::hydra:test:fail:1204:: auth/rotation.test.ts:48 › grace window | boom",
+			testMarker{kind: "case", c: TestCase{Status: CaseFailed, Path: "auth/rotation.test.ts", Line: 48, Name: "grace window", Message: "boom", DurationMs: 1204}},
+			true,
+		},
+		// A zero duration is legal (a case too fast to measure).
+		{
+			"::hydra:test:pass:0:: internal/tests › TestInstant",
+			testMarker{kind: "case", c: TestCase{Status: CasePassed, Path: "internal/tests", Name: "TestInstant"}},
+			true,
+		},
+		// A malformed or negative duration drops the timing but keeps the case -
+		// the result matters more than how long it took.
+		{
+			"::hydra:test:pass:abc:: internal/tests › TestJunk",
+			testMarker{kind: "case", c: TestCase{Status: CasePassed, Path: "internal/tests", Name: "TestJunk"}},
+			true,
+		},
+		{
+			"::hydra:test:pass:-5:: internal/tests › TestNegative",
+			testMarker{kind: "case", c: TestCase{Status: CasePassed, Path: "internal/tests", Name: "TestNegative"}},
+			true,
+		},
+		// A duration suffix on an unknown verb is still rejected.
+		{"::hydra:test:bogus:12:: internal/tests › TestX", testMarker{}, false},
 		// Dotted class chains route to Scope via the shared classifier; extra ›
 		// tokens append as further scope levels.
 		{

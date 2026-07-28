@@ -22,7 +22,7 @@ import (
 func RunGuardedOp(worktree, expectedBranch string, req gitq.Request) (ok bool, summary string) {
 	switch req.Op {
 	case "", gitq.OpCommit:
-		return GuardedCommit(worktree, expectedBranch, req.Message, req.Paths, req.Amend)
+		return GuardedCommit(worktree, expectedBranch, req.Message, req.Paths, req.Amend, req.Staged)
 	case gitq.OpReset:
 		return GuardedReset(worktree, expectedBranch, req.Mode, req.To, req.Unstage, req.Confirm)
 	case gitq.OpRevert:
@@ -130,11 +130,46 @@ func applyOntoHead(worktree, expectedBranch, op, commit string) (ok bool, summar
 	args = append(args, commit)
 	if out, err := gitCombined(worktree, args...); err != nil {
 		_, _ = gitCombined(worktree, op, "--abort") // leave the branch clean
-		return false, fmt.Sprintf("%s failed (conflicts?) and was aborted: %s", op, firstNonEmpty(strings.TrimSpace(out), err.Error()))
+		files, detail := summarizeConflict(firstNonEmpty(strings.TrimSpace(out), err.Error()))
+		where := ""
+		if len(files) > 0 {
+			where = " in " + strings.Join(files, ", ")
+		}
+		return false, fmt.Sprintf("%s of %s hit conflicts%s and was aborted - your branch is unchanged.\n%s", op, commit, where, detail)
 	}
 	hash, _ := gitOutput(worktree, "rev-parse", "--short", "HEAD")
 	subject, _ := gitOutput(worktree, "log", "-1", "--pretty=%s")
 	return true, fmt.Sprintf("%s of %s -> new commit %s on %s: %s", op, commit, hash, cur, subject)
+}
+
+// conflictNoiseRe matches git output lines that are actively wrong once we have
+// aborted the operation. Git's "hint:" block tells the reader to resolve the
+// files and run `git cherry-pick --continue`, but by the time they see it the
+// abort has already rolled the operation back, so there is nothing to continue -
+// and raw git is gate-denied for sandboxed heads anyway. "Recorded preimage" is
+// rerere bookkeeping that means nothing to the reader. Both render as
+// instructions in the chat card, so they are dropped from the summary.
+var conflictNoiseRe = regexp.MustCompile(`(?m)^(?:hint:.*|Recorded preimage for .*)$\n?`)
+
+// conflictContentRe and conflictModifyDeleteRe pull the conflicting paths out of
+// git's two CONFLICT spellings, so the summary can name the files up front
+// instead of making the reader parse a wall of merge output.
+var conflictContentRe = regexp.MustCompile(`(?m)^CONFLICT \([^)]*\): Merge conflict in (.+?)\s*$`)
+var conflictModifyDeleteRe = regexp.MustCompile(`(?m)^CONFLICT \([^)]*\): (\S+) deleted in `)
+
+// summarizeConflict returns the conflicting paths plus the git output with the
+// post-abort noise stripped (see conflictNoiseRe).
+func summarizeConflict(out string) (files []string, cleaned string) {
+	seen := map[string]bool{}
+	for _, re := range []*regexp.Regexp{conflictContentRe, conflictModifyDeleteRe} {
+		for _, m := range re.FindAllStringSubmatch(out, -1) {
+			if path := strings.TrimSpace(m[1]); path != "" && !seen[path] {
+				seen[path] = true
+				files = append(files, path)
+			}
+		}
+	}
+	return files, strings.TrimSpace(conflictNoiseRe.ReplaceAllString(out, ""))
 }
 
 // GuardedAdd stages files into the index on the head's own branch. An AddSpec

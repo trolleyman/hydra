@@ -61,6 +61,7 @@ type GitOpRequest struct {
 	Message string
 	Paths   []string
 	Amend   bool
+	Staged  bool
 
 	// reset
 	Mode    string
