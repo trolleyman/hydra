@@ -22,6 +22,7 @@ import { formatLineHash } from '../lib/lineRange'
 import { buildRepoSplat } from '../lib/repoSplat'
 import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
+import { AnsiText } from './AnsiText'
 import {
   TEST_STATUS_ORDER, type TestFilter,
   defaultHiddenStatuses, defaultTestFilter, isDefaultTestFilter, loadTestFilter, saveTestFilter,
@@ -614,9 +615,10 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
 
       {/* Errored with no log to show: surface the captured error text. */}
       {errored && runner.error && !hasLog ? (
-        <div className="mb-2 px-3 py-2 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 font-mono text-xs text-yellow-700 dark:text-yellow-400 whitespace-pre-wrap break-words">
-          {runner.error}
-        </div>
+        <AnsiText
+          text={runner.error}
+          className="mb-2 px-3 py-2 rounded-md bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 font-mono text-xs text-yellow-700 dark:text-yellow-400 whitespace-pre-wrap break-words"
+        />
       ) : null}
 
       {/* The filtered case tree - or its per-status sections when "Group by

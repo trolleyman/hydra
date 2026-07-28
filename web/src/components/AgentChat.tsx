@@ -894,14 +894,10 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
       return { text: subject + (notes.length ? ` (${notes.join(', ')})` : ''), prose: true }
     }
     case 'git_add': {
-      const files = Array.isArray(obj.files) ? obj.files : []
-      if (files.length !== 1) return { text: `${files.length} files`, prose: true }
-      const only = (files[0] ?? {}) as Record<string, unknown>
-      const ranges = Array.isArray(only.ranges) ? only.ranges : []
-      const lines = ranges
-        .map((range) => (Array.isArray(range) ? (range[0] === range[1] ? `${range[0]}` : `${range[0]}-${range[1]}`) : ''))
-        .filter(Boolean)
-      return { text: `${String(only.path ?? '')}${lines.length ? ` lines ${lines.join(', ')}` : ''}`, prose: false }
+      // Only a fallback: a git_add with a readable path renders as a lowlit path
+      // in the header (isPathSummary), with its ranges in the lineInfo slot.
+      const specs = gitAddSpecs(obj)
+      return { text: specs.length === 1 ? specs[0].path : `${specs.length} files`, prose: specs.length !== 1 }
     }
     case 'git_reset': {
       const unstage = Array.isArray(obj.unstage) ? obj.unstage : []
@@ -1046,15 +1042,18 @@ function parseSendMessageResult(text?: string): SendMessageResult | null {
 // They are Hydra's own git plumbing - the sanctioned replacement for raw git,
 // which is gate-denied - so the generic "MCP hydra::git_cherry_pick" rendering
 // buries the verb behind transport detail that means nothing to the reader.
+// Lowercase and named after the git subcommand they run ("git add", not "Git
+// stage"): these ARE git commands, so the label the reader already knows beats a
+// prettified synonym they have to map back.
 const GIT_TOOL_LABELS: Record<string, string> = {
-  git_commit: 'Git commit',
-  git_add: 'Git stage',
-  git_reset: 'Git reset',
-  git_revert: 'Git revert',
-  git_cherry_pick: 'Git cherry-pick',
-  git_rebase: 'Git rebase',
-  git_rebase_continue: 'Git rebase continue',
-  git_rebase_abort: 'Git rebase abort',
+  git_commit: 'git commit',
+  git_add: 'git add',
+  git_reset: 'git reset',
+  git_revert: 'git revert',
+  git_cherry_pick: 'git cherry-pick',
+  git_rebase: 'git rebase',
+  git_rebase_continue: 'git rebase --continue',
+  git_rebase_abort: 'git rebase --abort',
 }
 
 function displayToolName(name: string): string {
@@ -1961,6 +1960,144 @@ function TaskToolFields({ input, serif }: { input: Record<string, unknown>; seri
   )
 }
 
+// gitAddSpecs narrows a git_add `files` array to the {path, ranges} entries the
+// tool actually accepts, so both the header summary and the field panel read it
+// the same way.
+function gitAddSpecs(input: Record<string, unknown>): { path: string; lines: string[] }[] {
+  const files = Array.isArray(input.files) ? input.files : []
+  return files.flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return []
+    const spec = raw as Record<string, unknown>
+    const path = typeof spec.path === 'string' ? spec.path : ''
+    if (!path) return []
+    const ranges = Array.isArray(spec.ranges) ? spec.ranges : []
+    const lines = ranges
+      .map((range) => (Array.isArray(range) ? (range[0] === range[1] ? `${range[0]}` : `${range[0]}-${range[1]}`) : ''))
+      .filter(Boolean)
+    return [{ path, lines }]
+  })
+}
+
+// GitToolFields renders an mcp__hydra__git_* input as the operation it describes
+// instead of raw JSON. The commit message gets a real text box - it is prose the
+// agent wrote and the single most-read part of the card - and the staging mode is
+// stated outright, because "which of my changes did that actually capture?" is
+// the question the JSON never answered: `git add -A` is the default, so the
+// interesting cases (a path list, or a pre-built index) have to be visible.
+function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: Record<string, unknown>; serif: boolean; worktree: string | null }) {
+  const str = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '')
+  const strs = (key: string) => (Array.isArray(input[key]) ? (input[key] as unknown[]).filter((v): v is string => typeof v === 'string') : [])
+  const path = (p: string) => collapseHome(trimWorktreePaths(p, worktree))
+  const note = 'text-[11px] text-stone-500 dark:text-stone-400'
+  const sha = (value: string) => <span className="font-mono text-[11px] text-stone-600 dark:text-stone-300">{value}</span>
+
+  if (tool === 'git_commit') {
+    const paths = strs('paths')
+    const staging = input.staged === true
+      ? 'Commits the index as it already stands - stages nothing further'
+      : paths.length > 0
+        ? 'Stages only the paths below'
+        : 'Stages all changes, tracked and untracked (git add -A)'
+    return (
+      <div className="space-y-1.5">
+        <div className={note}>
+          {staging}
+          {input.amend === true && <span> &middot; amends the previous commit</span>}
+        </div>
+        <LabeledField label="Message">
+          <pre className={`${PANEL_CLASS} whitespace-pre-wrap break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 ${serif ? 'font-serif' : ''}`}>
+            {str('message')}
+          </pre>
+        </LabeledField>
+        {paths.length > 0 && (
+          <LabeledField label={paths.length === 1 ? 'Path' : 'Paths'}>
+            <div className="space-y-0.5">{paths.map((p) => <div key={p}><LowlitPath path={path(p)} /></div>)}</div>
+          </LabeledField>
+        )}
+      </div>
+    )
+  }
+
+  if (tool === 'git_add') {
+    const specs = gitAddSpecs(input)
+    return (
+      <div className="space-y-1.5">
+        <div className={note}>
+          {specs.some((s) => s.lines.length > 0)
+            ? 'Stages only the listed lines - commit with git_commit staged to keep the split'
+            : 'Stages these files into the index without committing'}
+        </div>
+        <div className="space-y-0.5">
+          {specs.map((s) => (
+            <div key={s.path} className="flex items-baseline gap-1.5">
+              <LowlitPath path={path(s.path)} />
+              {s.lines.length > 0 && (
+                <span className="font-mono text-[10px] text-stone-500 dark:text-stone-400">lines {s.lines.join(', ')}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (tool === 'git_reset') {
+    const unstage = strs('unstage')
+    if (unstage.length > 0) {
+      return (
+        <div className="space-y-1.5">
+          <div className={note}>Unstages these paths - HEAD does not move</div>
+          <div className="space-y-0.5">{unstage.map((p) => <div key={p}><LowlitPath path={path(p)} /></div>)}</div>
+        </div>
+      )
+    }
+    const mode = str('mode') || 'soft'
+    const modeNote: Record<string, string> = {
+      soft: 'keeps your changes staged',
+      mixed: 'keeps your changes, unstaged',
+      hard: 'DISCARDS uncommitted changes',
+    }
+    return (
+      <div className={note}>
+        Moves the branch to {sha(str('to') || 'HEAD')} &middot; {mode} - {modeNote[mode] ?? mode}
+      </div>
+    )
+  }
+
+  if (tool === 'git_revert' || tool === 'git_cherry_pick') {
+    return (
+      <div className={note}>
+        {tool === 'git_revert' ? 'Reverts ' : 'Applies '}
+        {sha(str('commit'))}
+        {tool === 'git_revert' ? ' with a new commit that undoes it' : ' onto your branch as a new commit'}
+      </div>
+    )
+  }
+
+  if (tool === 'git_rebase') {
+    const plan = Array.isArray(input.plan) ? input.plan : []
+    return (
+      <div className="space-y-1.5">
+        <div className={note}>Rewrites your branch above {sha(str('base'))}</div>
+        <div className="space-y-0.5">
+          {plan.map((raw, index) => {
+            const step = (raw ?? {}) as Record<string, unknown>
+            const message = typeof step.message === 'string' ? step.message.split('\n')[0] : ''
+            return (
+              <div key={`${String(step.commit)}:${index}`} className="flex items-baseline gap-1.5 text-[11px]">
+                <span className="font-medium text-stone-600 dark:text-stone-300">{String(step.action ?? '')}</span>
+                {sha(String(step.commit ?? ''))}
+                {message && <span className={`truncate text-stone-500 dark:text-stone-400 ${serif ? 'font-serif' : ''}`}>{message}</span>}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+  return null
+}
+
 // AgentChip is the recipient of a SendMessage - the sub-agent's label (and its
 // short id) as a pill that opens that agent's chat when we can resolve it.
 function AgentChip({
@@ -2187,7 +2324,19 @@ const ToolCard = memo(function ToolCard({
   const isRead = item.name === 'Read'
   const readPath = isRead && typeof input?.file_path === 'string' ? (input.file_path as string) : ''
   const mem = isRead ? memoryName(readPath) : null
-  const lineInfo = isRead ? readLineInfo(input) : ''
+  // The bare git_* name for a Hydra git tool ('' for anything else).
+  const gitTool = /^mcp__hydra__(git_.+)$/.exec(item.name)?.[1] ?? ''
+  // Read's "lines N-M" slot doubles as git_add's staged line ranges: the path
+  // renders lowlit like any other file, so the ranges ride alongside it rather
+  // than forcing the whole summary back into monospace.
+  const lineInfo = isRead
+    ? readLineInfo(input)
+    : gitTool === 'git_add' && input
+      ? (() => {
+          const lines = gitAddSpecs(input).flatMap((s) => s.lines)
+          return lines.length > 0 ? `lines ${lines.join(', ')}` : ''
+        })()
+      : ''
   const simpleRead =
     isRead && input != null && Object.keys(input).every((k) => k === 'file_path' || k === 'offset' || k === 'limit')
   const outputLang = isRead ? langFromPath(readPath) : ''
@@ -2236,13 +2385,19 @@ const ToolCard = memo(function ToolCard({
   // Bash command, a Grep pattern) stay monospace. A memory alias / Bash
   // description / task subject / prose input field (a ScheduleWakeup prompt)
   // are prose (sans) already.
+  // A git_add's subject is a file too, so it gets the same lowlit-path treatment
+  // as a Read/Edit rather than a flat monospace run - its path just lives one
+  // level down, in files[].path.
+  const gitAddPaths = gitTool === 'git_add' && input ? gitAddSpecs(input).map((s) => s.path) : []
   const isPathSummary =
-    !isBash && !mem && !!input && (isFileChanges || typeof input.file_path === 'string' || typeof input.path === 'string')
+    !isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string')
   const summaryPaths = isFileChanges
     ? changedPaths
-    : isPathSummary
-      ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
-      : []
+    : gitAddPaths.length > 0
+      ? gitAddPaths.map((p) => collapseHome(trimWorktreePaths(p, worktree)))
+      : isPathSummary
+        ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
+        : []
   const summaryMono = !mem && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
@@ -2413,6 +2568,8 @@ const ToolCard = memo(function ToolCard({
                 />
               ) : isTaskTool && input ? (
                 <TaskToolFields input={input} serif={serif} />
+              ) : gitTool && input ? (
+                <GitToolFields tool={gitTool} input={input} serif={serif} worktree={worktree} />
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}

@@ -1273,8 +1273,14 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	var scanWG sync.WaitGroup
 	scanWG.Go(func() { scan(stdout, StreamStdout) })
 	scanWG.Go(func() { scan(stderrPipe, StreamStderr) })
+	// Drain both pipes to EOF BEFORE Wait. cmd.StdoutPipe/StderrPipe document that
+	// Wait closes the pipes once the process exits, so calling it first races the
+	// scanners for whatever is still sitting in the pipe buffer - when Wait won,
+	// the tail of the script's output vanished. That silently dropped trailing
+	// ::hydra:artifact:: markers (their files then only appeared in the final
+	// settled scan, never as a streamed tile) and truncated the build log.
+	scanWG.Wait()
 	err = cmd.Wait()
-	scanWG.Wait() // drain both pipes before reading stderr / returning
 	if err != nil {
 		// A concise failure summary: the exit code, or "timed out after ..." when the
 		// per-script timeout fired. This is Hydra's framing - NOT something the

@@ -987,7 +987,11 @@ func simTestRunners(id string) []api.TestRunResult {
 			Cases: &[]api.TestCase{
 				// Scope levels are vitest describe blocks → ScopeKinds "module".
 				{Name: "rotates signing key on expiry", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), ScopeKinds: ptr([]string{"module"}), Line: ptr(48), Col: ptr(24), DurationMs: ptr(int64(38)), Message: ptr("AssertionError: expected 'kid-2' to be 'kid-3'\n  at rotation.test.ts:48:24")},
-				{Name: "keeps old sessions valid in grace window", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), ScopeKinds: ptr([]string{"module"}), Line: ptr(63), Col: ptr(11), DurationMs: ptr(int64(12)), Message: ptr("TypeError: currentKid is not a function\n  at token-service.ts:21:14")},
+				// This one's message carries ANSI, as a real runner's does (the dimmed
+				// "$ <command>" echo mage prints, go test's red FAIL). The case message
+				// renders through AnsiText, so the colour survives and the escape bytes
+				// never reach the reader as literal "[0m[2m[35m" garbage.
+				{Name: "keeps old sessions valid in grace window", Status: api.TestCaseFailed, Path: ptr("auth/rotation.test.ts"), Scope: ptr([]string{"key rotation"}), ScopeKinds: ptr([]string{"module"}), Line: ptr(63), Col: ptr(11), DurationMs: ptr(int64(12)), Message: ptr("\x1b[2m\x1b[35m$ \x1b[0m\x1b[2m\x1b[1mgo test ./internal/auth/\x1b[0m\n\x1b[31m--- FAIL: TestGraceWindow\x1b[0m (0.01s)\n    \x1b[2mrotation_test.go:63:\x1b[0m TypeError: currentKid is not a function\n\x1b[31mFAIL\x1b[0m\texit=1")},
 				{Name: "blends frames", Status: api.TestCasePassed, Path: ptr("diff/onion.test.ts"), Scope: ptr([]string{"onion skin"}), ScopeKinds: ptr([]string{"module"}), DurationMs: ptr(int64(5))},
 				{Name: "resumes on boot", Status: api.TestCaseSkipped, Path: ptr("heads/heads.test.ts"), Message: ptr("it.skip")},
 			},
