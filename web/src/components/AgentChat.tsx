@@ -1556,10 +1556,13 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
   const allDone = total > 0 && done === total
   // Completed items fold behind a "(N completed)" toggle so the in-progress /
   // pending work sits in view without scrolling past the done ones. Collapsed by
-  // default; irrelevant when everything's done (the whole panel is collapsed then).
+  // default - except when everything's done, where folding them away would leave
+  // a card the user just expanded with nothing in it. That is only the DEFAULT:
+  // the toggle still folds them away by hand, and closing + reopening the card
+  // starts over from the default (see the header button).
   const completed = todos.filter((t) => t.status === 'completed')
   const active = todos.filter((t) => t.status !== 'completed')
-  const [showDone, setShowDone] = useState(false)
+  const [showDone, setShowDone] = useState(allDone)
   // Default collapsed when the pane is too narrow to sit a card alongside the
   // transcript, or when every item is checked off (a finished plan is just
   // noise expanded).
@@ -1567,11 +1570,14 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
   // Follow the narrow/wide flip and the all-done flip (collapse when it gets
   // tight or the plan completes, re-open when it widens or work resumes) while
   // still letting the user toggle in between - a render-phase sync like the
-  // settings fields use.
+  // settings fields use. The all-done flip also flips the completed section, so
+  // expanding a finished plan shows the checked-off items rather than an empty
+  // body, and resuming work puts the active ones back in view.
   const [prevNarrow, setPrevNarrow] = useState(narrow)
   const [prevAllDone, setPrevAllDone] = useState(allDone)
   if (prevNarrow !== narrow || prevAllDone !== allDone) {
     setPrevNarrow(narrow)
+    if (prevAllDone !== allDone) setShowDone(allDone)
     setPrevAllDone(allDone)
     setOpen(!narrow && !allDone)
   }
@@ -1603,7 +1609,14 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
         <ChevronRight className="w-3 h-3 shrink-0" />
       </div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          // Reopening starts the completed section from its default again
+          // (open when the plan is finished), so a fold the user did last time
+          // doesn't leave the reopened card empty. Reset on the way OPEN, not
+          // on close - reshuffling the body mid-close animation shows.
+          if (!open) setShowDone(allDone)
+          setOpen((o) => !o)
+        }}
         className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
       >
         <ListChecks className={`w-3.5 h-3.5 shrink-0 ${allDone ? 'text-emerald-500' : 'text-[#c96442]'}`} />

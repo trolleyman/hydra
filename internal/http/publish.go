@@ -533,6 +533,25 @@ func warmAuthStatus(provider string) {
 	}()
 }
 
+// adoptedArmRefusal decides whether arming publish-when-green on this head must be
+// refused, and with what wording. Arming an ADOPTED PR means pushing into someone
+// else's PR on every green commit: allowed, but never implicitly - the caller has
+// to acknowledge it, which is what the UI's warning dialog collects
+// (docs/pr-adoption.md). A read-only PR is refused whatever the caller says, since
+// no push to it can succeed and the arm would only fail later, out of sight.
+func adoptedArmRefusal(head heads.Head, acknowledged bool) (detail string, refused bool) {
+	if !head.ReviewAdopted {
+		return "", false
+	}
+	if !head.ReviewCanPush {
+		return "this PR is read-only: its author has not enabled maintainer edits, so nothing can be pushed to it automatically", true
+	}
+	if !acknowledged {
+		return "this head is working on a PR Hydra did not create: pass acknowledge_adopted=true to confirm you want every green commit pushed into it", true
+	}
+	return "", false
+}
+
 // ArmPublishWhenGreen arms publish-when-green for a head.
 func (s *Server) ArmPublishWhenGreen(ctx context.Context, request api.ArmPublishWhenGreenRequestObject) (api.ArmPublishWhenGreenResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
@@ -546,10 +565,9 @@ func (s *Server) ArmPublishWhenGreen(ctx context.Context, request api.ArmPublish
 	if head == nil || head.Branch == nil {
 		return api.ArmPublishWhenGreen404JSONResponse{Code: 404, Error: api.ErrorResponseErrorNotFound, Details: "agent not found"}, nil
 	}
-	// Arming auto-publish on an adopted PR would auto-push into someone else's PR
-	// once tests go green - never do that implicitly (docs/pr-adoption.md).
-	if head.ReviewAdopted {
-		return api.ArmPublishWhenGreen400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: "publish-when-green is not available for an adopted PR: pushing to it must be a deliberate action"}, nil
+	ack := request.Params.AcknowledgeAdopted != nil && *request.Params.AcknowledgeAdopted
+	if detail, refused := adoptedArmRefusal(*head, ack); refused {
+		return api.ArmPublishWhenGreen400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: detail}, nil
 	}
 	if s.DB != nil {
 		if err := s.DB.SetPublishWhenGreen(head.ID, true, time.Now().UTC().Format(time.RFC3339)); err != nil {

@@ -50,7 +50,8 @@ interface DialogState {
   message: string
   type: DialogType
   variant: DialogVariant
-  // Label for the confirm button on rich variants (e.g. "Merge branch").
+  // Label for the confirm button (e.g. "Merge branch"). Honoured by every variant
+  // including the generic one, which falls back to "Confirm"/"OK" without it.
   confirmLabel?: string
   // An optional second action (e.g. the merge-gate's "Force merge" alongside
   // "Queue merge"). Rendered as an extra toned button left of the primary confirm.
