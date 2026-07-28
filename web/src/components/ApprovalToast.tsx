@@ -181,16 +181,17 @@ const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
   if (data.kind === 'host_command') {
     // Always show the FULL command (scroll for a long one) - the user is approving
     // arbitrary host code, so nothing may be hidden or truncated in the card. The
-    // command is chain-split (a newline after each top-level ;/&&/||) and bash
-    // syntax-highlighted for readability, exactly like the chat's Bash card. Set
-    // small and tall so a multi-step script fits without scrolling; what runs is
-    // the raw command echoed back on Allow (useAgentNotifications), never this
-    // rendered string.
+    // command is chain-split (a newline after each top-level ;/&&/||, plus an
+    // indented body for a for/while/if block) and bash syntax-highlighted for
+    // readability, exactly like the chat's Bash card. Set small and tall so a
+    // multi-step script fits without scrolling; what runs is the raw command
+    // echoed back on Allow (useAgentNotifications), never this rendered string.
     //
     // The only characters the rendering drops are a `;` that a chain split just
-    // moved to the end of a line and the whitespace before it - `cmd;` + newline
-    // is exactly `cmd` + newline in bash, so nothing can hide behind one. Every
-    // other byte of the command is still shown, in order.
+    // moved to the end of a line and the whitespace around a break - `cmd;` +
+    // newline is exactly `cmd` + newline in bash, so nothing can hide behind
+    // one. Everything it adds is leading indentation. Every other byte of the
+    // command is still shown, in order.
     const split = dropRedundantSemicolons(splitBashChains(data.target))
     if (split.includes('\n')) return <CommandLines code={split} />
     const html = highlightBash(split)

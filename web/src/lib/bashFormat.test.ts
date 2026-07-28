@@ -83,6 +83,44 @@ describe('Codex bash display', () => {
     expect(formatBashForDisplay(command)).toBe(command)
   })
 
+  it('lays a for loop out over its own indented lines', () => {
+    expect(formatBashForDisplay('cd /path && for i in 1 2 3; do echo $i; done')).toBe(
+      'cd /path &&\nfor i in 1 2 3; do\n    echo $i\ndone',
+    )
+  })
+
+  it('formats an if/else chain', () => {
+    expect(formatBashForDisplay('if [ -f x ]; then echo a; elif [ -f y ]; then echo b; else echo c; fi')).toBe(
+      'if [ -f x ]; then\n    echo a\nelif [ -f y ]; then\n    echo b\nelse\n    echo c\nfi',
+    )
+  })
+
+  it('indents nested blocks one level each', () => {
+    expect(formatBashForDisplay('for a in 1; do for b in 2; do echo $a$b; done; done')).toBe(
+      'for a in 1; do\n    for b in 2; do\n        echo $a$b\n    done\ndone',
+    )
+  })
+
+  it('keeps a block header on one line', () => {
+    expect(formatBashForDisplay('if command -v bun && test -x foo; then echo ok; fi')).toBe(
+      'if command -v bun && test -x foo; then\n    echo ok\nfi',
+    )
+    expect(formatBashForDisplay('for ((i=0;i<3;i++)); do echo $i; done')).toBe('for ((i=0; i<3; i++)); do\n    echo $i\ndone')
+  })
+
+  it('sees a keyword after a pipe but not in an argument', () => {
+    expect(formatBashForDisplay('cat f | while read l; do echo $l; done')).toBe('cat f | while read l; do\n    echo $l\ndone')
+    expect(formatBashForDisplay('echo done; echo then')).toBe('echo done\necho then')
+  })
+
+  it('keeps what follows a closed block on the same chain', () => {
+    expect(formatBashForDisplay('for i in 1; do echo $i; done && echo ok')).toBe('for i in 1; do\n    echo $i\ndone &&\necho ok')
+  })
+
+  it('leaves a keyword inside quotes alone', () => {
+    expect(formatBashForDisplay(`echo 'for i in 1; do x; done'`)).toBe(`echo 'for i in 1; do x; done'`)
+  })
+
   it('renders a bare command as the same shell script', () => {
     expect(formatBashForDisplay('echo 123123')).toBe('echo 123123')
     expect(formatBashForDisplay('/usr/bin/bash -lc "echo 123123"')).toBe('echo 123123')
