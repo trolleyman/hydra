@@ -671,6 +671,10 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			resp[i].Review = simReviewLink("open", forge.CISuccess, 2, 0, 1, 0)
 		case "agent-2":
 			resp[i].DownstreamBranch = ptr("feat/small-fix")
+		case "agent-3":
+			// agent-3 is an ADOPTED PR: linked and pushable, but auto-push is off.
+			resp[i].DownstreamBranch = ptr("contrib/auth-packages")
+			resp[i].Review = simAdoptedReviewLink()
 		}
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
@@ -850,16 +854,18 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	if id == "agent-3" {
 		createdAt := simNow().Add(-3 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
-			Id:            "agent-3",
-			Title:         ptr("Refactor auth into nested packages"),
-			AgentType:     "claude",
-			BaseBranch:    "main",
-			BranchName:    ptr("hydra/feat-3"),
-			SessionPid:    1003,
-			SessionStatus: "running",
-			CreatedAt:     &createdAt,
-			Prompt:        "Refactor the auth providers into a deeply nested package layout so the diff tree shows VS Code-style compacted folders.",
-			Tests:         simTestSummary("agent-3"),
+			Id:               "agent-3",
+			Title:            ptr("Refactor auth into nested packages"),
+			AgentType:        "claude",
+			BaseBranch:       "main",
+			BranchName:       ptr("hydra/feat-3"),
+			SessionPid:       1003,
+			SessionStatus:    "running",
+			CreatedAt:        &createdAt,
+			Prompt:           "Refactor the auth providers into a deeply nested package layout so the diff tree shows VS Code-style compacted folders.",
+			Tests:            simTestSummary("agent-3"),
+			DownstreamBranch: ptr("contrib/auth-packages"),
+			Review:           simAdoptedReviewLink(),
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    api.Running,
 				Timestamp: simNow().Format(time.RFC3339),
@@ -931,6 +937,20 @@ func (s *SimulationServer) MergeAgent(w http.ResponseWriter, r *http.Request, pr
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// simAdoptedReviewLink builds a fixture ReviewLink for a head spawned ONTO an
+// existing PR Hydra did not create (docs/pr-adoption.md). Maintainer edits are
+// on, so it can be pushed to by hand - but never automatically, which is what
+// the "Pushes to this PR are manual" note in the MR menu documents.
+func simAdoptedReviewLink() *api.ReviewLink {
+	link := simReviewLink("open", forge.CIRunning, 0, 1, 2, 0)
+	link.Provider = forge.ProviderGitHub
+	link.Url = "https://github.com/team/repo/pull/128"
+	link.Id = "128"
+	link.Adopted = ptr(true)
+	link.CanPush = ptr(true)
+	return link
+}
+
 // simReviewLink builds a fixture ReviewLink for the simulation server.
 func simReviewLink(state, ci string, approvals, unresolved, ahead, behind int) *api.ReviewLink {
 	return &api.ReviewLink{
@@ -961,12 +981,22 @@ func (s *SimulationServer) PublishAgent(w http.ResponseWriter, r *http.Request, 
 func (s *SimulationServer) PushToMr(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	resp := simAgentByID(id)
 	resp.Review = simReviewLink("open", forge.CIRunning, 1, 2, 0, 0)
+	// A push does not un-adopt a head: keep agent-3 on its adopted PR so the menu
+	// it repaints still shows the adopted affordances.
+	if id == "agent-3" {
+		resp.Review = simAdoptedReviewLink()
+		resp.Review.Ahead = ptr(0)
+	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *SimulationServer) PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	resp := simAgentByID(id)
 	resp.Review = simReviewLink("open", forge.CISuccess, 1, 0, 0, 0)
+	if id == "agent-3" {
+		resp.Review = simAdoptedReviewLink()
+		resp.Review.Behind = ptr(0)
+	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 

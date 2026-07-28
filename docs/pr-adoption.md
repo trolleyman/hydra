@@ -260,8 +260,14 @@ opening the cog.
   is safe for a branch we own; on someone else's PR it must be opt-in and loud. Plain
   FF push only by default.
 - **`publish_when_green` must default off** for adopted heads. `autoPublish`
-  (`review_watcher.go:244`) currently auto-pushes any linked armed head - auto-pushing
-  into someone else's PR is rude, and the arming UI should refuse it or warn.
+  (`review_watcher.go`) would otherwise auto-push any linked armed head, and auto-pushing
+  into someone else's PR is rude. Enforced in three places: `SpawnHead` skips the
+  `[review] publish_when_green` arm when `opts.Adopt != nil`, `ArmPublishWhenGreen`
+  rejects an adopted head with a 400, and `autoPublish` disarms one defensively. The UI
+  matches - the MR menu shows a disabled "Pushes to this PR are manual" note in place of
+  the arm toggle (`AgentDetail.tsx`), because a button whose only outcome is that 400 is
+  worse than no button. Disarming stays offered whatever the head is, so a stale arm can
+  always be cleared.
 - **`publishHead` must never run for an adopted head** - `EnsureMR` on a PR we did not
   create is at best a no-op and at worst opens a duplicate. Guard on `ReviewAdopted`.
 - **Creation-time `[review]` settings must not leak onto an adopted MR**: `squash`,

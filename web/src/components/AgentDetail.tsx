@@ -1756,8 +1756,9 @@ export function AgentDetail({
   // An adopted PR the author has not opened to maintainer edits is read-only: the
   // backend rejects a push, so the push affordances are replaced with a disabled
   // note (docs/pr-adoption.md).
-  const readOnlyPR = agent.review?.adopted === true && agent.review?.can_push === false
-  const mrNoun = agent.review?.adopted ? 'PR' : 'MR'
+  const adoptedPR = agent.review?.adopted === true
+  const readOnlyPR = adoptedPR && agent.review?.can_push === false
+  const mrNoun = adoptedPR ? 'PR' : 'MR'
   const canPushToMR = linked && !readOnlyPR
   const leadWithPush = canPushToMR && ahead > 0
   const viewMRItem = {
@@ -1799,6 +1800,26 @@ export function AgentDetail({
         tone: 'emerald' as const,
         disabled: busy || publishing,
       }
+  // Hydra never auto-pushes into a PR it did not create, and the backend rejects
+  // the arm outright (docs/pr-adoption.md), so offering the toggle on an adopted
+  // PR is a button whose only outcome is an error toast. Say why in its place.
+  const manualPushOnlyItem = {
+    label: 'Pushes to this PR are manual',
+    description: "Auto-push is off for a PR you adopted: sending commits to someone else's PR stays a deliberate action.",
+    icon: <Clock className="w-4 h-4" />,
+    onClick: () => {},
+    tone: 'neutral' as const,
+    disabled: true,
+  }
+  // Disarming stays available whatever the head is, so an arm that predates a link
+  // (or a stale one) can always be cleared; only the arm itself is gated.
+  const publishWhenGreenItems = agent.publish_when_green
+    ? [syncWhenGreenItem]
+    : readOnlyPR
+      ? [] // the read-only note above already says no commits can be pushed at all
+      : adoptedPR
+        ? [manualPushOnlyItem]
+        : [syncWhenGreenItem]
   const respondItem = {
     label: 'Respond to review comments',
     description: 'Ask the agent to fetch and address the unresolved review comments.',
@@ -1825,7 +1846,7 @@ export function AgentDetail({
                 ? []
                 : [{ label: `Push to ${mrNoun}`, description: 'Push the local head branch again (idempotent).', icon: <Upload className="w-4 h-4" />, onClick: () => void handlePushToMR(), tone: 'emerald' as const, disabled: busy || publishing }]),
             ...(behind > 0 ? [pullItem] : []),
-            ...(readOnlyPR ? [] : [syncWhenGreenItem]),
+            ...publishWhenGreenItems,
             ...((agent.review?.state?.unresolved_discussions ?? 0) > 0 ? [respondItem] : []),
           ] as AgentTopBarMenuItem[],
         }
