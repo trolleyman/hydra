@@ -41,64 +41,60 @@ export function AgentNameLink({
   // one hue the tile vocabulary doesn't spend on an agent lifecycle event
   // (green/emerald merge, red kill+error, amber warn, blue restart), so the
   // marker can own it without ever colliding with the tile it sits next to.
-  const iconCls = `${title ? 'w-3.5 h-3.5' : 'w-3 h-3'} shrink-0 text-violet-500 dark:text-violet-400`
-  // A title can wrap to two lines, and `items-center` would then centre the Bot
-  // between BOTH of them - it floated down into the gap and stopped reading as a
-  // marker on the name. So the title row aligns to the start and the Bot gets a
-  // box exactly one cap-height tall to centre inside.
   //
-  // `1cap` is the font's own cap height, which is the same quantity
-  // `.optical-center` trims the label down to - so the label's box top IS the
-  // cap top, and centring the glyph in a cap-tall box puts it on the first
-  // line's optical centre, identical to what items-center produced when the
-  // title fit on one line. A hard-coded `mt-px` would land in the same place at
-  // this one size in whichever font happened to load, which is exactly what
-  // CLAUDE.md says not to do.
-  const iconWrapCls = title ? 'flex h-[1cap] shrink-0 items-center' : 'contents'
+  // The Bot is INLINE in the text, not a sibling flex item. As a flex item it sat
+  // in its own column, so every line of a wrapped title was indented past it and
+  // the second line left a block of dead space under the glyph. In the text flow
+  // the title wraps back to the left edge and only the first line makes room.
+  //
+  // Sized in `em` and aligned in `cap` so both come from the font rather than a
+  // measurement of one: the glyph is exactly as tall as the text's em box, and
+  // `calc(0.5cap - 0.5em)` lowers it so its CENTRE lands on the cap-box centre
+  // (icon centre wanted at 0.5cap above the baseline; vertical-align raises the
+  // box's bottom, which is 0.5em below its centre). That is the same quantity
+  // `.optical-center` trims the label to, so the two agree by construction - and
+  // it is why this is not a `-mt-px` nudge, which CLAUDE.md rules out.
+  const iconCls = `${title ? 'mr-1.5' : 'mr-1'} inline-block h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)] text-violet-500 dark:text-violet-400`
   // Sans, both sizes. The serif that means "an agent is speaking" in chat prose
   // was tried here on the agent title and dropped: at 15px semibold in a card
   // this size Merriweather reads heavy and sits oddly against the sans it is
   // surrounded by - the status pill, the subtitle, the branch pills and the
   // action buttons are all sans, so the title was the only serif thing on the
   // card and read as a mistake rather than a signal.
-  const rowCls = `flex max-w-full ${title ? 'items-start gap-1.5' : 'items-center gap-1'} ${
+  //
+  // A title wraps to a second line rather than clipping: it is the headline of
+  // the card, agent titles are arbitrary-length human phrases, and at a fixed
+  // card width most of them would otherwise end in an ellipsis. The subtitle
+  // stays single-line - there the name is attribution, and a two-line one would
+  // out-weigh the title above it.
+  //
+  // `.optical-center` trims the box to the cap-to-baseline ink, which is what
+  // aligns this block against the toast's icon tile (see Toaster) and what the
+  // status line below compensates a margin for (see AgentTransitionRow). It also
+  // pads the box and takes the same back out as negative margin, so the clipped
+  // variants keep room for a descender - and for the Bot, which hangs slightly
+  // below the baseline.
+  const blockCls = `optical-center max-w-full ${title ? 'line-clamp-2' : 'truncate'} ${
     title
       ? 'text-sm font-semibold text-gray-900 dark:text-gray-100'
       : 'text-[11px] text-gray-500 dark:text-gray-400'
   }`
-  // hover:underline on the row, not the name span: the row is a flex box whose
-  // only text child is the name, so the rule lands on the name and skips the
-  // glyph (an <svg> takes no text-decoration).
-  const hoverCls = `transition-colors cursor-pointer hover:underline ${
+  const hoverCls = `transition-colors cursor-pointer ${
     title ? 'hover:text-blue-600 dark:hover:text-blue-400' : 'hover:text-gray-800 dark:hover:text-gray-200'
   }`
 
+  // The underline is on the NAME, not the whole link: a text-decoration on the
+  // link would be drawn across the Bot's inline-block box too, striking through
+  // the glyph.
   const body = (
     <>
-      <span className={iconWrapCls}><Bot className={iconCls} /></span>
-      {/* A title wraps to a second line rather than clipping: it is the headline
-          of the card, agent titles are arbitrary-length human phrases, and at a
-          fixed card width most of them would otherwise end in an ellipsis. The
-          subtitle stays single-line - there the name is attribution, and a
-          two-line one would out-weigh the title above it.
-          `.optical-center` (index.css) is what stops the title reading high
-          against the Bot: items-center centres the label's LINE BOX, which
-          reserves descender room these titles mostly don't use, so the ink sat
-          1.00px above the glyph's centre. The class takes that to 0.03px -
-          measured with a zero-height inline-block probe on the baseline, not
-          eyeballed. Safe against the clipping: the class pads the box and takes
-          the same back out as negative margin, so a `g`/`y` still has room
-          inside the overflow:hidden.
-          It also shrinks the row, which is why the status line below carries a
-          compensating margin (see AgentTransitionRow). The subtitle span is
-          inline (`truncate`, not `line-clamp`), where the trim has nothing to
-          act on - it is left on for consistency, and costs nothing there. */}
-      <span className={`optical-center ${title ? 'line-clamp-2' : 'truncate'}`}>{agentName}</span>
+      <Bot className={iconCls} />
+      <span className="group-hover:underline">{agentName}</span>
     </>
   )
 
   if (!agentId || !projectId) {
-    return <span className={rowCls}>{body}</span>
+    return <span className={blockCls}>{body}</span>
   }
 
   const openAgent = () => {
@@ -117,7 +113,7 @@ export function AgentNameLink({
         to="/project/$projectId/agent/$agentId"
         params={{ projectId, agentId }}
         onClick={openAgent}
-        className={`${rowCls} ${hoverCls}`}
+        className={`group ${blockCls} ${hoverCls}`}
       >
         {body}
       </Link>
