@@ -127,9 +127,10 @@ type PolicyConfig struct {
 	// GateEnabled toggles the decision-capable gate hook. nil = default (enabled).
 	GateEnabled *bool `toml:"gate_enabled"`
 	// GitIsolation bounds how much of the repo's shared .git the head may write:
-	// "off" (default) writable; "readonly" locks the whole common dir read-only so
-	// commits are host-mediated (anti-rogue). See docs/git-isolation.md. nil =
-	// default (off). A last-writer-wins scalar, not a union list.
+	// "readonly" (default) locks the whole common dir read-only so commits are
+	// host-mediated (anti-rogue); "off" leaves it writable. See
+	// docs/git-isolation.md. nil = default (readonly). A last-writer-wins scalar,
+	// not a union list.
 	GitIsolation *string `toml:"git_isolation"`
 	// MCPAllowed lists the MCP server names the agent may use. Any server not
 	// listed (and not referenced by MCPToolsAllowed) is stripped from the seeded
@@ -173,15 +174,18 @@ func (p PolicyConfig) IsGateEnabled() bool {
 }
 
 // ResolveGitIsolation returns the normalized git-isolation mode, defaulting to
-// "off" when unset or unrecognized (fail-open to today's behaviour so a typo
-// never silently locks a head out of committing).
+// "readonly" when unset or unrecognized: a locked .git is the protective posture,
+// so an absent or mistyped value falls back to it rather than silently handing a
+// head write access to the shared object store. Heads whose agent lacks the hydra
+// git tools are downgraded to off later (heads.resolveGitIsolation), so this
+// default never leaves an agent unable to commit.
 func (p PolicyConfig) ResolveGitIsolation() sandbox.GitIsolationMode {
 	if p.GitIsolation == nil {
-		return sandbox.GitIsolationOff
+		return sandbox.GitIsolationReadonly
 	}
 	m := sandbox.NormalizeGitIsolation(*p.GitIsolation)
 	if !sandbox.ValidGitIsolation(string(m)) || m == "" {
-		return sandbox.GitIsolationOff
+		return sandbox.GitIsolationReadonly
 	}
 	return m
 }
@@ -2077,8 +2081,8 @@ func defaultsSpec() []specEntry {
 		},
 		{
 			table: "policy", key: "git_isolation",
-			doc: `how much of the repo's shared .git the head may write: "off" (default) writable; "readonly" locks the whole .git read-only so commits go through the mcp__hydra__git_commit tool (anti-rogue). See docs/git-isolation.md.`,
-			def: func() string { return `"off"` },
+			doc: `how much of the repo's shared .git the head may write: "readonly" (default) locks the whole .git read-only so commits go through the mcp__hydra__git_commit tool (anti-rogue); "off" leaves it writable. See docs/git-isolation.md.`,
+			def: func() string { return `"readonly"` },
 			get: func(a AgentConfig) (string, bool) {
 				if a.Policy != nil && a.Policy.GitIsolation != nil {
 					return strconv.Quote(*a.Policy.GitIsolation), true
