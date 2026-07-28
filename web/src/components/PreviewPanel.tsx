@@ -37,6 +37,17 @@ function previewFailed(name: string, reason: string) {
   useToastStore.getState().show({ message: `Couldn't start preview "${name}": ${reason}`, type: 'error' })
 }
 
+// The 11px chips in this panel carry an explicit `leading-4`. Without it they
+// inherit Tailwind's 1.5 default, and 11px * 1.5 = 16.5px - a HALF pixel, which
+// is the tallest thing in both the section bar and a card header, so both end up
+// on a fractional height (a 34.5px card). Whether that lands on 34 or 35 device
+// pixels then depends on the subpixel offset it happens to be painted at, so the
+// row visibly changed height by 1px when a preview went from starting (the bar
+// grows its "Starting" chip, shifting everything below by half a pixel) to
+// running. 16px keeps every box in the panel a whole number of pixels, and
+// matches the artifact cards, which already land on 34.
+const CHIP_LEADING = 'leading-4'
+
 // stateChip renders the colored dot + label for an instance state.
 function StateChip({ state }: { state: PreviewStatus['state'] }) {
   const skin = {
@@ -46,7 +57,7 @@ function StateChip({ state }: { state: PreviewStatus['state'] }) {
     error: { dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400', label: 'failed' },
   }[state]
   return (
-    <span className={`flex items-center gap-1.5 text-[11px] ${skin.text}`}>
+    <span className={`flex items-center gap-1.5 text-[11px] ${CHIP_LEADING} ${skin.text}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${skin.dot}`} />
       {skin.label}
     </span>
@@ -220,7 +231,7 @@ function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, ref
           <p>The card body shows the captured build log; a running preview keeps its port, so bookmarks within one session stay valid.</p>
         </InfoTooltip>
         {startingCount > 0 && (
-          <span className="flex items-center gap-1.5 text-[11px] font-normal text-gray-400 dark:text-gray-500">
+          <span className={`flex items-center gap-1.5 text-[11px] ${CHIP_LEADING} font-normal text-gray-400 dark:text-gray-500`}>
             <LoaderCircle className="w-3 h-3 animate-spin" />
             Starting
           </span>
@@ -268,21 +279,21 @@ function PreviewCard({ preview: p, onOpen, onStart, onStop, onRestart }: {
       icon={<MonitorPlay className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />}
       name={p.name}
       status={
-        <span className="flex items-center gap-2 min-w-0">
+        <span className={`flex items-center gap-2 min-w-0 text-[11px] ${CHIP_LEADING}`}>
           <StateChip state={p.state} />
-          <span className="text-[11px] text-gray-400 dark:text-gray-500">{p.version}</span>
+          <span className="text-gray-400 dark:text-gray-500">{p.version}</span>
           {p.state === 'starting' && p.progress && (
-            <span className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{p.progress}</span>
+            <span className="text-gray-400 dark:text-gray-500 truncate">{p.progress}</span>
           )}
           {p.state === 'running' && (p.connections ?? 0) > 0 && (
-            <span className="text-[11px] text-gray-400 dark:text-gray-500">{p.connections} conn</span>
+            <span className="text-gray-400 dark:text-gray-500">{p.connections} conn</span>
           )}
           {p.state === 'error' && p.message && (
-            <span className="text-[11px] text-red-500 dark:text-red-400 truncate max-w-64" title={p.message}>{p.message}</span>
+            <span className="text-red-500 dark:text-red-400 truncate max-w-64" title={p.message}>{p.message}</span>
           )}
           {p.state === 'running' && p.stale && (
             <Tooltip content="The code changed since this server was built. Restart to rebuild.">
-              <span className="text-[11px] text-amber-600 dark:text-amber-500">code changed - restart</span>
+              <span className="text-amber-600 dark:text-amber-500">code changed - restart</span>
             </Tooltip>
           )}
         </span>
