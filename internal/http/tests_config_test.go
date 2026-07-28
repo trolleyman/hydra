@@ -50,11 +50,11 @@ command = "test added"
 	left := runnersByName(s.testRunnersFor(root, hydratests.Version{Ref: baseRef}, live))
 	right := runnersByName(s.testRunnersFor(root, hydratests.Version{Ref: "HEAD"}, live))
 
-	if left["unit"].Command != "go test ./v1" {
-		t.Errorf("left unit command = %q", left["unit"].Command)
+	if left["unit"].Script != "go test ./v1" {
+		t.Errorf("left unit command = %q", left["unit"].Script)
 	}
-	if right["unit"].Command != "go test ./v2" {
-		t.Errorf("right unit command = %q", right["unit"].Command)
+	if right["unit"].Script != "go test ./v2" {
+		t.Errorf("right unit command = %q", right["unit"].Script)
 	}
 	if _, ok := left["gone"]; !ok {
 		t.Error("expected 'gone' on the base side")
@@ -95,7 +95,7 @@ unsafe_host = true
 
 	// Trust anchor: the root config authorizes only "audited"/"trusted cmd".
 	trusted := config.Config{Tests: []config.TestScript{
-		{Name: "audited", Command: "trusted cmd", UnsafeHost: true},
+		{Name: "audited", Script: "trusted cmd", UnsafeHost: true},
 	}}
 
 	left := runnersByName(s.testRunnersFor(root, hydratests.Version{Ref: baseRef}, trusted))
@@ -139,13 +139,13 @@ enabled = false
 
 	// Root vetoes "vetoed" by naming it enabled = false.
 	live := config.Config{Tests: []config.TestScript{
-		{Name: "vetoed", Command: "whatever", Enabled: ptr(false)},
+		{Name: "vetoed", Script: "whatever", Enabled: ptr(false)},
 	}}
 
 	got := runnersByName(s.testRunnersFor(root, hydratests.Version{Ref: "HEAD"}, live))
 
-	if got["unit"].Command != "first wins" {
-		t.Errorf("duplicate name: got %q, want first definition", got["unit"].Command)
+	if got["unit"].Script != "first wins" {
+		t.Errorf("duplicate name: got %q, want first definition", got["unit"].Script)
 	}
 	if _, ok := got["vetoed"]; ok {
 		t.Error("root disabled 'vetoed' by name - it must be dropped")
@@ -179,8 +179,8 @@ unsafe_host = true
 	if !ok {
 		t.Fatal("expected 'wt' from the worktree config")
 	}
-	if spec.Command != "go test ./wt" {
-		t.Errorf("command = %q", spec.Command)
+	if spec.Script != "go test ./wt" {
+		t.Errorf("command = %q", spec.Script)
 	}
 	if spec.UnsafeHost {
 		t.Error("unverified worktree unsafe_host must be stripped")

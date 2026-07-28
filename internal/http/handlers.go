@@ -1018,7 +1018,7 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 
 // toAPIArtifactScript converts an internal ArtifactScript to the API representation.
 func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
-	out := api.ArtifactScript{Name: a.Name, Command: a.Command}
+	out := api.ArtifactScript{Name: a.Name, Script: a.Script}
 	if a.TimeoutSec != 0 {
 		out.TimeoutSec = &a.TimeoutSec
 	}
@@ -1035,7 +1035,7 @@ func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
 
 // toAPIPreviewScript converts an internal PreviewScript to the API representation.
 func toAPIPreviewScript(p config.PreviewScript) api.PreviewScript {
-	out := api.PreviewScript{Name: p.Name, Command: p.Command}
+	out := api.PreviewScript{Name: p.Name, Script: p.Script}
 	if p.UnsafeHost {
 		out.UnsafeHost = &p.UnsafeHost
 	}
@@ -1052,7 +1052,7 @@ func toAPIPreviewScript(p config.PreviewScript) api.PreviewScript {
 
 // fromAPIPreviewScript converts an API PreviewScript to the internal representation.
 func fromAPIPreviewScript(p api.PreviewScript) config.PreviewScript {
-	out := config.PreviewScript{Name: p.Name, Command: p.Command}
+	out := config.PreviewScript{Name: p.Name, Script: p.Script}
 	if p.UnsafeHost != nil {
 		out.UnsafeHost = *p.UnsafeHost
 	}
@@ -1069,7 +1069,7 @@ func fromAPIPreviewScript(p api.PreviewScript) config.PreviewScript {
 
 // fromAPIArtifactScript converts an API ArtifactScript to the internal representation.
 func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
-	out := config.ArtifactScript{Name: a.Name, Command: a.Command}
+	out := config.ArtifactScript{Name: a.Name, Script: a.Script}
 	if a.TimeoutSec != nil {
 		out.TimeoutSec = *a.TimeoutSec
 	}
@@ -1087,7 +1087,7 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 // toAPITestScript converts an internal TestScript to the API representation. The
 // fields mirror ArtifactScript, so this mirrors toAPIArtifactScript.
 func toAPITestScript(t config.TestScript) api.TestScript {
-	out := api.TestScript{Name: t.Name, Command: t.Command}
+	out := api.TestScript{Name: t.Name, Script: t.Script}
 	if t.TimeoutSec != 0 {
 		out.TimeoutSec = &t.TimeoutSec
 	}
@@ -1107,7 +1107,7 @@ func toAPITestScript(t config.TestScript) api.TestScript {
 
 // fromAPITestScript converts an API TestScript to the internal representation.
 func fromAPITestScript(t api.TestScript) config.TestScript {
-	out := config.TestScript{Name: t.Name, Command: t.Command}
+	out := config.TestScript{Name: t.Name, Script: t.Script}
 	if t.TimeoutSec != nil {
 		out.TimeoutSec = *t.TimeoutSec
 	}
@@ -1127,7 +1127,7 @@ func fromAPITestScript(t api.TestScript) config.TestScript {
 
 // toAPIServiceScript converts an internal ServiceScript to the API representation.
 func toAPIServiceScript(svc config.ServiceScript) api.ServiceScript {
-	out := api.ServiceScript{Name: svc.Name, Command: svc.Command}
+	out := api.ServiceScript{Name: svc.Name, Script: svc.Script}
 	if svc.Host {
 		out.Host = &svc.Host
 	}
@@ -1139,7 +1139,7 @@ func toAPIServiceScript(svc config.ServiceScript) api.ServiceScript {
 
 // fromAPIServiceScript converts an API ServiceScript to the internal representation.
 func fromAPIServiceScript(svc api.ServiceScript) config.ServiceScript {
-	out := config.ServiceScript{Name: svc.Name, Command: svc.Command}
+	out := config.ServiceScript{Name: svc.Name, Script: svc.Script}
 	if svc.Host != nil {
 		out.Host = *svc.Host
 	}

@@ -17,7 +17,7 @@ func TestBuildCommandSpecUsesSandboxTempDirectory(t *testing.T) {
 	t.Setenv("TMP", "/host/read-only/tmp")
 	t.Setenv("TEMP", "/host/read-only/tmp")
 	m := NewManager(root)
-	launch, err := m.buildCommandSpec(config.TestScript{Name: "env", Command: "true", UnsafeHost: true}, root, output, "HEAD")
+	launch, err := m.buildCommandSpec(config.TestScript{Name: "env", Script: "true", UnsafeHost: true}, root, output, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestGeneratePassingFromJUnit(t *testing.T) {
 	spec := config.TestScript{
 		Name:       "go",
 		UnsafeHost: true,
-		Command: `cat > "$HYDRA_TEST_OUTPUT/r.xml" <<'EOF'
+		Script: `cat > "$HYDRA_TEST_OUTPUT/r.xml" <<'EOF'
 <testsuite name="s"><testcase name="ok" time="0.1"/></testsuite>
 EOF`,
 	}
@@ -126,7 +126,7 @@ func TestGenerateFailingFromJUnit(t *testing.T) {
 		UnsafeHost: true,
 		// The runner writes a failing report AND exits non-zero - the report must
 		// win (failing verdict, not errored).
-		Command: `cat > "$HYDRA_TEST_OUTPUT/r.xml" <<'EOF'
+		Script: `cat > "$HYDRA_TEST_OUTPUT/r.xml" <<'EOF'
 <testsuite name="s"><testcase name="bad"><failure message="nope">trace</failure></testcase></testsuite>
 EOF
 exit 1`,
@@ -142,11 +142,11 @@ exit 1`,
 
 func TestGenerateDegenerateExitCode(t *testing.T) {
 	// No report written; exit code alone drives the verdict.
-	pass := runWorktree(t, config.TestScript{Name: "t", UnsafeHost: true, Command: "true"}, t.TempDir())
+	pass := runWorktree(t, config.TestScript{Name: "t", UnsafeHost: true, Script: "true"}, t.TempDir())
 	if pass.Status != StatusPassing || pass.Format != "exit" {
 		t.Errorf("clean exit: status=%q format=%q", pass.Status, pass.Format)
 	}
-	fail := runWorktree(t, config.TestScript{Name: "t", UnsafeHost: true, Command: "echo boom >&2; exit 2"}, t.TempDir())
+	fail := runWorktree(t, config.TestScript{Name: "t", UnsafeHost: true, Script: "echo boom >&2; exit 2"}, t.TempDir())
 	if fail.Status != StatusFailing || fail.Failed != 1 {
 		t.Errorf("nonzero exit: status=%q failed=%d", fail.Status, fail.Failed)
 	}
@@ -155,7 +155,7 @@ func TestGenerateDegenerateExitCode(t *testing.T) {
 func TestGenerateErroredOnExecFailure(t *testing.T) {
 	// A command that can't start (bogus interpreter path via NoSandbox argv is
 	// hard to force; instead use a timeout to exercise the errored path).
-	spec := config.TestScript{Name: "t", UnsafeHost: true, TimeoutSec: 1, Command: "sleep 5"}
+	spec := config.TestScript{Name: "t", UnsafeHost: true, TimeoutSec: 1, Script: "sleep 5"}
 	rep := runWorktree(t, spec, t.TempDir())
 	if rep.Status != StatusErrored {
 		t.Fatalf("status = %q, want errored (%+v)", rep.Status, rep)
@@ -166,7 +166,7 @@ func TestInvalidateAndCache(t *testing.T) {
 	work := t.TempDir()
 	initGitRepo(t, work)
 	m := NewManager(t.TempDir())
-	spec := config.TestScript{Name: "t", UnsafeHost: true, Command: "true"}
+	spec := config.TestScript{Name: "t", UnsafeHost: true, Script: "true"}
 	v := Version{WorktreeDir: work}
 
 	events, unsub := m.Subscribe()

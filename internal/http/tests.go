@@ -80,7 +80,7 @@ func (s *Server) testRunnersFor(projectRoot string, v hydratests.Version, liveCf
 	seen := make(map[string]bool, len(specs))
 	out := make([]config.TestScript, 0, len(specs))
 	for _, t := range specs {
-		if t.Name == "" || t.Command == "" || !t.IsEnabled() {
+		if t.Name == "" || t.Script == "" || !t.IsEnabled() {
 			continue
 		}
 		if seen[t.Name] || disabled[t.Name] {
@@ -89,7 +89,7 @@ func (s *Server) testRunnersFor(projectRoot string, v hydratests.Version, liveCf
 		seen[t.Name] = true
 		// TestScript.Type is the report format (junit/stdout), not a behavior
 		// change to what executes on the host, so it is not part of the trust key.
-		if t.UnsafeHost && !trustedHost[hostKey(t.Name, t.Command, "")] {
+		if t.UnsafeHost && !trustedHost[hostKey(t.Name, t.Script, "")] {
 			// A branch can't grant itself host access; force it into the sandbox.
 			t.UnsafeHost = false
 		}
@@ -115,8 +115,8 @@ func disabledTests(cfg config.Config) map[string]bool {
 func trustedHostTestCommands(cfg config.Config) map[string]bool {
 	trusted := map[string]bool{}
 	for _, t := range cfg.Tests {
-		if t.UnsafeHost && t.Name != "" && t.Command != "" {
-			trusted[hostKey(t.Name, t.Command, "")] = true
+		if t.UnsafeHost && t.Name != "" && t.Script != "" {
+			trusted[hostKey(t.Name, t.Script, "")] = true
 		}
 	}
 	return trusted

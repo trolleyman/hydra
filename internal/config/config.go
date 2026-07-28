@@ -282,8 +282,17 @@ type SandboxConfig struct {
 type ServiceScript struct {
 	// Name uniquely identifies the service; used as the UI label and in logs.
 	Name string `toml:"name"`
-	// Command is the shell command run (via `bash -c`) from the project root.
-	Command string `toml:"command"`
+	// Script is the shell script run (via `bash -c`) from the project root.
+	Script string `toml:"script"`
+	// LegacyCommand is the old `command` spelling of Script, and is always "" past
+	// decodeConfig - upgradeCommandKeys folds it in. It is still decoded so an
+	// older config, or an older git ref's config (read as-is when a diff or
+	// preview is generated), keeps working; the renderer only ever writes
+	// `script`, so a save migrates the file. An entry setting BOTH keys is a
+	// mistake, and `script` wins. Deliberately NOT named Command: nothing outside
+	// the fold should read it, and a distinct name makes that a compile error
+	// rather than a silent empty string.
+	LegacyCommand string `toml:"command"`
 	// Host, when true, runs the command directly on the host with NO sandbox -
 	// full access to the machine, network and credentials. Required for services
 	// that need host devices the sandbox hides (e.g. /dev/kvm for emulators).
@@ -357,8 +366,17 @@ type AgentConfig struct {
 type ArtifactScript struct {
 	// Name uniquely identifies the script; used as the UI label and cache dir.
 	Name string `toml:"name"`
-	// Command is the shell command run (via `bash -c`) in the checkout directory.
-	Command string `toml:"command"`
+	// Script is the shell script run (via `bash -c`) in the checkout directory.
+	Script string `toml:"script"`
+	// LegacyCommand is the old `command` spelling of Script, and is always "" past
+	// decodeConfig - upgradeCommandKeys folds it in. It is still decoded so an
+	// older config, or an older git ref's config (read as-is when a diff or
+	// preview is generated), keeps working; the renderer only ever writes
+	// `script`, so a save migrates the file. An entry setting BOTH keys is a
+	// mistake, and `script` wins. Deliberately NOT named Command: nothing outside
+	// the fold should read it, and a distinct name makes that a compile error
+	// rather than a silent empty string.
+	LegacyCommand string `toml:"command"`
 	// TimeoutSec bounds how long the command may run (0 = default, see artifacts).
 	TimeoutSec int `toml:"timeout_sec"`
 	// UnsafeHost, when true, runs the command directly on the host with NO
@@ -461,9 +479,18 @@ func (a ArtifactScript) IsServer() bool { return a.Type == ArtifactTypeServer }
 type PreviewScript struct {
 	// Name uniquely identifies the preview; used as the UI label and instance key.
 	Name string `toml:"name"`
-	// Command is the shell command run (via `bash -c`) in the checkout directory.
+	// Script is the shell script run (via `bash -c`) in the checkout directory.
 	// It must start a server on $HYDRA_PREVIEW_ADDR and stay in the foreground.
-	Command string `toml:"command"`
+	Script string `toml:"script"`
+	// LegacyCommand is the old `command` spelling of Script, and is always "" past
+	// decodeConfig - upgradeCommandKeys folds it in. It is still decoded so an
+	// older config, or an older git ref's config (read as-is when a diff or
+	// preview is generated), keeps working; the renderer only ever writes
+	// `script`, so a save migrates the file. An entry setting BOTH keys is a
+	// mistake, and `script` wins. Deliberately NOT named Command: nothing outside
+	// the fold should read it, and a distinct name makes that a compile error
+	// rather than a silent empty string.
+	LegacyCommand string `toml:"command"`
 	// UnsafeHost, when true, runs the command directly on the host with NO
 	// sandbox - full access to the user's credentials, network, and machine.
 	// Default false. The same loud caveat as ArtifactScript.UnsafeHost applies,
@@ -506,13 +533,47 @@ func (p PreviewScript) IsStrict() bool { return p.Strict == nil || *p.Strict }
 func previewFromArtifact(a ArtifactScript) PreviewScript {
 	return PreviewScript{
 		Name:            a.Name,
-		Command:         a.Command,
+		Script:          a.Script,
 		UnsafeHost:      a.UnsafeHost,
 		Enabled:         a.Enabled,
 		Strict:          a.Strict,
 		IdleTimeoutSec:  a.IdleTimeoutSec,
 		ReadyTimeoutSec: a.ReadyTimeoutSec,
 	}
+}
+
+// upgradeCommandKeys folds the legacy `command` key into `script` across all
+// four script sections, in place, at the end of decodeConfig - so every consumer
+// reads one field and a config predating the rename (including one at an older
+// git ref, read as-is when a diff or preview is generated) keeps working. The
+// legacy field is cleared afterwards, and the renderer only writes `script`, so
+// a save migrates the file.
+//
+// `script` wins when an entry sets both. That combination is a mistake either
+// way; preferring the current spelling makes the mistake behave the way someone
+// mid-rename would expect, and keeps the fold idempotent.
+func upgradeCommandKeys(cfg *Config) {
+	for i := range cfg.Artifacts {
+		foldCommand(&cfg.Artifacts[i].Script, &cfg.Artifacts[i].LegacyCommand)
+	}
+	for i := range cfg.Previews {
+		foldCommand(&cfg.Previews[i].Script, &cfg.Previews[i].LegacyCommand)
+	}
+	for i := range cfg.Services {
+		foldCommand(&cfg.Services[i].Script, &cfg.Services[i].LegacyCommand)
+	}
+	for i := range cfg.Tests {
+		foldCommand(&cfg.Tests[i].Script, &cfg.Tests[i].LegacyCommand)
+	}
+}
+
+// foldCommand moves a legacy `command` value into `script` unless `script` is
+// already set, then clears it either way.
+func foldCommand(script, legacyCommand *string) {
+	if *script == "" {
+		*script = *legacyCommand
+	}
+	*legacyCommand = ""
 }
 
 // upgradeServerArtifacts migrates the pre-[previews.<name>] spelling in place:
@@ -577,10 +638,19 @@ func upgradeServerArtifacts(cfg *Config) {
 type TestScript struct {
 	// Name uniquely identifies the runner; used as the UI label and cache dir.
 	Name string `toml:"name"`
-	// Command is the shell command run (via `bash -c`) in the checkout directory.
+	// Script is the shell script run (via `bash -c`) in the checkout directory.
 	// It should write a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT; if
 	// it writes none, the exit code alone becomes a degenerate red/green verdict.
-	Command string `toml:"command"`
+	Script string `toml:"script"`
+	// LegacyCommand is the old `command` spelling of Script, and is always "" past
+	// decodeConfig - upgradeCommandKeys folds it in. It is still decoded so an
+	// older config, or an older git ref's config (read as-is when a diff or
+	// preview is generated), keeps working; the renderer only ever writes
+	// `script`, so a save migrates the file. An entry setting BOTH keys is a
+	// mistake, and `script` wins. Deliberately NOT named Command: nothing outside
+	// the fold should read it, and a distinct name makes that a compile error
+	// rather than a silent empty string.
+	LegacyCommand string `toml:"command"`
 	// TimeoutSec bounds how long the command may run (0 = default, see internal/tests).
 	TimeoutSec int `toml:"timeout_sec"`
 	// UnsafeHost, when true, runs the command directly on the host with NO sandbox.
@@ -1124,7 +1194,6 @@ func decodeConfig(data []byte) (Config, error) {
 	if err != nil {
 		return cfg, errtrace.Wrap(err)
 	}
-	upgradeServerArtifacts(&cfg)
 	cfg.Services, cfg.ServicesNamed, err = decodeScriptSection(md2, raw.Services, "services",
 		func(s *ServiceScript) *string { return &s.Name })
 	if err != nil {
@@ -1135,6 +1204,11 @@ func decodeConfig(data []byte) (Config, error) {
 	if err != nil {
 		return cfg, errtrace.Wrap(err)
 	}
+	// Both upgrades run once every script section is decoded, and in this order:
+	// the command->script fold first, so upgradeServerArtifacts only ever has to
+	// carry the current spelling across into a PreviewScript.
+	upgradeCommandKeys(&cfg)
+	upgradeServerArtifacts(&cfg)
 	cfg.Icon = raw.Icon
 	cfg.ResumePrompt = raw.ResumePrompt
 	cfg.ArtifactConcurrency = raw.ArtifactConcurrency
@@ -1599,8 +1673,8 @@ func mergeByName[T any](base, over []T, name func(T) string, patch func(T, T) T)
 // patch cannot reset a field back to its zero value; restate it in the layer
 // that owns the entry for that.
 func patchArtifactScript(b, o ArtifactScript) ArtifactScript {
-	if o.Command != "" {
-		b.Command = o.Command
+	if o.Script != "" {
+		b.Script = o.Script
 	}
 	if o.TimeoutSec > 0 {
 		b.TimeoutSec = o.TimeoutSec
@@ -1643,8 +1717,8 @@ func (c *Config) hasPreview(name string) bool {
 
 // patchPreviewScript is patchArtifactScript for [previews.<name>] entries.
 func patchPreviewScript(b, o PreviewScript) PreviewScript {
-	if o.Command != "" {
-		b.Command = o.Command
+	if o.Script != "" {
+		b.Script = o.Script
 	}
 	if o.UnsafeHost {
 		b.UnsafeHost = true
@@ -1666,8 +1740,8 @@ func patchPreviewScript(b, o PreviewScript) PreviewScript {
 
 // patchServiceScript is patchArtifactScript for [[services]] entries.
 func patchServiceScript(b, o ServiceScript) ServiceScript {
-	if o.Command != "" {
-		b.Command = o.Command
+	if o.Script != "" {
+		b.Script = o.Script
 	}
 	if o.Host {
 		b.Host = true
@@ -1686,8 +1760,8 @@ func patchServiceScript(b, o ServiceScript) ServiceScript {
 
 // patchTestScript is patchArtifactScript for [[tests]] entries.
 func patchTestScript(b, o TestScript) TestScript {
-	if o.Command != "" {
-		b.Command = o.Command
+	if o.Script != "" {
+		b.Script = o.Script
 	}
 	if o.TimeoutSec > 0 {
 		b.TimeoutSec = o.TimeoutSec
@@ -2416,11 +2490,11 @@ func managedKeySet() map[string]bool {
 // replaced (kept current) on each save.
 func artifactsDocLines() []string {
 	return []string{
-		docPrefix + " [artifacts.<name>]: per-project commands that render visual artifacts (e.g.",
+		docPrefix + " [artifacts.<name>]: per-project scripts that render visual artifacts (e.g.",
 		docPrefix + " screenshots) of a checkout. The diff viewer runs each against both sides of a",
 		docPrefix + " comparison and shows the outputs that differ. The <name> table key is the unique",
 		docPrefix + " label, also used as the cache directory. Fields:",
-		docPrefix + "   command      shell script run via `bash -c` in the checkout directory (required).",
+		docPrefix + "   script       shell script run via `bash -c` in the checkout directory (required).",
 		docPrefix + "                Write it as a multi-line ''' block - it is a script, not a one-liner:",
 		docPrefix + "                each step on its own line, comments where a step needs explaining.",
 		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
@@ -2473,7 +2547,7 @@ func artifactsDocLines() []string {
 func artifactsExampleLines() []string {
 	return []string{
 		"# [artifacts.screenshots]",
-		"# command = '''",
+		"# script = '''",
 		"# cd web",
 		"# npm install",
 		"# node scripts/take-screenshots.ts",
@@ -2530,7 +2604,7 @@ func artifactFieldLines(a ArtifactScript) []string {
 	// they only ever meant "this is really a preview", and decodeConfig has
 	// already moved such an entry into [previews.<name>]. Writing the artifacts
 	// section without them is what migrates a legacy file on its next save.
-	out = append(out, "command = "+tomlStringValue(a.Command))
+	out = append(out, "script = "+tomlStringValue(a.Script))
 	if a.TimeoutSec > 0 {
 		out = append(out, fmt.Sprintf("timeout_sec = %d", a.TimeoutSec))
 	}
@@ -2556,7 +2630,7 @@ func emitArtifactsAuthoritative(out *[]string, arts []ArtifactScript, meta map[s
 	rendered := 0
 	seen := map[string]bool{}
 	for _, a := range arts {
-		if a.Name == "" && a.Command == "" {
+		if a.Name == "" && a.Script == "" {
 			continue
 		}
 		if rendered > 0 {
@@ -2578,12 +2652,12 @@ func emitArtifactsAuthoritative(out *[]string, arts []ArtifactScript, meta map[s
 // replaced (kept current) on each save.
 func previewsDocLines() []string {
 	return []string{
-		docPrefix + " [previews.<name>]: per-project commands that boot a live, clickable preview of",
+		docPrefix + " [previews.<name>]: per-project scripts that boot a live, clickable preview of",
 		docPrefix + " the app at a checkout. Each appears in the Previews row on the agent page; Hydra",
 		docPrefix + " proxies a dedicated port to it, spawning the server when its link is first",
 		docPrefix + " opened, keeping it warm while requests flow, and tearing it down once idle (the",
 		docPrefix + " next visit respawns it). The <name> table key is the unique label. Fields:",
-		docPrefix + "   command      shell script run via `bash -c` in the checkout directory (required).",
+		docPrefix + "   script       shell script run via `bash -c` in the checkout directory (required).",
 		docPrefix + "                It must build/boot a server that listens on $HYDRA_PREVIEW_ADDR and",
 		docPrefix + "                stay in the foreground. Write it as a multi-line ''' block - it is a",
 		docPrefix + "                script, not a one-liner: each step on its own line.",
@@ -2617,7 +2691,7 @@ func previewsDocLines() []string {
 func previewsExampleLines() []string {
 	return []string{
 		"# [previews.app]",
-		"# command = '''",
+		"# script = '''",
 		"# npm install",
 		"# npm run build",
 		"# npm run serve -- --host \"$HYDRA_PREVIEW_ADDR\"",
@@ -2629,7 +2703,7 @@ func previewsExampleLines() []string {
 // previewFieldLines renders the field assignments of one preview (its name lives
 // in the [previews.<name>] header, not a field).
 func previewFieldLines(p PreviewScript) []string {
-	out := []string{"command = " + tomlStringValue(p.Command)}
+	out := []string{"script = " + tomlStringValue(p.Script)}
 	if p.IdleTimeoutSec > 0 {
 		out = append(out, fmt.Sprintf("idle_timeout_sec = %d", p.IdleTimeoutSec))
 	}
@@ -2658,7 +2732,7 @@ func emitPreviewsAuthoritative(out *[]string, prevs []PreviewScript, meta, artMe
 	rendered := 0
 	seen := map[string]bool{}
 	for _, p := range prevs {
-		if p.Name == "" && p.Command == "" {
+		if p.Name == "" && p.Script == "" {
 			continue
 		}
 		if rendered > 0 {
@@ -2683,12 +2757,12 @@ func emitPreviewsAuthoritative(out *[]string, prevs []PreviewScript, meta, artMe
 // replaced (kept current) on each save.
 func servicesDocLines() []string {
 	return []string{
-		docPrefix + " [services.<name>]: per-project long-running commands the daemon supervises while",
+		docPrefix + " [services.<name>]: per-project long-running scripts the daemon supervises while",
 		docPrefix + " the project is registered. Each is started on daemon boot (and when the project",
 		docPrefix + " is added), restarted with capped backoff if it exits unexpectedly, and",
 		docPrefix + " process-group-killed on daemon shutdown, project removal, or a config save.",
 		docPrefix + " The <name> table key is the unique label shown in the UI and logs. Fields:",
-		docPrefix + "   command       shell command run via `bash -c` from the project root (required).",
+		docPrefix + "   script        shell script run via `bash -c` from the project root (required).",
 		docPrefix + "   host          run on the host with NO sandbox - full machine/credential access;",
 		docPrefix + "                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).",
 		docPrefix + fmt.Sprintf("   max_restarts  relaunch cap after an unexpected exit (default %d; 0 = never).", DefaultServiceMaxRestarts),
@@ -2706,7 +2780,9 @@ func servicesDocLines() []string {
 func servicesExampleLines() []string {
 	return []string{
 		"# [services.emu-pool]",
-		`# command = "scripts/emu-pool.sh up 3 --foreground"`,
+		"# script = '''",
+		"# scripts/emu-pool.sh up 3 --foreground",
+		"# '''",
 		"# host = true",
 		"# max_restarts = 3",
 	}
@@ -2715,7 +2791,7 @@ func servicesExampleLines() []string {
 // serviceFieldLines renders the field assignments of one service.
 func serviceFieldLines(svc ServiceScript) []string {
 	out := []string{
-		"command = " + tomlStringValue(svc.Command),
+		"script = " + tomlStringValue(svc.Script),
 	}
 	if svc.Host {
 		out = append(out, "host = true")
@@ -2739,7 +2815,7 @@ func emitServicesAuthoritative(out *[]string, svcs []ServiceScript, meta map[str
 	rendered := 0
 	seen := map[string]bool{}
 	for _, svc := range svcs {
-		if svc.Name == "" && svc.Command == "" {
+		if svc.Name == "" && svc.Script == "" {
 			continue
 		}
 		if rendered > 0 {
@@ -2760,11 +2836,11 @@ func emitServicesAuthoritative(out *[]string, svcs []ServiceScript, meta map[str
 // [[tests]] section.
 func testsDocLines() []string {
 	return []string{
-		docPrefix + " [tests.<name>]: per-project test-runner commands. Hydra runs each against a",
+		docPrefix + " [tests.<name>]: per-project test-runner scripts. Hydra runs each against a",
 		docPrefix + " head's branch and parses the report into a pass/fail verdict that gates the",
 		docPrefix + " merge button (failing/errored soft-block merge; force always available). The",
 		docPrefix + " <name> table key is the unique label, also used as the cache directory. Fields:",
-		docPrefix + "   command      shell command run via `bash -c` in the checkout directory (required).",
+		docPrefix + "   script       shell script run via `bash -c` in the checkout directory (required).",
 		docPrefix + "   timeout_sec  max seconds the command may run (0 = built-in default).",
 		docPrefix + "   unsafe_host  run on the host with NO sandbox - runs the diffed ref's test code;",
 		docPrefix + "                only for trusted refs (default false).",
@@ -2820,7 +2896,9 @@ func testsDocLines() []string {
 func testsExampleLines() []string {
 	return []string{
 		"# [tests.go]",
-		`# command = "gotestsum --junitfile $HYDRA_TEST_OUTPUT/go.xml ./..."`,
+		"# script = '''",
+		`# gotestsum --junitfile $HYDRA_TEST_OUTPUT/go.xml ./...`,
+		"# '''",
 		"# timeout_sec = 600",
 	}
 }
@@ -2829,7 +2907,7 @@ func testsExampleLines() []string {
 // lives in the [tests.<name>] header, not a field).
 func testFieldLines(t TestScript) []string {
 	out := []string{
-		"command = " + tomlStringValue(t.Command),
+		"script = " + tomlStringValue(t.Script),
 	}
 	if t.TimeoutSec > 0 {
 		out = append(out, fmt.Sprintf("timeout_sec = %d", t.TimeoutSec))
@@ -2858,7 +2936,7 @@ func emitTestsAuthoritative(out *[]string, tests []TestScript, meta map[string]a
 	rendered := 0
 	seen := map[string]bool{}
 	for _, t := range tests {
-		if t.Name == "" && t.Command == "" {
+		if t.Name == "" && t.Script == "" {
 			continue
 		}
 		if rendered > 0 {
@@ -3312,11 +3390,23 @@ func isBareTOMLKey(s string) bool {
 // comments and re-emitted next to a fresh example, duplicating on every save.
 func userComments(comments []string, keys map[string]bool) []string {
 	var out []string
-	inExample := false // inside a commented array-section example block
+	inExample := false   // inside a commented array-section example block
+	inMultiline := false // inside a commented ''' value within that block
 	for _, c := range comments {
 		t := strings.TrimSpace(c)
 		if t == "" {
-			inExample = false // a blank line ends an example block
+			inExample, inMultiline = false, false // a blank line ends an example block
+			continue
+		}
+		// A commented ''' body belongs to the assignment that opened it, so keep
+		// dropping until its closing delimiter. Without this the script examples -
+		// whose value is a multi-line ''' block, not a one-line string - left their
+		// body lines behind as "user comments" on every save, and the example was
+		// then re-emitted below them, accumulating a copy per save.
+		if inMultiline {
+			if commentedMultilineDelim(c) {
+				inMultiline = false
+			}
 			continue
 		}
 		if isManagedDoc(c) || isManagedCommentedAssign(c, keys) || isManagedCommentedAgentHeader(c) {
@@ -3327,12 +3417,24 @@ func userComments(comments []string, keys map[string]bool) []string {
 			continue
 		}
 		if inExample && isCommentedSimpleAssign(c) {
+			inMultiline = commentedMultilineDelim(c)
 			continue
 		}
 		inExample = false
 		out = append(out, c)
 	}
 	return out
+}
+
+// commentedMultilineDelim reports whether a commented line ends with a ”' TOML
+// multi-line delimiter - either opening one (`# script = ”'`) or closing one
+// (`# ”'`). Both spellings end in the delimiter, so one check covers the pair.
+func commentedMultilineDelim(line string) bool {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, "#") {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimSpace(strings.TrimPrefix(t, "#")), "'''")
 }
 
 // configHeaderLines is the explanatory banner at the top of every rendered
@@ -3347,7 +3449,7 @@ func configHeaderLines() []string {
 		docPrefix + " configures those agents and the daemon: the default pre-prompt, the sandbox",
 		docPrefix + " policy (what agents may read, write and reach over the network), the decision",
 		docPrefix + " gate, per-agent ([claude], [gemini], ...) overrides, and the [artifacts.<name>],",
-		docPrefix + " [previews.<name>], [services.<name>] and [tests.<name>] commands run per project.",
+		docPrefix + " [previews.<name>], [services.<name>] and [tests.<name>] scripts run per project.",
 		docPrefix + "",
 		docPrefix + " Reading this file:",
 		docPrefix + "   ##  lines are Hydra's own docs and defaults - rewritten on every save, so edit",

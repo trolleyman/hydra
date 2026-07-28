@@ -38,7 +38,7 @@ export function TestsEditor({
     onChange(tests.filter((_, i) => i !== index))
   }
   function add() {
-    onChange([...tests, { name: '', command: '' }])
+    onChange([...tests, { name: '', script: '' }])
   }
 
   return (
@@ -50,7 +50,7 @@ export function TestsEditor({
         <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Tests</h2>
         <InfoTooltip title="Tests">
           <p>Per-project commands that run a test suite against a head's branch. Hydra parses the report each writes and surfaces a pass/fail verdict that soft-gates the merge button.</p>
-          <p className="mt-1.5">The command runs via <code className="text-blue-300">bash -c</code> in the checkout directory with these variables set:</p>
+          <p className="mt-1.5">The script runs via <code className="text-blue-300">bash -c</code> in the checkout directory with these variables set:</p>
           <ul className="mt-1 space-y-0.5 list-none">
             <li><code className="text-blue-300">HYDRA_TEST_OUTPUT</code> - directory to write the report into</li>
             <li><code className="text-blue-300">HYDRA_TEST_SOURCE</code> - the checkout directory</li>
@@ -219,10 +219,10 @@ export function TestsEditor({
                     </label>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Command</label>
+                    <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Script</label>
                     <ShellEditor
-                      value={t.command}
-                      onChange={(val) => update(index, { command: val })}
+                      value={t.script}
+                      onChange={(val) => update(index, { script: val })}
                       placeholder='# e.g. go test ./... or bun x vitest run --reporter=junit --outputFile="$HYDRA_TEST_OUTPUT/web.xml"'
                       rows={6}
                     />

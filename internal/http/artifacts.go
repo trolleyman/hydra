@@ -277,13 +277,13 @@ func artifactSpecsByName(projectRoot string, v artifacts.Version, liveCfg config
 	trustedHost := trustedHostCommands(liveCfg)
 	byName := make(map[string]config.ArtifactScript, len(specs))
 	for _, spec := range specs {
-		if spec.Name == "" || spec.Command == "" {
+		if spec.Name == "" || spec.Script == "" {
 			continue
 		}
 		if _, dup := byName[spec.Name]; dup {
 			continue
 		}
-		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Command, hostKindArtifact)] {
+		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Script, hostKindArtifact)] {
 			// A version-sourced command not authorized on the host by the trusted
 			// config must run confined, regardless of what the version claims.
 			spec.UnsafeHost = false
@@ -327,8 +327,8 @@ func disabledArtifacts(cfg config.Config) map[string]bool {
 func trustedHostCommands(cfg config.Config) map[string]bool {
 	trusted := map[string]bool{}
 	for _, s := range cfg.Artifacts {
-		if s.UnsafeHost && s.Name != "" && s.Command != "" {
-			trusted[hostKey(s.Name, s.Command, hostKindArtifact)] = true
+		if s.UnsafeHost && s.Name != "" && s.Script != "" {
+			trusted[hostKey(s.Name, s.Script, hostKindArtifact)] = true
 		}
 	}
 	return trusted

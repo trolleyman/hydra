@@ -26,7 +26,7 @@ export function PreviewsEditor({
     onChange(previews.filter((_, i) => i !== index))
   }
   function add() {
-    onChange([...previews, { name: '', command: '' }])
+    onChange([...previews, { name: '', script: '' }])
   }
 
   return (
@@ -37,9 +37,9 @@ export function PreviewsEditor({
         </div>
         <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Previews</h2>
         <InfoTooltip title="Previews">
-          <p>Per-project commands that boot a live, clickable preview of your app at a checkout. Each appears in the Previews row on the agent page, so a head's UI changes can be tried in the real running app rather than only read as a diff.</p>
+          <p>Per-project scripts that boot a live, clickable preview of your app at a checkout. Each appears in the Previews row on the agent page, so a head's UI changes can be tried in the real running app rather than only read as a diff.</p>
           <p className="mt-1.5">Hydra proxies a dedicated port to it: the server is spawned when its link is first opened, kept warm while requests flow, and torn down once idle - the next visit respawns it.</p>
-          <p className="mt-1.5">The command runs via <code className="text-blue-300">bash -c</code> in the checkout directory with these variables set:</p>
+          <p className="mt-1.5">The script runs via <code className="text-blue-300">bash -c</code> in the checkout directory with these variables set:</p>
           <ul className="mt-1 space-y-0.5 list-none">
             <li><code className="text-blue-300">HYDRA_PREVIEW_ADDR</code> - the host:port to bind (bind this, not a hardcoded <code className="text-blue-300">127.0.0.1</code>)</li>
             <li><code className="text-blue-300">HYDRA_PREVIEW_PORT</code> - just the port</li>
@@ -149,10 +149,10 @@ export function PreviewsEditor({
                       </label>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Command</label>
+                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Script</label>
                       <ShellEditor
-                        value={p.command}
-                        onChange={(val) => update(index, { command: val })}
+                        value={p.script}
+                        onChange={(val) => update(index, { script: val })}
                         placeholder={'npm install\nnpm run build\nnpm run serve -- --host "$HYDRA_PREVIEW_ADDR"'}
                         rows={6}
                       />

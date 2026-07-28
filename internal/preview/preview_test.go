@@ -64,7 +64,7 @@ func pythonServerSpec(t *testing.T) config.PreviewScript {
 	return config.PreviewScript{
 		Name: "demo",
 
-		Command:    `exec python3 -m http.server "$HYDRA_PREVIEW_PORT" --bind 127.0.0.1 --directory .`,
+		Script:     `exec python3 -m http.server "$HYDRA_PREVIEW_PORT" --bind 127.0.0.1 --directory .`,
 		UnsafeHost: true,
 	}
 }
@@ -208,8 +208,8 @@ func TestLoadingPageWhileStarting(t *testing.T) {
 		t.Skip("bash not available")
 	}
 	spec := config.PreviewScript{
-		Name:    "slow",
-		Command: "sleep 60", UnsafeHost: true,
+		Name:   "slow",
+		Script: "sleep 60", UnsafeHost: true,
 	}
 	m := fastManager()
 	m.idleDefault = time.Minute
@@ -287,8 +287,8 @@ func TestReadyMarker(t *testing.T) {
 		t.Skip("bash not available")
 	}
 	spec := config.PreviewScript{
-		Name:    "marker",
-		Command: `echo "` + ReadyMarker + `"; sleep 60`, UnsafeHost: true,
+		Name:   "marker",
+		Script: `echo "` + ReadyMarker + `"; sleep 60`, UnsafeHost: true,
 	}
 	m := fastManager()
 	m.idleDefault = time.Minute
@@ -309,8 +309,8 @@ func TestNeverReadyErrorsWithLog(t *testing.T) {
 		t.Skip("bash not available")
 	}
 	spec := config.PreviewScript{
-		Name:    "wedged",
-		Command: "echo building things; sleep 60", UnsafeHost: true,
+		Name:   "wedged",
+		Script: "echo building things; sleep 60", UnsafeHost: true,
 	}
 	m := fastManager()
 	m.readyDefault = 400 * time.Millisecond
@@ -344,8 +344,8 @@ func TestWorktreeGoneReaper(t *testing.T) {
 		t.Skip("bash not available")
 	}
 	spec := config.PreviewScript{
-		Name:    "wt",
-		Command: "sleep 60", UnsafeHost: true,
+		Name:   "wt",
+		Script: "sleep 60", UnsafeHost: true,
 	}
 	m := fastManager()
 	m.idleDefault = time.Minute
@@ -376,8 +376,8 @@ func TestStopHeadAndStopAll(t *testing.T) {
 		t.Skip("bash not available")
 	}
 	spec := config.PreviewScript{
-		Name:    "sleeper",
-		Command: "sleep 60", UnsafeHost: true,
+		Name:   "sleeper",
+		Script: "sleep 60", UnsafeHost: true,
 	}
 	m := fastManager()
 	m.idleDefault = time.Minute

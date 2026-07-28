@@ -23,7 +23,7 @@ regenerates, chiefly to retry a cached failure.
 
 ```toml
 [artifacts.screenshots]
-command = '''
+script = '''
 cd web
 npm install
 node scripts/take-screenshots.ts
@@ -31,15 +31,17 @@ node scripts/take-screenshots.ts
 timeout_sec = 900
 ```
 
-The command is a **script**, not a one-liner: write it as a multi-line `'''`
-block with one step per line, and comment the steps that need explaining. It is
-run through `bash -c` either way, but a wall of `&&` is unreadable in the config
-file and in the Settings editor alike.
+The key is `script`, and it means it: write a multi-line `'''` block with one
+step per line, and comment the steps that need explaining. It is run through
+`bash -c` either way, but a wall of `&&` is unreadable in the config file and in
+the Settings editor alike. Every script section - artifacts, previews, tests,
+services - uses the same key; the older `command` spelling still parses and is
+rewritten to `script` on the next config save.
 
 | Field         | Required | Description |
 | ------------- | -------- | ----------- |
 | `name`        | yes      | Unique label, also used as the cache directory. |
-| `command`     | yes      | Shell script, run via `bash -c` in the checkout directory. |
+| `script`      | yes      | Shell script, run via `bash -c` in the checkout directory. Multi-line `'''` block; the older `command` key still parses and is migrated on save. |
 | `timeout_sec` | no       | Max seconds the command may run (`0` = built-in default). |
 | `unsafe_host` | no       | Run on the host with **no sandbox** — full access to your machine and credentials. Only for audited, self-contained commands you trust against every ref you compare. Honored only when the trusted live config authorizes that exact command, so a branch cannot grant itself host access. Default `false`. |
 
@@ -161,7 +163,7 @@ down once idle (the next visit respawns it). The runner is `internal/preview`.
 
 ```toml
 [previews.demo]
-command = '''
+script = '''
 npm install
 npm run build
 npm run serve -- --host "$HYDRA_PREVIEW_ADDR"
@@ -172,7 +174,7 @@ ready_timeout_sec = 900
 | Field               | Required | Description |
 | ------------------- | -------- | ----------- |
 | `name`              | yes      | Unique label, shown in the Previews row (the table key). |
-| `command`           | yes      | Shell script, run via `bash -c` in the checkout directory. It must bind `$HYDRA_PREVIEW_ADDR` and stay in the foreground. |
+| `script`            | yes      | Shell script, run via `bash -c` in the checkout directory. It must bind `$HYDRA_PREVIEW_ADDR` and stay in the foreground. The older `command` key still parses and is migrated on save. |
 | `idle_timeout_sec`  | no       | Teardown after this long with zero in-flight proxied requests; open WebSocket/long-poll connections count as in-flight (`0` = default 300). |
 | `ready_timeout_sec` | no       | Max seconds from spawn to ready, builds included (`0` = default 900). |
 | `unsafe_host`       | no       | Run on the host with **no sandbox**. Worse than for an artifact — a preview runs the previewed ref's code as a long-lived resident process. Gated by the trusted live config, and that authorization is *kind-scoped*: trusting an artifact of the same name+command does not authorize the preview. Default `false`. |

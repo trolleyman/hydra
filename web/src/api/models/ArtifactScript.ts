@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * A per-project command that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
+ * A per-project script that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
  */
 export type ArtifactScript = {
     /**
@@ -11,9 +11,9 @@ export type ArtifactScript = {
      */
     name: string;
     /**
-     * Shell command run via `bash -c` in the checkout directory
+     * Shell script run via `bash -c` in the checkout directory. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
      */
-    command: string;
+    script: string;
     /**
      * Max seconds the command may run (0 = built-in default)
      */

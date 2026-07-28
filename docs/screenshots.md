@@ -28,7 +28,7 @@ entry here — not attach an image file.** Concretely:
 - **A whole new artifact command** (e.g. a different generator/script) → add a new
   `[artifacts.<name>]` table to `.hydra/config.toml` (the table key is the name;
   the legacy `[[artifacts]]` array form still parses). See the documented fields
-  there (`command`, `timeout_sec`, `unsafe_host`) and the `HYDRA_ARTIFACT_*`
+  there (`script`, `timeout_sec`, `unsafe_host`) and the `HYDRA_ARTIFACT_*`
   env contract the command is given. Named entries merge by name across the
   user/project/config.local.toml layers; a legacy-array file replaces the list
   wholesale.

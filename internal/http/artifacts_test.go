@@ -129,11 +129,11 @@ command = "shot added"
 	}
 
 	// Each side carries its own command for "home" (edited on the branch).
-	if leftByName["home"].Command != "shot home v1" {
-		t.Errorf("left home command = %q", leftByName["home"].Command)
+	if leftByName["home"].Script != "shot home v1" {
+		t.Errorf("left home command = %q", leftByName["home"].Script)
 	}
-	if rightByName["home"].Command != "shot home v2" {
-		t.Errorf("right home command = %q", rightByName["home"].Command)
+	if rightByName["home"].Script != "shot home v2" {
+		t.Errorf("right home command = %q", rightByName["home"].Script)
 	}
 	// "gone" exists only on the base (removed), "added" only on HEAD.
 	if _, ok := leftByName["gone"]; !ok {
@@ -175,7 +175,7 @@ unsafe_host = true
 
 	// Trust anchor: the base config authorizes only "audited"/"trusted cmd".
 	trusted := config.Config{Artifacts: []config.ArtifactScript{
-		{Name: "audited", Command: "trusted cmd", UnsafeHost: true},
+		{Name: "audited", Script: "trusted cmd", UnsafeHost: true},
 	}}
 
 	left, err := artifactSpecsByName(root, artifacts.Version{Ref: baseRef}, trusted)
@@ -212,7 +212,7 @@ unsafe_host = true
 
 	// The live config trusts the same name+command as a media ARTIFACT.
 	trusted := config.Config{Artifacts: []config.ArtifactScript{
-		{Name: "audited", Command: "trusted cmd", UnsafeHost: true},
+		{Name: "audited", Script: "trusted cmd", UnsafeHost: true},
 	}}
 	byName, err := previewSpecsByName(root, "", "HEAD", trusted)
 	if err != nil {
@@ -223,7 +223,7 @@ unsafe_host = true
 	}
 
 	// Trusting it as a PREVIEW does authorize it.
-	trusted.Previews = []config.PreviewScript{{Name: "audited", Command: "trusted cmd", UnsafeHost: true}}
+	trusted.Previews = []config.PreviewScript{{Name: "audited", Script: "trusted cmd", UnsafeHost: true}}
 	byName, err = previewSpecsByName(root, "", "HEAD", trusted)
 	if err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ command = "y"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prevs["demo"].Command != "y" {
+	if prevs["demo"].Script != "y" {
 		t.Errorf("legacy server artifact did not resolve as a preview: %+v", prevs)
 	}
 	if _, ok := prevs["shots"]; ok {
@@ -299,8 +299,8 @@ unsafe_host = true
 	if !ok {
 		t.Fatal("expected 'wt' from the worktree config")
 	}
-	if spec.Command != "shot wt" {
-		t.Errorf("command = %q", spec.Command)
+	if spec.Script != "shot wt" {
+		t.Errorf("command = %q", spec.Script)
 	}
 	if spec.UnsafeHost {
 		t.Error("unverified worktree unsafe_host must be stripped")

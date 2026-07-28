@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * A per-project test-runner command whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN
+ * A per-project test-runner script whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN
  */
 export type TestScript = {
     /**
@@ -11,9 +11,9 @@ export type TestScript = {
      */
     name: string;
     /**
-     * Shell command run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT
+     * Shell script run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
      */
-    command: string;
+    script: string;
     /**
      * How results are read - "junit" (default; parse *.xml*.json report files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse `::hydra:test:*::` markers streamed live from stdout; the accumulated cases are the report, no file needed).
      */

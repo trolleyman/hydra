@@ -1164,9 +1164,9 @@ func (m *Manager) buildCommandSpec(spec config.TestScript, runDir, outputDir, re
 	)
 	env = append(env, sandbox.MiseTrustEnv(m.projectRoot, runDir)...)
 
-	command := spec.Command
+	command := spec.Script
 	if spec.IsStrict() {
-		command = sandbox.StrictScript(spec.Command)
+		command = sandbox.StrictScript(spec.Script)
 	}
 	opts := sandbox.Options{
 		AgentType:    sandbox.AgentTypeBash,

@@ -3418,13 +3418,13 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 			},
 		}
 		resp.Artifacts = &[]api.ArtifactScript{
-			{Name: "screenshots", Command: "cd web\nnpm install\nnode scripts/take-screenshots.ts\n", TimeoutSec: ptr(900)},
+			{Name: "screenshots", Script: "cd web\nnpm install\nnode scripts/take-screenshots.ts\n", TimeoutSec: ptr(900)},
 		}
 		resp.Previews = &[]api.PreviewScript{
-			{Name: "demo", Command: "cd web\nnpm install\nnpm run build\ncd ..\ngo run ./ server --simulation --addr \"$HYDRA_PREVIEW_ADDR\"\n", ReadyTimeoutSec: ptr(900)},
+			{Name: "demo", Script: "cd web\nnpm install\nnpm run build\ncd ..\ngo run ./ server --simulation --addr \"$HYDRA_PREVIEW_ADDR\"\n", ReadyTimeoutSec: ptr(900)},
 		}
 		resp.Services = &[]api.ServiceScript{
-			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: ptr(true), MaxRestarts: ptr(3)},
+			{Name: "emu-pool", Script: "scripts/emu-pool.sh up 3 --foreground", Host: ptr(true), MaxRestarts: ptr(3)},
 		}
 	}
 	// Review overrides per scope: the shared forge settings live in the project
@@ -3459,7 +3459,7 @@ func (s *SimulationServer) GetServices(w http.ResponseWriter, r *http.Request, p
 	if projectId == "mobile-app" {
 		api.WriteJSON(w, http.StatusOK, api.ServiceStatusResponse{
 			Services: []api.ServiceStatus{
-				{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Failed, Restarts: 3, MaxRestarts: 3, Pid: ptr(0),
+				{Name: "emu-pool", Script: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Failed, Restarts: 3, MaxRestarts: 3, Pid: ptr(0),
 					Message: ptr("exit status 1 (last output: emulator: ERROR: x86_64 emulation requires hardware acceleration - /dev/kvm not found)")},
 			},
 		})
@@ -3467,7 +3467,7 @@ func (s *SimulationServer) GetServices(w http.ResponseWriter, r *http.Request, p
 	}
 	api.WriteJSON(w, http.StatusOK, api.ServiceStatusResponse{
 		Services: []api.ServiceStatus{
-			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Up, Restarts: 0, MaxRestarts: 3, Pid: ptr(40123)},
+			{Name: "emu-pool", Script: "scripts/emu-pool.sh up 3 --foreground", Host: true, State: api.Up, Restarts: 0, MaxRestarts: 3, Pid: ptr(40123)},
 		},
 	})
 }

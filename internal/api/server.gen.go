@@ -457,19 +457,19 @@ type ArtifactLogLine struct {
 // ArtifactLogLineStream Which stream the line came from; stderr is rendered in red
 type ArtifactLogLineStream string
 
-// ArtifactScript A per-project command that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
+// ArtifactScript A per-project script that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
 type ArtifactScript struct {
 	// CleanIgnored Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
-
-	// Command Shell command run via `bash -c` in the checkout directory
-	Command string `json:"command"`
 
 	// Enabled Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
 	Enabled *bool `json:"enabled"`
 
 	// Name Unique label, also used as the cache directory
 	Name string `json:"name"`
+
+	// Script Shell script run via `bash -c` in the checkout directory. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
+	Script string `json:"script"`
 
 	// Strict Run the command under `set -eo pipefail` so a failing step aborts and propagates instead of being swallowed into a success (absent/null or true = strict; false = run exactly as written)
 	Strict *bool `json:"strict"`
@@ -861,11 +861,8 @@ type PolicyConfig struct {
 	McpToolsBlocked *[]string `json:"mcp_tools_blocked"`
 }
 
-// PreviewScript A per-project command that boots a live, clickable preview of the app at a checkout ([previews.<name>] in config.toml). Hydra proxies a dedicated port to it, spawning it when its link is opened and tearing it down when idle.
+// PreviewScript A per-project script that boots a live, clickable preview of the app at a checkout ([previews.<name>] in config.toml). Hydra proxies a dedicated port to it, spawning it when its link is opened and tearing it down when idle.
 type PreviewScript struct {
-	// Command Shell script run via `bash -c` in the checkout directory. It must start a server listening on $HYDRA_PREVIEW_ADDR and stay in the foreground.
-	Command string `json:"command"`
-
 	// Enabled Whether the preview is offered on the agent page (absent/null or true = enabled; false = hidden)
 	Enabled *bool `json:"enabled"`
 
@@ -877,6 +874,9 @@ type PreviewScript struct {
 
 	// ReadyTimeoutSec Max seconds from spawn to ready, builds included (0 = default 900)
 	ReadyTimeoutSec *int `json:"ready_timeout_sec,omitempty"`
+
+	// Script Shell script run via `bash -c` in the checkout directory. It must start a server listening on $HYDRA_PREVIEW_ADDR and stay in the foreground.
+	Script string `json:"script"`
 
 	// Strict Run the command under `set -eo pipefail` so a failing build step aborts the spawn instead of serving a half-built tree (absent/null or true = strict)
 	Strict *bool `json:"strict"`
@@ -1398,11 +1398,8 @@ type SandboxConfig struct {
 	WritablePaths  *[]string `json:"writable_paths"`
 }
 
-// ServiceScript A per-project long-running command the daemon supervises while the project is registered ([services.<name>] in config.toml)
+// ServiceScript A per-project long-running script the daemon supervises while the project is registered ([services.<name>] in config.toml)
 type ServiceScript struct {
-	// Command Shell command run via `bash -c` from the project root
-	Command string `json:"command"`
-
 	// Enabled Whether the daemon supervises this service (absent/null or true = enabled; false = skipped)
 	Enabled *bool `json:"enabled"`
 
@@ -1415,15 +1412,17 @@ type ServiceScript struct {
 	// Name Unique label, shown in the UI and logs
 	Name string `json:"name"`
 
+	// Script Shell script run via `bash -c` from the project root. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
+	Script string `json:"script"`
+
 	// Strict Run the command under `set -eo pipefail` so a failed startup step surfaces as a crash instead of a healthy process (absent/null or true = strict; false = run exactly as written)
 	Strict *bool `json:"strict"`
 }
 
 // ServiceStatus Live status of one supervised service
 type ServiceStatus struct {
-	Command     string `json:"command"`
-	Host        bool   `json:"host"`
-	MaxRestarts int    `json:"max_restarts"`
+	Host        bool `json:"host"`
+	MaxRestarts int  `json:"max_restarts"`
 
 	// Message Human-readable detail for non-running states (exit reason / last output)
 	Message *string `json:"message,omitempty"`
@@ -1433,7 +1432,8 @@ type ServiceStatus struct {
 	Pid *int `json:"pid,omitempty"`
 
 	// Restarts Restarts performed so far
-	Restarts int `json:"restarts"`
+	Restarts int    `json:"restarts"`
+	Script   string `json:"script"`
 
 	// State up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped; paused = not running because the project has no active agents (starts when one is spawned)
 	State ServiceStatusState `json:"state"`
@@ -1637,19 +1637,19 @@ type TestRunResult struct {
 	Warnings *int `json:"warnings,omitempty"`
 }
 
-// TestScript A per-project test-runner command whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN
+// TestScript A per-project test-runner script whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN
 type TestScript struct {
 	// CleanIgnored Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
-
-	// Command Shell command run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT
-	Command string `json:"command"`
 
 	// Enabled Whether the test gate runs this command (absent/null or true = enabled; false = skipped)
 	Enabled *bool `json:"enabled"`
 
 	// Name Unique label, also used as the cache directory
 	Name string `json:"name"`
+
+	// Script Shell script run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
+	Script string `json:"script"`
 
 	// Strict Run the command under `set -eo pipefail` (absent/null or true = strict; false = run exactly as written). The verdict still comes from the parsed report, not the exit code.
 	Strict *bool `json:"strict"`

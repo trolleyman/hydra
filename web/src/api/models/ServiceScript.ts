@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * A per-project long-running command the daemon supervises while the project is registered ([services.<name>] in config.toml)
+ * A per-project long-running script the daemon supervises while the project is registered ([services.<name>] in config.toml)
  */
 export type ServiceScript = {
     /**
@@ -11,9 +11,9 @@ export type ServiceScript = {
      */
     name: string;
     /**
-     * Shell command run via `bash -c` from the project root
+     * Shell script run via `bash -c` from the project root. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
      */
-    command: string;
+    script: string;
     /**
      * Run on the host with NO sandbox - needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
      */

@@ -7,7 +7,7 @@
  */
 export type ServiceStatus = {
     name: string;
-    command: string;
+    script: string;
     host: boolean;
     /**
      * up = running; restarting = backing off after an unexpected exit; failed = gave up after exhausting restarts; down = intentionally stopped; paused = not running because the project has no active agents (starts when one is spawned)

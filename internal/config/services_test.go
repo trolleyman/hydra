@@ -14,12 +14,12 @@ func boolPtr(b bool) *bool { return &b }
 func TestEnabledFlagRoundTrip(t *testing.T) {
 	cfg := Config{
 		Services: []ServiceScript{
-			{Name: "off-svc", Command: "true", Enabled: boolPtr(false)},
-			{Name: "on-svc", Command: "true"},
+			{Name: "off-svc", Script: "true", Enabled: boolPtr(false)},
+			{Name: "on-svc", Script: "true"},
 		},
 		Artifacts: []ArtifactScript{
-			{Name: "off-art", Command: "true", Enabled: boolPtr(false)},
-			{Name: "on-art", Command: "true"},
+			{Name: "off-art", Script: "true", Enabled: boolPtr(false)},
+			{Name: "on-art", Script: "true"},
 		},
 	}
 
@@ -101,8 +101,8 @@ func TestPreExitScriptAgentOverride(t *testing.T) {
 func TestServicesRoundTrip(t *testing.T) {
 	cfg := Config{
 		Services: []ServiceScript{
-			{Name: "emu-pool", Command: "scripts/emu-pool.sh up 3 --foreground", Host: true, MaxRestarts: intPtr(5)},
-			{Name: "indexer", Command: "bun run indexer"},
+			{Name: "emu-pool", Script: "scripts/emu-pool.sh up 3 --foreground", Host: true, MaxRestarts: intPtr(5)},
+			{Name: "indexer", Script: "bun run indexer"},
 		},
 	}
 
@@ -119,7 +119,7 @@ func TestServicesRoundTrip(t *testing.T) {
 		t.Fatalf("expected 2 services, got %d: %+v", len(parsed.Services), parsed.Services)
 	}
 	emu := parsed.Services[0]
-	if emu.Name != "emu-pool" || emu.Command != "scripts/emu-pool.sh up 3 --foreground" || !emu.Host {
+	if emu.Name != "emu-pool" || emu.Script != "scripts/emu-pool.sh up 3 --foreground" || !emu.Host {
 		t.Fatalf("emu-pool round-trip mismatch: %+v", emu)
 	}
 	if emu.MaxRestarts == nil || *emu.MaxRestarts != 5 {
@@ -208,7 +208,7 @@ func TestEmptySectionExampleDoesNotAccumulate(t *testing.T) {
 		t.Fatalf("services example accumulated across saves: got %d copies, want 1\n%s", got, second)
 	}
 	// The example must remain a valid, uncomment-able template.
-	if countHeaders(second, "# command = \"scripts/emu-pool.sh up 3 --foreground\"") != 1 {
+	if countHeaders(second, "# scripts/emu-pool.sh up 3 --foreground") != 1 {
 		t.Fatalf("services example malformed after save:\n%s", second)
 	}
 

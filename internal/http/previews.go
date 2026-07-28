@@ -53,13 +53,13 @@ func previewSpecsByName(projectRoot string, worktreeDir, ref string, liveCfg con
 	trustedHost := trustedHostPreviews(liveCfg)
 	byName := make(map[string]config.PreviewScript, len(specs))
 	for _, spec := range specs {
-		if spec.Name == "" || spec.Command == "" {
+		if spec.Name == "" || spec.Script == "" {
 			continue
 		}
 		if _, dup := byName[spec.Name]; dup {
 			continue
 		}
-		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Command, hostKindPreview)] {
+		if spec.UnsafeHost && !trustedHost[hostKey(spec.Name, spec.Script, hostKindPreview)] {
 			spec.UnsafeHost = false
 		}
 		byName[spec.Name] = spec
@@ -72,8 +72,8 @@ func previewSpecsByName(projectRoot string, worktreeDir, ref string, liveCfg con
 func trustedHostPreviews(cfg config.Config) map[string]bool {
 	trusted := map[string]bool{}
 	for _, p := range cfg.Previews {
-		if p.UnsafeHost && p.Name != "" && p.Command != "" {
-			trusted[hostKey(p.Name, p.Command, hostKindPreview)] = true
+		if p.UnsafeHost && p.Name != "" && p.Script != "" {
+			trusted[hostKey(p.Name, p.Script, hostKindPreview)] = true
 		}
 	}
 	return trusted

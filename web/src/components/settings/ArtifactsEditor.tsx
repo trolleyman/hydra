@@ -36,7 +36,7 @@ export function ArtifactsEditor({
     onChange(artifacts.filter((_, i) => i !== index))
   }
   function add() {
-    onChange([...artifacts, { name: '', command: '' }])
+    onChange([...artifacts, { name: '', script: '' }])
   }
 
   return (
@@ -47,14 +47,14 @@ export function ArtifactsEditor({
         </div>
         <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Diff Artifacts</h2>
         <InfoTooltip title="Diff Artifacts">
-          <p>Per-project commands that render visual artifacts (e.g. screenshots or screen recordings) of a checkout. The diff viewer runs each against both sides of a comparison and shows the outputs that differ.</p>
-          <p className="mt-1.5">The command runs via <code className="text-blue-300">bash -c</code> in the checkout directory with these variables set:</p>
+          <p>Per-project scripts that render visual artifacts (e.g. screenshots or screen recordings) of a checkout. The diff viewer runs each against both sides of a comparison and shows the outputs that differ.</p>
+          <p className="mt-1.5">The script runs via <code className="text-blue-300">bash -c</code> in the checkout directory with these variables set:</p>
           <ul className="mt-1 space-y-0.5 list-none">
             <li><code className="text-blue-300">HYDRA_ARTIFACT_OUTPUT</code> - directory to write images into</li>
             <li><code className="text-blue-300">HYDRA_ARTIFACT_SOURCE</code> - the checkout directory</li>
             <li><code className="text-blue-300">HYDRA_ARTIFACT_REF</code> - the resolved git ref</li>
           </ul>
-          <p className="mt-1.5">The command is a <strong>script</strong>, not a one-liner - put each step on its own line. A live, clickable preview of the app belongs in <strong>Previews</strong> below, not here.</p>
+          <p className="mt-1.5">It is a <strong>script</strong>, not a one-liner - put each step on its own line. A live, clickable preview of the app belongs in <strong>Previews</strong> below, not here.</p>
           <p className="mt-1.5"><code className="text-blue-300">.png .jpg .gif</code> are diffed pixel-by-pixel; <code className="text-blue-300">.webm</code> video is diffed frame-by-frame when <strong>ffmpeg</strong> is installed (else by byte hash); other types (<code className="text-blue-300">.webp .avif .svg .bmp .pdf</code>) are compared by byte hash. Encode video as <strong>lossless</strong> <code className="text-blue-300">.webm</code> (e.g. <code className="text-blue-300">libvpx-vp9 -lossless 1</code>) so identical frames stay identical - a lossy encode changes pixels and reads as changed.</p>
         </InfoTooltip>
       </div>
@@ -200,10 +200,10 @@ export function ArtifactsEditor({
                     </label>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Command</label>
+                    <label className="text-xs font-semibold text-gray-400 dark:text-gray-500">Script</label>
                     <ShellEditor
-                      value={a.command}
-                      onChange={(val) => update(index, { command: val })}
+                      value={a.script}
+                      onChange={(val) => update(index, { script: val })}
                       placeholder={'cd web\nnpm install\nnode scripts/take-screenshots.ts'}
                       rows={6}
                     />

@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * A per-project command that boots a live, clickable preview of the app at a checkout ([previews.<name>] in config.toml). Hydra proxies a dedicated port to it, spawning it when its link is opened and tearing it down when idle.
+ * A per-project script that boots a live, clickable preview of the app at a checkout ([previews.<name>] in config.toml). Hydra proxies a dedicated port to it, spawning it when its link is opened and tearing it down when idle.
  */
 export type PreviewScript = {
     /**
@@ -13,7 +13,7 @@ export type PreviewScript = {
     /**
      * Shell script run via `bash -c` in the checkout directory. It must start a server listening on $HYDRA_PREVIEW_ADDR and stay in the foreground.
      */
-    command: string;
+    script: string;
     /**
      * Run on the host with NO sandbox - full access to the machine and credentials (default false)
      */

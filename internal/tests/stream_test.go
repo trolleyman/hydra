@@ -161,7 +161,7 @@ echo "plain log line"
 	events, unsub := m.Subscribe()
 	defer unsub()
 
-	spec := config.TestScript{Name: "t", UnsafeHost: true, Type: "stdout", Command: script}
+	spec := config.TestScript{Name: "t", UnsafeHost: true, Type: "stdout", Script: script}
 	v := Version{WorktreeDir: workDir}
 	if _, err := m.Get(spec, v); err != nil {
 		t.Fatalf("Get: %v", err)
@@ -256,7 +256,7 @@ func TestGenerateStreamingSeedsFallbackTotal(t *testing.T) {
 
 	// Two cases, but no ::hydra:test:total:: marker.
 	script := "echo \"::hydra:test:pass:: pkg › A\"\necho \"::hydra:test:pass:: pkg › B\"\n"
-	spec := config.TestScript{Name: "t", UnsafeHost: true, Type: "stdout", Command: script}
+	spec := config.TestScript{Name: "t", UnsafeHost: true, Type: "stdout", Script: script}
 	v := Version{WorktreeDir: workDir}
 	if _, err := m.Get(spec, v); err != nil {
 		t.Fatalf("Get: %v", err)
@@ -390,7 +390,7 @@ func TestBranchTotalRecencyGuard(t *testing.T) {
 // A type=stdout runner that emits no markers falls back to the exit-code
 // verdict, exactly like a junit runner that wrote no report.
 func TestGenerateStreamingNoMarkersFallsBack(t *testing.T) {
-	rep := runWorktree(t, config.TestScript{Name: "t", UnsafeHost: true, Type: "stdout", Command: "true"}, t.TempDir())
+	rep := runWorktree(t, config.TestScript{Name: "t", UnsafeHost: true, Type: "stdout", Script: "true"}, t.TempDir())
 	if rep.Status != StatusPassing || rep.Format != "exit" {
 		t.Errorf("report = %+v, want passing via exit fallback", rep)
 	}

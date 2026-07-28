@@ -1392,11 +1392,11 @@ func (m *Manager) buildCommandSpec(spec config.ArtifactScript, runDir, outputDir
 	// so mise-managed toolchains (go, bun, ...) resolve inside the run dir.
 	env = append(env, sandbox.MiseTrustEnv(m.projectRoot, runDir)...)
 
-	command := spec.Command
+	command := spec.Script
 	if spec.IsStrict() {
 		// Fail-fast: a broken render whose last step happens to exit 0 must not be
 		// cached as a success (set strict = false on the script to opt out).
-		command = sandbox.StrictScript(spec.Command)
+		command = sandbox.StrictScript(spec.Script)
 	}
 	opts := sandbox.Options{
 		AgentType:    sandbox.AgentTypeBash, // a plain command, not an agent

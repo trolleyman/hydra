@@ -5,7 +5,7 @@
 ## configures those agents and the daemon: the default pre-prompt, the sandbox
 ## policy (what agents may read, write and reach over the network), the decision
 ## gate, per-agent ([claude], [gemini], ...) overrides, and the [artifacts.<name>],
-## [previews.<name>], [services.<name>] and [tests.<name>] commands run per project.
+## [previews.<name>], [services.<name>] and [tests.<name>] scripts run per project.
 ##
 ## Reading this file:
 ##   ##  lines are Hydra's own docs and defaults - rewritten on every save, so edit
@@ -172,11 +172,11 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 ## Codex-specific overrides: any of the settings above, applied only to codex agents.
 # [codex]
 
-## [artifacts.<name>]: per-project commands that render visual artifacts (e.g.
+## [artifacts.<name>]: per-project scripts that render visual artifacts (e.g.
 ## screenshots) of a checkout. The diff viewer runs each against both sides of a
 ## comparison and shows the outputs that differ. The <name> table key is the unique
 ## label, also used as the cache directory. Fields:
-##   command      shell script run via `bash -c` in the checkout directory (required).
+##   script       shell script run via `bash -c` in the checkout directory (required).
 ##                Write it as a multi-line ''' block - it is a script, not a one-liner:
 ##                each step on its own line, comments where a step needs explaining.
 ##   timeout_sec  max seconds the command may run (0 = built-in default).
@@ -232,7 +232,7 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 # in bitexact mode) so the video diff viewer is exercised too - see the [artifacts.<name>]
 # docs above on why video must be lossless. Building Go + the frontend is slow, so
 # allow a generous timeout (results are cached per resolved ref).
-command = '''
+script = '''
 cd web
 
 # aube when it is on PATH, npm otherwise - the lockfile is shared.
@@ -246,12 +246,12 @@ node scripts/screenshots/take-screenshots.ts
 '''
 timeout_sec = 900
 
-## [previews.<name>]: per-project commands that boot a live, clickable preview of
+## [previews.<name>]: per-project scripts that boot a live, clickable preview of
 ## the app at a checkout. Each appears in the Previews row on the agent page; Hydra
 ## proxies a dedicated port to it, spawning the server when its link is first
 ## opened, keeping it warm while requests flow, and tearing it down once idle (the
 ## next visit respawns it). The <name> table key is the unique label. Fields:
-##   command      shell script run via `bash -c` in the checkout directory (required).
+##   script       shell script run via `bash -c` in the checkout directory (required).
 ##                It must build/boot a server that listens on $HYDRA_PREVIEW_ADDR and
 ##                stay in the foreground. Write it as a multi-line ''' block - it is a
 ##                script, not a one-liner: each step on its own line.
@@ -286,7 +286,7 @@ timeout_sec = 900
 # starts, and tears it down when idle; the first visit after that transparently
 # respawns it. The frontend build dominates spawn time, hence the generous ready
 # timeout.
-command = '''
+script = '''
 cd web
 
 if command -v aube >/dev/null 2>&1; then
@@ -309,12 +309,12 @@ HYDRA_API_ADDR="$HYDRA_PREVIEW_ADDR" go run ./ server --simulation
 '''
 ready_timeout_sec = 900
 
-## [services.<name>]: per-project long-running commands the daemon supervises while
+## [services.<name>]: per-project long-running scripts the daemon supervises while
 ## the project is registered. Each is started on daemon boot (and when the project
 ## is added), restarted with capped backoff if it exits unexpectedly, and
 ## process-group-killed on daemon shutdown, project removal, or a config save.
 ## The <name> table key is the unique label shown in the UI and logs. Fields:
-##   command       shell command run via `bash -c` from the project root (required).
+##   script        shell script run via `bash -c` from the project root (required).
 ##   host          run on the host with NO sandbox - full machine/credential access;
 ##                 needed for host devices the sandbox hides, e.g. /dev/kvm (default false).
 ##   max_restarts  relaunch cap after an unexpected exit (default 3; 0 = never).
@@ -326,15 +326,17 @@ ready_timeout_sec = 900
 ## new names append. (The legacy [[services]] array syntax still parses, but a file
 ## using it replaces the inherited list wholesale.)
 # [services.emu-pool]
-# command = "scripts/emu-pool.sh up 3 --foreground"
+# script = '''
+# scripts/emu-pool.sh up 3 --foreground
+# '''
 # host = true
 # max_restarts = 3
 
-## [tests.<name>]: per-project test-runner commands. Hydra runs each against a
+## [tests.<name>]: per-project test-runner scripts. Hydra runs each against a
 ## head's branch and parses the report into a pass/fail verdict that gates the
 ## merge button (failing/errored soft-block merge; force always available). The
 ## <name> table key is the unique label, also used as the cache directory. Fields:
-##   command      shell command run via `bash -c` in the checkout directory (required).
+##   script       shell script run via `bash -c` in the checkout directory (required).
 ##   timeout_sec  max seconds the command may run (0 = built-in default).
 ##   unsafe_host  run on the host with NO sandbox - runs the diffed ref's test code;
 ##                only for trusted refs (default false).
@@ -401,7 +403,7 @@ ready_timeout_sec = 900
 # head's live worktree) emits ⚠ warn markers for what `mage tidy` would still
 # change — unwrapped error returns and unused //errtrace:skip directives —
 # informational only; they never gate the merge.
-command = '''
+script = '''
 # Count the cases first so the panel has a denominator to tick against.
 { go test -json -list '.*' ./... || true; } | go run ./scripts/gotest-markers -total
 
@@ -428,7 +430,7 @@ type = "stdout"
 # eslint alone and this runner never compiled — so a head could go green with a
 # frontend that does not build. Only `mage build` caught it, and nothing
 # automated runs that.
-command = '''
+script = '''
 cd web
 
 # aube when it is on PATH, npm otherwise; PX is the matching one-off runner.
@@ -477,7 +479,7 @@ type = "stdout"
 # killed by the timeout used to report NOTHING - playwright's junit reporter only
 # writes its file at the end, so a timeout read as a bare red exit code. Streamed
 # cases are kept as they arrive, so a partial run still shows what passed.
-command = '''
+script = '''
 cd web
 
 if command -v aube >/dev/null 2>&1; then

@@ -444,9 +444,9 @@ func (in *instance) buildSpec(spec config.PreviewScript, childPort int) (*sandbo
 	)
 	env = append(env, sandbox.MiseTrustEnv(in.root, in.runDir)...)
 
-	command := spec.Command
+	command := spec.Script
 	if spec.IsStrict() {
-		command = sandbox.StrictScript(spec.Command)
+		command = sandbox.StrictScript(spec.Script)
 	}
 	opts := sandbox.Options{
 		AgentType:    sandbox.AgentTypeBash, // a plain command, not an agent

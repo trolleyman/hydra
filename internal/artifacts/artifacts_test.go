@@ -66,7 +66,7 @@ func TestGenerateAndCache(t *testing.T) {
 	// TestGenerateSandboxed.
 	spec := config.ArtifactScript{
 		Name:       "shots",
-		Command:    `printf 'PNGDATA' > "$HYDRA_ARTIFACT_OUTPUT/home.png"`,
+		Script:     `printf 'PNGDATA' > "$HYDRA_ARTIFACT_OUTPUT/home.png"`,
 		UnsafeHost: true,
 	}
 
@@ -117,7 +117,7 @@ func slotDirs(entries []os.DirEntry) []string {
 func TestGenerateError(t *testing.T) {
 	repo := initRepo(t)
 	m := NewManager(repo)
-	spec := config.ArtifactScript{Name: "broken", Command: "echo boom >&2; exit 3", UnsafeHost: true}
+	spec := config.ArtifactScript{Name: "broken", Script: "echo boom >&2; exit 3", UnsafeHost: true}
 
 	meta := waitReady(t, m, spec, Version{Ref: "HEAD"})
 	if meta.Status != StatusError {
@@ -137,7 +137,7 @@ func TestInvalidateRegenerates(t *testing.T) {
 	v := Version{Ref: "HEAD"}
 
 	// First run fails and the failure is cached on disk.
-	failSpec := config.ArtifactScript{Name: "shots", Command: "exit 3", UnsafeHost: true}
+	failSpec := config.ArtifactScript{Name: "shots", Script: "exit 3", UnsafeHost: true}
 	if meta := waitReady(t, m, failSpec, v); meta.Status != StatusError {
 		t.Fatalf("expected cached error, got %s", meta.Status)
 	}
@@ -159,7 +159,7 @@ func TestInvalidateRegenerates(t *testing.T) {
 
 	// ...so the next Get regenerates. Use a now-succeeding command (same name) to
 	// confirm the result is freshly produced, not served from the stale failure.
-	okSpec := config.ArtifactScript{Name: "shots", Command: `printf 'PNGDATA' > "$HYDRA_ARTIFACT_OUTPUT/home.png"`, UnsafeHost: true}
+	okSpec := config.ArtifactScript{Name: "shots", Script: `printf 'PNGDATA' > "$HYDRA_ARTIFACT_OUTPUT/home.png"`, UnsafeHost: true}
 	if meta := waitReady(t, m, okSpec, v); meta.Status != StatusReady {
 		t.Fatalf("expected ready after refresh, got %s (%s)", meta.Status, meta.Error)
 	}
@@ -220,7 +220,7 @@ func TestPersistedLogRoundTrip(t *testing.T) {
 	m := NewManager(repo)
 	spec := config.ArtifactScript{
 		Name: "shots",
-		Command: "echo plain-out; " +
+		Script: "echo plain-out; " +
 			`echo '` + ProgressMarker + ` capturing 1/1'; ` +
 			"echo a-warning >&2; " +
 			`printf 'P' > "$HYDRA_ARTIFACT_OUTPUT/home.png"`,
@@ -271,7 +271,7 @@ func TestPersistedLogRoundTrip(t *testing.T) {
 func TestFailureSummaryAppendedToLog(t *testing.T) {
 	repo := initRepo(t)
 	m := NewManager(repo)
-	spec := config.ArtifactScript{Name: "shots", Command: "echo capturing; exit 7", UnsafeHost: true}
+	spec := config.ArtifactScript{Name: "shots", Script: "echo capturing; exit 7", UnsafeHost: true}
 	v := Version{Ref: "HEAD"}
 	if meta := waitReady(t, m, spec, v); meta.Status != StatusError {
 		t.Fatalf("expected error status, got %s", meta.Status)
@@ -301,8 +301,8 @@ func TestGenerateSandboxed(t *testing.T) {
 	repo := initRepo(t)
 	m := NewManager(repo)
 	spec := config.ArtifactScript{
-		Name:    "shots",
-		Command: `printf 'PNGDATA' > "$HYDRA_ARTIFACT_OUTPUT/home.png"`,
+		Name:   "shots",
+		Script: `printf 'PNGDATA' > "$HYDRA_ARTIFACT_OUTPUT/home.png"`,
 	}
 
 	meta := waitReady(t, m, spec, Version{Ref: "HEAD"})
@@ -721,7 +721,7 @@ func TestStreamFileMarker(t *testing.T) {
 	// written but never announced, to prove the final scan still collects it.
 	spec := config.ArtifactScript{
 		Name: "shots",
-		Command: `printf 'AAAA' > "$HYDRA_ARTIFACT_OUTPUT/a.png"; echo "::hydra:artifact:: a.png"; ` +
+		Script: `printf 'AAAA' > "$HYDRA_ARTIFACT_OUTPUT/a.png"; echo "::hydra:artifact:: a.png"; ` +
 			`printf 'CCCCCC' > "$HYDRA_ARTIFACT_OUTPUT/c.png"; echo "::hydra:artifact:: c.png"; ` +
 			`printf 'BB' > "$HYDRA_ARTIFACT_OUTPUT/b.png"`,
 		UnsafeHost: true,

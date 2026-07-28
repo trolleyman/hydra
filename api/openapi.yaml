@@ -4397,15 +4397,15 @@ components:
 
     ArtifactScript:
       type: object
-      required: [name, command]
-      description: A per-project command that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
+      required: [name, script]
+      description: A per-project script that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
       properties:
         name:
           type: string
           description: Unique label, also used as the cache directory
-        command:
+        script:
           type: string
-          description: Shell command run via `bash -c` in the checkout directory
+          description: Shell script run via `bash -c` in the checkout directory. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
         timeout_sec:
           type: integer
           description: Max seconds the command may run (0 = built-in default)
@@ -4425,16 +4425,16 @@ components:
           description: Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
     PreviewScript:
       type: object
-      required: [name, command]
+      required: [name, script]
       description: >-
-        A per-project command that boots a live, clickable preview of the app at a
+        A per-project script that boots a live, clickable preview of the app at a
         checkout ([previews.<name>] in config.toml). Hydra proxies a dedicated port
         to it, spawning it when its link is opened and tearing it down when idle.
       properties:
         name:
           type: string
           description: Unique label, shown in the agent page's Previews row
-        command:
+        script:
           type: string
           description: >-
             Shell script run via `bash -c` in the checkout directory. It must start
@@ -4520,15 +4520,15 @@ components:
 
     ServiceScript:
       type: object
-      required: [name, command]
-      description: A per-project long-running command the daemon supervises while the project is registered ([services.<name>] in config.toml)
+      required: [name, script]
+      description: A per-project long-running script the daemon supervises while the project is registered ([services.<name>] in config.toml)
       properties:
         name:
           type: string
           description: Unique label, shown in the UI and logs
-        command:
+        script:
           type: string
-          description: Shell command run via `bash -c` from the project root
+          description: Shell script run via `bash -c` from the project root. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
         host:
           type: boolean
           description: Run on the host with NO sandbox - needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
@@ -4547,15 +4547,15 @@ components:
 
     TestScript:
       type: object
-      required: [name, command]
-      description: A per-project test-runner command whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN #68)
+      required: [name, script]
+      description: A per-project test-runner script whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN #68)
       properties:
         name:
           type: string
           description: Unique label, also used as the cache directory
-        command:
+        script:
           type: string
-          description: Shell command run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT
+          description: Shell script run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
         type:
           type: string
           nullable: true
@@ -4826,12 +4826,12 @@ components:
 
     ServiceStatus:
       type: object
-      required: [name, command, host, state, restarts, max_restarts]
+      required: [name, script, host, state, restarts, max_restarts]
       description: Live status of one supervised service
       properties:
         name:
           type: string
-        command:
+        script:
           type: string
         host:
           type: boolean
