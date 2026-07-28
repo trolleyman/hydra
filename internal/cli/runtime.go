@@ -400,18 +400,25 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	}
 	go svcMgr.RunActivityGate(ctx)
 
-	// Remote-access auth: loopback (and the unix control socket) are always
-	// trusted; a configured key gates every non-localhost request. The key lives
-	// in the boot project's .hydra/deploy.toml (uncommitted). A single daemon can
-	// serve several projects on one TCP port, so the boot project's key is the
-	// one that applies to the web UI.
+	// Remote-access auth: loopback (and the unix control socket) are trusted by
+	// default; a configured key gates every non-localhost request. With
+	// require_local_auth the loopback exemption is dropped too (the control
+	// socket stays trusted). The key lives in the boot project's
+	// .hydra/deploy.toml (uncommitted). A single daemon can serve several
+	// projects on one TCP port, so the boot project's key is the one that applies
+	// to the web UI.
 	deployCfg, err := config.LoadDeploy(projectRoot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	auth := httppkg.NewAuthenticator(deployCfg.AuthKey)
-	if auth.Enabled() {
+	auth := httppkg.NewAuthenticator(deployCfg.AuthKey, deployCfg.RequireLocalAuth)
+	switch {
+	case auth.Enabled() && deployCfg.RequireLocalAuth:
+		log.Printf("Auth: every request (localhost included) requires the key in %s", paths.GetDeployConfigPath(projectRoot))
+	case auth.Enabled():
 		log.Printf("Auth: non-localhost requests require the key in %s", paths.GetDeployConfigPath(projectRoot))
+	case deployCfg.RequireLocalAuth:
+		log.Printf("warn: require_local_auth is set but auth_key is empty in %s - auth is OFF; run `mage deploy:setup`", paths.GetDeployConfigPath(projectRoot))
 	}
 
 	// Live server previews ([[artifacts]] type = "server"): each instance's
