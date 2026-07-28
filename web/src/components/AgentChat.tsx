@@ -3440,12 +3440,19 @@ function SubagentTimeline({
   serif,
   skipId,
   links,
+  // Whether this timeline may fold its own runs of steps. Off inside a folded
+  // SubagentCard: that card ALREADY hides the whole timeline behind its own
+  // "N steps" disclosure, so grouping inside it stacked a second fold with the
+  // same word on it - you clicked "4 steps" and were handed "3 steps". One fold
+  // per level. The full sub-agent chat view has no outer fold, so it groups.
+  fold = false,
 }: {
   sub: SubagentView
   worktree: string | null
   serif: boolean
   skipId?: number
   links?: SubagentLinks
+  fold?: boolean
 }) {
   const cwds = useMemo(() => shellCwdsFor(sub.items, worktree), [sub.items, worktree])
   // A sub-agent's own steps fold exactly like the main transcript's (see
@@ -3454,7 +3461,7 @@ function SubagentTimeline({
   const rows = planStepRows(
     sub.items.filter((it) => it.id !== skipId),
     links?.subByToolUse ?? {},
-    grouped,
+    fold && grouped,
   )
   const renderItem = (it: ChatItem) => {
     if (it.kind === 'thinking') return <ThinkingCard key={it.id} text={it.text} durationMs={it.durationMs} />
@@ -3939,7 +3946,7 @@ function SubagentChatView({
         </div>
       )}
       <div className="flex flex-col gap-3 text-xs">
-        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
+        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} fold />
       </div>
       {report && <SubagentReport report={report} serif={serif} />}
       {/* whitespace-nowrap for the same reason as the main working line: the
@@ -5185,15 +5192,17 @@ function StepGroup({
           · thought for {formatDuration(Math.max(1000, Math.ceil(thinkingMs / 1000) * 1000))}
         </span>
       )}
-      {failed > 0 && (
-        <span className="shrink-0 text-red-500/80 dark:text-red-400/80">
-          {shown ? '' : '· '}
-          {failed} failed
-        </span>
+      {!shown && failed > 0 && (
+        <span className="shrink-0 text-red-500/80 dark:text-red-400/80">· {failed} failed</span>
       )}
       {/* What the group is doing right now, in the ToolCard's own words and
-          colour so a folded step reads like the card it replaces. */}
-      {(needsApproval || running) && (
+          colour so a folded step reads like the card it replaces.
+
+          Everything but the count is for the FOLDED state only. Open, the cards
+          are right there saying it themselves - the red one is red, the running
+          one says "running", the parked one carries its own Allow/Deny row - so
+          repeating any of it on the header is just a second voice. */}
+      {!shown && (needsApproval || running) && (
         <span className="ml-auto pl-1.5 shrink-0 text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">
           {needsApproval ? 'needs approval' : `running ${running}`}
         </span>
