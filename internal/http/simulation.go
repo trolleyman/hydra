@@ -935,6 +935,128 @@ func (s *SimulationServer) ListReviews(w http.ResponseWriter, r *http.Request, p
 	})
 }
 
+// simThreadMu guards the simulation's in-memory review threads, so replies made
+// in the UI stick for the rest of the run (the fixtures are seeded lazily on
+// first read).
+var (
+	simThreadMu      sync.Mutex
+	simThreadsByHead map[string][]api.ReviewThread
+)
+
+// simSeedThreads builds the fixture review conversations for a head. They anchor
+// to lines that really exist in the simulated diff (internal/heads/heads.go 5 and
+// 45), so the diff viewer renders them inline, and cover the three shapes worth
+// looking at: a plain forge thread, a thread with an agent's local-only reply,
+// and a resolved one.
+func simSeedThreads(id string) []api.ReviewThread {
+	if id != "agent-1" {
+		return nil
+	}
+	return []api.ReviewThread{
+		{
+			Id: "701", Path: "internal/heads/heads.go", Line: 5,
+			Resolved: ptr(false), Outdated: ptr(false),
+			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701"),
+			Notes: []api.ReviewThreadNote{
+				{Id: "701", Author: ptr("priya"), Body: "Is `errors` still used after the refactor? If not this import can go.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:12:00Z"), Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701")},
+			},
+		},
+		{
+			Id: "702", Path: "internal/heads/heads.go", Line: 45,
+			Resolved: ptr(false), Outdated: ptr(false),
+			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_702"),
+			Notes: []api.ReviewThreadNote{
+				{Id: "702", Author: ptr("sam"), Body: "Threading a `*db.Store` through here couples spawn to the DB - can we pass the narrower interface instead?", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:20:00Z")},
+				{Id: "703", Author: ptr("priya"), Body: "Agreed, and it would make this testable without a temp DB.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:26:00Z")},
+				{Id: "local-1", Author: ptr("agent"), Body: "Narrowed it to a `HeadStore` interface in 4f21ac9 - spawn now takes just `CreateAgent`/`GetAgent`.", Origin: api.LocalOnly, CreatedAt: ptr("2026-07-28T09:41:00Z")},
+			},
+		},
+		{
+			Id: "704", Path: "web/src/components/AgentDetail.tsx", Line: 46,
+			Resolved: ptr(true), Outdated: ptr(false),
+			Notes: []api.ReviewThreadNote{
+				{Id: "704", Author: ptr("sam"), Body: "Nit: this could use the shared formatter.", Origin: api.Forge, CreatedAt: ptr("2026-07-27T16:02:00Z")},
+			},
+		},
+	}
+}
+
+// simThreads returns the head's threads, seeding the fixtures on first use.
+func simThreads(id string) []api.ReviewThread {
+	simThreadMu.Lock()
+	defer simThreadMu.Unlock()
+	if simThreadsByHead == nil {
+		simThreadsByHead = map[string][]api.ReviewThread{}
+	}
+	if _, ok := simThreadsByHead[id]; !ok {
+		simThreadsByHead[id] = simSeedThreads(id)
+	}
+	return simThreadsByHead[id]
+}
+
+// simThreadsResponse wraps the head's threads in the API envelope. agent-1 is the
+// linked head in the fixtures; everything else reports unlinked, which is what
+// makes the diff viewer show local comments only.
+func simThreadsResponse(id string) api.ReviewThreadsResponse {
+	threads := simThreads(id)
+	resp := api.ReviewThreadsResponse{Threads: threads, Linked: id == "agent-1"}
+	if resp.Threads == nil {
+		resp.Threads = []api.ReviewThread{}
+	}
+	if resp.Linked {
+		resp.Provider = ptr(forge.ProviderGitLab)
+		resp.MrUrl = ptr("https://gitlab.example.com/team/repo/-/merge_requests/42")
+		resp.FetchedAt = ptr(time.Now().Format(time.RFC3339))
+	}
+	return resp
+}
+
+func (s *SimulationServer) GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteJSON(w, http.StatusOK, simThreadsResponse(id))
+}
+
+func (s *SimulationServer) CreateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var body api.NewReviewCommentRequest
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	simThreads(id) // seed
+	simThreadMu.Lock()
+	newID := fmt.Sprintf("sim-%d", len(simThreadsByHead[id])+800)
+	simThreadsByHead[id] = append(simThreadsByHead[id], api.ReviewThread{
+		Id: newID, Path: body.Path, Line: body.Line,
+		Resolved: ptr(false), Outdated: ptr(false),
+		Notes: []api.ReviewThreadNote{{
+			Id: newID, Author: ptr("you"), Body: body.Body, Origin: api.Forge,
+			CreatedAt: ptr(time.Now().Format(time.RFC3339)),
+		}},
+	})
+	simThreadMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, simThreadsResponse(id))
+}
+
+func (s *SimulationServer) ReplyToReviewThread(w http.ResponseWriter, r *http.Request, projectId string, id string, threadId string) {
+	var body api.ReviewReplyRequest
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	simThreads(id) // seed
+	origin := api.Forge
+	author := "you"
+	if body.Local != nil && *body.Local {
+		origin = api.LocalOnly
+	}
+	simThreadMu.Lock()
+	for i := range simThreadsByHead[id] {
+		if simThreadsByHead[id][i].Id != threadId {
+			continue
+		}
+		simThreadsByHead[id][i].Notes = append(simThreadsByHead[id][i].Notes, api.ReviewThreadNote{
+			Id:     fmt.Sprintf("sim-reply-%d", len(simThreadsByHead[id][i].Notes)+900),
+			Author: ptr(author), Body: body.Body, Origin: origin,
+			CreatedAt: ptr(time.Now().Format(time.RFC3339)),
+		})
+	}
+	simThreadMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, simThreadsResponse(id))
+}
+
 func (s *SimulationServer) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }

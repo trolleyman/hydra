@@ -168,8 +168,8 @@ func adoptReviewSnapshot(ctx context.Context, provider forge.Provider, projectRo
 	}
 	var discussions []forge.Discussion
 	if st.UnresolvedDiscussions > 0 {
-		if d, err := provider.Discussions(ctx, projectRoot, remote, ref.ID); err == nil {
-			discussions = d
+		if threads, err := provider.Threads(ctx, projectRoot, remote, ref.ID); err == nil {
+			discussions = forge.UnresolvedDiscussions(threads)
 		}
 	}
 	return reviewSnapshot(ref.URL, ref.ID, provider.Name(), ref.TargetBranch, st, discussions)

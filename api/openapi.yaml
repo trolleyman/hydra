@@ -873,6 +873,128 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/review/threads:
+    get:
+      summary: The review threads on this head's MR, for the diff viewer
+      operationId: getReviewThreads
+      description: >
+        Returns the forge's review conversations for this head's linked MR, anchored to
+        file/line, with Hydra's local-only notes merged in (docs/review-threads.md).
+        Fetched live from the forge host-side; if that call fails the last cached
+        threads are returned with stale=true and an error hint, so the diff still
+        renders. An unlinked head returns an empty list.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The head's review threads (empty when unlinked).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewThreadsResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Start a new review thread on a line of this head's MR
+      operationId: createReviewComment
+      description: >
+        Posts a new review comment on the MR's diff, as the user, host-side via gh/glab.
+        The line is a NEW-side line number. Fails cleanly when the head has no MR, when
+        the line is not part of the MR's diff, or when the forge CLI is unauthenticated.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewReviewCommentRequest'
+      responses:
+        '200':
+          description: Posted (returns the refreshed threads).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewThreadsResponse'
+        '400':
+          description: Bad Request (unlinked head, empty body, or the forge rejected it)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply:
+    post:
+      summary: Reply to a review thread on this head's MR
+      operationId: replyToReviewThread
+      description: >
+        Adds a reply to an existing thread. `local: true` keeps the reply inside Hydra
+        (visible in the diff viewer, never sent to the forge); otherwise it is posted to
+        the forge as the user. Agents only ever write local notes, and they do so through
+        their MCP tool rather than this endpoint.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: thread_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewReplyRequest'
+      responses:
+        '200':
+          description: Replied (returns the refreshed threads).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewThreadsResponse'
+        '400':
+          description: Bad Request (unlinked head, empty body, or the forge rejected it)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/reviews:
     get:
       summary: List existing PRs/MRs on the project's forge, for the adoption picker
@@ -3073,6 +3195,101 @@ components:
         remote:
           type: string
           description: Git remote to resolve the forge against (defaults to the configured review remote, usually "origin").
+
+    ReviewThreadsResponse:
+      type: object
+      description: The review conversations on a head's MR, forge threads and Hydra's local-only notes merged (docs/review-threads.md).
+      required: [threads, linked]
+      properties:
+        threads:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewThread'
+        linked:
+          type: boolean
+          description: False when the head has no MR - the diff viewer then shows local comments only.
+        provider:
+          type: string
+          description: "\"github\" | \"gitlab\" - drives the origin badge on forge threads."
+        mr_url:
+          type: string
+          description: The MR/PR the threads belong to.
+        fetched_at:
+          type: string
+          description: RFC3339 time the threads were read from the forge.
+        stale:
+          type: boolean
+          description: True when the live forge read failed and these are the last cached threads.
+        error:
+          type: string
+          description: Why the live read failed (present with stale=true).
+
+    ReviewThread:
+      type: object
+      description: One review conversation, anchored to a file/line where the forge reports one.
+      required: [id, path, line, notes]
+      properties:
+        id:
+          type: string
+          description: Thread handle used for replies (GitHub - the root comment id; GitLab - the discussion id).
+        path:
+          type: string
+        line:
+          type: integer
+          description: NEW-side line the thread anchors to (0 when the forge reports none).
+        resolved:
+          type: boolean
+        outdated:
+          type: boolean
+          description: The anchor line no longer exists in the MR's diff.
+        url:
+          type: string
+        notes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewThreadNote'
+
+    ReviewThreadNote:
+      type: object
+      description: One comment in a review thread. Local notes never reach the forge.
+      required: [id, body, origin]
+      properties:
+        id:
+          type: string
+        author:
+          type: string
+        body:
+          type: string
+        url:
+          type: string
+        created_at:
+          type: string
+        origin:
+          type: string
+          enum: [forge, local_only]
+          description: "\"forge\" - on the PR for everyone to see; \"local_only\" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants."
+
+    NewReviewCommentRequest:
+      type: object
+      required: [path, line, body]
+      properties:
+        path:
+          type: string
+        line:
+          type: integer
+          description: NEW-side line number, as anchored in the diff viewer.
+        body:
+          type: string
+
+    ReviewReplyRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+        local:
+          type: boolean
+          description: Keep the reply inside Hydra instead of posting it to the forge.
 
     ReviewRef:
       type: object

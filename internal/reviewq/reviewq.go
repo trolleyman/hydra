@@ -33,10 +33,27 @@ const (
 	resultSuffix = ".result.json"
 )
 
-// Request asks the daemon to refresh this head's review file from the forge.
+// Op selects what the daemon should do. An empty Op means OpRefresh.
+type Op string
+
+const (
+	// OpRefresh re-reads the MR from the forge and rewrites the head's review file.
+	OpRefresh Op = "refresh"
+	// OpNote records a LOCAL-ONLY reply on a review thread. It is never sent to the
+	// forge: an agent has no forge credentials, and Hydra only ever writes to a PR
+	// as an explicit user action (docs/review-threads.md).
+	OpNote Op = "note"
+)
+
+// Request asks the daemon to do one thing for this head's review state.
 type Request struct {
 	ReqID string `json:"reqid"`
 	TS    string `json:"ts"`
+	Op    Op     `json:"op,omitempty"`
+
+	// note
+	ThreadID string `json:"thread_id,omitempty"`
+	Body     string `json:"body,omitempty"`
 }
 
 // Result is the host's outcome. Refreshed is false when the daemon deliberately

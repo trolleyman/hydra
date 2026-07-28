@@ -52,6 +52,11 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	// is seeded for every head; the file reports linked=false until published).
 	if os.Getenv("HYDRA_REVIEW_PATH") != "" {
 		deps.GetReview = loadReviewFile
+		// The local-reply tool needs the daemon channel (the note is stored
+		// host-side); without it the tool stays hidden rather than failing on use.
+		if os.Getenv("HYDRA_REVIEW_REQ_DIR") != "" {
+			deps.ReplyLocal = replyLocalToReviewThread
+		}
 	}
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
 }
@@ -164,18 +169,43 @@ func requestReviewRefresh() string {
 	if dir == "" {
 		return "" // older head (seeded before the refresh channel existed) - the 30s watcher is the only writer
 	}
-	reqid := strconv.FormatInt(time.Now().UnixNano(), 10)
-	req := reviewq.Request{ReqID: reqid, TS: time.Now().Format(time.RFC3339Nano)}
+	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpRefresh})
+	if !ok {
+		return "Hydra did not answer the refresh in time, so this is its last cached state. Ask the user to check the daemon if it keeps happening."
+	}
+	return res.Message
+}
+
+// replyLocalToReviewThread backs the reply_to_review_comment tool: it hands the
+// note to the daemon, which stores it against the thread for the user to read in
+// the diff viewer. Nothing is sent to the forge.
+func replyLocalToReviewThread(threadID, body string) (bool, string) {
+	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
+	if dir == "" {
+		return false, "Replying is not available in this session."
+	}
+	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpNote, ThreadID: threadID, Body: body})
+	if !ok {
+		return false, "Hydra did not confirm the note in time, so it may not have been saved. Ask the user to check the daemon."
+	}
+	return res.OK, res.Message
+}
+
+// reviewRoundTrip submits req to the daemon's review-request watcher and blocks
+// for its result. ok=false means the wait timed out.
+func reviewRoundTrip(dir string, req reviewq.Request) (reviewq.Result, bool) {
+	req.ReqID = strconv.FormatInt(time.Now().UnixNano(), 10)
+	req.TS = time.Now().Format(time.RFC3339Nano)
 	if err := reviewq.WriteRequest(dir, req); err != nil {
-		return "Hydra could not be asked for a refresh (" + err.Error() + "), so this is its last cached state."
+		return reviewq.Result{Message: "Hydra could not be reached (" + err.Error() + ")."}, true
 	}
 	deadline := time.Now().Add(reviewRefreshWait)
 	for {
-		if res, ok, err := reviewq.ReadResult(dir, reqid); err == nil && ok {
-			return res.Message
+		if res, ok, err := reviewq.ReadResult(dir, req.ReqID); err == nil && ok {
+			return res, true
 		}
 		if time.Now().After(deadline) {
-			return "Hydra did not answer the refresh in time, so this is its last cached state. Ask the user to check the daemon if it keeps happening."
+			return reviewq.Result{}, false
 		}
 		time.Sleep(reviewRefreshPoll)
 	}

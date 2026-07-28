@@ -84,13 +84,18 @@ func (s *Server) refreshHeadReview(ctx context.Context, a db.Agent) (forge.Statu
 	// Cache the fresh state on the head (for the UI chip).
 	s.cacheReviewState(projectRoot, a.ID, st)
 
-	// Fetch unresolved discussions only when the status reports some, then write
-	// the per-head review file the agent's mcp__hydra__* tools read.
+	// Fetch the review threads only when the status reports unresolved ones, then
+	// write the per-head review file the agent's mcp__hydra__* tools read. The
+	// threads are cached for the diff viewer in the same pass, so opening the diff
+	// does not re-hit the forge.
 	var discussions []forge.Discussion
 	if st.UnresolvedDiscussions > 0 {
-		if d, derr := provider.Discussions(ctx, projectRoot, remote, a.ReviewID); derr == nil {
-			discussions = d
+		if threads, terr := provider.Threads(ctx, projectRoot, remote, a.ReviewID); terr == nil {
+			discussions = forge.UnresolvedDiscussions(threads)
+			cacheThreads(projectRoot, a.ID, threads)
 		}
+	} else {
+		cacheThreads(projectRoot, a.ID, nil)
 	}
 	writeReviewFile(projectRoot, a, st, discussions)
 	return st, nil
@@ -129,7 +134,7 @@ func reviewSnapshot(url, id, provider, targetBranch string, st forge.Status, dis
 	}
 	for _, d := range discussions {
 		rf.Comments = append(rf.Comments, mcpserver.ReviewComment{
-			Author: d.Author, Body: d.Body, Path: d.Path, Line: d.Line, URL: d.URL,
+			ID: d.ID, Author: d.Author, Body: d.Body, Path: d.Path, Line: d.Line, URL: d.URL,
 		})
 	}
 	return rf

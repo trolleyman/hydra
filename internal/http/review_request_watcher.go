@@ -4,10 +4,12 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/reviewq"
+	"github.com/trolleyman/hydra/internal/reviewstore"
 )
 
 const (
@@ -74,10 +76,22 @@ func (s *Server) drainReviewRequests(ctx context.Context, projectRoot string) {
 		if err != nil || len(reqs) == 0 {
 			continue
 		}
-		// Every request from a head asks the same thing, so a burst collapses into
-		// one forge round trip and they all get the same answer.
-		res := s.refreshReviewOnDemand(ctx, id)
+		// Refreshes from one head all ask the same thing, so a burst collapses into
+		// one forge round trip and they all get the same answer. Notes carry their
+		// own payload and are handled individually.
+		var refresh *reviewq.Result
 		for _, r := range reqs {
+			res := reviewq.Result{OK: true}
+			switch r.Op {
+			case reviewq.OpNote:
+				res = s.recordLocalNote(projectRoot, id, r)
+			default:
+				if refresh == nil {
+					v := s.refreshReviewOnDemand(ctx, id)
+					refresh = &v
+				}
+				res = *refresh
+			}
 			if err := reviewq.WriteResult(dir, r.ReqID, res); err != nil {
 				log.Printf("warn: review refresh: write result for %s: %v", id, err)
 			}
@@ -109,6 +123,26 @@ func (s *Server) refreshReviewOnDemand(ctx context.Context, id string) reviewq.R
 		return reviewq.Result{OK: false, Message: "The forge lookup failed (" + err.Error() + "), so this is Hydra's last cached state."}
 	}
 	return reviewq.Result{OK: true, Refreshed: true}
+}
+
+// recordLocalNote stores an agent's LOCAL-ONLY reply on a review thread. It is
+// never forwarded to the forge: the agent has no forge credentials, and a write
+// to someone's PR is always an explicit user action. The user sees the note in
+// the diff viewer marked private, and can repeat it to the forge themselves.
+func (s *Server) recordLocalNote(projectRoot, id string, r reviewq.Request) reviewq.Result {
+	if strings.TrimSpace(r.Body) == "" {
+		return reviewq.Result{Message: "The note was empty, so nothing was recorded."}
+	}
+	if strings.TrimSpace(r.ThreadID) == "" {
+		return reviewq.Result{Message: "No thread id was given, so the note had nothing to attach to."}
+	}
+	if _, err := reviewstore.AppendNote(projectRoot, id, reviewstore.LocalNote{
+		ThreadID: r.ThreadID, Author: reviewstore.AuthorAgent, Body: r.Body,
+	}); err != nil {
+		return reviewq.Result{Message: "The note could not be saved: " + err.Error()}
+	}
+	s.notifyAgentsChanged(projectRoot, false)
+	return reviewq.Result{OK: true}
 }
 
 // fresh reports whether an RFC3339 timestamp is within d of now. An empty or
