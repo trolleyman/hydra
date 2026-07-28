@@ -689,8 +689,18 @@ func simArchivedAgents() []api.AgentResponse {
 	archived := true
 	finished := api.Finished
 	stopped := api.Stopped
-	mk := func(id, title, agentType, branch, endState, prompt string, status api.AgentStatus, ageHours time.Duration) api.AgentResponse {
-		createdAt := simNow().Add(-ageHours * time.Hour).Unix()
+	// createdHours / archivedHours are independent so the seeded history shows
+	// what the real list does: it is ordered by when a head was killed/merged,
+	// not by when it was spawned (a long-running head archived recently sorts
+	// above a short one spawned after it). archivedHours < 0 seeds a legacy row
+	// with no recorded archive time.
+	mk := func(id, title, agentType, branch, endState, prompt string, status api.AgentStatus, createdHours, archivedHours time.Duration) api.AgentResponse {
+		createdAt := simNow().Add(-createdHours * time.Hour).Unix()
+		var archivedAt *int64
+		if archivedHours >= 0 {
+			ts := simNow().Add(-archivedHours * time.Hour).Unix()
+			archivedAt = &ts
+		}
 		es := endState
 		return api.AgentResponse{
 			Id:            id,
@@ -703,18 +713,20 @@ func simArchivedAgents() []api.AgentResponse {
 			CreatedAt:     &createdAt,
 			Archived:      &archived,
 			EndState:      &es,
+			ArchivedAt:    archivedAt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:    status,
 				Timestamp: simNow().Format(time.RFC3339),
 			},
 		}
 	}
+	// Listed newest-archived first, as the real ListArchivedAgents orders them.
 	return []api.AgentResponse{
-		mk("archived-1", "Add dark-mode toggle to settings", "claude", "hydra/feat-darkmode", "merged", "Add a dark-mode toggle to the settings page, persisted to localStorage and respecting the OS preference by default.", finished, 5),
-		mk("archived-2", "Spike: WebSocket diff refresh", "gemini", "hydra/spike-ws", "killed", "Prototype pushing diff_refresh over the existing terminal WebSocket instead of the 20s poll, and measure the latency win.", stopped, 8),
-		mk("archived-3", "Fix flaky terminal resize test", "claude", "hydra/fix-resize", "merged", "TestTerminalResize fails intermittently in CI. Track down the race and make it deterministic.", finished, 26),
-		mk("archived-4", "Investigate sandbox netns isolation", "claude", "hydra/spike-netns", "killed", "Explore giving each agent its own network namespace with a rootless userspace NAT (pasta/slirp4netns) for per-agent port isolation.", stopped, 30),
-		mk("archived-5", "Render ANSI colour in artifact logs", "copilot", "hydra/feat-ansi", "merged", "Replace stripAnsi in the artifact log panes with a real SGR renderer so build output keeps its colour.", finished, 49),
+		mk("archived-1", "Add dark-mode toggle to settings", "claude", "hydra/feat-darkmode", "merged", "Add a dark-mode toggle to the settings page, persisted to localStorage and respecting the OS preference by default.", finished, 5, 2),
+		mk("archived-4", "Investigate sandbox netns isolation", "claude", "hydra/spike-netns", "killed", "Explore giving each agent its own network namespace with a rootless userspace NAT (pasta/slirp4netns) for per-agent port isolation.", stopped, 30, 4),
+		mk("archived-2", "Spike: WebSocket diff refresh", "gemini", "hydra/spike-ws", "killed", "Prototype pushing diff_refresh over the existing terminal WebSocket instead of the 20s poll, and measure the latency win.", stopped, 8, 7),
+		mk("archived-3", "Fix flaky terminal resize test", "claude", "hydra/fix-resize", "merged", "TestTerminalResize fails intermittently in CI. Track down the race and make it deterministic.", finished, 26, 25),
+		mk("archived-5", "Render ANSI colour in artifact logs", "copilot", "hydra/feat-ansi", "merged", "Replace stripAnsi in the artifact log panes with a real SGR renderer so build output keeps its colour.", finished, 49, -1),
 	}
 }
 

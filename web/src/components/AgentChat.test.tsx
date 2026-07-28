@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { ChatPane, normalizedToProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
 
@@ -46,6 +46,18 @@ class FakeWebSocket {
   }
   addEventListener() {}
   removeEventListener() {}
+}
+
+// The same socket, but reachable from the test so it can push chat frames in.
+const sockets: RecordingWebSocket[] = []
+class RecordingWebSocket extends FakeWebSocket {
+  constructor(url: string) {
+    super(url)
+    sockets.push(this)
+  }
+  emit(frame: unknown) {
+    this.onmessage?.({ data: JSON.stringify(frame) } as MessageEvent)
+  }
 }
 
 // A pasted PNG named "image.png" (a generic name, so the composer renames it
@@ -161,6 +173,71 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
     expect(ta.value).toBe('look at this ')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
+  })
+})
+
+// A streamed reply and the settled message it becomes have to be the SAME row.
+// They used to be two: the in-flight block rendered below the transcript, the
+// finished one as a new item inside it - so the swap tore the live node out of
+// the document. Anything selected inside it was dropped by the browser on the
+// spot, which is why selecting a reply while it streamed cleared itself a beat
+// later. The live block now carries the id its settled event lands on.
+describe('a streamed reply settles into the same DOM node', () => {
+  beforeAll(() => {
+    vi.stubGlobal('WebSocket', RecordingWebSocket)
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    sockets.length = 0
+    localStorage.clear()
+  })
+
+  const TEXT = 'The loader merges the per-environment file over the base.'
+  // One stream_event frame, flushed so the assertions see the render it caused.
+  const stream = (ws: RecordingWebSocket, event: unknown) =>
+    act(() => ws.emit({ type: 'claude_event', event: { type: 'stream_event', event } }))
+
+  it('keeps the live paragraph node when the completed message arrives', async () => {
+    renderChat()
+    await connectedComposer()
+    const ws = sockets[0]
+    // Everything before replay_done is treated as backfilled history; the live
+    // stream path only runs after it.
+    act(() => ws.emit({ type: 'replay_done' }))
+
+    stream(ws, { type: 'content_block_start', content_block: { type: 'text' } })
+    stream(ws, { type: 'content_block_delta', delta: { type: 'text_delta', text: TEXT } })
+
+    // The paced reveal walks the text in over a few frames.
+    const live = await waitFor(() => {
+      const p = document.querySelector('[data-md-root] p')
+      expect(p?.textContent).toBe(TEXT)
+      return p as HTMLElement
+    })
+
+    // message_stop lands as its own frame, ahead of the settled message: the
+    // rendered block has to survive that gap too, or the text blinks out.
+    stream(ws, { type: 'message_stop' })
+    expect(document.contains(live)).toBe(true)
+    expect(document.querySelector('[data-md-root] p')?.textContent).toBe(TEXT)
+
+    // The settled message. Asserted straight after the render it causes, with
+    // nothing else awaited in between, so this is the swap itself and not some
+    // later re-render putting an equivalent node back.
+    act(() => {
+      ws.emit({
+        type: 'claude_event',
+        event: { type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text: TEXT }] } },
+      })
+    })
+    expect(document.querySelectorAll('[data-md-root]')).toHaveLength(1)
+    expect(document.contains(live)).toBe(true)
+    expect(document.querySelector('[data-md-root] p')).toBe(live)
   })
 })
 

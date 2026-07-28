@@ -335,3 +335,37 @@ describe('seedAgents (cached list painted while the real fetch is in flight)', (
     toasts.mockRestore()
   })
 })
+
+describe('upsertArchived insert position', () => {
+  // The archived history is ordered by when a head was killed/merged (see
+  // db.ListArchivedAgents), so an optimistic insert must use the same key -
+  // otherwise a just-killed long-lived head lands halfway down the list and
+  // jumps to the top on the next fetch.
+  const archived = (id: string, created: number, archivedAt?: number): AgentResponse => ({
+    ...makeAgent(id),
+    archived: true,
+    end_state: 'merged',
+    created_at: created,
+    ...(archivedAt === undefined ? {} : { archived_at: archivedAt }),
+  })
+  const ids = () => useAgentStore.getState().archived.map((a) => a.id)
+
+  it('places a newly-archived old head at the top, not in created-at order', () => {
+    useAgentStore.getState().setArchivedFirstPage([
+      archived('closed-yesterday', 5_000, 9_000),
+      archived('closed-last-week', 8_000, 3_000),
+    ])
+    // Spawned before both, closed just now.
+    useAgentStore.getState().upsertArchived(archived('ancient-but-just-closed', 1_000, 10_000))
+    expect(ids()).toEqual(['ancient-but-just-closed', 'closed-yesterday', 'closed-last-week'])
+  })
+
+  it('falls back to created_at for a legacy row with no archive time', () => {
+    useAgentStore.getState().setArchivedFirstPage([
+      archived('recent', 5_000, 5_000),
+      archived('legacy', 2_000),
+    ])
+    useAgentStore.getState().upsertArchived(archived('legacy-newer', 3_000))
+    expect(ids()).toEqual(['recent', 'legacy-newer', 'legacy'])
+  })
+})

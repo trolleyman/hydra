@@ -40,11 +40,12 @@ test('the agent detail header renders the brand-colored type pill', async ({ pag
 
   // The type pill is detail-only (the sidebar uses bare colored text for the
   // type) and ICON-ONLY - the label moved into its tooltip, so there is no
-  // "gemini" text to match on. It is the first badge in the header meta strip
-  // (AgentDetail MetaStrip, [data-meta-strip]); this asserts the
+  // "gemini" text to match on. It leads the header's identity line
+  // ([data-head-identity]: type pill, status chip, head id), NOT the chip strip
+  // below it ([data-meta-strip]) where it used to sit. This asserts the
   // <Badge variant="pill"> + custom className path still paints the gemini
   // brand palette.
-  const pill = page.locator('[data-meta-strip] span.rounded-full').first()
+  const pill = page.locator('[data-head-identity] span.rounded-full').first()
   await expect(pill).toBeVisible()
   await expect(pill).toHaveClass(/bg-violet-100/)
   // ...and the type it stands for is still reachable, via that tooltip.

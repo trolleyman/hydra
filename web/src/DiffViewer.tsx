@@ -1857,35 +1857,36 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
 
   // show()'s pass ran before the box was in the DOM, so it could not measure it.
   // Re-run now that it is rendered (in a layout effect, so the correction lands
-  // before paint and never flickers).
+  // before paint and never flickers), and keep it fresh on scroll/resize.
+  //
+  // Scroll REPOSITIONS, it does not dismiss. This used to hide the card on any
+  // scroll, and the listener is capture-phase, so it fired for every scrollable
+  // pane on the page - including the chat, which glides itself to the bottom on
+  // a rAF loop as a reply streams in. The effect was that a commit hover card
+  // vanished the moment a chat message arrived, on the other side of the screen.
+  // Repositioning is what the shared Tooltip (components/Tooltip.tsx) already
+  // does, so the two now behave the same.
   useLayoutEffect(() => {
     if (!visible) return
-    const p = computePos()
-    // Legitimate measure-then-position pass: the DOM box is the external system,
-    // and the guard below makes it converge in one step (a second run computes
-    // the same position and returns `prev`, so no cascade).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setPos((prev) =>
-      prev && p && prev.top === p.top && prev.left === p.left && prev.side === p.side && prev.maxHeight === p.maxHeight
-        ? prev
-        : p,
-    )
-  }, [visible, computePos, content])
-
-  // The position is captured once on show, so it goes stale the moment the
-  // page scrolls. Dismiss on scroll rather than leave a detached box floating -
-  // except when the scroll is the BOX's own: this listener is capture-phase, so
-  // it also sees a tall card being scrolled internally, and dismissing then made
-  // an overflowing card impossible to read past its first screen.
-  useEffect(() => {
-    if (!visible) return
-    const onScroll = (e: Event) => {
-      if (e.target instanceof Node && boxRef.current?.contains(e.target)) return
-      hideNow()
+    const update = () => {
+      const p = computePos()
+      // Legitimate measure-then-position pass: the DOM box is the external
+      // system, and the guard below makes it converge in one step (a second run
+      // computes the same position and returns `prev`, so no cascade).
+      setPos((prev) =>
+        prev && p && prev.top === p.top && prev.left === p.left && prev.side === p.side && prev.maxHeight === p.maxHeight
+          ? prev
+          : p,
+      )
     }
-    window.addEventListener('scroll', onScroll, true)
-    return () => window.removeEventListener('scroll', onScroll, true)
-  }, [visible, hideNow])
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [visible, computePos, content])
 
   useEffect(() => () => hideNow(), [hideNow])
 

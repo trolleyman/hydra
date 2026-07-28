@@ -258,7 +258,10 @@ type AgentResponse struct {
 	AgentType   string           `json:"agent_type"`
 
 	// Archived True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only - they have no live session or worktree.
-	Archived   *bool   `json:"archived,omitempty"`
+	Archived *bool `json:"archived,omitempty"`
+
+	// ArchivedAt Unix timestamp (seconds) when an archived agent was killed or merged; absent for active agents (and for a legacy archived record with no recorded archive time). The archived history list is ordered by this.
+	ArchivedAt *int64  `json:"archived_at,omitempty"`
 	BaseBranch string  `json:"base_branch"`
 	BranchName *string `json:"branch_name"`
 

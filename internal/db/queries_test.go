@@ -3,6 +3,7 @@ package db
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func strptr(s string) *string { return &s }
@@ -187,6 +188,60 @@ func TestHardDeleteAgent(t *testing.T) {
 	// Even an Unscoped archived lookup must not find it.
 	if a, err := store.GetArchivedAgent("gone"); err != nil || a != nil {
 		t.Errorf("expected no archived record, got (%+v, %v)", a, err)
+	}
+}
+
+// The history list is ordered by when a head was archived (killed/merged), not
+// by when it was spawned: a long-lived head closed today belongs above a short
+// one spawned after it and closed last week.
+func TestListArchivedAgentsOrdersByArchiveTime(t *testing.T) {
+	const root = "/tmp/proj"
+	store := newTestStore(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	// created / archived offsets (hours ago) chosen so the two orderings differ.
+	seed := []struct {
+		id                string
+		createdH, closedH int
+	}{
+		{"old-head-closed-today", 300, 1},
+		{"new-head-closed-last-week", 10, 170},
+		{"mid-head-closed-yesterday", 100, 25},
+	}
+	for _, s := range seed {
+		mustArchive(t, store, &Agent{
+			ID: s.id, ProjectPath: root, AgentType: "claude",
+			CreatedAt: now.Add(-time.Duration(s.createdH) * time.Hour),
+		}, "merged")
+		// ArchiveAgent stamps deleted_at with the wall clock, so all three land
+		// in the same instant here - rewrite it to the intended archive time.
+		if err := store.db.Unscoped().Model(&Agent{}).Where("id = ?", s.id).
+			Update("deleted_at", now.Add(-time.Duration(s.closedH)*time.Hour)).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := []string{"old-head-closed-today", "mid-head-closed-yesterday", "new-head-closed-last-week"}
+	var got []string
+	for _, a := range mustList(t, store, root) {
+		got = append(got, a.ID)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d archived rows, got %v", len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("archived order = %v, want %v (newest-archived first)", got, want)
+		}
+	}
+
+	// Paging must follow the same order.
+	page, err := store.ListArchivedAgents(root, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 1 || page[0].ID != want[1] {
+		t.Errorf("limit=1 offset=1 returned %+v, want just %q", page, want[1])
 	}
 }
 

@@ -61,13 +61,32 @@ a11y rule keeps it honest), a **`data-*` hook** added for the purpose
 (`data-branch-selector`, like `data-main-scroll`), then visible text. Never a
 native `title`, never a lucide class.
 
-Note that a failed shot does NOT fail the run, and should not: the generator
-reports `✗` and carries on, because `internal/artifacts` returns before
-`scanOutputs` on a non-zero exit, so failing hard would throw away every shot
-that DID render. The cost is that the failure is quiet - it shows up as a removed
-tile on the diff's right-hand side. A preflight that walks these selectors in the
-e2e suite (which already boots the same simulation server) would catch a stale
-one at test time instead; not built.
+A failed shot does NOT fail the run, and should not: the generator reports `✗`
+and carries on, because `internal/artifacts` returns before `scanOutputs` on a
+non-zero exit, so failing hard would throw away every shot that DID render. The
+cost is that the failure is quiet - it shows up as a removed tile on the diff's
+right-hand side, hours later.
+
+So the shot list is **checked at test time instead**. It lives in
+`web/scripts/screenshots/pages.ts` as pure data, and
+`web/e2e/screenshot-selectors.spec.ts` imports it and walks every
+`click`/`clicks`/`hover` selector against the same simulation server - one test
+per shot, so a failure names the shot and which selector in its chain broke. It
+runs in about a minute, against ~15 for the artifact, and it caught all 12 shots
+that were silently broken when it was written.
+
+Two things it has to honour, because both change *which controls exist* - get
+either wrong and it cries wolf every run:
+
+- the shot's own **`viewport`** (a mobile hamburger has no desktop equivalent);
+- selectors are a **chain** - the second only resolves once the first has been
+  clicked - so it walks them in order rather than checking them against the
+  initial page.
+
+The selector list is imported, never copied: a duplicate in the spec would rot
+exactly the same way, one step removed. Shots whose setup the spec cannot cheaply
+reproduce (a seeded localStorage flag, say) are the known gap - if one of those
+starts failing here, fix the spec rather than loosening the selector.
 
 **Chromium needs the egress proxy handed to it explicitly.** Every browser launch
 here spreads `proxyLaunchOptions()` (`web/scripts/lib/browserProxy.ts`) into its
