@@ -17,19 +17,29 @@ import (
 const authCookieName = "hydra_auth"
 
 // Authenticator gates non-localhost access to the API/WebSocket endpoints with a
-// shared key. Loopback (and unix-socket / in-process) requests are always
-// trusted, so the local web UI and the CLI's daemon socket keep working with no
+// shared key. Loopback (and unix-socket / in-process) requests are trusted by
+// default, so the local web UI and the CLI's daemon socket keep working with no
 // credentials. When the key is empty, auth is disabled entirely and every
 // request passes through - preserving the prior localhost-only behaviour.
+//
+// requireLocal (deploy.toml `require_local_auth`) withdraws the loopback
+// exemption: a browser on this machine then has to present the key too. That
+// matters when something else on the host forwards outside traffic in - a
+// `tailscale serve` / reverse-proxy front-end dials Hydra from 127.0.0.1, so
+// without it every proxied request looks local and is waved through. The unix
+// control socket stays trusted regardless: it is filesystem-permission gated
+// (0600) and is how the CLI and in-sandbox tools talk to the daemon.
 type Authenticator struct {
-	key   string // the configured shared secret ("" disables auth)
-	token string // hex(sha256(key)); the cookie value, so the raw key isn't stored client-side
+	key          string // the configured shared secret ("" disables auth)
+	token        string // hex(sha256(key)); the cookie value, so the raw key isn't stored client-side
+	requireLocal bool   // gate loopback TCP peers as well as remote ones
 }
 
 // NewAuthenticator builds an Authenticator for the given key. An empty key
-// disables authentication.
-func NewAuthenticator(key string) *Authenticator {
-	a := &Authenticator{key: key}
+// disables authentication. requireLocal additionally gates loopback clients (a
+// no-op when the key is empty, since there is then nothing to check).
+func NewAuthenticator(key string, requireLocal bool) *Authenticator {
+	a := &Authenticator{key: key, requireLocal: requireLocal}
 	if key != "" {
 		sum := sha256.Sum256([]byte(key))
 		a.token = hex.EncodeToString(sum[:])
@@ -71,17 +81,19 @@ func isProtected(path string) bool {
 	return false
 }
 
-// isTrustedLocal reports whether a request originates from this machine: a
-// loopback TCP peer, or a unix-socket / in-process connection (empty/abstract
-// RemoteAddr, as used by the daemon control socket and tests). Such requests are
-// always trusted.
-func isTrustedLocal(r *http.Request) bool {
+// isLocalSocket reports whether a request arrived over the daemon's unix control
+// socket or in-process (empty/abstract RemoteAddr, as used by the CLI and
+// tests). Those are always trusted - the socket is 0600, so reaching it already
+// means local filesystem access - and `require_local_auth` does not gate them.
+func isLocalSocket(r *http.Request) bool {
 	addr := r.RemoteAddr
-	if addr == "" || addr == "@" {
-		return true // unix socket / in-process
-	}
-	host := addr
-	if h, _, err := net.SplitHostPort(addr); err == nil {
+	return addr == "" || addr == "@"
+}
+
+// isLoopbackPeer reports whether the request's TCP peer is on this machine.
+func isLoopbackPeer(r *http.Request) bool {
+	host := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
 	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
@@ -89,6 +101,15 @@ func isTrustedLocal(r *http.Request) bool {
 		return ip.IsLoopback()
 	}
 	return host == "localhost"
+}
+
+// trusted reports whether a request may skip the key entirely: the control
+// socket always, and a loopback TCP peer unless require_local_auth is set.
+func (a *Authenticator) trusted(r *http.Request) bool {
+	if isLocalSocket(r) {
+		return true
+	}
+	return !a.requireLocal && isLoopbackPeer(r)
 }
 
 // authenticated reports whether a request carries valid credentials: either the
@@ -119,7 +140,7 @@ func (a *Authenticator) authenticated(r *http.Request) bool {
 // server previews) - the auth cookie is host-scoped, so a browser logged into
 // the main UI passes this check on any port of the same host.
 func (a *Authenticator) Authorized(r *http.Request) bool {
-	return !a.Enabled() || isTrustedLocal(r) || a.authenticated(r)
+	return !a.Enabled() || a.trusted(r) || a.authenticated(r)
 }
 
 // Middleware wraps next, allowing trusted-local and unprotected requests through
@@ -127,15 +148,19 @@ func (a *Authenticator) Authorized(r *http.Request) bool {
 // remote clients. Unauthenticated protected requests get a 401.
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !a.Enabled() || isTrustedLocal(r) || !isProtected(r.URL.Path) || a.authenticated(r) {
+		if !a.Enabled() || a.trusted(r) || !isProtected(r.URL.Path) || a.authenticated(r) {
 			next.ServeHTTP(w, r)
 			return
+		}
+		details := "authentication required for non-localhost access"
+		if a.requireLocal {
+			details = "authentication required (require_local_auth is on, so localhost is gated too)"
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error":   "unauthorized",
-			"details": "authentication required for non-localhost access",
+			"details": details,
 		})
 	})
 }
@@ -150,14 +175,18 @@ func (a *Authenticator) RegisterRoutes(mux *http.ServeMux) {
 }
 
 // handleStatus tells the web client whether it must show a login screen.
-// auth_required is true only when a key is configured AND the request is remote;
-// authenticated reflects whether this request would already be let through.
+// auth_required is true when a key is configured and this request isn't exempt
+// (remote always; localhost too under require_local_auth); authenticated
+// reflects whether this request would already be let through. `remote` lets the
+// login screen explain *why* it is asking - "you are off-machine" reads wrong
+// when the browser is on the same box.
 func (a *Authenticator) handleStatus(w http.ResponseWriter, r *http.Request) {
-	required := a.Enabled() && !isTrustedLocal(r)
-	authed := isTrustedLocal(r) || a.authenticated(r)
+	required := a.Enabled() && !a.trusted(r)
+	authed := a.trusted(r) || a.authenticated(r)
 	writeJSONResponse(w, http.StatusOK, map[string]bool{
 		"auth_required": required,
 		"authenticated": authed,
+		"remote":        !isLocalSocket(r) && !isLoopbackPeer(r),
 	})
 }
 
