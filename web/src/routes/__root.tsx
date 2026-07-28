@@ -10,7 +10,6 @@ import { usePushStatus } from '../lib/usePushStatus'
 import { useSystemStatus } from '../lib/useSystemStatus'
 import { useArchivedAgents } from '../lib/useArchivedAgents'
 import { useGlobalShortcuts } from '../lib/useGlobalShortcuts'
-import { hasUnsavedWork } from '../lib/unsavedChanges'
 import { ProjectSwitcher } from '../components/ProjectSwitcher'
 import { touchProject } from '../lib/projectRecency'
 import { useAgentNotifications } from '../lib/useAgentNotifications'
@@ -459,6 +458,11 @@ function RootLayout() {
   const titleProjectName = currentProject?.name
   const titleAgentName = selectedAgentName
   const onRepository = /\/repository(\/|$)/.test(location.pathname)
+  // The project home - the bare /project/<id>, with no agent, repository browser
+  // or settings below it. The one page a spawn is allowed to navigate away from
+  // (see handleSpawned). "/" never matches, and doesn't need to: it is a
+  // redirect to the last project, not a page you sit on.
+  const onProjectHome = /^\/project\/[^/]+\/?$/.test(location.pathname)
   useEffect(() => {
     const parts = [anyUnread ? '● Hydra' : 'Hydra']
     if (titleProjectName) parts.push(titleProjectName)
@@ -685,19 +689,18 @@ function RootLayout() {
 
   const handleSpawned = useCallback((agent: AgentResponse) => {
     addAgent(agent)
-    // Spawn in the background: only jump to the new agent if the user isn't
-    // already focused on one. When an agent is open, leave it in front so a
-    // spawn from the sidebar doesn't yank them away from their current work -
-    // the new agent just appears in the list. If nothing is selected (e.g. the
-    // project home / repository view), select it so the spawn isn't a no-op.
-    // A page holding an unsaved draft (settings) counts as current work too:
-    // navigating there would trip its blocker, so pressing Spawn would ask the
-    // user to discard edits they never meant to leave behind. The new head
-    // still shows up in the sidebar, so the spawn isn't invisible.
-    if (currentProjectId && !selectedAgentId && !hasUnsavedWork()) {
+    // Spawn in the background: only the project home jumps to the new agent.
+    // That page is the one place with nothing of the user's own on it, so
+    // opening the head there is the obvious next step rather than an
+    // interruption. Every other page - an open agent, the repository browser,
+    // settings - is somewhere they deliberately went, so leave it in front and
+    // let the new head just appear in the sidebar list. (Settings especially:
+    // navigating away from a draft trips its unsaved-changes blocker, so a
+    // spawn would ask them to discard edits they never meant to leave.)
+    if (currentProjectId && onProjectHome) {
       navigate({ to: '/project/$projectId/agent/$agentId', params: { projectId: currentProjectId, agentId: agent.id } })
     }
-  }, [addAgent, currentProjectId, selectedAgentId, navigate])
+  }, [addAgent, currentProjectId, onProjectHome, navigate])
 
   // One shared deselect handler for every sidebar row (clicking the already-open
   // agent toggles back to the project home). Stable so the memo()'d rows don't

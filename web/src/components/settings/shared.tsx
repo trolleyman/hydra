@@ -1,8 +1,54 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Loader2, Save } from 'lucide-react'
 import { readLocal, writeLocal } from '../../lib/storage'
+import { TopBarPortal } from '../TopBarPortal'
+import { Tooltip } from '../Tooltip'
 
 export type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'codex' | 'defaults'
+
+// The settings pages' share of the global top bar, portalled into __root's slot
+// the way the agent page puts its toolbar there. The bar already renders the
+// "Settings" crumb, so a page-level header of its own would just say "Settings"
+// twice - this is the whole page chrome, and it is only the action.
+//
+// The button doubles as the unsaved-changes indicator: filled blue while the
+// page holds a draft, quiet otherwise. Without that, the navigation blocker's
+// "discard them?" confirm was the first and only hint that the page considered
+// itself dirty.
+export function SettingsSaveAction({
+  dirty,
+  saving,
+  onSave,
+}: {
+  dirty: boolean
+  saving: boolean
+  onSave: () => void
+}) {
+  return (
+    <TopBarPortal>
+      {/* ml-auto: the slot is a flex row shared with the crumb, so the action
+          takes the far end of the bar. */}
+      <div className="ml-auto shrink-0 flex items-center gap-1.5">
+        <Tooltip content={dirty ? 'Save settings - you have unsaved changes' : 'Save settings'} side="bottom">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving}
+            aria-label="Save settings"
+            className={`shrink-0 h-8 inline-flex items-center justify-center gap-1.5 px-3 rounded-lg text-[13px] font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+              dirty
+                ? 'bg-blue-600 hover:bg-blue-500 text-white border border-blue-700/30 shadow-sm'
+                : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+          >
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            <span className="whitespace-nowrap optical-center">{saving ? 'Saving...' : 'Save'}</span>
+          </button>
+        </Tooltip>
+      </div>
+    </TopBarPortal>
+  )
+}
 
 // A labelled block at the top of settings: a Title-Case heading, an optional
 // one-line description, then the control(s). Used for Theme / Scope / Agent.

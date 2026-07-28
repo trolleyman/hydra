@@ -1,24 +1,20 @@
-import { createFileRoute, useParams, useCanGoBack, useRouter } from '@tanstack/react-router'
+import { createFileRoute, useParams } from '@tanstack/react-router'
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../../stores/apiClient'
 import { formatError } from '../../api/format_error'
 import { refreshReviewConfig, useProjectStore } from '../../stores/projectStore'
 import type { ConfigResponse, AgentResponse } from '../../api'
-import { Save, Loader2 } from 'lucide-react'
 import { useDialogStore } from '../../stores/dialogStore'
 import { useToastStore } from '../../stores/toastStore'
 import {
   type SettingsSection,
   SettingsContent,
-  FloatingSaveBar,
 } from '../../components/SettingsComponents'
 import { useUnsavedChangesGuard } from '../../lib/unsavedChanges'
-import { PageTopBar } from '../../components/PageTopBar'
-import { Tooltip } from '../../components/Tooltip'
 import { ProjectIconSection } from '../../components/settings/ProjectIconSection'
 import { RemoveProjectSection } from '../../components/settings/RemoveProjectSection'
 import { BrowserSections } from '../../components/settings/BrowserSections'
-import { ScopeTabs } from '../../components/settings/shared'
+import { ScopeTabs, SettingsSaveAction } from '../../components/settings/shared'
 
 export const Route = createFileRoute('/project/$projectId/settings')({
   component: ProjectSettingsPage,
@@ -38,8 +34,6 @@ const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
 
 function ProjectSettingsPage() {
   const { projectId } = useParams({ from: '/project/$projectId/settings' })
-  const router = useRouter()
-  const canGoBack = useCanGoBack()
   const { projects } = useProjectStore()
   // The visible tab. `scope` lags behind it as the last *config* tab, so the
   // fetched config (and any unsaved draft) survives a detour via Browser.
@@ -146,26 +140,10 @@ function ProjectSettingsPage() {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      {/* Single "Settings" header bar with a small save button (always shown,
-          never grayed - except on the Browser tab, whose preferences apply
-          instantly). */}
-      <PageTopBar
-        title="Settings"
-        onBack={canGoBack ? () => router.history.back() : undefined}
-        right={
-          tab !== 'browser' ? (
-            <Tooltip content="Save settings">
-              <button
-                onClick={handleSave}
-                aria-label="Save settings"
-                className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors cursor-pointer"
-              >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              </button>
-            </Tooltip>
-          ) : undefined
-        }
-      />
+      {/* Save lives in the global top bar beside its "Settings" crumb - the page
+          has no header of its own. Nothing to save on the Browser tab, whose
+          preferences apply instantly. */}
+      {tab !== 'browser' && <SettingsSaveAction dirty={hasUnsavedChanges} saving={saving} onSave={handleSave} />}
       <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
           {/* Scope tabs: which settings store the page edits. Kept outside the
@@ -211,9 +189,6 @@ function ProjectSettingsPage() {
           )}
         </div>
       </div>
-      {/* The only sign the page is holding a draft - without it the navigation
-          blocker's "discard them?" confirm arrives out of nowhere. */}
-      <FloatingSaveBar visible={tab !== 'browser' && hasUnsavedChanges} saving={saving} onSave={handleSave} />
     </div>
   )
 }

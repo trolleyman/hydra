@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import type { AgentResponse, ConfigResponse, ProjectInfo } from '../../api'
-import { X, Terminal, AlertCircle, Save } from 'lucide-react'
+import { X, Terminal } from 'lucide-react'
 import { isTypingTarget } from '../../lib/shortcuts'
 import { AgentTerminal } from '../AgentTerminal'
 import { AgentTypeIcon, type AgentTypeIconName } from '../AgentTypeIcon'
@@ -46,38 +46,6 @@ function AgentSelector({ value, onChange }: { value: SettingsSection; onChange: 
           </button>
         )
       })}
-    </div>
-  )
-}
-
-// ── FloatingSaveBar ───────────────────────────────────────────────────────────
-// A bar pinned to the bottom of the viewport that appears whenever there are
-// unsaved changes, so the user can save from anywhere on a long settings page
-// without scrolling back to the top button.
-export function FloatingSaveBar({
-  visible,
-  saving,
-  onSave,
-}: {
-  visible: boolean
-  saving: boolean
-  onSave: () => void
-}) {
-  if (!visible) return null
-  return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 pl-4 pr-2 py-2 rounded-2xl bg-white/95 dark:bg-gray-800/95 backdrop-blur shadow-2xl border border-orange-200 dark:border-orange-800 animate-in fade-in slide-in-from-bottom-2 duration-200">
-      <div className="flex items-center gap-1.5 text-orange-600 dark:text-orange-400 text-sm font-semibold">
-        <AlertCircle className="w-4 h-4" />
-        Unsaved changes
-      </div>
-      <button
-        onClick={onSave}
-        disabled={saving}
-        className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold bg-blue-600 text-white hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/25 active:scale-95 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-      >
-        <Save className="w-4 h-4" />
-        {saving ? 'Saving...' : 'Save'}
-      </button>
     </div>
   )
 }

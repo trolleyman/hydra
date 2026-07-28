@@ -1,22 +1,14 @@
 import { useEffect } from 'react'
 import { useBlocker } from '@tanstack/react-router'
 
-// A page holding an unsaved draft (both settings pages) guards navigation with a
-// confirm and registers itself here while it is dirty, so code that navigates on
-// the user's behalf - rather than because they clicked a link - can check first
-// and stay put instead of springing a "discard your changes?" prompt on them.
+// useUnsavedChangesGuard wires up what a page holding an unsaved draft needs -
+// the in-app navigation blocker and the browser's tab-close warning - so both
+// settings pages state it once instead of repeating the pair. Pass whether the
+// page currently has unsaved changes.
 //
-// A plain module-level count, not a store: nothing re-renders on it, and the one
-// reader (spawn) samples it once at click time.
-let dirtyPages = 0
-
-export function hasUnsavedWork(): boolean {
-  return dirtyPages > 0
-}
-
-// useUnsavedChangesGuard wires up the three things a page with a draft needs:
-// the in-app navigation blocker, the browser's tab-close warning, and the
-// registration above. Pass whether the page currently has unsaved changes.
+// Only user-driven navigation should ever reach this: code that navigates on
+// the user's behalf (the sidebar spawn) stays put unless it is on a page with
+// nothing to lose, so the confirm never arrives as a surprise.
 export function useUnsavedChangesGuard(hasUnsavedChanges: boolean) {
   useBlocker({
     shouldBlockFn: () => {
@@ -30,12 +22,8 @@ export function useUnsavedChangesGuard(hasUnsavedChanges: boolean) {
 
   useEffect(() => {
     if (!hasUnsavedChanges) return
-    dirtyPages++
     const handleBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
     window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => {
-      dirtyPages--
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-    }
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [hasUnsavedChanges])
 }
