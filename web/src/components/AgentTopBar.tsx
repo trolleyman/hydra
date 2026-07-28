@@ -527,8 +527,8 @@ export function AgentTopBarContent({
 
   const editing = rename?.editing ?? false
   // What the title box currently shows: the live draft while editing, else the
-  // saved title. Drives both the auto-sizing mirror and AdaptiveActions' width
-  // reservation, so the toolbar refits as the draft grows or shrinks.
+  // saved title. AdaptiveActions still measures the SAVED title, so the toolbar
+  // doesn't re-collapse on every keystroke of a rename.
   const displayed = editing && rename ? rename.draft : title
 
   // When editing is triggered without a click (F2 / the menu's Rename item),
@@ -577,66 +577,54 @@ export function AgentTopBarContent({
           row via its own parentElement, so the row needs no ref. */}
       <div className="flex items-center gap-1 min-w-0 flex-1">
         {rename ? (
-          // A single always-mounted input (read-only until editing) so clicking
-          // places the caret where you click and the text never shifts between
-          // the display and edit states. The bottom border is always reserved
-          // (transparent → blue) to avoid any reflow.
+          // A single always-mounted input (read-only until editing) so the box
+          // keeps its full width, clicking places the caret where you click, and
+          // the text never shifts between the display and edit states. The bottom
+          // border is always reserved (transparent → blue) to avoid any reflow.
           //
-          // The box is sized to the TEXT, not the row: an invisible mirror span
-          // shares one grid cell with the input, so the grid track tracks the
-          // draft's width. Both cell items are overflow-hidden, which zeroes
-          // their automatic minimum size and lets the track shrink (rather than
-          // force the row wider) when the title is longer than the space left.
-          <Tooltip content={editing ? undefined : 'Rename'} side="bottom" className="min-w-0 max-w-full">
-            {/* While editing, keep a floor under the box so clearing the field
-                doesn't collapse it to nothing; otherwise it is free to shrink. */}
-            <span className={`grid items-center flex-1 ${editing ? 'min-w-[7rem]' : 'min-w-0'}`}>
-              <span
-                aria-hidden
-                className="col-start-1 row-start-1 invisible overflow-hidden whitespace-pre border-b border-transparent pl-1 pr-1.5 py-1 text-sm font-semibold"
-              >
-                {displayed || ' '}
-              </span>
-              <input
-                ref={inputRef}
-                type="text"
-                // An input's intrinsic width is `size` characters (20 by
-                // default), which would floor the grid track at ~200px and stop
-                // the box tracking short titles. 1 hands sizing to the mirror.
-                size={1}
-                aria-label="Agent title"
-                value={displayed}
-                readOnly={!editing}
-                disabled={rename.saving}
-                onChange={(e) => rename.onChange(e.target.value)}
-                onFocus={() => {
-                  if (!editing) rename.onStart()
-                }}
-                onBlur={() => {
-                  if (editing && !rename.saving) rename.onSave()
-                }}
-                onKeyDown={(e) => {
-                  if (!editing) return
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    rename.onSave()
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault()
-                    rename.onCancel()
-                  }
-                }}
-                className={`col-start-1 row-start-1 w-full min-w-0 overflow-hidden text-sm font-semibold bg-transparent border-b px-1 py-1 rounded focus:outline-none text-gray-800 dark:text-gray-100 transition-colors disabled:opacity-50 ${
-                  editing
-                    ? 'border-blue-400'
-                    : 'border-transparent cursor-text hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`}
-              />
-            </span>
+          // flex-1: the box claims every px the row has left once the toolbar
+          // (and, while editing, the Generate button) have taken theirs - both of
+          // which are shrink-0, so growing here can never squeeze them out.
+          // size={1} keeps the input's intrinsic 20-character width out of the
+          // row's min-content, so a narrow viewport shrinks the box rather than
+          // overflowing the bar.
+          <Tooltip content={editing ? undefined : 'Rename'} side="bottom" className="min-w-0 flex-1">
+            <input
+              ref={inputRef}
+              type="text"
+              size={1}
+              aria-label="Agent title"
+              value={displayed}
+              readOnly={!editing}
+              disabled={rename.saving}
+              onChange={(e) => rename.onChange(e.target.value)}
+              onFocus={() => {
+                if (!editing) rename.onStart()
+              }}
+              onBlur={() => {
+                if (editing && !rename.saving) rename.onSave()
+              }}
+              onKeyDown={(e) => {
+                if (!editing) return
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  rename.onSave()
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  rename.onCancel()
+                }
+              }}
+              className={`min-w-0 flex-1 text-sm font-semibold bg-transparent border-b px-1 py-1 rounded focus:outline-none text-gray-800 dark:text-gray-100 transition-colors disabled:opacity-50 ${
+                editing
+                  ? 'border-blue-400'
+                  : 'border-transparent cursor-text hover:bg-gray-100 dark:hover:bg-gray-700'
+              }`}
+            />
           </Tooltip>
         ) : (
           <span
             title={title}
-            className="min-w-0 truncate text-sm font-semibold text-gray-800 dark:text-gray-100 px-1 py-1"
+            className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-gray-100 px-1 py-1"
           >
             {title}
           </span>
@@ -665,13 +653,8 @@ export function AgentTopBarContent({
           </div>
         )}
 
-        {/* Slack between the content-width title box and the right-aligned toolbar.
-            flex-basis 0 means it only ever grows, so a tight row shrinks the title
-            box (which can ellipsize) rather than this. */}
-        <div className="flex-1 min-w-0" />
-
         {actions.length > 0 && (
-          <AdaptiveActions actions={actions} title={displayed} showShortcut={showShortcut} reserve={genReserve} />
+          <AdaptiveActions actions={actions} title={title} showShortcut={showShortcut} reserve={genReserve} />
         )}
       </div>
 
