@@ -113,7 +113,47 @@ describe('Codex bash display', () => {
   })
 
   it('does not mistake a subshell or substitution for a case pattern', () => {
-    expect(formatBashForDisplay('(cd web && echo $(date)); echo done')).toBe('(cd web &&\necho $(date))\necho done')
+    expect(formatBashForDisplay('(cd web && echo $(date)); echo done')).toBe('(cd web && echo $(date))\necho done')
+  })
+
+  it.each([
+    // A subshell is one step: its `;`/`&&` join, and the `)` is never orphaned.
+    ['(fuser -k 21765/tcp >/dev/null 2>&1; true)', '(fuser -k 21765/tcp >/dev/null 2>&1; true)'],
+    ['(fuser -k 21765/tcp; true) && sleep 1', '(fuser -k 21765/tcp; true) &&\nsleep 1'],
+    ['echo a && (cd web; bun test) && echo b', 'echo a &&\n(cd web; bun test) &&\necho b'],
+    // Blocks inside one stay inline too, rather than half-formatted.
+    ['(if [ -f x ]; then echo a; fi) && echo b', '(if [ -f x ]; then echo a; fi) &&\necho b'],
+  ])('keeps a subshell on one line in %j', (command, expected) => {
+    expect(formatBashForDisplay(command)).toBe(expected)
+  })
+
+  it('splits the chain that opens a heredoc but leaves the body alone', () => {
+    const command = "cd web && cat > scripts/probe.ts <<'EOF' && node scripts/probe.ts\nconst x = 1;\nif (x) { go(); }\nEOF"
+    expect(formatBashForDisplay(command)).toBe(
+      "cd web &&\ncat > scripts/probe.ts <<'EOF' && node scripts/probe.ts\nconst x = 1;\nif (x) { go(); }\nEOF",
+    )
+  })
+
+  it('leaves a heredoc body untouched however shell-like it looks', () => {
+    const command = 'cat <<EOF\ndone; fi\nfor a in 1; do\nEOF\necho after'
+    expect(formatBashForDisplay(command)).toBe('cat <<EOF\ndone; fi\nfor a in 1; do\nEOF\necho after')
+  })
+
+  it('formats the shell that follows a heredoc', () => {
+    expect(formatBashForDisplay('cat <<-EOF\n\tbody\n\tEOF\nnode f.ts && echo ok')).toBe(
+      'cat <<-EOF\n\tbody\n\tEOF\nnode f.ts &&\necho ok',
+    )
+  })
+
+  it('queues two heredocs opened on one line', () => {
+    const command = 'cat <<A <<B && echo ok\nfirst; done\nA\nsecond; done\nB'
+    expect(formatBashForDisplay(command)).toBe(command)
+  })
+
+  it('keeps the line breaks an author already wrote', () => {
+    expect(formatBashForDisplay('for f in *; do\n  echo $f && wc -l $f\ndone')).toBe(
+      'for f in *; do\n  echo $f &&\n    wc -l $f\ndone',
+    )
   })
 
   it.each([

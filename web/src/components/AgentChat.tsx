@@ -1951,12 +1951,16 @@ function GutterCodePanel({ nums, code, lang }: { nums: string[]; code: string[];
   const lines = useMemo(() => highlightLines(code.join('\n'), lang || 'plaintext'), [code, lang])
   return (
     <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
-      <div className="grid grid-cols-[auto_1fr] text-[11px] leading-4 font-mono">
+      {/* data-copy-code / data-copy-line: the rows are grid cells, not block
+          elements, so nothing in this panel tells a copy where the lines end -
+          the chat's copy-as-markdown handler would hand over the whole script
+          on one line. See lib/copyMarkdown. */}
+      <div data-copy-code className="grid grid-cols-[auto_1fr] text-[11px] leading-4 font-mono">
         {nums.map((n, i) => (
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
             <span className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]">{n}</span>
-            <span className="min-w-0 whitespace-pre-wrap break-words px-2.5 text-stone-800 dark:text-stone-200" dangerouslySetInnerHTML={{ __html: lines[i] ?? '' }} />
+            <span data-copy-line className="min-w-0 whitespace-pre-wrap break-words px-2.5 text-stone-800 dark:text-stone-200" dangerouslySetInnerHTML={{ __html: lines[i] ?? '' }} />
           </Fragment>
         ))}
       </div>
@@ -2521,7 +2525,12 @@ const ToolCard = memo(function ToolCard({
   const isHostRun = hostRunScript !== null
   // The host command runs in the head's worktree whatever the agent's own cwd
   // was, so a `cd` preamble would be a lie - drop it for a host run.
-  const bashSource = hostRunScript ?? command
+  //
+  // Worktree paths are trimmed BEFORE formatting, not just on the way to the
+  // panel: agents habitually open a script with `cd <the worktree>`, which trims
+  // to the no-op `cd .` - and only the formatter knows that a no-op cd (and the
+  // `&&` chaining it) is noise worth dropping.
+  const bashSource = trimWorktreePaths(hostRunScript ?? command, worktree)
   const bashIndent = useChatBashIndentStore((s) => s.indent)
   const displayedCommand = isBash ? formatBashForDisplay(bashSource, isHostRun || commandCwd === worktree ? '' : commandCwd, bashIndent) : ''
   const executableCommand = isBash ? formatBashForDisplay(bashSource, '', bashIndent) : ''
