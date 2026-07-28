@@ -5,10 +5,12 @@ bound the blast radius of an agent's git activity - from "accidentally commits t
 the wrong branch" up to "a rogue/confused agent physically cannot damage the real
 repo" - while keeping the normal edit -> commit loop working.
 
-Two modes ship: **`off`** (default, today's behaviour) and **`readonly`** (a hard
-anti-rogue boundary). Both are opt-in per head, so `readonly` can be dogfooded one
-head at a time. Two earlier modes - `refs` and `clone` - were built and then
-removed; see [History](#history-removed-modes-refs-and-clone) for why.
+Two modes ship: **`readonly`** (the default - a hard anti-rogue boundary) and
+**`off`** (the historical behaviour: a writable `.git` guarded only by the gate).
+Either can be chosen per head, so a head that needs native in-sandbox git can drop
+back to `off` one head at a time. Two earlier modes - `refs` and `clone` - were
+built and then removed; see
+[History](#history-removed-modes-refs-and-clone) for why.
 
 ## Background: why this is not a one-liner
 
@@ -42,14 +44,15 @@ Two empirical facts shape the design (both verified against real `git`):
 
 | Mode | What is read-only in the sandbox | Stops | Agent loses | Commit path |
 |------|----------------------------------|-------|-------------|-------------|
-| `off` (default) | nothing | (heuristic gate only) | nothing | in-sandbox (raw `git commit` gate-denied; `mcp__hydra__git_commit` commits in-sandbox) |
-| `readonly` | the whole common dir (`refs/` + `objects/` + config + ...) | wrong-branch commits **and** rogue destruction of the object store | native in-sandbox `git add`/`stash`/history-editing | host-mediated |
+| `off` | nothing | (heuristic gate only) | nothing | in-sandbox (raw `git commit` gate-denied; `mcp__hydra__git_commit` commits in-sandbox) |
+| `readonly` (default) | the whole common dir (`refs/` + `objects/` + config + ...) | wrong-branch commits **and** rogue destruction of the object store | native in-sandbox `git add`/`stash`/history-editing | host-mediated |
 
 Read it as: **`off` = heuristic guard (the gate), `readonly` = hard OS boundary.**
 
 ### `off`
 
-Today's behaviour. The whole common dir is writable; the only guardrails are the
+The historical behaviour, still available per head. The whole common dir is
+writable; the only guardrails are the
 decision gate (raw `git commit` denied, `git push` denied) and the
 `mcp__hydra__git_commit` tool, which commits in-sandbox onto the head's own branch.
 A determined or buggy agent can still reach other branches / the object store. This
@@ -139,7 +142,10 @@ bypasses just hit the OS wall (readonly is the boundary).
 
 `readonly` blocks *all* in-sandbox `.git` writes, including config, the index,
 `modules/`, and `lfs/`. These three tools write `.git` as part of setup that the
-**agent** triggers in-sandbox, so they hit the read-only mount:
+**agent** triggers in-sandbox, so they hit the read-only mount. Since `readonly`
+is the default, a repo that leans on any of them meets this on the first spawn -
+either route the setup through host-run (below) or set
+`[<agent>.policy] git_isolation = "off"` for that project:
 
 - **husky** - the `prepare` script (`"prepare": "husky"`) runs during dep install and
   writes `core.hooksPath` into `.git/config`. Usually skippable: an agent rarely
@@ -169,20 +175,25 @@ dangerous.
 
 ## Config + surface
 
-- **Per-agent config:** `[<agent>.policy] git_isolation = "off" | "readonly"`
-  (nil -> `off`). Resolved per agent type like other policy fields
+- **Per-agent config:** `[<agent>.policy] git_isolation = "readonly" | "off"`
+  (nil -> `readonly`). Resolved per agent type like other policy fields
   (`config.PolicyConfig`, `ResolveGitIsolation`), normalized/validated with a
   `sandbox.GitIsolationMode` enum mirroring `NetworkMode`. Unknown values (including
-  the removed `refs`/`clone`) fall back to `off`.
+  the removed `refs`/`clone`) fall back to the default, `readonly` - the protective
+  posture, not the permissive one. An agent type without the hydra git tools
+  (copilot, bash) is downgraded to `off` at spawn (`heads.resolveGitIsolation`), so
+  the default never leaves a head unable to commit.
 - **Per-spawn override:** `SpawnAgentRequest.git_isolation` (openapi) ->
   `heads.SpawnHeadOptions.GitIsolation` -> persisted on `db.Agent` -> drives the
   sandbox binds. Falls back to the config default when omitted.
 - **Sandbox:** `sandbox.Options.GitIsolation` selects the bind: `off` = writable
   common dir (`addRWDir`); `readonly` = `--ro-bind` the whole common dir (Linux) /
   omit the write grant (darwin Seatbelt).
-- **Web:** a git-isolation dropdown on the spawn box (`SpawnForm.tsx`'s
-  `SpawnOptionsMenu`), grouped with the chat-mode and base-branch controls under a
-  kebab/overflow menu. The per-agent config default can also be set through
+- **Web:** a git-isolation dropdown at the bottom of the spawn box's "Spawn
+  options" popover (`SpawnForm.tsx` -> `SettingsPopover`'s `SettingsSelect`),
+  below the chat-mode toggle and the base-branch selector. A dropdown rather than
+  an inline list because the options carry two-line explanations that crowded out
+  the other controls. The per-agent config default can also be set through
   `.hydra/config.toml` (`[<agent>.policy] git_isolation`) directly.
 
 ## Tracking an agent's branch from the main repo
@@ -240,7 +251,9 @@ collision.)
 
 - **Settings selector:** an off/readonly control in project Settings (Sandbox
   Policy card, under Network Egress) for the per-agent config default, with an
-  explanation tooltip. `SpawnForm.tsx`'s `SegmentedControl`.
+  explanation tooltip. `ConfigForm.tsx`'s `SegmentedControl`. `readonly` being the
+  default, it is `off` that is written explicitly - selecting readonly clears the
+  key to keep the emitted config minimal.
 - **Header indicator:** a lock badge to the right of the network-sandbox shield on
   the agent page (`AgentDetail.tsx` `GitIsolationBadge`), shown for `readonly` heads
   with a card tooltip. The effective mode is on the agent API response

@@ -11,7 +11,7 @@ export type PolicyConfig = {
      */
     gate_enabled?: boolean | null;
     /**
-     * How much of the repo's shared .git the head may write: "off" (default, writable) or "readonly" (whole .git bound read-only, commits host-mediated). Unset inherits the default (off). See docs/git-isolation.md.
+     * How much of the repo's shared .git the head may write: "readonly" (default, whole .git bound read-only, commits host-mediated) or "off" (writable). Unset inherits the default (readonly). See docs/git-isolation.md.
      */
     git_isolation?: string | null;
     /**
