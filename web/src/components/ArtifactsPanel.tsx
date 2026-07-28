@@ -185,11 +185,18 @@ function FileTile({ file, gallery, index }: { file: ArtifactFile; gallery?: Ligh
   const isPdf = isPdfArtifact(file.name)
   const Icon = isPdf ? FileText : FileArchive
   const open = url && gallery && index != null
-    ? (e: React.MouseEvent) => openLightbox(gallery, index, e.currentTarget)
+    ? (e: React.SyntheticEvent<HTMLDivElement>) => openLightbox(gallery, index, e.currentTarget)
     : undefined
   return (
+    // role/tabIndex rather than a <button>: the save links live INSIDE the card,
+    // and interactive content nested in a button is invalid (and unreachable by
+    // keyboard). Same shape AttachmentChips uses for the same reason.
     <div
       onClick={open}
+      onKeyDown={open ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e) } } : undefined}
+      role={open ? 'button' : undefined}
+      tabIndex={open ? 0 : undefined}
+      aria-label={open ? `View ${file.name}` : undefined}
       className={`flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 ${open ? 'cursor-zoom-in hover:bg-gray-50 dark:hover:bg-gray-800' : ''}`}
     >
       <Icon className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />

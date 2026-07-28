@@ -43,7 +43,7 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
   // Open this tile's file in the lightbox. The index is found by url rather than
   // passed down because the gallery is built once for the whole grid and every cell
   // shares it; a file that didn't make the gallery (no url) has no tile to click.
-  const open = (e: React.MouseEvent) => {
+  const open = (e: React.SyntheticEvent<Element>) => {
     const i = gallery.findIndex((g) => g.url === url)
     openLightbox(gallery, i >= 0 ? i : 0, e.currentTarget)
   }
@@ -73,8 +73,14 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
           // The card opens the lightbox like every other tile (the PDF renders in
           // the browser's viewer there; a package gets a card with its download
           // link), and the save button on the right downloads it directly.
+          // role/tabIndex rather than a <button>: the save link lives INSIDE the
+          // card, and interactive content nested in a button is invalid.
           <div
             onClick={open}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e) } }}
+            role="button"
+            tabIndex={0}
+            aria-label={`View ${file.name}`}
             className="w-full flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 text-gray-600 dark:text-gray-300 cursor-zoom-in hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             <CardIcon className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
