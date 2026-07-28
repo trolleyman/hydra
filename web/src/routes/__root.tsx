@@ -652,7 +652,17 @@ function RootLayout() {
   // user reviews and trusts the config *before* we register it. Trust is decided
   // here, once, at add time; there is no persisted trust state, so opening an
   // already-added project never re-prompts. Declining leaves nothing registered.
-  const handleAddProject = useCallback(async (path: string) => {
+  const handleAddProject = useCallback(async (typedPath: string) => {
+    // Resolve first, so everything from here on - the trust prompt, the
+    // create/init dialogs, the error messages - names the absolute path the
+    // server will actually use, not the "~/code/x" shorthand that was typed.
+    // Only the server can do this (it knows its own home directory). If the
+    // resolve call itself fails, carry on with what was typed and let
+    // registerProject produce the real error.
+    let path = typedPath.trim()
+    try {
+      path = (await api.default.resolvePath(path)).path
+    } catch { /* fall back to the typed path */ }
     const name = path.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || path
     const trusted = await new Promise<boolean>((resolve) => {
       setTrustPrompt({

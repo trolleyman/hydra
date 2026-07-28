@@ -33,6 +33,55 @@ func NormalizePath(path string) (string, error) {
 	return filepath.ToSlash(final), nil
 }
 
+// ResolveUserPath turns a path a human typed into an absolute one, the way a
+// shell would: "~" and "~/x" expand to the home directory. A relative path
+// ("code/hydra", "./hydra") resolves against HOME too, NOT against the process
+// working directory - the person typing it is in a browser and has no idea what
+// the daemon's cwd is, whereas home is the one directory they can reason about.
+//
+// "~user/..." (another user's home) is not supported and is returned unchanged,
+// so the caller's "no such directory" error names what was typed instead of a
+// nonsense $HOME/~user path.
+func ResolveUserPath(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	return resolveUserPath(p, home)
+}
+
+// resolveUserPath is ResolveUserPath with an explicit home, split out for
+// testing. An empty home falls back to filepath.Abs (process cwd) - the best
+// that can be done when the OS won't say where home is.
+func resolveUserPath(p, home string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	if home != "" {
+		if p == "~" {
+			return filepath.Clean(home)
+		}
+		if strings.HasPrefix(p, "~/") || (os.PathSeparator == '\\' && strings.HasPrefix(p, `~\`)) {
+			return filepath.Clean(filepath.Join(home, p[2:]))
+		}
+	}
+	// "~user" or a bare "~" with no home: leave it alone rather than inventing a path.
+	if strings.HasPrefix(p, "~") {
+		return p
+	}
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	if home != "" {
+		return filepath.Clean(filepath.Join(home, p))
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return filepath.Clean(p)
+}
+
 // ComparePaths compares two paths using platform-appropriate rules.
 // On Windows it is case-insensitive; on other platforms it is case-sensitive.
 func ComparePaths(p1, p2 string) bool {
