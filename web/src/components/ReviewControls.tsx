@@ -473,8 +473,13 @@ export function CreateMRDialog({
           )}
           <div className="flex justify-end gap-2">
             <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
+            {/* Blue, not emerald: this dialog IS the Create MR button, which is
+                blue in the top bar - and its own header tile is blue for the same
+                reason. Emerald is the merge identity (the Merge button, the merge
+                dialog, the merged toast), so a green confirm here read as if it
+                were about to merge something. */}
             <DialogConfirmButton
-              tone="emerald"
+              tone="blue"
               onClick={() => onConfirm({ downstream_branch: branch.trim(), remote, target_branch: target.trim(), title: title.trim(), description, draft })}
               disabled={submitting || !branch.trim() || !target.trim()}
             >
