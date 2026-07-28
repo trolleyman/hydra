@@ -153,7 +153,10 @@ export const Dialog: React.FC = () => {
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-[#232b3a]">
             <div className="flex items-center gap-3">
               {getIcon()}
-              <h3 id="dialog-title" className="text-lg font-semibold text-gray-900 dark:text-[#eef1f6]">
+              {/* .optical-center: this header centres the title against the icon
+                  tile, and items-center centres the title's LINE BOX - descender
+                  room the words mostly don't use - so it read ~1px high. */}
+              <h3 id="dialog-title" className="optical-center text-lg font-semibold text-gray-900 dark:text-[#eef1f6]">
                 {withBranchPills(title)}
               </h3>
             </div>
@@ -509,7 +512,8 @@ function UpdateBasePanel({
         <DialogIconTile tone="blue">
           <FolderSync className="w-5 h-5" />
         </DialogIconTile>
-        <h3 id="dialog-title" className="flex-1 text-lg font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
+        {/* .optical-center - see the plain dialog header above. */}
+        <h3 id="dialog-title" className="optical-center flex-1 text-lg font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
           {withBranchPills(title)}
         </h3>
         <IconButton onClick={onCancel} aria-label="Close">
