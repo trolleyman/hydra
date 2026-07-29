@@ -1,7 +1,7 @@
 import { createRootRoute, Link, Outlet, useNavigate, useParams, useLocation } from '@tanstack/react-router'
-import { useEffect, useRef, useState, useCallback, memo, type WheelEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback, memo, type WheelEvent, type RefObject } from 'react'
 import { api } from '../stores/apiClient'
-import { ensureReviewConfig, useProjectStore } from '../stores/projectStore'
+import { ensureReviewConfig, useProjectStore, visibleProjects } from '../stores/projectStore'
 import { useAgentStore } from '../stores/agentStore'
 import { usePageActive } from '../lib/usePageActive'
 import { useEventStream } from '../lib/useEventStream'
@@ -571,8 +571,15 @@ function RootLayout() {
   // Ctrl+` alt-tab project switcher - all merged into one hook. The switcher state
   // (projects in last-visited order + the highlighted index) is rendered by the
   // dedicated ProjectSwitcher overlay below.
+  // Hidden projects are left out of the switcher, except the one you're in (see
+  // visibleProjects) - a project you told Hydra to keep out of the list has no
+  // business turning up in the middle of an alt-tab cycle.
+  const switcherProjects = useMemo(
+    () => visibleProjects(projects, currentProjectId),
+    [projects, currentProjectId],
+  )
   const { state: switcherState, setIndex: switcherSetIndex, commit: switcherCommit } =
-    useGlobalShortcuts({ projects, currentProjectId, selectProject })
+    useGlobalShortcuts({ projects: switcherProjects, currentProjectId, selectProject })
 
   async function handleRestart() {
     setRestarting(true)

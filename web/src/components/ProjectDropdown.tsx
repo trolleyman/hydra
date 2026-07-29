@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, ChevronUp, FolderOpen, GripVertical, Pencil, Plus, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, Eye, EyeOff, FolderOpen, GripVertical, Pencil, Plus, X } from 'lucide-react'
 import type { ProjectInfo, ResolvedPathResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
@@ -9,7 +9,7 @@ import { ProjectIcon } from '../lib/projectIcon'
 import { api } from '../stores/apiClient'
 import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
-import { reorderProjects, useProjectStore } from '../stores/projectStore'
+import { expandOrder, reorderProjects, setProjectHidden, useProjectStore, visibleProjects } from '../stores/projectStore'
 import { ProjectAgentCounts, ProjectAttentionDot } from './ProjectAgentCounts'
 import { ServiceHealthWarning } from './ServiceHealthWarning'
 import { pillText } from '../lib/branchPills'
@@ -133,20 +133,26 @@ function ProjectRow({
   editing,
   onClick,
   reorder,
+  onToggleHidden,
   onRemove,
 }: {
   project: ProjectInfo
   selected: boolean
-  // Edit mode: reorder handles are pinned instead of hover-only, removal is
-  // offered, and the row no longer switches project when clicked.
+  // Edit mode: reorder handles are pinned instead of hover-only, hiding and
+  // removal are offered, and the row no longer switches project when clicked.
   editing: boolean
   onClick: () => void
   reorder?: RowReorder
+  onToggleHidden?: () => void
   onRemove?: () => void
 }) {
   // Handles belong to edit mode: outside it the row still drags (a mouse can
   // always just pick a project up), but the list stays a plain list.
   const swapIcon = reorder != null && editing
+  // A hidden project is only listed here (edit mode) and, still un-dimmed, on
+  // the picker of the project you are actually in - so the fade means "this one
+  // is not in the list", not "this one is disabled".
+  const dim = editing && p.hidden ? 'opacity-45' : ''
   return (
     <div
       // mx-1 + rounded: the highlight/hover is an inset pill, so the selected
@@ -162,7 +168,7 @@ function ProjectRow({
     >
       {/* Icon slot, fixed at the icon's own size so swapping the grip in and out
           of it never moves anything. */}
-      <span className="relative shrink-0 mt-0.5 inline-flex items-center justify-center w-3.5 h-3.5 text-gray-400">
+      <span className={`relative shrink-0 mt-0.5 inline-flex items-center justify-center w-3.5 h-3.5 text-gray-400 ${dim}`}>
         <ProjectIcon
           icon={p.icon}
           projectId={p.id}
@@ -171,7 +177,7 @@ function ProjectRow({
         />
         {swapIcon && <ReorderControl project={p} reorder={reorder} />}
       </span>
-      <div className="min-w-0 flex-1">
+      <div className={`min-w-0 flex-1 ${dim}`}>
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{p.name}</span>
           {/* Needs-input/unread notification dot, right of the name so "this
@@ -188,16 +194,34 @@ function ProjectRow({
       {/* Per-project agent tally (running/waiting/finished/needs_input). Fixed
           to the trailing edge, centered against the two-line name/path - nothing
           appears on plain hover, so the counts never shift; edit mode trades
-          them for the remove button. */}
-      {editing && onRemove ? (
-        <button
-          type="button"
-          aria-label={`Remove ${p.name} from Hydra`}
-          onClick={(e) => { e.stopPropagation(); onRemove() }}
-          className="shrink-0 self-center p-1 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 cursor-pointer transition-colors"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
+          them for the hide and remove buttons. */}
+      {editing && (onToggleHidden || onRemove) ? (
+        <span className="shrink-0 self-center flex items-center gap-0.5">
+          {onToggleHidden && (
+            <button
+              type="button"
+              // Hidden rows only exist in this mode, so the label says what the
+              // click does *and* what the row's state is - the crossed-out eye
+              // alone reads as "hidden" to some people and "hide me" to others.
+              aria-label={p.hidden ? `Show ${p.name} in the project list` : `Hide ${p.name} from the project list`}
+              aria-pressed={!!p.hidden}
+              onClick={(e) => { e.stopPropagation(); onToggleHidden() }}
+              className="p-1 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer transition-colors"
+            >
+              {p.hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              aria-label={`Remove ${p.name} from Hydra`}
+              onClick={(e) => { e.stopPropagation(); onRemove() }}
+              className="p-1 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 cursor-pointer transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </span>
       ) : (
         <ProjectAgentCounts project={p} className="shrink-0 self-center" />
       )}
@@ -419,17 +443,28 @@ export const ProjectDropdown = memo(function ProjectDropdown({
   // The rendered list, plus the span of it the user may reorder: built-ins are
   // pinned to the top, so everything from the first non-built-in down is fair
   // game and nothing can be dropped above that line.
-  const ordered = orderProjects(projects)
+  //
+  // Hidden projects are listed only in edit mode - which is the one place they
+  // can be brought back, so the mode has to show everything - and, so the picker
+  // never reads as "nothing selected", whichever one you currently have open.
+  const allOrdered = orderProjects(projects)
+  const ordered = editing ? allOrdered : visibleProjects(allOrdered, selectedId)
   const firstMovable = ordered.findIndex((p) => !p.builtin)
   const canReorder = firstMovable >= 0 && ordered.length - firstMovable > 1
   // Edit mode is worth offering as soon as there is one project to remove, even
-  // if there is nothing to reorder yet.
-  const canEditList = firstMovable >= 0
+  // if there is nothing to reorder yet. Measured against the *full* list: edit
+  // mode is the only way to bring a hidden project back, so hiding everything
+  // must not take away the door.
+  const canEditList = allOrdered.some((p) => !p.builtin || p.hidden)
 
   // Persist a new order. No-op when the drag put everything back where it was.
+  // The dragged rows are only the ones on screen, so the hidden projects are
+  // folded back in (expandOrder) before the list is sent - otherwise the server,
+  // which appends anything the client didn't name, would sweep every hidden
+  // project to the bottom the first time you reorder the visible ones.
   function commitOrder(ids: string[]) {
     if (ids.every((id, i) => ordered[i]?.id === id)) return
-    void reorderProjects(ids)
+    void reorderProjects(expandOrder(allOrdered, ids))
   }
 
   // Keyboard/touch reorder: move a project one slot up or down.
@@ -569,6 +604,10 @@ export const ProjectDropdown = memo(function ProjectDropdown({
                       }
                       setOpen(false)
                     }}
+                    // Hiding is offered for every project, built-ins included:
+                    // the scratch project is exactly the one some people never
+                    // use, and unlike removal it costs nothing to undo.
+                    onToggleHidden={() => { void setProjectHidden(p.id, !p.hidden) }}
                     onRemove={p.builtin ? undefined : () => confirmRemove(p)}
                     // Touch has no drag, so its up/down pair only exists in edit
                     // mode; a mouse can always drag, handle or no handle.
@@ -686,7 +725,8 @@ export const ProjectDropdown = memo(function ProjectDropdown({
           {editing ? (
             <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 leading-snug">
               {canReorder ? (finePointer ? 'Drag a project to reorder it. ' : 'Use the arrows to reorder. ') : ''}
-              Removing only takes a project off this list - your files stay put.
+              The eye hides a project from this list and the Ctrl+` switcher; removing takes it off this
+              list entirely - either way your files stay put.
             </div>
           ) : projects.length > 1 && finePointer && (
             <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
