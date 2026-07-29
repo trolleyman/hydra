@@ -54,12 +54,13 @@ import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
-import { usePasteMarkersStore } from '../lib/composerPrefs'
+import { useAutoPairStore, usePasteMarkersStore } from '../lib/composerPrefs'
+import { fenceEnterEdit } from '../lib/autoPair'
 import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
-import { enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
+import { applyEdit, enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
 import { Lightbox } from './Lightbox'
@@ -6092,6 +6093,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Whether pasting an attachment also inserts its "[filename]" marker into the
   // composer (a Browser setting, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
+  // Whether the composer auto-pairs (a Browser setting, default on). The shared
+  // textarea applies the rules itself; this composer needs the flag because it
+  // owns Enter (which sends), so the fence-body step is its call to make.
+  const autoPair = useAutoPairStore((s) => s.enabled)
   // The head's worktree, for trimming absolute paths in tool cards (item 19).
   // Falls back to the archived list for a finished head.
   const worktreePath = useAgentStore(
@@ -9129,6 +9134,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
     if (e.key === 'Enter') {
       if (e.nativeEvent.isComposing) return
+      // Caret parked on a fence auto-pairing just opened (after "```", where the
+      // language goes): every flavour of Enter steps down into the body line
+      // that already exists. Sending here would fire off a half-written block,
+      // and inserting a newline would leave a blank line behind.
+      if (autoPair && !e.metaKey) {
+        const ta = e.currentTarget
+        const edit = fenceEnterEdit(ta.value, ta.selectionStart ?? 0, ta.selectionEnd ?? 0)
+        if (edit) {
+          e.preventDefault()
+          applyEdit(ta, edit)
+          requestAnimationFrame(() => ensureCaretVisible(ta))
+          return
+        }
+      }
       // Shift+Enter is the browser's native newline; Ctrl+Enter and Alt+Enter
       // insert one too (item 7) - they'd otherwise do nothing.
       if (e.altKey || (e.ctrlKey && !e.metaKey)) {

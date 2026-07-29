@@ -4,7 +4,8 @@
 // Four behaviours, all off one client preference (lib/composerPrefs):
 //   - typing an opener (` ( [ { " ') inserts its closer behind the caret,
 //   - typing a closer that is already there steps over it instead of doubling it,
-//   - a third backtick on its own line opens a fenced block, caret in the body,
+//   - a third backtick on its own line opens a fenced block, caret left on the
+//     fence so the language can be typed (Enter then steps into the body),
 //   - typing a mark with text selected WRAPS the selection (` ( [ { " ' * _ ~).
 //   - Backspace between an empty pair deletes both.
 //
@@ -102,16 +103,18 @@ export function autoPairEdit(key: string, value: string, selStart: number, selEn
   const prev = selStart > 0 ? value[selStart - 1] : ''
 
   // The third backtick of a "```" at the end of an otherwise-empty line opens a
-  // fenced block. The caret lands in the BODY (not after the opening fence):
-  // Enter sends the message in the chat composer, so a caret parked on the info
-  // string would be the one spot the user can't type their way out of.
+  // fenced block: the body line and the closing fence are laid out in one go.
+  // The caret STAYS on the opening fence, right after the third backtick, so the
+  // info string ("```python") can be typed - that is the only moment it can be.
+  // Enter from there walks down into the body (fenceEnterEdit), which is what
+  // keeps the caret from being parked somewhere it can't type its way out of.
   if (key === '`') {
     const [ls, le] = lineBounds(value, selStart)
     const before = value.slice(ls, selStart)
     if (le === selStart && /^[ \t]*``$/.test(before)) {
       const indent = before.slice(0, -2)
       const insert = `\`\n${indent}\n${indent}${FENCE}`
-      return { value: value.slice(0, selStart) + insert + value.slice(selStart), caret: selStart + 2 + indent.length }
+      return { value: value.slice(0, selStart) + insert + value.slice(selStart), caret: selStart + 1 }
     }
   }
 
@@ -135,6 +138,28 @@ export function autoPairEdit(key: string, value: string, selStart: number, selEn
   if (key === closer && (WORD.test(prev) || prev === key)) return null
   if (key === '`' && inOpenFence(value, selStart)) return null
   return { value: value.slice(0, selStart) + key + closer + value.slice(selStart), caret: selStart + 1 }
+}
+
+// fenceEnterEdit is what Enter should do with the caret parked at the end of a
+// fence line that auto-pairing just opened - the position it is left in so an
+// info string can be typed. The blank body line and the closing fence are
+// already there, so a newline here would insert a second blank line (and in the
+// chat composer, plain Enter would send the half-written block instead). The
+// caret steps down into the body line instead; nothing about the text changes.
+//
+// Only the exact shape auto-pairing produces qualifies: an opening fence plus at
+// most an info string, then a blank line, then the closing fence. Anywhere else
+// this returns null and Enter does its normal thing.
+export function fenceEnterEdit(value: string, selStart: number, selEnd: number): TextareaEdit | null {
+  if (selStart !== selEnd) return null
+  const [ls, le] = lineBounds(value, selStart)
+  if (selStart !== le || le >= value.length) return null
+  if (!/^[ \t]*```[^`]*$/.test(value.slice(ls, le))) return null
+  const [bs, be] = lineBounds(value, le + 1)
+  if (value.slice(bs, be).trim() !== '' || be >= value.length) return null
+  const [cs, ce] = lineBounds(value, be + 1)
+  if (!/^[ \t]*```[ \t]*$/.test(value.slice(cs, ce))) return null
+  return { value, caret: be }
 }
 
 // backspacePairEdit deletes BOTH halves of an empty pair when the caret sits

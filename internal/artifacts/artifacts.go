@@ -59,11 +59,13 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/checkout"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/sched"
 	"github.com/trolleyman/hydra/internal/scope"
 )
 
@@ -79,7 +81,7 @@ const (
 	DefaultMaxBytes = int64(2) << 30 // 2 GiB
 	// Generations are heavy (a full build per ref) and run untrusted ref code, so
 	// distinct refs must not fan out without bound: how many run at once is capped
-	// by genScheduler, whose limit comes from config.ArtifactConcurrency (default
+	// by a sched.Scheduler, whose limit comes from config.ArtifactConcurrency (default
 	// config.DefaultArtifactConcurrency). A normal diff view (left+right of one
 	// script) saturates the default; further requests queue, foreground first.
 	// maxLogLines bounds the in-memory live log kept per in-flight generation so
@@ -765,11 +767,13 @@ type Manager struct {
 	// sched bounds concurrent generations and prioritizes foreground (a user
 	// viewing a diff) over background (proactive pre-generation) work, without
 	// preempting in-flight runs. Its limit comes from config.ArtifactConcurrency.
-	sched *genScheduler
+	sched *sched.Scheduler
 
 	// pool reuses a bounded set of detached worktrees for commit checkouts rather
-	// than creating/destroying one per generation (PLAN #51).
-	pool *slotPool
+	// than creating/destroying one per generation (PLAN #51). It is this manager's
+	// own pool, with its own dir and cap - other consumers (internal/tests) keep
+	// theirs separate.
+	pool *checkout.Pool
 }
 
 // NewManager returns a Manager for the given project root. The generation
@@ -792,9 +796,9 @@ func NewManager(projectRoot string) *Manager {
 		cancel:      map[string]context.CancelFunc{},
 		fgWant:      map[string]bool{},
 		subs:        map[int]chan Event{},
-		sched:       newGenScheduler(concurrency),
+		sched:       sched.New(concurrency),
 	}
-	m.pool = newSlotPool(m.projectRoot, m.slotsDir(), slotsForConcurrency(concurrency))
+	m.pool = checkout.NewPool(m.projectRoot, m.slotsDir(), checkout.SlotsForConcurrency(concurrency))
 	_ = paths.EnsureHydraLocalIgnored(m.root())
 	return m
 }
@@ -808,22 +812,8 @@ func (m *Manager) SetConcurrency(n int) {
 	if n < 0 {
 		n = 0
 	}
-	m.sched.setLimit(n)
-	m.pool.setMaxSlots(slotsForConcurrency(n))
-}
-
-// slotsForConcurrency sizes the worktree-slot pool for a generation concurrency.
-// Every commit-side generation holds one slot for its duration, so the pool must
-// have at least `n` slots or concurrent commit-side gens would deadlock waiting
-// for a slot. The +2 keeps freed slots "warm" on recently-used commits for
-// zero-cost affinity reuse, and the floor of maxSlots preserves that headroom at
-// the default concurrency. n == 0 (unlimited concurrency) maps to 0 (an
-// unbounded pool) so commit-side gens never block on a slot.
-func slotsForConcurrency(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	return max(maxSlots, n+2)
+	m.sched.SetLimit(n)
+	m.pool.SetMaxSlots(checkout.SlotsForConcurrency(n))
 }
 
 // Subscribe registers a listener for generation events and returns the event
@@ -995,7 +985,7 @@ func (m *Manager) Peek(script string, v Version) (Meta, bool, error) {
 		return meta, true, nil
 	}
 	if _, inFlight := m.gens[dir]; inFlight {
-		meta := Meta{Script: script, Key: key, Ref: ref, Status: StatusGenerating, Progress: m.progress[dir], StartedAt: m.startedAt[dir], Queued: m.sched.queuePosition(dir)}
+		meta := Meta{Script: script, Key: key, Ref: ref, Status: StatusGenerating, Progress: m.progress[dir], StartedAt: m.startedAt[dir], Queued: m.sched.QueuePosition(dir)}
 		m.mu.Unlock()
 		return meta, true, nil
 	}
@@ -1027,14 +1017,14 @@ func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, err
 		started := m.startedAt[dir]
 		// Read the queue position under the same lock as the rest of the snapshot,
 		// so "generating" and "2nd in the queue" describe the same instant.
-		queued := m.sched.queuePosition(dir)
+		queued := m.sched.QueuePosition(dir)
 		logCopy := append([]LogLine(nil), m.logs[dir]...)
 		// Include the files streamed so far (via FileMarker) so a late subscriber or
 		// the polling fallback sees the partial tiles instead of an empty card.
 		filesCopy := append([]FileMeta(nil), m.live[dir]...)
 		m.mu.Unlock()
 		if fg {
-			m.sched.promote(dir)
+			m.sched.Promote(dir)
 		}
 		return Meta{Script: spec.Name, Key: key, Ref: ref, Status: StatusGenerating, Progress: prog, StartedAt: started, Log: logCopy, Files: filesCopy, Queued: queued}, nil
 	}
@@ -1057,8 +1047,8 @@ func (m *Manager) get(spec config.ArtifactScript, v Version, fg bool) (Meta, err
 		// Bound concurrent generations, foreground before background. The entry
 		// stays marked in-flight while queued, so duplicate requests keep getting
 		// StatusGenerating instead of piling up more builds.
-		m.sched.acquire(dir, fg)
-		defer m.sched.release()
+		m.sched.Acquire(dir, fg)
+		defer m.sched.Release()
 
 		meta := m.generate(genCtx, spec, v, key, ref)
 		// A cancelled generation was preempted (a newer version superseded this
@@ -1241,13 +1231,13 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	// worktree per generation (PLAN #51). Released for reuse when generation ends.
 	runDir := v.WorktreeDir
 	if runDir == "" {
-		s, err := m.pool.acquire(ref, spec.CleanIgnored)
+		s, err := m.pool.Acquire(ref, spec.CleanIgnored)
 		if err != nil {
 			meta.Status, meta.Error = StatusError, fmt.Sprintf("checkout %s: %v", ref, err)
 			return meta
 		}
-		defer m.pool.release(s)
-		runDir = s.path
+		defer m.pool.Release(s)
+		runDir = s.Path()
 	}
 
 	timeout := defaultTimeout
@@ -1571,7 +1561,7 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 func (m *Manager) CleanCheckouts() {
 	_ = os.RemoveAll(m.checkoutsDir()) // legacy per-commit checkouts (pre-slot-pool)
 	_ = os.RemoveAll(m.cowDir())       // ephemeral per-generation cow_paths layers
-	m.pool.clean()                     // slot worktrees + `git worktree prune`
+	m.pool.Clean()                     // slot worktrees + `git worktree prune`
 }
 
 // legacyKeyRe matches a cache-entry dir in the old flat layout, where the kind

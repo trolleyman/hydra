@@ -21,11 +21,13 @@ import (
 	"braces.dev/errtrace"
 
 	"github.com/trolleyman/hydra/internal/artifacts"
+	"github.com/trolleyman/hydra/internal/checkout"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/sched"
 	"github.com/trolleyman/hydra/internal/scope"
 )
 
@@ -55,8 +57,9 @@ const (
 const ProgressMarker = artifacts.ProgressMarker
 
 // Manager owns test generation, caching, locking, and live-progress for a
-// project. It mirrors artifacts.Manager (and reuses its slot pool + scheduler),
-// differing only in the post-run parse step and the persisted result type.
+// project. It mirrors artifacts.Manager (and reuses the same checkout/sched
+// machinery, with its own pool and scheduler instances), differing only in the
+// post-run parse step and the persisted result type.
 type Manager struct {
 	projectRoot string
 
@@ -85,8 +88,8 @@ type Manager struct {
 	subs       map[int]chan Event
 	nextSub    int
 
-	sched *artifacts.GenScheduler
-	pool  *artifacts.SlotPool
+	sched *sched.Scheduler
+	pool  *checkout.Pool
 }
 
 // NewManager creates a Manager for projectRoot, sized to the project's
@@ -107,9 +110,9 @@ func NewManager(projectRoot string) *Manager {
 		cancel:      map[string]context.CancelFunc{},
 		fgWant:      map[string]bool{},
 		subs:        map[int]chan Event{},
-		sched:       artifacts.NewGenScheduler(concurrency),
+		sched:       sched.New(concurrency),
 	}
-	m.pool = artifacts.NewSlotPool(projectRoot, m.slotsDir(), artifacts.SlotsForConcurrency(concurrency))
+	m.pool = checkout.NewPool(projectRoot, m.slotsDir(), checkout.SlotsForConcurrency(concurrency))
 	_ = paths.EnsureHydraLocalIgnored(m.root())
 	return m
 }
@@ -120,7 +123,7 @@ func (m *Manager) SetConcurrency(n int) {
 		n = 0
 	}
 	m.sched.SetLimit(n)
-	m.pool.SetMaxSlots(artifacts.SlotsForConcurrency(n))
+	m.pool.SetMaxSlots(checkout.SlotsForConcurrency(n))
 }
 
 // CleanCheckouts tears the slot pool down to empty (call on boot) and wipes any
