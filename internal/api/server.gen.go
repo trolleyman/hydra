@@ -598,6 +598,34 @@ type ArtifactsResponse struct {
 	Scripts []ArtifactSet `json:"scripts"`
 }
 
+// ChatAssistantMessagePayload defines model for ChatAssistantMessagePayload.
+type ChatAssistantMessagePayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry     *ChatProviderEntry `json:"entry,omitempty"`
+	MessageId string             `json:"message_id,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+
+	// Partial Set when an interrupt settled the deltas received so far.
+	Partial    bool   `json:"partial,omitempty"`
+	Sidechain  bool   `json:"sidechain,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
+	Text       string `json:"text,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
 // ChatClientMessage One client-to-server frame on a chat-mode socket. Flat rather than a union: `type` selects which of the optional fields carry meaning.
 type ChatClientMessage struct {
 	// Command The shell command of a shell_command frame (the text after the composer's leading "!"), run in the head's sandbox.
@@ -632,6 +660,126 @@ type ChatClientMessage struct {
 
 // ChatClientMessageType defines model for ChatClientMessage.Type.
 type ChatClientMessageType string
+
+// ChatCommitCreatedPayload A commit the reconciler observed. Sequenced in the same log as the tool output that produced it, so the chip cannot render before its cause.
+type ChatCommitCreatedPayload struct {
+	AuthorEmail string `json:"author_email,omitempty"`
+	AuthorName  string `json:"author_name,omitempty"`
+
+	// CausalItemId The tool call that produced it, when one is known.
+	CausalItemId  string             `json:"causal_item_id,omitempty"`
+	Head          string             `json:"head,omitempty"`
+	IsMerge       bool               `json:"is_merge,omitempty"`
+	MergedCommits []ChatMergedCommit `json:"merged_commits,omitempty"`
+	MergedCount   int                `json:"merged_count,omitempty"`
+	Sha           string             `json:"sha,omitempty"`
+	ShortSha      string             `json:"short_sha,omitempty"`
+	Subject       string             `json:"subject,omitempty"`
+	Timestamp     string             `json:"timestamp,omitempty"`
+}
+
+// ChatContentStreamPayload defines model for ChatContentStreamPayload.
+type ChatContentStreamPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+	Kind  string             `json:"kind,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatContextMessagePayload defines model for ChatContextMessagePayload.
+type ChatContextMessagePayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string          `json:"agent_id,omitempty"`
+	Content json.RawMessage `json:"content,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry  *ChatProviderEntry `json:"entry,omitempty"`
+	IsMeta bool               `json:"is_meta,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatConversationStartedPayload defines model for ChatConversationStartedPayload.
+type ChatConversationStartedPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// ApiKeySource "none" means subscription auth, so turn footers hide the notional cost.
+	ApiKeySource   string `json:"api_key_source,omitempty"`
+	ConversationId string `json:"conversation_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+	Model string             `json:"model,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId  string   `json:"parent_item_id,omitempty"`
+	Sidechain     bool     `json:"sidechain,omitempty"`
+	SlashCommands []string `json:"slash_commands,omitempty"`
+	StopReason    string   `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatDeltaPayload defines model for ChatDeltaPayload.
+type ChatDeltaPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry     *ChatProviderEntry `json:"entry,omitempty"`
+	MessageId string             `json:"message_id,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+	Text         string `json:"text,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
 
 // ChatErrorFrame This head's normalized event log could not be opened, so the connection will render nothing. There is no fallback to degrade to, and an empty transcript is indistinguishable from a head that never spoke.
 type ChatErrorFrame struct {
@@ -673,6 +821,12 @@ type ChatFrame struct {
 	union json.RawMessage
 }
 
+// ChatHeadChangedPayload HEAD moved without fast-forwarding (a reset, rebase or checkout), so the projection reconciles its visible commit set rather than inventing chips.
+type ChatHeadChangedPayload struct {
+	Head    string `json:"head,omitempty"`
+	OldHead string `json:"old_head,omitempty"`
+}
+
 // ChatHistoryFrame One page of durable history, oldest-first. Answers the initial window and every load_events_before. Paging is display-only: an older page never rewinds the state_snapshot projection.
 type ChatHistoryFrame struct {
 	// Done True once the log's beginning has been reached.
@@ -686,6 +840,121 @@ type ChatHistoryFrame struct {
 
 // ChatHistoryFrameType defines model for ChatHistoryFrame.Type.
 type ChatHistoryFrameType string
+
+// ChatInteractionPayload defines model for ChatInteractionPayload.
+type ChatInteractionPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+	// Interaction The provider's own request, forwarded verbatim.
+	Interaction json.RawMessage `json:"interaction,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	RequestId    string `json:"request_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatItemDeltaPayload defines model for ChatItemDeltaPayload.
+type ChatItemDeltaPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+	Id    string             `json:"id,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+	Text         string `json:"text,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatMergedCommit One commit a merge brought in, previewed in the merge chip.
+type ChatMergedCommit struct {
+	AuthorName string `json:"author_name,omitempty"`
+	Sha        string `json:"sha,omitempty"`
+	ShortSha   string `json:"short_sha,omitempty"`
+	Subject    string `json:"subject,omitempty"`
+	Timestamp  string `json:"timestamp,omitempty"`
+}
+
+// ChatMessagesRetractedPayload defines model for ChatMessagesRetractedPayload.
+type ChatMessagesRetractedPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry      *ChatProviderEntry `json:"entry,omitempty"`
+	MessageIds []string           `json:"message_ids,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatModelChangedPayload The active model changed, captured daemon-side.
+type ChatModelChangedPayload struct {
+	Model string `json:"model,omitempty"`
+}
+
+// ChatNoticePayload defines model for ChatNoticePayload.
+type ChatNoticePayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+	Text         string `json:"text,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
 
 // ChatPendingAsk A question the provider is still blocked on.
 type ChatPendingAsk struct {
@@ -701,6 +970,41 @@ type ChatPendingQuestionsFrame struct {
 
 // ChatPendingQuestionsFrameType defines model for ChatPendingQuestionsFrame.Type.
 type ChatPendingQuestionsFrameType string
+
+// ChatPlanEntry One plan/to-do step. Codex `{step,status}` normalizes to this too.
+type ChatPlanEntry struct {
+	ActiveForm  string `json:"activeForm,omitempty"`
+	Content     string `json:"content,omitempty"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status,omitempty"`
+}
+
+// ChatPlanUpdatedPayload defines model for ChatPlanUpdatedPayload.
+type ChatPlanUpdatedPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string          `json:"parent_item_id,omitempty"`
+	Plan         json.RawMessage `json:"plan,omitempty"`
+
+	// Provider Which provider produced it. Claude's Task cards already carry the timeline, so only Codex renders a visible Update Plan card.
+	Provider   string `json:"provider,omitempty"`
+	Sidechain  bool   `json:"sidechain,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
 
 // ChatProjection Bounded current state, folded from the event log and checkpointed with the sequence it was folded through. Complete messages, tool output and sub-agent transcripts stay in the paged log, so this does not grow with the conversation.
 type ChatProjection struct {
@@ -725,6 +1029,32 @@ type ChatProjection struct {
 	Usage   json.RawMessage `json:"usage,omitempty"`
 	Version int             `json:"version"`
 }
+
+// ChatProviderContext What a provider-derived display event carries besides its own fields: who produced it and where it belongs. Sidechain events are a sub-agent's own steps, folded into that sub-agent's card rather than the main flow.
+type ChatProviderContext struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatProviderEntry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+type ChatProviderEntry map[string]interface{}
 
 // ChatQuestionExpiredFrame An answer was dropped because its request had already been retired. The card flips to expired rather than settling on an "Answered" that never was.
 type ChatQuestionExpiredFrame struct {
@@ -759,6 +1089,37 @@ type ChatQueuedState struct {
 	Status  string          `json:"status"`
 }
 
+// ChatReasoningCompletedPayload defines model for ChatReasoningCompletedPayload.
+type ChatReasoningCompletedPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry     *ChatProviderEntry `json:"entry,omitempty"`
+	MessageId string             `json:"message_id,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+	Text         string `json:"text,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatReasoningDurationPayload The measured duration of a thinking block. Separate from the block itself, because no provider reports it - the daemon times it.
+type ChatReasoningDurationPayload struct {
+	DurationMs int64  `json:"duration_ms,omitempty"`
+	MessageId  string `json:"message_id,omitempty"`
+}
+
 // ChatReplayDoneFrame The initial window has been delivered; everything after this is live.
 type ChatReplayDoneFrame struct {
 	Type ChatReplayDoneFrameType `json:"type"`
@@ -776,6 +1137,16 @@ type ChatShellOutputFrame struct {
 
 // ChatShellOutputFrameType defines model for ChatShellOutputFrame.Type.
 type ChatShellOutputFrameType string
+
+// ChatShellResult The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
+type ChatShellResult struct {
+	Command   string `json:"command"`
+	ExitCode  int    `json:"exit_code"`
+	Output    string `json:"output"`
+	Stopped   bool   `json:"stopped,omitempty"`
+	TimedOut  bool   `json:"timed_out,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
 
 // ChatStateSnapshotFrame The head's current state, sent first on attach. Taken with the history watermark under one lock, so a plan or sub-agent cannot change between snapshotting and subscribing.
 type ChatStateSnapshotFrame struct {
@@ -807,6 +1178,33 @@ type ChatSubagentEventsFrame struct {
 // ChatSubagentEventsFrameType defines model for ChatSubagentEventsFrame.Type.
 type ChatSubagentEventsFrameType string
 
+// ChatSubagentPayload defines model for ChatSubagentPayload.
+type ChatSubagentPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId   string `json:"agent_id,omitempty"`
+	AgentType string `json:"agent_type,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd         string `json:"cwd,omitempty"`
+	Description string `json:"description,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry        *ChatProviderEntry `json:"entry,omitempty"`
+	Id           string             `json:"id,omitempty"`
+	ParentId     string             `json:"parent_id,omitempty"`
+	ParentItemId string             `json:"parent_item_id,omitempty"`
+	Prompt       string             `json:"prompt,omitempty"`
+	Sidechain    bool               `json:"sidechain,omitempty"`
+	Status       string             `json:"status,omitempty"`
+	StopReason   string             `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
 // ChatSubagentState defines model for ChatSubagentState.
 type ChatSubagentState struct {
 	Activity    string `json:"activity,omitempty"`
@@ -834,10 +1232,163 @@ type ChatTaskOutputFrame struct {
 // ChatTaskOutputFrameType defines model for ChatTaskOutputFrame.Type.
 type ChatTaskOutputFrameType string
 
+// ChatToolCompletedPayload defines model for ChatToolCompletedPayload.
+type ChatToolCompletedPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Content The provider's verbatim result blocks, when it sent any.
+	Content json.RawMessage `json:"content,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+	Id    string             `json:"id,omitempty"`
+
+	// Input Codex reveals semantic tool fields only on completion, so a completed event can carry richer input than its start.
+	Input   json.RawMessage `json:"input,omitempty"`
+	IsError bool            `json:"is_error,omitempty"`
+	Name    string          `json:"name,omitempty"`
+	Output  string          `json:"output,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+
+	// Patch An Edit's own structuredPatch, so the card renders a diff against the file's real line numbers rather than two loose fragments.
+	Patch      json.RawMessage `json:"patch,omitempty"`
+	Sidechain  bool            `json:"sidechain,omitempty"`
+	Status     string          `json:"status,omitempty"`
+	StopReason string          `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatToolStartedPayload defines model for ChatToolStartedPayload.
+type ChatToolStartedPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+	Id    string             `json:"id,omitempty"`
+
+	// Input The provider's own block input, verbatim - the shape is the tool's, so this is where an agent-type-specific payload lives. Codex additionally carries its native item under `_raw`.
+	Input  json.RawMessage `json:"input,omitempty"`
+	Name   string          `json:"name,omitempty"`
+	Output string          `json:"output,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+
+	// Status Present on Codex items; its absence is what marks a Claude block.
+	Status     string `json:"status,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatTurnPayload defines model for ChatTurnPayload.
+type ChatTurnPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string  `json:"agent_id,omitempty"`
+	CostUsd float32 `json:"cost_usd,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+	// Error The provider's structured failure. The browser unwraps app-server's nested JSON to show its type, status and message.
+	Error json.RawMessage `json:"error,omitempty"`
+	Id    string          `json:"id,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Result       string `json:"result,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	Status       string `json:"status,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
 // ChatTurnState defines model for ChatTurnState.
 type ChatTurnState struct {
 	Id     string `json:"id,omitempty"`
 	Status string `json:"status,omitempty"`
+}
+
+// ChatUsageUpdatedPayload defines model for ChatUsageUpdatedPayload.
+type ChatUsageUpdatedPayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry     *ChatProviderEntry `json:"entry,omitempty"`
+	MessageId string             `json:"message_id,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string          `json:"parent_item_id,omitempty"`
+	Sidechain    bool            `json:"sidechain,omitempty"`
+	StopReason   string          `json:"stop_reason,omitempty"`
+	Usage        json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatUserMessagePayload defines model for ChatUserMessagePayload.
+type ChatUserMessagePayload struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Content Content blocks, or a bare string for a provider command echo.
+	Content json.RawMessage `json:"content,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+	// Id The client-generated id, so a queued bubble reconciles to it.
+	Id string `json:"id,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+
+	// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
+	Shell      *ChatShellResult `json:"shell,omitempty"`
+	Sidechain  bool             `json:"sidechain,omitempty"`
+	StopReason string           `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
 }
 
 // ClaudeUsageResponse defines model for ClaudeUsageResponse.

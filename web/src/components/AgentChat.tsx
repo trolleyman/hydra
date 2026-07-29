@@ -37,7 +37,9 @@ import {
   X,
 } from 'lucide-react'
 import { SiGit } from '@icons-pack/react-simple-icons'
-import { AgentStatus, type ChatEvent, type ChatFrame } from '../api'
+import { AgentStatus, type ChatFrame } from '../api'
+import { asNormalizedChatEvent, eventItemID, eventMessageID, isSidechainEvent, type NormalizedChatEvent } from '../lib/chatEvents'
+import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
@@ -118,10 +120,9 @@ interface ChatProps {
 
 // The socket's events and frames are declared in api/openapi.yaml and generated
 // for both the daemon and this component (see docs/chat-mode.md), so what the
-// daemon writes and what this switch narrows on cannot drift. Payloads stay
-// deliberately open: their shape varies per event type, and the provider's own
-// recorded entry rides there for the Raw panel.
-type NormalizedChatEvent = ChatEvent
+// daemon writes and what this switch narrows on cannot drift. NormalizedChatEvent
+// narrows an event's payload by its type (lib/chatEvents); only the fields the
+// provider owns - its recorded entry, a tool's input, an interaction - stay open.
 
 // Omit that distributes over a union (plain Omit collapses ChatItem to its
 // common properties, losing each variant's own fields).
@@ -662,80 +663,97 @@ function entryString(entry: unknown, key: string): string {
   return typeof value === 'string' ? value : ''
 }
 
-// Convert one provider-neutral backend event into the presentation shapes the
-// card renderers below understand. Provider details stop at this boundary, and
-// paging and live delivery share the conversion, so a scrolled-back page
-// renders exactly like the live session did. (Exported for tests.)
-// eslint-disable-next-line react-refresh/only-export-components
-export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning = false): ProviderEvent[] {
-  const p = ev.payload ?? {}
-  const base = {
+// providerBase is what every display event carries besides its own fields: who
+// produced it and where it belongs. Only the payloads that allOf
+// ChatProviderContext have these, so each case passes its own narrowed payload
+// and the ones without it (a commit, a model change) pass nothing.
+function providerBase(ev: NormalizedChatEvent, p: Partial<ChatProviderContext>, fallbackID?: string) {
+  return {
     timestamp: ev.timestamp,
     // Hydra user events retain the client-generated id. Matching optimistic
     // bubbles by this id avoids a repeated same-text message replacing the
     // wrong bubble (and visibly flashing during Codex send reconciliation).
-    uuid: typeof p.uuid === 'string' && p.uuid
-      ? p.uuid
-      : ev.type === 'user_message' && typeof p.id === 'string' && p.id
-        ? p.id
-        : `normalized:${ev.seq}`,
+    uuid: p.uuid || fallbackID || `normalized:${ev.seq}`,
     isSidechain: p.sidechain === true,
-    agentId: typeof p.agent_id === 'string' ? p.agent_id : undefined,
-    parent_tool_use_id: typeof p.parent_item_id === 'string' ? p.parent_item_id : undefined,
+    agentId: p.agent_id || undefined,
+    parent_tool_use_id: p.parent_item_id || undefined,
     // The provider's own recorded entry, when the backend captured one. The
     // fields the presentation needs are read off it rather than being copied up
     // one by one - `cwd` (see lib/shellCwd) is the first, and whatever a future
     // CLI adds is already here. `p.cwd` is the older spelling, kept for events
     // stored before the entry was relayed.
-    entry: p.entry && typeof p.entry === 'object' ? p.entry : undefined,
-    cwd: entryString(p.entry, 'cwd') || (typeof p.cwd === 'string' ? p.cwd : '') || undefined,
+    entry: p.entry,
+    cwd: entryString(p.entry, 'cwd') || p.cwd || undefined,
     synthesizedEvent: true,
   }
-  const text = typeof p.text === 'string' ? p.text : contentText(p.content)
-  const id = typeof p.id === 'string' ? p.id : typeof p.message_id === 'string' ? p.message_id : String(ev.seq)
+}
+
+// Convert one provider-neutral backend event into the presentation shapes the
+// card renderers below understand. Provider details stop at this boundary, and
+// paging and live delivery share the conversion, so a scrolled-back page
+// renders exactly like the live session did. Each case reads its own narrowed
+// payload (lib/chatEvents), so a field this file expects and the daemon does not
+// send is a type error rather than an undefined at runtime. (Exported for tests.)
+// eslint-disable-next-line react-refresh/only-export-components
+export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning = false): ProviderEvent[] {
   switch (ev.type) {
     case 'conversation_started':
-      return [{ type: 'system', subtype: 'init', model: typeof p.model === 'string' ? p.model : undefined, slash_commands: Array.isArray(p.slash_commands) ? p.slash_commands.filter((v): v is string => typeof v === 'string') : undefined, apiKeySource: typeof p.api_key_source === 'string' ? p.api_key_source : undefined }]
-    case 'user_message': {
+      return [{ type: 'system', subtype: 'init', model: ev.payload.model, slash_commands: ev.payload.slash_commands, apiKeySource: ev.payload.api_key_source }]
+    case 'user_message':
+    case 'user_message_echoed': {
+      const p = ev.payload
+      const base = providerBase(ev, p, p.id)
       // A "!command" the user ran: its user_message payload carries the sandboxed
       // result under `shell`. Render it as a shell-command card, not a user bubble
       // (the same text is still what the agent received as its turn).
-      const sh = p.shell as { command?: unknown; output?: unknown; exit_code?: unknown; truncated?: unknown; timed_out?: unknown; stopped?: unknown } | undefined
-      if (sh && typeof sh === 'object') {
+      if (p.shell) {
         return [{
           ...base,
           type: 'shellcmd',
           shell: {
-            command: typeof sh.command === 'string' ? sh.command : '',
-            output: typeof sh.output === 'string' ? sh.output : '',
-            exit_code: typeof sh.exit_code === 'number' ? sh.exit_code : -1,
-            truncated: sh.truncated === true,
-            timed_out: sh.timed_out === true,
-            stopped: sh.stopped === true,
+            command: p.shell.command,
+            output: p.shell.output,
+            exit_code: p.shell.exit_code,
+            truncated: p.shell.truncated === true,
+            timed_out: p.shell.timed_out === true,
+            stopped: p.shell.stopped === true,
           },
         }]
       }
+      const text = contentText(p.content)
       return text.trim() ? [{ ...base, type: 'user', message: { content: p.content as ClaudeContentBlock[] | string } }] : []
     }
     case 'context_message':
-      return [{ ...base, type: 'user', isMeta: true, message: { content: p.content as ClaudeContentBlock[] | string } }]
-    case 'assistant_message':
-      return text.trim() ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'text', text }], stop_reason: typeof p.stop_reason === 'string' ? p.stop_reason : undefined, usage: p.usage as TokenUsage } }] : []
-    case 'reasoning_completed':
-      return text.trim() || showEmptyReasoning ? [{ ...base, type: 'assistant', message: { id, content: [{ type: 'thinking', thinking: text }] } }] : []
+      return [{ ...providerBase(ev, ev.payload), type: 'user', isMeta: true, message: { content: ev.payload.content as ClaudeContentBlock[] | string } }]
+    case 'assistant_message': {
+      const p = ev.payload
+      const text = p.text ?? ''
+      return text.trim() ? [{ ...providerBase(ev, p), type: 'assistant', message: { id: p.message_id || String(ev.seq), content: [{ type: 'text', text }], stop_reason: p.stop_reason || undefined, usage: p.usage as TokenUsage } }] : []
+    }
+    case 'reasoning_completed': {
+      const p = ev.payload
+      const text = p.text ?? ''
+      return text.trim() || showEmptyReasoning ? [{ ...providerBase(ev, p), type: 'assistant', message: { id: p.message_id || String(ev.seq), content: [{ type: 'thinking', thinking: text }] } }] : []
+    }
     case 'tool_started': {
-      const name = typeof p.name === 'string' ? p.name : 'tool'
-      const input = p.input ?? p.item ?? (typeof p.command === 'string' ? { command: p.command, cwd: p.cwd } : p)
+      const p = ev.payload
+      const base = providerBase(ev, p)
+      const id = p.id || String(ev.seq)
+      const name = p.name || 'tool'
+      const input = p.input ?? p
       // Claude's normalized tool payloads are the Anthropic block, field for
       // field, so the block rebuilt here IS what the provider sent and Raw can
       // show it. Codex's are not - they carry the item's status/output (and its
       // native item), and the daemon passes the true payload separately as
       // `_raw` - so mark those blocks synthetic and let Raw fall back to it.
-      const codexShaped = p.status !== undefined || p.output !== undefined || p.item !== undefined
+      const codexShaped = p.status !== undefined || p.output !== undefined
       return [{ ...base, type: 'assistant', message: { id: `tool:${id}`, content: [{ type: 'tool_use', id, name, input, synthetic: codexShaped }] } }]
     }
     case 'tool_completed': {
-      const result = p.content ?? p.output ?? (typeof p.status === 'string' ? p.status : '')
+      const p = ev.payload
+      const base = providerBase(ev, p)
+      const id = p.id || String(ev.seq)
+      const result = p.content ?? p.output ?? p.status ?? ''
       // Same rule for the result: `content` is Claude's verbatim tool_result
       // payload; anything reconstructed from output/status is not a block.
       // `patch` rides on the event, not the block - it is Hydra's extract of the
@@ -747,6 +765,8 @@ export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyRea
       // its tracker-generated plan events are state checkpoints, not a second
       // visible UpdatePlan invocation. Codex's turn/plan/updated notification
       // has no separate tool item, so retain its useful timeline card.
+      const p = ev.payload
+      const base = providerBase(ev, {})
       if (p.provider !== 'codex') return []
       const plan = Array.isArray(p.plan) ? p.plan : []
       const completed = plan.filter((entry) => entry && typeof entry === 'object' && (entry as { status?: unknown }).status === 'completed').length
@@ -761,10 +781,9 @@ export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyRea
       ]
     }
     case 'subagent_completed': {
-      const key = typeof p.id === 'string' ? p.id : ''
-      const label = typeof p.agent_type === 'string' ? p.agent_type : 'Sub-agent'
-      const description = typeof p.description === 'string' ? p.description : ''
-      return key ? [{ ...base, type: 'hydra_subagent_completed', isSidechain: false, agentId: undefined, parent_tool_use_id: null, subagentNotice: { key, label, description } }] : []
+      const p = ev.payload
+      const key = p.id ?? ''
+      return key ? [{ ...providerBase(ev, {}), type: 'hydra_subagent_completed', isSidechain: false, agentId: undefined, parent_tool_use_id: null, subagentNotice: { key, label: p.agent_type || 'Sub-agent', description: p.description ?? '' } }] : []
     }
     case 'content_stream_started':
       // The first normalized delta opens the presentation stream. Forwarding
@@ -776,25 +795,29 @@ export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyRea
       // settled item, avoiding an empty gap between preview and final content.
       return []
     case 'usage_updated': {
-      const usage = p.usage as TokenUsage
-      return typeof p.message_id === 'string'
+      const usage = ev.payload.usage as TokenUsage
+      return ev.payload.message_id
         ? [{ type: 'stream_event', event: { type: 'message_start', message: { usage } } }]
         : [{ type: 'stream_event', event: { type: 'message_delta', usage } }]
     }
     case 'reasoning_duration':
-      return [{ type: 'hydra_thinking', message_id: typeof p.message_id === 'string' ? p.message_id : '', duration_ms: typeof p.duration_ms === 'number' ? p.duration_ms : 0 }]
+      return [{ type: 'hydra_thinking', message_id: ev.payload.message_id ?? '', duration_ms: ev.payload.duration_ms ?? 0 }]
     case 'messages_retracted':
-      return [{ type: 'system', subtype: 'model_refusal_fallback', retractedMessageUuids: Array.isArray(p.message_ids) ? p.message_ids.filter((v): v is string => typeof v === 'string') : [] }]
-    case 'notice':
-      return text && !isAgentCompletionNotification(text) ? [{ ...base, type: 'queue-operation', content: text }] : []
+      return [{ type: 'system', subtype: 'model_refusal_fallback', retractedMessageUuids: ev.payload.message_ids ?? [] }]
+    case 'notice': {
+      const text = ev.payload.text ?? ''
+      return text && !isAgentCompletionNotification(text) ? [{ ...providerBase(ev, ev.payload), type: 'queue-operation', content: text }] : []
+    }
     case 'interaction_requested': {
-      const interaction = p.interaction && typeof p.interaction === 'object' ? p.interaction as Record<string, unknown> : {}
+      const p = ev.payload
+      const base = providerBase(ev, {})
+      const interaction = (p.interaction ?? {}) as Record<string, unknown>
       if (p.provider === 'claude') {
-        return [{ type: 'control_request', request_id: typeof p.request_id === 'string' ? p.request_id : '', request: interaction as ProviderEvent['request'] }]
+        return [{ type: 'control_request', request_id: p.request_id ?? '', request: interaction as ProviderEvent['request'] }]
       }
       const params = interaction.params && typeof interaction.params === 'object' ? interaction.params as Record<string, unknown> : {}
       if (interaction.method === 'item/tool/requestUserInput') {
-        const toolID = typeof params.itemId === 'string' ? params.itemId : id
+        const toolID = typeof params.itemId === 'string' ? params.itemId : String(ev.seq)
         const requestID = String(interaction.request_id ?? '')
         const input = { questions: Array.isArray(params.questions) ? params.questions : [] }
         return [
@@ -809,16 +832,18 @@ export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyRea
       // Compatibility for logs written before cancellation got its own event
       // type: the adapter labelled them completed/failed but retained Codex's
       // cancellation status or error in the payload.
-      const terminal = `${typeof p.status === 'string' ? p.status : ''} ${contentText(p.error)}`.toLowerCase()
+      const p = ev.payload
+      const base = providerBase(ev, p)
+      const terminal = `${p.status ?? ''} ${contentText(p.error)}`.toLowerCase()
       if (/interrupt|cancel/.test(terminal)) {
         return [{ ...base, type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }]
       }
       return [{ ...base, type: 'result', subtype: ev.type === 'turn_failed' ? 'error' : 'success', is_error: ev.type === 'turn_failed', result: providerErrorText(p.error) || (typeof p.result === 'string' ? p.result : ''), usage: p.usage as TokenUsage, total_cost_usd: typeof p.cost_usd === 'number' ? p.cost_usd : undefined }]
     }
     case 'turn_error':
-      return [{ ...base, type: 'result', subtype: 'error', is_error: true, result: providerErrorText(p.error) }]
+      return [{ ...providerBase(ev, ev.payload), type: 'result', subtype: 'error', is_error: true, result: providerErrorText(ev.payload.error) }]
     case 'turn_interrupted':
-      return [{ ...base, type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }]
+      return [{ ...providerBase(ev, ev.payload), type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }]
     default:
       return []
   }
@@ -7619,7 +7644,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const emptyNormalizedReasoning = new Map<string, NormalizedChatEvent>()
     const normalizedReasoningDurations = new Set<string>()
     const normalizedPresentationEvents = (event: NormalizedChatEvent): ProviderEvent[] => {
-      const messageID = typeof event.payload?.message_id === 'string' ? event.payload.message_id : ''
+      const messageID = eventMessageID(event)
       if (event.type === 'reasoning_completed' && !contentText(event.payload?.text).trim()) {
         if (messageID && normalizedReasoningDurations.has(messageID)) {
           return normalizedToProviderEvents(event, true)
@@ -7659,9 +7684,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
     const enrichNormalizedTool = (event: NormalizedChatEvent): NormalizedChatEvent => {
       if (event.type !== 'tool_started') return event
-      const id = typeof event.payload?.id === 'string' ? event.payload.id : ''
-      const rich = normalizedToolMetadata.get(id)
-      return rich ? { ...event, payload: { ...event.payload, name: rich.name, input: rich.input } } : event
+      const rich = normalizedToolMetadata.get(event.payload.id ?? '')
+      return rich ? { ...event, payload: { ...event.payload, name: rich.name, input: rich.input as ChatToolStartedPayload['input'] } } : event
     }
     const handleNormalizedSubagent = (event: NormalizedChatEvent): boolean => {
       if (event.type !== 'subagent_started' && event.type !== 'subagent_updated' && event.type !== 'subagent_completed') return false
@@ -7767,14 +7791,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'chat_event': {
-          const normalized = msg.event as unknown as NormalizedChatEvent | undefined
+          const normalized = asNormalizedChatEvent(msg.event)
           if (!normalized || !firstNormalizedDelivery(normalized) || !keepNormalizedUserEvent(normalized)) return
           // Status frames and normalized chat events travel independently. A
           // completed turn is already durable by the time this event arrives,
           // so settle the selected head immediately instead of waiting for the
           // slower project-status refresh. Historical pages use chat_history,
           // not this live-only branch, and therefore cannot overwrite status.
-          if (normalized.payload?.sidechain !== true) {
+          if (!isSidechainEvent(normalized)) {
             if (normalized.type === 'turn_started') {
               onStatusUpdateRef.current?.(AgentStatus.RUNNING)
             } else if (
@@ -7788,15 +7812,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           }
           rememberNormalizedToolMetadata(normalized)
           if (handleNormalizedSubagent(normalized)) {
-            const subID = typeof normalized.payload?.id === 'string' ? normalized.payload.id : ''
+            const subID = eventItemID(normalized)
             if (normalized.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
               for (const converted of normalizedPresentationEvents(normalized)) handleProviderEvent(converted)
             }
             return
           }
-          const explicitStreamID = typeof normalized.payload?.message_id === 'string' ? normalized.payload.message_id : ''
+          const explicitStreamID = eventMessageID(normalized)
           if (normalized.type === 'assistant_delta' || normalized.type === 'reasoning_delta') {
-            if (normalized.payload?.sidechain === true) {
+            if (isSidechainEvent(normalized)) {
               // Sub-agent cards consume their completed blocks; routing child
               // token deltas through the main stream created a second partial
               // response and corrupted replay state.
@@ -7862,7 +7886,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'chat_history': {
-          const normalized = msg.events
+          const normalized = msg.events.map(asNormalizedChatEvent)
             .filter(firstNormalizedDelivery)
             .filter(keepNormalizedUserEvent)
           oldestEventCursorRef.current = msg.next_cursor ?? null
@@ -7874,16 +7898,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             const main: ProviderEvent[] = []
             for (const rawEvent of normalized) {
               if (handleNormalizedSubagent(rawEvent)) {
-                const subID = typeof rawEvent.payload?.id === 'string' ? rawEvent.payload.id : ''
+                const subID = eventItemID(rawEvent)
                 if (rawEvent.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
                   main.push(...normalizedPresentationEvents(rawEvent))
                 }
                 continue
               }
               const event = enrichNormalizedTool(rawEvent)
-              if (event.payload?.sidechain === true) {
+              if (isSidechainEvent(event)) {
                 if (event.type === 'tool_started' || event.type === 'tool_completed') {
-                  const toolID = typeof event.payload?.id === 'string' ? event.payload.id : ''
+                  const toolID = eventItemID(event)
                   const toolName = typeof event.payload?.name === 'string' ? event.payload.name : ''
                   if (toolID && toolName && 'input' in event.payload) patchToolMetadata(toolID, toolName, event.payload.input)
                 }
@@ -7896,7 +7920,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           } else {
             for (const rawEvent of normalized) {
               if (handleNormalizedSubagent(rawEvent)) {
-                const subID = typeof rawEvent.payload?.id === 'string' ? rawEvent.payload.id : ''
+                const subID = eventItemID(rawEvent)
                 if (rawEvent.type === 'subagent_completed' && !backgroundCommandTaskIDs.has(subID)) {
                   for (const converted of normalizedPresentationEvents(rawEvent)) handleProviderEvent(converted)
                 }
@@ -7933,7 +7957,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // through the live handler into the sub-agent's card. Deduped by seq,
           // so overlap with the already-loaded window (or a later scroll) is a
           // no-op.
-          const normalized = msg.events
+          const normalized = msg.events.map(asNormalizedChatEvent)
             .filter(firstNormalizedDelivery)
             .filter(keepNormalizedUserEvent)
           for (const rawEvent of normalized) rememberNormalizedToolMetadata(rawEvent)
