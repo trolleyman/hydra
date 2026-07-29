@@ -43,6 +43,7 @@ import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { fileViewLineInfo, parseFileViewScript, splitFileViewOutput, type FileViewSection } from '../lib/fileViewCommand'
+import { gitOutputSpans, type GitSpan } from '../lib/gitOutput'
 import { parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
 import { formatBytes } from '../lib/formatBytes'
@@ -2162,6 +2163,10 @@ interface ScriptOutputRow {
   num: string
   // The line's content, already highlighted.
   html: string
+  // Pre-coloured pieces instead of `html`, for a line git wrote about the
+  // repository rather than one it read out of a file (lib/gitOutput): there is
+  // no grammar to run over those, just shapes, so they arrive as spans.
+  spans?: GitSpan[]
   // The `path:` a multi-file search printed in front of the line, shown lowlit
   // so the file it names does not read as part of the line's code.
   prefix?: string
@@ -2212,6 +2217,10 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
   for (const section of sections) {
     if (section.kind === 'matches') {
       rows.push(...scriptMatchRows(section))
+      continue
+    }
+    if (section.kind === 'git') {
+      for (const spans of gitOutputSpans(section.lines)) rows.push({ num: '', html: '', spans, tone: 'code' })
       continue
     }
     if (section.kind !== 'view') {
@@ -2272,7 +2281,9 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
               className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
             >
               {row.prefix && <span className="text-stone-400 dark:text-stone-500">{row.prefix}:</span>}
-              <span dangerouslySetInnerHTML={{ __html: row.html }} />
+              {row.spans
+                ? row.spans.map((s, j) => <span key={j} className={s.cls}>{s.text}</span>)
+                : <span dangerouslySetInnerHTML={{ __html: row.html }} />}
             </span>
           </Fragment>
         ))}

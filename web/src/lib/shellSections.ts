@@ -11,7 +11,8 @@
 // and hands the lines between them to the one command that printed them. The
 // chat card then renders each section as what it is: a file's own lines with a
 // line-number gutter and its language's highlighting, a grep's matches with the
-// file line numbers it printed, and the separators as the strings they are.
+// file line numbers it printed, a git report in git's own colours (lib/
+// gitOutput), and the separators as the strings they are.
 //
 // The neighbouring lib/fileViewCommand answers a STRICTER version of the same
 // question - "is this whole script nothing but reads?", which promotes the card
@@ -46,6 +47,9 @@ export type ScriptStep =
   | { kind: 'view'; view: FileView }
   // Lines matched out of one or more files.
   | { kind: 'matches'; match: MatchesView; command: string }
+  // git reporting on the repository rather than printing a file: a status, a
+  // diffstat, a commit header (see lib/gitOutput).
+  | { kind: 'git'; command: string }
   // Prints nothing, so it takes no output (`cd`, an assignment, a redirect).
   | { kind: 'silent' }
   // Prints something this module cannot describe.
@@ -55,6 +59,7 @@ export type ScriptSection =
   | { kind: 'marker'; lines: string[] }
   | { kind: 'view'; view: FileView; lines: string[] }
   | { kind: 'matches'; match: MatchesView; command: string; lines: string[] }
+  | { kind: 'git'; command: string; lines: string[] }
   | { kind: 'plain'; lines: string[] }
 
 // Steps beyond this are not a script anyone is reading the output of, and the
@@ -323,9 +328,17 @@ function parseMarker(words: Word[]): string | null {
   return text.trim().length >= MIN_MARKER_LEN ? text : null
 }
 
+interface ParsedGrep extends MatchesView {
+  // How many file operands the search names. Zero means it read stdin, which is
+  // what makes it a filter on the command before it rather than a search of its
+  // own - and is not the same as `paths` being empty, which also happens when a
+  // named file's word is a glob or a variable.
+  fileCount: number
+}
+
 // parseMatches reads a grep-family search: which files it could have printed
 // lines from, and whether those lines carry their numbers.
-function parseMatches(words: Word[]): MatchesView | null {
+function parseMatches(words: Word[]): ParsedGrep | null {
   if (!GREP_TOOLS.has(words[0].text) || words[0].quoted) return null
   const args = words.slice(1)
   const operands: Word[] = []
@@ -357,12 +370,52 @@ function parseMatches(words: Word[]): MatchesView | null {
   }
   // The first bare operand is the pattern unless `-e` already gave one.
   const files = patternGiven ? operands : operands.slice(1)
-  return { paths: files.some((f) => f.dynamic) ? [] : files.map((f) => f.text), numbered }
+  return {
+    paths: files.some((f) => f.dynamic) ? [] : files.map((f) => f.text),
+    numbered,
+    fileCount: files.length,
+  }
 }
 
 function splitAt(word: string, sep: string): [string, string | null] {
   const at = word.indexOf(sep)
   return at === -1 ? [word, null] : [word.slice(0, at), word.slice(at + 1)]
+}
+
+// git subcommands whose output is a report on the repository - the shapes
+// lib/gitOutput knows how to colour.
+const GIT_REPORTS = new Set(['status', 'show', 'log', 'diff'])
+
+// Flags that make git print something other than those shapes: a patch, a
+// machine-readable format, a custom pretty format, a commit graph.
+const GIT_REFUSED = /^(-p|-u|--patch|-U\d*|--unified(=.*)?|--numstat|--name-only|--name-status|--raw|--graph|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
+
+// Flags that replace `show`/`log`/`diff`'s patch with a summary of it.
+const GIT_SUMMARY = /^(--stat(=.*)?|--shortstat|--compact-summary|--summary|--oneline|-s|--no-patch)$/
+
+// parseGitReport reports whether a command is a git call whose output is one of
+// the reports lib/gitOutput colours: a status, a diffstat, a commit header.
+//
+// Narrow on purpose. Everything outside this set either prints a patch - which
+// wants a diff view, not a line-shape colouriser - or a format chosen by the
+// caller, and a `--pretty` this module has not read can put anything on any
+// line.
+function parseGitReport(words: Word[]): boolean {
+  if (words[0].text !== 'git' || words[0].quoted) return false
+  // git's own options come before the subcommand; `-C` and `-c` take the word
+  // after them, and none of them change what the subcommand prints.
+  let i = 1
+  while (i < words.length && !words[i].quoted && words[i].text.startsWith('-')) {
+    if (words[i].text === '-C' || words[i].text === '-c') i++
+    i++
+  }
+  const sub = words[i]
+  if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return false
+  const args = words.slice(i + 1)
+  if (args.some((w) => !w.quoted && GIT_REFUSED.test(w.text))) return false
+  // `status` only ever prints a status, long or short.
+  if (sub.text === 'status') return true
+  return args.some((w) => !w.quoted && GIT_SUMMARY.test(w.text))
 }
 
 // isFilter reports whether a command only trims what the command before it in
@@ -373,16 +426,35 @@ function isFilter(cmd: Command): 'head' | 'tail' | null {
   return cmd.words.slice(1).every((w) => w.text.startsWith('-') && !w.quoted) ? name : null
 }
 
+// isLineFilter reports whether a command only DROPS lines from what the command
+// before it printed, leaving the ones it keeps byte for byte - `| grep -v test/`,
+// `| grep import`. Agents write these constantly (`grep -rn X src | grep -v
+// _test.go | head -20`), and each one used to cost the whole step its
+// highlighting even though every line that survives is still a line of the file
+// the search before it named.
+//
+// It is the same parse as a searching grep, held to two more conditions: it
+// names no file of its own (so what it read was the pipe), and it adds no line
+// numbers (which would count lines of the STREAM, not lines of any file).
+function isLineFilter(cmd: Command): boolean {
+  const grep = parseMatches(cmd.words)
+  return grep !== null && grep.fileCount === 0 && !grep.numbered
+}
+
 // classify decides what one pipeline contributes to the output.
 function classify(p: Pipeline): ScriptStep {
-  // Trailing filters truncate what the command before them printed; they do not
-  // change what it IS, so `grep -n x f | head` is still that grep's matches.
+  // Trailing filters cut lines out of what the command before them printed; they
+  // do not change what the lines ARE, so `grep -n x f | grep -v y | head` is
+  // still that grep's matches.
   let cmds = p.cmds
   let trimmedFrom: 'head' | 'tail' | null = null
+  let filtered = false
   while (cmds.length > 1) {
-    const filter = isFilter(cmds[cmds.length - 1])
-    if (!filter) break
-    trimmedFrom = filter
+    const last = cmds[cmds.length - 1]
+    const trim = isFilter(last)
+    if (trim) trimmedFrom = trim
+    else if (isLineFilter(last)) filtered = true
+    else break
     cmds = cmds.slice(0, -1)
   }
   if (cmds.length !== 1) return { kind: 'unknown', command: p.raw }
@@ -394,14 +466,25 @@ function classify(p: Pipeline): ScriptStep {
   if (!name.quoted && (SILENT.has(name.text) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(name.text))) return { kind: 'silent' }
 
   const marker = parseMarker(cmd.words)
-  if (marker !== null && !trimmedFrom) return { kind: 'marker', text: marker }
+  if (marker !== null && !trimmedFrom && !filtered) return { kind: 'marker', text: marker }
 
   const matches = parseMatches(cmd.words)
-  if (matches) return { kind: 'matches', match: matches, command: p.raw }
+  if (matches) return { kind: 'matches', match: { paths: matches.paths, numbered: matches.numbered }, command: p.raw }
+
+  if (parseGitReport(cmd.words)) return { kind: 'git', command: p.raw }
 
   if (!cmd.words.some((w) => w.dynamic)) {
     const view = parseView(cmd.words.map((w) => w.text), p.raw)
     if (view) {
+      // Grepped, so the lines that came through are no longer a contiguous
+      // slice to number from `start` - but they are still that file's lines,
+      // and still want its language. (`cat -n` is the exception: its numbers
+      // ride in the text, and nothing downstream can read them back off.)
+      if (filtered) {
+        return view.numbered
+          ? { kind: 'unknown', command: p.raw }
+          : { kind: 'matches', match: { paths: [view.path], numbered: false }, command: p.raw }
+      }
       // A `| head` keeps the start of what was printed and drops the end; a
       // `| tail` keeps an end this parser cannot number.
       if (trimmedFrom === 'head') return { kind: 'view', view: { ...view, end: null } }
@@ -419,7 +502,8 @@ export function parseScriptSteps(script: string): ScriptStep[] | null {
   const pipelines = lexPipelines(script)
   if (!pipelines || pipelines.length === 0 || pipelines.length > MAX_STEPS) return null
   const steps = pipelines.map(classify)
-  return steps.some((s) => s.kind === 'marker' || s.kind === 'view' || s.kind === 'matches') ? steps : null
+  const describes = new Set(['marker', 'view', 'matches', 'git'])
+  return steps.some((s) => describes.has(s.kind)) ? steps : null
 }
 
 // --- Splitting the output -----------------------------------------------------
@@ -493,6 +577,8 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
         sections.push({ kind: 'view', view: step.view, lines: part })
       } else if (step.kind === 'matches') {
         sections.push({ kind: 'matches', match: step.match, command: step.command, lines: part })
+      } else if (step.kind === 'git') {
+        sections.push({ kind: 'git', command: step.command, lines: part })
       } else {
         sections.push({ kind: 'plain', lines: part })
       }
