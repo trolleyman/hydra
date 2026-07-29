@@ -145,9 +145,9 @@ func (w *worker) run(id string) {
 		// one-shot history import is what picks them up - appending them at the
 		// TAIL of an event log the live stream already filled, where a note about
 		// an image read mid-turn renders as an "Injected context" card stuck to
-		// the end of a finished answer. This is the one point both the live and
-		// the backfill relay pass through; the raw claude_event relay has its own
-		// call in sendChatEventLine.
+		// the end of a finished answer. Every line - live or imported - passes
+		// through here, and this log is the only thing a chat socket relays, so
+		// this is the single point the filter has to hold.
 		if (item.provider == "claude" || item.provider == "claude_history") && claudestream.IsHiddenChatMessage(item.line) {
 			continue
 		}

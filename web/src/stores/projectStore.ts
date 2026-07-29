@@ -31,6 +31,31 @@ function sameOrder(a: ProjectInfo[], b: ProjectInfo[]): boolean {
   return a.length === b.length && a.every((p, i) => p.id === b[i].id)
 }
 
+// applyHidden overlays the hidden flags a toggle just applied locally, and drops
+// the ones the server has caught up with (see pendingHidden). Returns the list
+// unchanged - same identity - when there is nothing pending, so the common case
+// costs nothing.
+function applyHidden(
+  projects: ProjectInfo[],
+  pending: Record<string, boolean>,
+): { projects: ProjectInfo[]; pending: Record<string, boolean> } {
+  const ids = Object.keys(pending)
+  if (ids.length === 0) return { projects, pending }
+  const settled = ids.filter((id) => {
+    const p = projects.find((x) => x.id === id)
+    // A project that vanished (removed elsewhere) settles too - nothing to hold.
+    return p == null || !!p.hidden === pending[id]
+  })
+  const next = settled.length === ids.length ? {} : { ...pending }
+  for (const id of settled) delete next[id]
+  const remaining = Object.keys(next)
+  if (remaining.length === 0) return { projects, pending: next }
+  return {
+    projects: projects.map((p) => (p.id in next ? { ...p, hidden: next[p.id] } : p)),
+    pending: next,
+  }
+}
+
 interface ProjectState {
   projects: ProjectInfo[]
   // The order a drag-to-reorder just applied locally, held until the server's
@@ -38,6 +63,10 @@ interface ProjectState {
   // poll and events-stream nudge, so without this a poll already in flight when
   // the drop happened would land the old order and visibly snap the row back.
   pendingOrder: string[] | null
+  // Hidden flags a visibility toggle just applied locally, keyed by project id,
+  // held until the server's list agrees - the same "don't let an in-flight poll
+  // snap it back" guard as pendingOrder (see applyHidden).
+  pendingHidden: Record<string, boolean>
   selectedProjectId: string | null
   systemStatus: StatusResponse | null
   // Resolved [review] config, cached per project. It is project-scoped (not
@@ -46,6 +75,7 @@ interface ProjectState {
   reviewConfigs: Record<string, ReviewConfigResponse>
   setProjects: (projects: ProjectInfo[]) => void
   setProjectOrder: (ids: string[]) => void
+  setProjectHiddenLocal: (id: string, hidden: boolean) => void
   setSelectedProjectId: (id: string | null) => void
   setSystemStatus: (status: StatusResponse) => void
   setReviewConfig: (projectId: string, cfg: ReviewConfigResponse) => void
@@ -54,6 +84,7 @@ interface ProjectState {
 export const useProjectStore = create<ProjectState>((set) => ({
   projects: [],
   pendingOrder: null,
+  pendingHidden: {},
   selectedProjectId: readLocal(StorageKeys.projectId),
   systemStatus: null,
   reviewConfigs: readStoredReviewConfigs(),
@@ -74,11 +105,26 @@ export const useProjectStore = create<ProjectState>((set) => ({
     // things in; drop the override as soon as the server agrees with it.
     const ordered = s.pendingOrder ? applyOrder(projects, s.pendingOrder) : projects
     const pendingOrder = s.pendingOrder && sameOrder(projects, ordered) ? null : s.pendingOrder
-    return { projects: reconcileList(s.projects, ordered, (p) => p.id), reviewConfigs, pendingOrder }
+    // Same for a hide/show still in flight.
+    const withHidden = applyHidden(ordered, s.pendingHidden)
+    return {
+      projects: reconcileList(s.projects, withHidden.projects, (p) => p.id),
+      reviewConfigs,
+      pendingOrder,
+      pendingHidden: withHidden.pending,
+    }
   }),
   setProjectOrder: (ids) => set((s) => ({
     pendingOrder: ids,
     projects: reconcileList(s.projects, applyOrder(s.projects, ids), (p) => p.id),
+  })),
+  setProjectHiddenLocal: (id, hidden) => set((s) => ({
+    pendingHidden: { ...s.pendingHidden, [id]: hidden },
+    projects: reconcileList(
+      s.projects,
+      s.projects.map((p) => (p.id === id ? { ...p, hidden } : p)),
+      (p) => p.id,
+    ),
   })),
   setSelectedProjectId: (id) => {
     writeLocal(StorageKeys.projectId, id)
@@ -103,6 +149,64 @@ export function reorderProjects(ids: string[]): Promise<void> {
     .catch(() => {
       useProjectStore.setState({ pendingOrder: null })
     })
+}
+
+// setProjectHidden hides a project from the project lists (or shows it again),
+// applying it locally first so the row leaves the list under the pointer. On
+// failure the local override is dropped, which lets the next refetch put the
+// server's answer back.
+export function setProjectHidden(id: string, hidden: boolean): Promise<void> {
+  useProjectStore.getState().setProjectHiddenLocal(id, hidden)
+  return api.default
+    .setProjectHidden(id, { hidden })
+    .then(() => {})
+    .catch(() => {
+      useProjectStore.setState((s) => {
+        const pendingHidden = { ...s.pendingHidden }
+        delete pendingHidden[id]
+        return {
+          pendingHidden,
+          projects: s.projects.map((p) => (p.id === id ? { ...p, hidden: !hidden } : p)),
+        }
+      })
+    })
+}
+
+// visibleProjects drops the projects the user has hidden, keeping the one that
+// is currently selected: a hidden project you are *looking at* still has to be
+// in the list its own picker renders, or the picker would show nothing selected.
+// Everything that lists projects to switch between goes through this - the
+// dropdown (outside its edit mode, which is where hiding is done and so must
+// show everything) and the Ctrl+` switcher.
+export function visibleProjects(projects: ProjectInfo[], selectedId: string | null): ProjectInfo[] {
+  if (!projects.some((p) => p.hidden)) return projects // keep list identity stable
+  return projects.filter((p) => !p.hidden || p.id === selectedId)
+}
+
+// expandOrder folds the projects that aren't on screen (the hidden ones - see
+// visibleProjects) back into an order the user just dragged, anchoring each to
+// the visible project it currently sits behind. `all` is the full list in its
+// current order, `visibleIds` the rendered rows in their new one.
+export function expandOrder(all: ProjectInfo[], visibleIds: string[]): string[] {
+  if (all.length === visibleIds.length) return visibleIds
+  const shown = new Set(visibleIds)
+  // Hidden projects ahead of the first visible one have nothing to anchor to and
+  // simply stay at the front.
+  const lead: string[] = []
+  const trailing = new Map<string, string[]>()
+  let anchor: string | null = null
+  for (const p of all) {
+    if (shown.has(p.id)) {
+      anchor = p.id
+    } else if (anchor == null) {
+      lead.push(p.id)
+    } else {
+      const ids = trailing.get(anchor) ?? []
+      ids.push(p.id)
+      trailing.set(anchor, ids)
+    }
+  }
+  return [...lead, ...visibleIds.flatMap((id) => [id, ...(trailing.get(id) ?? [])])]
 }
 
 // One in-flight GET per project, shared by every consumer (root layout, agent

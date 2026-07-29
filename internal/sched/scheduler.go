@@ -1,20 +1,28 @@
-package artifacts
+// Package sched bounds and prioritises concurrent generation work - artifact
+// generation, test runs, and anything else where a user-visible request should
+// jump ahead of proactive background work without preempting what is already
+// running.
+//
+// Each consumer owns its own Scheduler with its own limit; the package knows
+// nothing about what a "generation" is beyond an opaque key.
+package sched
 
 import "sync"
 
-// genScheduler bounds how many artifact generations run at once and orders the
-// queue by priority: foreground requests (a user actively viewing a diff) are
-// always granted a free slot before queued background ones (proactive
-// pre-generation). It does NOT preempt - a generation that already holds a slot
-// runs to completion regardless of priority - so background work is never
-// wasted; foreground simply jumps the *queue*. A foreground request that lands
-// on an already-queued background entry can promote it (see promote), so the
-// thing the user is now watching stops waiting behind other background work.
+// Scheduler bounds how many generations run at once and orders the queue by
+// priority: foreground requests (a user actively viewing a diff) are always
+// granted a free slot before queued background ones (proactive pre-generation).
+// It does NOT preempt - a generation that already holds a slot runs to
+// completion regardless of priority - so background work is never wasted;
+// foreground simply jumps the *queue*. A foreground request that lands on an
+// already-queued background entry can promote it (see Promote), so the thing the
+// user is now watching stops waiting behind other background work.
 //
-// The limit is mutable (setLimit) so a config change to artifact_concurrency
-// takes effect without recreating the manager. A limit of 0 means unlimited
-// (no cap) - every acquire is granted immediately.
-type genScheduler struct {
+// The limit is mutable (SetLimit) so a config change to the consumer's
+// concurrency (artifact_concurrency, test_concurrency) takes effect without
+// recreating the manager. A limit of 0 means unlimited (no cap) - every acquire
+// is granted immediately.
+type Scheduler struct {
 	mu      sync.Mutex
 	limit   int // 0 = unlimited (no cap)
 	running int
@@ -31,16 +39,17 @@ type waiter struct {
 	seq   int
 }
 
-func newGenScheduler(limit int) *genScheduler {
+// New creates a scheduler with the given concurrency limit (0 = unlimited).
+func New(limit int) *Scheduler {
 	if limit < 0 {
 		limit = 0
 	}
-	return &genScheduler{limit: limit, waiters: map[string]*waiter{}}
+	return &Scheduler{limit: limit, waiters: map[string]*waiter{}}
 }
 
 // hasCapacityLocked reports whether another generation may start right now. A
 // limit of 0 means unlimited (always capacity). Caller holds mu.
-func (s *genScheduler) hasCapacityLocked() bool {
+func (s *Scheduler) hasCapacityLocked() bool {
 	return s.limit == 0 || s.running < s.limit
 }
 
@@ -48,7 +57,7 @@ func (s *genScheduler) hasCapacityLocked() bool {
 // entry dir, which is unique per in-flight generation (the manager dedups by
 // dir before calling acquire), so it doubles as the promotion handle. fg sets
 // the initial priority. The caller must call release when the generation ends.
-func (s *genScheduler) acquire(key string, fg bool) {
+func (s *Scheduler) Acquire(key string, fg bool) {
 	s.mu.Lock()
 	if s.hasCapacityLocked() {
 		s.running++
@@ -65,7 +74,7 @@ func (s *genScheduler) acquire(key string, fg bool) {
 // release returns a slot, handing it to the highest-priority queued waiter
 // (foreground before background, then FIFO) rather than decrementing, so the
 // slot is transferred without a window where it sits idle while a waiter exists.
-func (s *genScheduler) release() {
+func (s *Scheduler) Release() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if k, w := s.bestLocked(); w != nil {
@@ -80,7 +89,7 @@ func (s *genScheduler) release() {
 // pre-generation the user has now opened jumps ahead of other background work.
 // A no-op if the entry isn't queued (already running, already foreground, or
 // not tracked).
-func (s *genScheduler) promote(key string) {
+func (s *Scheduler) Promote(key string) {
 	s.mu.Lock()
 	if w := s.waiters[key]; w != nil {
 		w.fg = true
@@ -91,7 +100,7 @@ func (s *genScheduler) promote(key string) {
 // setLimit changes the concurrency cap. Raising it immediately grants slots to
 // the highest-priority queued waiters; lowering it just stops new grants until
 // running generations drain back under the new cap (no preemption).
-func (s *genScheduler) setLimit(n int) {
+func (s *Scheduler) SetLimit(n int) {
 	if n < 0 {
 		n = 0
 	}
@@ -119,7 +128,7 @@ func (s *genScheduler) setLimit(n int) {
 // acquires a slot (see Manager.get), so a queued generation reports itself as
 // generating, with a ticking elapsed time and no output - indistinguishable from
 // one that is genuinely running but slow to print.
-func (s *genScheduler) queuePosition(key string) int {
+func (s *Scheduler) QueuePosition(key string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	me := s.waiters[key]
@@ -137,7 +146,7 @@ func (s *genScheduler) queuePosition(key string) int {
 
 // bestLocked returns the highest-priority queued waiter (foreground first, then
 // lowest seq) and its key, or ("", nil) when none are queued. Caller holds mu.
-func (s *genScheduler) bestLocked() (string, *waiter) {
+func (s *Scheduler) bestLocked() (string, *waiter) {
 	var bestKey string
 	var best *waiter
 	for k, w := range s.waiters {

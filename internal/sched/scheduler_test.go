@@ -1,4 +1,4 @@
-package artifacts
+package sched
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 
 // waitQueued spins until the scheduler has at least n queued waiters, so a test
 // can assert on queue ordering without racing the goroutines that enqueue.
-func waitQueued(t *testing.T, s *genScheduler, n int) {
+func waitQueued(t *testing.T, s *Scheduler, n int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -29,21 +29,21 @@ func waitQueued(t *testing.T, s *genScheduler, n int) {
 // TestSchedulerForegroundJumpsQueue verifies a foreground waiter is granted the
 // next freed slot ahead of background waiters that queued earlier.
 func TestSchedulerForegroundJumpsQueue(t *testing.T) {
-	s := newGenScheduler(1)
-	s.acquire("running", false) // hold the only slot
+	s := New(1)
+	s.Acquire("running", false) // hold the only slot
 
 	// Two background waiters queue first, then one foreground.
 	order := make(chan string, 3)
 	var wg sync.WaitGroup
 	for _, key := range []string{"bg1", "bg2"} {
-		wg.Go(func() { s.acquire(key, false); order <- key; s.release() })
+		wg.Go(func() { s.Acquire(key, false); order <- key; s.Release() })
 	}
 	waitQueued(t, s, 2)
-	wg.Go(func() { s.acquire("fg", true); order <- "fg"; s.release() })
+	wg.Go(func() { s.Acquire("fg", true); order <- "fg"; s.Release() })
 	waitQueued(t, s, 3)
 
 	// Releasing the running slot should hand it to the foreground waiter first.
-	s.release()
+	s.Release()
 	wg.Wait()
 	close(order)
 	var got []string
@@ -58,19 +58,19 @@ func TestSchedulerForegroundJumpsQueue(t *testing.T) {
 // TestSchedulerPromote verifies a queued background waiter promoted to
 // foreground is then served before an un-promoted background one.
 func TestSchedulerPromote(t *testing.T) {
-	s := newGenScheduler(1)
-	s.acquire("running", false)
+	s := New(1)
+	s.Acquire("running", false)
 
 	order := make(chan string, 2)
 	var wg sync.WaitGroup
 	// bg1 queues before bg2; promoting bg2 should let it win.
-	wg.Go(func() { s.acquire("bg1", false); order <- "bg1"; s.release() })
+	wg.Go(func() { s.Acquire("bg1", false); order <- "bg1"; s.Release() })
 	waitQueued(t, s, 1)
-	wg.Go(func() { s.acquire("bg2", false); order <- "bg2"; s.release() })
+	wg.Go(func() { s.Acquire("bg2", false); order <- "bg2"; s.Release() })
 	waitQueued(t, s, 2)
 
-	s.promote("bg2")
-	s.release()
+	s.Promote("bg2")
+	s.Release()
 	wg.Wait()
 	close(order)
 	first := <-order
@@ -82,14 +82,14 @@ func TestSchedulerPromote(t *testing.T) {
 // TestSchedulerSetLimitAdmits verifies raising the limit immediately admits
 // queued waiters without a release.
 func TestSchedulerSetLimitAdmits(t *testing.T) {
-	s := newGenScheduler(1)
-	s.acquire("running", false)
+	s := New(1)
+	s.Acquire("running", false)
 
 	done := make(chan struct{})
-	go func() { s.acquire("waiter", false); close(done) }()
+	go func() { s.Acquire("waiter", false); close(done) }()
 	waitQueued(t, s, 1)
 
-	s.setLimit(2) // now two may run at once → the waiter is admitted
+	s.SetLimit(2) // now two may run at once → the waiter is admitted
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -98,14 +98,14 @@ func TestSchedulerSetLimitAdmits(t *testing.T) {
 }
 
 // TestSchedulerUnlimited verifies a limit of 0 caps nothing: many acquires all
-// proceed without blocking, and lowering the limit afterwards via setLimit lets
+// proceed without blocking, and lowering the limit afterwards via SetLimit lets
 // the running set drain without preempting.
 func TestSchedulerUnlimited(t *testing.T) {
-	s := newGenScheduler(0) // 0 = unlimited
+	s := New(0) // 0 = unlimited
 	const n = 50
 	done := make(chan struct{}, n)
 	for i := range n {
-		go func() { s.acquire(fmt.Sprintf("k%d", i), false); done <- struct{}{} }()
+		go func() { s.Acquire(fmt.Sprintf("k%d", i), false); done <- struct{}{} }()
 	}
 	for i := range n {
 		select {
@@ -116,23 +116,23 @@ func TestSchedulerUnlimited(t *testing.T) {
 	}
 	// All n are "running"; releasing them is a no-op queue-wise.
 	for range n {
-		s.release()
+		s.Release()
 	}
 }
 
 // TestSchedulerSetLimitUnlimitedAdmitsAll verifies switching to unlimited (0)
 // admits every queued waiter at once.
 func TestSchedulerSetLimitUnlimitedAdmitsAll(t *testing.T) {
-	s := newGenScheduler(1)
-	s.acquire("running", false)
+	s := New(1)
+	s.Acquire("running", false)
 
 	const n = 8
 	done := make(chan struct{}, n)
 	for i := range n {
-		go func() { s.acquire(fmt.Sprintf("w%d", i), false); done <- struct{}{} }()
+		go func() { s.Acquire(fmt.Sprintf("w%d", i), false); done <- struct{}{} }()
 	}
 	waitQueued(t, s, n)
-	s.setLimit(0) // unlimited → all queued waiters admitted
+	s.SetLimit(0) // unlimited → all queued waiters admitted
 	for i := range n {
 		select {
 		case <-done:
@@ -147,17 +147,17 @@ func TestSchedulerSetLimitUnlimitedAdmitsAll(t *testing.T) {
 // only reorders the queue (covered above). Here we confirm the running count is
 // respected - a second acquire blocks until release even when foreground.
 func TestSchedulerNoPreemption(t *testing.T) {
-	s := newGenScheduler(1)
-	s.acquire("bg", false)
+	s := New(1)
+	s.Acquire("bg", false)
 
 	admitted := make(chan struct{})
-	go func() { s.acquire("fg", true); close(admitted) }()
+	go func() { s.Acquire("fg", true); close(admitted) }()
 	select {
 	case <-admitted:
 		t.Fatal("foreground preempted a running generation")
 	case <-time.After(50 * time.Millisecond):
 	}
-	s.release() // bg finishes; now fg runs
+	s.Release() // bg finishes; now fg runs
 	select {
 	case <-admitted:
 	case <-time.After(2 * time.Second):

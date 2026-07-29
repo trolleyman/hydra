@@ -56,6 +56,13 @@ type ProjectInfo struct {
 	// Callers asking "does the user have any projects yet?" must exclude these,
 	// otherwise first-run states never render again.
 	Builtin bool `json:"builtin,omitempty"`
+	// Hidden keeps a project out of the project lists (the dropdown and the
+	// Ctrl+` switcher) without unregistering it: its agents keep running and its
+	// pages stay reachable. It lives here, next to the list order, rather than in
+	// the project's own .hydra/config.toml, because "I don't want this in my
+	// list" is a property of this machine's list - not of the repository, which
+	// would commit one person's clutter to everybody's checkout.
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // Manager persists the list of known projects to ~/.config/hydra/projects.json.
@@ -206,6 +213,28 @@ func (m *Manager) ReorderProjects(ids []string) error {
 	return nil
 }
 
+// SetHidden hides or shows the project with the given ID (see
+// ProjectInfo.Hidden). Returns false if there is no such project.
+func (m *Manager) SetHidden(id string, hidden bool) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.projects {
+		if m.projects[i].ID != id {
+			continue
+		}
+		if m.projects[i].Hidden == hidden {
+			return true, nil // already there; don't rewrite the file
+		}
+		m.projects[i].Hidden = hidden
+		if err := m.save(); err != nil {
+			m.projects[i].Hidden = !hidden // rollback, so memory and disk stay in step
+			return false, errtrace.Wrap(err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 // AddProject registers the given absolute path as a project (idempotent by path).
 // Returns the ProjectInfo (existing or newly created).
 func (m *Manager) AddProject(path string) (ProjectInfo, error) {
@@ -217,11 +246,21 @@ func (m *Manager) AddProject(path string) (ProjectInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Idempotent: return existing entry for this path.
-	for _, p := range m.projects {
-		if paths.ComparePaths(p.Path, path) {
-			return p, nil
+	// Idempotent: return existing entry for this path. Adding a folder you had
+	// hidden un-hides it - the add flow ends by selecting the project, so leaving
+	// it out of the list would read as "nothing happened".
+	for i := range m.projects {
+		if !paths.ComparePaths(m.projects[i].Path, path) {
+			continue
 		}
+		if m.projects[i].Hidden {
+			m.projects[i].Hidden = false
+			if err := m.save(); err != nil {
+				m.projects[i].Hidden = true
+				return ProjectInfo{}, errtrace.Wrap(err)
+			}
+		}
+		return m.projects[i], nil
 	}
 
 	// Migrate a project added at runtime (e.g. via the web UI) from the old flat
