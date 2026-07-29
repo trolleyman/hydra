@@ -43,12 +43,22 @@ one hazard embedding introduces: a payload field whose json tag collides with
 the context's would make `encoding/json` silently drop both, so a test asserts
 none do.
 
-The browser narrows the same union in `web/src/lib/chatEvents.ts`: an OpenAPI
-discriminator only works on a property within its own schema, so `payload`
-cannot key off its sibling `type`. Modelling that as one union would mean
-repeating the envelope thirty times and turning `ChatEvent` into an opaque
-generated union wrapper the event store cannot field-access, so the schema
-names each payload and thirty lines of aliases compose the discrimination.
+Which payload each type carries is stated once, in the schema:
+`ChatEventUnion` is a `oneOf` over one member per event type, so the browser
+narrows on a generated union rather than a hand-written mapping.
+
+`ChatEvent` describes the same wire bytes with `payload` left open, and that is
+what the frames carry - the event store reads `seq`/`type` off every event and
+appends it to a log, which needs a concrete struct, and a generated `oneOf` is
+an opaque wrapper it cannot field-access. `asNormalizedChatEvent` is the single
+point where one becomes the other.
+
+Because the daemon builds its own typed events rather than consuming the union,
+`internal/chat/schema_test.go` checks the two agree: every Go event must resolve
+through the generated union to the member its type maps to, every mapped type
+must have a Go event, and no Go payload may carry a field its schema member does
+not declare. Adding an event type means adding it in both places, and the test
+is what says so.
 
 Server to client:
 

@@ -343,7 +343,6 @@ func codexLineThreads(line []byte) (threadID, startedThread string) {
 	return params.ThreadID, startedThread
 }
 
-
 func codexSpawnFromLine(line []byte) (codexSpawn, bool) {
 	var msg codexMessage
 	if json.Unmarshal(line, &msg) != nil || msg.Method != "item/started" {

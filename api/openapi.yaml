@@ -6046,6 +6046,585 @@ components:
           type: string
           x-go-type-skip-optional-pointer: true
 
+    # --- The event union ------------------------------------------------------
+    #
+    # Which payload each event type carries. This is the mapping the browser
+    # narrows on, and the one the daemon's conformance test checks its typed
+    # events against - so adding an event type here is what makes both sides
+    # agree, rather than each asserting the pairing separately.
+    #
+    # ChatEvent above describes the same wire bytes with `payload` left open.
+    # Both exist because the daemon's event store reads seq/type off every event
+    # and appends it to a log, which needs a concrete struct - and a generated
+    # oneOf is an opaque wrapper it cannot field-access.
+
+    ChatEventEnvelope:
+      type: object
+      description: The fields every event carries, whatever its type.
+      required: [seq, timestamp]
+      properties:
+        seq:
+          type: integer
+          format: int64
+          x-go-type: uint64
+          description: Per-head sequence number; also the history cursor.
+        source_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Ingestion identity used to deduplicate.
+        timestamp:
+          type: string
+          format: date-time
+
+    ChatEventUnion:
+      description: One normalized event, narrowed by its type to the payload it carries.
+      oneOf:
+        - $ref: '#/components/schemas/ConversationStartedEvent'
+        - $ref: '#/components/schemas/UserMessageEvent'
+        - $ref: '#/components/schemas/UserMessageEchoedEvent'
+        - $ref: '#/components/schemas/ContextMessageEvent'
+        - $ref: '#/components/schemas/AssistantMessageEvent'
+        - $ref: '#/components/schemas/AssistantDeltaEvent'
+        - $ref: '#/components/schemas/ReasoningCompletedEvent'
+        - $ref: '#/components/schemas/ReasoningDeltaEvent'
+        - $ref: '#/components/schemas/ReasoningDurationEvent'
+        - $ref: '#/components/schemas/ContentStreamStartedEvent'
+        - $ref: '#/components/schemas/ContentStreamCompletedEvent'
+        - $ref: '#/components/schemas/ToolStartedEvent'
+        - $ref: '#/components/schemas/ToolCompletedEvent'
+        - $ref: '#/components/schemas/ToolDeltaEvent'
+        - $ref: '#/components/schemas/PlanUpdatedEvent'
+        - $ref: '#/components/schemas/PlanDeltaEvent'
+        - $ref: '#/components/schemas/SubagentStartedEvent'
+        - $ref: '#/components/schemas/SubagentUpdatedEvent'
+        - $ref: '#/components/schemas/SubagentCompletedEvent'
+        - $ref: '#/components/schemas/TurnStartedEvent'
+        - $ref: '#/components/schemas/TurnCompletedEvent'
+        - $ref: '#/components/schemas/TurnFailedEvent'
+        - $ref: '#/components/schemas/TurnInterruptedEvent'
+        - $ref: '#/components/schemas/TurnErrorEvent'
+        - $ref: '#/components/schemas/UsageUpdatedEvent'
+        - $ref: '#/components/schemas/MessagesRetractedEvent'
+        - $ref: '#/components/schemas/NoticeEvent'
+        - $ref: '#/components/schemas/InteractionRequestedEvent'
+        - $ref: '#/components/schemas/InteractionResolvedEvent'
+        - $ref: '#/components/schemas/CommitCreatedEvent'
+        - $ref: '#/components/schemas/HeadChangedEvent'
+        - $ref: '#/components/schemas/HeadObservedEvent'
+        - $ref: '#/components/schemas/ModelChangedEvent'
+        - $ref: '#/components/schemas/QueuedMessageEvent'
+        - $ref: '#/components/schemas/QueueMessageRemovedEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          conversation_started: '#/components/schemas/ConversationStartedEvent'
+          user_message: '#/components/schemas/UserMessageEvent'
+          user_message_echoed: '#/components/schemas/UserMessageEchoedEvent'
+          context_message: '#/components/schemas/ContextMessageEvent'
+          assistant_message: '#/components/schemas/AssistantMessageEvent'
+          assistant_delta: '#/components/schemas/AssistantDeltaEvent'
+          reasoning_completed: '#/components/schemas/ReasoningCompletedEvent'
+          reasoning_delta: '#/components/schemas/ReasoningDeltaEvent'
+          reasoning_duration: '#/components/schemas/ReasoningDurationEvent'
+          content_stream_started: '#/components/schemas/ContentStreamStartedEvent'
+          content_stream_completed: '#/components/schemas/ContentStreamCompletedEvent'
+          tool_started: '#/components/schemas/ToolStartedEvent'
+          tool_completed: '#/components/schemas/ToolCompletedEvent'
+          tool_delta: '#/components/schemas/ToolDeltaEvent'
+          plan_updated: '#/components/schemas/PlanUpdatedEvent'
+          plan_delta: '#/components/schemas/PlanDeltaEvent'
+          subagent_started: '#/components/schemas/SubagentStartedEvent'
+          subagent_updated: '#/components/schemas/SubagentUpdatedEvent'
+          subagent_completed: '#/components/schemas/SubagentCompletedEvent'
+          turn_started: '#/components/schemas/TurnStartedEvent'
+          turn_completed: '#/components/schemas/TurnCompletedEvent'
+          turn_failed: '#/components/schemas/TurnFailedEvent'
+          turn_interrupted: '#/components/schemas/TurnInterruptedEvent'
+          turn_error: '#/components/schemas/TurnErrorEvent'
+          usage_updated: '#/components/schemas/UsageUpdatedEvent'
+          messages_retracted: '#/components/schemas/MessagesRetractedEvent'
+          notice: '#/components/schemas/NoticeEvent'
+          interaction_requested: '#/components/schemas/InteractionRequestedEvent'
+          interaction_resolved: '#/components/schemas/InteractionResolvedEvent'
+          commit_created: '#/components/schemas/CommitCreatedEvent'
+          head_changed: '#/components/schemas/HeadChangedEvent'
+          head_observed: '#/components/schemas/HeadObservedEvent'
+          model_changed: '#/components/schemas/ModelChangedEvent'
+          queued_message: '#/components/schemas/QueuedMessageEvent'
+          queue_message_removed: '#/components/schemas/QueueMessageRemovedEvent'
+
+    ConversationStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [conversation_started]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatConversationStartedPayload'
+
+    UserMessageEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [user_message]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatUserMessagePayload'
+
+    UserMessageEchoedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [user_message_echoed]
+            payload:
+              $ref: '#/components/schemas/ChatUserMessageEchoedPayload'
+
+    ContextMessageEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [context_message]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatContextMessagePayload'
+
+    AssistantMessageEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [assistant_message]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatAssistantMessagePayload'
+
+    AssistantDeltaEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [assistant_delta]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatDeltaPayload'
+
+    ReasoningCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [reasoning_completed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatReasoningCompletedPayload'
+
+    ReasoningDeltaEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [reasoning_delta]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatDeltaPayload'
+
+    ReasoningDurationEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [reasoning_duration]
+            payload:
+              $ref: '#/components/schemas/ChatReasoningDurationPayload'
+
+    ContentStreamStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [content_stream_started]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatContentStreamPayload'
+
+    ContentStreamCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [content_stream_completed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatContentStreamPayload'
+
+    ToolStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [tool_started]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatToolStartedPayload'
+
+    ToolCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [tool_completed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatToolCompletedPayload'
+
+    ToolDeltaEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [tool_delta]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatItemDeltaPayload'
+
+    PlanUpdatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [plan_updated]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatPlanUpdatedPayload'
+
+    PlanDeltaEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [plan_delta]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatItemDeltaPayload'
+
+    SubagentStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [subagent_started]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatSubagentPayload'
+
+    SubagentUpdatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [subagent_updated]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatSubagentPayload'
+
+    SubagentCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [subagent_completed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatSubagentPayload'
+
+    TurnStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [turn_started]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatTurnPayload'
+
+    TurnCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [turn_completed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatTurnPayload'
+
+    TurnFailedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [turn_failed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatTurnPayload'
+
+    TurnInterruptedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [turn_interrupted]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatTurnPayload'
+
+    TurnErrorEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [turn_error]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatTurnPayload'
+
+    UsageUpdatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [usage_updated]
+            payload:
+              $ref: '#/components/schemas/ChatUsageUpdatedPayload'
+
+    MessagesRetractedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [messages_retracted]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatMessagesRetractedPayload'
+
+    NoticeEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [notice]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatNoticePayload'
+
+    InteractionRequestedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [interaction_requested]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatInteractionPayload'
+
+    InteractionResolvedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [interaction_resolved]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatInteractionPayload'
+
+    CommitCreatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [commit_created]
+            payload:
+              $ref: '#/components/schemas/ChatCommitCreatedPayload'
+
+    HeadChangedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [head_changed]
+            payload:
+              $ref: '#/components/schemas/ChatHeadChangedPayload'
+
+    HeadObservedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [head_observed]
+            payload:
+              $ref: '#/components/schemas/ChatHeadChangedPayload'
+
+    ModelChangedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [model_changed]
+            payload:
+              $ref: '#/components/schemas/ChatModelChangedPayload'
+
+    QueuedMessageEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [queued_message]
+            payload:
+              $ref: '#/components/schemas/ChatQueuedMessagePayload'
+
+    QueueMessageRemovedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [queue_message_removed]
+            payload:
+              $ref: '#/components/schemas/ChatQueueMessageRemovedPayload'
+
     ChatFrame:
       description: >-
         One server-to-client frame on a chat-mode socket. Each member declares
