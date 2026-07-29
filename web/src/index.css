@@ -596,21 +596,29 @@ body {
    results, commit messages, prompts): it cannot jiggle, and leaving it on
    leading-relaxed keeps their density exactly as it was. Mono runs get their
    own box because they set an em-relative size (0.85em-0.9em of a fractional
-   parent). The values match what the ratios produced, rounded. */
+   parent). The values match what the ratios produced, rounded.
+
+   Every number here carries + --app-font-chat-step, the Chat size control
+   (Settings -> Browser -> Fonts). It is a whole-pixel length, so a stepped line
+   box is still whole-pixel and the anti-jiggle property above survives; at its
+   0px default every value below is exactly what it always was. .chat-leading-xs
+   states the 12px it used to inherit from its sub-agent card, because the card
+   is `text-xs` and would not step with the prose inside it. */
 .chat-leading {
-  line-height: 21px;
+  line-height: calc(21px + var(--app-font-chat-step, 0px));
 }
 .chat-leading-xs {
-  line-height: 20px;
+  font-size: calc(12px + var(--app-font-chat-step, 0px));
+  line-height: calc(20px + var(--app-font-chat-step, 0px));
 }
 .chat-serif {
-  font-size: 14px;
-  line-height: 22px;
+  font-size: calc(14px + var(--app-font-chat-step, 0px));
+  line-height: calc(22px + var(--app-font-chat-step, 0px));
 }
 .chat-leading :is(code, pre, .font-mono),
 .chat-leading-xs :is(code, pre, .font-mono),
 .chat-serif :is(code, pre, .font-mono) {
-  line-height: 18px;
+  line-height: calc(18px + var(--app-font-chat-step, 0px));
 }
 .chat-serif strong,
 .chat-serif b {

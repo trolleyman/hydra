@@ -62,6 +62,13 @@ export const StorageKeys = {
   fontChat: 'hydra-font-chat',
   fontCode: 'hydra-font-code',
   fontTerminal: 'hydra-font-terminal',
+  // The size STEP for the three roles that have one - a signed whole number of
+  // pixels from that surface's built-in size ('-1', '2'), not an absolute size.
+  // Absent/'0' = the built-in size. The Interface role has no size key; see the
+  // note in lib/fonts.ts for why. See lib/fontPrefs.
+  fontSizeChat: 'hydra-font-size-chat',
+  fontSizeCode: 'hydra-font-size-code',
+  fontSizeTerminal: 'hydra-font-size-terminal',
   // '0' when the user turned OFF the paste markers: pasting an attachment
   // (image / large text) into a composer also inserts its "[filename]" at the
   // caret. Absent/'1' = on (the default). See lib/composerPrefs.ts.

@@ -50,7 +50,12 @@ and `web/src/DiffViewer.tsx`):
   are the one body that can't be predicted (`estimateVisibleRows` is the crude
   fallback). Get this wrong and the document grows as you scroll - the scrollbar
   thumb visibly shrinks - which is what `diffScroll.ts`'s re-correcting rAF loops
-  used to exist for.
+  used to exist for. The chosen **Code font and size** are inputs to this, not
+  just to the paint (a family wraps at a different column, a size changes the row
+  height outright), so both are in the measure effect's deps and the row classes
+  take their size from `--app-font-code-step` rather than a literal `text-xs` -
+  see `CODE_TEXT`/`CODE_LEADING` in `diffMetrics` and the size note in
+  `web/src/lib/fonts.ts`.
 - Copying out of the chat yields **markdown source**, not the flattened rendered
   text: the transcript's scroll container owns an `onCopy`
   (`copyTranscriptAsMarkdown` in `AgentChat.tsx`) that hands the selection to

@@ -17,6 +17,7 @@ import {
   LoaderCircle, Settings2, FileQuestion, FileSymlink, CornerDownRight,
   Images, Camera, ExternalLink,
 } from 'lucide-react'
+import { CODE_TEXT } from '../lib/diffMetrics'
 import { getFileIcon } from '../lib/fileIcons'
 import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { copyWithToast, showCopyToast } from '../lib/copyToast'
@@ -558,8 +559,12 @@ function CodeView({ content, lang, wrap, highlightRange, onSelectLine }: { conte
 
   const gutterWidth = `${Math.max(2, String(lines.length).length)}ch`
 
+  // CODE_TEXT, not text-xs: the source pane is a Code surface, so it follows the
+  // Code size control (the gutter is already `ch`-based and follows by itself).
+  // leading-snug stays a ratio - nothing here streams, so the whole-pixel rule
+  // the diff rows follow doesn't apply.
   return (
-    <div className={`text-xs font-mono leading-snug pt-2 ${wrap ? 'w-full' : 'w-max min-w-full'}`}>
+    <div className={`${CODE_TEXT} font-mono leading-snug pt-2 ${wrap ? 'w-full' : 'w-max min-w-full'}`}>
       {lines.map((html, i) => {
         // The 1-based line number doubles as the scroll/highlight anchor: the
         // page scrolls the row carrying data-line into view (see contentRef

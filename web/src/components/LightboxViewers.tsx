@@ -9,6 +9,7 @@
 // the lightbox below it rather than repeated inside.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Download, File as FileIcon, FileArchive, FileText, LoaderCircle, TriangleAlert } from 'lucide-react'
+import { CODE_LEADING, CODE_TEXT } from '../lib/diffMetrics'
 import { LIGHTBOX_MEDIA_CLASS } from '../lib/lightboxFlip'
 import { highlightLines } from '../lib/highlightCore'
 import { langFromPath, type FileKind } from '../lib/fileKind'
@@ -208,8 +209,10 @@ export function LightboxText({ url, filename, diff }: {
         ) : text ? (
           // The token colours come from the global `.dark .token` palette (index.css),
           // which applies because PANEL_CLASS forces this subtree `dark` - so the code
-          // reads the same as the diff viewer's, whatever theme the app is in.
-          <pre className="p-3 font-mono text-xs leading-5 text-gray-200">
+          // reads the same as the diff viewer's, whatever theme the app is in. Same
+          // reason it takes the diff's size classes rather than a fixed text-xs: the
+          // Code size control has to move this with everything else it reads like.
+          <pre className={`p-3 font-mono ${CODE_TEXT} ${CODE_LEADING} text-gray-200`}>
             <code dangerouslySetInnerHTML={{ __html: html }} />
           </pre>
         ) : (

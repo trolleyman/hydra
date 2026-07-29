@@ -246,13 +246,20 @@ interface Style {
 const STYLES: Record<Variant, Style> = {
   // Compact styling for chat / prompt / config previews (mirrors the retired
   // renderMarkdownBlocks look: tight vertical rhythm, no heading borders).
+  //
+  // The headings and the table carry + --app-font-chat-step, the Chat size
+  // control. They are the one part of this variant stated in absolute units
+  // rather than em, so without it a stepped-up pane would grow its body text
+  // past its own h3 - a heading has to move with the prose under it. Inline code
+  // and code blocks need nothing: they are already em-relative and follow the
+  // body by construction. At the 0px default every value is what it was.
   chat: {
-    h1: 'text-base font-bold mt-3 mb-1 first:mt-0',
-    h2: 'text-[0.95rem] font-bold mt-3 mb-1 first:mt-0',
-    h3: 'text-sm font-semibold mt-2 mb-0.5 first:mt-0',
-    h4: 'text-sm font-semibold mt-2 mb-0.5 first:mt-0',
-    h5: 'text-sm font-semibold mt-2 mb-0.5 first:mt-0',
-    h6: 'text-sm font-semibold mt-2 mb-0.5 first:mt-0',
+    h1: 'text-[calc(1rem_+_var(--app-font-chat-step,_0px))] font-bold mt-3 mb-1 first:mt-0',
+    h2: 'text-[calc(0.95rem_+_var(--app-font-chat-step,_0px))] font-bold mt-3 mb-1 first:mt-0',
+    h3: 'text-[calc(0.875rem_+_var(--app-font-chat-step,_0px))] font-semibold mt-2 mb-0.5 first:mt-0',
+    h4: 'text-[calc(0.875rem_+_var(--app-font-chat-step,_0px))] font-semibold mt-2 mb-0.5 first:mt-0',
+    h5: 'text-[calc(0.875rem_+_var(--app-font-chat-step,_0px))] font-semibold mt-2 mb-0.5 first:mt-0',
+    h6: 'text-[calc(0.875rem_+_var(--app-font-chat-step,_0px))] font-semibold mt-2 mb-0.5 first:mt-0',
     p: 'my-1 first:mt-0 last:mb-0 break-words',
     ul: 'list-disc pl-5 my-1 space-y-0.5',
     ol: 'list-decimal pl-5 my-1 space-y-0.5',
@@ -267,7 +274,7 @@ const STYLES: Record<Variant, Style> = {
     // of stretching to fill the chat column; `max-w-full` still caps it and
     // `overflow-x-auto` scrolls a genuinely wide table.
     tableWrap: 'my-2 w-fit max-w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-white/10',
-    table: 'border-collapse text-sm',
+    table: 'border-collapse text-[calc(0.875rem_+_var(--app-font-chat-step,_0px))]',
     th: 'px-3 py-1.5 text-left font-semibold text-stone-700 dark:text-stone-200 bg-stone-100/70 dark:bg-white/[0.04] border-b border-stone-200 dark:border-white/10 whitespace-nowrap',
     td: 'px-3 py-1.5 border-b border-stone-200/60 dark:border-white/[0.06] align-top',
     tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-stone-500/[0.04] dark:[&>tr:nth-child(even)]:bg-white/[0.025]',

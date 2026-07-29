@@ -209,6 +209,56 @@ export const FONT_ROLE_SPEC: Record<FontRole, FontRoleSpec> = {
   },
 }
 
+// ── Size ──────────────────────────────────────────────────────────────────────
+//
+// A size is a STEP in whole pixels from the size the surface already renders at,
+// not an absolute value, and that shape is deliberate:
+//
+//   - Every affected surface keeps its own metrics. Chat prose is 13px sans /
+//     14px serif, a diff row is 12px, the terminal is 13px - and a step of +1
+//     moves all of them by one pixel rather than flattening them onto one
+//     number. Chat in particular: the serif treatment reads a pixel larger than
+//     the sans one on purpose (see .chat-serif in index.css), and an absolute
+//     control would silently discard that the moment you switched family.
+//   - It stays whole-pixel. The chat pane's line boxes are whole pixels to stop
+//     the streaming last line from jiggling (the long note in index.css), which
+//     a fractional or ratio-based size would undo.
+//   - A step of 0 is the default, so the stored value is absent for anyone who
+//     never touched it and every surface renders byte-identically to before.
+//
+// Only three roles have one. There is no Interface size: the shell has no single
+// lever to pull - fixed row heights (h-7/h-8), sticky-header offsets and
+// `calc(100vh-140px)` viewport math do not follow a font-size change - and the
+// only global lever, root font-size, scales Tailwind's rem spacing too, which is
+// browser zoom with extra steps. Ctrl +/- already does that job properly.
+export type FontSizeRole = 'chat' | 'code' | 'terminal'
+export const FONT_SIZE_ROLES: FontSizeRole[] = ['chat', 'code', 'terminal']
+
+export const MIN_FONT_STEP = -2
+export const MAX_FONT_STEP = 4
+
+// What each role renders at with the step at 0 - the number the Settings stepper
+// counts from, and the one the CSS falls back to when no variable is set. Chat's
+// is the sans figure; a serif chat font adds the pixel .chat-serif already adds.
+export const FONT_BASE_PX: Record<FontSizeRole, number> = { chat: 13, code: 12, terminal: 13 }
+
+export function hasFontSize(role: FontRole): role is FontSizeRole {
+  return (FONT_SIZE_ROLES as FontRole[]).includes(role)
+}
+
+export function clampFontStep(step: number): number {
+  if (!Number.isFinite(step)) return 0
+  return Math.min(MAX_FONT_STEP, Math.max(MIN_FONT_STEP, Math.round(step)))
+}
+
+// The px a role's text lands on at this step. `fontId` only matters for chat,
+// where a serif carries its own +1px treatment - pass the role's chosen font so
+// the Settings stepper shows the size the prose will actually be.
+export function fontSizePx(role: FontSizeRole, step: number, fontId?: string): number {
+  const serifChat = role === 'chat' && FONT_BY_ID.get(fontId ?? '')?.category === 'serif'
+  return FONT_BASE_PX[role] + (serifChat ? 1 : 0) + clampFontStep(step)
+}
+
 // The options a role may be set to, in category order.
 export function fontOptionsFor(role: FontRole): FontOption[] {
   const { categories } = FONT_ROLE_SPEC[role]
