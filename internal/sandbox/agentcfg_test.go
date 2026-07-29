@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/trolleyman/hydra/internal/gate"
 )
 
 func TestBuildClaudeSettingsRegistersGateWhenEnabled(t *testing.T) {
@@ -190,5 +192,74 @@ func TestMCPServerSpecs(t *testing.T) {
 	}
 	if s.Env["TOKEN"] != "x" {
 		t.Errorf("env not captured: %+v", s.Env)
+	}
+}
+
+// TestBuildStrictMCPConfig covers the config strict mode launches with: the
+// allow-listed servers, copied verbatim so transports MCPServerSpecs can't
+// render (http/sse) survive, plus the control server, and nothing else.
+func TestBuildStrictMCPConfig(t *testing.T) {
+	claude := []byte(`{
+	  "mcpServers": {
+	    "github": {"command": "gh-mcp", "args": ["--stdio"], "env": {"TOKEN": "x"}},
+	    "remote": {"type": "http", "url": "https://example.com", "headers": {"X-Key": "secret"}},
+	    "notallowed": {"command": "nope"}
+	  },
+	  "projects": {
+	    "/some/worktree": {"mcpServers": {"perproject": {"command": "pp"}}}
+	  }
+	}`)
+	mcpJSON := []byte(`{"mcpServers": {"sentry": {"command": "sentry-mcp"}}}`)
+
+	data, err := BuildStrictMCPConfig(claude, mcpJSON, []string{"github", "remote", "perproject", "sentry"}, "/tmp/hydra-internal", "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("output is not JSON: %v", err)
+	}
+
+	for _, name := range []string{"github", "remote", "perproject", "sentry", gate.HydraControlServer} {
+		if _, ok := cfg.MCPServers[name]; !ok {
+			t.Errorf("%q missing from strict config %s", name, data)
+		}
+	}
+	if _, ok := cfg.MCPServers["notallowed"]; ok {
+		t.Errorf("non-allow-listed server survived: %s", data)
+	}
+	// The remote server is the case this exists for: no command to re-derive, so
+	// it has to come through as it was written, headers and all.
+	remote := cfg.MCPServers["remote"]
+	if remote["url"] != "https://example.com" || remote["type"] != "http" {
+		t.Errorf("remote server not copied verbatim: %+v", remote)
+	}
+	if hdrs, _ := remote["headers"].(map[string]any); hdrs["X-Key"] != "secret" {
+		t.Errorf("remote headers lost: %+v", remote)
+	}
+	if hydra := cfg.MCPServers[gate.HydraControlServer]; hydra["command"] != "/tmp/hydra-internal" {
+		t.Errorf("control server = %+v, want command /tmp/hydra-internal", hydra)
+	}
+}
+
+// TestBuildStrictMCPConfigDegrades: an unreadable source must not cost the head
+// its control server - that would be the very failure this work is about.
+func TestBuildStrictMCPConfigDegrades(t *testing.T) {
+	for _, src := range [][]byte{nil, []byte("not json"), []byte(`{"mcpServers": null}`)} {
+		data, err := BuildStrictMCPConfig(src, nil, []string{"github"}, "/tmp/hydra-internal", "claude")
+		if err != nil {
+			t.Fatalf("source %q: %v", src, err)
+		}
+		var cfg struct {
+			MCPServers map[string]map[string]any `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			t.Fatalf("source %q: output is not JSON: %v", src, err)
+		}
+		if len(cfg.MCPServers) != 1 || cfg.MCPServers[gate.HydraControlServer] == nil {
+			t.Errorf("source %q: want only the control server, got %s", src, data)
+		}
 	}
 }

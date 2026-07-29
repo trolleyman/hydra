@@ -33,6 +33,12 @@ const GateSandboxPolicyPath = "/tmp/hydra-gate-policy.json"
 // the sandbox (read by `hydra mcp` via gate.EnvMCPCatalogPath).
 const mcpCatalogSandboxPath = "/tmp/hydra-mcp-catalog.json"
 
+// strictMCPConfigSandboxPath is where the rendered strict MCP config is bound
+// (read-only) inside the sandbox, for `claude --mcp-config <path>
+// --strict-mcp-config`. Under the per-head /tmp like the other seeded inputs, so
+// no host process shares the path - the whole point of strict mode.
+const strictMCPConfigSandboxPath = "/tmp/hydra-mcp-config.json"
+
 // seedResult holds the per-head sandbox inputs produced by seedHead.
 type seedResult struct {
 	// Binds are host->sandbox file binds for agent config (Linux only; macOS
@@ -44,6 +50,11 @@ type seedResult struct {
 	WritablePaths []string
 	// Env are extra environment variables (HYDRA_STATUS_PATH etc.).
 	Env []string
+	// MCPConfigPath is the in-sandbox path of the rendered strict MCP config, set
+	// only when the policy asks for strict mode. Passed to sandbox.AgentArgv, which
+	// turns it into --mcp-config <path> --strict-mcp-config; empty means the
+	// non-strict launch (control server inline, seeded ~/.claude.json for the rest).
+	MCPConfigPath string
 	// ROOverlays expose per-head files under otherwise read-only system dirs via a
 	// read-only overlay - e.g. /etc/claude-code/managed-settings.json under /etc.
 	// See sandbox.ROOverlay (a tmpfs mountpoint can't be created under the
@@ -228,6 +239,26 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 
 		mcpJSON := readHostFile(filepath.Join(projectRoot, ".mcp.json"))
 
+		// Strict MCP: render the allow-listed servers + the control server into a
+		// per-head file and let AgentArgv launch with --strict-mcp-config, so this
+		// file is the agent's ONLY source of servers. Bound read-only under the
+		// per-head /tmp - NOT over a host-owned path like ~/.claude.json, whose bind
+		// the host can detach by replacing the file (which is what silently undid
+		// the filtering the seeded config was doing). mcpKeep is the same set the
+		// non-strict path keeps, so the two agree on what is allowed.
+		if policy.StrictMCP {
+			strictCfg, err := sandbox.BuildStrictMCPConfig(hostClaudeJSON, mcpJSON, mcpKeep, stableHydraBin, string(agentType))
+			if err != nil {
+				return nil, errtrace.Wrap(err)
+			}
+			strictHost := filepath.Join(cacheDir, id+"-mcp-config.json")
+			if err := os.WriteFile(strictHost, strictCfg, 0644); err != nil {
+				return nil, errtrace.Wrap(fmt.Errorf("write %s: %w", strictHost, err))
+			}
+			res.Binds = append(res.Binds, sandbox.Bind{Source: strictHost, Target: strictMCPConfigSandboxPath, ReadOnly: true})
+			res.MCPConfigPath = strictMCPConfigSandboxPath
+		}
+
 		// Seed the catalog of host-configured MCP servers so the `hydra mcp` control
 		// server can tell the agent which servers it may request access to.
 		if err := seedMCPCatalog(res, cacheDir, id, hostClaudeJSON, mcpJSON); err != nil {
@@ -351,6 +382,7 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 		MCPBlocked:       p.MCPBlocked,
 		MCPToolsBlocked:  p.MCPToolsBlocked,
 		AutoAllowReadMCP: p.MCPAutoAllowRead != nil && *p.MCPAutoAllowRead,
+		StrictMCP:        p.IsStrictMCP(),
 		KnownTools:       p.KnownTools,
 	}
 	// WebFetch host-gating is derived from the sandbox network policy rather than a

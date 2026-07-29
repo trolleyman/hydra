@@ -421,12 +421,24 @@ every other event.
   that bind is not permanent**: anything host-side that replaces `~/.claude.json`
   by `rename()` (which is how Claude Code saves its own config) drops the mount
   from every running head's sandbox, and the path falls through to the host's
-  real, unfiltered config. So the stripping is best-effort in practice and the
-  runtime gate is the property that actually holds. It also cost the agent its
-  hydra tools until the control server moved into argv (`--mcp-config`, see
-  `sandbox.claudeMCPConfigArgs`); a `--strict-mcp-config` argv carrying the whole
-  allow-list would make the filtering argv-borne too, but `MCPServerSpecs` only
-  renders stdio servers today, so http/sse allow-listed servers would be lost.
+  real, unfiltered config. So filtering is best-effort and the runtime gate is
+  what actually holds. It also cost the agent its hydra tools until the control
+  server moved into argv (`--mcp-config`, `sandbox.claudeMCPConfigArgs`).
+- ✅ **Strict mode (`policy.strict_mcp`, on by default) replaces filtering with
+  substitution** and is the form that holds: `sandbox.BuildStrictMCPConfig`
+  renders the allow-listed servers + the control server into a per-head file,
+  seeded read-only under the head's own `/tmp` (a path no host process shares),
+  and the head launches with `--mcp-config <file> --strict-mcp-config`. The
+  host's `~/.claude.json` and the branch's `.mcp.json` are then not consulted at
+  all, so there is nothing to detach. Servers are copied verbatim, so http/sse
+  transports survive - `MCPServerSpecs` (stdio-only, for tool-annotation
+  introspection) is deliberately not reused here.
+  **Cost:** claude.ai account connectors (Gmail/Calendar/Drive) are part of "all
+  other MCP configurations" and go away with it. They cannot be re-declared:
+  they use an account-authenticated internal transport, and declaring their proxy
+  URL as a plain http server fails OAuth discovery (`HTTP 404: Invalid OAuth
+  error response`, spike-verified). An agent that needs them sets
+  `strict_mcp = false` and falls back to the filtered-config posture above.
 
 ### Step 4 — The "ask" round-trip (reuse the file-polling channel)
 

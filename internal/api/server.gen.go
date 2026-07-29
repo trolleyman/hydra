@@ -868,6 +868,9 @@ type PolicyConfig struct {
 
 	// McpToolsBlocked Individual MCP tools ("<server>__<tool>") denied outright even when their server is allowed. Block overrides allow.
 	McpToolsBlocked *[]string `json:"mcp_tools_blocked"`
+
+	// StrictMcp Make the allow-list the agent's only source of MCP servers: Hydra renders them (plus its own control server) into a per-head config and launches with --strict-mcp-config, so the host's ~/.claude.json and a branch's .mcp.json are ignored outright rather than filtered. Costs the claude.ai account connectors (Gmail/Calendar/Drive), which cannot be re-declared. null = on (the default).
+	StrictMcp *bool `json:"strict_mcp"`
 }
 
 // PreviewScript A per-project script that boots a live, clickable preview of the app at a checkout ([previews.<name>] in config.toml). Hydra proxies a dedicated port to it, spawning it when its link is opened and tearing it down when idle.

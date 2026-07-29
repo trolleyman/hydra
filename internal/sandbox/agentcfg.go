@@ -410,6 +410,75 @@ func HydraMCPServer(hydraBin, agentType string) (name, command string, args []st
 	return gate.HydraControlServer, hydraBin, []string{"mcp", agentType}
 }
 
+// BuildStrictMCPConfig renders the head's WHOLE MCP config - the allow-listed
+// servers plus Hydra's control server - as a standalone {"mcpServers": {...}}
+// document, for launching with --mcp-config <file> --strict-mcp-config.
+//
+// Under strict, this file is the agent's only source of MCP servers: the host's
+// ~/.claude.json and the branch's .mcp.json are not consulted at all. That is the
+// point - the alternative (seeding a filtered ~/.claude.json) rides a bind mount
+// over a host-owned path, which the host can silently detach, taking the
+// filtering with it.
+//
+// Server definitions are copied VERBATIM from wherever they were found, rather
+// than re-derived field by field like MCPServerSpecs does: that keeps transports
+// this code knows nothing about (http/sse urls, headers, per-server timeouts)
+// working, and means a new field in the Claude config format needs no change
+// here. Sources are searched user-scope first, then projects[*], then the project
+// .mcp.json; the first definition of a name wins, matching ListMCPServers.
+func BuildStrictMCPConfig(claudeJSON, mcpJSON []byte, keep []string, hydraBin, agentType string) ([]byte, error) {
+	want := make(map[string]bool, len(keep))
+	for _, n := range keep {
+		want[n] = true
+	}
+	servers := map[string]any{}
+	take := func(container map[string]interface{}) {
+		found, ok := container["mcpServers"].(map[string]interface{})
+		if !ok {
+			return
+		}
+		for name, raw := range found {
+			if !want[name] {
+				continue
+			}
+			if _, dup := servers[name]; dup {
+				continue
+			}
+			servers[name] = raw
+		}
+	}
+	for _, data := range [][]byte{claudeJSON, mcpJSON} {
+		if len(data) == 0 {
+			continue
+		}
+		var cfg map[string]interface{}
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			// Best-effort, as everywhere else that reads the host's config: a
+			// half-written file must not take the control server down with it.
+			log.Printf("warn: failed to unmarshal MCP config source: %v", err)
+			continue
+		}
+		take(cfg)
+		if projects, ok := cfg["projects"].(map[string]interface{}); ok {
+			for _, p := range projects {
+				if pm, ok := p.(map[string]interface{}); ok {
+					take(pm)
+				}
+			}
+		}
+	}
+	// Injected last and unconditionally, so the head keeps its git/status tools
+	// even if the allow-list is empty or a source was unreadable.
+	name, command, args := HydraMCPServer(hydraBin, agentType)
+	servers[name] = map[string]any{"type": "stdio", "command": command, "args": args}
+
+	data, err := json.MarshalIndent(map[string]any{"mcpServers": servers}, "", "  ")
+	if err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("marshal strict MCP config: %w", err))
+	}
+	return data, nil
+}
+
 // HydraBinPath is the well-known path the hydra binary is bound to inside every
 // sandbox. /tmp is always a fresh, per-head writable mount in our bwrap config (a
 // private host-backed dir on Linux, else a tmpfs - see Options.TmpDir), so it is a
@@ -585,7 +654,14 @@ func BuildCodexConfig(existing []byte, hydraBin string) ([]byte, error) {
 // spike-verified), while an explicit --resume <id> loads them fine. Callers
 // pass the newest non-sidechain transcript's id
 // (claudestream.LatestSessionID); empty falls back to --continue.
-func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string, chatMode bool, resumeSessionID string) ([]string, error) {
+//
+// strictMCPConfigPath (Claude only) is the IN-SANDBOX path of the rendered
+// allow-list config from BuildStrictMCPConfig. Non-empty switches the launch to
+// --mcp-config <path> --strict-mcp-config, making that file the agent's only
+// source of MCP servers; empty keeps the non-strict launch, which declares just
+// the control server inline and leaves the seeded ~/.claude.json to supply the
+// rest. seedHead decides which, since it is what writes the file.
+func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model string, chatMode bool, resumeSessionID, strictMCPConfigPath string) ([]string, error) {
 	if chatMode && agentType != AgentTypeClaude && agentType != AgentTypeCodex {
 		return nil, errtrace.Wrap(fmt.Errorf("chat mode is only supported for claude and codex agents, not %q", agentType))
 	}
@@ -596,7 +672,11 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 		// every following non-flag token: `--mcp-config <json> mcp list` reads
 		// "mcp" and "list" as two more config paths. It goes here, at the front,
 		// where everything that can follow is a flag, `--`, or nothing at all.
-		argv = append(argv, claudeMCPConfigArgs(string(agentType))...)
+		if strictMCPConfigPath != "" {
+			argv = append(argv, "--mcp-config", strictMCPConfigPath, "--strict-mcp-config")
+		} else {
+			argv = append(argv, claudeMCPConfigArgs(string(agentType))...)
+		}
 		if systemPrompt != "" {
 			argv = append(argv, "--append-system-prompt", systemPrompt)
 		}

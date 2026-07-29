@@ -668,7 +668,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		return nil, errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, launchPrePrompt, opts.Prompt, opts.Model, opts.ChatMode, "")
+	argv, err := sandbox.AgentArgv(opts.AgentType, opts.Resume, launchPrePrompt, opts.Prompt, opts.Model, opts.ChatMode, "", seed.MCPConfigPath)
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, err)
 		return nil, errtrace.Wrap(err)
@@ -1235,7 +1235,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktreePath))
 		resumeSession = claudestream.LatestSessionID(dir)
 	}
-	argv, err := sandbox.AgentArgv(head.AgentType, true, launchPrePrompt, "", "", head.ChatMode, resumeSession)
+	argv, err := sandbox.AgentArgv(head.AgentType, true, launchPrePrompt, "", "", head.ChatMode, resumeSession, seed.MCPConfigPath)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}

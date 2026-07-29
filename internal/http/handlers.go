@@ -1311,6 +1311,7 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			McpBlocked:       &p.MCPBlocked,
 			McpToolsBlocked:  &p.MCPToolsBlocked,
 			McpAutoAllowRead: p.MCPAutoAllowRead,
+			StrictMcp:        p.StrictMCP,
 			// known_tools is not edited by the Settings UI, but must ride along in
 			// the response so a round-tripped save preserves a hand-edited value.
 			KnownTools: &p.KnownTools,
@@ -1365,7 +1366,7 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		out.Sandbox = sb
 	}
 	if a.Policy != nil {
-		p := &config.PolicyConfig{GateEnabled: a.Policy.GateEnabled, GitIsolation: a.Policy.GitIsolation, MCPAutoAllowRead: a.Policy.McpAutoAllowRead}
+		p := &config.PolicyConfig{GateEnabled: a.Policy.GateEnabled, GitIsolation: a.Policy.GitIsolation, MCPAutoAllowRead: a.Policy.McpAutoAllowRead, StrictMCP: a.Policy.StrictMcp}
 		if a.Policy.McpAllowed != nil {
 			p.MCPAllowed = *a.Policy.McpAllowed
 		}

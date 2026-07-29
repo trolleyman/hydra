@@ -78,6 +78,12 @@ type Policy struct {
 	// best-effort heuristic (see ClassifyMCPTool), so this trades safety for fewer
 	// prompts - off by default.
 	AutoAllowReadMCP bool `json:"mcp_auto_allow_read"`
+	// StrictMCP is set when the head's MCP servers come only from the config Hydra
+	// renders (--strict-mcp-config). It changes nothing about the gate's decisions -
+	// a server reaching it is still checked against the allow-lists - but it rides
+	// here because seedHead takes the policy and needs to know whether to render
+	// that config. See config.PolicyConfig.StrictMCP.
+	StrictMCP bool `json:"strict_mcp,omitempty"`
 	// MCPToolRW maps "<server>__<tool>" to a read/write classification ("read" or
 	// "write") captured from the server-declared readOnlyHint annotation at seed
 	// time. It takes precedence over the name heuristic when present.

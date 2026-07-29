@@ -331,6 +331,7 @@ export function ConfigForm({
       next.gate_enabled == null &&
       next.git_isolation == null &&
       next.mcp_auto_allow_read == null &&
+      next.strict_mcp == null &&
       !next.mcp_allowed?.length &&
       !next.mcp_tools_allowed?.length &&
       !next.mcp_blocked?.length &&
@@ -669,6 +670,30 @@ export function ConfigForm({
             <p className="mt-1.5 text-gray-400 italic">MCP servers are loaded at launch, so a change applies on the agent's <strong>next launch or resume</strong>, not to a running session.</p>
           </InfoTooltip>
         </div>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Strict config</label>
+            <InfoTooltip title="Strict config">
+              <p>Launch the agent with <strong>only</strong> the servers allowed here: Hydra writes them to its own config file and starts Claude with <code className="text-blue-300">--strict-mcp-config</code>, so your <code className="text-blue-300">~/.claude.json</code> and the branch's <code className="text-blue-300">.mcp.json</code> are ignored outright.</p>
+              <p className="mt-1.5">Turning this off falls back to filtering a seeded copy of your config instead. That copy is a bind mount over the real file, and anything on the host that rewrites <code className="text-blue-300">~/.claude.json</code> silently detaches it - after which the agent sees your unfiltered config. Only strict actually holds.</p>
+              <p className="mt-1.5 text-amber-300">Cost: your <strong>claude.ai connectors</strong> (Gmail, Calendar, Drive) also go away, in every head using this agent. They can't be re-declared here - they authenticate through your account, not a config entry. Turn this off for an agent that needs them.</p>
+            </InfoTooltip>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={policy.strict_mcp !== false}
+              onChange={(e) => updatePolicy({ strict_mcp: e.target.checked ? null : false })}
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+          </label>
+        </div>
+        {policy.strict_mcp === false && (
+          <p className="text-[11px] text-amber-600 dark:text-amber-400 italic">
+            Not strict: allow-listed servers are filtered out of a seeded copy of your config, which the host can silently detach. The runtime gate still denies non-allow-listed tool calls.
+          </p>
+        )}
         {discovered.length === 0 && extraAllowed.length === 0 ? (
           <p className="text-[11px] text-gray-400 dark:text-gray-500 italic">No MCP servers found in <span className="font-mono">~/.claude.json</span> or <span className="font-mono">.mcp.json</span>. Add one by name below to pre-authorise it.</p>
         ) : (

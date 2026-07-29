@@ -95,7 +95,7 @@ func TestAgentArgv(t *testing.T) {
 		{AgentTypeCodex, true, "ignored on resume", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false, "")
+		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false, "", "")
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}
@@ -104,7 +104,7 @@ func TestAgentArgv(t *testing.T) {
 		}
 	}
 
-	if _, err := AgentArgv(AgentType("nope"), false, "", "", "", false, ""); err == nil {
+	if _, err := AgentArgv(AgentType("nope"), false, "", "", "", false, "", ""); err == nil {
 		t.Error("AgentArgv with unknown agent type: expected error, got nil")
 	}
 }
@@ -135,7 +135,7 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 		{"fresh ignores id", false, false, "abc-123", claudeArgv()},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(AgentTypeClaude, c.resume, "", "", "", c.chatMode, c.sessionID)
+		got, err := AgentArgv(AgentTypeClaude, c.resume, "", "", "", c.chatMode, c.sessionID, "")
 		if err != nil {
 			t.Fatalf("%s: AgentArgv error: %v", c.name, err)
 		}
@@ -144,7 +144,7 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 		}
 	}
 
-	if _, err := AgentArgv(AgentTypeGemini, false, "", "", "", true, ""); err == nil {
+	if _, err := AgentArgv(AgentTypeGemini, false, "", "", "", true, "", ""); err == nil {
 		t.Error("chat mode for gemini: expected error, got nil")
 	}
 }
@@ -156,7 +156,7 @@ func TestAgentArgvChatAndResumeSession(t *testing.T) {
 func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 	for _, chatMode := range []bool{false, true} {
 		for _, resume := range []bool{false, true} {
-			argv, err := AgentArgv(AgentTypeClaude, resume, "sys", "task", "opus", chatMode, "sess-1")
+			argv, err := AgentArgv(AgentTypeClaude, resume, "sys", "task", "opus", chatMode, "sess-1", "")
 			if err != nil {
 				t.Fatalf("chat=%v resume=%v: %v", chatMode, resume, err)
 			}
@@ -189,9 +189,29 @@ func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 		}
 	}
 
+	// Strict mode swaps the inline server for the rendered config file, which
+	// then supplies the control server too - so the inline JSON must be gone,
+	// not doubled up.
+	for _, chatMode := range []bool{false, true} {
+		argv, err := AgentArgv(AgentTypeClaude, false, "sys", "task", "", chatMode, "", "/tmp/hydra-mcp-config.json")
+		if err != nil {
+			t.Fatalf("chat=%v: %v", chatMode, err)
+		}
+		i := slices.Index(argv, "--mcp-config")
+		if i < 0 || argv[i+1] != "/tmp/hydra-mcp-config.json" {
+			t.Fatalf("chat=%v: want --mcp-config /tmp/hydra-mcp-config.json, got %q", chatMode, argv)
+		}
+		if !slices.Contains(argv, "--strict-mcp-config") {
+			t.Errorf("chat=%v: --strict-mcp-config missing from %q", chatMode, argv)
+		}
+		if strings.Contains(strings.Join(argv, " "), "mcpServers") {
+			t.Errorf("chat=%v: inline server config still present alongside the strict file: %q", chatMode, argv)
+		}
+	}
+
 	// Only Claude takes the flag; the others are configured by seeded files.
 	for _, a := range []AgentType{AgentTypeGemini, AgentTypeCodex, AgentTypeBash} {
-		argv, err := AgentArgv(a, false, "", "task", "", false, "")
+		argv, err := AgentArgv(a, false, "", "task", "", false, "", "")
 		if err != nil {
 			t.Fatalf("%s: %v", a, err)
 		}
@@ -203,7 +223,7 @@ func TestAgentArgvCarriesHydraMCPServer(t *testing.T) {
 
 func TestAgentArgvCodexChat(t *testing.T) {
 	for _, resume := range []bool{false, true} {
-		got, err := AgentArgv(AgentTypeCodex, resume, "", "ignored", "ignored", true, "")
+		got, err := AgentArgv(AgentTypeCodex, resume, "", "ignored", "ignored", true, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -230,7 +250,7 @@ func TestAgentArgvModel(t *testing.T) {
 		{AgentTypeCodex, true, []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "", "", "opus", false, "")
+		got, err := AgentArgv(c.agent, c.resume, "", "", "opus", false, "", "")
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}

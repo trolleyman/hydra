@@ -60,7 +60,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `restore_ro` - paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` - paths mounted copy-on-write (you can read and overwrite them; writes stay per-head and never touch the real files). A worktree-relative entry (`pipeline/out`) is mirrored from the project root into your worktree; a home/absolute entry (`~/.gradle`, `/opt/cache`) is overlaid in place, so you share the real dir read-only but keep your writes and lock files private.\n" +
 	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` - the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). This same list also gates the WebFetch tool: with filtering off (unrestricted/off) WebFetch reaches any host, otherwise it may reach only allow-listed hosts and a new one pauses for user approval. The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset. `network.allowed_loopback_ports` (e.g. `[5037]` for adb) lists host-loopback TCP ports that stay reachable at 127.0.0.1 under hard mode, whose network namespace otherwise cuts off host-local daemons.\n" +
-	"- `policy.mcp_allowed` / `policy.mcp_tools_allowed` - MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server; `policy.mcp_blocked` / `policy.mcp_tools_blocked` deny a server or tool outright (block overrides allow). A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop - ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume).\n" +
+	"- `policy.mcp_allowed` / `policy.mcp_tools_allowed` - MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server; `policy.mcp_blocked` / `policy.mcp_tools_blocked` deny a server or tool outright (block overrides allow). A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop - ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume). `policy.strict_mcp` (on by default) decides how that allow-list is applied: on, the allow-listed servers are the ONLY ones you get, and the user's claude.ai connectors (Gmail/Calendar/Drive) are unavailable to you - if you need one, ask the user to set `strict_mcp = false` for this agent.\n" +
 	"- `pre_spawn_script` - a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`. It can set env vars for the agent by appending `KEY=value` lines to the file at `$HYDRA_ENV`.\n" +
 	"- `pre_exit_script` - a bash script run inside a sandbox when a head ends (before its worktree is removed), for per-head teardown such as releasing a claimed resource.\n" +
 	"- `pre_prompt` - the standing instructions you are reading now.\n" +
@@ -157,6 +157,20 @@ type PolicyConfig struct {
 	// MCPAutoAllowRead auto-allows MCP tools the read/write classifier deems
 	// read-only (parking only writes/unknown). Best-effort heuristic; off by default.
 	MCPAutoAllowRead *bool `toml:"mcp_auto_allow_read"`
+	// StrictMCP makes the allow-list the agent's ONLY source of MCP servers: Hydra
+	// renders the allow-listed servers (plus its own control server) into a per-head
+	// config file and launches Claude with --strict-mcp-config, so the host's
+	// ~/.claude.json and the branch's .mcp.json are ignored outright rather than
+	// filtered. The filtering alternative rides a bind mount over a host-owned file,
+	// which the host can silently detach by replacing that path (see
+	// sandbox.claudeMCPConfigArgs), so strict is the only form that actually holds.
+	//
+	// The cost: claude.ai account connectors (Gmail/Calendar/Drive) are part of
+	// "all other MCP configurations" and go away too. They cannot be re-declared -
+	// they use an internal account-authenticated transport, and declaring their
+	// proxy URL as a plain http server just fails OAuth discovery (spike-verified).
+	// Turn this off for an agent that needs them. nil = default (on).
+	StrictMCP *bool `toml:"strict_mcp"`
 	// KnownTools extends the gate's built-in known-tool allow-list with extra tool
 	// names to treat as safe (allowed without parking). The gate fails closed on any
 	// tool it doesn't recognize - not a known built-in and without the mcp__ prefix -
@@ -175,6 +189,14 @@ type PolicyConfig struct {
 // the protective default.
 func (p PolicyConfig) IsGateEnabled() bool {
 	return p.GateEnabled == nil || *p.GateEnabled
+}
+
+// IsStrictMCP reports whether the agent's MCP servers come only from the
+// allow-list Hydra renders. Absent (nil) means on: like the gate, this is
+// opt-out, so a config written before the flag existed gets the protective
+// default. See PolicyConfig.StrictMCP for what it costs.
+func (p PolicyConfig) IsStrictMCP() bool {
+	return p.StrictMCP == nil || *p.StrictMCP
 }
 
 // ResolveGitIsolation returns the normalized git-isolation mode, defaulting to
@@ -221,6 +243,9 @@ func (p *PolicyConfig) Merge(other PolicyConfig) {
 	}
 	if other.MCPAutoAllowRead != nil {
 		p.MCPAutoAllowRead = other.MCPAutoAllowRead
+	}
+	if other.StrictMCP != nil {
+		p.StrictMCP = other.StrictMCP
 	}
 	if other.KnownTools != nil {
 		p.KnownTools = unionStrings(p.KnownTools, other.KnownTools)
@@ -2438,6 +2463,17 @@ func defaultsSpec() []specEntry {
 			},
 		},
 		{
+			table: "policy", key: "strict_mcp",
+			doc: "make the allow-list the ONLY source of MCP servers: Hydra renders the allow-listed servers (plus its own control server) into a per-head config and launches Claude with --strict-mcp-config, so the host's ~/.claude.json and a branch's .mcp.json are ignored outright rather than filtered (filtering rides a bind mount the host can silently detach). Costs the claude.ai account connectors - Gmail/Calendar/Drive - which cannot be re-declared; turn it off for an agent that needs them. On by default.",
+			def: func() string { return "true" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Policy != nil && a.Policy.StrictMCP != nil {
+					return fmt.Sprintf("%t", *a.Policy.StrictMCP), true
+				}
+				return "", false
+			},
+		},
+		{
 			table: "policy", key: "known_tools",
 			doc: "extra tool names to treat as safe (allowed without approval), extending the gate's built-in set. The gate fails closed on any tool it doesn't recognize (not a known built-in and no mcp__ prefix), parking it for approval; register a legitimate tool here to stop that. The default value below is the built-in set the gate already recognizes - add names to it, don't remove.",
 			def: func() string { return tomlStringArray(gate.DefaultKnownTools()) },
@@ -4110,6 +4146,9 @@ func emitAgentPolicy(out *[]string, name string, p *PolicyConfig, keyComments, t
 	emitSetField(out, name+".policy", "mcp_tools_blocked", tomlStringArray(p.MCPToolsBlocked), len(p.MCPToolsBlocked) > 0, keyComments)
 	if p.MCPAutoAllowRead != nil {
 		emitSetField(out, name+".policy", "mcp_auto_allow_read", fmt.Sprintf("%t", *p.MCPAutoAllowRead), true, keyComments)
+	}
+	if p.StrictMCP != nil {
+		emitSetField(out, name+".policy", "strict_mcp", fmt.Sprintf("%t", *p.StrictMCP), true, keyComments)
 	}
 	emitSetField(out, name+".policy", "known_tools", tomlStringArray(p.KnownTools), len(p.KnownTools) > 0, keyComments)
 }

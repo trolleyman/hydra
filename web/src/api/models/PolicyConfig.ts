@@ -35,6 +35,10 @@ export type PolicyConfig = {
      */
     mcp_auto_allow_read?: boolean | null;
     /**
+     * Make the allow-list the agent's only source of MCP servers: Hydra renders them (plus its own control server) into a per-head config and launches with --strict-mcp-config, so the host's ~/.claude.json and a branch's .mcp.json are ignored outright rather than filtered. Costs the claude.ai account connectors (Gmail/Calendar/Drive), which cannot be re-declared. null = on (the default).
+     */
+    strict_mcp?: boolean | null;
+    /**
      * Extra tool names the gate treats as safe, extending its built-in known-tool set. Not edited by the Settings UI; carried in responses so a round-tripped save preserves a hand-edited value.
      */
     known_tools?: Array<string> | null;

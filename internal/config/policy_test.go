@@ -140,3 +140,31 @@ func TestDefaultsLevelPolicy(t *testing.T) {
 		t.Fatalf("defaults [policy] not decoded: %+v", cfg.Defaults.Policy)
 	}
 }
+
+// TestIsStrictMCP: strict is opt-OUT, so a config written before the flag
+// existed (and a config that never mentions it) gets the protective default.
+func TestIsStrictMCP(t *testing.T) {
+	if !(PolicyConfig{}).IsStrictMCP() {
+		t.Error("unset strict_mcp should default to on")
+	}
+	off, on := false, true
+	if (PolicyConfig{StrictMCP: &off}).IsStrictMCP() {
+		t.Error("strict_mcp=false should turn it off")
+	}
+	if !(PolicyConfig{StrictMCP: &on}).IsStrictMCP() {
+		t.Error("strict_mcp=true should keep it on")
+	}
+	// Last writer wins across layers, like the other scalar policy flags - it is
+	// a posture, not a list, so a later layer can turn it off (that is how an
+	// agent that needs the claude.ai connectors opts out).
+	base := PolicyConfig{StrictMCP: &on}
+	base.Merge(PolicyConfig{StrictMCP: &off})
+	if base.IsStrictMCP() {
+		t.Error("a later layer's strict_mcp=false should win")
+	}
+	// A layer that says nothing leaves it alone.
+	base.Merge(PolicyConfig{MCPAllowed: []string{"github"}})
+	if base.IsStrictMCP() {
+		t.Error("a layer that doesn't mention strict_mcp should not re-enable it")
+	}
+}
