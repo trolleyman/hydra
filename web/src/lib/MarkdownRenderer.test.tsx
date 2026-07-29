@@ -35,11 +35,19 @@ describe('Markdown', () => {
   // heading size is a fixed 16px h1 in all of them; an em is a multiple of the
   // body it actually sits in, and follows the size control for free. Re-absolute
   // one of these and the pane grows its prose past its own h3.
-  it('sizes chat headings and tables relative to their prose', () => {
-    const { container } = render(<Markdown text={'# a\n\n## b\n\n### c\n\n| x |\n| - |\n| y |'} />)
-    for (const tag of ['h1', 'h2', 'h3', 'table']) {
+  it('sizes chat headings relative to their prose', () => {
+    const { container } = render(<Markdown text={'# a\n\n## b\n\n### c'} />)
+    for (const tag of ['h1', 'h2', 'h3']) {
       expect(container.querySelector(tag)!.className).toMatch(/text-\[length:[\d.]+em\]/)
     }
+  })
+
+  // A table is body content, not a heading: it takes no size of its own, so it
+  // reads at the size of the prose around it. It used to carry a literal 14px
+  // from when chat prose was 14px, which left it 1.077x its surroundings.
+  it('gives the chat table no size of its own', () => {
+    const { container } = render(<Markdown text={'| x |\n| - |\n| y |'} />)
+    expect(container.querySelector('table')!.className).not.toMatch(/text-/)
   })
 
   // The document variant is a README at a fixed page size, not prose that moves,

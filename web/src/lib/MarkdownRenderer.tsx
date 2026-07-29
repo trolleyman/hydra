@@ -293,7 +293,13 @@ const STYLES: Record<Variant, Style> = {
     // of stretching to fill the chat column; `max-w-full` still caps it and
     // `overflow-x-auto` scrolls a genuinely wide table.
     tableWrap: 'my-2 w-fit max-w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-white/10',
-    table: 'border-collapse text-[length:1.0769em]',
+    // No size of its own: a table is body content, not a heading, so it reads at
+    // the size of the prose around it. It carried a literal 14px from the days
+    // when chat prose was 14px too; prose has since moved (13px sans, 14px
+    // serif, 12px sub-agent cards, 10px config previews) and the table did not,
+    // so it rendered 1.077x its surroundings everywhere and read as a size step
+    // up mid-paragraph.
+    table: 'border-collapse',
     th: 'px-3 py-1.5 text-left font-semibold text-stone-700 dark:text-stone-200 bg-stone-100/70 dark:bg-white/[0.04] border-b border-stone-200 dark:border-white/10 whitespace-nowrap',
     td: 'px-3 py-1.5 border-b border-stone-200/60 dark:border-white/[0.06] align-top',
     tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-stone-500/[0.04] dark:[&>tr:nth-child(even)]:bg-white/[0.025]',
