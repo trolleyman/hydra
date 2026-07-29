@@ -331,8 +331,8 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `internal/selfupdate` - `syscall.Exec` keeps the PID and carries the web
   listener across, so no supervisor and no exit-code protocol. `Dev`/`DevExpose`/
   `Prod`/`Preview`/`DevAutoReload` deleted. NOT built: carrying agent PTYs across
-  the restart - the spike in `internal/selfupdate/ptyhandover_unix_test.go` shows
-  it needs `Pdeathsig`/`--die-with-parent` dropped first, trading away the
+  the restart, so a restart still stops running heads - a spike showed it needs
+  `Pdeathsig`/`--die-with-parent` dropped first, trading away the
   crashed-daemon-can't-orphan guarantee)
 The open backlog (ideas/gaps not yet built) lives in
 [docs/roadmap.md](docs/roadmap.md).

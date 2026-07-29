@@ -210,23 +210,20 @@ before starting. Grouped by area.
   deleted - eight ways to start Hydra down to three. See
   [deployment.md](deployment.md).
 
-- [ ] **Restart without killing every running head.** SPIKED
-  (`internal/selfupdate/ptyhandover_unix_test.go`), deliberately not built. The
-  spike drives a real PTY child through a real re-exec and settles two things: a
-  PTY master crosses `exec` fine (same trick as the web listener), but *only*
-  with the parent-death signal dropped - with `Pdeathsig` set, as every sandbox
-  has it via `internal/scope.StartFunc`, the exec SIGKILLs the child even though
-  the process never died, because Linux keys `PR_SET_PDEATHSIG` to the parent
-  THREAD and `exec` kills every thread but the caller. (It depends on which
-  thread forked: an earlier version of the spike forked and exec'd on one thread
-  and the child survived - a false green light.) So the cheap route trades away
-  the guarantee that a *crashed* daemon cannot orphan a sandbox, leaving
-  `SweepOrphanScopes`-at-next-boot as the only backstop; it would also need that
-  sweep taught to skip the units it just adopted. Splitting the PTY owner into a
-  supervisor that never restarts buys the same thing without the trade, and is
-  the one to build if this starts to hurt. Until then a restart stops running
-  heads, they resume with `--continue`, and the UI confirms first. See
-  [deployment.md](deployment.md).
+- [ ] **Restart without killing every running head.** Spiked, deliberately not
+  built. A PTY master crosses `syscall.Exec` fine - the same trick the web
+  listener already uses - but *only* with the parent-death signal dropped: with
+  `Pdeathsig` set, as every sandbox has it via `internal/scope.StartFunc`, the
+  exec SIGKILLs the child even though the process never died, because Linux keys
+  `PR_SET_PDEATHSIG` to the parent THREAD and `exec` kills every thread but the
+  caller. (It depends on which thread forked - forking and exec'ing on one thread
+  lets the child survive and gives a false green light.) So the cheap route
+  trades away the guarantee that a *crashed* daemon cannot orphan a sandbox,
+  leaving `SweepOrphanScopes`-at-next-boot as the only backstop; it would also
+  need that sweep taught to skip the units it just adopted. Splitting the PTY
+  owner into a supervisor that never restarts buys the same thing without the
+  trade. Until then a restart stops running heads, they resume with `--continue`,
+  and the UI confirms first. See [deployment.md](deployment.md).
 
 - [ ] **Make a second Hydra instance survivable** (only if wanted - see
   [deployment.md](deployment.md) for why one instance is probably right).

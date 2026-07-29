@@ -1,76 +1,97 @@
 # Deploying Hydra: a self-updating local service
 
-Status: **Phases A and B BUILT. Phase C spiked, deliberately not built** (see
-"The hard part" below for why).
+Hydra installs as a `systemd --user` service and rebuilds itself on demand. You
+press a button in the sidebar; it compiles in the background while still serving,
+streams the build log into a toast, and only swaps the binary and restarts if the
+build succeeded.
 
-The end state: **one installed service that rebuilds itself on demand.** You press
-a button, it compiles in the background while still serving, streams the build log
-into a toast, and only swaps the binary and restarts if the build succeeded. Dev
-and prod stop being different things - there is one server, built one way
-(minified *with* source maps, precompressed), and the restart button *is* the
-deploy. `mage dev` and its four cousins go away.
+There is one build flavour - minified, with source maps, precompressed - and one
+way to run the server. The restart button *is* the deploy.
 
 ## What this is, and isn't
 
-This is not a deployment in the classic sense - the machine keeps the source
+This is not a deployment in the classic sense: the machine keeps the source
 checkout and the toolchain, and the server compiles itself. For a single-user
-tool you are actively building, that is the right shape. The safety property you
-actually want is preserved and is worth naming: **the installed binary is a
-snapshot, and the button is an explicit "adopt current source".** A broken working
-tree cannot take the server down until you ask it to, and a failed build cannot
-take it down at all.
+tool you are actively building, that is the right shape.
 
-## The build flavour question, measured
+The safety property worth naming is that **the installed binary is a snapshot,
+and the button is an explicit "adopt current source"**. A broken working tree
+cannot take the server down until you ask it to, and a failed build cannot take
+it down at all.
 
-`minify` and `sourcemap` are independent Vite options that `web/vite.config.ts`
-derives from a single flag (`:106`, `:109`), which makes "production" and
-"debuggable" look mutually exclusive. They aren't. Measured on this tree:
+## Installing
+
+```
+mage deploy:setup     # once - generates the auth key non-localhost access needs
+mage deploy:service
+```
+
+`Deploy.Service` (`magefiles/magefile.go`) builds a binary to
+`~/.local/bin/hydra`, provisions the bundled sandbox tools (a headless service
+cannot fall back to a nice shell environment), and writes
+`~/.config/systemd/user/hydra.service` via `service.RenderSystemdUnit`. It offers
+to enable lingering, without which a `--user` unit stops at logout and only
+returns at the next login - the single most surprising thing about this
+deployment. It does not enable or start the unit; it prints the two `systemctl`
+lines.
+
+The unit carries no exit-code protocol and no `StartLimit` tuning, because
+restarts never reach systemd - see below.
+
+## The build
+
+`web/vite.config.ts` has exactly one flavour: `minify: 'esbuild'` and
+`sourcemap: true`. Those are independent Vite options, and deriving both from a
+`--mode development` flag is what used to make "fast" and "debuggable" look
+mutually exclusive. They aren't - DevTools fetches a `.map` only when it is open,
+so maps cost the browser nothing on a normal load.
 
 Main-bundle bytes on the wire, and the resulting binary:
 
-| flavour | JS on the wire | binary |
+| | JS on the wire | binary |
 |---|---|---|
 | unminified + maps (the old `mage dev` build) | 7.3 MB total | 53.9 MB |
 | minified, no maps | 399 KB | 37.4 MB |
-| minified + maps, no compression | 399 KB | 49.9 MB |
-| minified + maps, runtime gzip | 122 KB | 49.9 MB |
-| **minified + maps, precompressed (BUILT)** | **105 KB brotli / 122 KB gzip** | **41.9 MB** |
+| minified + maps, uncompressed | 399 KB | 49.9 MB |
+| minified + maps, runtime gzip only | 122 KB | 49.9 MB |
+| **minified + maps, precompressed** | **105 KB brotli / 122 KB gzip** | **~42 MB** |
 
-Reading it:
+Because there is one flavour, `HYDRA_DEV_BUILD` does not exist. That removed a
+live trap as much as a branch: heads inherit the daemon's environment, so an
+agent running `mage build` under a `mage dev` daemon silently produced a
+development frontend, and a `mage deploy:service` from such a shell would have
+installed one as prod.
 
-- **Maps cost the browser nothing.** DevTools fetches `.map` files only when it
-  is open. Same 3.9 MB of JS either way.
-- **The server does not compress today.** No gzip, no `Content-Encoding` anywhere
-  in `internal/cli/server_frontend.go` or the HTTP middleware - so raw size *is*
-  wire size, and today's unminified bundle really is ~5.6x the bytes of the end
-  state on every cold load. Invisible on loopback, very visible over Tailscale
-  from a phone.
-- **Precompression pays for the source maps almost exactly.** Embedding
-  compressible assets gzipped shrinks `dist` from 19.9 MB to 7.9 MB, landing the
-  binary at ~37.9 MB - i.e. today's *no-maps* production binary, but with full
-  maps, and 3x less traffic.
+### Compression
 
-So the end state is strictly better than today on every axis: 5.6x less JS on the
-wire, 16 MB smaller binary, and original-source stack traces.
+Static assets are compressed at build time by `web/scripts/precompress.ts`, which
+writes `<name>.br` and `<name>.gz` and **deletes the original**. `dist` is
+embedded in the binary, so keeping a copy nobody fetches would be paid for
+forever - deleting it is what takes the binary from 49.9 MB to ~42 MB. It costs
+~4-5s for ~970 files, fanning out across cores because `node:zlib`'s async calls
+run on libuv's thread pool.
 
-### What was actually built
+Brotli needs no new dependency at either end: node ships the encoder, and Go
+never decodes brotli, it only serves the bytes.
 
-**Both**, each where it fits.
+The script also writes `dist/.encoded.json`, listing every file whose original it
+replaced and which encodings exist for it. `internal/cli.serveAsset` loads that
+once at startup, so serving is a map lookup rather than a hunt: absent means
+"still on disk unencoded" (files under the size floor, and already-compressed
+types like png and woff2), present means "the original is gone, here is what
+exists instead". An empty index is a valid state, not an error - a `vite build`
+without the precompress step leaves a plain `dist`, every lookup misses, and
+every asset is read directly.
 
-Static assets are compressed at build time (`web/scripts/precompress.ts`) into
-`.br` and `.gz`, and the original is *deleted* - `dist` is embedded in the
-binary, so keeping a copy nobody fetches would be paid for forever. That is what
-takes the binary from 49.9 MB to 41.9 MB. Cost: 4.0s for 973 files, which fans
-out across cores because `node:zlib`'s async calls run on libuv's thread pool.
-Brotli needs no new dependency at either end - node ships the encoder, and Go
-never decodes brotli, it just serves the bytes.
+Details that are easy to get wrong, all covered by tests in
+`internal/cli/server_frontend_test.go`:
 
-`internal/cli.serveAsset` picks the best encoding the client accepts. Details
-that would otherwise bite, all with tests:
-
-- **Content-Type comes from the logical name**, not the file's. `index-abc.js.br`
-  means nothing to a browser, and `.map` is absent from the mime tables - left to
-  sniffing it comes back as gzip, which silently defeats shipping maps at all.
+- **Content-Type comes from the logical name.** The file on disk is
+  `index-abc.js.br`, and `.br` means nothing to a browser. Nothing is sniffed
+  either: for an encoded asset the bytes in hand are compressed, so sniffing
+  answers "gzip" for everything. `.map` is registered with the `mime` package at
+  init, since it has no entry in the system tables and would otherwise come back
+  as gzip - which makes DevTools quietly ignore source maps.
 - **Content-Length is the encoded length**, and Range is not supported: a range
   over a content-encoded body describes a representation the client never asked
   for.
@@ -78,343 +99,202 @@ that would otherwise bite, all with tests:
   decoded on the way out. That is why the identity fallback reads `.gz` and not
   `.br`: the standard library can do gzip.
 
-Dynamic responses still go through a runtime gzip middleware
+Dynamic responses go through a separate runtime gzip middleware
 (`internal/http/compress.go`) - diff payloads are the largest thing the UI
-fetches and cannot be compressed ahead of time. It leaves the static assets
-alone automatically, never touching a response that already carries a
-Content-Encoding.
+fetches and cannot be compressed ahead of time. It leaves static assets alone
+automatically, never touching a response that already carries a Content-Encoding.
+It also has to decide late (same sniffing problem), skip bodies under ~1KB (gzip
+framing makes them bigger, and the UI polls several small JSON endpoints per
+second per tab), treat a flush as "streaming, so the size threshold does not
+apply", and pass through websocket upgrades, range requests and 204/304. It sits
+*outside* `LoggingMiddleware`, which captures the body of a failed response for
+the log and should capture the readable one.
 
-Things that middleware has to get right, also all tested:
+## Restarting and updating
 
-- **Decide late.** Go sniffs `Content-Type` from the first bytes to reach the
-  underlying writer, so compressing before the type is known labels the response
-  `application/x-gzip`. The header is held back until the uncompressed prefix can
-  be sniffed.
-- **Don't compress small bodies.** Under ~1KB gzip framing makes the response
-  bigger, and the UI polls several small JSON endpoints per second per tab.
-- **A flush means streaming.** A handler that flushes has no knowable size, so
-  the size threshold must not apply - this is what the build-log stream needs.
-- **Skip what isn't ours**: websocket upgrades (they hijack the connection),
-  range requests (they name bytes of the identity representation), already
-  encoded or already compressed bodies, 204/304. Drop `Content-Length` and weaken
-  a strong `ETag` when re-encoding.
-- It sits **outside** `LoggingMiddleware`, which captures the body of a failed
-  response for the log and should capture the readable one.
+### Restart is `syscall.Exec`, not exit-and-be-restarted
 
-Dropping brotli would save roughly 4 MB more binary at the cost of 17% more wire
-- the other end of the same trade, if that ever becomes the one worth making.
-
-## Yes, `HYDRA_DEV_BUILD` can go
-
-`isDev` is used in exactly two places in `web/vite.config.ts` (`:106` minify,
-`:109` sourcemap). Once both are constants, `isDev` and the `mode` check at `:56`
-are dead, and with them:
-
-- `HYDRA_DEV_BUILD` itself, and the five `os.Setenv` calls that set it
-  (`magefile.go:1304,1318,1373,1460,1642`);
-- the dual build stamp - `.mage/web-build.stamp` and `.mage/web-build-dev.stamp`
-  collapse to one (`BuildWeb`, `:1161-1166`);
-- the `NODE_ENV=development` / `--mode development` branch (`:1194-1198`).
-
-This also deletes a live trap rather than just simplifying: heads currently
-inherit `HYDRA_DEV_BUILD=1` and `HYDRA_DEV_RESTART=1` from the `mage dev` process
-that started the daemon (verified with `printenv` inside a head), so any
-`mage build` an agent runs silently produces a development frontend - and a
-`mage deploy:service` from such a shell would install a dev bundle as prod. With
-one build flavour there is nothing to get wrong.
-
-`mage devFast` / `mage demo` are unaffected: they run the Vite *dev server*,
-which is a different code path and stays unminified with HMR, as it should.
-
-## And most of the magefile's run-loops
-
-There are currently eight ways to start Hydra: `Run`, `Dev`, `DevExpose`,
-`DevFast`, `DevAutoReload`, `Preview`, `Demo`, `Prod`. Once the server updates
-itself, most are duplicates of each other:
-
-| target | fate |
-|---|---|
-| `Dev` (`:1302`) | **gone** - the installed service updates itself |
-| `DevExpose` (`:1313`) | **gone** - `HYDRA_API_ADDR` on the service, auth key already enforced |
-| `Prod` (`:1061`) | **gone** - `deploy:service` covers it |
-| `Preview` (`:1572`) | **gone** - watch-rebuild-restart, superseded |
-| `DevAutoReload` (`:1459`) | **gone** - overlaps `DevFast` |
-| `DevFast` (`:1371`) | **keep** - Vite HMR is genuinely faster than any rebuild loop, and is a different mechanism, not a duplicate |
-| `Demo` (`:1640`) | **keep** - simulation mode, fully isolated (see below) |
-| `Run` (`:520`) | **keep** - foreground, for debugging the daemon itself |
-
-Eight down to three, plus `devServerLoop` (`:1328`) and the whole exit-42 rebuild
-dance in the magefile. That is the real simplification, and note it is downstream
-of the in-app update, not of the sourcemap change.
-
-(`mage demo` is worth keeping specifically because `runSimulationServer`
-(`internal/cli/server.go:152`) returns *before* `setupRuntime` /
-`serveUnixSocket` - it touches no daemon socket, DB, `projects.json`, or scope
-sweep. It is the one genuinely isolated second instance, and it covers most
-frontend work.)
-
-## The update mechanism
-
-### Flow
-
-1. `POST /api/server/update` returns immediately; the daemon starts the build in
-   a subprocess. **The old server keeps serving throughout.**
-2. Build log streams to the client over a WebSocket, with phase events:
-   `building` -> `verifying` -> `swapping` -> `restarting`.
-3. On build failure: stop. Report the error in the toast. Nothing was touched,
-   the server never went down. This is the whole safety argument.
-4. On success, verify the new binary actually runs (`hydra --version`, or better
-   a `hydra selfcheck` that boots the runtime against a temp root and exits).
-5. `os.Rename` `hydra` -> `hydra.prev`, `hydra.new` -> `hydra`. Atomic on one
-   filesystem. `go build -o` over a running binary does **not** `ETXTBSY` (the Go
-   linker unlinks first - verified), and existing sandbox binds pin the old
-   inode, so running heads keep the binary they started with.
-6. **`syscall.Exec` the new binary** - not exit-42-and-let-systemd-restart. See
-   below.
-
-The daemon can do all of this itself - it is not sandboxed, it is the thing that
-*spawns* sandboxes.
-
-### Why `exec`, not exit 42
-
-Re-execing in place is better than the exit-code protocol on every axis, and the
-reasons are independent of the fd handoff in Phase C:
+`internal/selfupdate` replaces the process image in place. That choice pays for
+itself three times:
 
 - **No supervisor dependency.** Restart behaves identically under systemd, under
-  `mage run` in a terminal, or under nothing at all. That deletes the exit-code
-  protocol, `RestartForceExitStatus=42`, and the `StartLimit*` tuning from the
-  plan entirely.
-- **systemd never notices.** `Type=simple` tracks MainPID, and `exec` preserves
-  the PID - so pressing restart ten times cannot trip the start rate limit into
-  `failed`, which was a real wart of the exit-42 design.
-- **Zero downtime, if you keep the listener.** Extract the TCP listener's fd
-  (`(*net.TCPListener).File()`), clear `CLOEXEC`, pass the number in the
-  environment, and `net.FileListener` it on the other side. The port is then
-  never unbound: new connections queue in the accept backlog instead of getting
-  `ECONNREFUSED`. It also deletes `devServerLoop`'s
-  `time.Sleep(1 * time.Second) // Give the OS time to release the port`.
-- **It is the mechanism Phase C needs anyway**, so adopting it now means Phase C
-  adds fds incrementally rather than replacing the restart path.
+  `hydra server` in a terminal, and under nothing at all. There is no exit-code
+  protocol, no `RestartForceExitStatus`, no `StartLimit` tuning, and no mage
+  rebuild loop.
+- **The PID never changes**, so systemd - tracking MainPID under `Type=simple` -
+  does not observe a restart. Pressing restart repeatedly cannot trip the
+  5-starts-in-10s limit into `failed`.
+- **Descriptors cross the exec.** The web listener is handed to the new image by
+  clearing `FD_CLOEXEC` and passing its number in the environment, so the port is
+  never unbound: requests arriving mid-restart queue in the accept backlog
+  instead of being refused.
 
-**Take `exec` in Phase B with no fd handoff at all.** Heads still die at that
-point - PTY masters are `CLOEXEC`, and `exec` terminates every thread but the
-caller so bwrap's parent-death signal fires regardless - so keep the explicit
-`Registry.StopAll()` for determinism rather than letting them die from a race.
-Phase C then adds fd inheritance and removes `StopAll` and `--die-with-parent`
-together.
+Details that bite:
 
-Details that will bite on day one:
+- **Exec the installed path, not `/proc/self/exe`** - after a swap that still
+  resolves to the pre-swap inode, so you would faithfully re-exec the binary you
+  just replaced.
+- **`StopDaemon` must not signal itself.** `serveUnixSocket` calls it at startup;
+  after a re-exec the pidfile holds our own PID and `/proc/<pid>/cmdline` still
+  says `__daemon`, so `pidIsHydraDaemon` agrees we are a daemon worth killing.
+  Guarded on `pid == os.Getpid()` (`internal/daemon/upgrade.go`), with a test
+  that fails without it.
+- **Exit 42 survives only as a fallback** for when `exec` itself fails
+  (`ENOENT`, `EACCES`, `ENOEXEC`).
+- **Nothing deferred runs after the exec.** Drain first - services, previews,
+  sessions, then close the database so SQLite's WAL is checkpointed - but do not
+  `Shutdown` the listener being preserved, since that closes it.
 
-- **Exec the installed path, not `/proc/self/exe`.** After the swap
-  `/proc/self/exe` still resolves to the *old* inode (now `hydra.prev`, or
-  unlinked), so you would faithfully re-exec the binary you just replaced.
-- **Guard against SIGTERMing yourself.** `serveUnixSocket` calls
-  `daemon.StopDaemon` on startup, which reads the pidfile and signals it if
-  `/proc/<pid>/cmdline` contains `__daemon`
-  (`internal/daemon/upgrade.go:84`, `pidIsHydraDaemon` `:132`). After an `exec`
-  the pidfile holds *your own* PID and your cmdline still says `__daemon`, so the
-  fresh image can kill itself. A `pid == os.Getpid()` skip fixes it and is
-  correct regardless of this work.
-- **Keep exit 42 as the fallback.** `syscall.Exec` only returns on failure
-  (`ENOENT`, `EACCES`, `ENOEXEC`); on that path `os.Exit(42)` and let whatever
-  supervisor exists pick it up.
-- **Nothing deferred runs after `exec`** - no `srv.Shutdown`, no cleanup
-  closures. Drain first. But do *not* `Shutdown` the listener you are trying to
-  preserve, since that closes it; extract the fd first.
-- **Close the DB before exec** so SQLite's WAL is flushed cleanly.
-- Order: verify new binary -> drain -> close DB -> dup listener fd and clear
-  `CLOEXEC` -> `exec`.
+### Update is a restart with a build in front
 
-What you give up is close to nothing. The one thing the supervisor contributed
-was "if the new binary crash-loops, give up and sit in `failed`" - and that still
-works, because a crash after `exec` is an ordinary process exit and systemd's
-restart policy still applies. Verify-before-swap was always the real protection.
+1. `POST /api/server/update` returns immediately; the build runs in a
+   subprocess. **The old server keeps serving throughout.**
+2. The log streams over `/ws/server/update` as `phase` and `log` frames:
+   `building` -> `verifying` -> `swapping` -> `restarting`.
+3. A build failure stops there and reports. Nothing was touched, the server never
+   went down. This is the whole safety argument.
+4. On success the new binary must prove it starts (`--version`) *before* anything
+   is swapped.
+5. `os.Rename` `hydra` -> `hydra.prev`, `hydra.new` -> `hydra`: two renames within
+   one directory, so there is no instant at which the binary does not exist.
+   `go build -o` over a running binary does not `ETXTBSY` (the Go linker unlinks
+   its output first), and the sandbox binds carrying this binary into running
+   heads pin the old inode, so they keep the version they started with.
+6. Re-exec.
 
-### API shape
+The daemon can do all of this itself: it is not sandboxed, it is the thing that
+*spawns* sandboxes.
 
-Today it is one fire-and-forget call: `POST /api/dev/restart` ->
-`Server.DevRestart` (`internal/http/handlers.go:1513`) -> `os.Exit(42)`, with the
-client health-polling in `handleRestart` (`web/src/routes/__root.tsx:577`). That
-splits into:
+Update is offered only when the daemon's project root is a Hydra checkout with
+mage available - Hydra manages other people's repositories too, and rebuilding
+the server from one of those would be nonsense. Those daemons get restart but not
+update, reported as `can_restart` / `can_update` on `/api/status`.
 
-- `POST /api/server/restart` - restart only, no build. What prod wanted all along.
-- `POST /api/server/update` - build, verify, swap, restart.
-- `WS /ws/server/update` - the log + phase stream.
+### The UI
 
-Two details worth getting right:
-
-- **The stream dies on purpose.** The server that is streaming is the one about
-  to re-exec, so the client must treat "socket closed after the `restarting`
-  phase" as success, not as an error. The existing `/health` poll-then-reload
-  loop (`__root.tsx:598-610`) already handles the rest and needs no change -
-  though with the listener carried across the `exec`, connections queue rather
-  than being refused, so the poll should settle on the first attempt.
-- **Write the log to a file too**, under the existing build-log dir
-  (`paths.GetBuildLogDirFromProjectRoot`, `internal/paths/paths.go:237`), so it
-  survives the restart and the toast can show the completed log after the reload
-  rather than losing it mid-stream.
-
-### The toast
-
-An expandable toast, phase as the title, with the build log inside it - built on
-the persistent (`duration: 0`) toast `handleRestart` already used.
+One toast for the whole run, keyed so a second press replaces it in place. Its
+body reads the update store, so "Building..." becomes "Update failed" by
+re-rendering the same card - there is never a second toast, and never a gap where
+the first has gone and the next has not arrived.
 
 The log goes through `LogView`, the same xterm view the artifact and test build
-logs use. That is a correctness requirement rather than a consistency one: real
-`mage build` output is full of ANSI, so a stack of divs would render the escape
+logs use. That is a correctness requirement, not a consistency one: real
+`mage build` output is full of ANSI, so a stack of divs renders the escape
 sequences as literal garbage. xterm also brings scrollback, selection and
-follow-the-tail.
+follow-the-tail. The toast opts into `TOAST_CARD_WIDTH_WIDE` (44rem, measured at
+85 columns) because a terminal has a real width requirement;
+`web/src/lib/toastLayout.ts` documents it as the one exception to the
+single-width notification column.
 
-The toast is NOT widened for it. `web/src/lib/toastLayout.ts` pins the whole
-notification column to one width deliberately - stepping one card out of line
-undoes the reason that exists.
+Two things the client has to get right, both about what "the stream ended" means:
 
-## The hard part: "hot swap" without killing your agents
+- A **successful** update severs its own websocket - the server re-execs, so no
+  terminal frame can arrive. A socket lost at or after the swap is success
+  (`outcome: 'restarting'`); one lost while the build was still running is a real
+  failure.
+- Subscribers are **replayed the events so far**, which is what lets a late tab
+  catch up. So the job is started *before* subscribing - connecting first hands
+  you the previous run's history, terminal frame and all, and declares the update
+  finished before it began.
 
-This is the one place the vision meets real resistance, and it is worth
-separating two things that "hot swap" runs together:
+A failed build opens the log automatically and says nothing was changed. There is
+no reload on that path: the server never went anywhere.
 
-1. **Rebuilding without downtime** - trivial, and covered above. The build
-   happens while the old server serves; only a *successful* build causes any
-   interruption.
-2. **Swapping without killing running heads** - hard.
+### Restarting stops running heads
 
-Today a restart kills every live head. Two mechanisms do it: bwrap runs with
-`--die-with-parent` (`internal/sandbox/linux.go:181`), and the drain calls
-`Registry.StopAll()` (`internal/session/registry.go:665`). Heads come back via
-`--continue`, but an in-flight turn is lost.
+A restart stops every live agent. They come back via `--continue`, but the
+in-flight turn is lost, so the UI confirms first and names the count.
 
-Note the cgroup side is *already* fine: workloads run in transient systemd scopes
-(`hydra-*.scope`), which outlive the process that created them. What binds a head
-to the daemon is only `PR_SET_PDEATHSIG` and the fact that the PTY master fd
-lives in the daemon's memory - close it and the agent gets `SIGHUP`.
+Two mechanisms do it: bwrap runs with `--die-with-parent`
+(`internal/sandbox/linux.go`) and the drain calls `Registry.StopAll()`
+(`internal/session/registry.go`).
 
-### The spike result
+This is the one part of the design that is not free, and it is **not fixed** -
+see "Not built" below.
 
-Run, rather than reasoned about: `internal/selfupdate/ptyhandover_unix_test.go`
-drives a real process with a real PTY child through a real re-exec. Two findings,
-and they settle the design:
+## `mage` after all this
 
-- **The handover mechanism works.** A PTY master crosses `exec` exactly like the
-  listener does - clear `FD_CLOEXEC`, pass the number in the environment - and on
-  the far side the child is still running and still echoing through it.
-- **It only works with the parent-death signal gone.** With `Pdeathsig` set, as
-  every Hydra sandbox has it today (`internal/scope.StartFunc`), the child is
-  SIGKILLed by the exec even though the process it belongs to never died. Linux
-  keys `PR_SET_PDEATHSIG` to the parent *thread*, and `exec` terminates every
-  thread but the caller.
+Eight ways to start Hydra became three. `Dev`, `DevExpose`, `Prod`, `Preview`,
+`DevAutoReload` and `devServerLoop` are gone - the installed service updates
+itself, and `HYDRA_API_ADDR` covers exposing a port.
 
-That second point is easy to miss because it depends on *which thread* forked.
-An early version of the spike forked and exec'd from the same goroutine and the
-child survived, which would have been a false green light. Forking from a
-separate goroutine - the shape `scope.StartFunc` produces, and the shape the
-daemon really has, since sessions start on request handlers and the exec happens
-on the update goroutine - kills the child every time.
+What remains, because each does a genuinely different job:
 
-### What Phase C therefore costs
+- `mage run` - foreground, for debugging the daemon itself.
+- `mage devFast` - Vite HMR in front of the Go API. Hot-module-replacement is
+  faster than any rebuild loop and is a different mechanism, not a duplicate.
+- `mage demo` - simulation mode. `runSimulationServer` (`internal/cli/server.go`)
+  returns *before* `setupRuntime` / `serveUnixSocket`, so it touches no daemon
+  socket, DB, `projects.json` or scope sweep. It is the one genuinely isolated
+  second instance, and it simulates an update - phases, a streaming log, and a
+  failure every third run - so the panel can be driven without a real build.
 
-Carrying agent PTYs across a restart is not "also hand over these fds". It
-requires dropping `Pdeathsig` *and* bwrap's `--die-with-parent` for agent
-sessions, and those exist for a reason: they guarantee that a daemon which dies
-ungracefully (crash, SIGKILL, OOM) cannot leave a sandbox running. Give them up
-and the backstop becomes `SweepOrphanScopes` at the next daemon boot - which
-means a crashed daemon leaves agents running, burning tokens, until something
-restarts it.
+## Not built: carrying agent PTYs across a restart
 
-Three routes, given that:
+Making a restart *not* stop running heads means handing their PTY masters to the
+new image, the way the listener already is. A spike settled two things:
 
-- **(a) Carry the PTY fds across the `exec`.** Now a small increment on Phase B
-  mechanically - the spike proves the descriptor half - but it carries the
-  lifetime trade above, and it needs `SweepOrphanScopes`
-  (`internal/sandbox/scope_linux.go:160`) taught to skip the units it just
-  adopted, or the restarted daemon reaps the very sandboxes it carried over.
-- **(b) Split the process** - a small supervisor owning the PTYs, plus a web/API
-  server that restarts freely. Keeps the parent-death guarantee (the supervisor
-  is the parent and never restarts), at the cost of the largest change here.
-- **(c) A per-head shim** owning the PTY, so nothing the daemon does matters.
-  Medium-large, and much the same trade as (b) at a finer grain.
+- **The mechanism works.** A PTY master crosses `exec` fine, and on the far side
+  the child is still running and still responding through it.
+- **It only works with the parent-death signal gone.** With `Pdeathsig` set - as
+  every Hydra sandbox has it, via `internal/scope.StartFunc` - the exec SIGKILLs
+  the child even though the process it belongs to never died. Linux keys
+  `PR_SET_PDEATHSIG` to the parent *thread*, and `exec` terminates every thread
+  but the caller.
 
-**Unbuilt, deliberately.** (a) is cheap now but pays for restarts with a weaker
-crash guarantee, and the integration - real bwrap sandboxes, transient scopes,
-re-adopting `Wait()` on processes we no longer forked - cannot be exercised in an
-agent sandbox, because bwrap will not nest. (b) is the design that gives
-restarts *and* keeps the guarantee, and is the one to spend the effort on if
-restart-without-losing-agents turns out to matter. Until then a restart stops
-running heads and they resume with `--continue`, and the UI says so before you
-press the button.
+That second finding depends on **which thread forked**, which is the trap for
+anyone re-running it. An early version of the spike forked and exec'd from the
+same goroutine and the child survived - a false green light. Forking from a
+separate goroutine, pinned across the fork and unpinned after (the shape
+`scope.StartFunc` produces, and the shape the daemon really has, since sessions
+start on request handlers while the exec runs on the update goroutine), kills the
+child every time. Reproduce that setup or you measure the wrong thing.
 
-## Audit: what else is missing
+The spike itself was deleted with the finding written down here: it exercised
+Linux and Go semantics rather than any Hydra code, and its negative assertion
+would have to be deleted the day someone made it work.
 
-- **`Development` is a boolean meaning "mage will rebuild me"**
-  (`internal/cli/runtime.go:249`), so the restart button only renders under the
-  mage loop. Needs to become a mode (`off` / `restart` / `update`).
-- **The systemd unit does not account for the button** - `RenderSystemdUnit`
-  (`internal/service/systemd.go:52-53`) emits `Restart=on-failure` /
-  `RestartSec=2`, and exit 42 counts against systemd's default rate limit
-  (5 starts / 10s), so a few quick presses land the unit in `failed`. Moot once
-  restart is an `exec`: the PID never changes and systemd is not involved. Noted
-  because it is the reason the exit-code design needed unit changes at all.
-- **The CLI auto-upgrade fights systemd.** `daemon.Connect` compares the invoking
-  binary's stamp to the running daemon's (`internal/daemon/upgrade.go:19`, `:63`)
-  and on a mismatch `StopDaemon`s it (`:84`, SIGTERM) then spawns a **detached**
-  `hydra __daemon`. Against a service-managed daemon that is wrong either way.
-  Detection is free - systemd sets `INVOCATION_ID` - so `WriteDaemonFiles`
-  (`:32`) can stamp `managed=systemd` into the `.info` file and `isStale` can
-  skip the takeover.
-- **`Deploy.Service` never enables linger**, so the unit dies at logout unless
-  the user runs the printed `loginctl enable-linger`.
+So the cheap route requires dropping `Pdeathsig` *and* bwrap's
+`--die-with-parent` for agent sessions, and those exist for a reason: they
+guarantee that a daemon dying ungracefully cannot leave a sandbox running. Give
+them up and the backstop becomes `SweepOrphanScopes` at the next daemon boot,
+which means a crash leaves agents running and burning tokens until something
+restarts. It would also need that sweep taught to skip the units it just adopted,
+or the restarted daemon reaps exactly what it carried over.
 
-(All four are addressed in Phase B; kept here because they explain why the
-design is shaped the way it is.)
+The alternative is to split the PTY owner into a small supervisor that never
+restarts, with the web/API server restarting freely in front of it. That buys the
+same thing without the trade, at the cost of the larger change. It is the one to
+build if restart-without-losing-agents starts to matter.
 
-## Plan
-
-**Phase A - build flavour. BUILT.** `sourcemap: true` with minification kept,
-`isDev` / `HYDRA_DEV_BUILD` / the dual stamp deleted, and a gzip middleware in
-front of everything.
-
-**Phase B - self-update via `exec`. BUILT.** The update endpoint, the log stream,
-the toast, verify-then-swap, `exec`-restart with the listener fd carried over,
-the `os.Getpid()` guard in `StopDaemon`, `can_restart`/`can_update` replacing the
-`Development` boolean, `INVOCATION_ID` detection, linger offered by
-`deploy:service`. `Dev`, `DevExpose`, `Prod`, `Preview`, `DevAutoReload` and
-`devServerLoop` are gone - eight ways to start Hydra down to three. A restart
-still stops running heads, so it confirms first, showing the live count.
-
-**Phase C - restart without killing heads. SPIKED, NOT BUILT.** The spike
-(above) proves the descriptor handover works and proves it needs the
-parent-death signal dropped first, which trades away the guarantee that a
-crashed daemon cannot orphan a sandbox. Route (b) - splitting the PTY owner out
-of the restarting process - buys the same thing without that trade, and is the
-one to build if this becomes important. Phase B's confirmation dialog stands in
-the meantime.
-
-A and B are worth doing regardless. C is the one to prototype before planning.
+Note the integration cannot be exercised inside an agent sandbox - bwrap will not
+nest - so any attempt at this needs testing on the host with real heads.
 
 ## Decisions and rejected alternatives
 
-- **Source maps in prod, minified and precompressed.** Reversing the first draft
-  of this doc, which cut maps from prod on binary-size grounds - precompression
-  more than pays for them. One caveat: maps hand out original source to anyone
-  who can load the UI. Fine for loopback/Tailscale of your own code; reconsider
-  before a public ngrok Funnel.
-- **One instance, not two.** Untying minify from sourcemap removes the
-  debuggability argument, and `SweepOrphanScopes`
-  (`internal/sandbox/scope_linux.go:160`) is global - it reaps *all*
-  `hydra-*.scope` units at daemon boot, so a second instance would kill the
-  first's live sandboxes. If instances are ever revived they need a per-instance
+- **Source maps in prod, minified and precompressed.** The caveat: maps hand out
+  original source to anyone who can load the UI. Fine for a loopback/Tailscale
+  deployment of your own code; reconsider before a public ngrok Funnel. Dropping
+  brotli would save ~4 MB more binary for 17% more wire - the other end of the
+  same trade, if that ever becomes the one worth making.
+- **Verify before swapping, never roll back after.** Recovering from a dead
+  process is not something to rely on; `hydra.prev` is a manual escape hatch, not
+  the mechanism.
+- **Update builds from the project root's working tree**, not a fetched release.
+  That is the point - it is a self-updating local service. The UI should show the
+  commit it is about to build so it is never a surprise.
+- **No file watcher.** `mage devFast` covers fast iteration; auto-restarting a
+  server that stops every running head is not something to automate.
+- **One instance, not two.** An earlier draft of this doc proposed a dev instance
+  beside a prod one. Untying minify from sourcemap removed the debuggability
+  argument, and `SweepOrphanScopes` (`internal/sandbox/scope_linux.go`) is global
+  - it reaps *all* `hydra-*.scope` units at daemon boot, so a second instance
+  would kill the first's live sandboxes. Reviving it would need a per-instance
   scope prefix, plus namespacing for `~/.config/hydra/projects.json`, `uuid.txt`,
   the shared `~/.local/share/hydra/logs/hydra.log`, the daemon runtime key, and a
   templated `hydra@<instance>.service`.
-- **Update builds from the project root's working tree**, not from a fetched
-  release. That is the point - it is a self-updating local service. The UI should
-  show the commit it is about to build so it is never a surprise.
-- **Verify before swapping, never after.** Rollback from a dead process is not
-  something to rely on; `hydra.prev` is a manual escape hatch, not the mechanism.
-- **`syscall.Exec` rather than exit-42-and-let-the-supervisor-restart.** It makes
-  restart independent of how the process was started, keeps the PID (so systemd's
-  start rate limit is never involved), and allows the listener - and later the
-  PTYs - to be carried across. Exit 42 survives only as the fallback for when
-  `exec` itself fails.
-- **No file watcher.** Auto-rebuilding a server that (pre-Phase C) kills every
-  running head is not something to automate. `mage devFast` covers fast iteration.
+- **The CLI's binary-stamp auto-upgrade leaves a service-managed daemon alone.**
+  It used to SIGTERM it and respawn it detached, which left systemd's unit
+  inactive with an unsupervised daemon behind it. The daemon stamps
+  `managed=systemd` into its info file (systemd sets `INVOCATION_ID` for every
+  service) and `Connect` prints what to do instead.
