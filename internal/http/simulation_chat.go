@@ -246,8 +246,12 @@ var simChatEvents = []simNorm{
 	simThought("msg_sim_1", 5000),
 	simThought("msg_sim_4", 3000),
 	simConversationStarted("claude-opus-4-8", simChatSlashCommands),
-	// A context-compaction "session continued" preamble (item 39).
-	simInjectedContext("sim-compaction", "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. The user asked to add a retry loop with exponential backoff to the artifacts uploader, plus a giving-up test.\n2. We located the uploader in internal/artifacts/upload.go and drafted a jittered backoff helper.\n3. Next step: wire the retry loop into Put and add TestPutRetry.\n\nContinue from where you left off."),
+	// A context-compaction "session continued" preamble (item 39). The CLI does
+	// NOT flag this one isMeta, so it normalizes to an ordinary user_message and
+	// the chat recognises it by its opening line (detectContextNote), collapsing
+	// it behind a "Continued from a previous conversation" pill. Sending it as
+	// injected context instead would render it as a generic meta card.
+	simUser("sim-compaction", "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. The user asked to add a retry loop with exponential backoff to the artifacts uploader, plus a giving-up test.\n2. We located the uploader in internal/artifacts/upload.go and drafted a jittered backoff helper.\n3. Next step: wire the retry loop into Put and add TestPutRetry.\n\nContinue from where you left off."),
 	simUser("sim-real-0", simAgentChatPrompt).at("2026-07-09T18:00:00.000Z"),
 	simThink("msg_sim_1", "The uploader lives in internal/artifacts/upload.go. A retry loop with jittered exponential backoff around the PUT, capped attempts, and a unit test faking a flaky server should cover it.\nThe giving-up path needs the fake server to fail more times than the attempt cap, then assert the last error surfaces.").at("2026-07-09T18:00:03.000Z"),
 	simSay("msg_sim_1", "I'll add the retry around the upload call. The plan:\n\n## Approach\n\n- Wrap the `PUT` in a retry loop with **exponential backoff** (100ms base, x2, jitter)\n- Give up after *5 attempts* and surface the last error\n- Cover the giving-up path with a fake flaky server\n\nLet me look at the current uploader first."),

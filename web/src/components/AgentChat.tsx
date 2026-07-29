@@ -484,9 +484,6 @@ interface ProviderEvent {
   // total_cost_usd is a notional API-rate figure, not money actually billed,
   // and the per-turn footer hides it.
   apiKeySource?: string
-  // Set by the CLI on the synthesized assistant message it emits when a turn
-  // fails mid-response ("API Error: ... The response above may be incomplete.").
-  isApiErrorMessage?: boolean
   // Sub-agent (Task tool) markers: a sidechain event is one of a sub-agent's
   // own inner steps, not part of the main conversation; agentId names which
   // sub-agent. The reducer routes these into that sub-agent's card instead of
@@ -504,16 +501,10 @@ interface ProviderEvent {
   // SKILL.md body. The reducer routes these out of the normal chat flow (a
   // collapsed meta card / a skill card) instead of rendering them as a user turn.
   isMeta?: boolean
-  // A background/async sub-agent's completion <task-notification> is written to
-  // the main transcript not as a user turn but as bookkeeping records the chat
-  // socket relays live: a queue-operation (XML on top-level `content`) and an
-  // attachment (XML on `attachment.prompt`). handleProviderEvent settles the sub
-  // off whichever carries it (see handleTaskNotification).
+  // A <task-notification> bookkeeping record (a background sub-agent finishing,
+  // a background command completing) arrives as a notice carrying its XML here.
+  // handleProviderEvent settles the sub off it (see handleTaskNotification).
   content?: string
-  // attachment.prompt is a string for <task-notification> records, and an array
-  // of content blocks for queued_command records (a queued message consumed
-  // into a running turn - see queuedCommandText).
-  attachment?: { type?: string; prompt?: string | { type?: string; text?: string }[]; commandMode?: string }
   // Raw API event carried by stream_event lines (--include-partial-messages):
   // message_start carries the message's initial usage, message_delta the running
   // output-token count - fed to the live "working" indicator (item 48).
@@ -886,32 +877,6 @@ function isAgentCompletionNotification(text: string): boolean {
   return status === 'completed' && /^Agent\b/i.test(summary)
 }
 
-// queuedCommandText extracts the message text from a queued_command attachment
-// record. When the CLI consumes a queued message INTO A RUNNING TURN (mid-turn
-// steering - the queue-operation "remove" path), it writes NO plain `user`
-// event; this attachment, with the text on attachment.prompt content blocks,
-// is the message's only durable trace - so replay must rebuild the user bubble
-// from it or the message vanishes on the next reattach. (A message consumed
-// while the CLI is idle gets a real user event and never reaches this path.)
-function queuedCommandText(ev: ProviderEvent): string | null {
-  const att = ev.attachment
-  if (ev.type !== 'attachment' || att?.type !== 'queued_command') return null
-  const prompt = att.prompt
-  if (typeof prompt === 'string') {
-    // A background task's <task-notification> rides the same attachment type
-    // with a string prompt - that's a notice, never a user message (the
-    // reducers consume it before reaching here; this guard is belt+braces).
-    const t = prompt.trim()
-    return !t || isTaskNotification(t) ? null : t
-  }
-  if (!Array.isArray(prompt)) return null
-  const text = prompt
-    .filter((b) => !!b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text)
-    .join('\n')
-    .trim()
-  return text || null
-}
 
 // detectContextNote recognises the CLI-injected "session continued" preamble that
 // leads a conversation after a context compaction (auto/ran-out-of-context or an
@@ -5333,13 +5298,9 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
   for (const ev of events) {
     const evTs = parseEventTs(ev)
     if (evTs != null) lastTs = evTs
-    // A <task-notification> bookkeeping record (queue-operation XML on
-    // `content`, attachment XML on `attachment.prompt`): render its chip in
-    // place, like the live relay does.
-    const notifText =
-      (typeof ev.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
-      (typeof ev.attachment?.prompt === 'string' && isTaskNotification(ev.attachment.prompt) && ev.attachment.prompt) ||
-      ''
+    // A <task-notification> bookkeeping record, carried as a notice's text:
+    // render its chip in place, like the live relay does.
+    const notifText = typeof ev.content === 'string' && isTaskNotification(ev.content) ? ev.content : ''
     if (notifText) {
       pushNotification(notifText)
       continue
@@ -5348,16 +5309,6 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
       const notice = ev.subagentNotice
       if (notice.key) subCompletions.add(notice.key)
       push({ kind: 'notice', text: `${notice.label} finished${notice.description ? ': ' + notice.description : ''}`, subagentKey: notice.key, noEntrance: true })
-      continue
-    }
-    // A queued message consumed into a running turn: its queued_command
-    // attachment is its only durable record (no plain user event exists) -
-    // rebuild the user bubble from it, settling the prior turn's footer like
-    // any real user turn.
-    const queuedText = queuedCommandText(ev)
-    if (queuedText != null) {
-      flushHistFooter()
-      push({ kind: 'user', text: queuedText })
       continue
     }
     if (ev.type === 'shellcmd' && ev.shell) {
@@ -5392,15 +5343,6 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
       }
     } else if (ev.type === 'assistant') {
       const content = ev.message?.content
-      if (ev.isApiErrorMessage) {
-        const text = Array.isArray(content)
-          ? content.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
-          : typeof content === 'string'
-            ? content
-            : ''
-        push({ kind: 'result', isError: true, errorText: text.trim() || undefined })
-        continue
-      }
       if (!Array.isArray(content)) continue
       const msgId = ev.message?.id ?? ''
       let seen = seenBlocks.get(msgId)
@@ -7189,16 +7131,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         push({ kind: 'contextNote', text, outOfContext: ctxNote.outOfContext })
         return
       }
-      // The stdout echo of a message already rendered from its queued_command
-      // attachment (a queued message consumed into a running turn): the
-      // attachment is the durable, correctly-placed copy - drop the echo.
-      const qi = queuedCmdTexts.indexOf(text)
-      if (qi >= 0) {
-        queuedCmdTexts.splice(qi, 1)
-        markTurnStart()
-        settlePendingSend(text)
-        return
-      }
       // The echo of a message we already showed optimistically (item 26): just
       // confirm that copy (clear its sending flag) instead of rendering a
       // duplicate. The echo can arrive after the turn's response, so relying on
@@ -7232,56 +7164,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
-      plainUserTexts.push(text)
       push({ kind: 'user', text, noEntrance: fromQueue })
-    }
-
-    // One-shot dedup between a queued_command attachment and the stdout echo of
-    // the same message: whichever renders first is remembered here so the other
-    // is dropped (they carry different uuids, so the socket's uuid dedup can't
-    // pair them).
-    const queuedCmdTexts: string[] = []
-    const plainUserTexts: string[] = []
-
-    // routeQueuedCommand renders a queued_command attachment - the only durable
-    // record of a queued message consumed into a RUNNING turn (see
-    // queuedCommandText). Routed through routeUserText so the sender's own
-    // optimistic/queued bubbles fold into the settled item.
-    const routeQueuedCommand = (text: string, ts: number | null) => {
-      const pi = plainUserTexts.indexOf(text)
-      if (pi >= 0) {
-        // Its stdout echo already rendered the bubble (ring replay order).
-        plainUserTexts.splice(pi, 1)
-        return
-      }
-      routeUserText(text, ts)
-      queuedCmdTexts.push(text)
     }
 
     const handleProviderEvent = (ev: ProviderEvent) => {
       // A background/async sub-agent's completion arrives NOT as a user turn but
-      // as a <task-notification> bookkeeping record the chat socket relays live
-      // off the main transcript: a queue-operation (XML on `content`) or an
-      // attachment (XML on `attachment.prompt`). Settle off it up front, whatever
-      // the event type, so a finished background sub-agent's card stops reading
-      // "working" the moment it ends. A notification later consumed by a real
-      // user turn routes through routeUserText instead, and dedups there.
-      const notifText =
-        (typeof ev.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
-        (typeof ev.attachment?.prompt === 'string' &&
-          isTaskNotification(ev.attachment.prompt) &&
-          ev.attachment.prompt) ||
-        ''
+      // as a <task-notification> bookkeeping record, carried as a notice's text.
+      // Settle off it up front, whatever the event type, so a finished background
+      // sub-agent's card stops reading "working" the moment it ends. A
+      // notification later consumed by a real user turn routes through
+      // routeUserText instead, and dedups there.
+      const notifText = typeof ev.content === 'string' && isTaskNotification(ev.content) ? ev.content : ''
       if (notifText) {
         handleTaskNotification(notifText, parseEventTs(ev))
-        return
-      }
-      // A queued message consumed into a running turn: its queued_command
-      // attachment (relayed by the backfill and the live notification tailer)
-      // is its only durable record - render the user bubble from it.
-      const queuedText = queuedCommandText(ev)
-      if (queuedText != null) {
-        routeQueuedCommand(queuedText, parseEventTs(ev))
         return
       }
       // A sub-agent's inner step: route it into that sub-agent's card, never the
@@ -7414,20 +7309,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         }
         case 'assistant': {
           const content = ev.message?.content
-          // A turn that failed mid-response comes back as an ordinary assistant
-          // message flagged isApiErrorMessage; render it as an error box (like a
-          // result error) rather than a normal reply so it reads as the failure
-          // it is. The head is also flipped into the `error` status server-side.
-          if (ev.isApiErrorMessage) {
-            const text = Array.isArray(content)
-              ? content.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
-              : typeof content === 'string'
-                ? content
-                : ''
-            push({ kind: 'result', isError: true, errorText: text.trim() || undefined })
-            clearStream()
-            return
-          }
           if (!Array.isArray(content)) return
           clearSending()
           // Remember this turn's latest stop_reason so the result footer can flag
