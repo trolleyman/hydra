@@ -1868,6 +1868,10 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   // The rendered box, so the position pass can measure it and flip/clamp against
   // the real geometry instead of guessing.
   const boxRef = useRef<HTMLDivElement>(null)
+  // Dark mode is class-scoped, and the box portals to document.body, so mirror
+  // the trigger's theme context onto the portal root - same reason and same
+  // trick as the shared Tooltip (components/Tooltip.tsx).
+  const [inDark, setInDark] = useState(false)
   const [pos, setPos] = useState<TipPos | null>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // A stable per-instance identity for the "which tooltip is active" singleton, so
@@ -1928,6 +1932,7 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
     // Dismiss any other tooltip before we claim the active slot.
     if (activeTooltip && activeTooltip.id !== id) activeTooltip.hide()
     activeTooltip = { id, hide: hideNow }
+    setInDark(!!ref.current?.closest('.dark'))
     const p = computePos()
     if (p) setPos(p)
     setVisible(true)
@@ -1978,13 +1983,23 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   return (
     <div ref={ref} className={`relative inline-flex ${className}`} onMouseEnter={show} onMouseLeave={scheduleHide}>
       {children}
-      {visible && pos && (
+      {/* Portalled to document.body, like the shared Tooltip. The box is
+          viewport-positioned (`fixed` + computed coordinates), so moving it out
+          of the trigger's subtree costs nothing in layout - and it is the only
+          way it can outrank anything on the page. Rendered in place it sat
+          inside the Changes bar's sticky z-[25] stacking context, which CAPS it:
+          its own z-[200] only ordered it against its siblings in there, so the
+          chat's floating plan card (z-30, a sibling of that whole bar) painted
+          over a commit card that had flipped left across the divider. On the
+          body it competes at the root, on the popover tier shared with
+          Tooltip/menus (z-[9999]) - i.e. above everything but a Dialog. */}
+      {visible && pos && createPortal(
         <div
           ref={boxRef}
           // Same surface as the shared Tooltip (components/Tooltip.tsx): light in
           // light mode, dark in dark mode. It used to be dark in both, which made
           // it look like a stray widget from another app on a light page.
-          className="fixed z-[200] overflow-y-auto overscroll-contain rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 shadow-xl dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+          className={`fixed z-[9999] overflow-y-auto overscroll-contain rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 shadow-xl dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 ${inDark ? 'dark' : ''}`}
           style={{
             top: pos.top,
             left: pos.left,
@@ -1996,7 +2011,8 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
           onMouseLeave={scheduleHide}
         >
           {content}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
