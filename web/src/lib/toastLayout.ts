@@ -17,3 +17,14 @@
 // you stop and read, and two words in a 26rem card is the mostly-empty card the
 // compact scale exists to avoid.
 export const TOAST_CARD_WIDTH = 'w-[26rem] max-w-[calc(100vw-2rem)]'
+
+// The one documented exception. A toast whose body is a TERMINAL has a width
+// requirement the column cannot satisfy: the server-update log is real build
+// output, and at 26rem the xterm inside it is ~46 columns, which wraps compiler
+// diagnostics into unreadable ribbons. 44rem gives it ~80, the width those tools
+// assume when they format for a terminal.
+//
+// This is deliberately not a general "size" knob. Everything else stays in the
+// column for the reason above; reach for this only when the content has a real
+// measured width, not because a card feels cramped.
+export const TOAST_CARD_WIDTH_WIDE = 'w-[44rem] max-w-[calc(100vw-2rem)]'

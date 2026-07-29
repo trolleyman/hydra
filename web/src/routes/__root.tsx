@@ -621,12 +621,18 @@ function RootLayout() {
     const toast = useToastStore.getState()
     // Keyed + persistent: the body follows the update store on its own, so this
     // is shown once and never re-shown as several hundred build lines arrive.
+    // ONE toast for the whole run, keyed so a second press replaces it in place
+    // rather than stacking. Its body reads the update store, so "Building..."
+    // becomes "Update failed" (or the reload) by re-rendering - there is never a
+    // second card, and never a gap where the first has gone and the next has not
+    // arrived. Wide because the body is a terminal (see TOAST_CARD_WIDTH_WIDE).
     toast.show({
       key: 'server-update',
       message: <ServerUpdateToast />,
       richMessage: true,
       type: 'info',
       duration: 0,
+      wide: true,
     })
 
     // A plain restart has no build to report, and the server may be gone before

@@ -59,11 +59,16 @@ func gzipBytes(t *testing.T, s string) []byte {
 }
 
 // precompressedFS mirrors what web/scripts/precompress.ts leaves behind: the
-// original is GONE, replaced by its two encodings. Everything below turns on
-// that, since a handler that only looked for the original would 404 the whole app.
+// original is GONE, replaced by its two encodings, and a manifest names exactly
+// which files that happened to. Everything below turns on that, since a handler
+// that only looked for the original would 404 the whole app.
 func precompressedFS(t *testing.T) fstest.MapFS {
 	t.Helper()
 	return fstest.MapFS{
+		".encoded.json": {Data: []byte(`{
+			"index.html": ["br", "gzip"],
+			"assets/app-abc.js": ["br", "gzip"]
+		}`)},
 		"index.html.br":         {Data: []byte("brotli-index")},
 		"index.html.gz":         {Data: gzipBytes(t, "<html>app</html>")},
 		"assets/app-abc.js.br":  {Data: []byte("brotli-js")},
@@ -196,5 +201,47 @@ func TestHeadSendsLengthWithoutBody(t *testing.T) {
 	}
 	if got := rec.Header().Get("Content-Length"); got != "9" { // len("brotli-js")
 		t.Errorf("Content-Length = %q, want 9 (the ENCODED length)", got)
+	}
+}
+
+// A dist built without the precompress step has no manifest at all. Every lookup
+// should miss and every asset be read directly, rather than the whole app 404ing.
+func TestNoManifestServesPlainDist(t *testing.T) {
+	h := spaHandler(fstest.MapFS{
+		"index.html":        {Data: []byte("<html>app</html>")},
+		"assets/app-abc.js": {Data: []byte("console.log(1)")},
+	})
+
+	req := httptest.NewRequest("GET", "/assets/app-abc.js", nil)
+	req.Header.Set("Accept-Encoding", "br, gzip")
+	rec := httptest.NewRecorder()
+	h(rec, req)
+
+	if got := rec.Header().Get("Content-Encoding"); got != "" {
+		t.Errorf("Content-Encoding = %q, want empty - nothing was precompressed", got)
+	}
+	if rec.Body.String() != "console.log(1)" {
+		t.Errorf("body = %q, want the plain asset", rec.Body.String())
+	}
+}
+
+// A manifest that promises an encoding the bundle does not contain must degrade
+// to the next option rather than serving a truncated or empty response.
+func TestManifestPromisingAMissingVariantFallsBack(t *testing.T) {
+	h := spaHandler(fstest.MapFS{
+		".encoded.json":        {Data: []byte(`{"assets/app-abc.js": ["br", "gzip"]}`)},
+		"assets/app-abc.js.gz": {Data: gzipBytes(t, "console.log(1)")}, // no .br
+	})
+
+	req := httptest.NewRequest("GET", "/assets/app-abc.js", nil)
+	req.Header.Set("Accept-Encoding", "br, gzip")
+	rec := httptest.NewRecorder()
+	h(rec, req)
+
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip - the promised brotli is absent", got)
+	}
+	if rec.Body.Len() == 0 {
+		t.Error("empty body")
 	}
 }

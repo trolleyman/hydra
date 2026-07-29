@@ -110,6 +110,9 @@ export interface Toast {
   // confirmation is the whole reason this exists: at the standard size, a
   // two-word title over a one-line value sat in a card that was mostly padding.
   compact?: boolean
+  // Widen this card out of the shared notification column. Only for content with
+  // a real measured width requirement - see TOAST_CARD_WIDTH_WIDE.
+  wide?: boolean
   type: ToastType
   // Total lifetime in ms before the toast auto-dismisses. 0 = persistent (the
   // caller dismisses it manually). Kept on the toast so the renderer can drive
@@ -164,6 +167,7 @@ interface ToastState {
     code?: string
     codeLang?: string
     compact?: boolean
+    wide?: boolean
     type?: ToastType
     // Lifetime in ms; 0 = persistent. Omitted, it defaults by type (errors get
     // the longer ERROR_DURATION_MS, everything else DEFAULT_DURATION_MS).
@@ -225,7 +229,7 @@ function clearTimer(id: number) {
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  show: ({ message, richMessage, code, codeLang, compact, type = 'info', duration = type === 'error' ? ERROR_DURATION_MS : DEFAULT_DURATION_MS, actions, onDismiss, key, icon, accent, approval, projectContext }) => {
+  show: ({ message, richMessage, code, codeLang, compact, wide, type = 'info', duration = type === 'error' ? ERROR_DURATION_MS : DEFAULT_DURATION_MS, actions, onDismiss, key, icon, accent, approval, projectContext }) => {
     // Keyed toast already on screen → replace its contents in place (same id, no
     // re-stack), and re-arm its expiry timer if it auto-dismisses.
     if (key !== undefined) {
@@ -234,7 +238,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
         set((state) => ({
           toasts: state.toasts.map((t) =>
             t.id === existing.id
-              ? { ...t, message, richMessage, code, codeLang, compact, type, duration, actions, onDismiss, icon, accent, approval, projectContext, createdAt: Date.now() }
+              ? { ...t, message, richMessage, code, codeLang, compact, wide, type, duration, actions, onDismiss, icon, accent, approval, projectContext, createdAt: Date.now() }
               : t,
           ),
         }))
@@ -246,7 +250,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
     set((state) => ({
       toasts: [
         ...state.toasts,
-        { id, message, richMessage, code, codeLang, compact, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, icon, accent, approval, projectContext },
+        { id, message, richMessage, code, codeLang, compact, wide, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, icon, accent, approval, projectContext },
       ],
     }))
     if (duration > 0) {

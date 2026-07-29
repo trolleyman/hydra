@@ -4,6 +4,7 @@ package cli
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"io/fs"
 	"log"
@@ -16,6 +17,46 @@ import (
 	"github.com/trolleyman/hydra/web"
 )
 
+func init() {
+	// Source maps have no entry in the system mime tables, and left to content
+	// sniffing they come back as gzip - the bytes we hold are compressed - which
+	// makes DevTools quietly ignore them, undoing the whole point of shipping
+	// them. Register it once rather than special-casing it per request.
+	_ = mime.AddExtensionType(".map", "application/json")
+}
+
+// encodedManifest is the file web/scripts/precompress.ts writes listing every
+// asset whose original it replaced with encoded variants, and which encodings it
+// produced. See assetIndex.
+const encodedManifest = ".encoded.json"
+
+// encodingSuffix maps a Content-Encoding token to the file suffix the build step
+// writes for it.
+var encodingSuffix = map[string]string{"br": ".br", "gzip": ".gz"}
+
+// assetIndex is what the build step recorded, so serving is a lookup rather than
+// a guess: for a given path we know whether the original still exists and which
+// encodings sit beside it. Absent from the map means "still on disk, unencoded"
+// (small files and already-compressed types are left alone).
+//
+// An empty index is a valid state, not an error: a `vite build` run without the
+// precompress step leaves a plain dist, and then every lookup misses and every
+// asset is read directly - which is exactly right.
+type assetIndex map[string][]string
+
+func loadAssetIndex(fsys fs.FS) assetIndex {
+	data, err := fs.ReadFile(fsys, encodedManifest)
+	if err != nil {
+		return assetIndex{}
+	}
+	var idx assetIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		log.Printf("frontend: %s is unreadable (%v); serving assets unencoded", encodedManifest, err)
+		return assetIndex{}
+	}
+	return idx
+}
+
 // registerFrontend mounts the embedded React SPA on the root of mux.
 func registerFrontend(mux *http.ServeMux) {
 	distFS, err := fs.Sub(web.FrontendAssets, "dist")
@@ -25,24 +66,16 @@ func registerFrontend(mux *http.ServeMux) {
 	mux.Handle("/", spaHandler(distFS))
 }
 
-// encodings are the precompressed variants web/scripts/precompress.ts writes,
-// best first. That script REPLACES each original with these rather than sitting
-// beside it, which is the point: dist is compiled into the binary, so an
-// uncompressed copy would be paid for on disk forever to serve a client that
-// does not exist.
-var encodings = []struct{ name, suffix string }{
-	{"br", ".br"},
-	{"gzip", ".gz"},
-}
-
 func spaHandler(fsys fs.FS) http.HandlerFunc {
+	index := loadAssetIndex(fsys)
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		cleanPath := trimSlash(r.URL.Path)
 		if cleanPath == "" {
 			cleanPath = "index.html"
 		}
 
-		if serveAsset(w, r, fsys, cleanPath, http.StatusOK) {
+		if serveAsset(w, r, fsys, index, cleanPath, http.StatusOK) {
 			return
 		}
 
@@ -53,7 +86,7 @@ func spaHandler(fsys fs.FS) http.HandlerFunc {
 		if web.RoutesRegex.MatchString(r.URL.Path) {
 			status = http.StatusOK
 		}
-		if serveAsset(w, r, fsys, "index.html", status) {
+		if serveAsset(w, r, fsys, index, "index.html", status) {
 			return
 		}
 		log.Printf("frontend: index.html is missing from the embedded assets")
@@ -64,49 +97,57 @@ func spaHandler(fsys fs.FS) http.HandlerFunc {
 // serveAsset writes name from fsys, preferring a precompressed variant the client
 // said it can read. Reports whether it found anything.
 //
-// Content-Type comes from name's own extension, never the variant's: the file on
-// disk is `index-abc.js.br`, and `.br` means nothing to a browser. Content-Length
-// is the encoded length, and no Range support is advertised - a range over a
-// content-encoded body describes bytes of a representation the client did not ask
-// for, and nothing here needs one.
-func serveAsset(w http.ResponseWriter, r *http.Request, fsys fs.FS, name string, status int) bool {
-	// Headers common to every branch below. Vary is set even when we end up
-	// serving identity, so a shared cache never hands a brotli body to a client
-	// that cannot read it.
+// Which variants exist comes from the build manifest, not from trying paths until
+// one opens. Content-Type comes from the LOGICAL name, never the variant's: the
+// file on disk is `index-abc.js.br`, and `.br` means nothing to a browser.
+// Content-Length is the encoded length, and no Range support is advertised - a
+// range over a content-encoded body describes bytes of a representation the
+// client did not ask for, and nothing here needs one.
+func serveAsset(w http.ResponseWriter, r *http.Request, fsys fs.FS, index assetIndex, name string, status int) bool {
+	available, encoded := index[name]
+
+	// Headers common to every branch below. Vary is set even when we serve
+	// identity, so a shared cache never hands a brotli body to a client that
+	// cannot read it.
 	setHeaders := func() {
 		setFrontendCacheHeader(w, name)
 		w.Header().Set("Content-Type", contentTypeFor(name))
 		w.Header().Add("Vary", "Accept-Encoding")
 	}
 
-	// Best encoding the client accepts that we actually have.
-	for _, enc := range encodings {
-		if !acceptsEncoding(r, enc.name) {
+	// Best encoding the build produced that this client accepts.
+	for _, enc := range available {
+		if !acceptsEncoding(r, enc) {
 			continue
 		}
-		data, err := fs.ReadFile(fsys, name+enc.suffix)
+		data, err := fs.ReadFile(fsys, name+encodingSuffix[enc])
 		if err != nil {
+			log.Printf("frontend: %s is in %s as %q but missing from the bundle: %v", name, encodedManifest, enc, err)
 			continue
 		}
 		setHeaders()
-		w.Header().Set("Content-Encoding", enc.name)
+		w.Header().Set("Content-Encoding", enc)
 		writeBody(w, r, data, status)
 		return true
 	}
 
-	// The client wants it unencoded. Usually that just means reading it off the
-	// embedded FS - small files are left uncompressed by the build step.
-	if data, err := fs.ReadFile(fsys, name); err == nil {
+	// Not encoded at all - small files and already-compressed types are left as
+	// they were built, so read the original.
+	if !encoded {
+		data, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return false
+		}
 		setHeaders()
 		writeBody(w, r, data, status)
 		return true
 	}
 
-	// Otherwise precompression removed the original, so decode one back. gzip
-	// rather than brotli because the standard library can do it, which keeps this
-	// fallback free of a new dependency. Cold path: every browser sends gzip, so
-	// this is for curl and the occasional health checker.
-	f, err := fsys.Open(name + ".gz")
+	// Encoded, but this client accepts none of the encodings, and the original
+	// was removed - so decode one back. gzip rather than brotli because the
+	// standard library can do it, which keeps this free of a new dependency. Cold
+	// path: every browser sends gzip, so it is for curl and health checkers.
+	f, err := fsys.Open(name + encodingSuffix["gzip"])
 	if err != nil {
 		return false
 	}
@@ -161,13 +202,10 @@ func acceptsEncoding(r *http.Request, enc string) bool {
 	return false
 }
 
-// contentTypeFor maps a logical asset name to its media type. `.map` is absent
-// from the system mime tables, and left to sniffing it would come back as gzip -
-// the bytes we hold are compressed.
+// contentTypeFor maps a logical asset name to its media type (see the init above
+// for `.map`). Never sniffed: for an encoded asset the bytes in hand are
+// compressed, so sniffing would confidently answer "gzip" for everything.
 func contentTypeFor(name string) string {
-	if path.Ext(name) == ".map" {
-		return "application/json"
-	}
 	if ct := mime.TypeByExtension(path.Ext(name)); ct != "" {
 		return ct
 	}

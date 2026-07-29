@@ -8,7 +8,7 @@ import { CrossProjectBanner } from './CrossProjectBanner'
 import { withBranchPills } from '../lib/branchPills'
 import { highlightCode } from '../lib/markdown'
 import { TILE_TONE, TILE_BAR, TILE_GLYPH, type TileTone } from '../lib/tileTone'
-import { TOAST_CARD_WIDTH } from '../lib/toastLayout'
+import { TOAST_CARD_WIDTH, TOAST_CARD_WIDTH_WIDE } from '../lib/toastLayout'
 
 // Per-type visual identity: the icon and its tinted rounded square. The tint and
 // the countdown bar come from the shared tile table (lib/tileTone), which the
@@ -99,6 +99,9 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
 
   const base = TYPE_VISUAL[toast.type] ?? TYPE_VISUAL.info
   const size = toast.compact ? SIZE.compact : SIZE.default
+  // A wide toast keeps the default scale and only swaps its width, so it still
+  // reads as the same kind of card - just one that had to leave the column.
+  const cardClass = toast.wide ? size.card.replace(TOAST_CARD_WIDTH, TOAST_CARD_WIDTH_WIDE) : size.card
   // The tile glyph, tile fill and countdown-bar colour all default to the type
   // identity; a toast may override the glyph (`icon`) and the fill+bar pair
   // (`accent`) - an agent toast does both, from its status (see lib/agentToast).
@@ -125,7 +128,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
     <ToastDismissContext.Provider value={onDismiss}>
     <div
       role="status"
-      className={`relative overflow-hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl ${size.card} ${
+      className={`relative overflow-hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-xl ${cardClass} ${
         toast.exiting ? 'animate-toast-out' : 'animate-toast-in'
       }`}
     >
