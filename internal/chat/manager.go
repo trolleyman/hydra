@@ -556,7 +556,9 @@ func (m *Manager) RetractOrphanedTurn(id, transcriptDir string) ([]string, error
 	if len(orphans) == 0 {
 		return nil, nil
 	}
-	if _, err := s.Append("messages_retracted", map[string]any{"message_ids": orphans}); err != nil {
+	retracted := MessagesRetracted{}
+	retracted.MessageIds = orphans
+	if _, err := s.Append(retracted); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	return orphans, nil
