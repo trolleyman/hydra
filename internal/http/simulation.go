@@ -1,10 +1,12 @@
 package http
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"image"
 	"net/http"
 	"os"
 	"path"
@@ -3359,6 +3361,36 @@ func (s *SimulationServer) HandleAgentFileBlob(w http.ResponseWriter, r *http.Re
 	}
 	w.Header().Set("Content-Type", "image/png")
 	_, _ = w.Write(png)
+}
+
+// HandleAgentFileSizes answers the chat renderer's "how big are these pictures?"
+// batch (see the real Server.HandleAgentFileSizes, which reads each file's
+// header). Every simulated path serves the same placeholder PNG, so measuring it
+// once answers for all of them - which is exactly what a real answer looks like
+// from the client's side, and lets the demo show a chat image being laid out
+// before its bytes arrive.
+func (s *SimulationServer) HandleAgentFileSizes(w http.ResponseWriter, r *http.Request) {
+	var req agentFileSizesRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	out := agentFileSizesResponse{Sizes: make(map[string]agentFileSize)}
+	png, err := base64.StdEncoding.DecodeString(simDiffImageAfterBase64)
+	if err != nil {
+		http.Error(w, "decode error", http.StatusInternalServerError)
+		return
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(png))
+	if err == nil {
+		for _, raw := range req.Paths {
+			if agentImageExts[strings.ToLower(path.Ext(raw))] {
+				out.Sizes[raw] = agentFileSize{Width: cfg.Width, Height: cfg.Height}
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 // HandleAgentBlob serves the simulated repo's raw file bytes for an agent diff.

@@ -1,6 +1,9 @@
 package http
 
 import (
+	"bytes"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -117,4 +120,63 @@ func TestResolveAgentFile(t *testing.T) {
 			t.Fatalf("got %q, want no match", got)
 		}
 	})
+}
+
+// writePNGFile writes a real w×h PNG (writeFile's bytes are not an image, and
+// the sizes endpoint has to read a header out of them).
+func writePNGFile(t *testing.T, path string, w, h int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, w, h))); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// The sizes endpoint tells the chat how big a picture is before it fetches it,
+// so a screenshot lands in a box that was already the right height instead of
+// shoving the transcript. It answers only for files the blob endpoint would
+// serve - it shares resolveAgentFile and the same extension allowlist - and says
+// NOTHING (rather than zero) about anything it can't measure, because the client
+// falls back to decoding the image itself for exactly those.
+func TestAgentFileSizes(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, ".hydra", "local", "worktrees", "head-1")
+	tmpDir := filepath.Join(root, ".hydra", "local", "tmp", "head-1")
+
+	shot := filepath.Join(tmpDir, "shot.png")
+	inTree := filepath.Join(worktree, "web", "public", "logo.png")
+	writePNGFile(t, shot, 780, 1688)
+	writePNGFile(t, inTree, 64, 32)
+	// An image by extension whose bytes are not one - the shape of a screenshot
+	// still being written when the page asks about it.
+	writeFile(t, filepath.Join(tmpDir, "half-written.png"))
+
+	got := agentFileSizes(root, worktree, tmpDir, []string{
+		"/tmp/shot.png",         // the head's private tmp
+		"web/public/logo.png",   // relative to the worktree
+		"/tmp/half-written.png", // an image we cannot measure
+		"/tmp/missing.png",      // nothing there
+		"/etc/passwd.png",       // outside every root
+		"/tmp/notes.txt",        // not an image at all
+		"/tmp/shot.png",         // a duplicate: one answer, not two
+	})
+
+	want := map[string]agentFileSize{
+		"/tmp/shot.png":       {Width: 780, Height: 1688},
+		"web/public/logo.png": {Width: 64, Height: 32},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d sizes %v, want %d %v", len(got), got, len(want), want)
+	}
+	for path, size := range want {
+		if got[path] != size {
+			t.Errorf("%s: got %v, want %v", path, got[path], size)
+		}
+	}
 }
