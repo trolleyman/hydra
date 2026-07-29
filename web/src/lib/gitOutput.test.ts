@@ -113,6 +113,56 @@ describe('gitOutputSpans', () => {
     expect(out[7]).toEqual([['\t', ''], ['scratch/', 'del']])
   })
 
+  it('colours a patch by direction, with its header receding', () => {
+    expect(spans(
+      'diff --git a/internal/chat/manager.go b/internal/chat/manager.go',
+      'index 560e9b39..28c6f309 100644',
+      '--- a/internal/chat/manager.go',
+      '+++ b/internal/chat/manager.go',
+      '@@ -556,7 +556,9 @@ func (m *Manager) RetractOrphanedTurn(id string) error {',
+      ' \tif len(orphans) == 0 {',
+      '-\tif _, err := s.Append("messages_retracted", m); err != nil {',
+      '+\tretracted := MessagesRetracted{}',
+      '\\ No newline at end of file',
+    )).toEqual([
+      [['diff --git ', 'dim'], ['a/internal/chat/manager.go b/internal/chat/manager.go', '']],
+      [['index ', 'dim'], ['560e9b39..28c6f309', 'sha'], [' 100644', 'dim']],
+      [['--- ', 'dim'], ['a/internal/chat/manager.go', '']],
+      [['+++ ', 'dim'], ['b/internal/chat/manager.go', '']],
+      [['@@ -556,7 +556,9 @@', 'ref'], [' func (m *Manager) RetractOrphanedTurn(id string) error {', 'dim']],
+      [[' \tif len(orphans) == 0 {', '']],
+      [['-\tif _, err := s.Append("messages_retracted", m); err != nil {', 'del']],
+      [['+\tretracted := MessagesRetracted{}', 'add']],
+      [['\\ No newline at end of file', 'dim']],
+    ])
+  })
+
+  it('reads a patch of a new file', () => {
+    expect(spans('new file mode 100644', '--- /dev/null', '+++ b/a.go')).toEqual([
+      [['new file mode 100644', 'dim']],
+      // Not a path anyone is looking for.
+      [['--- ', 'dim'], ['/dev/null', 'dim']],
+      [['+++ ', 'dim'], ['b/a.go', '']],
+    ])
+  })
+
+  it('runs the patch state through a log -p, and drops it at the next commit', () => {
+    const out = spans(
+      'commit a7401035',
+      '    - dropped the retry loop',
+      'diff --git a/a.go b/a.go',
+      '-\told',
+      'commit 5d671ab0',
+      '    - and the backoff with it',
+    )
+    // A dash in a commit message is not a deletion...
+    expect(out[1]).toEqual([['    - dropped the retry loop', '']])
+    expect(out[3]).toEqual([['-\told', 'del']])
+    // ...on either side of the patch.
+    expect(out[4]).toEqual([['commit ', 'dim'], ['5d671ab0', 'sha']])
+    expect(out[5]).toEqual([['    - and the backoff with it', '']])
+  })
+
   it('leaves a line it has no shape for alone', () => {
     // A commit message body, indented four spaces by `git show`.
     expect(spans('    Merge branch \'main\'', '')).toEqual([[["    Merge branch 'main'", '']], []])

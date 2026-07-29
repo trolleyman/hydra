@@ -53,7 +53,7 @@ export type ScriptStep =
   // Lines matched out of one or more files.
   | { kind: 'matches'; match: MatchesView; command: string }
   // git reporting on the repository rather than printing a file: a status, a
-  // diffstat, a commit header (see lib/gitOutput).
+  // commit header, a diffstat, a patch (see lib/gitOutput).
   | { kind: 'git'; command: string }
   // Prints nothing, so it takes no output (`cd`, an assignment, a redirect).
   | { kind: 'silent' }
@@ -389,33 +389,29 @@ function splitAt(word: string, sep: string): [string, string | null] {
   return at === -1 ? [word, null] : [word.slice(0, at), word.slice(at + 1)]
 }
 
-// git subcommands whose output is a report on the repository - the shapes
-// lib/gitOutput knows how to colour.
+// git subcommands whose output is a report on the repository - a status, a
+// commit header, a diffstat, a patch - which are the shapes lib/gitOutput knows
+// how to colour. Each of them prints one of those whatever it is asked for, so
+// the refused flags below are the only thing that can turn one into something
+// else.
 const GIT_REPORTS = new Set(['status', 'show', 'log', 'diff'])
 
-// Subcommands that print one of those shapes whatever they are asked for.
-// `status` only ever prints a status. `log` prints commit headers and their
-// messages - a patch takes an explicit `-p` - so the refused flags below are the
-// only thing that can turn either into something else.
-const GIT_ALWAYS_REPORTS = new Set(['status', 'log'])
-
-// Flags that make git print something other than those shapes: a patch, a
-// machine-readable format, a custom pretty format.
+// Flags that make git print something OTHER than those shapes: a machine
+// readable listing, a format chosen by the caller that could put anything on any
+// line, a diff marked up inside the line rather than by it.
 //
-// `--graph` is NOT among them: it only puts the topology in the left margin and
-// then prints the same lines, which lib/gitOutput strips back off.
-const GIT_REFUSED = /^(-p|-u|--patch|-U\d*|--unified(=.*)?|--numstat|--name-only|--name-status|--raw|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
-
-// Flags that replace `show`/`diff`'s patch with a summary of it.
-const GIT_SUMMARY = /^(--stat(=.*)?|--shortstat|--compact-summary|--summary|--oneline|-s|--no-patch)$/
+// `--graph` and `-p` are not among them: the first only puts the topology in the
+// left margin and then prints the same lines, and the second prints a patch,
+// which lib/gitOutput now reads.
+const GIT_REFUSED = /^(--numstat|--name-only|--name-status|--raw|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
 
 // parseGitReport reports whether a command is a git call whose output is one of
-// the reports lib/gitOutput colours: a status, a diffstat, a commit header.
+// the reports lib/gitOutput colours: a status, a commit header, a diffstat, a
+// patch.
 //
-// Narrow on purpose. Everything outside this set either prints a patch - which
-// wants a diff view, not a line-shape colouriser - or a format chosen by the
-// caller, and a `--pretty` this module has not read can put anything on any
-// line.
+// Narrow on purpose. Everything outside this set prints a listing or a format
+// chosen by the caller, and a `--pretty` this module has not read can put
+// anything on any line.
 function parseGitReport(words: Word[]): boolean {
   if (words[0].text !== 'git' || words[0].quoted) return false
   // git's own options come before the subcommand; `-C` and `-c` take the word
@@ -427,10 +423,7 @@ function parseGitReport(words: Word[]): boolean {
   }
   const sub = words[i]
   if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return false
-  const args = words.slice(i + 1)
-  if (args.some((w) => !w.quoted && GIT_REFUSED.test(w.text))) return false
-  if (GIT_ALWAYS_REPORTS.has(sub.text)) return true
-  return args.some((w) => !w.quoted && GIT_SUMMARY.test(w.text))
+  return !words.slice(i + 1).some((w) => !w.quoted && GIT_REFUSED.test(w.text))
 }
 
 // isFilter reports whether a command only trims what the command before it in

@@ -113,11 +113,16 @@ describe('parseScriptSteps', () => {
     // The `| cat` that stops git paging changes nothing about what it printed.
     expect(steps('git log --oneline -1 | cat')[0]).toEqual({ kind: 'git', command: 'git log --oneline -1 | cat' })
     expect(kinds('git log | cat | head -20\necho ----')).toEqual(['git', 'marker'])
-    // A patch wants a diff view, not a line-shape colouriser - and a caller's
-    // own format could put anything on any line.
-    expect(kinds('git show HEAD\necho ----')).toEqual(['unknown', 'marker'])
-    expect(kinds('git log -p\necho ----')).toEqual(['unknown', 'marker'])
+    // A patch is a shape too.
+    expect(kinds('git show HEAD\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git log -p\necho ----')).toEqual(['git', 'marker'])
+    expect(steps('cd .. && git diff internal/chat/manager.go | head -20')).toMatchObject([
+      { kind: 'silent' },
+      { kind: 'git', command: 'git diff internal/chat/manager.go | head -20' },
+    ])
+    // A listing, or a caller's own format, could put anything on any line.
     expect(kinds('git show --stat --pretty=format:%s\necho ----')).toEqual(['unknown', 'marker'])
+    expect(kinds('git diff --name-only\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git status --porcelain=v2\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git commit -m x\necho ----')).toEqual(['unknown', 'marker'])
   })
