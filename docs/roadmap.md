@@ -66,17 +66,31 @@ before starting. Grouped by area.
   `[stdout]` / `[stderr]`), preserving interleaving instead of buffering and
   printing everything at once.
 
-- [ ] **A review agent over a head's diff** - get a second model to review what a
-  head wrote, without disturbing the head's own conversation. Options surveyed in
-  [review-agent.md](review-agent.md): a sub-agent (free, weakest), a second chat
-  thread on the same worktree (rejected - it shares the head's transcript dir and
-  can poison `--continue`), a `[tests.review]` runner emitting `warn` markers
-  (buildable today with no Hydra code, needs a per-runner `prefetch = false` flag
-  so it isn't a model call per commit), an `Ephemeral` reviewer head stacked on
-  `hydra/<id>` (80% built - needs a `ReviewOf` link + a button), a first-class
-  `[review.<name>]` runner writing diff-anchored findings into the gutter, and a
-  one-shot `claude -p` (good only for narrow, tool-less checks). Recommended
-  order: try the test runner, then the reviewer head, then the gutter.
+- [ ] **Hydra-native review threads + @-mentioning an agent on a line.** Today
+  there are two half comment systems: local review comments (`localStorage`, no
+  thread, no reply, no persistence) and forge threads (real threads, but require a
+  published PR). Neither can hold a conversation between you and an agent about a
+  line of code. Proposed in [review-agent.md](review-agent.md): server-side
+  threads anchored to `(commit, path, line-range)` that exist without a forge
+  (`reviewstore.LocalNote` is most of the model; `mergeLocalNotes` must stop
+  dropping orphans), a third origin badge for agent-authored notes, and
+  `@<head-id>` / `@self` / `@review` mentions as the trigger. Both delivery ends
+  already exist - `SendAgentInput` inbound, `reviewq.OpNote` outbound. Needs:
+  staleness policy (`hunkHash` exists), wake-on-mention, a mention-loop cap, and
+  a `?thread=<id>` permalink (which needs the URL sub-view state from
+  [agent-page-tabs.md](agent-page-tabs.md)).
+
+- [ ] **A review agent over a head's diff** - the tenant of the above. Options
+  surveyed in [review-agent.md](review-agent.md): a sub-agent (free, weakest), a
+  second chat thread on the same worktree (rejected - it shares the head's
+  transcript dir and can poison `--continue`), a `[tests.review]` runner emitting
+  `warn` markers (buildable today with no Hydra code, needs a per-runner
+  `prefetch = false` flag so it isn't a model call per commit), an `Ephemeral`
+  reviewer head stacked on `hydra/<id>` (80% built - needs a `ReviewOf` link + a
+  button), a first-class `[review.<name>]` runner, and a one-shot `claude -p`
+  (good only for narrow, tool-less checks). Recommended order: the test runner to
+  find out whether the findings are any good, then threads, then mentions, then a
+  reviewer head behind `@review`.
 
 ## Diff viewer
 
@@ -119,6 +133,21 @@ before starting. Grouped by area.
   rendering.
 
 ## Web
+
+- [ ] **Tabs inside the inspector pane, and head-level events as chat rows.** The
+  inspector is five mutually-exclusive things stacked in one scroll (Changes bar,
+  Tests, Previews, Artifacts, Files+diffs), which is what the sticky-header
+  co-ordination machinery (`--sticky-changes-h` / `--sticky-section-h` /
+  `STICKY_CARD_TOP` / the hard-coded `max-h-[calc(100vh-140px)]`) exists to
+  survive - tabs would simplify it away, give each section the full pane height,
+  and create the page's first addressable sub-view state (`?tab=`, later
+  `?file=` / `?thread=`). Separately, head-level events (status transitions, test
+  verdict changes, publishes, merges) are ephemeral today - `AgentTransitionRow`
+  lives inside a toast and is lost if you were not looking - and should become
+  `ChatItem` rows in the transcript alongside the existing `commit` chips, rather
+  than a separate Activity feed. Argued in
+  [agent-page-tabs.md](agent-page-tabs.md), which also explains why chat and diff
+  should *not* be tabbed apart on a live head.
 
 - [ ] **Async markdown renderer so fenced code blocks pick up on-demand syntax
   highlighting.** The syntax-highlighting refactor split Prism (via refractor)

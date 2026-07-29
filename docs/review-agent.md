@@ -14,9 +14,21 @@ part) than on three questions the options answer differently:
 3. **What does it cost the head being reviewed** - context window, transcript
    integrity, wall-clock, money per commit?
 
+**The framing that makes the rest fall into place, and which a first pass at this
+doc missed: a review agent is not a report generator, it is a participant in a
+comment thread.** Once the reviewer posts into threads and you summon it by
+@-mentioning it on a line, the "where do the findings go" question answers itself,
+the trigger becomes contextual instead of global, and the same mechanism covers
+self-review, asking another head, and spawning a fresh reviewer. That design is
+["Review is a thread"](#review-is-a-thread-not-a-report) below; the options survey
+after it is then only about *how the reviewer is run*, which is a smaller and
+more replaceable decision.
+
 Related: [testing.md](testing.md) (the runner + marker machinery), [review-threads.md](review-threads.md)
 (the diff viewer's comment gutter), [non-local-integration.md](non-local-integration.md)
-(the forge review side), [artifacts.md](artifacts.md) (the sibling runner).
+(the forge review side), [artifacts.md](artifacts.md) (the sibling runner),
+[agent-page-tabs.md](agent-page-tabs.md) (the navigation work that gives threads
+a permalink).
 
 ## The constraint everything bends around
 
@@ -70,7 +82,98 @@ are not forge threads (local review comments are `localStorage` only -
 `PendingReviewComment` in `web/src/lib/reviewDrafts.ts:26-37`), and any origin
 badge other than `forge` / `local_only` (`web/src/components/ReviewThreadCard.tsx:44-83`).
 
-## The options
+## Review is a thread, not a report
+
+Hydra currently has **two half comment systems**, and the gap between them is
+exactly the review agent's missing home:
+
+| | local review comment | forge thread |
+| --- | --- | --- |
+| storage | `localStorage` only (`web/src/lib/reviewDrafts.ts:26-37`) | live from the forge, cached server-side as fallback |
+| anchored to a line | yes | yes |
+| is a thread | **no** - one shot, fire into chat, gone | yes |
+| can be replied to | no | yes (`reviewstore.LocalNote`, local-only) |
+| survives a reload / another device | no | yes |
+| exists without a PR | yes | **no** |
+| addressable / linkable | no | on the forge, not in Hydra |
+
+So today you can either write a note that has no thread and no persistence, or
+have a real thread that requires a published PR. Neither can hold a conversation
+between you and an agent about a line of code, which is what review actually is.
+
+**The proposal: a Hydra-native comment thread** - server-side, anchored to
+`(commit, path, line-range)`, with a stable id, existing with or without a forge.
+The data model is most of the way there already: `reviewstore.LocalNote{ID,
+ThreadID, Author, Body, CreatedAt}` (`internal/reviewstore/reviewstore.go:23-97`)
+is append-only JSON per head and already understands a non-human author
+(`AuthorAgent = "agent"`). What it lacks is (a) an anchor, and (b) the ability to
+exist without a forge parent - `mergeLocalNotes` (`internal/http/review_threads.go`)
+deliberately *drops* notes whose thread is not in the forge's list. Staleness
+handling already exists client-side: `PendingReviewComment` freezes a
+`contextBlock` and a `hunkHash` per comment for exactly this.
+
+### @-mentions are the trigger
+
+Instead of a global "Review this diff" button, you summon a reviewer **on the
+line you care about**:
+
+- `@<head-id>` - ask another head. Head ids are already global primary keys, so
+  they are addressable across projects with no new naming scheme.
+- `@self` - ask the head that wrote this to explain or reconsider it.
+- `@review` - a reserved handle: spawn an ephemeral reviewer scoped to this
+  thread's anchor (which of the run options below backs it is an implementation
+  detail the user never sees).
+
+Why this is better than a button:
+
+- **The anchor is the prompt.** "@review is this lock held across the await?" on
+  line 40 carries its own context. A global "review this diff" has to be answered
+  in the abstract, and abstract review is where models produce confident noise.
+- **Both directions of delivery already exist.** Inbound: `SendAgentInput`
+  (`internal/http/handlers.go`) queues a chat turn for a chat head or
+  bracketed-pastes into the PTY otherwise, and the diff viewer already formats
+  comments as markdown for an agent (`buildReviewMessage`). Outbound: an agent
+  replies with `reply_to_review_comment` -> `reviewq.OpNote`
+  (`internal/reviewq/reviewq.go`), which takes a `thread_id` + `body` and writes a
+  `LocalNote` authored by `"agent"`. **The agent reply path is built.** It is
+  currently pointed only at forge threads.
+- **One mechanism, three features.** Self-review, cross-agent review and a fresh
+  reviewer stop being three UI surfaces and become three handles.
+- **It absorbs the delivery gap.** The reason the first pass at this doc ended
+  with "there is no server-side store for diff-anchored comments that are not
+  forge threads" is that building that store *is* this feature.
+
+### What has to be true for it to work
+
+- **Staleness.** A thread anchored to a line the agent then rewrites must degrade
+  gracefully. `hunkHash` already detects it; the policy should be GitHub's -
+  mark the thread outdated, keep it readable, show it against the code it was
+  written on rather than silently re-anchoring to whatever now occupies line 40.
+- **Waking a stopped head.** An @-mentioned head may not be running. Lazy resume
+  already exists (`ResumeHead` on attach), and `reviewq` is already the on-demand
+  file channel the daemon watches for exactly this class of request - so the
+  queue is there; the wake-on-mention wiring is not.
+- **Mention loops.** Agent A mentions B, B replies mentioning A, forever. Cap
+  chain depth and do not let an agent's reply auto-fire another mention without a
+  human in the loop. Cheap to get right up front, ugly to retrofit.
+- **A permalink.** Threads want `?thread=<id>`, and the agent page has no URL
+  sub-view state at all today. That is the same prerequisite the inspector-tabs
+  work creates - see [agent-page-tabs.md](agent-page-tabs.md).
+- **A third origin badge.** `OriginBadge`
+  (`web/src/components/ReviewThreadCard.tsx:44-83`) knows `forge` and
+  `local_only`. An agent-authored note currently renders as "private" with the
+  author string doing all the work. It needs its own mark - a reader must be able
+  to tell "a model said this" from "a person said this" at a glance.
+- **Promotion, later.** A Hydra-native thread on a head that later gets published
+  should be able to become a forge thread. Deliberately a separate, explicit user
+  action - the agent has no forge credentials, which is the whole reason
+  `reply_to_review_comment` is local-only ([review-threads.md](review-threads.md)).
+
+## The options - how the reviewer is *run*
+
+These are orthogonal to the thread design above: whichever one backs `@review`,
+the findings land in the same place. They differ in what the reviewer can read,
+what it costs, and whether you can argue with it.
 
 ### A. A sub-agent inside the head's own conversation
 
@@ -254,31 +357,26 @@ Three ways to cover it, in increasing order of intrusiveness:
 
 ## Where findings land
 
-Four sinks, and the choice is independent of how the reviewer is run:
+The destination is threads (above). The other sinks are worth knowing as
+stepping stones, because two of them are free today:
 
-- **Tests panel** (`CaseTree`) - free today via `warn` markers. One line per
-  finding, real file locations, filters, search. Good enough to evaluate whether
-  the reviewer is worth building for; not good enough as the destination.
-- **Diff viewer gutter** - the best UX by far, and the diff viewer already has
-  the hard parts: line anchoring, a frozen `contextBlock` and `hunkHash` for
-  staleness detection, and a card layout. What is missing is a *server-side*
-  store (local review comments are `localStorage` only, and `reviewstore.LocalNote`
-  requires an existing forge thread id to hang off - `mergeLocalNotes` drops
-  orphans) and a third origin badge beside `forge` / `local_only`.
-- **A chat message into the reviewed head** - `SendAgentInput` already does
-  exactly this, and the existing "Submit review" flow already formats comments as
-  markdown for the agent (`buildReviewMessage`). Cheapest delivery, but it spends
-  the head's context and gives you no chance to drop the bad findings first.
-- **Its own chat pane** - only option E, and the only one where the findings are
-  a conversation rather than a list.
-
-The sinks compose: D writing to a server-side findings store, rendered in the
-gutter, with a per-finding "send to agent" button reusing `SendAgentInput`, is
-the shape worth aiming at.
+- **Tests panel** (`CaseTree`) - free via `warn` markers, one line per finding,
+  real file locations, filters, search. The right place to *evaluate* whether a
+  reviewer produces anything worth reading, before any UI is built for it. Not a
+  destination: a test case cannot hold prose and cannot be replied to.
+- **A chat message into the reviewed head** - `SendAgentInput`, free today. But
+  it spends the head's context and gives you no chance to drop the bad findings
+  first, which for a first-generation reviewer is most of them.
+- **Its own chat pane** - option E only, and the fallback if threads are not
+  built: a conversation you can push back on, just not one anchored to a line.
+- **The forge** - option G, later, as explicit promotion of a thread.
 
 ## When it fires
 
-- **Manual button** - "Review this diff" in the agent header. Always needed.
+- **An @-mention on a line** - the primary trigger, and the only one that carries
+  context. Everything else is a convenience on top of it.
+- **Manual button** - "Review this diff" in the agent header, i.e. an @-mention
+  of `@review` with the whole diff as its anchor.
 - **On the `finished` transition** - the hook machinery already distinguishes
   main-agent completion from live sub-agents, and merge-when-green already gates
   on finished-for-10s, so there is a precise moment to fire on. This is the
@@ -291,24 +389,37 @@ the shape worth aiming at.
 
 ## Recommendation
 
+The order below is deliberately "cheap question first": each step answers
+something the next one would otherwise be a bet on.
+
 1. **Today, free:** adopt A as a convention - a pre-prompt line telling the head
    to have a sub-agent review its diff before declaring done. Costs nothing,
    catches the obvious.
-2. **First build (small):** C - a `[tests.review]` runner emitting `warn`
-   markers, plus the per-runner `prefetch = false` flag on `config.TestScript`
-   so it is manual-only. This answers the question that actually matters - are
-   the findings any good? - for a day's work and no new subsystem.
-3. **If the findings are good, and you want to argue with them:** E - a
-   "Review this diff" button spawning an `Ephemeral` head with
-   `BaseBranch = hydra/<id>`, plus a `ReviewOf` column and child-card rendering.
-   Mostly bookkeeping.
-4. **If the findings are good, and you want them in the gutter:** D - the
-   `[review.<name>]` runner, a server-side findings store, and a third origin in
-   `ReviewThreadCard`. This is the real feature, and it is worth doing only once
-   steps 2 or 3 have shown the reviewer earns its place.
+2. **Find out if the findings are any good, for a day's work:** C - a
+   `[tests.review]` runner emitting `warn` markers, plus the per-runner
+   `prefetch = false` flag on `config.TestScript` so it stays manual. No new
+   subsystem, no UI, and if the output is noise you have written no Hydra code.
+3. **Build the thread, not the reviewer.** Server-side Hydra-native threads
+   anchored to `(commit, path, line-range)`: extend `reviewstore` with an anchor,
+   let threads exist without a forge parent (`mergeLocalNotes` stops dropping
+   orphans), add the third origin badge, and render them in the gutter beside the
+   existing local + forge cards. **This is worth building even if no review agent
+   ever ships** - it is the persistent, linkable, replyable comment system that
+   `PendingReviewComment` should have been, and every later step plugs into it.
+4. **Wire @-mentions.** `@<head-id>` / `@self` via `SendAgentInput` inbound and
+   `reviewq.OpNote` outbound - both ends exist, so this is mostly routing plus
+   the wake-on-mention and loop-cap rules. At this point "ask another agent to
+   review this line" works with no reviewer subsystem at all.
+5. **Then `@review`** - back it with E (an `Ephemeral` head stacked on
+   `hydra/<id>`, plus a `ReviewOf` link and child-card rendering) if you want to
+   argue with it, or D (a `[review.<name>]` runner) if you want it cached
+   per-commit and cheap. E is the better first cut: a thread participant needs an
+   identity and a mailbox, and a head already *is* both.
 
-Steps 3 and 4 are not alternatives - they answer different questions ("discuss
-this with me" vs "annotate my diff") and can both exist.
+The reframe changes the order from the first pass at this doc: the previous
+version had the runner subsystem (D) as the endgame with threads as its output
+format. It is the other way round. Threads are the feature; the runner is one
+possible tenant, and the one you can defer longest.
 
 ## Deliberately not
 
@@ -322,3 +433,8 @@ this with me" vs "annotate my diff") and can both exist.
   removed ([git-isolation.md](git-isolation.md)); the slot pool already provides
   cheap isolated checkouts and is the thing to reuse.
 - **Gating merges on review findings** in a first version.
+- **An agent posting to the forge.** Threads are Hydra-local; promotion to a PR
+  stays an explicit user action, for the credential reason above.
+- **Auto-mention chains.** An agent's reply must not summon another agent
+  without a human in the loop, or a single "@review this" becomes an unbounded
+  bill.
