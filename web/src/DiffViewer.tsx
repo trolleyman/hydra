@@ -41,7 +41,8 @@ import {
 } from './lib/diffMetrics'
 import {
   buildSideBySide, buildSegments, bodyShape, computeGap, trailingContext, isContiguous, isChangeLine,
-  hunkContext, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, type RenderSeg, type RevealMap,
+  hunkContext, regionAfterHunk, LEAD_REGION_ID, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, PROMOTED_MAX_LINES, PROMOTED_MAX_CHANGES,
+  type RenderSeg, type RevealMap,
 } from './lib/diffBody'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { ReviewDraftPopover } from './components/ReviewDraftPopover'
@@ -1152,13 +1153,16 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // eligible file's entire content in the main diff response (full_context) and
   // marks it `expanded`, so we derive the line list straight from the hunks -
   // no per-file round-trip. Files the server left at windowed context (too
-  // large) aren't marked expanded and fall through to the `-U3` hunks + network
-  // expand below. The size/contiguity checks are a defensive guard so a
-  // malformed response can't drive the reveal model with non-whole-file lines.
+  // large for the bulk cap) aren't marked expanded and fall through to the `-U3`
+  // hunks below, until the reader clicks one of their expanders and the parent
+  // re-fetches that one file in full (PROMOTED_MAX_LINES) - which is why the
+  // guard here is the promotion cap, not the bulk one. The size/contiguity
+  // checks are a defensive guard so a malformed response can't drive the reveal
+  // model with non-whole-file lines.
   const fullLines = useMemo<DiffLine[] | null>(() => {
     if (file.binary || isHidden || !bodyMounted || !near || !file.expanded) return null
     const lines = file.hunks ? file.hunks.flatMap((h) => h.lines) : []
-    if (lines.length === 0 || lines.length > FULL_MAX_LINES || !isContiguous(lines)) return null
+    if (lines.length === 0 || lines.length > PROMOTED_MAX_LINES || !isContiguous(lines)) return null
     return lines
     // hunksSig stands in for file.hunks identity (stable across no-op refreshes).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1345,7 +1349,21 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // the reader's place. Anchoring the thing under the cursor beats anchoring the
   // thing being revealed.
 
+  // Clicking an expander on a WINDOWED file (the `-U3` fallback below) does two
+  // things. It asks the parent for more content - which promotes the file to the
+  // whole-content model when the server will ship it, and only otherwise falls
+  // back to re-fetching at a wider `-U`. And it records the reveal against the
+  // region the click belongs to, in the same reveal map the whole-content model
+  // reads. That second half is what stops the click going to waste: the promoted
+  // file re-renders with exactly the gap you clicked opened by EXPAND_STEP,
+  // instead of snapping back to the default view and making you click again. If
+  // the promotion is declined the entry names a region that never exists, and is
+  // simply never read.
   const expand = (newCtx: number) => onExpand(file.path, newCtx)
+  const windowedExpand = (regionId: string | null, patch: { top?: number; bot?: number }, newCtx: number) => {
+    if (regionId) setRegion(regionId, patch)
+    expand(newCtx)
+  }
 
   const synthHunk = (lines: DiffLine[]): DiffHunk => ({ header: '', old_start: 0, new_start: 0, lines })
 
@@ -1577,8 +1595,13 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
               })}
             </div>
           ) : (
-            // Fallback for very large files: keep the `-U3` hunks and widen the
-            // whole-file context over the network on expand.
+            // Fallback for a file the server won't ship whole (past
+            // PROMOTED_MAX_LINES): keep the `-U3` hunks and widen the file's
+            // context over the network on expand. Every expander here also
+            // records its reveal against the region it would be in the
+            // whole-content model (windowedExpand), so the usual case - the
+            // server DOES ship the file, and this branch is replaced by the
+            // segments above - applies the click to the gap it was aimed at.
             <div className="overflow-hidden">
               {file.hunks.map((hunk, i) => {
                 const isFirst = i === 0
@@ -1587,13 +1610,18 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                 const gapSize = prevHunk ? computeGap(prevHunk, hunk) : 0
                 const atTopOfFile = isFirst && hunk.new_start <= 1 && hunk.old_start <= 1
                 const atEndOfFile = isLast && trailingContext(hunk) < currentContext
+                // The gap above this hunk is the unchanged run that starts just
+                // after the previous hunk's last change; the run below the last
+                // hunk starts the same way. The file's leading run is line 1.
+                const gapRegion = prevHunk ? regionAfterHunk(prevHunk) : null
+                const tailRegion = regionAfterHunk(hunk)
                 return (
                   <Fragment key={hunk.header}>
                     {isFirst && !atTopOfFile && (
                       <div className={EXPANDER_ROW}>
                         <div className={EXPANDER_BTNS}>
                           <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
-                            <button onClick={() => expand(currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                            <button onClick={() => windowedExpand(LEAD_REGION_ID, { bot: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
                               <ChevronUp className="w-3 h-3" />
                             </button>
                           </Tooltip>
@@ -1605,17 +1633,17 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                       <div className={EXPANDER_ROW}>
                         <div className={EXPANDER_BTNS}>
                           <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
-                            <button onClick={() => expand(currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                            <button onClick={() => windowedExpand(gapRegion, { top: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
                               <ChevronDown className="w-3 h-3" />
                             </button>
                           </Tooltip>
                           <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
-                            <button onClick={() => expand(currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                            <button onClick={() => windowedExpand(gapRegion, { bot: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
                               <ChevronUp className="w-3 h-3" />
                             </button>
                           </Tooltip>
                         </div>
-                        <GapCount hidden={gapSize} onClick={() => expand(currentContext + Math.max(gapSize, EXPAND_STEP))} />
+                        <GapCount hidden={gapSize} onClick={() => windowedExpand(gapRegion, { top: CTX + gapSize }, currentContext + Math.max(gapSize, EXPAND_STEP))} />
                         <HunkContextLabel label={contextLabels.get(hunk.header)} />
                       </div>
                     )}
@@ -1633,7 +1661,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                       <div className={EXPANDER_ROW}>
                         <div className={EXPANDER_BTNS}>
                           <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
-                            <button onClick={() => expand(currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                            <button onClick={() => windowedExpand(tailRegion, { top: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
                               <ChevronDown className="w-3 h-3" />
                             </button>
                           </Tooltip>
@@ -2812,8 +2840,12 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const [hiddenFiles, setHiddenFiles] = useState<Set<string>>(new Set())
   const userShownFilesRef = useRef<Set<string>>(new Set())
   // Per-file context (number of surrounding lines). Persists across polling refreshes.
+  // Only files the server won't expand end up here - see expandFileDiff.
   const [fileContexts, setFileContexts] = useState<Map<string, number>>(new Map())
   const fileContextsRef = useRef<Map<string, number>>(new Map())
+  // Files promoted to the whole-content reveal model by an expander click, so a
+  // background refresh (which returns them windowed again) can re-promote them.
+  const promotedFilesRef = useRef<Set<string>>(new Set())
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const fileRefCallbacksRef = useRef<Map<string, (el: HTMLDivElement | null) => void>>(new Map())
   const sidebarRef = useRef<HTMLDivElement>(null)
@@ -2922,28 +2954,50 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       }).catch(() => setCommits([]))
   }, [agent.id, agent.branch_name, projectId, refreshKey])
 
-  // expandFileDiff: fetches a single file's diff with a given context (for context expansion only).
+  // expandFileDiff: revealing context in a file the bulk response left windowed.
+  //
+  // It asks for that ONE file in full (full_context at the promotion caps). If
+  // the server agrees, the file switches to the whole-content reveal model for
+  // good: every later expander is instant, client-side, and touches only the gap
+  // it belongs to. That is the point of promoting rather than re-fetching at a
+  // wider `-U`: `-U` is a property of the whole file, so widening the gap you
+  // clicked also widened every other hunk in the file, shoving the rest of the
+  // diff around for no reason.
+  //
+  // A file too big even for the promotion cap keeps the old behaviour - and the
+  // same response carries it at `context`, since the server falls back to the
+  // requested windowed context when it declines to expand. So the fallback costs
+  // no extra round-trip.
   const expandFileDiff = useCallback(async (path: string, context: number = 3) => {
     if (!agent.branch_name) return
-
-    // Record this context for use across polling refreshes
-    fileContextsRef.current.set(path, context)
-    setFileContexts(new Map(fileContextsRef.current))
 
     const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
     try {
       const fileDiff = await api.default.getAgentDiff(projectId ?? '', agent.id,
-        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, context)
+        params.baseRef, params.headRef, params.ignoreWhitespace, params.includeUncommitted, path, context,
+        true, PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES)
 
       // Select by path rather than [0] - the backend may return more than the
       // requested file (e.g. the simulation server ignores the path filter).
       const updated = fileDiff.files.find((x) => x.path === path)
+      const promoted = !!updated?.expanded
+
+      // Remember which files need what after a background refresh replaces the
+      // diff with fresh `-U3` hunks: promoted ones are re-promoted, the rest are
+      // re-fetched at the context they had reached.
+      if (promoted) {
+        promotedFilesRef.current.add(path)
+      } else {
+        fileContextsRef.current.set(path, context)
+        setFileContexts(new Map(fileContextsRef.current))
+      }
+
       setDiff((prev) => {
         if (!prev) return prev
         const nextFiles = prev.files.map((f) => {
           if (f.path === path) {
-            return { ...f, hunks: updated?.hunks ?? [] }
+            return { ...f, hunks: updated?.hunks ?? [], expanded: promoted }
           }
           return f
         })
@@ -3021,6 +3075,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setDiffError(null)
     // Reset per-file context expansions when diff params change
     fileContextsRef.current = new Map()
+    promotedFilesRef.current = new Set()
     setFileContexts(new Map())
 
     const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
@@ -3117,25 +3172,33 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   // Apply a silently-fetched diff and re-apply the user's per-file context expansions.
   // No-ops when the content is byte-identical to what's already shown.
-  const applySilentDiff = useCallback((d: DiffResponse, contexts: Map<string, number>) => {
+  //
+  // A refresh returns every file at the bulk caps, so a file the reader had
+  // promoted to the whole-content model comes back windowed - re-promote it (at
+  // its base context; the promotion is what the reveal state inside FileDiff is
+  // keyed against, and that state survives the refresh).
+  const applySilentDiff = useCallback((d: DiffResponse, contexts: Map<string, number>, promoted: Set<string>) => {
     const { files, changed } = reconcileFiles(d.files)
     if (!changed) return
     setDiff({ ...d, files })
     applyHiddenFiles(files)
+    for (const path of promoted) {
+      expandFileDiffRef.current(path, 3).catch(() => { })
+    }
     for (const [path, ctx] of contexts) {
-      if (ctx > 3) expandFileDiffRef.current(path, ctx).catch(() => { })
+      if (ctx > 3 && !promoted.has(path)) expandFileDiffRef.current(path, ctx).catch(() => { })
     }
   }, [applyHiddenFiles, reconcileFiles])
 
   // A background refresh deferred because the user had an active selection. Flushed
   // by the selectionchange listener once the selection clears. Latest fetch wins.
-  const pendingSilentRef = useRef<{ d: DiffResponse; contexts: Map<string, number> } | null>(null)
+  const pendingSilentRef = useRef<{ d: DiffResponse; contexts: Map<string, number>; promoted: Set<string> } | null>(null)
   useEffect(() => {
     const flush = () => {
       const pending = pendingSilentRef.current
       if (!pending || hasActiveSelection()) return
       pendingSilentRef.current = null
-      applySilentDiff(pending.d, pending.contexts)
+      applySilentDiff(pending.d, pending.contexts, pending.promoted)
     }
     document.addEventListener('selectionchange', flush)
     return () => document.removeEventListener('selectionchange', flush)
@@ -3166,8 +3229,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
       const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
-      // Snapshot current per-file contexts before async work
+      // Snapshot current per-file contexts + promotions before async work
       const contextsSnap = new Map(fileContextsRef.current)
+      const promotedSnap = new Set(promotedFilesRef.current)
 
       // Refresh commits list silently - but only push it into state when it actually
       // changed, so an idle/no-op refresh never re-renders (and never disturbs a
@@ -3189,10 +3253,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           // Defer applying while the user is selecting text - otherwise the re-render
           // wipes their selection. The selectionchange listener flushes it later.
           if (hasActiveSelection()) {
-            pendingSilentRef.current = { d, contexts: contextsSnap }
+            pendingSilentRef.current = { d, contexts: contextsSnap, promoted: promotedSnap }
           } else {
             pendingSilentRef.current = null
-            applySilentDiff(d, contextsSnap)
+            applySilentDiff(d, contextsSnap, promotedSnap)
           }
         })
         .catch(() => { })

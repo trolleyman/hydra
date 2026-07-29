@@ -1230,7 +1230,9 @@ paths:
             Return each file's full content (so the client can expand context
             without further round-trips), in a single request for all files.
             Files larger than max_full_lines are returned at the normal context
-            instead. Ignored when a specific path is requested.
+            instead. Combined with path it expands just that file, which is how
+            the client promotes a single big file (left windowed by the bulk
+            caps) once the reader expands it - pass caps above the bulk ones.
         - in: query
           name: max_full_changes
           required: false
@@ -2240,7 +2242,9 @@ paths:
             Return each file's full content (so the client can expand context
             without further round-trips), in a single request for all files.
             Files larger than max_full_lines are returned at the normal context
-            instead. Ignored when a specific path is requested.
+            instead. Combined with path it expands just that file, which is how
+            the client promotes a single big file (left windowed by the bulk
+            caps) once the reader expands it - pass caps above the bulk ones.
         - in: query
           name: max_full_changes
           required: false
