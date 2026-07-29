@@ -459,11 +459,7 @@ func tailNotifications(dir string, stop <-chan struct{}, out chan<- [][]byte) {
 // worktree's transcripts (~/.claude/projects/<worktree-slug>), or "" when it
 // can't be determined.
 func claudeProjectDir(worktree string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || worktree == "" {
-		return ""
-	}
-	return filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree))
+	return paths.ClaudeProjectDir(worktree)
 }
 
 // pumpChatOutput relays a chat session's events to the socket until

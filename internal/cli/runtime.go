@@ -223,6 +223,21 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 			log.Printf("warn: persist model for %s: %v", id, err)
 		}
 	})
+	// A chat head is being resumed. Whatever its previous process streamed before
+	// it died is in the normalized log but not in the CLI's transcript, and the
+	// resumed process is about to re-run that turn and say it again - so retract
+	// the uncommitted blocks before it starts. Runs inline (see SetOnChatResume):
+	// once the new process appends, the tail is no longer safe to judge.
+	reg.SetOnChatResume(func(id, worktree string) {
+		retracted, err := chatEvents.RetractOrphanedTurn(id, paths.ClaudeProjectDir(worktree))
+		if err != nil {
+			log.Printf("warn: retract orphaned turn for %s: %v", id, err)
+			return
+		}
+		if len(retracted) > 0 {
+			log.Printf("chat %s: retracted %d block(s) from an interrupted turn the CLI never committed", id, len(retracted))
+		}
+	})
 	reg.SetOnChatPlanChange(func(id, planJSON string) {
 		if cur := reg.ChatPlanJSON(id); cur != "" {
 			planJSON = cur

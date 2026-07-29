@@ -91,6 +91,19 @@ func TestDecide(t *testing.T) {
 		{"bash echo mentioning pkill allowed", "Bash", map[string]any{"command": "echo 'do not use pkill here'"}, Allow},
 		{"bash grep for pkill allowed", "Bash", map[string]any{"command": "grep -rn pkill internal/"}, Allow},
 		{"bash kill by pid allowed", "Bash", map[string]any{"command": "kill \"$SRV\""}, Allow},
+		// A grep ALTERNATION is not a pipe: `\|` inside a quoted pattern used to read
+		// as a command boundary, so searching for these very words was denied.
+		{"bash grep alternation naming pkill allowed", "Bash", map[string]any{"command": `grep -rn "pkill\|killall\|pgrep" internal/gate/`}, Allow},
+		{"bash grep alternation naming git push allowed", "Bash", map[string]any{"command": `grep -rn "git push\|git commit" docs/`}, Allow},
+		// pkill spelled out: pgrep/pidof resolves by name or (with -f) whole command
+		// line, and every head's argv carries the entire system prompt.
+		{"bash kill pgrep subshell denied", "Bash", map[string]any{"command": `kill $(pgrep -f "server --simulation" | head -1)`}, Deny},
+		{"bash pgrep piped to xargs kill denied", "Bash", map[string]any{"command": "pgrep -f 'go run' | xargs kill -9"}, Deny},
+		{"bash kill pidof denied", "Bash", map[string]any{"command": "kill $(pidof node)"}, Deny},
+		{"bash chained kill pgrep denied", "Bash", map[string]any{"command": "cd /tmp && kill $(pgrep -f vite) ; echo done"}, Deny},
+		// Either half alone is legitimate: listing pids, or killing one you captured.
+		{"bash bare pgrep allowed", "Bash", map[string]any{"command": "pgrep -f 'go run' | head -5"}, Allow},
+		{"bash kill by port allowed", "Bash", map[string]any{"command": "fuser -k 26601/tcp"}, Allow},
 		{"bash normal allowed", "Bash", map[string]any{"command": "go test ./..."}, Allow},
 		// `git commit` is now denied outright (routed to the tool), but scrubbing of
 		// commit-message TEXT still runs first so the deny carries the commit-routing

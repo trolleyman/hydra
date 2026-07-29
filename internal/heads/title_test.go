@@ -1,10 +1,15 @@
 package heads
 
 import (
+	"braces.dev/errtrace"
+	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDeriveTitle(t *testing.T) {
@@ -135,4 +140,73 @@ func TestSanitizeGeneratedTitle(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTitleEnvDisablesThinking guards the fix for the "signal: killed" toast:
+// extended thinking left on made haiku spend ~1900 tokens deliberating over a
+// 5-word title, which took 20-65s and blew the deadline. The override has to
+// come LAST so it wins over a value inherited from the host environment.
+func TestTitleEnvDisablesThinking(t *testing.T) {
+	t.Setenv("MAX_THINKING_TOKENS", "31999")
+	env := titleEnv()
+
+	last := map[string]string{}
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			last[k] = v
+		}
+	}
+	if got := last["MAX_THINKING_TOKENS"]; got != "0" {
+		t.Errorf("effective MAX_THINKING_TOKENS = %q, want %q", got, "0")
+	}
+	if got := last["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]; got != "1" {
+		t.Errorf("effective CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = %q, want %q", got, "1")
+	}
+}
+
+func TestTitleCallError(t *testing.T) {
+	// A killed-on-deadline child reports a bare "signal: killed"; the caller has
+	// to learn it was a timeout from the context, not the process error.
+	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	err := titleCallError(expired, errors.New("signal: killed"))
+	if !errors.Is(err, ErrTitleTimeout) {
+		t.Errorf("expired ctx: got %v, want ErrTitleTimeout", err)
+	}
+	if strings.Contains(err.Error(), "signal: killed") {
+		t.Errorf("timeout error still leaks the opaque signal text: %v", err)
+	}
+
+	// A real non-zero exit surfaces the CLI's own first stderr line, which
+	// cmd.Output() captures but nothing used to read.
+	exit := exitErrorWithStderr(t, "Invalid API key - please run /login\nmore noise\n")
+	err = titleCallError(context.Background(), exit)
+	if !strings.Contains(err.Error(), "Invalid API key") {
+		t.Errorf("exit error dropped stderr: %v", err)
+	}
+	if strings.Contains(err.Error(), "more noise") {
+		t.Errorf("exit error should keep only the first stderr line: %v", err)
+	}
+	if !errors.Is(err, exit) {
+		t.Errorf("exit error should wrap the original: %v", err)
+	}
+
+	// Nothing on stderr, nothing to add: pass the error through untouched.
+	plain := errors.New("exec: \"claude\": executable file not found in $PATH")
+	if err := titleCallError(context.Background(), plain); !errors.Is(err, plain) {
+		t.Errorf("plain error should pass through, got %v", err)
+	}
+}
+
+// exitErrorWithStderr produces a genuine *exec.ExitError carrying stderr, the
+// way cmd.Output() does, by running a command that fails after writing to it.
+func exitErrorWithStderr(t *testing.T, stderr string) error {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", "printf '%s' \"$0\" >&2; exit 1", stderr)
+	_, err := cmd.Output()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("setup: want *exec.ExitError, got %v", err)
+	}
+	return errtrace.Wrap(exitErr)
 }

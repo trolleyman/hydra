@@ -611,6 +611,20 @@ func buildSimOlderChatEvents() []simNorm {
 		} else {
 			out = append(out, simSay(fmt.Sprintf("old-m%d", i), fmt.Sprintf("Older reply #%d from earlier in the conversation.", i/2+1)))
 		}
+		// A commit chip that exists ONLY in the paged-in history, so scrolling up
+		// has to place it back among these older messages. Two of them, either
+		// side of the halfway mark, because the bug they guard against was an
+		// ordering one: chips arriving newest-page-first were appended to a list
+		// the interleave reads in order, so every paged-in chip fell out of the
+		// merge in one clump at the load boundary instead of at its own place.
+		// They must also not animate in - they are backfill, like the messages
+		// around them.
+		switch i {
+		case 6:
+			out = append(out, simCommit("0dd0dd0d0123456789abcdef0123456789abcdef", "0dd0dd0", "Sketch the uploader's retry budget", "2026-07-09T17:59:00.007Z"))
+		case 14:
+			out = append(out, simCommit("1ee1ee1e0123456789abcdef0123456789abcdef", "1ee1ee1", "Pull the backoff constants into one place", "2026-07-09T17:59:00.016Z"))
+		}
 	}
 	return out
 }
