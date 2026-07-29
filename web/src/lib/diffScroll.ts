@@ -1,4 +1,4 @@
-// Scroll helpers shared by the diff viewer. Both exist for the same reason: a
+// Scroll helpers shared by the diff viewer. They all exist for the same reason: a
 // diff's layout can still move under a scroll in flight. Off-screen cards hold a
 // placeholder whose height diffMetrics measures up front, so mounting a card no
 // longer resizes it - but a collapse glide is still tweening, an in-tree image
@@ -36,26 +36,11 @@ export function pinCardToTop(el: HTMLElement, durationMs = 400) {
   requestAnimationFrame(step)
 }
 
-// anchorScrollBelow keeps a card's *bottom* edge pinned to a captured viewport
-// position while a reveal above it grows the layout. Used for "expand up": the
-// change below the gap should stay put and the new context grow upward toward
-// it, rather than the change being shoved down the page. A one-shot scroll
-// adjustment isn't enough because the file body's height lands a frame or two
-// after the reveal commits (its ResizeObserver-driven wrapper, and any collapse
-// tween), so this re-corrects each frame until the layout settles. Every element
-// below the insertion moves by the same delta, so pinning the card bottom pins
-// the change too.
-export function anchorScrollBelow(card: HTMLElement, targetBottom: number, durationMs = 350) {
-  const scroller = scrollerFor(card)
-  if (!scroller) return
-  const start = performance.now()
-  const step = () => {
-    const delta = card.getBoundingClientRect().bottom - targetBottom
-    if (Math.abs(delta) > 0.5) scroller.scrollTop += delta
-    if (performance.now() - start < durationMs) requestAnimationFrame(step)
-  }
-  requestAnimationFrame(step)
-}
+// There is deliberately no helper here for the context expanders. "Expand up"
+// used to pin the change below the gap (anchorScrollBelow), which meant every
+// click scrolled the pane by the height of what it revealed and threw the button
+// under the pointer off the top of the pane. Revealing context now leaves the
+// scroll alone entirely - see the note by setRegion in DiffViewer.
 
 // Jump-to-file tuning. The glide is a fixed fraction of the remaining distance
 // per frame (with a floor so the tail doesn't crawl), not a fixed-duration
