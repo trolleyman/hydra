@@ -38,8 +38,10 @@ const DU_LINE = new RegExp(`^(\\s*)(${SIZE_RE})(\\s+)(.+)$`)
 // so this anchors on the four measurements at the END rather than counting from
 // the left.
 const DF_LINE = new RegExp(`^(\\S.*?)(\\s+)(${SIZE_RE})(\\s+)(${SIZE_RE})(\\s+)(${SIZE_RE})(\\s+)(\\d+%)(\\s+)(.*)$`)
-// Its header, which names the columns rather than measuring anything.
-const DF_HEAD = /^(Filesystem|Filsystem|Sist)\b/
+// Its header names the columns rather than measuring anything - and does it in
+// whatever language the shell is in, so it is recognised by carrying no number
+// rather than by a word this would have to guess at.
+const DF_HEAD = /^\D*$/
 
 // An `ls -l` row: mode, link count, owner, group, size, date, name. The date is
 // `Jul 29 16:57` or `2026-07-29 16:57` depending on the locale and `--full-time`.

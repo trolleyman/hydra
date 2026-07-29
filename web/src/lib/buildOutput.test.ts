@@ -102,6 +102,16 @@ describe('buildOutputSpans', () => {
     ])
   })
 
+  it('leaves a sentence that opens with a verdict word alone', () => {
+    // `ok` in go test's output is a COLUMN, padded out to the package name; in
+    // prose it is the first word of a sentence.
+    expect(buildOutputSpans([
+      'ok now rebuilding the frontend',
+      'x is still unset',
+      'PASSING the config through instead',
+    ])).toBeNull()
+  })
+
   it('declines output that carries no location and no verdict', () => {
     // Prose, a URL, a time of day, a Go map literal: nothing here says where.
     expect(buildOutputSpans([

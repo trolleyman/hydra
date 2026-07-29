@@ -10,7 +10,7 @@
 // reader's eye has somewhere specific to go: the LOCATION (which file, which
 // line) and the VERDICT (did it pass). Everything else on the line is prose.
 //
-// Unlike lib/gitOutput and lib/duOutput this is keyed on the LINE and not on
+// Unlike lib/gitOutput and lib/diskOutput this is keyed on the LINE and not on
 // the command, because the command is unknowable: the same diagnostics come out
 // of `go build`, `go vet`, `mage build`, `npm run lint`, `make`, a test run, or
 // a script that pipes three of them together. So it is applied to the stretches
@@ -41,15 +41,20 @@ const SEVERITY = /^(error|err|fatal|failure|failed|warning|warn|note|info|hint)\
 
 // `go test`'s verdict lines. The package path and timing are furniture; whether
 // it passed is the whole message.
+//
 // A lookahead rather than a `\b`, because `?` (Go's "no test files" marker) is
-// not a word character and would never have one after it.
-const GO_RESULT = /^(ok|FAIL|PASS|SKIP|\?|---\s*(?:FAIL|PASS|SKIP))(?=[:\s]|$)(.*)$/
+// not a word character and would never have one after it. What it demands is the
+// COLUMN go test prints: end of line, a colon, a tab, or the padding that lines
+// the package names up. A single space after the word means this is a sentence
+// that happens to open with "ok", and it is left alone.
+const GO_RESULT = /^(ok|FAIL|PASS|SKIP|\?|---\s*(?:FAIL|PASS|SKIP))(?=$|[:\t]| {2,})(.*)$/
 const GO_RUN = /^(===\s*(?:RUN|PAUSE|CONT|NAME)\b.*)$/
 // vitest / bun / jest summaries: `Test Files  1 failed | 91 passed (92)`.
 const SUMMARY_PART = /\d+\s+(?:failed|passed|skipped|todo)/gi
-// A tick or cross a runner prints in front of a test name.
+// A tick or cross a runner prints in front of a test name. Only the marks - a
+// bare `x` is a variable name far more often than it is a failing test.
 const TICK = /^(\s*)([✓✔√])(\s.*)$/
-const CROSS = /^(\s*)([✗✘×x])(\s.*)$/
+const CROSS = /^(\s*)([✗✘×])(\s.*)$/
 
 function severitySpans(message: string): OutputSpan[] {
   const m = SEVERITY.exec(message)

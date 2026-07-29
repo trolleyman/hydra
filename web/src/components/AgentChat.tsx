@@ -2191,7 +2191,8 @@ interface ScriptOutputRow {
   html: string
   // Pre-coloured pieces instead of `html`, for a line a TOOL wrote rather than
   // one it read out of a file - what git said about the repository
-  // (lib/gitOutput), what `du` measured (lib/duOutput). There is no grammar to
+  // (lib/gitOutput), what `du` or `df` measured (lib/diskOutput), what a build
+  // said went wrong (lib/buildOutput). There is no grammar to
   // run over those, just shapes, so they arrive as spans.
   spans?: OutputSpan[]
   // The `path:` a multi-file search printed in front of the line, shown lowlit

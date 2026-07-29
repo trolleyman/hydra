@@ -63,9 +63,13 @@ describe('diskOutputSpans: df', () => {
     expect(row.find(([text]) => text === '95%')).toEqual(['95%', 'full'])
   })
 
-  it('lowlights the header, which measures nothing', () => {
+  it('lowlights the header, which measures nothing, in any language', () => {
     expect(df('Filesystem      Size  Used Avail Use% Mounted on')).toEqual([
       [['Filesystem      Size  Used Avail Use% Mounted on', 'dim']],
+    ])
+    // Recognised by carrying no number, so a translated header works too.
+    expect(df('Dateisystem     Größe Benutzt Verf. Verw% Eingehängt auf')).toEqual([
+      [['Dateisystem     Größe Benutzt Verf. Verw% Eingehängt auf', 'dim']],
     ])
   })
 })

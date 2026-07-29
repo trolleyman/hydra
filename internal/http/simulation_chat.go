@@ -530,7 +530,7 @@ var simChatEvents = []simNorm{
 	simTool("toolu_sim_ignore", "Bash", simRaw(`{"command":"sed -n '12,18p' .gitignore\necho \"=== web/public/fonts/.gitignore ===\"\ncat web/public/fonts/.gitignore\necho \"=== which rule catches them ===\"\ngit check-ignore -v web/public/fonts/iosevka-400-normal.woff2 web/.iosevka-build.json","description":"Read both ignore files, and ask git which rule wins"}`)),
 	simToolOut("toolu_sim_ignore", "# Self-hosted webfonts (Iosevka, the Nerd Fonts symbol fallback).\n# Not committed - `cd web && npm run build-fonts` fetches them.\n/web/public/fonts/iosevka-*.woff2\n/web/public/fonts/nerd-symbols-*.woff2\n/web/public/fonts/google.css\n/web/public/fonts/google/\n/web/.iosevka-build.json\n=== web/public/fonts/.gitignore ===\n# Generated font files - see web/scripts/build-fonts.ts.\niosevka-*.woff2\n!iosevka-400-normal.woff2\ngoogle.css\ngoogle/\n=== which rule catches them ===\nweb/public/fonts/.gitignore:2:iosevka-*.woff2\tweb/public/fonts/iosevka-400-normal.woff2\n.gitignore:18:/web/.iosevka-build.json\tweb/.iosevka-build.json"),
 	// A `du` sorted biggest-first, and a search of a whole DIRECTORY. The sizes
-	// are marked against the paths they measure (web/src/lib/duOutput.ts); the
+	// are marked against the paths they measure (web/src/lib/diskOutput.ts); the
 	// `| sort` in front of the `| head` is a filter that reorders lines and
 	// leaves them byte for byte. The search names one operand and prints a
 	// `path:` in front of every line, which is what says where each line came

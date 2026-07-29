@@ -19,7 +19,7 @@ import { IGNORE_TOKEN_CLASSES, ignoreTokens } from './ignoreHighlight'
 import type { OutputSpan } from './outputSpan'
 
 // The shape every function here returns - named for what it is a span OF, since
-// this module is one of several that colour a tool's output (see lib/duOutput).
+// this module is one of several that colour a tool's output (see lib/diskOutput).
 export type GitSpan = OutputSpan
 
 // The staged/unstaged split is the whole point of a status, so it gets the
@@ -97,7 +97,6 @@ const BRANCH_DETACHED = /^([* +]\s*)(\([^)]*\))(\s+)([0-9a-f]{7,40})(\s+)(.*)$/
 const REMOTE_ROW = /^(\S+)(\s+)(\S+)(\s+\((?:fetch|push)\))$/
 // `git stash list`: `stash@{0}: WIP on main: a7401035 subject`.
 const STASH_ROW = /^(stash@\{\d+\})(: )(.*)$/
-// `git shortlog -sn`: how many commits, then who.
 // `git shortlog -sn`: how many commits, then who. The tab is required - a
 // commit message body that opens with a number is not a shortlog row.
 const SHORTLOG_ROW = /^(\s*)(\d+)(\t)(.*)$/
