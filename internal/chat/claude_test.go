@@ -14,7 +14,7 @@ func TestNormalizeClaudeAssistantBlocks(t *testing.T) {
 	}
 	want := []string{"reasoning_completed", "tool_started", "assistant_message"}
 	for i := range want {
-		if got[i].eventType != want[i] || got[i].sourceID != "claude:u1:block:"+string(rune('0'+i)) {
+		if got[i].eventType() != want[i] || got[i].sourceID != "claude:u1:block:"+string(rune('0'+i)) {
 			t.Errorf("event %d = %+v", i, got[i])
 		}
 	}
@@ -22,11 +22,11 @@ func TestNormalizeClaudeAssistantBlocks(t *testing.T) {
 
 func TestNormalizeClaudeToolResultAndTurn(t *testing.T) {
 	result := normalizeClaude([]byte(`{"type":"user","uuid":"u2","message":{"content":[{"type":"tool_result","tool_use_id":"tool1","content":"ok"}]}}`))
-	if len(result) != 1 || result[0].eventType != "tool_completed" {
+	if len(result) != 1 || result[0].eventType() != "tool_completed" {
 		t.Fatalf("tool result = %+v", result)
 	}
 	turn := normalizeClaude([]byte(`{"type":"result","session_id":"s1","is_error":false,"result":"done"}`))
-	if len(turn) != 1 || turn[0].eventType != "turn_completed" || turn[0].sourceID != "" {
+	if len(turn) != 1 || turn[0].eventType() != "turn_completed" || turn[0].sourceID != "" {
 		t.Fatalf("turn = %+v", turn)
 	}
 }
@@ -43,14 +43,14 @@ func TestNormalizeClaudeCarriesTheEntry(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("events = %+v", got)
 	}
-	payload, ok := got[0].payload.(map[string]any)
+	done, ok := got[0].payload.(*ToolCompleted)
 	if !ok {
 		t.Fatalf("payload = %T", got[0].payload)
 	}
-	entry, ok := payload["entry"].(map[string]any)
-	if !ok {
-		t.Fatalf("entry = %#v", payload["entry"])
+	if done.Entry == nil {
+		t.Fatal("payload carries no provider entry")
 	}
+	entry := map[string]any(*done.Entry)
 	if cwd, _ := entry["cwd"].(string); cwd != "/repo/wt/web" {
 		t.Errorf("entry cwd = %q, want /repo/wt/web", cwd)
 	}
@@ -79,8 +79,8 @@ func TestNormalizeClaudeEditPatch(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("%s: events = %+v", field, got)
 		}
-		raw, ok := got[0].payload.(map[string]any)["patch"].(json.RawMessage)
-		if !ok || string(raw) != patch {
+		done, ok := got[0].payload.(*ToolCompleted)
+		if !ok || string(done.Patch) != patch {
 			t.Fatalf("%s: patch = %v", field, got[0].payload)
 		}
 	}
@@ -96,7 +96,7 @@ func TestNormalizeClaudeNonEditHasNoPatch(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("events = %+v", got)
 	}
-	if _, ok := got[0].payload.(map[string]any)["patch"]; ok {
+	if done, ok := got[0].payload.(*ToolCompleted); !ok || len(done.Patch) > 0 {
 		t.Fatalf("payload carries a patch: %+v", got[0].payload)
 	}
 }
@@ -110,7 +110,7 @@ func TestNormalizeClaudeUserEchoIsIgnored(t *testing.T) {
 
 func TestNormalizeClaudeInterruptEcho(t *testing.T) {
 	got := normalizeClaude([]byte(`{"type":"user","uuid":"interrupt","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}`))
-	if len(got) != 1 || got[0].eventType != "turn_interrupted" {
+	if len(got) != 1 || got[0].eventType() != "turn_interrupted" {
 		t.Fatalf("events = %+v", got)
 	}
 }
@@ -128,7 +128,7 @@ func TestNormalizeClaudeRichEvents(t *testing.T) {
 	}
 	for _, tc := range tests {
 		got := normalizeClaude([]byte(tc.line))
-		if len(got) != 1 || got[0].eventType != tc.want {
+		if len(got) != 1 || got[0].eventType() != tc.want {
 			t.Errorf("%s => %+v, want %s", tc.line, got, tc.want)
 		}
 	}
@@ -136,32 +136,32 @@ func TestNormalizeClaudeRichEvents(t *testing.T) {
 
 func TestNormalizeClaudeHistoryIncludesPlainUser(t *testing.T) {
 	got := normalizeClaudeHistory([]byte(`{"type":"user","uuid":"u3","message":{"content":[{"type":"text","text":"hello"}]}}`))
-	if len(got) != 1 || got[0].eventType != "user_message" || got[0].sourceID != "claude:u3" {
+	if len(got) != 1 || got[0].eventType() != "user_message" || got[0].sourceID != "claude:u3" {
 		t.Fatalf("events = %+v", got)
 	}
 }
 
 func TestNormalizeClaudeTaskNotificationSettlesSubagent(t *testing.T) {
 	got := normalizeClaude([]byte(`{"type":"queue-operation","content":"<task-notification><task-id>agent-7</task-id><status>completed</status><summary>done</summary></task-notification>"}`))
-	if len(got) != 1 || got[0].eventType != "subagent_completed" {
+	if len(got) != 1 || got[0].eventType() != "subagent_completed" {
 		t.Fatalf("events = %+v", got)
 	}
-	payload := got[0].payload.(map[string]any)
-	if payload["id"] != "agent-7" || payload["status"] != "completed" {
-		t.Fatalf("completion payload = %+v", payload)
+	done, ok := got[0].payload.(*SubagentCompleted)
+	if !ok || done.Id != "agent-7" || done.Status != "completed" {
+		t.Fatalf("completion payload = %+v", got[0].payload)
 	}
 }
 
 func TestNormalizeClaudeBackgroundCommandDoesNotCreateSubagent(t *testing.T) {
 	got := normalizeClaude([]byte(`{"type":"queue-operation","content":"<task-notification><task-id>command-7</task-id><status>completed</status><summary>command done</summary><output-file>/tmp/command-7.log</output-file></task-notification>"}`))
-	if len(got) != 1 || got[0].eventType != "notice" {
+	if len(got) != 1 || got[0].eventType() != "notice" {
 		t.Fatalf("events = %+v", got)
 	}
 }
 
 func TestNormalizeClaudeAgentOutputFileStillSettlesSubagent(t *testing.T) {
 	got := normalizeClaude([]byte(`{"type":"queue-operation","content":"<task-notification><task-id>agent-8</task-id><status>completed</status><summary>Agent &quot;Explore code&quot; finished</summary><output-file>/tmp/agent-8.output</output-file></task-notification>"}`))
-	if len(got) != 1 || got[0].eventType != "subagent_completed" {
+	if len(got) != 1 || got[0].eventType() != "subagent_completed" {
 		t.Fatalf("events = %+v", got)
 	}
 }
@@ -177,7 +177,7 @@ func TestNormalizeClaudeAgentNotificationUserTurnDedups(t *testing.T) {
 	if len(record) != 1 || len(turn) != 1 {
 		t.Fatalf("record = %+v, turn = %+v", record, turn)
 	}
-	if turn[0].eventType != "subagent_completed" || turn[0].sourceID != record[0].sourceID {
+	if turn[0].eventType() != "subagent_completed" || turn[0].sourceID != record[0].sourceID {
 		t.Fatalf("turn = %+v, want same source as %+v", turn[0], record[0])
 	}
 }
@@ -192,12 +192,14 @@ func mustJSON(s string) string {
 
 func TestNormalizeClaudeAgentResultDropsContinuationTrailer(t *testing.T) {
 	got := normalizeClaude([]byte(`{"type":"user","uuid":"u4","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":[{"type":"text","text":"Useful report"},{"type":"text","text":"agentId: child-1 (use SendMessage...)\n<usage>subagent_tokens: 12</usage>"}]}]}}`))
-	if len(got) != 1 || got[0].eventType != "tool_completed" {
+	if len(got) != 1 || got[0].eventType() != "tool_completed" {
 		t.Fatalf("events = %+v", got)
 	}
-	payload := got[0].payload.(map[string]any)
-	content, _ := payload["content"].(json.RawMessage)
-	if strings.Contains(string(content), "agentId:") || !strings.Contains(string(content), "Useful report") {
+	done, ok := got[0].payload.(*ToolCompleted)
+	if !ok {
+		t.Fatalf("payload = %T", got[0].payload)
+	}
+	if content := string(done.Content); strings.Contains(content, "agentId:") || !strings.Contains(content, "Useful report") {
 		t.Fatalf("content = %s", content)
 	}
 }

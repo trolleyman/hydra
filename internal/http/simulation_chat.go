@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/trolleyman/hydra/internal/api"
 )
 
 // The simulated Claude chat conversation, written directly in Hydra's
@@ -637,12 +637,12 @@ var simChatLog = simSequence(append(append([]simNorm{}, simOlderChatEvents...), 
 // replay_done; the rest are paged in on scroll. Matches pumpChatOutput.
 const simChatWindow = 100
 
-// simSequence assigns each event its seq and timestamp, producing the wire
-// shape a chat_event / chat_history frame carries. An event with no explicit
-// timestamp lands one millisecond after its predecessor, so ordering is stable
-// and the commit chips still interleave where their `at` puts them.
-func simSequence(events []simNorm) []map[string]any {
-	out := make([]map[string]any, 0, len(events))
+// simSequence assigns each event its seq and timestamp, producing the same
+// ChatEvent the daemon would have stored. An event with no explicit timestamp
+// lands one millisecond after its predecessor, so ordering is stable and the
+// commit chips still interleave where their `at` puts them.
+func simSequence(events []simNorm) []api.ChatEvent {
+	out := make([]api.ChatEvent, 0, len(events))
 	cur := time.Date(2026, 7, 9, 17, 59, 0, 0, time.UTC)
 	for i, ev := range events {
 		if ev.ts != "" {
@@ -652,11 +652,12 @@ func simSequence(events []simNorm) []map[string]any {
 		} else {
 			cur = cur.Add(time.Millisecond)
 		}
-		out = append(out, map[string]any{
-			"seq":       i + 1,
-			"type":      ev.typ,
-			"timestamp": cur.Format(time.RFC3339Nano),
-			"payload":   ev.payload,
+		payload, err := json.Marshal(ev.payload)
+		if err != nil {
+			continue
+		}
+		out = append(out, api.ChatEvent{
+			Seq: uint64(i + 1), Type: ev.typ, Timestamp: cur, Payload: payload,
 		})
 	}
 	return out
@@ -665,36 +666,48 @@ func simSequence(events []simNorm) []map[string]any {
 // simChatProjection is the current-state snapshot a chat socket opens with: the
 // plan, the "/" autocomplete list and every sub-agent's lifecycle state, all
 // derived from the log so the two can never drift.
-func simChatProjection() map[string]any {
-	subagents := map[string]any{}
+func simChatProjection() api.ChatProjection {
+	subagents := map[string]api.ChatSubagentState{}
 	for _, ev := range simChatLog {
-		payload, _ := ev["payload"].(map[string]any)
-		id, _ := payload["id"].(string)
-		if id == "" {
+		var payload struct {
+			ID           string `json:"id"`
+			ParentID     string `json:"parent_id"`
+			ParentItemID string `json:"parent_item_id"`
+			AgentType    string `json:"agent_type"`
+			Description  string `json:"description"`
+			Prompt       string `json:"prompt"`
+			Status       string `json:"status"`
+		}
+		if json.Unmarshal(ev.Payload, &payload) != nil || payload.ID == "" {
 			continue
 		}
-		switch ev["type"] {
+		switch ev.Type {
 		case "subagent_started":
-			state := maps.Clone(payload)
-			if prior, ok := subagents[id].(map[string]any); ok {
-				state["status"] = prior["status"]
+			state := api.ChatSubagentState{
+				Id: payload.ID, ParentId: payload.ParentID, ParentItemId: payload.ParentItemID,
+				AgentType: payload.AgentType, Description: payload.Description,
+				Prompt: payload.Prompt, Status: payload.Status,
 			}
-			subagents[id] = state
+			// A completion normalized BEFORE the event that introduces the
+			// sub-agent (the resumed background case) must still win.
+			if prior, ok := subagents[payload.ID]; ok && prior.Status != "" {
+				state.Status = prior.Status
+			}
+			subagents[payload.ID] = state
 		case "subagent_completed":
-			if prior, ok := subagents[id].(map[string]any); ok {
-				prior["status"] = "completed"
-			} else {
-				subagents[id] = map[string]any{"id": id, "status": "completed"}
-			}
+			state := subagents[payload.ID]
+			state.Id = payload.ID
+			state.Status = "completed"
+			subagents[payload.ID] = state
 		}
 	}
-	return map[string]any{
-		"version":        1,
-		"through":        len(simChatLog),
-		"model":          "claude-opus-4-8",
-		"slash_commands": simChatSlashCommands,
-		"plan":           simRaw(simChatPlan),
-		"subagents":      subagents,
+	return api.ChatProjection{
+		Version:       1,
+		Through:       uint64(len(simChatLog)),
+		Model:         "claude-opus-4-8",
+		SlashCommands: simChatSlashCommands,
+		Plan:          simRaw(simChatPlan),
+		Subagents:     subagents,
 	}
 }
 
@@ -714,7 +727,7 @@ func nextSimChatSeq() int {
 
 // sendSimNorm relays one normalized event as a live chat_event frame.
 func sendSimNorm(conn *safeConn, ev simNorm) {
-	sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), ev.typ, ev.payload)
+	sendSimChatEvent(conn, int64(nextSimChatSeq()), ev.typ, ev.payload)
 }
 
 // --- Live streaming -----------------------------------------------------------
@@ -789,7 +802,7 @@ func streamSimReply(conn *safeConn, msgID, replyText string) {
 // simChatHistoryPage is the batch of canned history older than cursor (0 =
 // newest), oldest-first, with the cursor to ask for next and whether the log's
 // start has been reached. Mirrors chat.Store.Before.
-func simChatHistoryPage(cursor, limit int) (events []map[string]any, next string, done bool) {
+func simChatHistoryPage(cursor, limit int) (events []api.ChatEvent, next string, done bool) {
 	if limit <= 0 || limit > 500 {
 		limit = simChatWindow
 	}
@@ -800,7 +813,7 @@ func simChatHistoryPage(cursor, limit int) (events []map[string]any, next string
 	start := max(end-limit, 0)
 	events = simChatLog[start:end]
 	if len(events) > 0 {
-		next = fmt.Sprintf("%d", events[0]["seq"])
+		next = fmt.Sprintf("%d", events[0].Seq)
 	}
 	return events, next, start == 0
 }
@@ -808,26 +821,27 @@ func simChatHistoryPage(cursor, limit int) (events []map[string]any, next string
 // sendSimChatHistory answers the initial window and every load_events_before.
 func sendSimChatHistory(conn *safeConn, cursor, limit int) {
 	events, next, done := simChatHistoryPage(cursor, limit)
-	frame, _ := json.Marshal(map[string]any{
-		"type": "chat_history", "events": events,
-		"next_cursor": next, "done": done,
+	writeFrame(conn, api.ChatHistoryFrame{
+		Type: api.ChatHistory, Events: events, NextCursor: next, Done: done,
 	})
-	_ = conn.WriteMessage(websocket.TextMessage, frame)
 }
 
 // sendSimSubagentEvents answers a load_subagent with that sub-agent's own steps,
 // wherever they sit in the log - the client opens a sub-agent's tab without
 // having paged the main conversation back to where it ran.
 func sendSimSubagentEvents(conn *safeConn, subID string) {
-	events := []map[string]any{}
+	events := []api.ChatEvent{}
 	for _, ev := range simChatLog {
-		payload, _ := ev["payload"].(map[string]any)
-		if agentID, _ := payload["agent_id"].(string); agentID == subID {
+		var payload struct {
+			AgentID string `json:"agent_id"`
+		}
+		if json.Unmarshal(ev.Payload, &payload) == nil && payload.AgentID == subID {
 			events = append(events, ev)
 		}
 	}
-	frame, _ := json.Marshal(map[string]any{"type": "subagent_events", "agentId": subID, "events": events})
-	_ = conn.WriteMessage(websocket.TextMessage, frame)
+	writeFrame(conn, api.ChatSubagentEventsFrame{
+		Type: api.SubagentEvents, AgentId: subID, Events: events,
+	})
 }
 
 // handleSimChatWS speaks the chat framing (see chat_ws.go) for the simulated
@@ -836,10 +850,9 @@ func sendSimSubagentEvents(conn *safeConn, subID string) {
 // exercised end to end.
 func handleSimChatWS(conn *safeConn) {
 	sendStatusUpdate(conn, "running")
-	state, _ := json.Marshal(map[string]any{"type": "state_snapshot", "state": simChatProjection()})
-	_ = conn.WriteMessage(websocket.TextMessage, state)
+	writeFrame(conn, api.ChatStateSnapshotFrame{Type: api.StateSnapshot, State: simChatProjection()})
 	sendSimChatHistory(conn, 0, simChatWindow)
-	sendTerminalEvent(conn, "replay_done")
+	sendReplayDone(conn)
 	// Replay any queued messages held from a prior connection (survives a
 	// reconnect, like the daemon's persisted queue).
 	sendSimQueueFrame(conn, "sim-chat")
@@ -858,7 +871,7 @@ func handleSimChatWS(conn *safeConn) {
 	// event). A slash command answers with local output instead.
 	processTurn := func(content json.RawMessage) {
 		turn++
-		sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
+		sendSimChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
 			"id": fmt.Sprintf("sim-live-user-%d", turn), "content": content,
 		})
 		text := firstTextBlock(content)
@@ -890,7 +903,7 @@ func handleSimChatWS(conn *safeConn) {
 		}
 		switch msg.Type {
 		case "shell_command":
-			cmd, id := msg.Command, msg.ID
+			cmd, id := msg.Command, msg.Id
 			stop := make(chan struct{})
 			shellStopsMu.Lock()
 			shellStops[id] = stop
@@ -905,16 +918,16 @@ func handleSimChatWS(conn *safeConn) {
 			}()
 		case "shell_stop":
 			shellStopsMu.Lock()
-			if ch, ok := shellStops[msg.ID]; ok {
+			if ch, ok := shellStops[msg.Id]; ok {
 				close(ch)
-				delete(shellStops, msg.ID)
+				delete(shellStops, msg.Id)
 			}
 			shellStopsMu.Unlock()
 		case "set_model":
 			// The daemon records the change as a model_changed event. The CLI's own
 			// "Set model to ..." echo is a plain user line, which normalization
 			// drops - the composer's optimistic confirmation is what the user sees.
-			sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "model_changed", map[string]any{"model": msg.Model})
+			sendSimChatEvent(conn, int64(nextSimChatSeq()), "model_changed", map[string]any{"model": msg.Model})
 		case "interrupt":
 			sendSimNorm(conn, simTurnInterrupted())
 			sendSimNorm(conn, simTurnFailed())
@@ -924,7 +937,7 @@ func handleSimChatWS(conn *safeConn) {
 				processTurn(qm.Content)
 			}
 		case "dequeue":
-			simQueueRemove("sim-chat", msg.ID)
+			simQueueRemove("sim-chat", msg.Id)
 		case "load_events_before":
 			cursor := 0
 			if _, err := fmt.Sscanf(msg.Cursor, "%d", &cursor); err != nil {
@@ -932,19 +945,20 @@ func handleSimChatWS(conn *safeConn) {
 			}
 			sendSimChatHistory(conn, cursor, msg.Limit)
 		case "load_subagent":
-			sendSimSubagentEvents(conn, msg.SubID)
+			sendSimSubagentEvents(conn, msg.SubId)
 		case "task_output":
 			// The expandable background-command chip fetching the task's output
 			// file (see chat_ws.go sendChatTaskOutput). Canned tail for the demo.
 			out := "ok  \tgithub.com/trolleyman/hydra/internal/artifacts\t0.41s\nok  \tgithub.com/trolleyman/hydra/internal/git\t1.02s\nok  \tgithub.com/trolleyman/hydra/internal/heads\t2.35s\nok  \tgithub.com/trolleyman/hydra/internal/http\t3.87s\nok  \tgithub.com/trolleyman/hydra/internal/sandbox\t0.66s\nPASS\nexit=0"
-			frame, _ := json.Marshal(map[string]any{"type": "task_output", "file": msg.File, "content": out})
-			_ = conn.WriteMessage(websocket.TextMessage, frame)
+			writeFrame(conn, api.ChatTaskOutputFrame{
+				Type: api.ChatTaskOutputFrameTypeTaskOutput, File: msg.File, Content: out,
+			})
 		case "user_message":
 			// A message the client marked queued (a turn was running) is HELD, to
 			// be drained when the current turn ends - here, right after the next
 			// processed turn, one per turn (each queued message is its own turn).
 			if msg.Queued {
-				simQueueAppend("sim-chat", simQueuedMsg{ID: msg.ID, Content: msg.Content})
+				simQueueAppend("sim-chat", simQueuedMsg{ID: msg.Id, Content: msg.Content})
 				continue
 			}
 			processTurn(msg.Content)
@@ -1057,15 +1071,14 @@ func simRunShellCommand(conn *safeConn, cmd, id string, stop <-chan struct{}) {
 		}
 		chunk := ln + "\n"
 		full.WriteString(chunk)
-		frame, _ := json.Marshal(map[string]any{"type": "shell_output", "id": id, "chunk": chunk})
-		_ = conn.WriteMessage(websocket.TextMessage, frame)
+		writeFrame(conn, api.ChatShellOutputFrame{Type: api.ShellOutput, Id: id, Chunk: chunk})
 		time.Sleep(35 * time.Millisecond)
 	}
 	shell := map[string]any{"command": cmd, "output": full.String(), "exit_code": exit, "truncated": false}
 	if stopped {
 		shell["stopped"] = true
 	}
-	sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
+	sendSimChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
 		"id":      id,
 		"content": simTextContent("I ran a shell command from the chat.\n\nCommand:\n```\n" + cmd + "\n```"),
 		"shell":   shell,

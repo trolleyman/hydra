@@ -5,12 +5,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/trolleyman/hydra/internal/api"
 )
 
+// eventSpec is one event a provider line normalizes to. The payload names its
+// own type (see events.go), so a spec cannot claim a type its payload is not.
 type eventSpec struct {
-	sourceID  string
-	eventType string
-	payload   any
+	sourceID string
+	payload  Payload
+}
+
+// eventType is the type the spec's payload declares.
+func (e eventSpec) eventType() string {
+	if e.payload == nil {
+		return ""
+	}
+	return e.payload.EventType()
 }
 
 type claudeEnvelope struct {
@@ -31,7 +42,7 @@ type claudeEnvelope struct {
 	ParentToolUseID string   `json:"parent_tool_use_id,omitempty"`
 	Content         string   `json:"content,omitempty"`
 	DurationMS      int64    `json:"duration_ms,omitempty"`
-	MessageID       string   `json:"message_id,omitempty"`
+	MessageId       string   `json:"message_id,omitempty"`
 	TotalCostUSD    float64  `json:"total_cost_usd,omitempty"`
 	Message         struct {
 		ID         string          `json:"id,omitempty"`
@@ -75,7 +86,7 @@ type claudeBlock struct {
 // Content is dropped because the payload already carries it, and it is the big
 // part - a tool result can be a megabyte of output, and keeping a second copy
 // per block would multiply the stored conversation.
-func claudeEntry(line []byte) map[string]any {
+func claudeEntry(line []byte) *api.ChatProviderEntry {
 	var entry map[string]any
 	if json.Unmarshal(bytes.TrimSpace(line), &entry) != nil {
 		return nil
@@ -83,7 +94,8 @@ func claudeEntry(line []byte) map[string]any {
 	if msg, ok := entry["message"].(map[string]any); ok {
 		delete(msg, "content")
 	}
-	return entry
+	out := api.ChatProviderEntry(entry)
+	return &out
 }
 
 func normalizeClaude(line []byte) []eventSpec {
@@ -98,14 +110,22 @@ func normalizeClaude(line []byte) []eventSpec {
 	switch ev.Type {
 	case "system":
 		if ev.Subtype == "init" {
-			return []eventSpec{{sourceID: "claude:" + ev.SessionID + ":init", eventType: "conversation_started", payload: map[string]any{"conversation_id": ev.SessionID, "model": ev.Model, "slash_commands": ev.SlashCommands, "api_key_source": ev.APIKeySource}}}
+			started := &ConversationStarted{}
+			started.ConversationId, started.Model = ev.SessionID, ev.Model
+			started.SlashCommands, started.ApiKeySource = ev.SlashCommands, ev.APIKeySource
+			return []eventSpec{{sourceID: "claude:" + ev.SessionID + ":init", payload: started}}
 		}
 		if ev.Subtype == "model_refusal_fallback" {
-			return []eventSpec{{sourceID: base + ":retraction", eventType: "messages_retracted", payload: map[string]any{"message_ids": ev.RetractedMessageUUIDs}}}
+			retracted := &MessagesRetracted{}
+			retracted.MessageIds = ev.RetractedMessageUUIDs
+			return []eventSpec{{sourceID: base + ":retraction", payload: retracted}}
 		}
 	case "assistant":
 		if ev.IsAPIError {
-			return []eventSpec{{sourceID: base, eventType: "turn_failed", payload: map[string]any{"id": ev.Message.ID, "status": "failed", "error": textFromClaudeContent(ev.Message.Content)}}}
+			failed := &TurnFailed{}
+			failed.Id, failed.Status = ev.Message.ID, "failed"
+			failed.Error, _ = json.Marshal(textFromClaudeContent(ev.Message.Content))
+			return []eventSpec{{sourceID: base, payload: failed}}
 		}
 		var blocks []claudeBlock
 		if json.Unmarshal(ev.Message.Content, &blocks) != nil {
@@ -116,11 +136,18 @@ func normalizeClaude(line []byte) []eventSpec {
 			source := claudeBlockSource(base, i)
 			switch block.Type {
 			case "text":
-				out = append(out, eventSpec{sourceID: source, eventType: "assistant_message", payload: richClaudePayload(ev, map[string]any{"message_id": ev.Message.ID, "text": block.Text})})
+				msg := &AssistantMessage{ProviderContext: claudeContext(ev)}
+				msg.MessageId, msg.Text = ev.Message.ID, block.Text
+				out = append(out, eventSpec{sourceID: source, payload: msg})
 			case "thinking":
-				out = append(out, eventSpec{sourceID: source, eventType: "reasoning_completed", payload: richClaudePayload(ev, map[string]any{"message_id": ev.Message.ID, "text": block.Thinking})})
+				thought := &ReasoningCompleted{ProviderContext: claudeContext(ev)}
+				thought.MessageId, thought.Text = ev.Message.ID, block.Thinking
+				out = append(out, eventSpec{sourceID: source, payload: thought})
 			case "tool_use":
-				out = append(out, eventSpec{sourceID: source, eventType: "tool_started", payload: richClaudePayload(ev, map[string]any{"id": block.ID, "name": block.Name, "input": block.Input, "entry": claudeEntry(line)})})
+				call := &ToolStarted{ProviderContext: claudeContext(ev)}
+				call.Id, call.Name, call.Input = block.ID, block.Name, block.Input
+				call.Entry = claudeEntry(line)
+				out = append(out, eventSpec{sourceID: source, payload: call})
 			}
 		}
 		return out
@@ -143,11 +170,10 @@ func normalizeClaude(line []byte) []eventSpec {
 			}
 			for i, block := range blocks {
 				if block.Type == "tool_result" {
-					payload := map[string]any{"id": block.ToolUseID, "content": cleanClaudeToolResult(block.Content), "is_error": block.IsError, "entry": claudeEntry(line)}
-					if patch != nil {
-						payload["patch"] = patch
-					}
-					out = append(out, eventSpec{sourceID: claudeBlockSource(base, i), eventType: "tool_completed", payload: richClaudePayload(ev, payload)})
+					done := &ToolCompleted{ProviderContext: claudeContext(ev)}
+					done.Id, done.Content = block.ToolUseID, cleanClaudeToolResult(block.Content)
+					done.IsError, done.Entry, done.Patch = block.IsError, claudeEntry(line), patch
+					out = append(out, eventSpec{sourceID: claudeBlockSource(base, i), payload: done})
 				}
 			}
 			if len(out) > 0 {
@@ -156,7 +182,9 @@ func normalizeClaude(line []byte) []eventSpec {
 		}
 		userText := textFromClaudeContent(ev.Message.Content)
 		if strings.HasPrefix(strings.TrimSpace(userText), "[Request interrupted by user") {
-			return []eventSpec{{sourceID: base, eventType: "turn_interrupted", payload: map[string]any{"status": "interrupted"}}}
+			interrupted := &TurnInterrupted{}
+			interrupted.Status = "interrupted"
+			return []eventSpec{{sourceID: base, payload: interrupted}}
 		}
 		// Claude records an agent's completion notification TWICE: as the
 		// standalone bookkeeping record (collapsed below) and as the user turn that
@@ -171,30 +199,42 @@ func normalizeClaude(line []byte) []eventSpec {
 		// the queue/input boundary. Claude echoes them here; emitting the echo too
 		// would duplicate the bubble and lose queue reconciliation identity.
 		if ev.IsMeta {
-			return []eventSpec{{sourceID: base, eventType: "context_message", payload: richClaudePayload(ev, map[string]any{"content": ev.Message.Content, "is_meta": true})}}
+			injected := &ContextMessage{ProviderContext: claudeContext(ev)}
+			injected.Content, injected.IsMeta = ev.Message.Content, true
+			return []eventSpec{{sourceID: base, payload: injected}}
 		}
 		return nil
 	case "result":
-		kind, status := "turn_completed", "completed"
+		turn := api.ChatTurnPayload{Status: "completed", Result: ev.Result, CostUsd: ev.TotalCostUSD}
+		ctx := ProviderContext{Usage: ev.Usage}
 		if ev.IsError {
-			kind, status = "turn_failed", "failed"
+			turn.Status = "failed"
+			return []eventSpec{{sourceID: base, payload: &TurnFailed{ProviderContext: ctx, ChatTurnPayload: turn}}}
 		}
-		return []eventSpec{{sourceID: base, eventType: kind, payload: map[string]any{"status": status, "result": ev.Result, "usage": ev.Usage, "cost_usd": ev.TotalCostUSD}}}
+		return []eventSpec{{sourceID: base, payload: &TurnCompleted{ProviderContext: ctx, ChatTurnPayload: turn}}}
 	case "control_request":
-		return []eventSpec{{sourceID: "claude:request:" + ev.RequestID, eventType: "interaction_requested", payload: map[string]any{"interaction": json.RawMessage(ev.Request), "request_id": ev.RequestID, "provider": "claude"}}}
+		asked := &InteractionRequested{}
+		asked.Interaction, asked.RequestId, asked.Provider = json.RawMessage(ev.Request), ev.RequestID, "claude"
+		return []eventSpec{{sourceID: "claude:request:" + ev.RequestID, payload: asked}}
 	case "stream_event":
 		return normalizeClaudeStream(ev.Event)
 	case "hydra_thinking":
-		return []eventSpec{{sourceID: "claude:thinking:" + ev.MessageID, eventType: "reasoning_duration", payload: map[string]any{"message_id": ev.MessageID, "duration_ms": ev.DurationMS}}}
+		measured := &ReasoningDuration{}
+		measured.MessageId, measured.DurationMs = ev.MessageId, ev.DurationMS
+		return []eventSpec{{sourceID: "claude:thinking:" + ev.MessageId, payload: measured}}
 	}
 	if ev.Content != "" {
 		if spec := claudeAgentCompletionSpec(ev.Content); spec != nil {
 			return spec
 		}
-		return []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": ev.Content})}}
+		note := &Notice{ProviderContext: claudeContext(ev)}
+		note.Text = ev.Content
+		return []eventSpec{{sourceID: base, payload: note}}
 	}
 	if len(ev.Attachment.Prompt) > 0 && string(ev.Attachment.Prompt) != "null" {
-		return []eventSpec{{sourceID: base, eventType: "notice", payload: richClaudePayload(ev, map[string]any{"text": textFromClaudeContent(ev.Attachment.Prompt)})}}
+		note := &Notice{ProviderContext: claudeContext(ev)}
+		note.Text = textFromClaudeContent(ev.Attachment.Prompt)
+		return []eventSpec{{sourceID: base, payload: note}}
 	}
 	return nil
 }
@@ -297,7 +337,9 @@ func claudeAgentCompletionSpec(text string) []eventSpec {
 		!strings.HasPrefix(strings.ToLower(taskNotificationField(text, "summary")), "agent ") {
 		return nil
 	}
-	return []eventSpec{{sourceID: "claude:subagent:" + taskID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": taskID, "status": "completed"}}}
+	done := &SubagentCompleted{}
+	done.Id, done.Status = taskID, "completed"
+	return []eventSpec{{sourceID: "claude:subagent:" + taskID + ":completed", payload: done}}
 }
 
 func normalizeClaudeHistory(line []byte) []eventSpec {
@@ -309,7 +351,9 @@ func normalizeClaudeHistory(line []byte) []eventSpec {
 	if json.Unmarshal(bytes.TrimSpace(line), &ev) != nil || ev.Type != "user" || ev.UUID == "" {
 		return nil
 	}
-	return []eventSpec{{sourceID: "claude:" + ev.UUID, eventType: "user_message", payload: richClaudePayload(ev, map[string]any{"id": ev.UUID, "content": ev.Message.Content})}}
+	msg := &UserMessage{ProviderContext: claudeContext(ev)}
+	msg.Id, msg.Content = ev.UUID, ev.Message.Content
+	return []eventSpec{{sourceID: "claude:" + ev.UUID, payload: msg}}
 }
 
 func claudeBlockSource(base string, index int) string {
@@ -319,14 +363,17 @@ func claudeBlockSource(base string, index int) string {
 	return fmt.Sprintf("%s:block:%d", base, index)
 }
 
-func richClaudePayload(ev claudeEnvelope, payload map[string]any) map[string]any {
-	payload["uuid"] = ev.UUID
-	payload["usage"] = ev.Message.Usage
-	payload["stop_reason"] = ev.Message.StopReason
-	payload["sidechain"] = ev.IsSidechain || ev.ParentToolUseID != ""
-	payload["agent_id"] = ev.AgentID
-	payload["parent_item_id"] = ev.ParentToolUseID
-	return payload
+// claudeContext is who produced an event and where it belongs, read off the
+// envelope once and embedded rather than copied field by field at each site.
+func claudeContext(ev claudeEnvelope) ProviderContext {
+	return ProviderContext{
+		Uuid:         ev.UUID,
+		Usage:        ev.Message.Usage,
+		StopReason:   ev.Message.StopReason,
+		Sidechain:    ev.IsSidechain || ev.ParentToolUseID != "",
+		AgentId:      ev.AgentID,
+		ParentItemId: ev.ParentToolUseID,
+	}
 }
 
 func normalizeClaudeStream(raw json.RawMessage) []eventSpec {
@@ -351,20 +398,30 @@ func normalizeClaudeStream(raw json.RawMessage) []eventSpec {
 	}
 	switch event.Type {
 	case "content_block_start":
-		return []eventSpec{{eventType: "content_stream_started", payload: map[string]any{"kind": event.ContentBlock.Type}}}
+		opened := &ContentStreamStarted{}
+		opened.Kind = event.ContentBlock.Type
+		return []eventSpec{{payload: opened}}
 	case "content_block_delta":
 		if event.Delta.Type == "text_delta" {
-			return []eventSpec{{eventType: "assistant_delta", payload: map[string]any{"text": event.Delta.Text}}}
+			delta := &AssistantDelta{}
+			delta.Text = event.Delta.Text
+			return []eventSpec{{payload: delta}}
 		}
 		if event.Delta.Type == "thinking_delta" {
-			return []eventSpec{{eventType: "reasoning_delta", payload: map[string]any{"text": event.Delta.Thinking}}}
+			delta := &ReasoningDelta{}
+			delta.Text = event.Delta.Thinking
+			return []eventSpec{{payload: delta}}
 		}
 	case "message_start":
-		return []eventSpec{{eventType: "usage_updated", payload: map[string]any{"message_id": event.Message.ID, "usage": event.Message.Usage}}}
+		usage := &UsageUpdated{}
+		usage.MessageId, usage.Usage = event.Message.ID, event.Message.Usage
+		return []eventSpec{{payload: usage}}
 	case "message_delta":
-		return []eventSpec{{eventType: "usage_updated", payload: map[string]any{"usage": event.Usage}}}
+		usage := &UsageUpdated{}
+		usage.Usage = event.Usage
+		return []eventSpec{{payload: usage}}
 	case "message_stop":
-		return []eventSpec{{eventType: "content_stream_completed", payload: map[string]any{}}}
+		return []eventSpec{{payload: &ContentStreamCompleted{}}}
 	}
 	return nil
 }

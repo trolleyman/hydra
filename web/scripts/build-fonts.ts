@@ -1,8 +1,14 @@
-// Fetches and subsets the self-hosted webfonts into public/fonts.
+// Fetches the self-hosted webfonts into public/fonts. EVERY font this UI renders
+// is vendored here - nothing is fetched from a CDN at runtime.
 //
-// Three families, none of which is on Google Fonts (everything else rides the
-// single Google Fonts stylesheet in index.html, which already serves properly
-// subsetted, unicode-range-split CSS):
+// Two groups, fetched differently because they arrive differently.
+//
+// The Google families (GOOGLE_QUERY) come as Google's own stylesheet, which is
+// already properly subsetted and unicode-range-split, so they are mirrored
+// rather than re-cut: the CSS is fetched once, each .woff2 it points at is
+// downloaded, and the urls are rewritten to /fonts/google/. See vendorGoogle.
+//
+// The other three are not on Google Fonts at all, so we cut our own:
 //
 //   Iosevka, Iosevka Term   offered mono families. No CDN and no maintained npm
 //                           build at a current version, so we cut our own.
@@ -14,8 +20,15 @@
 //
 // The .woff2 output is NOT committed - it is gitignored and produced at build
 // time. `npm run build` runs this first (see the prebuild script), and it is a
-// no-op once the cache stamp matches, so only a fresh checkout, a version bump
-// or a change to the subsets below pays the download.
+// no-op once the cache stamp matches.
+//
+// A real build costs ~19s, nearly all of it CPU spent subsetting, and a fresh
+// worktree has no output and no stamp - so with a worktree per head that was
+// ~19s each, every time, for identical bytes. The built faces are therefore also
+// kept in ~/.cache/hydra/fonts/<signature>/: the first build anywhere fills it
+// and every worktree after that copies (~6MB, ~0.06s) without touching the
+// network or a subsetter. Only a version bump or an edit to the subsets below
+// changes the signature and pays the real cost again.
 //
 //     cd web && npm run build-fonts          # or: node scripts/build-fonts.ts
 //     cd web && npm run build-fonts -- --force
@@ -42,7 +55,8 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import subsetFont from 'subset-font'
@@ -50,15 +64,41 @@ import subsetFont from 'subset-font'
 const IOSEVKA_VERSION = '34.8.0'
 const NERD_FONTS_VERSION = '3.4.0'
 
+// The families index.html used to request straight from fonts.googleapis.com.
+// Weights are held to 400-700 (plus italics where the family has them) - that is
+// everything the UI asks for, and the wider ranges in Google's own snippets
+// triple the stylesheet for faces nothing renders.
+const GOOGLE_QUERY =
+  'family=Fira+Code:wght@400..700' +
+  '&family=IBM+Plex+Mono:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700' +
+  '&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700' +
+  '&family=Inter:ital,opsz,wght@0,14..32,400..700;1,14..32,400..700' +
+  '&family=JetBrains+Mono:ital,wght@0,400..700;1,400..700' +
+  '&family=Merriweather:ital,opsz,wght@0,18..144,300..900;1,18..144,300..900' +
+  '&family=Roboto+Flex:slnt,wght@-10..0,100..1000' +
+  '&family=Source+Code+Pro:ital,wght@0,400..700;1,400..700' +
+  '&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..700' +
+  '&display=swap'
+
+// Google serves woff2 only to a UA it recognises as a modern browser; curl's own
+// gets the ttf fallback, which is roughly twice the bytes.
+const BROWSER_UA =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+const GOOGLE_DIR = 'google'
+const GOOGLE_CSS = 'google.css'
+
 const WEB_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = join(WEB_DIR, 'public', 'fonts')
-// Records what the files in OUT_DIR were built from. A build whose inputs match
-// skips the network entirely; anything else (version bump, edited subset, a
-// half-written file) rebuilds. Gitignored, like the fonts - and kept OUT of
-// public/, which vite copies wholesale into dist/ and web/embed.go then bakes
-// into the binary. A build receipt does not belong in a shipped artifact.
+// Records what the files in OUT_DIR were built from - all of it, not just
+// Iosevka: the Nerd Fonts symbols and the mirrored Google families too. A build
+// whose inputs match skips the network entirely; anything else (version bump,
+// edited subset, a half-written file) rebuilds. Gitignored, like the fonts - and
+// kept OUT of public/, which vite copies wholesale into dist/ and web/embed.go
+// then bakes into the binary. A build receipt does not belong in a shipped
+// artifact.
 
-const STAMP = join(WEB_DIR, '.iosevka-build.json')
+const STAMP = join(WEB_DIR, '.fonts-build.json')
 
 const FORCE = process.argv.includes('--force')
 
@@ -255,6 +295,45 @@ function readMember(url: string, entry: ZipEntry): Buffer {
   throw new Error(`unsupported compression method ${entry.method} for ${entry.name}`)
 }
 
+// vendorGoogle mirrors Google's stylesheet and everything it points at into
+// public/fonts/google/, returning the sizes of what it wrote.
+//
+// Google's CSS is already the right shape - properly subsetted, split by
+// unicode-range so a browser fetches only the blocks its text actually needs -
+// so this rewrites the urls and changes nothing else. Vendoring it takes the
+// network out of the render entirely, which fixes two things a runtime CDN
+// caused: screenshots flapping between real and fallback metrics depending on
+// whether a face arrived in time, and page loads timing out because a
+// render-blocking stylesheet on a host the sandbox could not reach never
+// settled.
+async function vendorGoogle(): Promise<Record<string, number>> {
+  const url = `https://fonts.googleapis.com/css2?${GOOGLE_QUERY}`
+  console.log(`  Google families: fetching ${url.slice(0, 60)}...`)
+  let css = curl(['-A', BROWSER_UA, url]).toString()
+
+  const urls = [...new Set([...css.matchAll(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/g)].map((m) => m[1]))]
+  if (urls.length === 0) throw new Error('no gstatic urls in the Google stylesheet - did the response shape change?')
+
+  mkdirSync(join(OUT_DIR, GOOGLE_DIR), { recursive: true })
+  const sizes: Record<string, number> = {}
+  for (const remote of urls) {
+    // The basename is Google's own content hash, so it is stable for a given
+    // face and changes when they reissue it.
+    const file = remote.split('/').pop()!
+    const rel = `${GOOGLE_DIR}/${file}`
+    const body = curl(['-A', BROWSER_UA, remote])
+    writeFileSync(join(OUT_DIR, rel), body)
+    sizes[rel] = body.length
+    css = css.split(remote).join(`/fonts/${rel}`)
+  }
+  writeFileSync(join(OUT_DIR, GOOGLE_CSS), css)
+  sizes[GOOGLE_CSS] = Buffer.byteLength(css)
+
+  const total = Object.values(sizes).reduce((a, b) => a + b, 0)
+  console.log(`    ${urls.length} faces  ${(total / 1024 / 1024).toFixed(2)}MB  ${GOOGLE_DIR}/`)
+  return sizes
+}
+
 const cps = codepoints()
 const text = cps.map((cp) => String.fromCodePoint(cp)).join('')
 const nerdText = expand(NERD_RANGES)
@@ -262,6 +341,7 @@ const NERD_OUTPUT = 'nerd-symbols-400-normal.woff2'
 const outputs = [
   ...FAMILIES.flatMap(({ slug }) => FACES.map((f) => `${slug}-${f.weight}-${f.style}.woff2`)),
   NERD_OUTPUT,
+  GOOGLE_CSS,
 ]
 
 // The stamp covers everything that decides the bytes: the releases, which faces
@@ -276,20 +356,112 @@ const signature = createHash('sha256')
       faces: FACES.map((f) => f.file),
       codepoints: cps,
       nerdCodepoints: nerdText.length,
+      google: GOOGLE_QUERY,
     }),
   )
   .digest('hex')
   .slice(0, 16)
+
+// A build costs ~19s, nearly all of it CPU spent subsetting - and the outputs are
+// gitignored, so EVERY fresh worktree paid it again. Hydra gives each head its
+// own worktree, so that was ~19s per head for bytes that are identical whenever
+// the signature is.
+//
+// So the built faces are also kept outside the checkout, keyed by that
+// signature. The first build anywhere fills the cache; every worktree after it
+// copies (~6MB, milliseconds) and touches neither the network nor a subsetter.
+// ~/.cache is bound writable inside a Hydra sandbox, so heads both read and
+// populate it.
+const CACHE_ROOT = join(
+  process.env.XDG_CACHE_HOME || join(homedir(), '.cache'),
+  'hydra',
+  'fonts',
+)
+const CACHE_DIR = join(CACHE_ROOT, signature)
+const CACHE_MANIFEST = 'sizes.json'
+
+// restoreFromCache copies a previous build of this exact signature into OUT_DIR.
+// Returns the sizes it restored, or null if there is no complete copy to use.
+function restoreFromCache(): Record<string, number> | null {
+  const manifest = join(CACHE_DIR, CACHE_MANIFEST)
+  if (!existsSync(manifest)) return null
+  let sizes: Record<string, number>
+  try {
+    sizes = JSON.parse(readFileSync(manifest, 'utf8')) as Record<string, number>
+  } catch {
+    return null
+  }
+  // Verify before trusting it: a cache interrupted mid-write would otherwise
+  // hand back a truncated face that renders as tofu.
+  for (const [name, size] of Object.entries(sizes)) {
+    const src = join(CACHE_DIR, name)
+    if (!existsSync(src) || statSync(src).size !== size) return null
+  }
+  for (const name of Object.keys(sizes)) {
+    const dest = join(OUT_DIR, name)
+    mkdirSync(dirname(dest), { recursive: true })
+    // Copied, not hardlinked: a later --force rewrites these paths in place, and
+    // a shared inode would corrupt the cache for every other worktree.
+    copyFileSync(join(CACHE_DIR, name), dest)
+  }
+  return sizes
+}
+
+// saveToCache stores this build for every other worktree. Best-effort: a full
+// disk or a read-only cache root must not fail a build that already succeeded.
+function saveToCache(sizes: Record<string, number>): void {
+  const tmp = `${CACHE_DIR}.tmp-${process.pid}`
+  try {
+    rmSync(tmp, { recursive: true, force: true })
+    for (const name of Object.keys(sizes)) {
+      const dest = join(tmp, name)
+      mkdirSync(dirname(dest), { recursive: true })
+      copyFileSync(join(OUT_DIR, name), dest)
+    }
+    writeFileSync(join(tmp, CACHE_MANIFEST), JSON.stringify(sizes))
+    mkdirSync(CACHE_ROOT, { recursive: true })
+    // Another worktree may have won the race; its copy is byte-identical (same
+    // signature), so keep it and drop ours.
+    if (existsSync(CACHE_DIR)) rmSync(tmp, { recursive: true, force: true })
+    else renameSync(tmp, CACHE_DIR)
+  } catch (err) {
+    rmSync(tmp, { recursive: true, force: true })
+    console.log(`  (not cached: ${(err as Error).message})`)
+    return
+  }
+  // Old signatures are dead weight once nothing builds them - a version bump
+  // would otherwise leave 6MB behind for every version ever built.
+  try {
+    for (const entry of readdirSync(CACHE_ROOT)) {
+      if (entry !== signature) rmSync(join(CACHE_ROOT, entry), { recursive: true, force: true })
+    }
+  } catch {
+    // A concurrent build may be mid-rename; leaving a stale dir is harmless.
+  }
+}
+
+function writeStamp(sizes: Record<string, number>): void {
+  writeFileSync(
+    STAMP,
+    JSON.stringify({ iosevka: IOSEVKA_VERSION, nerdFonts: NERD_FONTS_VERSION, signature, sizes }, null, 2) + '\n',
+  )
+}
 
 function upToDate(): boolean {
   if (FORCE || !existsSync(STAMP)) return false
   try {
     const stamp = JSON.parse(readFileSync(STAMP, 'utf8')) as { signature?: string; sizes?: Record<string, number> }
     if (stamp.signature !== signature) return false
-    return outputs.every((name) => {
-      const path = join(OUT_DIR, name)
-      return existsSync(path) && statSync(path).size === stamp.sizes?.[name]
-    })
+    // Check every file the last build recorded, not just `outputs`: the Google
+    // faces are named by Google's own hashes, so they are only knowable from the
+    // stamp.
+    const recorded = Object.entries(stamp.sizes ?? {})
+    if (recorded.length < outputs.length) return false
+    return outputs.every((name) => stamp.sizes?.[name] !== undefined) &&
+      recorded.every(([name, size]) => {
+        const path = join(OUT_DIR, name)
+        return existsSync(path) && statSync(path).size === size
+      })
   } catch {
     return false
   }
@@ -301,6 +473,16 @@ if (upToDate()) {
 }
 
 mkdirSync(OUT_DIR, { recursive: true })
+
+if (!FORCE) {
+  const cached = restoreFromCache()
+  if (cached) {
+    writeStamp(cached)
+    const mb = Object.values(cached).reduce((a, b) => a + b, 0) / 1024 / 1024
+    console.log(`fonts: restored ${Object.keys(cached).length} file(s), ${mb.toFixed(1)}MB from ${CACHE_DIR}`)
+    process.exit(0)
+  }
+}
 console.log(
   `fonts: cutting Iosevka v${IOSEVKA_VERSION} (${cps.length} code points) ` +
     `+ Nerd Fonts symbols v${NERD_FONTS_VERSION} (${nerdText.length})`,
@@ -357,8 +539,8 @@ for (const { pkg, family, slug } of FAMILIES) {
   )
 }
 
-writeFileSync(
-  STAMP,
-  JSON.stringify({ iosevka: IOSEVKA_VERSION, nerdFonts: NERD_FONTS_VERSION, signature, sizes }, null, 2) + '\n',
-)
+Object.assign(sizes, await vendorGoogle())
+
+writeStamp(sizes)
+saveToCache(sizes)
 console.log(`fonts: done (${(Object.values(sizes).reduce((a, b) => a + b, 0) / 1024 / 1024).toFixed(1)}MB total)`)

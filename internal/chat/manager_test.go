@@ -32,7 +32,9 @@ func TestManagerPreservesProviderOrderAndWatches(t *testing.T) {
 	if snapshot.Through != 2 {
 		t.Fatalf("snapshot through = %d", snapshot.Through)
 	}
-	if _, err := m.Append("head", "model_changed", map[string]string{"model": "opus"}); err != nil {
+	changed := ModelChanged{}
+	changed.Model = "opus"
+	if _, err := m.Append("head", changed); err != nil {
 		t.Fatal(err)
 	}
 	ev := <-live
@@ -95,7 +97,7 @@ func TestManagerReconcilesClaudeUserEchoDurably(t *testing.T) {
 	root := t.TempDir()
 	resolve := func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" }
 	m := NewManager(resolve)
-	if _, err := m.Append("head", "user_message", map[string]any{"id": "client-1", "content": []map[string]any{{"type": "text", "text": "same text"}}}); err != nil {
+	if _, err := m.Append("head", testUserMessage("client-1", "same text")); err != nil {
 		t.Fatal(err)
 	}
 	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"user","uuid":"claude-1","message":{"content":[{"type":"text","text":"same text"}]}}`))
@@ -110,7 +112,7 @@ func TestManagerReconcilesClaudeUserEchoDurably(t *testing.T) {
 	// Reopening the store must remember that the first identical message was
 	// paired, while still allowing a later identical turn to pair once.
 	m = NewManager(resolve)
-	if _, err := m.Append("head", "user_message", map[string]any{"id": "client-2", "content": []map[string]any{{"type": "text", "text": "same text"}}}); err != nil {
+	if _, err := m.Append("head", testUserMessage("client-2", "same text")); err != nil {
 		t.Fatal(err)
 	}
 	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"user","uuid":"claude-2","message":{"content":[{"type":"text","text":"same text"}]}}`))
@@ -147,16 +149,16 @@ func TestManagerLinksCodexChildThreadToSpawn(t *testing.T) {
 		var payload struct {
 			AgentID      string `json:"agent_id"`
 			ID           string `json:"id"`
-			ParentItemID string `json:"parent_item_id"`
+			ParentItemId string `json:"parent_item_id"`
 		}
 		_ = json.Unmarshal(event.Payload, &payload)
 		switch event.Type {
 		case "subagent_started":
-			started = payload.ID == "child" && payload.ParentItemID == "spawn-1"
+			started = payload.ID == "child" && payload.ParentItemId == "spawn-1"
 		case "assistant_message":
-			report = payload.AgentID == "child" && payload.ParentItemID == "spawn-1"
+			report = payload.AgentID == "child" && payload.ParentItemId == "spawn-1"
 		case "subagent_completed":
-			completed = payload.ID == "child" && payload.ParentItemID == "spawn-1"
+			completed = payload.ID == "child" && payload.ParentItemId == "spawn-1"
 		}
 	}
 	if !started || !report || !completed {
@@ -216,18 +218,22 @@ func TestManagerSequencesCommitAfterToolCompletion(t *testing.T) {
 
 func TestCodexInterruptSettlesDeltaOnlyAssistantMessage(t *testing.T) {
 	w := worker{codexAssistantDeltas: map[string]string{}}
-	delta := eventSpec{eventType: "assistant_delta", payload: map[string]any{"message_id": "message-1", "text": "partial reply"}}
+	partial := &AssistantDelta{}
+	partial.MessageId, partial.Text = "message-1", "partial reply"
+	delta := eventSpec{payload: partial}
 	if got := w.settleCodexPartialOnInterrupt([]eventSpec{delta}); len(got) != 1 {
 		t.Fatalf("delta events = %+v", got)
 	}
-	interrupted := eventSpec{eventType: "turn_interrupted", payload: map[string]any{"id": "turn-1", "status": "interrupted"}}
+	stopped := &TurnInterrupted{}
+	stopped.Id, stopped.Status = "turn-1", "interrupted"
+	interrupted := eventSpec{payload: stopped}
 	got := w.settleCodexPartialOnInterrupt([]eventSpec{interrupted})
-	if len(got) != 2 || got[0].eventType != "assistant_message" || got[1].eventType != "turn_interrupted" {
+	if len(got) != 2 || got[0].eventType() != "assistant_message" || got[1].eventType() != "turn_interrupted" {
 		t.Fatalf("interrupt events = %+v", got)
 	}
-	payload := got[0].payload.(map[string]any)
-	if payload["text"] != "partial reply" || payload["partial"] != true {
-		t.Fatalf("partial payload = %+v", payload)
+	settled, ok := got[0].payload.(*AssistantMessage)
+	if !ok || settled.Text != "partial reply" || !settled.Partial {
+		t.Fatalf("partial payload = %+v", got[0].payload)
 	}
 }
 
@@ -244,4 +250,12 @@ func TestPendingCodexAssistantDeltasRebuildsAfterRestart(t *testing.T) {
 	if got := pendingCodexAssistantDeltas(events); len(got) != 0 {
 		t.Fatalf("settled pending = %+v", got)
 	}
+}
+
+// testUserMessage is the shape the queue emits for a submitted turn.
+func testUserMessage(id, text string) UserMessage {
+	content, _ := json.Marshal([]map[string]any{{"type": "text", "text": text}})
+	msg := UserMessage{}
+	msg.Id, msg.Content = id, content
+	return msg
 }

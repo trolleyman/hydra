@@ -5221,63 +5221,2143 @@ components:
           items:
             $ref: '#/components/schemas/ArtifactSet'
 
+    # --- Terminal WebSocket (/ws/projects/{id}/agents/{id}/terminal) ----------
+    #
+    # A terminal-mode head's socket carries raw PTY bytes as binary frames and
+    # these control events as text frames. Each member declares its own single
+    # value for `type`, so a client can narrow on it directly.
+
     TerminalEvent:
-      type: object
-      required: [type]
+      description: One server-to-client control event on a terminal-mode socket.
+      oneOf:
+        - $ref: '#/components/schemas/HeadStatusEvent'
+        - $ref: '#/components/schemas/TerminalDataEvent'
+        - $ref: '#/components/schemas/HeadDiffRefreshEvent'
+        - $ref: '#/components/schemas/TerminalSizeEvent'
       discriminator:
         propertyName: type
         mapping:
-          status: '#/components/schemas/TerminalStatusEvent'
+          status: '#/components/schemas/HeadStatusEvent'
           data: '#/components/schemas/TerminalDataEvent'
-          diff_refresh: '#/components/schemas/TerminalDiffRefreshEvent'
+          diff_refresh: '#/components/schemas/HeadDiffRefreshEvent'
           size: '#/components/schemas/TerminalSizeEvent'
+
+    HeadStatusEvent:
+      type: object
+      description: >-
+        The head's computed status changed. Sent on both sockets, so it belongs
+        to both unions rather than being modelled twice.
+      required: [type, status]
       properties:
         type:
           type: string
-          enum: [status, data, diff_refresh, size]
-
-    TerminalDiffRefreshEvent:
-      allOf:
-        - $ref: '#/components/schemas/TerminalEvent'
-        - type: object
-          properties:
-            head_moved:
-              type: boolean
-              description: >-
-                True when this refresh was triggered by a new commit (HEAD
-                moved), as opposed to an uncommitted working-tree change. The
-                diff viewer uses it to also re-snapshot per-commit artifacts
-                (screenshots), which are memoized by commit SHA, while a plain
-                working-tree change only re-fetches the diff text.
-
-    TerminalStatusEvent:
-      allOf:
-        - $ref: '#/components/schemas/TerminalEvent'
-        - type: object
-          properties:
-            status:
-              $ref: '#/components/schemas/AgentStatus'
+          enum: [status]
+        status:
+          $ref: '#/components/schemas/AgentStatus'
 
     TerminalDataEvent:
-      allOf:
-        - $ref: '#/components/schemas/TerminalEvent'
-        - type: object
-          properties:
-            data:
-              type: string
-              description: Base64 encoded binary data or plain string
+      type: object
+      description: A chunk of PTY output, when it is relayed as text rather than binary.
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          enum: [data]
+        data:
+          type: string
+          description: Base64 encoded binary data or plain string
+
+    HeadDiffRefreshEvent:
+      type: object
+      description: >-
+        The worktree changed; the diff viewer should re-fetch. Sent on both
+        sockets, so it belongs to both unions rather than being modelled twice.
+      required: [type, head_moved]
+      properties:
+        type:
+          type: string
+          enum: [diff_refresh]
+        head_moved:
+          type: boolean
+          description: >-
+            True when this refresh was triggered by a new commit (HEAD
+            moved), as opposed to an uncommitted working-tree change. The
+            diff viewer uses it to also re-snapshot per-commit artifacts
+            (screenshots), which are memoized by commit SHA, while a plain
+            working-tree change only re-fetches the diff text.
 
     TerminalSizeEvent:
-      allOf:
-        - $ref: '#/components/schemas/TerminalEvent'
-        - type: object
+      type: object
+      description: >-
+        The PTY's current window size, sent on attach right before the
+        scrollback replay so the client can size its terminal to match. The
+        replayed bytes carry cursor moves and wrapping computed for this
+        width; rendering them at a different width corrupts the history.
+      required: [type, cols, rows]
+      properties:
+        type:
+          type: string
+          enum: [size]
+        cols:
+          type: integer
+        rows:
+          type: integer
+
+    # --- Chat WebSocket (the same /terminal socket, for a chat-mode head) -----
+    #
+    # A chat-mode head's socket carries no PTY bytes: every frame is text, and
+    # every conversation frame carries Hydra's provider-neutral normalized
+    # events (see internal/chat and docs/chat-mode.md). A provider's own payload
+    # rides inside an event's `payload`, where the Raw panel can show it, but it
+    # never determines the wire format.
+
+    ChatEvent:
+      type: object
+      description: >-
+        One durable normalized event. `seq` is per-head, monotonic, and the sole
+        wire and cursor identity - provider object ids stay inside `payload`.
+      required: [seq, type, timestamp]
+      properties:
+        seq:
+          type: integer
+          format: int64
+          x-go-type: uint64
+          description: Per-head sequence number; also the history cursor.
+        source_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
           description: >-
-            The PTY's current window size, sent on attach right before the
-            scrollback replay so the client can size its terminal to match. The
-            replayed bytes carry cursor moves and wrapping computed for this
-            width; rendering them at a different width corrupts the history.
+            Ingestion identity used to deduplicate. Re-reading a transcript
+            window or re-observing a line appends nothing new.
+        type:
+          type: string
+          description: >-
+            The event kind, e.g. conversation_started, user_message,
+            assistant_delta, assistant_message, reasoning_completed,
+            reasoning_duration, tool_started, tool_completed, subagent_started,
+            subagent_completed, plan_updated, commit_created, head_changed,
+            notice, interaction_requested, messages_retracted, turn_started,
+            turn_completed, turn_failed, turn_interrupted.
+        timestamp:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The event's fields, which vary by `type`. Deliberately open: the
+            provider's own recorded entry rides here too, so the Raw panel can
+            show what the provider actually sent.
+
+    ChatTurnState:
+      type: object
+      properties:
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        status:
+          x-go-type-skip-optional-pointer: true
+          type: string
+
+    ChatSubagentState:
+      type: object
+      required: [id]
+      properties:
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        parent_id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The sub-agent that spawned this one; empty for a main-agent spawn.
+        parent_item_id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The tool call that spawned it, so the chat folds it into that card.
+        agent_type:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        description:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        prompt:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        status:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        activity:
+          x-go-type-skip-optional-pointer: true
+          type: string
+
+    ChatStreamState:
+      type: object
+      description: >-
+        The block a response is in the middle of producing, accumulated from
+        every delta no completed message has settled yet. Derived on read, so a
+        client attaching mid-response renders the whole partial block rather
+        than the tail it happens to catch live.
+      required: [kind, text]
+      properties:
+        kind:
+          type: string
+          enum: [text, thinking]
+        message_id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        text:
+          type: string
+
+    ChatQueuedMessage:
+      type: object
+      description: >-
+        A message held daemon-side because a turn was running. It lives only in
+        the queue projection until it drains, at which point it becomes a
+        durable user_message carrying the same id.
+      required: [id, content]
+      properties:
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The client-generated id, used to reconcile the pending bubble.
+        content:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    ChatPendingAsk:
+      type: object
+      description: A question the provider is still blocked on.
+      required: [requestId, toolUseId]
+      properties:
+        requestId:
+          type: string
+        toolUseId:
+          type: string
+
+    ChatProjection:
+      type: object
+      description: >-
+        Bounded current state, folded from the event log and checkpointed with
+        the sequence it was folded through. Complete messages, tool output and
+        sub-agent transcripts stay in the paged log, so this does not grow with
+        the conversation.
+      required: [version, through]
+      properties:
+        version:
+          type: integer
+        through:
+          type: integer
+          format: int64
+          x-go-type: uint64
+          description: The sequence number this projection was folded through.
+        plan:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        subagents:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ChatSubagentState'
+          x-go-type-skip-optional-pointer: true
+        turn:
+          $ref: '#/components/schemas/ChatTurnState'
+        interaction:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        model:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        slash_commands:
+          type: array
+          items:
+            type: string
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The "/" autocomplete list the provider advertised on init. Persisted
+            so it survives a resume - the list is only emitted on the live init
+            line, never in the transcript.
+        usage:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        queue:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ChatQueuedState'
+          x-go-type-skip-optional-pointer: true
+        head:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The Git HEAD the commit reconciler last observed.
+        imports:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+          x-go-type-skip-optional-pointer: true
+        stream:
+          $ref: '#/components/schemas/ChatStreamState'
+
+    ChatQueuedState:
+      type: object
+      required: [id, status, content]
+      properties:
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        status:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        content:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    # --- Normalized event payloads --------------------------------------------
+    #
+    # A ChatEvent's `payload` varies by its `type`. OpenAPI discriminators only
+    # work on a property within the same schema, so `payload` cannot declare a
+    # oneOf keyed on its sibling `type` - modelling that as one union would mean
+    # repeating the envelope 30 times and turning ChatEvent into an opaque
+    # generated union wrapper, which the daemon's event store cannot field-access.
+    #
+    # Instead each payload is a named schema here, the daemon constructs those
+    # types directly, and the browser composes them into a discriminated union in
+    # web/src/lib/chatEvents.ts (thirty lines of `type` aliases over these).
+    #
+    # What stays open is only what the PROVIDER owns: `entry` (its whole recorded
+    # entry, which the Raw panel shows), a tool's `input`/`content`, an
+    # `interaction`, `usage` accounting, and an `error`. Those differ per agent
+    # type and per tool, and pinning them down would mean tracking two CLIs'
+    # release trains in this file.
+
+    ChatProviderEntry:
+      type: object
+      additionalProperties: true
+      description: >-
+        The provider's own recorded entry for this event, with the message
+        content taken out (the payload already carries it, and a tool result can
+        be a megabyte). The chat's Raw panel shows this rather than a handful of
+        fields something thought to copy across, so it is deliberately open.
+
+    ChatProviderContext:
+      type: object
+      description: >-
+        What a provider-derived display event carries besides its own fields: who
+        produced it and where it belongs. Sidechain events are a sub-agent's own
+        steps, folded into that sub-agent's card rather than the main flow.
+
+        Deliberately a separate schema rather than allOf'd into each payload: Go
+        embeds it alongside the payload (encoding/json promotes embedded fields,
+        so the wire stays flat) and TypeScript intersects the two. Flattening it
+        into every payload would mean copying eight fields at every construction
+        site in the daemon.
+      properties:
+        uuid:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The provider's id for the record this came from.
+        sidechain:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+        agent_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The sub-agent whose step this is.
+        parent_item_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The tool call this belongs under.
+        stop_reason:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        cwd:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Where the provider says its shell was left.
+        usage:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: Provider token accounting; the shape differs per provider.
+        entry:
+          $ref: '#/components/schemas/ChatProviderEntry'
+
+    ChatPlanEntry:
+      type: object
+      description: One plan/to-do step. Codex `{step,status}` normalizes to this too.
+      properties:
+        content:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        activeForm:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        description:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatShellResult:
+      type: object
+      description: >-
+        The sandboxed result of a composer "!command", carried on the user_message
+        it settles into so the chat renders a shell card rather than a bubble.
+      required: [command, output, exit_code]
+      properties:
+        command:
+          type: string
+        output:
+          type: string
+        exit_code:
+          type: integer
+        truncated:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+        timed_out:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+        stopped:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+
+    ChatMergedCommit:
+      type: object
+      description: One commit a merge brought in, previewed in the merge chip.
+      properties:
+        sha:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        short_sha:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        subject:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        author_name:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        timestamp:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatConversationStartedPayload:
+      type: object
+      description: The provider announced its session.
+      properties:
+        conversation_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        model:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        api_key_source:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: '"none" means subscription auth, so turn footers hide the notional cost.'
+        slash_commands:
+          type: array
+          items:
+            type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatUserMessagePayload:
+      type: object
+      description: A user turn. Hydra records this at the input boundary.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The client-generated id, so a queued bubble reconciles to it.
+        content:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: Content blocks, or a bare string for a provider command echo.
+        shell:
+          $ref: '#/components/schemas/ChatShellResult'
+
+    ChatUserMessageEchoedPayload:
+      type: object
+      description: >-
+        Reconciles a provider's echo of a message Hydra already recorded. The
+        marker is durable on purpose: without it, two identical messages sent in
+        separate turns cannot be paired correctly after a daemon restart.
+      properties:
+        user_seq:
+          type: integer
+          format: int64
+          x-go-type: uint64
+          x-go-type-skip-optional-pointer: true
+          description: The sequence of the user_message this echo belongs to.
+        content:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    ChatContextMessagePayload:
+      type: object
+      description: >-
+        Machine-injected context that rode in a user envelope but was never
+        typed - a compaction preamble, a skill's auto-loaded body.
+      properties:
+        content:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        is_meta:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+
+    ChatAssistantMessagePayload:
+      type: object
+      description: A settled assistant message; it replaces its streamed preview.
+      properties:
+        message_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        text:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        partial:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+          description: Set when an interrupt settled the deltas received so far.
+
+    ChatReasoningCompletedPayload:
+      type: object
+      description: >-
+        A settled thinking block. Some models expose an empty one and report
+        only a duration, which still renders as "Thought for Xs".
+      properties:
+        message_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        text:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatDeltaPayload:
+      type: object
+      description: >-
+        One token delta. The first opens the live block; the completed message
+        closes and replaces it. Not persisted to the display log.
+      properties:
+        message_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        text:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatItemDeltaPayload:
+      type: object
+      description: One delta against a tool or plan item, keyed by that item's id.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        text:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatReasoningDurationPayload:
+      type: object
+      description: >-
+        The measured duration of a thinking block. Separate from the block
+        itself, because no provider reports it - the daemon times it.
+      properties:
+        message_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        duration_ms:
+          type: integer
+          format: int64
+          x-go-type-skip-optional-pointer: true
+
+    ChatContentStreamPayload:
+      type: object
+      description: A provider content-boundary hint; a state signal, not a card.
+      properties:
+        kind:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatToolStartedPayload:
+      type: object
+      description: A tool call.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        name:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        input:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The provider's own block input, verbatim - the shape is the
+            tool's, so this is where an agent-type-specific payload lives.
+            Codex additionally carries its native item under `_raw`.
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Present on Codex items; its absence is what marks a Claude block.
+        output:
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            Whatever the tool produced, as the provider sent it - a string, an
+            object, an error. Provider-owned, like `input`.
+
+    ChatToolCompletedPayload:
+      type: object
+      description: A tool call's result.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        name:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        content:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: The provider's verbatim result blocks, when it sent any.
+        input:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            Codex reveals semantic tool fields only on completion, so a
+            completed event can carry richer input than its start.
+        output:
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: Whatever the tool produced, as the provider sent it.
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        is_error:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+        patch:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            An Edit's own structuredPatch, so the card renders a diff against
+            the file's real line numbers rather than two loose fragments.
+
+    ChatPlanUpdatedPayload:
+      type: object
+      description: A plan checkpoint. Also folded into the projection.
+      properties:
+        provider:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            Which provider produced it. Claude's Task cards already carry the
+            timeline, so only Codex renders a visible Update Plan card.
+        plan:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatPlanEntry'
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    ChatSubagentPayload:
+      type: object
+      description: >-
+        A sub-agent's lifecycle. subagent_completed is the one completion chip.
+        The tool call that spawned it rides in ChatProviderContext's
+        parent_item_id, which is the same field.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        parent_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        agent_type:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        description:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        prompt:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatTurnPayload:
+      type: object
+      description: A turn boundary - the unit queue draining and head status key off.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        result:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        cost_usd:
+          type: number
+          format: double
+          x-go-type-skip-optional-pointer: true
+        error:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The provider's structured failure. The browser unwraps
+            app-server's nested JSON to show its type, status and message.
+
+    ChatUsageUpdatedPayload:
+      type: object
+      description: >-
+        Token accounting. One carrying a message_id opens a message's count; the
+        rest tick it up, which is what the live working indicator counts.
+      properties:
+        message_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        usage:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    ChatMessagesRetractedPayload:
+      type: object
+      description: >-
+        A safety retry evicted blocks the provider had already streamed. The
+        client must drop these ids or the flagged text lingers.
+      properties:
+        message_ids:
+          type: array
+          items:
+            type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatNoticePayload:
+      type: object
+      description: Harness bookkeeping shown as a compact chip.
+      properties:
+        text:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatInteractionPayload:
+      type: object
+      description: >-
+        The provider is blocked on the user (an AskUserQuestion elicitation), or
+        that request was answered.
+      properties:
+        provider:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        request_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        interaction:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: The provider's own request, forwarded verbatim.
+
+    ChatCommitCreatedPayload:
+      type: object
+      description: >-
+        A commit the reconciler observed. Sequenced in the same log as the tool
+        output that produced it, so the chip cannot render before its cause.
+      properties:
+        sha:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        short_sha:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        subject:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        author_name:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        author_email:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        timestamp:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        head:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        causal_item_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The tool call that produced it, when one is known.
+        is_merge:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+        merged_count:
+          type: integer
+          x-go-type-skip-optional-pointer: true
+        merged_commits:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMergedCommit'
+          x-go-type-skip-optional-pointer: true
+
+    ChatHeadChangedPayload:
+      type: object
+      description: >-
+        HEAD moved without fast-forwarding (a reset, rebase or checkout), so the
+        projection reconciles its visible commit set rather than inventing chips.
+      properties:
+        old_head:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        head:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatQueuedMessagePayload:
+      type: object
+      description: >-
+        A message the daemon is holding because a turn was running. It lives in
+        the queue projection only; when it drains it becomes a durable
+        user_message carrying the same id.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        content:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    ChatQueueMessageRemovedPayload:
+      type: object
+      description: A queued message was recalled or drained, so it leaves the queue.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatModelChangedPayload:
+      type: object
+      description: The active model changed, captured daemon-side.
+      properties:
+        model:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    # --- The event union ------------------------------------------------------
+    #
+    # Which payload each event type carries. This is the mapping the browser
+    # narrows on, and the one the daemon's conformance test checks its typed
+    # events against - so adding an event type here is what makes both sides
+    # agree, rather than each asserting the pairing separately.
+    #
+    # ChatEvent above describes the same wire bytes with `payload` left open.
+    # Both exist because the daemon's event store reads seq/type off every event
+    # and appends it to a log, which needs a concrete struct - and a generated
+    # oneOf is an opaque wrapper it cannot field-access.
+
+    # --- Artifacts WebSocket (/ws/projects/{id}/agents/{id}/artifacts) ---------
+    #
+    # Generation progress for a head's artifact scripts, so the panel reflects a
+    # run as it happens instead of polling.
+
+    ArtifactSide:
+      type: string
+      description: Which side of the comparison a frame belongs to.
+      enum: [left, right]
+      # Pinned: `left`/`right` also appear in GetAgentArtifactsParams, and
+      # oapi-codegen answers a clash by prefixing every value of BOTH enums -
+      # renaming a neighbour that has nothing to do with this socket.
+      x-enum-varnames: [ArtifactSideLeft, ArtifactSideRight]
+
+    ArtifactsFrame:
+      description: One server-to-client frame on the artifacts socket.
+      oneOf:
+        - $ref: '#/components/schemas/ArtifactsSnapshotFrame'
+        - $ref: '#/components/schemas/ArtifactsSetFrame'
+        - $ref: '#/components/schemas/ArtifactsLogFrame'
+        - $ref: '#/components/schemas/ArtifactsProgressFrame'
+        - $ref: '#/components/schemas/ArtifactsFileFrame'
+      discriminator:
+        propertyName: type
+        mapping:
+          snapshot: '#/components/schemas/ArtifactsSnapshotFrame'
+          set: '#/components/schemas/ArtifactsSetFrame'
+          log: '#/components/schemas/ArtifactsLogFrame'
+          progress: '#/components/schemas/ArtifactsProgressFrame'
+          file: '#/components/schemas/ArtifactsFileFrame'
+
+    ArtifactsSnapshotFrame:
+      type: object
+      description: Every script's current set, sent once on connect.
+      required: [type, scripts]
+      properties:
+        type:
+          type: string
+          enum: [snapshot]
+        scripts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactSet'
+
+    ArtifactsSetFrame:
+      type: object
+      description: One script's set changed - a generation settled or was refreshed.
+      required: [type, set]
+      properties:
+        type:
+          type: string
+          enum: [set]
+        set:
+          $ref: '#/components/schemas/ArtifactSet'
+
+    ArtifactsLogFrame:
+      type: object
+      description: One captured log line from a running generation.
+      required: [type, script, side, line]
+      properties:
+        type:
+          type: string
+          enum: [log]
+        script:
+          type: string
+        side:
+          $ref: '#/components/schemas/ArtifactSide'
+        line:
+          $ref: '#/components/schemas/ArtifactLogLine'
+
+    ArtifactsProgressFrame:
+      type: object
+      description: The header progress line changed for one side of a script.
+      required: [type, script, side, progress]
+      properties:
+        type:
+          type: string
+          enum: [progress]
+        script:
+          type: string
+        side:
+          $ref: '#/components/schemas/ArtifactSide'
+        progress:
+          type: string
+
+    ArtifactsFileFrame:
+      type: object
+      description: >-
+        One output file finished and was compared mid-run, so its tile can
+        render before the whole set settles. The client upserts it into the set
+        by name; the authoritative `set` at settle reconciles the list.
+      required: [type, script, file]
+      properties:
+        type:
+          type: string
+          enum: [file]
+        script:
+          type: string
+        file:
+          $ref: '#/components/schemas/ArtifactFile'
+
+    ArtifactsClientMessage:
+      type: object
+      description: >-
+        Client to server. Only `refresh` is supported - regenerate one script,
+        or with a side, just that side, leaving the other cached.
+      required: [type, script]
+      properties:
+        type:
+          type: string
+          enum: [refresh]
+        script:
+          type: string
+        side:
+          allOf:
+            - $ref: '#/components/schemas/ArtifactSide'
+          x-go-type-skip-optional-pointer: true
+
+    # --- Tests WebSocket (/ws/projects/{id}/agents/{id}/tests) -----------------
+
+    TestsFrame:
+      description: One server-to-client frame on the tests socket.
+      oneOf:
+        - $ref: '#/components/schemas/TestsSnapshotFrame'
+        - $ref: '#/components/schemas/TestsRunnerFrame'
+        - $ref: '#/components/schemas/TestsLogFrame'
+        - $ref: '#/components/schemas/TestsProgressFrame'
+        - $ref: '#/components/schemas/TestsCountsFrame'
+      discriminator:
+        propertyName: type
+        mapping:
+          snapshot: '#/components/schemas/TestsSnapshotFrame'
+          runner: '#/components/schemas/TestsRunnerFrame'
+          log: '#/components/schemas/TestsLogFrame'
+          progress: '#/components/schemas/TestsProgressFrame'
+          counts: '#/components/schemas/TestsCountsFrame'
+
+    TestsSnapshotFrame:
+      type: object
+      description: Every runner's current verdict, sent once on connect.
+      required: [type, runners]
+      properties:
+        type:
+          type: string
+          enum: [snapshot]
+        runners:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestRunResult'
+
+    TestsRunnerFrame:
+      type: object
+      description: One runner's verdict changed.
+      required: [type, runner]
+      properties:
+        type:
+          type: string
+          enum: [runner]
+        runner:
+          $ref: '#/components/schemas/TestRunResult'
+
+    TestsLogFrame:
+      type: object
+      description: One captured log line from a running runner.
+      required: [type, name, line]
+      properties:
+        type:
+          type: string
+          enum: [log]
+        name:
+          type: string
+        line:
+          $ref: '#/components/schemas/ArtifactLogLine'
+
+    TestsProgressFrame:
+      type: object
+      description: The header progress line changed for one runner.
+      required: [type, name, progress]
+      properties:
+        type:
+          type: string
+          enum: [progress]
+        name:
+          type: string
+        progress:
+          type: string
+
+    TestsCountsFrame:
+      type: object
+      description: Running totals for one runner, mid-run.
+      required: [type, name, counts]
+      properties:
+        type:
+          type: string
+          enum: [counts]
+        name:
+          type: string
+        counts:
+          $ref: '#/components/schemas/TestsCounts'
+
+    TestsCounts:
+      type: object
+      description: >-
+        Authoritative running totals - not deltas - plus the newly-appended
+        cases the client merges into its case list.
+      required: [passed, failed, skipped, warnings, total]
+      properties:
+        passed:
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        warnings:
+          type: integer
+        total:
+          type: integer
+          description: The denominator; 0 means unknown.
+        total_estimated:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The total is an estimate carried from a prior run, because this one
+            emitted no ::hydra:test:total:: marker.
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestCase'
+          x-go-type-skip-optional-pointer: true
+
+    TestsClientMessage:
+      type: object
+      description: Client to server. Only `refresh` is supported - re-run one runner.
+      required: [type, name]
+      properties:
+        type:
+          type: string
+          enum: [refresh]
+        name:
+          type: string
+
+    # --- Events WebSocket (/ws/projects/{id}/events) ---------------------------
+    #
+    # Change signals for one project, so the UI refetches on demand rather than
+    # polling. Most frames name a resource and carry nothing; the client runs the
+    # corresponding fetch. On connect the server sends one of each, so a client
+    # that missed changes while away refetches everything once.
+
+    ProjectEventFrame:
+      description: >-
+        One change signal. No `discriminator` here: the four bare refetch nudges
+        share one schema, and a discriminator mapping several type values onto
+        the same member is not expressible - openapi-typescript-codegen collapses
+        the enum to whichever mapping it saw last. A plain oneOf narrows on
+        `type` correctly because every member's is a literal or a closed enum.
+      oneOf:
+        - $ref: '#/components/schemas/ResourceChangedEvent'
+        - $ref: '#/components/schemas/AgentTestsChangedEvent'
+        - $ref: '#/components/schemas/AgentStatusChangedEvent'
+
+    ResourceChangedEvent:
+      type: object
+      description: A resource changed; refetch it. Carries no payload.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [agents_changed, projects_changed, services_changed, push_status_changed]
+
+    AgentTestsChangedEvent:
+      type: object
+      description: >-
+        One agent's test counts moved mid-run, so the sidebar chips can tick
+        without refetching the agent list.
+      required: [type, agent_id]
+      properties:
+        type:
+          type: string
+          enum: [agent_tests_changed]
+        agent_id:
+          type: string
+        tests:
+          $ref: '#/components/schemas/TestSummary'
+
+    AgentStatusChangedEvent:
+      type: object
+      description: One agent's live status bundle changed.
+      required: [type, agent_id]
+      properties:
+        type:
+          type: string
+          enum: [agent_status_changed]
+        agent_id:
+          type: string
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        activity:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        last_message:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        last_message_is_suggested:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+
+    # --- Server-update WebSocket (/ws/server/update) ---------------------------
+    #
+    # The progress of a self-update, streamed while the server rebuilds itself.
+    #
+    # How the connection ENDS is part of the contract: on success the server
+    # re-execs, so the socket dies mid-stream with no `done` frame. A client must
+    # read "closed after the restarting phase" as success and switch to polling
+    # /health. A failure sends `done` with an error and the server stays up,
+    # because nothing was swapped.
+
+    ServerUpdatePhase:
+      type: string
+      description: The stage an update has reached.
+      enum: [building, verifying, swapping, restarting]
+      # Named explicitly because `building` also appears in AgentStatus, and
+      # oapi-codegen answers a clash by prefixing every value of BOTH enums -
+      # silently renaming api.Running and friends across the codebase.
+      x-enum-varnames:
+        - ServerUpdatePhaseBuilding
+        - ServerUpdatePhaseVerifying
+        - ServerUpdatePhaseSwapping
+        - ServerUpdatePhaseRestarting
+
+    ServerUpdateEvent:
+      type: object
+      description: >-
+        One frame of an update's progress, flat: the daemon constructs and fans
+        these out internally, so it needs one struct rather than the union below.
+        Both describe the same wire bytes.
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [phase, log, done]
+        phase:
+          allOf:
+            - $ref: '#/components/schemas/ServerUpdatePhase'
+          x-go-type-skip-optional-pointer: true
+        line:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: One line of build output.
+        error:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Set on a failed `done` frame; empty means success.
+
+    ServerUpdateFrame:
+      description: >-
+        One frame, narrowed by its kind to the field that kind carries. What the
+        browser reads.
+      oneOf:
+        - $ref: '#/components/schemas/ServerUpdatePhaseFrame'
+        - $ref: '#/components/schemas/ServerUpdateLogFrame'
+        - $ref: '#/components/schemas/ServerUpdateDoneFrame'
+      discriminator:
+        propertyName: kind
+        mapping:
+          phase: '#/components/schemas/ServerUpdatePhaseFrame'
+          log: '#/components/schemas/ServerUpdateLogFrame'
+          done: '#/components/schemas/ServerUpdateDoneFrame'
+
+    ServerUpdatePhaseFrame:
+      type: object
+      description: The update reached a new stage.
+      required: [kind, phase]
+      properties:
+        kind:
+          type: string
+          enum: [phase]
+          x-enum-varnames: [ServerUpdatePhaseFrameKindPhase]
+        phase:
+          $ref: '#/components/schemas/ServerUpdatePhase'
+
+    ServerUpdateLogFrame:
+      type: object
+      description: One line of build output.
+      required: [kind, line]
+      properties:
+        kind:
+          type: string
+          enum: [log]
+          x-enum-varnames: [ServerUpdateLogFrameKindLog]
+        line:
+          type: string
+
+    ServerUpdateDoneFrame:
+      type: object
+      description: >-
+        The update finished without restarting - which in practice means it
+        failed, since a success re-execs instead of sending this.
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [done]
+          x-enum-varnames: [ServerUpdateDoneFrameKindDone]
+        error:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Empty means success.
+
+    ChatEventEnvelope:
+      type: object
+      description: The fields every event carries, whatever its type.
+      required: [seq, timestamp]
+      properties:
+        seq:
+          type: integer
+          format: int64
+          x-go-type: uint64
+          description: Per-head sequence number; also the history cursor.
+        source_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Ingestion identity used to deduplicate.
+        timestamp:
+          type: string
+          format: date-time
+
+    ChatEventUnion:
+      description: One normalized event, narrowed by its type to the payload it carries.
+      oneOf:
+        - $ref: '#/components/schemas/ConversationStartedEvent'
+        - $ref: '#/components/schemas/UserMessageEvent'
+        - $ref: '#/components/schemas/UserMessageEchoedEvent'
+        - $ref: '#/components/schemas/ContextMessageEvent'
+        - $ref: '#/components/schemas/AssistantMessageEvent'
+        - $ref: '#/components/schemas/AssistantDeltaEvent'
+        - $ref: '#/components/schemas/ReasoningCompletedEvent'
+        - $ref: '#/components/schemas/ReasoningDeltaEvent'
+        - $ref: '#/components/schemas/ReasoningDurationEvent'
+        - $ref: '#/components/schemas/ContentStreamStartedEvent'
+        - $ref: '#/components/schemas/ContentStreamCompletedEvent'
+        - $ref: '#/components/schemas/ToolStartedEvent'
+        - $ref: '#/components/schemas/ToolCompletedEvent'
+        - $ref: '#/components/schemas/ToolDeltaEvent'
+        - $ref: '#/components/schemas/PlanUpdatedEvent'
+        - $ref: '#/components/schemas/PlanDeltaEvent'
+        - $ref: '#/components/schemas/SubagentStartedEvent'
+        - $ref: '#/components/schemas/SubagentUpdatedEvent'
+        - $ref: '#/components/schemas/SubagentCompletedEvent'
+        - $ref: '#/components/schemas/TurnStartedEvent'
+        - $ref: '#/components/schemas/TurnCompletedEvent'
+        - $ref: '#/components/schemas/TurnFailedEvent'
+        - $ref: '#/components/schemas/TurnInterruptedEvent'
+        - $ref: '#/components/schemas/TurnErrorEvent'
+        - $ref: '#/components/schemas/UsageUpdatedEvent'
+        - $ref: '#/components/schemas/MessagesRetractedEvent'
+        - $ref: '#/components/schemas/NoticeEvent'
+        - $ref: '#/components/schemas/InteractionRequestedEvent'
+        - $ref: '#/components/schemas/InteractionResolvedEvent'
+        - $ref: '#/components/schemas/CommitCreatedEvent'
+        - $ref: '#/components/schemas/HeadChangedEvent'
+        - $ref: '#/components/schemas/HeadObservedEvent'
+        - $ref: '#/components/schemas/ModelChangedEvent'
+        - $ref: '#/components/schemas/QueuedMessageEvent'
+        - $ref: '#/components/schemas/QueueMessageRemovedEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          conversation_started: '#/components/schemas/ConversationStartedEvent'
+          user_message: '#/components/schemas/UserMessageEvent'
+          user_message_echoed: '#/components/schemas/UserMessageEchoedEvent'
+          context_message: '#/components/schemas/ContextMessageEvent'
+          assistant_message: '#/components/schemas/AssistantMessageEvent'
+          assistant_delta: '#/components/schemas/AssistantDeltaEvent'
+          reasoning_completed: '#/components/schemas/ReasoningCompletedEvent'
+          reasoning_delta: '#/components/schemas/ReasoningDeltaEvent'
+          reasoning_duration: '#/components/schemas/ReasoningDurationEvent'
+          content_stream_started: '#/components/schemas/ContentStreamStartedEvent'
+          content_stream_completed: '#/components/schemas/ContentStreamCompletedEvent'
+          tool_started: '#/components/schemas/ToolStartedEvent'
+          tool_completed: '#/components/schemas/ToolCompletedEvent'
+          tool_delta: '#/components/schemas/ToolDeltaEvent'
+          plan_updated: '#/components/schemas/PlanUpdatedEvent'
+          plan_delta: '#/components/schemas/PlanDeltaEvent'
+          subagent_started: '#/components/schemas/SubagentStartedEvent'
+          subagent_updated: '#/components/schemas/SubagentUpdatedEvent'
+          subagent_completed: '#/components/schemas/SubagentCompletedEvent'
+          turn_started: '#/components/schemas/TurnStartedEvent'
+          turn_completed: '#/components/schemas/TurnCompletedEvent'
+          turn_failed: '#/components/schemas/TurnFailedEvent'
+          turn_interrupted: '#/components/schemas/TurnInterruptedEvent'
+          turn_error: '#/components/schemas/TurnErrorEvent'
+          usage_updated: '#/components/schemas/UsageUpdatedEvent'
+          messages_retracted: '#/components/schemas/MessagesRetractedEvent'
+          notice: '#/components/schemas/NoticeEvent'
+          interaction_requested: '#/components/schemas/InteractionRequestedEvent'
+          interaction_resolved: '#/components/schemas/InteractionResolvedEvent'
+          commit_created: '#/components/schemas/CommitCreatedEvent'
+          head_changed: '#/components/schemas/HeadChangedEvent'
+          head_observed: '#/components/schemas/HeadObservedEvent'
+          model_changed: '#/components/schemas/ModelChangedEvent'
+          queued_message: '#/components/schemas/QueuedMessageEvent'
+          queue_message_removed: '#/components/schemas/QueueMessageRemovedEvent'
+
+    ConversationStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
           properties:
-            cols:
-              type: integer
-            rows:
-              type: integer
+            type:
+              type: string
+              enum: [conversation_started]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatConversationStartedPayload'
+
+    UserMessageEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [user_message]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatUserMessagePayload'
+
+    UserMessageEchoedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [user_message_echoed]
+            payload:
+              $ref: '#/components/schemas/ChatUserMessageEchoedPayload'
+
+    ContextMessageEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [context_message]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatContextMessagePayload'
+
+    AssistantMessageEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [assistant_message]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatAssistantMessagePayload'
+
+    AssistantDeltaEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [assistant_delta]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatDeltaPayload'
+
+    ReasoningCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [reasoning_completed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatReasoningCompletedPayload'
+
+    ReasoningDeltaEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [reasoning_delta]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatDeltaPayload'
+
+    ReasoningDurationEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [reasoning_duration]
+            payload:
+              $ref: '#/components/schemas/ChatReasoningDurationPayload'
+
+    ContentStreamStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [content_stream_started]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatContentStreamPayload'
+
+    ContentStreamCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [content_stream_completed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatContentStreamPayload'
+
+    ToolStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [tool_started]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatToolStartedPayload'
+
+    ToolCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [tool_completed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatToolCompletedPayload'
+
+    ToolDeltaEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [tool_delta]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatItemDeltaPayload'
+
+    PlanUpdatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [plan_updated]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatPlanUpdatedPayload'
+
+    PlanDeltaEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [plan_delta]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatItemDeltaPayload'
+
+    SubagentStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [subagent_started]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatSubagentPayload'
+
+    SubagentUpdatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [subagent_updated]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatSubagentPayload'
+
+    SubagentCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [subagent_completed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatSubagentPayload'
+
+    TurnStartedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [turn_started]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatTurnPayload'
+
+    TurnCompletedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [turn_completed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatTurnPayload'
+
+    TurnFailedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [turn_failed]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatTurnPayload'
+
+    TurnInterruptedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [turn_interrupted]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatTurnPayload'
+
+    TurnErrorEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [turn_error]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatTurnPayload'
+
+    UsageUpdatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [usage_updated]
+            payload:
+              $ref: '#/components/schemas/ChatUsageUpdatedPayload'
+
+    MessagesRetractedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [messages_retracted]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatMessagesRetractedPayload'
+
+    NoticeEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [notice]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatNoticePayload'
+
+    InteractionRequestedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [interaction_requested]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatInteractionPayload'
+
+    InteractionResolvedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [interaction_resolved]
+            payload:
+              allOf:
+                - $ref: '#/components/schemas/ChatProviderContext'
+                - $ref: '#/components/schemas/ChatInteractionPayload'
+
+    CommitCreatedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [commit_created]
+            payload:
+              $ref: '#/components/schemas/ChatCommitCreatedPayload'
+
+    HeadChangedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [head_changed]
+            payload:
+              $ref: '#/components/schemas/ChatHeadChangedPayload'
+
+    HeadObservedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [head_observed]
+            payload:
+              $ref: '#/components/schemas/ChatHeadChangedPayload'
+
+    ModelChangedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [model_changed]
+            payload:
+              $ref: '#/components/schemas/ChatModelChangedPayload'
+
+    QueuedMessageEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [queued_message]
+            payload:
+              $ref: '#/components/schemas/ChatQueuedMessagePayload'
+
+    QueueMessageRemovedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [queue_message_removed]
+            payload:
+              $ref: '#/components/schemas/ChatQueueMessageRemovedPayload'
+
+    ChatFrame:
+      description: >-
+        One server-to-client frame on a chat-mode socket. Each member declares
+        its own single value for `type`, so a client narrows on it directly.
+      oneOf:
+        - $ref: '#/components/schemas/HeadStatusEvent'
+        - $ref: '#/components/schemas/HeadDiffRefreshEvent'
+        - $ref: '#/components/schemas/ChatStateSnapshotFrame'
+        - $ref: '#/components/schemas/ChatHistoryFrame'
+        - $ref: '#/components/schemas/ChatEventFrame'
+        - $ref: '#/components/schemas/ChatSubagentEventsFrame'
+        - $ref: '#/components/schemas/ChatReplayDoneFrame'
+        - $ref: '#/components/schemas/ChatQueueFrame'
+        - $ref: '#/components/schemas/ChatPendingQuestionsFrame'
+        - $ref: '#/components/schemas/ChatQuestionExpiredFrame'
+        - $ref: '#/components/schemas/ChatShellOutputFrame'
+        - $ref: '#/components/schemas/ChatTaskOutputFrame'
+        - $ref: '#/components/schemas/ChatErrorFrame'
+      discriminator:
+        propertyName: type
+        mapping:
+          status: '#/components/schemas/HeadStatusEvent'
+          diff_refresh: '#/components/schemas/HeadDiffRefreshEvent'
+          state_snapshot: '#/components/schemas/ChatStateSnapshotFrame'
+          chat_history: '#/components/schemas/ChatHistoryFrame'
+          chat_event: '#/components/schemas/ChatEventFrame'
+          subagent_events: '#/components/schemas/ChatSubagentEventsFrame'
+          replay_done: '#/components/schemas/ChatReplayDoneFrame'
+          queue: '#/components/schemas/ChatQueueFrame'
+          pending_questions: '#/components/schemas/ChatPendingQuestionsFrame'
+          question_expired: '#/components/schemas/ChatQuestionExpiredFrame'
+          shell_output: '#/components/schemas/ChatShellOutputFrame'
+          task_output: '#/components/schemas/ChatTaskOutputFrame'
+          chat_error: '#/components/schemas/ChatErrorFrame'
+
+    ChatStateSnapshotFrame:
+      type: object
+      description: >-
+        The head's current state, sent first on attach. Taken with the history
+        watermark under one lock, so a plan or sub-agent cannot change between
+        snapshotting and subscribing.
+      required: [type, state]
+      properties:
+        type:
+          type: string
+          enum: [state_snapshot]
+        state:
+          $ref: '#/components/schemas/ChatProjection'
+
+    ChatHistoryFrame:
+      type: object
+      description: >-
+        One page of durable history, oldest-first. Answers the initial window
+        and every load_events_before. Paging is display-only: an older page
+        never rewinds the state_snapshot projection.
+      required: [type, events, done]
+      properties:
+        type:
+          type: string
+          enum: [chat_history]
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatEvent'
+        next_cursor:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The cursor to ask for the page before this one.
+        done:
+          type: boolean
+          description: True once the log's beginning has been reached.
+
+    ChatEventFrame:
+      type: object
+      description: One live normalized event.
+      required: [type, event]
+      properties:
+        type:
+          type: string
+          enum: [chat_event]
+        event:
+          $ref: '#/components/schemas/ChatEvent'
+
+    ChatSubagentEventsFrame:
+      type: object
+      description: >-
+        One sub-agent's full step history, answering load_subagent. Not
+        paginated: a sub-agent's steps may sit entirely outside the loaded
+        main-conversation window.
+      required: [type, agentId, events]
+      properties:
+        type:
+          type: string
+          enum: [subagent_events]
+        agentId:
+          type: string
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatEvent'
+
+    ChatReplayDoneFrame:
+      type: object
+      description: The initial window has been delivered; everything after this is live.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [replay_done]
+
+    ChatQueueFrame:
+      type: object
+      description: >-
+        The daemon's authoritative snapshot of still-queued messages, sent after
+        replay_done and on reconnect.
+      required: [type, messages]
+      properties:
+        type:
+          type: string
+          enum: [queue]
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatQueuedMessage'
+
+    ChatPendingQuestionsFrame:
+      type: object
+      description: >-
+        Which question cards can still be answered. A question's request id is
+        durable and replays forever, but the request behind it dies with the
+        turn that raised it, so the client cannot tell a live card from a dead
+        one on its own. An empty list is a definite none; the frame being
+        omitted entirely means the daemon cannot say.
+      required: [type, requests]
+      properties:
+        type:
+          type: string
+          enum: [pending_questions]
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatPendingAsk'
+
+    ChatQuestionExpiredFrame:
+      type: object
+      description: >-
+        An answer was dropped because its request had already been retired. The
+        card flips to expired rather than settling on an "Answered" that never
+        was.
+      required: [type, requestId]
+      properties:
+        type:
+          type: string
+          enum: [question_expired]
+        requestId:
+          type: string
+
+    ChatShellOutputFrame:
+      type: object
+      description: >-
+        A live chunk of a running composer "!command", keyed by the send frame's
+        id. Ephemeral - the durable record is the user_message it settles into.
+      required: [type, id, chunk]
+      properties:
+        type:
+          type: string
+          enum: [shell_output]
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        chunk:
+          type: string
+
+    ChatTaskOutputFrame:
+      type: object
+      description: The tail of a background task's output file, or why it could not be read.
+      required: [type, file]
+      properties:
+        type:
+          type: string
+          enum: [task_output]
+        file:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        content:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        error:
+          x-go-type-skip-optional-pointer: true
+          type: string
+
+    ChatErrorFrame:
+      type: object
+      description: >-
+        This head's normalized event log could not be opened, so the connection
+        will render nothing. There is no fallback to degrade to, and an empty
+        transcript is indistinguishable from a head that never spoke.
+      required: [type, error]
+      properties:
+        type:
+          type: string
+          enum: [chat_error]
+        error:
+          x-go-type-skip-optional-pointer: true
+          type: string
+
+    ChatClientMessage:
+      type: object
+      description: >-
+        One client-to-server frame on a chat-mode socket. Flat rather than a
+        union: `type` selects which of the optional fields carry meaning.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum:
+            - user_message
+            - interrupt
+            - set_model
+            - control_response
+            - shell_command
+            - shell_stop
+            - dequeue
+            - load_events_before
+            - load_subagent
+            - task_output
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: >-
+            The client-generated id of a user_message, or the dequeue/shell_stop
+            target, so a queued message can be reconciled and recalled.
+        queued:
+          x-go-type-skip-optional-pointer: true
+          type: boolean
+          description: >-
+            Set on a user_message sent while a turn runs: the daemon HOLDS it
+            rather than delivering now, and drains it when the turn ends.
+        cursor:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: >-
+            The history cursor of a load_events_before request - the daemon
+            returns the batch older than it.
+        limit:
+          x-go-type-skip-optional-pointer: true
+          type: integer
+        content:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            A user_message's content blocks, forwarded to the provider verbatim.
+        model:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The set_model target (a provider alias like "sonnet").
+        command:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: >-
+            The shell command of a shell_command frame (the text after the
+            composer's leading "!"), run in the head's sandbox.
+        response:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: A control_response payload, e.g. AskUserQuestion answers.
+        file:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: >-
+            The output-file path of a task_output request, as the SANDBOXED
+            agent saw it.
+        sub_id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The sub-agent whose full step history the client wants.

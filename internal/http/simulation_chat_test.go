@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"strconv"
 	"testing"
 )
@@ -12,16 +13,16 @@ import (
 // in order, with no gap or repeat at a page boundary.
 func TestSimChatHistoryPagesTheWholeLog(t *testing.T) {
 	const limit = 17 // deliberately not a divisor of the log length
-	var seen []int
+	var seen []uint64
 	cursor := 0
 	for page := 0; ; page++ {
 		if page > len(simChatLog) {
 			t.Fatal("paging never reached the start of the log")
 		}
 		events, next, done := simChatHistoryPage(cursor, limit)
-		var seqs []int
+		var seqs []uint64
 		for _, ev := range events {
-			seqs = append(seqs, ev["seq"].(int))
+			seqs = append(seqs, ev.Seq)
 		}
 		seen = append(seqs, seen...)
 		if done {
@@ -39,7 +40,7 @@ func TestSimChatHistoryPagesTheWholeLog(t *testing.T) {
 		t.Fatalf("paged %d events, want the whole log (%d)", len(seen), len(simChatLog))
 	}
 	for i, seq := range seen {
-		if seq != i+1 {
+		if seq != uint64(i+1) {
 			t.Fatalf("event %d has seq %d, want the log walked in order with no gaps", i, seq)
 		}
 	}
@@ -52,7 +53,7 @@ func TestSimChatHistoryOpensOnTheNewestEvents(t *testing.T) {
 	if len(events) != simChatWindow {
 		t.Fatalf("initial window holds %d events, want %d", len(events), simChatWindow)
 	}
-	if last := events[len(events)-1]["seq"].(int); last != len(simChatLog) {
+	if last := events[len(events)-1].Seq; last != uint64(len(simChatLog)) {
 		t.Fatalf("initial window ends at seq %d, want the newest event (%d)", last, len(simChatLog))
 	}
 	if done {
@@ -68,17 +69,28 @@ func TestSimChatHistoryOpensOnTheNewestEvents(t *testing.T) {
 func TestSimChatEverySubagentHasSteps(t *testing.T) {
 	steps := map[string]int{}
 	for _, ev := range simChatLog {
-		payload, _ := ev["payload"].(map[string]any)
-		if agentID, _ := payload["agent_id"].(string); agentID != "" {
-			steps[agentID]++
+		var payload struct {
+			ID      string `json:"id"`
+			AgentID string `json:"agent_id"`
+		}
+		if json.Unmarshal(ev.Payload, &payload) != nil {
+			continue
+		}
+		if payload.AgentID != "" {
+			steps[payload.AgentID]++
 		}
 	}
 	for _, ev := range simChatLog {
-		if ev["type"] != "subagent_started" {
+		if ev.Type != "subagent_started" {
 			continue
 		}
-		payload, _ := ev["payload"].(map[string]any)
-		id, _ := payload["id"].(string)
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(ev.Payload, &payload) != nil {
+			continue
+		}
+		id := payload.ID
 		if steps[id] == 0 {
 			t.Errorf("sub-agent %q has no steps in the log, so its tab would open empty", id)
 		}
@@ -89,15 +101,15 @@ func TestSimChatEverySubagentHasSteps(t *testing.T) {
 // must read as finished in the snapshot - including the resumed background one,
 // whose completion is normalized BEFORE the event that introduces it.
 func TestSimChatProjectionSettlesFinishedSubagents(t *testing.T) {
-	subagents, _ := simChatProjection()["subagents"].(map[string]any)
+	subagents := simChatProjection().Subagents
 	for _, id := range []string{"sim_sub_resumed_bg", "sim_sub_nest", "sim_sub_nest_child"} {
-		state, ok := subagents[id].(map[string]any)
+		state, ok := subagents[id]
 		if !ok {
 			t.Errorf("sub-agent %q missing from the snapshot", id)
 			continue
 		}
-		if state["status"] != "completed" {
-			t.Errorf("sub-agent %q status = %v, want completed", id, state["status"])
+		if state.Status != "completed" {
+			t.Errorf("sub-agent %q status = %v, want completed", id, state.Status)
 		}
 	}
 }

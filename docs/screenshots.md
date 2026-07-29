@@ -90,16 +90,52 @@ starts failing here, fix the spec rather than loosening the selector.
 
 **Chromium needs the egress proxy handed to it explicitly.** Every browser launch
 here spreads `proxyLaunchOptions()` (`web/scripts/lib/browserProxy.ts`) into its
-options, and it must. curl, node and git read `HTTPS_PROXY` from the environment;
-Chromium does not, so inside a sandboxed head it resolves names itself in a
-network namespace with no resolver and every external request dies with
-`ERR_NAME_NOT_RESOLVED`. That silently cost the shots their webfonts - Merriweather
-and Roboto Flex come from `fonts.googleapis.com`, which was on the allow-list and
-reachable all along - so a screenshot generated in a head rendered in fallback
-fonts while the same script on the host rendered correctly. The helper's loopback
-bypass is equally load-bearing: Playwright appends Chromium's `<-loopback>` when a
-proxy is set, undoing its built-in "never proxy loopback" rule, which would
-otherwise send the simulation server's own traffic to the proxy.
+options. curl, node and git read `HTTPS_PROXY` from the environment; Chromium
+does not, so inside a sandboxed head it resolves names itself in a network
+namespace with no resolver and every external request dies with
+`ERR_NAME_NOT_RESOLVED`. The helper's loopback bypass is equally load-bearing:
+Playwright appends Chromium's `<-loopback>` when a proxy is set, undoing its
+built-in "never proxy loopback" rule, which would otherwise send the simulation
+server's own traffic to the proxy.
+
+**The shots no longer need the network for fonts, and that is deliberate.** Every
+family is self-hosted (`scripts/build-fonts.ts`), so a capture makes zero
+external requests. It used to fetch nine families from `fonts.googleapis.com` on
+every run, which cost two distinct bugs:
+
+- **Flapping diffs.** A face that arrived late, or not at all, left the page in a
+  fallback with different metrics - Fira Code measures 7.0px per character cell
+  against the fallback's 6.6px - so every xterm row shifted and the terminal
+  panels "changed" between runs with no UI change behind it.
+- **Shots timing out.** A render-blocking stylesheet on a host the sandbox cannot
+  reach does not fail fast; `page.goto` waited out its 30s and the shot failed.
+
+Two earlier attempts treated the symptom: an in-process font cache
+(`lib/fontCache.ts`, since removed) shared the fetch across the ~80 contexts a run
+creates, and aborted a failed fetch so it would fall back rather than hang - which
+made the silent-fallback render *more* likely, not less. Vendoring removes the
+class: there is nothing to race and nothing to time out.
+
+**Running animations are jumped to their end before every capture.** The injected
+`animation:none;transition:none` stylesheet only reaches CSS - a Web Animation
+started with `element.animate()` ignores it entirely, and the lightbox's FLIP
+flight (`src/lib/lightboxFlip.ts`) is exactly that. So `settle()` walks
+`document.getAnimations()` and finishes each one (cancelling the endless ones,
+which have no end state to jump to). Without it the same picture came out 28px
+wide one run and 171px the next - `spawn-image-lightbox-dark` and
+`artifact-image-lightbox-dark` caught the flight at different points, which reads
+as a real layout change and is not one. `waitForStableRect` covers the other half
+of that problem (a box that moves AFTER settle returns, from an async measure);
+this covers the box that is still moving when it is called.
+
+`settle()` still verifies it. It explicitly requests each family in
+`REQUIRED_FONTS` and then *checks* it arrived, because `document.fonts.ready`
+answers neither question on its own - it settles only faces the page has already
+asked for (one used by a panel that mounts later, an xterm, may not be among
+them), and it resolves the same way when a request failed. With the fonts in the
+binary that check should never fire; if it does, something is wrong with the
+build rather than the network, and failing the run beats shipping a shot whose
+text metrics are wrong.
 
 The generator emits a `::hydra:artifact:: <name>.png` marker after writing each
 shot, so its tiles **stream** into the diff viewer as they render rather than

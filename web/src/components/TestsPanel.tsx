@@ -7,7 +7,7 @@ import { PanelError } from './PanelError'
 import type { TestRunResult } from '../api/models/TestRunResult'
 import type { TestCase } from '../api/models/TestCase'
 import { TestCaseStatus } from '../api/models/TestCaseStatus'
-import type { ArtifactLogLine } from '../api'
+import type { ArtifactLogLine, TestsFrame } from '../api'
 import { TONE_BADGE, verdictTone } from './badgeTones'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { CollapseSlide } from './CollapseSlide'
@@ -40,23 +40,10 @@ import {
   computeVisibleCases, computeStatusCounts,
 } from '../lib/testFilterPrefs'
 
-// Server→client message on the tests WebSocket. Mirrors internal/http/tests_ws.go.
-// Single-sided (no before/after), so a runner is addressed by name alone.
-type TestWSCounts = {
-  passed: number
-  failed: number
-  skipped: number
-  warnings: number
-  total: number // denominator, 0 = unknown
-  total_estimated?: boolean // total is a carried-over estimate (no ::hydra:test:total::)
-  cases?: TestCase[]
-}
-type TestWSMessage =
-  | { type: 'snapshot'; runners: TestRunResult[] }
-  | { type: 'runner'; runner: TestRunResult }
-  | { type: 'log'; name: string; line: ArtifactLogLine }
-  | { type: 'progress'; name: string; progress: string }
-  | { type: 'counts'; name: string; counts: TestWSCounts }
+// The socket's frames are declared in api/openapi.yaml and generated for both
+// the daemon and here, so a frame the server sends and one this panel narrows
+// on cannot drift. Single-sided (no before/after), so a runner is addressed by
+// name alone.
 
 function testsWsUrl(projectId: string, agentId: string, headRef?: string, includeUncommitted?: boolean): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -134,7 +121,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
   })
 
   // Apply a server→client WS message to local state.
-  const applyMessage = useCallback((msg: TestWSMessage) => {
+  const applyMessage = useCallback((msg: TestsFrame) => {
     if (msg.type === 'log') {
       enqueueLog(msg.name, msg.line)
       return
@@ -191,7 +178,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
     ws.onopen = () => { if (!cancelled) setMode('ws') }
     ws.onmessage = (e) => {
       if (cancelled) return
-      try { applyMessage(JSON.parse(e.data) as TestWSMessage) } catch { /* ignore malformed frames */ }
+      try { applyMessage(JSON.parse(e.data) as TestsFrame) } catch { /* ignore malformed frames */ }
     }
     ws.onclose = () => {
       wsRef.current = null

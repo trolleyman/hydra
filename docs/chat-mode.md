@@ -9,13 +9,85 @@ mode for any other agent type.
 Both providers converge on one contract. The daemon normalizes every provider
 line into Hydra's own sequenced event log (`internal/chat`), and that log is the
 only thing a chat socket carries. Nothing provider-shaped reaches the browser as
-transport: a provider's own payload rides *inside* a normalized event, where the
+transport: a provider's own payload rides *inside* a Hydra event, where the
 Raw panel can show it, but it never determines the wire format or the reducer.
 
-## The wire protocol
+## Every socket is declared in the schema
+
+Hydra serves five WebSockets, and all of them follow one rule: their frames are
+declared in `api/openapi.yaml` and generated for both the daemon
+(`internal/api`) and the browser (`web/src/api/models`), so a frame the server
+writes and one the client narrows on cannot drift.
+
+| Socket | Union | Carries |
+| --- | --- | --- |
+| `/ws/.../terminal` (terminal head) | `TerminalEvent` | PTY output, size, status, diff refresh |
+| `/ws/.../terminal` (chat head) | `ChatFrame` | the conversation - see below |
+| `/ws/.../artifacts` | `ArtifactsFrame` | generation progress, live log, finished tiles |
+| `/ws/.../tests` | `TestsFrame` | runner verdicts, live log, running counts |
+| `/ws/projects/{id}/events` | `ProjectEventFrame` | change signals, so the UI refetches on demand |
+| `/ws/server/update` | `ServerUpdateFrame` | self-update progress (docs/deployment.md) |
+
+Each member declares its own single value for `type`, and the parent is a
+`oneOf`, so the generated TypeScript is a real discriminated union: `switch
+(frame.type)` narrows to that member with no casts, and Go gets a constant per
+frame. `writeFrame` in `internal/http/terminal.go` is the one place a frame
+becomes bytes.
+
+Two traps worth knowing before adding a sixth:
+
+- **Enum names are global.** oapi-codegen gives an enum short constant names
+  only while they are unique across the whole spec, and answers a clash by
+  prefixing every value of BOTH enums - silently renaming a neighbour that has
+  nothing to do with your socket. Pin yours with `x-enum-varnames` when the
+  values are generic (`left`, `building`, `log`).
+- **A discriminator cannot map several values onto one member.**
+  `ProjectEventFrame` has four bare refetch nudges sharing a schema;
+  openapi-typescript-codegen collapses that enum to whichever mapping it saw
+  last. Dropping the `discriminator` and keeping the plain `oneOf` narrows
+  correctly.
+
+## The chat socket
 
 A chat head shares `/ws/.../terminal` with terminal heads, but every frame is
-text (see `internal/http/chat_ws.go`).
+text.
+
+`internal/chat` type-aliases the generated `ChatEvent` and `ChatProjection`
+rather than declaring its own, so the durable log and the wire are the same
+shape by construction.
+
+Each event type has its own payload schema, and a provider-derived one also
+carries `ChatProviderContext` - who produced it and where it belongs. The two
+are separate schemas so each language composes them its own way: Go embeds
+both (`encoding/json` promotes embedded fields, so the wire stays flat) and
+TypeScript intersects them. What stays open is only what the PROVIDER owns -
+its recorded entry (the Raw panel's source), a tool's `input` and result, an
+interaction, usage accounting, an error - because those differ per agent type
+and per tool.
+
+The daemon builds these as typed structs (`internal/chat/events.go`), each
+declaring its own type through an `EventType()` method that `Append` derives
+from, so an event's type and its payload cannot disagree. `go vet` guards the
+one hazard embedding introduces: a payload field whose json tag collides with
+the context's would make `encoding/json` silently drop both, so a test asserts
+none do.
+
+Which payload each type carries is stated once, in the schema:
+`ChatEventUnion` is a `oneOf` over one member per event type, so the browser
+narrows on a generated union rather than a hand-written mapping.
+
+`ChatEvent` describes the same wire bytes with `payload` left open, and that is
+what the frames carry - the event store reads `seq`/`type` off every event and
+appends it to a log, which needs a concrete struct, and a generated `oneOf` is
+an opaque wrapper it cannot field-access. `asChatEvent` is the single
+point where one becomes the other.
+
+Because the daemon builds its own typed events rather than consuming the union,
+`internal/chat/schema_test.go` checks the two agree: every Go event must resolve
+through the generated union to the member its type maps to, every mapped type
+must have a Go event, and no Go payload may carry a field its schema member does
+not declare. Adding an event type means adding it in both places, and the test
+is what says so.
 
 Server to client:
 
@@ -23,7 +95,7 @@ Server to client:
 | --- | --- |
 | `state_snapshot` | the projection (current state) and its `through` watermark |
 | `chat_history` | one page of durable events, oldest-first, with `next_cursor` and `done` |
-| `chat_event` | one live normalized event |
+| `chat_event` | one live event |
 | `subagent_events` | one sub-agent's full step history |
 | `replay_done` | the initial window has been delivered |
 | `queue` | the head's still-queued messages |
@@ -102,12 +174,12 @@ CLIs put neither on the main stream:
 - the main transcript's `<task-notification>` records - a background sub-agent's
   completion, the only live signal that settles its card.
 
-Both go to the manager, not the socket, and come back out as ordinary
-normalized events.
+Both go to the manager, not the socket, and come back out as ordinary chat
+events.
 
 ## The Claude driver
 
-`internal/chat/claude.go` maps stream-json to normalized events: `system:init`
+`internal/chat/claude.go` maps stream-json to chat events: `system:init`
 to `conversation_started`, assistant content blocks to `assistant_message` /
 `reasoning_completed` / `tool_started`, `tool_result` blocks to
 `tool_completed`, `result` to `turn_completed`/`turn_failed`, `control_request`
@@ -245,12 +317,12 @@ Codex runs with bypassed approvals because the process is already inside Hydra's
 sandbox, and app-server turns are configured equivalently. Server-request
 handling is still defensive: Hydra replies automatically only to the classes it
 already auto-allows and surfaces genuinely interactive elicitation as a
-normalized request card. App-server is never left blocked merely because no
+request card. App-server is never left blocked merely because no
 browser is attached.
 
 ## Git commits as sequenced events
 
-Commit chips are durable normalized events, not a second data set merged into
+Commit chips are durable events in the log, not a second data set merged into
 the transcript by timestamp - provider output, filesystem polling, HTTP fetches
 and author timestamps are independent clocks, so timestamps cannot guarantee a
 commit renders after the tool card that created it.
@@ -302,9 +374,9 @@ uncertain delivery state instead of silently sending a possibly duplicated turn.
 
 ## Presentation
 
-`AgentChat.tsx` consumes normalized events and converts each into the
+`AgentChat.tsx` consumes the event log and converts each event into the
 presentation shapes its card renderers already understand
-(`normalizedToProviderEvents`). Normal cards show semantic fields; the
+(`toProviderEvents`). Normal cards show semantic fields; the
 provider's own payload stays available under Raw, and blocks Hydra reconstructed
 rather than received are marked synthetic so Raw does not present them as
 protocol payloads the provider never sent.
@@ -360,7 +432,7 @@ emulation is out of scope.
 
 `/agent/agent-chat` and `/agent/agent-chat-codex` serve canned conversations
 over the same contract (`internal/http/simulation_chat.go`). The fixtures are
-written directly as normalized events, and each one names the rendering
+written directly as chat events, and each one names the rendering
 behaviour it guards, so the simulation is a fair test of the reducer rather than
 a happy path. The simulated socket also answers `load_events_before` and
 `load_subagent`, so pagination is exercised the way a real client uses it.

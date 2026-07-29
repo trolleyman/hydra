@@ -8,6 +8,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -29,6 +30,16 @@ const (
 	Starting   AgentStatus = "starting"
 	Stopped    AgentStatus = "stopped"
 	Waiting    AgentStatus = "waiting"
+)
+
+// Defines values for AgentStatusChangedEventType.
+const (
+	AgentStatusChanged AgentStatusChangedEventType = "agent_status_changed"
+)
+
+// Defines values for AgentTestsChangedEventType.
+const (
+	AgentTestsChanged AgentTestsChangedEventType = "agent_tests_changed"
 )
 
 // Defines values for ApprovalDecisionRequestDecision.
@@ -56,6 +67,152 @@ const (
 	ArtifactSetStatusError      ArtifactSetStatus = "error"
 	ArtifactSetStatusGenerating ArtifactSetStatus = "generating"
 	ArtifactSetStatusReady      ArtifactSetStatus = "ready"
+)
+
+// Defines values for ArtifactSide.
+const (
+	ArtifactSideLeft  ArtifactSide = "left"
+	ArtifactSideRight ArtifactSide = "right"
+)
+
+// Defines values for ArtifactsClientMessageType.
+const (
+	ArtifactsClientMessageTypeRefresh ArtifactsClientMessageType = "refresh"
+)
+
+// Defines values for ArtifactsFileFrameType.
+const (
+	File ArtifactsFileFrameType = "file"
+)
+
+// Defines values for ArtifactsLogFrameType.
+const (
+	ArtifactsLogFrameTypeLog ArtifactsLogFrameType = "log"
+)
+
+// Defines values for ArtifactsProgressFrameType.
+const (
+	ArtifactsProgressFrameTypeProgress ArtifactsProgressFrameType = "progress"
+)
+
+// Defines values for ArtifactsSetFrameType.
+const (
+	Set ArtifactsSetFrameType = "set"
+)
+
+// Defines values for ArtifactsSnapshotFrameType.
+const (
+	ArtifactsSnapshotFrameTypeSnapshot ArtifactsSnapshotFrameType = "snapshot"
+)
+
+// Defines values for AssistantDeltaEventType.
+const (
+	AssistantDelta AssistantDeltaEventType = "assistant_delta"
+)
+
+// Defines values for AssistantMessageEventType.
+const (
+	AssistantMessage AssistantMessageEventType = "assistant_message"
+)
+
+// Defines values for ChatClientMessageType.
+const (
+	ChatClientMessageTypeControlResponse  ChatClientMessageType = "control_response"
+	ChatClientMessageTypeDequeue          ChatClientMessageType = "dequeue"
+	ChatClientMessageTypeInterrupt        ChatClientMessageType = "interrupt"
+	ChatClientMessageTypeLoadEventsBefore ChatClientMessageType = "load_events_before"
+	ChatClientMessageTypeLoadSubagent     ChatClientMessageType = "load_subagent"
+	ChatClientMessageTypeSetModel         ChatClientMessageType = "set_model"
+	ChatClientMessageTypeShellCommand     ChatClientMessageType = "shell_command"
+	ChatClientMessageTypeShellStop        ChatClientMessageType = "shell_stop"
+	ChatClientMessageTypeTaskOutput       ChatClientMessageType = "task_output"
+	ChatClientMessageTypeUserMessage      ChatClientMessageType = "user_message"
+)
+
+// Defines values for ChatErrorFrameType.
+const (
+	ChatError ChatErrorFrameType = "chat_error"
+)
+
+// Defines values for ChatEventFrameType.
+const (
+	ChatEventFrameTypeChatEvent ChatEventFrameType = "chat_event"
+)
+
+// Defines values for ChatHistoryFrameType.
+const (
+	ChatHistory ChatHistoryFrameType = "chat_history"
+)
+
+// Defines values for ChatPendingQuestionsFrameType.
+const (
+	PendingQuestions ChatPendingQuestionsFrameType = "pending_questions"
+)
+
+// Defines values for ChatQuestionExpiredFrameType.
+const (
+	QuestionExpired ChatQuestionExpiredFrameType = "question_expired"
+)
+
+// Defines values for ChatQueueFrameType.
+const (
+	Queue ChatQueueFrameType = "queue"
+)
+
+// Defines values for ChatReplayDoneFrameType.
+const (
+	ReplayDone ChatReplayDoneFrameType = "replay_done"
+)
+
+// Defines values for ChatShellOutputFrameType.
+const (
+	ShellOutput ChatShellOutputFrameType = "shell_output"
+)
+
+// Defines values for ChatStateSnapshotFrameType.
+const (
+	StateSnapshot ChatStateSnapshotFrameType = "state_snapshot"
+)
+
+// Defines values for ChatStreamStateKind.
+const (
+	Text     ChatStreamStateKind = "text"
+	Thinking ChatStreamStateKind = "thinking"
+)
+
+// Defines values for ChatSubagentEventsFrameType.
+const (
+	SubagentEvents ChatSubagentEventsFrameType = "subagent_events"
+)
+
+// Defines values for ChatTaskOutputFrameType.
+const (
+	ChatTaskOutputFrameTypeTaskOutput ChatTaskOutputFrameType = "task_output"
+)
+
+// Defines values for CommitCreatedEventType.
+const (
+	CommitCreated CommitCreatedEventType = "commit_created"
+)
+
+// Defines values for ContentStreamCompletedEventType.
+const (
+	ContentStreamCompleted ContentStreamCompletedEventType = "content_stream_completed"
+)
+
+// Defines values for ContentStreamStartedEventType.
+const (
+	ContentStreamStarted ContentStreamStartedEventType = "content_stream_started"
+)
+
+// Defines values for ContextMessageEventType.
+const (
+	ContextMessage ContextMessageEventType = "context_message"
+)
+
+// Defines values for ConversationStartedEventType.
+const (
+	ConversationStarted ConversationStartedEventType = "conversation_started"
 )
 
 // Defines values for DiffFileChangeType.
@@ -86,6 +243,36 @@ const (
 	ErrorResponseErrorUnauthorized  ErrorResponseError = "unauthorized"
 )
 
+// Defines values for HeadChangedEventType.
+const (
+	HeadChanged HeadChangedEventType = "head_changed"
+)
+
+// Defines values for HeadDiffRefreshEventType.
+const (
+	DiffRefresh HeadDiffRefreshEventType = "diff_refresh"
+)
+
+// Defines values for HeadObservedEventType.
+const (
+	HeadObserved HeadObservedEventType = "head_observed"
+)
+
+// Defines values for HeadStatusEventType.
+const (
+	Status HeadStatusEventType = "status"
+)
+
+// Defines values for InteractionRequestedEventType.
+const (
+	InteractionRequested InteractionRequestedEventType = "interaction_requested"
+)
+
+// Defines values for InteractionResolvedEventType.
+const (
+	InteractionResolved InteractionResolvedEventType = "interaction_resolved"
+)
+
 // Defines values for MergeConflictErrorError.
 const (
 	MergeConflictErrorErrorConflict           MergeConflictErrorError = "conflict"
@@ -93,6 +280,16 @@ const (
 	MergeConflictErrorErrorTestsErrored       MergeConflictErrorError = "tests_errored"
 	MergeConflictErrorErrorTestsFailing       MergeConflictErrorError = "tests_failing"
 	MergeConflictErrorErrorUncommittedChanges MergeConflictErrorError = "uncommitted_changes"
+)
+
+// Defines values for MessagesRetractedEventType.
+const (
+	MessagesRetracted MessagesRetractedEventType = "messages_retracted"
+)
+
+// Defines values for ModelChangedEventType.
+const (
+	ModelChanged ModelChangedEventType = "model_changed"
 )
 
 // Defines values for NetworkConfigMode.
@@ -104,12 +301,52 @@ const (
 	Unrestricted NetworkConfigMode = "unrestricted"
 )
 
+// Defines values for NoticeEventType.
+const (
+	Notice NoticeEventType = "notice"
+)
+
+// Defines values for PlanDeltaEventType.
+const (
+	PlanDelta PlanDeltaEventType = "plan_delta"
+)
+
+// Defines values for PlanUpdatedEventType.
+const (
+	PlanUpdated PlanUpdatedEventType = "plan_updated"
+)
+
 // Defines values for PreviewState.
 const (
 	PreviewError    PreviewState = "error"
 	PreviewRunning  PreviewState = "running"
 	PreviewStarting PreviewState = "starting"
 	PreviewStopped  PreviewState = "stopped"
+)
+
+// Defines values for QueueMessageRemovedEventType.
+const (
+	QueueMessageRemoved QueueMessageRemovedEventType = "queue_message_removed"
+)
+
+// Defines values for QueuedMessageEventType.
+const (
+	QueuedMessage QueuedMessageEventType = "queued_message"
+)
+
+// Defines values for ReasoningCompletedEventType.
+const (
+	ReasoningCompleted ReasoningCompletedEventType = "reasoning_completed"
+)
+
+// Defines values for ReasoningDeltaEventType.
+const (
+	ReasoningDelta ReasoningDeltaEventType = "reasoning_delta"
+)
+
+// Defines values for ReasoningDurationEventType.
+const (
+	ReasoningDuration ReasoningDurationEventType = "reasoning_duration"
 )
 
 // Defines values for RepositoryArtifactResponseStatus.
@@ -119,10 +356,48 @@ const (
 	RepositoryArtifactResponseStatusReady      RepositoryArtifactResponseStatus = "ready"
 )
 
+// Defines values for ResourceChangedEventType.
+const (
+	AgentsChanged     ResourceChangedEventType = "agents_changed"
+	ProjectsChanged   ResourceChangedEventType = "projects_changed"
+	PushStatusChanged ResourceChangedEventType = "push_status_changed"
+	ServicesChanged   ResourceChangedEventType = "services_changed"
+)
+
 // Defines values for ReviewThreadNoteOrigin.
 const (
 	Forge     ReviewThreadNoteOrigin = "forge"
 	LocalOnly ReviewThreadNoteOrigin = "local_only"
+)
+
+// Defines values for ServerUpdateDoneFrameKind.
+const (
+	ServerUpdateDoneFrameKindDone ServerUpdateDoneFrameKind = "done"
+)
+
+// Defines values for ServerUpdateEventKind.
+const (
+	ServerUpdateEventKindDone  ServerUpdateEventKind = "done"
+	ServerUpdateEventKindLog   ServerUpdateEventKind = "log"
+	ServerUpdateEventKindPhase ServerUpdateEventKind = "phase"
+)
+
+// Defines values for ServerUpdateLogFrameKind.
+const (
+	ServerUpdateLogFrameKindLog ServerUpdateLogFrameKind = "log"
+)
+
+// Defines values for ServerUpdatePhase.
+const (
+	ServerUpdatePhaseBuilding   ServerUpdatePhase = "building"
+	ServerUpdatePhaseRestarting ServerUpdatePhase = "restarting"
+	ServerUpdatePhaseSwapping   ServerUpdatePhase = "swapping"
+	ServerUpdatePhaseVerifying  ServerUpdatePhase = "verifying"
+)
+
+// Defines values for ServerUpdatePhaseFrameKind.
+const (
+	ServerUpdatePhaseFrameKindPhase ServerUpdatePhaseFrameKind = "phase"
 )
 
 // Defines values for ServiceStatusState.
@@ -134,44 +409,29 @@ const (
 	Up         ServiceStatusState = "up"
 )
 
+// Defines values for SubagentCompletedEventType.
+const (
+	SubagentCompleted SubagentCompletedEventType = "subagent_completed"
+)
+
+// Defines values for SubagentStartedEventType.
+const (
+	SubagentStarted SubagentStartedEventType = "subagent_started"
+)
+
+// Defines values for SubagentUpdatedEventType.
+const (
+	SubagentUpdated SubagentUpdatedEventType = "subagent_updated"
+)
+
 // Defines values for TerminalDataEventType.
 const (
-	TerminalDataEventTypeData        TerminalDataEventType = "data"
-	TerminalDataEventTypeDiffRefresh TerminalDataEventType = "diff_refresh"
-	TerminalDataEventTypeSize        TerminalDataEventType = "size"
-	TerminalDataEventTypeStatus      TerminalDataEventType = "status"
-)
-
-// Defines values for TerminalDiffRefreshEventType.
-const (
-	TerminalDiffRefreshEventTypeData        TerminalDiffRefreshEventType = "data"
-	TerminalDiffRefreshEventTypeDiffRefresh TerminalDiffRefreshEventType = "diff_refresh"
-	TerminalDiffRefreshEventTypeSize        TerminalDiffRefreshEventType = "size"
-	TerminalDiffRefreshEventTypeStatus      TerminalDiffRefreshEventType = "status"
-)
-
-// Defines values for TerminalEventType.
-const (
-	TerminalEventTypeData        TerminalEventType = "data"
-	TerminalEventTypeDiffRefresh TerminalEventType = "diff_refresh"
-	TerminalEventTypeSize        TerminalEventType = "size"
-	TerminalEventTypeStatus      TerminalEventType = "status"
+	Data TerminalDataEventType = "data"
 )
 
 // Defines values for TerminalSizeEventType.
 const (
-	TerminalSizeEventTypeData        TerminalSizeEventType = "data"
-	TerminalSizeEventTypeDiffRefresh TerminalSizeEventType = "diff_refresh"
-	TerminalSizeEventTypeSize        TerminalSizeEventType = "size"
-	TerminalSizeEventTypeStatus      TerminalSizeEventType = "status"
-)
-
-// Defines values for TerminalStatusEventType.
-const (
-	Data        TerminalStatusEventType = "data"
-	DiffRefresh TerminalStatusEventType = "diff_refresh"
-	Size        TerminalStatusEventType = "size"
-	Status      TerminalStatusEventType = "status"
+	Size TerminalSizeEventType = "size"
 )
 
 // Defines values for TestCaseStatus.
@@ -190,6 +450,91 @@ const (
 	TestStatusPassing TestStatus = "passing"
 	TestStatusRunning TestStatus = "running"
 	TestStatusStale   TestStatus = "stale"
+)
+
+// Defines values for TestsClientMessageType.
+const (
+	TestsClientMessageTypeRefresh TestsClientMessageType = "refresh"
+)
+
+// Defines values for TestsCountsFrameType.
+const (
+	Counts TestsCountsFrameType = "counts"
+)
+
+// Defines values for TestsLogFrameType.
+const (
+	Log TestsLogFrameType = "log"
+)
+
+// Defines values for TestsProgressFrameType.
+const (
+	TestsProgressFrameTypeProgress TestsProgressFrameType = "progress"
+)
+
+// Defines values for TestsRunnerFrameType.
+const (
+	Runner TestsRunnerFrameType = "runner"
+)
+
+// Defines values for TestsSnapshotFrameType.
+const (
+	TestsSnapshotFrameTypeSnapshot TestsSnapshotFrameType = "snapshot"
+)
+
+// Defines values for ToolCompletedEventType.
+const (
+	ToolCompleted ToolCompletedEventType = "tool_completed"
+)
+
+// Defines values for ToolDeltaEventType.
+const (
+	ToolDelta ToolDeltaEventType = "tool_delta"
+)
+
+// Defines values for ToolStartedEventType.
+const (
+	ToolStarted ToolStartedEventType = "tool_started"
+)
+
+// Defines values for TurnCompletedEventType.
+const (
+	TurnCompleted TurnCompletedEventType = "turn_completed"
+)
+
+// Defines values for TurnErrorEventType.
+const (
+	TurnError TurnErrorEventType = "turn_error"
+)
+
+// Defines values for TurnFailedEventType.
+const (
+	TurnFailed TurnFailedEventType = "turn_failed"
+)
+
+// Defines values for TurnInterruptedEventType.
+const (
+	TurnInterrupted TurnInterruptedEventType = "turn_interrupted"
+)
+
+// Defines values for TurnStartedEventType.
+const (
+	TurnStarted TurnStartedEventType = "turn_started"
+)
+
+// Defines values for UsageUpdatedEventType.
+const (
+	UsageUpdated UsageUpdatedEventType = "usage_updated"
+)
+
+// Defines values for UserMessageEchoedEventType.
+const (
+	UserMessageEchoed UserMessageEchoedEventType = "user_message_echoed"
+)
+
+// Defines values for UserMessageEventType.
+const (
+	UserMessage UserMessageEventType = "user_message"
 )
 
 // Defines values for GetAgentArtifactsParamsRefreshSide.
@@ -325,6 +670,19 @@ type AgentResponse struct {
 // AgentStatus The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
 type AgentStatus string
 
+// AgentStatusChangedEvent One agent's live status bundle changed.
+type AgentStatusChangedEvent struct {
+	Activity               string                      `json:"activity,omitempty"`
+	AgentId                string                      `json:"agent_id"`
+	LastMessage            string                      `json:"last_message,omitempty"`
+	LastMessageIsSuggested bool                        `json:"last_message_is_suggested,omitempty"`
+	Status                 string                      `json:"status,omitempty"`
+	Type                   AgentStatusChangedEventType `json:"type"`
+}
+
+// AgentStatusChangedEventType defines model for AgentStatusChangedEvent.Type.
+type AgentStatusChangedEventType string
+
 // AgentStatusInfo defines model for AgentStatusInfo.
 type AgentStatusInfo struct {
 	// Activity Short human-readable description of the agent's current action, derived from status_log.jsonl (present while running)
@@ -351,6 +709,18 @@ type AgentStatusInfo struct {
 	// Timestamp ISO 8601 timestamp of when the status was set
 	Timestamp string `json:"timestamp"`
 }
+
+// AgentTestsChangedEvent One agent's test counts moved mid-run, so the sidebar chips can tick without refetching the agent list.
+type AgentTestsChangedEvent struct {
+	AgentId string `json:"agent_id"`
+
+	// Tests Compact per-head test verdict for the head's current commit, shown as the sidebar/header chip without opening the tests panel (PLAN #68). Computed from the cached report without triggering a run.
+	Tests *TestSummary               `json:"tests,omitempty"`
+	Type  AgentTestsChangedEventType `json:"type"`
+}
+
+// AgentTestsChangedEventType defines model for AgentTestsChangedEvent.Type.
+type AgentTestsChangedEventType string
 
 // ApprovalDecisionRequest defines model for ApprovalDecisionRequest.
 type ApprovalDecisionRequest struct {
@@ -537,9 +907,671 @@ type ArtifactSet struct {
 // ArtifactSetStatus defines model for ArtifactSet.Status.
 type ArtifactSetStatus string
 
+// ArtifactSide Which side of the comparison a frame belongs to.
+type ArtifactSide string
+
+// ArtifactsClientMessage Client to server. Only `refresh` is supported - regenerate one script, or with a side, just that side, leaving the other cached.
+type ArtifactsClientMessage struct {
+	Script string                     `json:"script"`
+	Side   ArtifactSide               `json:"side,omitempty"`
+	Type   ArtifactsClientMessageType `json:"type"`
+}
+
+// ArtifactsClientMessageType defines model for ArtifactsClientMessage.Type.
+type ArtifactsClientMessageType string
+
+// ArtifactsFileFrame One output file finished and was compared mid-run, so its tile can render before the whole set settles. The client upserts it into the set by name; the authoritative `set` at settle reconciles the list.
+type ArtifactsFileFrame struct {
+	File   ArtifactFile           `json:"file"`
+	Script string                 `json:"script"`
+	Type   ArtifactsFileFrameType `json:"type"`
+}
+
+// ArtifactsFileFrameType defines model for ArtifactsFileFrame.Type.
+type ArtifactsFileFrameType string
+
+// ArtifactsFrame One server-to-client frame on the artifacts socket.
+type ArtifactsFrame struct {
+	union json.RawMessage
+}
+
+// ArtifactsLogFrame One captured log line from a running generation.
+type ArtifactsLogFrame struct {
+	Line   ArtifactLogLine `json:"line"`
+	Script string          `json:"script"`
+
+	// Side Which side of the comparison a frame belongs to.
+	Side ArtifactSide          `json:"side"`
+	Type ArtifactsLogFrameType `json:"type"`
+}
+
+// ArtifactsLogFrameType defines model for ArtifactsLogFrame.Type.
+type ArtifactsLogFrameType string
+
+// ArtifactsProgressFrame The header progress line changed for one side of a script.
+type ArtifactsProgressFrame struct {
+	Progress string `json:"progress"`
+	Script   string `json:"script"`
+
+	// Side Which side of the comparison a frame belongs to.
+	Side ArtifactSide               `json:"side"`
+	Type ArtifactsProgressFrameType `json:"type"`
+}
+
+// ArtifactsProgressFrameType defines model for ArtifactsProgressFrame.Type.
+type ArtifactsProgressFrameType string
+
 // ArtifactsResponse defines model for ArtifactsResponse.
 type ArtifactsResponse struct {
 	Scripts []ArtifactSet `json:"scripts"`
+}
+
+// ArtifactsSetFrame One script's set changed - a generation settled or was refreshed.
+type ArtifactsSetFrame struct {
+	Set  ArtifactSet           `json:"set"`
+	Type ArtifactsSetFrameType `json:"type"`
+}
+
+// ArtifactsSetFrameType defines model for ArtifactsSetFrame.Type.
+type ArtifactsSetFrameType string
+
+// ArtifactsSnapshotFrame Every script's current set, sent once on connect.
+type ArtifactsSnapshotFrame struct {
+	Scripts []ArtifactSet              `json:"scripts"`
+	Type    ArtifactsSnapshotFrameType `json:"type"`
+}
+
+// ArtifactsSnapshotFrameType defines model for ArtifactsSnapshotFrame.Type.
+type ArtifactsSnapshotFrameType string
+
+// AssistantDeltaEvent defines model for AssistantDeltaEvent.
+type AssistantDeltaEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry     *ChatProviderEntry `json:"entry,omitempty"`
+		MessageId string             `json:"message_id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+		Text         string `json:"text,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                  `json:"source_id,omitempty"`
+	Timestamp time.Time               `json:"timestamp"`
+	Type      AssistantDeltaEventType `json:"type"`
+}
+
+// AssistantDeltaEventType defines model for AssistantDeltaEvent.Type.
+type AssistantDeltaEventType string
+
+// AssistantMessageEvent defines model for AssistantMessageEvent.
+type AssistantMessageEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry     *ChatProviderEntry `json:"entry,omitempty"`
+		MessageId string             `json:"message_id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+
+		// Partial Set when an interrupt settled the deltas received so far.
+		Partial    bool   `json:"partial,omitempty"`
+		Sidechain  bool   `json:"sidechain,omitempty"`
+		StopReason string `json:"stop_reason,omitempty"`
+		Text       string `json:"text,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                    `json:"source_id,omitempty"`
+	Timestamp time.Time                 `json:"timestamp"`
+	Type      AssistantMessageEventType `json:"type"`
+}
+
+// AssistantMessageEventType defines model for AssistantMessageEvent.Type.
+type AssistantMessageEventType string
+
+// ChatAssistantMessagePayload A settled assistant message; it replaces its streamed preview.
+type ChatAssistantMessagePayload struct {
+	MessageId string `json:"message_id,omitempty"`
+
+	// Partial Set when an interrupt settled the deltas received so far.
+	Partial bool   `json:"partial,omitempty"`
+	Text    string `json:"text,omitempty"`
+}
+
+// ChatClientMessage One client-to-server frame on a chat-mode socket. Flat rather than a union: `type` selects which of the optional fields carry meaning.
+type ChatClientMessage struct {
+	// Command The shell command of a shell_command frame (the text after the composer's leading "!"), run in the head's sandbox.
+	Command string `json:"command,omitempty"`
+
+	// Content A user_message's content blocks, forwarded to the provider verbatim.
+	Content json.RawMessage `json:"content,omitempty"`
+
+	// Cursor The history cursor of a load_events_before request - the daemon returns the batch older than it.
+	Cursor string `json:"cursor,omitempty"`
+
+	// File The output-file path of a task_output request, as the SANDBOXED agent saw it.
+	File string `json:"file,omitempty"`
+
+	// Id The client-generated id of a user_message, or the dequeue/shell_stop target, so a queued message can be reconciled and recalled.
+	Id    string `json:"id,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+
+	// Model The set_model target (a provider alias like "sonnet").
+	Model string `json:"model,omitempty"`
+
+	// Queued Set on a user_message sent while a turn runs: the daemon HOLDS it rather than delivering now, and drains it when the turn ends.
+	Queued bool `json:"queued,omitempty"`
+
+	// Response A control_response payload, e.g. AskUserQuestion answers.
+	Response json.RawMessage `json:"response,omitempty"`
+
+	// SubId The sub-agent whose full step history the client wants.
+	SubId string                `json:"sub_id,omitempty"`
+	Type  ChatClientMessageType `json:"type"`
+}
+
+// ChatClientMessageType defines model for ChatClientMessage.Type.
+type ChatClientMessageType string
+
+// ChatCommitCreatedPayload A commit the reconciler observed. Sequenced in the same log as the tool output that produced it, so the chip cannot render before its cause.
+type ChatCommitCreatedPayload struct {
+	AuthorEmail string `json:"author_email,omitempty"`
+	AuthorName  string `json:"author_name,omitempty"`
+
+	// CausalItemId The tool call that produced it, when one is known.
+	CausalItemId  string             `json:"causal_item_id,omitempty"`
+	Head          string             `json:"head,omitempty"`
+	IsMerge       bool               `json:"is_merge,omitempty"`
+	MergedCommits []ChatMergedCommit `json:"merged_commits,omitempty"`
+	MergedCount   int                `json:"merged_count,omitempty"`
+	Sha           string             `json:"sha,omitempty"`
+	ShortSha      string             `json:"short_sha,omitempty"`
+	Subject       string             `json:"subject,omitempty"`
+	Timestamp     string             `json:"timestamp,omitempty"`
+}
+
+// ChatContentStreamPayload A provider content-boundary hint; a state signal, not a card.
+type ChatContentStreamPayload struct {
+	Kind string `json:"kind,omitempty"`
+}
+
+// ChatContextMessagePayload Machine-injected context that rode in a user envelope but was never typed - a compaction preamble, a skill's auto-loaded body.
+type ChatContextMessagePayload struct {
+	Content json.RawMessage `json:"content,omitempty"`
+	IsMeta  bool            `json:"is_meta,omitempty"`
+}
+
+// ChatConversationStartedPayload The provider announced its session.
+type ChatConversationStartedPayload struct {
+	// ApiKeySource "none" means subscription auth, so turn footers hide the notional cost.
+	ApiKeySource   string   `json:"api_key_source,omitempty"`
+	ConversationId string   `json:"conversation_id,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	SlashCommands  []string `json:"slash_commands,omitempty"`
+}
+
+// ChatDeltaPayload One token delta. The first opens the live block; the completed message closes and replaces it. Not persisted to the display log.
+type ChatDeltaPayload struct {
+	MessageId string `json:"message_id,omitempty"`
+	Text      string `json:"text,omitempty"`
+}
+
+// ChatErrorFrame This head's normalized event log could not be opened, so the connection will render nothing. There is no fallback to degrade to, and an empty transcript is indistinguishable from a head that never spoke.
+type ChatErrorFrame struct {
+	Error string             `json:"error"`
+	Type  ChatErrorFrameType `json:"type"`
+}
+
+// ChatErrorFrameType defines model for ChatErrorFrame.Type.
+type ChatErrorFrameType string
+
+// ChatEvent One durable normalized event. `seq` is per-head, monotonic, and the sole wire and cursor identity - provider object ids stay inside `payload`.
+type ChatEvent struct {
+	// Payload The event's fields, which vary by `type`. Deliberately open: the provider's own recorded entry rides here too, so the Raw panel can show what the provider actually sent.
+	Payload json.RawMessage `json:"payload,omitempty"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate. Re-reading a transcript window or re-observing a line appends nothing new.
+	SourceId  string    `json:"source_id,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+
+	// Type The event kind, e.g. conversation_started, user_message, assistant_delta, assistant_message, reasoning_completed, reasoning_duration, tool_started, tool_completed, subagent_started, subagent_completed, plan_updated, commit_created, head_changed, notice, interaction_requested, messages_retracted, turn_started, turn_completed, turn_failed, turn_interrupted.
+	Type string `json:"type"`
+}
+
+// ChatEventEnvelope The fields every event carries, whatever its type.
+type ChatEventEnvelope struct {
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string    `json:"source_id,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// ChatEventFrame One live normalized event.
+type ChatEventFrame struct {
+	// Event One durable normalized event. `seq` is per-head, monotonic, and the sole wire and cursor identity - provider object ids stay inside `payload`.
+	Event ChatEvent          `json:"event"`
+	Type  ChatEventFrameType `json:"type"`
+}
+
+// ChatEventFrameType defines model for ChatEventFrame.Type.
+type ChatEventFrameType string
+
+// ChatEventUnion One normalized event, narrowed by its type to the payload it carries.
+type ChatEventUnion struct {
+	union json.RawMessage
+}
+
+// ChatFrame One server-to-client frame on a chat-mode socket. Each member declares its own single value for `type`, so a client narrows on it directly.
+type ChatFrame struct {
+	union json.RawMessage
+}
+
+// ChatHeadChangedPayload HEAD moved without fast-forwarding (a reset, rebase or checkout), so the projection reconciles its visible commit set rather than inventing chips.
+type ChatHeadChangedPayload struct {
+	Head    string `json:"head,omitempty"`
+	OldHead string `json:"old_head,omitempty"`
+}
+
+// ChatHistoryFrame One page of durable history, oldest-first. Answers the initial window and every load_events_before. Paging is display-only: an older page never rewinds the state_snapshot projection.
+type ChatHistoryFrame struct {
+	// Done True once the log's beginning has been reached.
+	Done   bool        `json:"done"`
+	Events []ChatEvent `json:"events"`
+
+	// NextCursor The cursor to ask for the page before this one.
+	NextCursor string               `json:"next_cursor,omitempty"`
+	Type       ChatHistoryFrameType `json:"type"`
+}
+
+// ChatHistoryFrameType defines model for ChatHistoryFrame.Type.
+type ChatHistoryFrameType string
+
+// ChatInteractionPayload The provider is blocked on the user (an AskUserQuestion elicitation), or that request was answered.
+type ChatInteractionPayload struct {
+	// Interaction The provider's own request, forwarded verbatim.
+	Interaction json.RawMessage `json:"interaction,omitempty"`
+	Provider    string          `json:"provider,omitempty"`
+	RequestId   string          `json:"request_id,omitempty"`
+}
+
+// ChatItemDeltaPayload One delta against a tool or plan item, keyed by that item's id.
+type ChatItemDeltaPayload struct {
+	Id   string `json:"id,omitempty"`
+	Text string `json:"text,omitempty"`
+}
+
+// ChatMergedCommit One commit a merge brought in, previewed in the merge chip.
+type ChatMergedCommit struct {
+	AuthorName string `json:"author_name,omitempty"`
+	Sha        string `json:"sha,omitempty"`
+	ShortSha   string `json:"short_sha,omitempty"`
+	Subject    string `json:"subject,omitempty"`
+	Timestamp  string `json:"timestamp,omitempty"`
+}
+
+// ChatMessagesRetractedPayload A safety retry evicted blocks the provider had already streamed. The client must drop these ids or the flagged text lingers.
+type ChatMessagesRetractedPayload struct {
+	MessageIds []string `json:"message_ids,omitempty"`
+}
+
+// ChatModelChangedPayload The active model changed, captured daemon-side.
+type ChatModelChangedPayload struct {
+	Model string `json:"model,omitempty"`
+}
+
+// ChatNoticePayload Harness bookkeeping shown as a compact chip.
+type ChatNoticePayload struct {
+	Text string `json:"text,omitempty"`
+}
+
+// ChatPendingAsk A question the provider is still blocked on.
+type ChatPendingAsk struct {
+	RequestId string `json:"requestId"`
+	ToolUseId string `json:"toolUseId"`
+}
+
+// ChatPendingQuestionsFrame Which question cards can still be answered. A question's request id is durable and replays forever, but the request behind it dies with the turn that raised it, so the client cannot tell a live card from a dead one on its own. An empty list is a definite none; the frame being omitted entirely means the daemon cannot say.
+type ChatPendingQuestionsFrame struct {
+	Requests []ChatPendingAsk              `json:"requests"`
+	Type     ChatPendingQuestionsFrameType `json:"type"`
+}
+
+// ChatPendingQuestionsFrameType defines model for ChatPendingQuestionsFrame.Type.
+type ChatPendingQuestionsFrameType string
+
+// ChatPlanEntry One plan/to-do step. Codex `{step,status}` normalizes to this too.
+type ChatPlanEntry struct {
+	ActiveForm  string `json:"activeForm,omitempty"`
+	Content     string `json:"content,omitempty"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status,omitempty"`
+}
+
+// ChatPlanUpdatedPayload A plan checkpoint. Also folded into the projection.
+type ChatPlanUpdatedPayload struct {
+	Plan json.RawMessage `json:"plan,omitempty"`
+
+	// Provider Which provider produced it. Claude's Task cards already carry the timeline, so only Codex renders a visible Update Plan card.
+	Provider string `json:"provider,omitempty"`
+}
+
+// ChatProjection Bounded current state, folded from the event log and checkpointed with the sequence it was folded through. Complete messages, tool output and sub-agent transcripts stay in the paged log, so this does not grow with the conversation.
+type ChatProjection struct {
+	// Head The Git HEAD the commit reconciler last observed.
+	Head        string                     `json:"head,omitempty"`
+	Imports     map[string]int64           `json:"imports,omitempty"`
+	Interaction json.RawMessage            `json:"interaction,omitempty"`
+	Model       string                     `json:"model,omitempty"`
+	Plan        json.RawMessage            `json:"plan,omitempty"`
+	Queue       map[string]ChatQueuedState `json:"queue,omitempty"`
+
+	// SlashCommands The "/" autocomplete list the provider advertised on init. Persisted so it survives a resume - the list is only emitted on the live init line, never in the transcript.
+	SlashCommands []string `json:"slash_commands,omitempty"`
+
+	// Stream The block a response is in the middle of producing, accumulated from every delta no completed message has settled yet. Derived on read, so a client attaching mid-response renders the whole partial block rather than the tail it happens to catch live.
+	Stream    *ChatStreamState             `json:"stream,omitempty"`
+	Subagents map[string]ChatSubagentState `json:"subagents,omitempty"`
+
+	// Through The sequence number this projection was folded through.
+	Through uint64          `json:"through"`
+	Turn    *ChatTurnState  `json:"turn,omitempty"`
+	Usage   json.RawMessage `json:"usage,omitempty"`
+	Version int             `json:"version"`
+}
+
+// ChatProviderContext What a provider-derived display event carries besides its own fields: who produced it and where it belongs. Sidechain events are a sub-agent's own steps, folded into that sub-agent's card rather than the main flow.
+// Deliberately a separate schema rather than allOf'd into each payload: Go embeds it alongside the payload (encoding/json promotes embedded fields, so the wire stays flat) and TypeScript intersects the two. Flattening it into every payload would mean copying eight fields at every construction site in the daemon.
+type ChatProviderContext struct {
+	// AgentId The sub-agent whose step this is.
+	AgentId string `json:"agent_id,omitempty"`
+
+	// Cwd Where the provider says its shell was left.
+	Cwd string `json:"cwd,omitempty"`
+
+	// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+	Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+	// ParentItemId The tool call this belongs under.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Sidechain    bool   `json:"sidechain,omitempty"`
+	StopReason   string `json:"stop_reason,omitempty"`
+
+	// Usage Provider token accounting; the shape differs per provider.
+	Usage json.RawMessage `json:"usage,omitempty"`
+
+	// Uuid The provider's id for the record this came from.
+	Uuid string `json:"uuid,omitempty"`
+}
+
+// ChatProviderEntry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+type ChatProviderEntry map[string]interface{}
+
+// ChatQuestionExpiredFrame An answer was dropped because its request had already been retired. The card flips to expired rather than settling on an "Answered" that never was.
+type ChatQuestionExpiredFrame struct {
+	RequestId string                       `json:"requestId"`
+	Type      ChatQuestionExpiredFrameType `json:"type"`
+}
+
+// ChatQuestionExpiredFrameType defines model for ChatQuestionExpiredFrame.Type.
+type ChatQuestionExpiredFrameType string
+
+// ChatQueueFrame The daemon's authoritative snapshot of still-queued messages, sent after replay_done and on reconnect.
+type ChatQueueFrame struct {
+	Messages []ChatQueuedMessage `json:"messages"`
+	Type     ChatQueueFrameType  `json:"type"`
+}
+
+// ChatQueueFrameType defines model for ChatQueueFrame.Type.
+type ChatQueueFrameType string
+
+// ChatQueueMessageRemovedPayload A queued message was recalled or drained, so it leaves the queue.
+type ChatQueueMessageRemovedPayload struct {
+	Id string `json:"id,omitempty"`
+}
+
+// ChatQueuedMessage A message held daemon-side because a turn was running. It lives only in the queue projection until it drains, at which point it becomes a durable user_message carrying the same id.
+type ChatQueuedMessage struct {
+	Content json.RawMessage `json:"content"`
+
+	// Id The client-generated id, used to reconcile the pending bubble.
+	Id string `json:"id"`
+}
+
+// ChatQueuedMessagePayload A message the daemon is holding because a turn was running. It lives in the queue projection only; when it drains it becomes a durable user_message carrying the same id.
+type ChatQueuedMessagePayload struct {
+	Content json.RawMessage `json:"content,omitempty"`
+	Id      string          `json:"id,omitempty"`
+	Status  string          `json:"status,omitempty"`
+}
+
+// ChatQueuedState defines model for ChatQueuedState.
+type ChatQueuedState struct {
+	Content json.RawMessage `json:"content"`
+	Id      string          `json:"id"`
+	Status  string          `json:"status"`
+}
+
+// ChatReasoningCompletedPayload A settled thinking block. Some models expose an empty one and report only a duration, which still renders as "Thought for Xs".
+type ChatReasoningCompletedPayload struct {
+	MessageId string `json:"message_id,omitempty"`
+	Text      string `json:"text,omitempty"`
+}
+
+// ChatReasoningDurationPayload The measured duration of a thinking block. Separate from the block itself, because no provider reports it - the daemon times it.
+type ChatReasoningDurationPayload struct {
+	DurationMs int64  `json:"duration_ms,omitempty"`
+	MessageId  string `json:"message_id,omitempty"`
+}
+
+// ChatReplayDoneFrame The initial window has been delivered; everything after this is live.
+type ChatReplayDoneFrame struct {
+	Type ChatReplayDoneFrameType `json:"type"`
+}
+
+// ChatReplayDoneFrameType defines model for ChatReplayDoneFrame.Type.
+type ChatReplayDoneFrameType string
+
+// ChatShellOutputFrame A live chunk of a running composer "!command", keyed by the send frame's id. Ephemeral - the durable record is the user_message it settles into.
+type ChatShellOutputFrame struct {
+	Chunk string                   `json:"chunk"`
+	Id    string                   `json:"id"`
+	Type  ChatShellOutputFrameType `json:"type"`
+}
+
+// ChatShellOutputFrameType defines model for ChatShellOutputFrame.Type.
+type ChatShellOutputFrameType string
+
+// ChatShellResult The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
+type ChatShellResult struct {
+	Command   string `json:"command"`
+	ExitCode  int    `json:"exit_code"`
+	Output    string `json:"output"`
+	Stopped   bool   `json:"stopped,omitempty"`
+	TimedOut  bool   `json:"timed_out,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// ChatStateSnapshotFrame The head's current state, sent first on attach. Taken with the history watermark under one lock, so a plan or sub-agent cannot change between snapshotting and subscribing.
+type ChatStateSnapshotFrame struct {
+	// State Bounded current state, folded from the event log and checkpointed with the sequence it was folded through. Complete messages, tool output and sub-agent transcripts stay in the paged log, so this does not grow with the conversation.
+	State ChatProjection             `json:"state"`
+	Type  ChatStateSnapshotFrameType `json:"type"`
+}
+
+// ChatStateSnapshotFrameType defines model for ChatStateSnapshotFrame.Type.
+type ChatStateSnapshotFrameType string
+
+// ChatStreamState The block a response is in the middle of producing, accumulated from every delta no completed message has settled yet. Derived on read, so a client attaching mid-response renders the whole partial block rather than the tail it happens to catch live.
+type ChatStreamState struct {
+	Kind      ChatStreamStateKind `json:"kind"`
+	MessageId string              `json:"message_id,omitempty"`
+	Text      string              `json:"text"`
+}
+
+// ChatStreamStateKind defines model for ChatStreamState.Kind.
+type ChatStreamStateKind string
+
+// ChatSubagentEventsFrame One sub-agent's full step history, answering load_subagent. Not paginated: a sub-agent's steps may sit entirely outside the loaded main-conversation window.
+type ChatSubagentEventsFrame struct {
+	AgentId string                      `json:"agentId"`
+	Events  []ChatEvent                 `json:"events"`
+	Type    ChatSubagentEventsFrameType `json:"type"`
+}
+
+// ChatSubagentEventsFrameType defines model for ChatSubagentEventsFrame.Type.
+type ChatSubagentEventsFrameType string
+
+// ChatSubagentPayload A sub-agent's lifecycle. subagent_completed is the one completion chip. The tool call that spawned it rides in ChatProviderContext's parent_item_id, which is the same field.
+type ChatSubagentPayload struct {
+	AgentType   string `json:"agent_type,omitempty"`
+	Description string `json:"description,omitempty"`
+	Id          string `json:"id,omitempty"`
+	ParentId    string `json:"parent_id,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
+	Status      string `json:"status,omitempty"`
+}
+
+// ChatSubagentState defines model for ChatSubagentState.
+type ChatSubagentState struct {
+	Activity    string `json:"activity,omitempty"`
+	AgentType   string `json:"agent_type,omitempty"`
+	Description string `json:"description,omitempty"`
+	Id          string `json:"id"`
+
+	// ParentId The sub-agent that spawned this one; empty for a main-agent spawn.
+	ParentId string `json:"parent_id,omitempty"`
+
+	// ParentItemId The tool call that spawned it, so the chat folds it into that card.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Prompt       string `json:"prompt,omitempty"`
+	Status       string `json:"status,omitempty"`
+}
+
+// ChatTaskOutputFrame The tail of a background task's output file, or why it could not be read.
+type ChatTaskOutputFrame struct {
+	Content string                  `json:"content,omitempty"`
+	Error   string                  `json:"error,omitempty"`
+	File    string                  `json:"file"`
+	Type    ChatTaskOutputFrameType `json:"type"`
+}
+
+// ChatTaskOutputFrameType defines model for ChatTaskOutputFrame.Type.
+type ChatTaskOutputFrameType string
+
+// ChatToolCompletedPayload A tool call's result.
+type ChatToolCompletedPayload struct {
+	// Content The provider's verbatim result blocks, when it sent any.
+	Content json.RawMessage `json:"content,omitempty"`
+	Id      string          `json:"id,omitempty"`
+
+	// Input Codex reveals semantic tool fields only on completion, so a completed event can carry richer input than its start.
+	Input   json.RawMessage `json:"input,omitempty"`
+	IsError bool            `json:"is_error,omitempty"`
+	Name    string          `json:"name,omitempty"`
+
+	// Output Whatever the tool produced, as the provider sent it.
+	Output json.RawMessage `json:"output,omitempty"`
+
+	// Patch An Edit's own structuredPatch, so the card renders a diff against the file's real line numbers rather than two loose fragments.
+	Patch  json.RawMessage `json:"patch,omitempty"`
+	Status string          `json:"status,omitempty"`
+}
+
+// ChatToolStartedPayload A tool call.
+type ChatToolStartedPayload struct {
+	Id string `json:"id,omitempty"`
+
+	// Input The provider's own block input, verbatim - the shape is the tool's, so this is where an agent-type-specific payload lives. Codex additionally carries its native item under `_raw`.
+	Input json.RawMessage `json:"input,omitempty"`
+	Name  string          `json:"name,omitempty"`
+
+	// Output Whatever the tool produced, as the provider sent it - a string, an object, an error. Provider-owned, like `input`.
+	Output json.RawMessage `json:"output,omitempty"`
+
+	// Status Present on Codex items; its absence is what marks a Claude block.
+	Status string `json:"status,omitempty"`
+}
+
+// ChatTurnPayload A turn boundary - the unit queue draining and head status key off.
+type ChatTurnPayload struct {
+	CostUsd float64 `json:"cost_usd,omitempty"`
+
+	// Error The provider's structured failure. The browser unwraps app-server's nested JSON to show its type, status and message.
+	Error  json.RawMessage `json:"error,omitempty"`
+	Id     string          `json:"id,omitempty"`
+	Result string          `json:"result,omitempty"`
+	Status string          `json:"status,omitempty"`
+}
+
+// ChatTurnState defines model for ChatTurnState.
+type ChatTurnState struct {
+	Id     string `json:"id,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+// ChatUsageUpdatedPayload Token accounting. One carrying a message_id opens a message's count; the rest tick it up, which is what the live working indicator counts.
+type ChatUsageUpdatedPayload struct {
+	MessageId string          `json:"message_id,omitempty"`
+	Usage     json.RawMessage `json:"usage,omitempty"`
+}
+
+// ChatUserMessageEchoedPayload Reconciles a provider's echo of a message Hydra already recorded. The marker is durable on purpose: without it, two identical messages sent in separate turns cannot be paired correctly after a daemon restart.
+type ChatUserMessageEchoedPayload struct {
+	Content json.RawMessage `json:"content,omitempty"`
+
+	// UserSeq The sequence of the user_message this echo belongs to.
+	UserSeq uint64 `json:"user_seq,omitempty"`
+}
+
+// ChatUserMessagePayload A user turn. Hydra records this at the input boundary.
+type ChatUserMessagePayload struct {
+	// Content Content blocks, or a bare string for a provider command echo.
+	Content json.RawMessage `json:"content,omitempty"`
+
+	// Id The client-generated id, so a queued bubble reconciles to it.
+	Id string `json:"id,omitempty"`
+
+	// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
+	Shell *ChatShellResult `json:"shell,omitempty"`
 }
 
 // ClaudeUsageResponse defines model for ClaudeUsageResponse.
@@ -571,6 +1603,23 @@ type ClaudeUsageResponse struct {
 	// WeeklyResetText Raw weekly reset text, e.g. "Resets Jan 15, 3:30pm".
 	WeeklyResetText *string `json:"weekly_reset_text"`
 }
+
+// CommitCreatedEvent defines model for CommitCreatedEvent.
+type CommitCreatedEvent struct {
+	// Payload A commit the reconciler observed. Sequenced in the same log as the tool output that produced it, so the chip cannot render before its cause.
+	Payload ChatCommitCreatedPayload `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                 `json:"source_id,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+	Type      CommitCreatedEventType `json:"type"`
+}
+
+// CommitCreatedEventType defines model for CommitCreatedEvent.Type.
+type CommitCreatedEventType string
 
 // CommitInfo defines model for CommitInfo.
 type CommitInfo struct {
@@ -652,6 +1701,160 @@ type ConfigTomlResponse struct {
 	// Exists Whether a .hydra/config.toml file is present in the project
 	Exists bool `json:"exists"`
 }
+
+// ContentStreamCompletedEvent defines model for ContentStreamCompletedEvent.
+type ContentStreamCompletedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+		Kind  string             `json:"kind,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                          `json:"source_id,omitempty"`
+	Timestamp time.Time                       `json:"timestamp"`
+	Type      ContentStreamCompletedEventType `json:"type"`
+}
+
+// ContentStreamCompletedEventType defines model for ContentStreamCompletedEvent.Type.
+type ContentStreamCompletedEventType string
+
+// ContentStreamStartedEvent defines model for ContentStreamStartedEvent.
+type ContentStreamStartedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+		Kind  string             `json:"kind,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                        `json:"source_id,omitempty"`
+	Timestamp time.Time                     `json:"timestamp"`
+	Type      ContentStreamStartedEventType `json:"type"`
+}
+
+// ContentStreamStartedEventType defines model for ContentStreamStartedEvent.Type.
+type ContentStreamStartedEventType string
+
+// ContextMessageEvent defines model for ContextMessageEvent.
+type ContextMessageEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string          `json:"agent_id,omitempty"`
+		Content json.RawMessage `json:"content,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry  *ChatProviderEntry `json:"entry,omitempty"`
+		IsMeta bool               `json:"is_meta,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                  `json:"source_id,omitempty"`
+	Timestamp time.Time               `json:"timestamp"`
+	Type      ContextMessageEventType `json:"type"`
+}
+
+// ContextMessageEventType defines model for ContextMessageEvent.Type.
+type ContextMessageEventType string
+
+// ConversationStartedEvent defines model for ConversationStartedEvent.
+type ConversationStartedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// ApiKeySource "none" means subscription auth, so turn footers hide the notional cost.
+		ApiKeySource   string `json:"api_key_source,omitempty"`
+		ConversationId string `json:"conversation_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+		Model string             `json:"model,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId  string   `json:"parent_item_id,omitempty"`
+		Sidechain     bool     `json:"sidechain,omitempty"`
+		SlashCommands []string `json:"slash_commands,omitempty"`
+		StopReason    string   `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                       `json:"source_id,omitempty"`
+	Timestamp time.Time                    `json:"timestamp"`
+	Type      ConversationStartedEventType `json:"type"`
+}
+
+// ConversationStartedEventType defines model for ConversationStartedEvent.Type.
+type ConversationStartedEventType string
 
 // DiffFile defines model for DiffFile.
 type DiffFile struct {
@@ -763,6 +1966,142 @@ type GeneratedTitleResponse struct {
 	Title string `json:"title"`
 }
 
+// HeadChangedEvent defines model for HeadChangedEvent.
+type HeadChangedEvent struct {
+	// Payload HEAD moved without fast-forwarding (a reset, rebase or checkout), so the projection reconciles its visible commit set rather than inventing chips.
+	Payload ChatHeadChangedPayload `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string               `json:"source_id,omitempty"`
+	Timestamp time.Time            `json:"timestamp"`
+	Type      HeadChangedEventType `json:"type"`
+}
+
+// HeadChangedEventType defines model for HeadChangedEvent.Type.
+type HeadChangedEventType string
+
+// HeadDiffRefreshEvent The worktree changed; the diff viewer should re-fetch. Sent on both sockets, so it belongs to both unions rather than being modelled twice.
+type HeadDiffRefreshEvent struct {
+	// HeadMoved True when this refresh was triggered by a new commit (HEAD moved), as opposed to an uncommitted working-tree change. The diff viewer uses it to also re-snapshot per-commit artifacts (screenshots), which are memoized by commit SHA, while a plain working-tree change only re-fetches the diff text.
+	HeadMoved bool                     `json:"head_moved"`
+	Type      HeadDiffRefreshEventType `json:"type"`
+}
+
+// HeadDiffRefreshEventType defines model for HeadDiffRefreshEvent.Type.
+type HeadDiffRefreshEventType string
+
+// HeadObservedEvent defines model for HeadObservedEvent.
+type HeadObservedEvent struct {
+	// Payload HEAD moved without fast-forwarding (a reset, rebase or checkout), so the projection reconciles its visible commit set rather than inventing chips.
+	Payload ChatHeadChangedPayload `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                `json:"source_id,omitempty"`
+	Timestamp time.Time             `json:"timestamp"`
+	Type      HeadObservedEventType `json:"type"`
+}
+
+// HeadObservedEventType defines model for HeadObservedEvent.Type.
+type HeadObservedEventType string
+
+// HeadStatusEvent The head's computed status changed. Sent on both sockets, so it belongs to both unions rather than being modelled twice.
+type HeadStatusEvent struct {
+	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
+	Status AgentStatus         `json:"status"`
+	Type   HeadStatusEventType `json:"type"`
+}
+
+// HeadStatusEventType defines model for HeadStatusEvent.Type.
+type HeadStatusEventType string
+
+// InteractionRequestedEvent defines model for InteractionRequestedEvent.
+type InteractionRequestedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+		// Interaction The provider's own request, forwarded verbatim.
+		Interaction json.RawMessage `json:"interaction,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Provider     string `json:"provider,omitempty"`
+		RequestId    string `json:"request_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                        `json:"source_id,omitempty"`
+	Timestamp time.Time                     `json:"timestamp"`
+	Type      InteractionRequestedEventType `json:"type"`
+}
+
+// InteractionRequestedEventType defines model for InteractionRequestedEvent.Type.
+type InteractionRequestedEventType string
+
+// InteractionResolvedEvent defines model for InteractionResolvedEvent.
+type InteractionResolvedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+		// Interaction The provider's own request, forwarded verbatim.
+		Interaction json.RawMessage `json:"interaction,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Provider     string `json:"provider,omitempty"`
+		RequestId    string `json:"request_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                       `json:"source_id,omitempty"`
+	Timestamp time.Time                    `json:"timestamp"`
+	Type      InteractionResolvedEventType `json:"type"`
+}
+
+// InteractionResolvedEventType defines model for InteractionResolvedEvent.Type.
+type InteractionResolvedEventType string
+
 // ListReviewsResponse The open PRs/MRs available to adopt, plus the forge auth state so the picker can show a "run gh/glab auth login" hint (docs/pr-adoption.md).
 type ListReviewsResponse struct {
 	// AuthStatus Live auth status line, when not authenticated / configured.
@@ -810,6 +2149,60 @@ type MergeConflictError struct {
 // MergeConflictErrorError defines model for MergeConflictError.Error.
 type MergeConflictErrorError string
 
+// MessagesRetractedEvent defines model for MessagesRetractedEvent.
+type MessagesRetractedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry      *ChatProviderEntry `json:"entry,omitempty"`
+		MessageIds []string           `json:"message_ids,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                     `json:"source_id,omitempty"`
+	Timestamp time.Time                  `json:"timestamp"`
+	Type      MessagesRetractedEventType `json:"type"`
+}
+
+// MessagesRetractedEventType defines model for MessagesRetractedEvent.Type.
+type MessagesRetractedEventType string
+
+// ModelChangedEvent defines model for ModelChangedEvent.
+type ModelChangedEvent struct {
+	// Payload The active model changed, captured daemon-side.
+	Payload ChatModelChangedPayload `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                `json:"source_id,omitempty"`
+	Timestamp time.Time             `json:"timestamp"`
+	Type      ModelChangedEventType `json:"type"`
+}
+
+// ModelChangedEventType defines model for ModelChangedEvent.Type.
+type ModelChangedEventType string
+
 // NetworkConfig defines model for NetworkConfig.
 type NetworkConfig struct {
 	// AllowedHosts Extra outbound hosts (exact host or *.suffix) allowed when filtering is on, unioned on top of the built-in default allow-list.
@@ -842,6 +2235,121 @@ type NewReviewCommentRequest struct {
 	Line int    `json:"line"`
 	Path string `json:"path"`
 }
+
+// NoticeEvent defines model for NoticeEvent.
+type NoticeEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+		Text         string `json:"text,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string          `json:"source_id,omitempty"`
+	Timestamp time.Time       `json:"timestamp"`
+	Type      NoticeEventType `json:"type"`
+}
+
+// NoticeEventType defines model for NoticeEvent.Type.
+type NoticeEventType string
+
+// PlanDeltaEvent defines model for PlanDeltaEvent.
+type PlanDeltaEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+		Id    string             `json:"id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+		Text         string `json:"text,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string             `json:"source_id,omitempty"`
+	Timestamp time.Time          `json:"timestamp"`
+	Type      PlanDeltaEventType `json:"type"`
+}
+
+// PlanDeltaEventType defines model for PlanDeltaEvent.Type.
+type PlanDeltaEventType string
+
+// PlanUpdatedEvent defines model for PlanUpdatedEvent.
+type PlanUpdatedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string          `json:"parent_item_id,omitempty"`
+		Plan         json.RawMessage `json:"plan,omitempty"`
+
+		// Provider Which provider produced it. Claude's Task cards already carry the timeline, so only Codex renders a visible Update Plan card.
+		Provider   string `json:"provider,omitempty"`
+		Sidechain  bool   `json:"sidechain,omitempty"`
+		StopReason string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string               `json:"source_id,omitempty"`
+	Timestamp time.Time            `json:"timestamp"`
+	Type      PlanUpdatedEventType `json:"type"`
+}
+
+// PlanUpdatedEventType defines model for PlanUpdatedEvent.Type.
+type PlanUpdatedEventType string
 
 // PolicyConfig Per-agent security-gate policy. The decision-capable gate can deny (or park for approval) tool calls even under skip-permissions.
 type PolicyConfig struct {
@@ -942,6 +2450,11 @@ type PreviewsResponse struct {
 	Previews []PreviewStatus `json:"previews"`
 }
 
+// ProjectEventFrame One change signal. No `discriminator` here: the four bare refetch nudges share one schema, and a discriminator mapping several type values onto the same member is not expressible - openapi-typescript-codegen collapses the enum to whichever mapping it saw last. A plain oneOf narrows on `type` correctly because every member's is a literal or a closed enum.
+type ProjectEventFrame struct {
+	union json.RawMessage
+}
+
 // ProjectInfo defines model for ProjectInfo.
 type ProjectInfo struct {
 	// AgentCount Total number of this project's active (non-ephemeral, non-archived) agents. Drives the project switcher's per-project agent tally.
@@ -983,6 +2496,133 @@ type ProjectInfo struct {
 	// WaitingCount Number of this project's active agents currently in the `waiting` (gone quiet) status.
 	WaitingCount *int `json:"waiting_count,omitempty"`
 }
+
+// QueueMessageRemovedEvent defines model for QueueMessageRemovedEvent.
+type QueueMessageRemovedEvent struct {
+	// Payload A queued message was recalled or drained, so it leaves the queue.
+	Payload ChatQueueMessageRemovedPayload `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                       `json:"source_id,omitempty"`
+	Timestamp time.Time                    `json:"timestamp"`
+	Type      QueueMessageRemovedEventType `json:"type"`
+}
+
+// QueueMessageRemovedEventType defines model for QueueMessageRemovedEvent.Type.
+type QueueMessageRemovedEventType string
+
+// QueuedMessageEvent defines model for QueuedMessageEvent.
+type QueuedMessageEvent struct {
+	// Payload A message the daemon is holding because a turn was running. It lives in the queue projection only; when it drains it becomes a durable user_message carrying the same id.
+	Payload ChatQueuedMessagePayload `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                 `json:"source_id,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+	Type      QueuedMessageEventType `json:"type"`
+}
+
+// QueuedMessageEventType defines model for QueuedMessageEvent.Type.
+type QueuedMessageEventType string
+
+// ReasoningCompletedEvent defines model for ReasoningCompletedEvent.
+type ReasoningCompletedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry     *ChatProviderEntry `json:"entry,omitempty"`
+		MessageId string             `json:"message_id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+		Text         string `json:"text,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                      `json:"source_id,omitempty"`
+	Timestamp time.Time                   `json:"timestamp"`
+	Type      ReasoningCompletedEventType `json:"type"`
+}
+
+// ReasoningCompletedEventType defines model for ReasoningCompletedEvent.Type.
+type ReasoningCompletedEventType string
+
+// ReasoningDeltaEvent defines model for ReasoningDeltaEvent.
+type ReasoningDeltaEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry     *ChatProviderEntry `json:"entry,omitempty"`
+		MessageId string             `json:"message_id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+		Text         string `json:"text,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                  `json:"source_id,omitempty"`
+	Timestamp time.Time               `json:"timestamp"`
+	Type      ReasoningDeltaEventType `json:"type"`
+}
+
+// ReasoningDeltaEventType defines model for ReasoningDeltaEvent.Type.
+type ReasoningDeltaEventType string
+
+// ReasoningDurationEvent defines model for ReasoningDurationEvent.
+type ReasoningDurationEvent struct {
+	// Payload The measured duration of a thinking block. Separate from the block itself, because no provider reports it - the daemon times it.
+	Payload ChatReasoningDurationPayload `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                     `json:"source_id,omitempty"`
+	Timestamp time.Time                  `json:"timestamp"`
+	Type      ReasoningDurationEventType `json:"type"`
+}
+
+// ReasoningDurationEventType defines model for ReasoningDurationEvent.Type.
+type ReasoningDurationEventType string
 
 // ReorderProjectsRequest defines model for ReorderProjectsRequest.
 type ReorderProjectsRequest struct {
@@ -1183,6 +2823,14 @@ type ResolvedPathResponse struct {
 	// RepoRoot Root of the git repository containing the path, when is_git_repo (the project would be added at this path)
 	RepoRoot *string `json:"repo_root,omitempty"`
 }
+
+// ResourceChangedEvent A resource changed; refetch it. Carries no payload.
+type ResourceChangedEvent struct {
+	Type ResourceChangedEventType `json:"type"`
+}
+
+// ResourceChangedEventType defines model for ResourceChangedEvent.Type.
+type ResourceChangedEventType string
 
 // ResourceLimits The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults - weights on 50/50, hard caps off - are applied only when resolving). Weights are soft (bite only under contention); the hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
 type ResourceLimits struct {
@@ -1413,6 +3061,58 @@ type SandboxConfig struct {
 	WritablePaths  *[]string `json:"writable_paths"`
 }
 
+// ServerUpdateDoneFrame The update finished without restarting - which in practice means it failed, since a success re-execs instead of sending this.
+type ServerUpdateDoneFrame struct {
+	// Error Empty means success.
+	Error string                    `json:"error,omitempty"`
+	Kind  ServerUpdateDoneFrameKind `json:"kind"`
+}
+
+// ServerUpdateDoneFrameKind defines model for ServerUpdateDoneFrame.Kind.
+type ServerUpdateDoneFrameKind string
+
+// ServerUpdateEvent One frame of an update's progress, flat: the daemon constructs and fans these out internally, so it needs one struct rather than the union below. Both describe the same wire bytes.
+type ServerUpdateEvent struct {
+	// Error Set on a failed `done` frame; empty means success.
+	Error string                `json:"error,omitempty"`
+	Kind  ServerUpdateEventKind `json:"kind"`
+
+	// Line One line of build output.
+	Line  string            `json:"line,omitempty"`
+	Phase ServerUpdatePhase `json:"phase,omitempty"`
+}
+
+// ServerUpdateEventKind defines model for ServerUpdateEvent.Kind.
+type ServerUpdateEventKind string
+
+// ServerUpdateFrame One frame, narrowed by its kind to the field that kind carries. What the browser reads.
+type ServerUpdateFrame struct {
+	union json.RawMessage
+}
+
+// ServerUpdateLogFrame One line of build output.
+type ServerUpdateLogFrame struct {
+	Kind ServerUpdateLogFrameKind `json:"kind"`
+	Line string                   `json:"line"`
+}
+
+// ServerUpdateLogFrameKind defines model for ServerUpdateLogFrame.Kind.
+type ServerUpdateLogFrameKind string
+
+// ServerUpdatePhase The stage an update has reached.
+type ServerUpdatePhase string
+
+// ServerUpdatePhaseFrame The update reached a new stage.
+type ServerUpdatePhaseFrame struct {
+	Kind ServerUpdatePhaseFrameKind `json:"kind"`
+
+	// Phase The stage an update has reached.
+	Phase ServerUpdatePhase `json:"phase"`
+}
+
+// ServerUpdatePhaseFrameKind defines model for ServerUpdatePhaseFrame.Kind.
+type ServerUpdatePhaseFrameKind string
+
 // ServiceScript A per-project long-running script the daemon supervises while the project is registered ([services.<name>] in config.toml)
 type ServiceScript struct {
 	// Enabled Whether the daemon supervises this service (absent/null or true = enabled; false = skipped)
@@ -1539,53 +3239,156 @@ type StatusResponse struct {
 	Version       *string  `json:"version,omitempty"`
 }
 
-// TerminalDataEvent defines model for TerminalDataEvent.
+// SubagentCompletedEvent defines model for SubagentCompletedEvent.
+type SubagentCompletedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId   string `json:"agent_id,omitempty"`
+		AgentType string `json:"agent_type,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd         string `json:"cwd,omitempty"`
+		Description string `json:"description,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry    *ChatProviderEntry `json:"entry,omitempty"`
+		Id       string             `json:"id,omitempty"`
+		ParentId string             `json:"parent_id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Prompt       string `json:"prompt,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		Status       string `json:"status,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                     `json:"source_id,omitempty"`
+	Timestamp time.Time                  `json:"timestamp"`
+	Type      SubagentCompletedEventType `json:"type"`
+}
+
+// SubagentCompletedEventType defines model for SubagentCompletedEvent.Type.
+type SubagentCompletedEventType string
+
+// SubagentStartedEvent defines model for SubagentStartedEvent.
+type SubagentStartedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId   string `json:"agent_id,omitempty"`
+		AgentType string `json:"agent_type,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd         string `json:"cwd,omitempty"`
+		Description string `json:"description,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry    *ChatProviderEntry `json:"entry,omitempty"`
+		Id       string             `json:"id,omitempty"`
+		ParentId string             `json:"parent_id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Prompt       string `json:"prompt,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		Status       string `json:"status,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                   `json:"source_id,omitempty"`
+	Timestamp time.Time                `json:"timestamp"`
+	Type      SubagentStartedEventType `json:"type"`
+}
+
+// SubagentStartedEventType defines model for SubagentStartedEvent.Type.
+type SubagentStartedEventType string
+
+// SubagentUpdatedEvent defines model for SubagentUpdatedEvent.
+type SubagentUpdatedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId   string `json:"agent_id,omitempty"`
+		AgentType string `json:"agent_type,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd         string `json:"cwd,omitempty"`
+		Description string `json:"description,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry    *ChatProviderEntry `json:"entry,omitempty"`
+		Id       string             `json:"id,omitempty"`
+		ParentId string             `json:"parent_id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Prompt       string `json:"prompt,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		Status       string `json:"status,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                   `json:"source_id,omitempty"`
+	Timestamp time.Time                `json:"timestamp"`
+	Type      SubagentUpdatedEventType `json:"type"`
+}
+
+// SubagentUpdatedEventType defines model for SubagentUpdatedEvent.Type.
+type SubagentUpdatedEventType string
+
+// TerminalDataEvent A chunk of PTY output, when it is relayed as text rather than binary.
 type TerminalDataEvent struct {
 	// Data Base64 encoded binary data or plain string
-	Data *string               `json:"data,omitempty"`
+	Data string                `json:"data"`
 	Type TerminalDataEventType `json:"type"`
 }
 
 // TerminalDataEventType defines model for TerminalDataEvent.Type.
 type TerminalDataEventType string
 
-// TerminalDiffRefreshEvent defines model for TerminalDiffRefreshEvent.
-type TerminalDiffRefreshEvent struct {
-	// HeadMoved True when this refresh was triggered by a new commit (HEAD moved), as opposed to an uncommitted working-tree change. The diff viewer uses it to also re-snapshot per-commit artifacts (screenshots), which are memoized by commit SHA, while a plain working-tree change only re-fetches the diff text.
-	HeadMoved *bool                        `json:"head_moved,omitempty"`
-	Type      TerminalDiffRefreshEventType `json:"type"`
-}
-
-// TerminalDiffRefreshEventType defines model for TerminalDiffRefreshEvent.Type.
-type TerminalDiffRefreshEventType string
-
-// TerminalEvent defines model for TerminalEvent.
+// TerminalEvent One server-to-client control event on a terminal-mode socket.
 type TerminalEvent struct {
-	Type TerminalEventType `json:"type"`
+	union json.RawMessage
 }
 
-// TerminalEventType defines model for TerminalEvent.Type.
-type TerminalEventType string
-
-// TerminalSizeEvent defines model for TerminalSizeEvent.
+// TerminalSizeEvent The PTY's current window size, sent on attach right before the scrollback replay so the client can size its terminal to match. The replayed bytes carry cursor moves and wrapping computed for this width; rendering them at a different width corrupts the history.
 type TerminalSizeEvent struct {
-	Cols *int                  `json:"cols,omitempty"`
-	Rows *int                  `json:"rows,omitempty"`
+	Cols int                   `json:"cols"`
+	Rows int                   `json:"rows"`
 	Type TerminalSizeEventType `json:"type"`
 }
 
 // TerminalSizeEventType defines model for TerminalSizeEvent.Type.
 type TerminalSizeEventType string
-
-// TerminalStatusEvent defines model for TerminalStatusEvent.
-type TerminalStatusEvent struct {
-	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
-	Status *AgentStatus            `json:"status,omitempty"`
-	Type   TerminalStatusEventType `json:"type"`
-}
-
-// TerminalStatusEventType defines model for TerminalStatusEvent.Type.
-type TerminalStatusEventType string
 
 // TestCase defines model for TestCase.
 type TestCase struct {
@@ -1720,16 +3523,447 @@ type TestSummary struct {
 	Warnings *int `json:"warnings,omitempty"`
 }
 
+// TestsClientMessage Client to server. Only `refresh` is supported - re-run one runner.
+type TestsClientMessage struct {
+	Name string                 `json:"name"`
+	Type TestsClientMessageType `json:"type"`
+}
+
+// TestsClientMessageType defines model for TestsClientMessage.Type.
+type TestsClientMessageType string
+
+// TestsCounts Authoritative running totals - not deltas - plus the newly-appended cases the client merges into its case list.
+type TestsCounts struct {
+	Cases   []TestCase `json:"cases,omitempty"`
+	Failed  int        `json:"failed"`
+	Passed  int        `json:"passed"`
+	Skipped int        `json:"skipped"`
+
+	// Total The denominator; 0 means unknown.
+	Total int `json:"total"`
+
+	// TotalEstimated The total is an estimate carried from a prior run, because this one emitted no ::hydra:test:total:: marker.
+	TotalEstimated bool `json:"total_estimated,omitempty"`
+	Warnings       int  `json:"warnings"`
+}
+
+// TestsCountsFrame Running totals for one runner, mid-run.
+type TestsCountsFrame struct {
+	// Counts Authoritative running totals - not deltas - plus the newly-appended cases the client merges into its case list.
+	Counts TestsCounts          `json:"counts"`
+	Name   string               `json:"name"`
+	Type   TestsCountsFrameType `json:"type"`
+}
+
+// TestsCountsFrameType defines model for TestsCountsFrame.Type.
+type TestsCountsFrameType string
+
+// TestsFrame One server-to-client frame on the tests socket.
+type TestsFrame struct {
+	union json.RawMessage
+}
+
+// TestsLogFrame One captured log line from a running runner.
+type TestsLogFrame struct {
+	Line ArtifactLogLine   `json:"line"`
+	Name string            `json:"name"`
+	Type TestsLogFrameType `json:"type"`
+}
+
+// TestsLogFrameType defines model for TestsLogFrame.Type.
+type TestsLogFrameType string
+
+// TestsProgressFrame The header progress line changed for one runner.
+type TestsProgressFrame struct {
+	Name     string                 `json:"name"`
+	Progress string                 `json:"progress"`
+	Type     TestsProgressFrameType `json:"type"`
+}
+
+// TestsProgressFrameType defines model for TestsProgressFrame.Type.
+type TestsProgressFrameType string
+
 // TestsResponse defines model for TestsResponse.
 type TestsResponse struct {
 	Runners []TestRunResult `json:"runners"`
 }
+
+// TestsRunnerFrame One runner's verdict changed.
+type TestsRunnerFrame struct {
+	// Runner One test runner's parsed result for a single ref (single-sided; no comparison)
+	Runner TestRunResult        `json:"runner"`
+	Type   TestsRunnerFrameType `json:"type"`
+}
+
+// TestsRunnerFrameType defines model for TestsRunnerFrame.Type.
+type TestsRunnerFrameType string
+
+// TestsSnapshotFrame Every runner's current verdict, sent once on connect.
+type TestsSnapshotFrame struct {
+	Runners []TestRunResult        `json:"runners"`
+	Type    TestsSnapshotFrameType `json:"type"`
+}
+
+// TestsSnapshotFrameType defines model for TestsSnapshotFrame.Type.
+type TestsSnapshotFrameType string
+
+// ToolCompletedEvent defines model for ToolCompletedEvent.
+type ToolCompletedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Content The provider's verbatim result blocks, when it sent any.
+		Content json.RawMessage `json:"content,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+		Id    string             `json:"id,omitempty"`
+
+		// Input Codex reveals semantic tool fields only on completion, so a completed event can carry richer input than its start.
+		Input   json.RawMessage `json:"input,omitempty"`
+		IsError bool            `json:"is_error,omitempty"`
+		Name    string          `json:"name,omitempty"`
+
+		// Output Whatever the tool produced, as the provider sent it.
+		Output json.RawMessage `json:"output,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+
+		// Patch An Edit's own structuredPatch, so the card renders a diff against the file's real line numbers rather than two loose fragments.
+		Patch      json.RawMessage `json:"patch,omitempty"`
+		Sidechain  bool            `json:"sidechain,omitempty"`
+		Status     string          `json:"status,omitempty"`
+		StopReason string          `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                 `json:"source_id,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+	Type      ToolCompletedEventType `json:"type"`
+}
+
+// ToolCompletedEventType defines model for ToolCompletedEvent.Type.
+type ToolCompletedEventType string
+
+// ToolDeltaEvent defines model for ToolDeltaEvent.
+type ToolDeltaEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+		Id    string             `json:"id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+		Text         string `json:"text,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string             `json:"source_id,omitempty"`
+	Timestamp time.Time          `json:"timestamp"`
+	Type      ToolDeltaEventType `json:"type"`
+}
+
+// ToolDeltaEventType defines model for ToolDeltaEvent.Type.
+type ToolDeltaEventType string
+
+// ToolStartedEvent defines model for ToolStartedEvent.
+type ToolStartedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+		Id    string             `json:"id,omitempty"`
+
+		// Input The provider's own block input, verbatim - the shape is the tool's, so this is where an agent-type-specific payload lives. Codex additionally carries its native item under `_raw`.
+		Input json.RawMessage `json:"input,omitempty"`
+		Name  string          `json:"name,omitempty"`
+
+		// Output Whatever the tool produced, as the provider sent it - a string, an object, an error. Provider-owned, like `input`.
+		Output json.RawMessage `json:"output,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+
+		// Status Present on Codex items; its absence is what marks a Claude block.
+		Status     string `json:"status,omitempty"`
+		StopReason string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string               `json:"source_id,omitempty"`
+	Timestamp time.Time            `json:"timestamp"`
+	Type      ToolStartedEventType `json:"type"`
+}
+
+// ToolStartedEventType defines model for ToolStartedEvent.Type.
+type ToolStartedEventType string
 
 // TrackRemoteResponse defines model for TrackRemoteResponse.
 type TrackRemoteResponse struct {
 	// Remote The configured local remote name (e.g. "hydra-agents"). Check out and follow a head with `git checkout -t <remote>/<head-id>` then `git pull`.
 	Remote string `json:"remote"`
 }
+
+// TurnCompletedEvent defines model for TurnCompletedEvent.
+type TurnCompletedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string  `json:"agent_id,omitempty"`
+		CostUsd float64 `json:"cost_usd,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+		// Error The provider's structured failure. The browser unwraps app-server's nested JSON to show its type, status and message.
+		Error json.RawMessage `json:"error,omitempty"`
+		Id    string          `json:"id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Result       string `json:"result,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		Status       string `json:"status,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                 `json:"source_id,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+	Type      TurnCompletedEventType `json:"type"`
+}
+
+// TurnCompletedEventType defines model for TurnCompletedEvent.Type.
+type TurnCompletedEventType string
+
+// TurnErrorEvent defines model for TurnErrorEvent.
+type TurnErrorEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string  `json:"agent_id,omitempty"`
+		CostUsd float64 `json:"cost_usd,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+		// Error The provider's structured failure. The browser unwraps app-server's nested JSON to show its type, status and message.
+		Error json.RawMessage `json:"error,omitempty"`
+		Id    string          `json:"id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Result       string `json:"result,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		Status       string `json:"status,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string             `json:"source_id,omitempty"`
+	Timestamp time.Time          `json:"timestamp"`
+	Type      TurnErrorEventType `json:"type"`
+}
+
+// TurnErrorEventType defines model for TurnErrorEvent.Type.
+type TurnErrorEventType string
+
+// TurnFailedEvent defines model for TurnFailedEvent.
+type TurnFailedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string  `json:"agent_id,omitempty"`
+		CostUsd float64 `json:"cost_usd,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+		// Error The provider's structured failure. The browser unwraps app-server's nested JSON to show its type, status and message.
+		Error json.RawMessage `json:"error,omitempty"`
+		Id    string          `json:"id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Result       string `json:"result,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		Status       string `json:"status,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string              `json:"source_id,omitempty"`
+	Timestamp time.Time           `json:"timestamp"`
+	Type      TurnFailedEventType `json:"type"`
+}
+
+// TurnFailedEventType defines model for TurnFailedEvent.Type.
+type TurnFailedEventType string
+
+// TurnInterruptedEvent defines model for TurnInterruptedEvent.
+type TurnInterruptedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string  `json:"agent_id,omitempty"`
+		CostUsd float64 `json:"cost_usd,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+		// Error The provider's structured failure. The browser unwraps app-server's nested JSON to show its type, status and message.
+		Error json.RawMessage `json:"error,omitempty"`
+		Id    string          `json:"id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Result       string `json:"result,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		Status       string `json:"status,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                   `json:"source_id,omitempty"`
+	Timestamp time.Time                `json:"timestamp"`
+	Type      TurnInterruptedEventType `json:"type"`
+}
+
+// TurnInterruptedEventType defines model for TurnInterruptedEvent.Type.
+type TurnInterruptedEventType string
+
+// TurnStartedEvent defines model for TurnStartedEvent.
+type TurnStartedEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string  `json:"agent_id,omitempty"`
+		CostUsd float64 `json:"cost_usd,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+		// Error The provider's structured failure. The browser unwraps app-server's nested JSON to show its type, status and message.
+		Error json.RawMessage `json:"error,omitempty"`
+		Id    string          `json:"id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+		Result       string `json:"result,omitempty"`
+		Sidechain    bool   `json:"sidechain,omitempty"`
+		Status       string `json:"status,omitempty"`
+		StopReason   string `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string               `json:"source_id,omitempty"`
+	Timestamp time.Time            `json:"timestamp"`
+	Type      TurnStartedEventType `json:"type"`
+}
+
+// TurnStartedEventType defines model for TurnStartedEvent.Type.
+type TurnStartedEventType string
 
 // UncommittedSummary defines model for UncommittedSummary.
 type UncommittedSummary struct {
@@ -1757,6 +3991,85 @@ type UpdateAgentRequest struct {
 	// Title New user-facing display name for the agent. Trimmed; must be non-empty if provided.
 	Title *string `json:"title,omitempty"`
 }
+
+// UsageUpdatedEvent defines model for UsageUpdatedEvent.
+type UsageUpdatedEvent struct {
+	// Payload Token accounting. One carrying a message_id opens a message's count; the rest tick it up, which is what the live working indicator counts.
+	Payload ChatUsageUpdatedPayload `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                `json:"source_id,omitempty"`
+	Timestamp time.Time             `json:"timestamp"`
+	Type      UsageUpdatedEventType `json:"type"`
+}
+
+// UsageUpdatedEventType defines model for UsageUpdatedEvent.Type.
+type UsageUpdatedEventType string
+
+// UserMessageEchoedEvent defines model for UserMessageEchoedEvent.
+type UserMessageEchoedEvent struct {
+	// Payload Reconciles a provider's echo of a message Hydra already recorded. The marker is durable on purpose: without it, two identical messages sent in separate turns cannot be paired correctly after a daemon restart.
+	Payload ChatUserMessageEchoedPayload `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                     `json:"source_id,omitempty"`
+	Timestamp time.Time                  `json:"timestamp"`
+	Type      UserMessageEchoedEventType `json:"type"`
+}
+
+// UserMessageEchoedEventType defines model for UserMessageEchoedEvent.Type.
+type UserMessageEchoedEventType string
+
+// UserMessageEvent defines model for UserMessageEvent.
+type UserMessageEvent struct {
+	Payload struct {
+		// AgentId The sub-agent whose step this is.
+		AgentId string `json:"agent_id,omitempty"`
+
+		// Content Content blocks, or a bare string for a provider command echo.
+		Content json.RawMessage `json:"content,omitempty"`
+
+		// Cwd Where the provider says its shell was left.
+		Cwd string `json:"cwd,omitempty"`
+
+		// Entry The provider's own recorded entry for this event, with the message content taken out (the payload already carries it, and a tool result can be a megabyte). The chat's Raw panel shows this rather than a handful of fields something thought to copy across, so it is deliberately open.
+		Entry *ChatProviderEntry `json:"entry,omitempty"`
+
+		// Id The client-generated id, so a queued bubble reconciles to it.
+		Id string `json:"id,omitempty"`
+
+		// ParentItemId The tool call this belongs under.
+		ParentItemId string `json:"parent_item_id,omitempty"`
+
+		// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
+		Shell      *ChatShellResult `json:"shell,omitempty"`
+		Sidechain  bool             `json:"sidechain,omitempty"`
+		StopReason string           `json:"stop_reason,omitempty"`
+
+		// Usage Provider token accounting; the shape differs per provider.
+		Usage json.RawMessage `json:"usage,omitempty"`
+
+		// Uuid The provider's id for the record this came from.
+		Uuid string `json:"uuid,omitempty"`
+	} `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string               `json:"source_id,omitempty"`
+	Timestamp time.Time            `json:"timestamp"`
+	Type      UserMessageEventType `json:"type"`
+}
+
+// UserMessageEventType defines model for UserMessageEvent.Type.
+type UserMessageEventType string
 
 // PreviewConfigTomlParams defines parameters for PreviewConfigToml.
 type PreviewConfigTomlParams struct {
@@ -2056,6 +4369,2218 @@ type SetProjectIconJSONRequestBody = SetProjectIconRequest
 
 // CommitRepositoryJSONRequestBody defines body for CommitRepository for application/json ContentType.
 type CommitRepositoryJSONRequestBody = CommitRepositoryRequest
+
+// AsArtifactsSnapshotFrame returns the union data inside the ArtifactsFrame as a ArtifactsSnapshotFrame
+func (t ArtifactsFrame) AsArtifactsSnapshotFrame() (ArtifactsSnapshotFrame, error) {
+	var body ArtifactsSnapshotFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromArtifactsSnapshotFrame overwrites any union data inside the ArtifactsFrame as the provided ArtifactsSnapshotFrame
+func (t *ArtifactsFrame) FromArtifactsSnapshotFrame(v ArtifactsSnapshotFrame) error {
+	v.Type = "snapshot"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeArtifactsSnapshotFrame performs a merge with any union data inside the ArtifactsFrame, using the provided ArtifactsSnapshotFrame
+func (t *ArtifactsFrame) MergeArtifactsSnapshotFrame(v ArtifactsSnapshotFrame) error {
+	v.Type = "snapshot"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsArtifactsSetFrame returns the union data inside the ArtifactsFrame as a ArtifactsSetFrame
+func (t ArtifactsFrame) AsArtifactsSetFrame() (ArtifactsSetFrame, error) {
+	var body ArtifactsSetFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromArtifactsSetFrame overwrites any union data inside the ArtifactsFrame as the provided ArtifactsSetFrame
+func (t *ArtifactsFrame) FromArtifactsSetFrame(v ArtifactsSetFrame) error {
+	v.Type = "set"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeArtifactsSetFrame performs a merge with any union data inside the ArtifactsFrame, using the provided ArtifactsSetFrame
+func (t *ArtifactsFrame) MergeArtifactsSetFrame(v ArtifactsSetFrame) error {
+	v.Type = "set"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsArtifactsLogFrame returns the union data inside the ArtifactsFrame as a ArtifactsLogFrame
+func (t ArtifactsFrame) AsArtifactsLogFrame() (ArtifactsLogFrame, error) {
+	var body ArtifactsLogFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromArtifactsLogFrame overwrites any union data inside the ArtifactsFrame as the provided ArtifactsLogFrame
+func (t *ArtifactsFrame) FromArtifactsLogFrame(v ArtifactsLogFrame) error {
+	v.Type = "log"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeArtifactsLogFrame performs a merge with any union data inside the ArtifactsFrame, using the provided ArtifactsLogFrame
+func (t *ArtifactsFrame) MergeArtifactsLogFrame(v ArtifactsLogFrame) error {
+	v.Type = "log"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsArtifactsProgressFrame returns the union data inside the ArtifactsFrame as a ArtifactsProgressFrame
+func (t ArtifactsFrame) AsArtifactsProgressFrame() (ArtifactsProgressFrame, error) {
+	var body ArtifactsProgressFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromArtifactsProgressFrame overwrites any union data inside the ArtifactsFrame as the provided ArtifactsProgressFrame
+func (t *ArtifactsFrame) FromArtifactsProgressFrame(v ArtifactsProgressFrame) error {
+	v.Type = "progress"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeArtifactsProgressFrame performs a merge with any union data inside the ArtifactsFrame, using the provided ArtifactsProgressFrame
+func (t *ArtifactsFrame) MergeArtifactsProgressFrame(v ArtifactsProgressFrame) error {
+	v.Type = "progress"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsArtifactsFileFrame returns the union data inside the ArtifactsFrame as a ArtifactsFileFrame
+func (t ArtifactsFrame) AsArtifactsFileFrame() (ArtifactsFileFrame, error) {
+	var body ArtifactsFileFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromArtifactsFileFrame overwrites any union data inside the ArtifactsFrame as the provided ArtifactsFileFrame
+func (t *ArtifactsFrame) FromArtifactsFileFrame(v ArtifactsFileFrame) error {
+	v.Type = "file"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeArtifactsFileFrame performs a merge with any union data inside the ArtifactsFrame, using the provided ArtifactsFileFrame
+func (t *ArtifactsFrame) MergeArtifactsFileFrame(v ArtifactsFileFrame) error {
+	v.Type = "file"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ArtifactsFrame) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t ArtifactsFrame) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "file":
+		return t.AsArtifactsFileFrame()
+	case "log":
+		return t.AsArtifactsLogFrame()
+	case "progress":
+		return t.AsArtifactsProgressFrame()
+	case "set":
+		return t.AsArtifactsSetFrame()
+	case "snapshot":
+		return t.AsArtifactsSnapshotFrame()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t ArtifactsFrame) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ArtifactsFrame) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsConversationStartedEvent returns the union data inside the ChatEventUnion as a ConversationStartedEvent
+func (t ChatEventUnion) AsConversationStartedEvent() (ConversationStartedEvent, error) {
+	var body ConversationStartedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromConversationStartedEvent overwrites any union data inside the ChatEventUnion as the provided ConversationStartedEvent
+func (t *ChatEventUnion) FromConversationStartedEvent(v ConversationStartedEvent) error {
+	v.Type = "conversation_started"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeConversationStartedEvent performs a merge with any union data inside the ChatEventUnion, using the provided ConversationStartedEvent
+func (t *ChatEventUnion) MergeConversationStartedEvent(v ConversationStartedEvent) error {
+	v.Type = "conversation_started"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsUserMessageEvent returns the union data inside the ChatEventUnion as a UserMessageEvent
+func (t ChatEventUnion) AsUserMessageEvent() (UserMessageEvent, error) {
+	var body UserMessageEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromUserMessageEvent overwrites any union data inside the ChatEventUnion as the provided UserMessageEvent
+func (t *ChatEventUnion) FromUserMessageEvent(v UserMessageEvent) error {
+	v.Type = "user_message"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeUserMessageEvent performs a merge with any union data inside the ChatEventUnion, using the provided UserMessageEvent
+func (t *ChatEventUnion) MergeUserMessageEvent(v UserMessageEvent) error {
+	v.Type = "user_message"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsUserMessageEchoedEvent returns the union data inside the ChatEventUnion as a UserMessageEchoedEvent
+func (t ChatEventUnion) AsUserMessageEchoedEvent() (UserMessageEchoedEvent, error) {
+	var body UserMessageEchoedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromUserMessageEchoedEvent overwrites any union data inside the ChatEventUnion as the provided UserMessageEchoedEvent
+func (t *ChatEventUnion) FromUserMessageEchoedEvent(v UserMessageEchoedEvent) error {
+	v.Type = "user_message_echoed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeUserMessageEchoedEvent performs a merge with any union data inside the ChatEventUnion, using the provided UserMessageEchoedEvent
+func (t *ChatEventUnion) MergeUserMessageEchoedEvent(v UserMessageEchoedEvent) error {
+	v.Type = "user_message_echoed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsContextMessageEvent returns the union data inside the ChatEventUnion as a ContextMessageEvent
+func (t ChatEventUnion) AsContextMessageEvent() (ContextMessageEvent, error) {
+	var body ContextMessageEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromContextMessageEvent overwrites any union data inside the ChatEventUnion as the provided ContextMessageEvent
+func (t *ChatEventUnion) FromContextMessageEvent(v ContextMessageEvent) error {
+	v.Type = "context_message"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeContextMessageEvent performs a merge with any union data inside the ChatEventUnion, using the provided ContextMessageEvent
+func (t *ChatEventUnion) MergeContextMessageEvent(v ContextMessageEvent) error {
+	v.Type = "context_message"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAssistantMessageEvent returns the union data inside the ChatEventUnion as a AssistantMessageEvent
+func (t ChatEventUnion) AsAssistantMessageEvent() (AssistantMessageEvent, error) {
+	var body AssistantMessageEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAssistantMessageEvent overwrites any union data inside the ChatEventUnion as the provided AssistantMessageEvent
+func (t *ChatEventUnion) FromAssistantMessageEvent(v AssistantMessageEvent) error {
+	v.Type = "assistant_message"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAssistantMessageEvent performs a merge with any union data inside the ChatEventUnion, using the provided AssistantMessageEvent
+func (t *ChatEventUnion) MergeAssistantMessageEvent(v AssistantMessageEvent) error {
+	v.Type = "assistant_message"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAssistantDeltaEvent returns the union data inside the ChatEventUnion as a AssistantDeltaEvent
+func (t ChatEventUnion) AsAssistantDeltaEvent() (AssistantDeltaEvent, error) {
+	var body AssistantDeltaEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAssistantDeltaEvent overwrites any union data inside the ChatEventUnion as the provided AssistantDeltaEvent
+func (t *ChatEventUnion) FromAssistantDeltaEvent(v AssistantDeltaEvent) error {
+	v.Type = "assistant_delta"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAssistantDeltaEvent performs a merge with any union data inside the ChatEventUnion, using the provided AssistantDeltaEvent
+func (t *ChatEventUnion) MergeAssistantDeltaEvent(v AssistantDeltaEvent) error {
+	v.Type = "assistant_delta"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsReasoningCompletedEvent returns the union data inside the ChatEventUnion as a ReasoningCompletedEvent
+func (t ChatEventUnion) AsReasoningCompletedEvent() (ReasoningCompletedEvent, error) {
+	var body ReasoningCompletedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromReasoningCompletedEvent overwrites any union data inside the ChatEventUnion as the provided ReasoningCompletedEvent
+func (t *ChatEventUnion) FromReasoningCompletedEvent(v ReasoningCompletedEvent) error {
+	v.Type = "reasoning_completed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeReasoningCompletedEvent performs a merge with any union data inside the ChatEventUnion, using the provided ReasoningCompletedEvent
+func (t *ChatEventUnion) MergeReasoningCompletedEvent(v ReasoningCompletedEvent) error {
+	v.Type = "reasoning_completed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsReasoningDeltaEvent returns the union data inside the ChatEventUnion as a ReasoningDeltaEvent
+func (t ChatEventUnion) AsReasoningDeltaEvent() (ReasoningDeltaEvent, error) {
+	var body ReasoningDeltaEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromReasoningDeltaEvent overwrites any union data inside the ChatEventUnion as the provided ReasoningDeltaEvent
+func (t *ChatEventUnion) FromReasoningDeltaEvent(v ReasoningDeltaEvent) error {
+	v.Type = "reasoning_delta"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeReasoningDeltaEvent performs a merge with any union data inside the ChatEventUnion, using the provided ReasoningDeltaEvent
+func (t *ChatEventUnion) MergeReasoningDeltaEvent(v ReasoningDeltaEvent) error {
+	v.Type = "reasoning_delta"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsReasoningDurationEvent returns the union data inside the ChatEventUnion as a ReasoningDurationEvent
+func (t ChatEventUnion) AsReasoningDurationEvent() (ReasoningDurationEvent, error) {
+	var body ReasoningDurationEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromReasoningDurationEvent overwrites any union data inside the ChatEventUnion as the provided ReasoningDurationEvent
+func (t *ChatEventUnion) FromReasoningDurationEvent(v ReasoningDurationEvent) error {
+	v.Type = "reasoning_duration"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeReasoningDurationEvent performs a merge with any union data inside the ChatEventUnion, using the provided ReasoningDurationEvent
+func (t *ChatEventUnion) MergeReasoningDurationEvent(v ReasoningDurationEvent) error {
+	v.Type = "reasoning_duration"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsContentStreamStartedEvent returns the union data inside the ChatEventUnion as a ContentStreamStartedEvent
+func (t ChatEventUnion) AsContentStreamStartedEvent() (ContentStreamStartedEvent, error) {
+	var body ContentStreamStartedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromContentStreamStartedEvent overwrites any union data inside the ChatEventUnion as the provided ContentStreamStartedEvent
+func (t *ChatEventUnion) FromContentStreamStartedEvent(v ContentStreamStartedEvent) error {
+	v.Type = "content_stream_started"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeContentStreamStartedEvent performs a merge with any union data inside the ChatEventUnion, using the provided ContentStreamStartedEvent
+func (t *ChatEventUnion) MergeContentStreamStartedEvent(v ContentStreamStartedEvent) error {
+	v.Type = "content_stream_started"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsContentStreamCompletedEvent returns the union data inside the ChatEventUnion as a ContentStreamCompletedEvent
+func (t ChatEventUnion) AsContentStreamCompletedEvent() (ContentStreamCompletedEvent, error) {
+	var body ContentStreamCompletedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromContentStreamCompletedEvent overwrites any union data inside the ChatEventUnion as the provided ContentStreamCompletedEvent
+func (t *ChatEventUnion) FromContentStreamCompletedEvent(v ContentStreamCompletedEvent) error {
+	v.Type = "content_stream_completed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeContentStreamCompletedEvent performs a merge with any union data inside the ChatEventUnion, using the provided ContentStreamCompletedEvent
+func (t *ChatEventUnion) MergeContentStreamCompletedEvent(v ContentStreamCompletedEvent) error {
+	v.Type = "content_stream_completed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsToolStartedEvent returns the union data inside the ChatEventUnion as a ToolStartedEvent
+func (t ChatEventUnion) AsToolStartedEvent() (ToolStartedEvent, error) {
+	var body ToolStartedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromToolStartedEvent overwrites any union data inside the ChatEventUnion as the provided ToolStartedEvent
+func (t *ChatEventUnion) FromToolStartedEvent(v ToolStartedEvent) error {
+	v.Type = "tool_started"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeToolStartedEvent performs a merge with any union data inside the ChatEventUnion, using the provided ToolStartedEvent
+func (t *ChatEventUnion) MergeToolStartedEvent(v ToolStartedEvent) error {
+	v.Type = "tool_started"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsToolCompletedEvent returns the union data inside the ChatEventUnion as a ToolCompletedEvent
+func (t ChatEventUnion) AsToolCompletedEvent() (ToolCompletedEvent, error) {
+	var body ToolCompletedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromToolCompletedEvent overwrites any union data inside the ChatEventUnion as the provided ToolCompletedEvent
+func (t *ChatEventUnion) FromToolCompletedEvent(v ToolCompletedEvent) error {
+	v.Type = "tool_completed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeToolCompletedEvent performs a merge with any union data inside the ChatEventUnion, using the provided ToolCompletedEvent
+func (t *ChatEventUnion) MergeToolCompletedEvent(v ToolCompletedEvent) error {
+	v.Type = "tool_completed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsToolDeltaEvent returns the union data inside the ChatEventUnion as a ToolDeltaEvent
+func (t ChatEventUnion) AsToolDeltaEvent() (ToolDeltaEvent, error) {
+	var body ToolDeltaEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromToolDeltaEvent overwrites any union data inside the ChatEventUnion as the provided ToolDeltaEvent
+func (t *ChatEventUnion) FromToolDeltaEvent(v ToolDeltaEvent) error {
+	v.Type = "tool_delta"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeToolDeltaEvent performs a merge with any union data inside the ChatEventUnion, using the provided ToolDeltaEvent
+func (t *ChatEventUnion) MergeToolDeltaEvent(v ToolDeltaEvent) error {
+	v.Type = "tool_delta"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPlanUpdatedEvent returns the union data inside the ChatEventUnion as a PlanUpdatedEvent
+func (t ChatEventUnion) AsPlanUpdatedEvent() (PlanUpdatedEvent, error) {
+	var body PlanUpdatedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPlanUpdatedEvent overwrites any union data inside the ChatEventUnion as the provided PlanUpdatedEvent
+func (t *ChatEventUnion) FromPlanUpdatedEvent(v PlanUpdatedEvent) error {
+	v.Type = "plan_updated"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePlanUpdatedEvent performs a merge with any union data inside the ChatEventUnion, using the provided PlanUpdatedEvent
+func (t *ChatEventUnion) MergePlanUpdatedEvent(v PlanUpdatedEvent) error {
+	v.Type = "plan_updated"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPlanDeltaEvent returns the union data inside the ChatEventUnion as a PlanDeltaEvent
+func (t ChatEventUnion) AsPlanDeltaEvent() (PlanDeltaEvent, error) {
+	var body PlanDeltaEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPlanDeltaEvent overwrites any union data inside the ChatEventUnion as the provided PlanDeltaEvent
+func (t *ChatEventUnion) FromPlanDeltaEvent(v PlanDeltaEvent) error {
+	v.Type = "plan_delta"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePlanDeltaEvent performs a merge with any union data inside the ChatEventUnion, using the provided PlanDeltaEvent
+func (t *ChatEventUnion) MergePlanDeltaEvent(v PlanDeltaEvent) error {
+	v.Type = "plan_delta"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsSubagentStartedEvent returns the union data inside the ChatEventUnion as a SubagentStartedEvent
+func (t ChatEventUnion) AsSubagentStartedEvent() (SubagentStartedEvent, error) {
+	var body SubagentStartedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSubagentStartedEvent overwrites any union data inside the ChatEventUnion as the provided SubagentStartedEvent
+func (t *ChatEventUnion) FromSubagentStartedEvent(v SubagentStartedEvent) error {
+	v.Type = "subagent_started"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSubagentStartedEvent performs a merge with any union data inside the ChatEventUnion, using the provided SubagentStartedEvent
+func (t *ChatEventUnion) MergeSubagentStartedEvent(v SubagentStartedEvent) error {
+	v.Type = "subagent_started"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsSubagentUpdatedEvent returns the union data inside the ChatEventUnion as a SubagentUpdatedEvent
+func (t ChatEventUnion) AsSubagentUpdatedEvent() (SubagentUpdatedEvent, error) {
+	var body SubagentUpdatedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSubagentUpdatedEvent overwrites any union data inside the ChatEventUnion as the provided SubagentUpdatedEvent
+func (t *ChatEventUnion) FromSubagentUpdatedEvent(v SubagentUpdatedEvent) error {
+	v.Type = "subagent_updated"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSubagentUpdatedEvent performs a merge with any union data inside the ChatEventUnion, using the provided SubagentUpdatedEvent
+func (t *ChatEventUnion) MergeSubagentUpdatedEvent(v SubagentUpdatedEvent) error {
+	v.Type = "subagent_updated"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsSubagentCompletedEvent returns the union data inside the ChatEventUnion as a SubagentCompletedEvent
+func (t ChatEventUnion) AsSubagentCompletedEvent() (SubagentCompletedEvent, error) {
+	var body SubagentCompletedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSubagentCompletedEvent overwrites any union data inside the ChatEventUnion as the provided SubagentCompletedEvent
+func (t *ChatEventUnion) FromSubagentCompletedEvent(v SubagentCompletedEvent) error {
+	v.Type = "subagent_completed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSubagentCompletedEvent performs a merge with any union data inside the ChatEventUnion, using the provided SubagentCompletedEvent
+func (t *ChatEventUnion) MergeSubagentCompletedEvent(v SubagentCompletedEvent) error {
+	v.Type = "subagent_completed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTurnStartedEvent returns the union data inside the ChatEventUnion as a TurnStartedEvent
+func (t ChatEventUnion) AsTurnStartedEvent() (TurnStartedEvent, error) {
+	var body TurnStartedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTurnStartedEvent overwrites any union data inside the ChatEventUnion as the provided TurnStartedEvent
+func (t *ChatEventUnion) FromTurnStartedEvent(v TurnStartedEvent) error {
+	v.Type = "turn_started"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTurnStartedEvent performs a merge with any union data inside the ChatEventUnion, using the provided TurnStartedEvent
+func (t *ChatEventUnion) MergeTurnStartedEvent(v TurnStartedEvent) error {
+	v.Type = "turn_started"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTurnCompletedEvent returns the union data inside the ChatEventUnion as a TurnCompletedEvent
+func (t ChatEventUnion) AsTurnCompletedEvent() (TurnCompletedEvent, error) {
+	var body TurnCompletedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTurnCompletedEvent overwrites any union data inside the ChatEventUnion as the provided TurnCompletedEvent
+func (t *ChatEventUnion) FromTurnCompletedEvent(v TurnCompletedEvent) error {
+	v.Type = "turn_completed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTurnCompletedEvent performs a merge with any union data inside the ChatEventUnion, using the provided TurnCompletedEvent
+func (t *ChatEventUnion) MergeTurnCompletedEvent(v TurnCompletedEvent) error {
+	v.Type = "turn_completed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTurnFailedEvent returns the union data inside the ChatEventUnion as a TurnFailedEvent
+func (t ChatEventUnion) AsTurnFailedEvent() (TurnFailedEvent, error) {
+	var body TurnFailedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTurnFailedEvent overwrites any union data inside the ChatEventUnion as the provided TurnFailedEvent
+func (t *ChatEventUnion) FromTurnFailedEvent(v TurnFailedEvent) error {
+	v.Type = "turn_failed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTurnFailedEvent performs a merge with any union data inside the ChatEventUnion, using the provided TurnFailedEvent
+func (t *ChatEventUnion) MergeTurnFailedEvent(v TurnFailedEvent) error {
+	v.Type = "turn_failed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTurnInterruptedEvent returns the union data inside the ChatEventUnion as a TurnInterruptedEvent
+func (t ChatEventUnion) AsTurnInterruptedEvent() (TurnInterruptedEvent, error) {
+	var body TurnInterruptedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTurnInterruptedEvent overwrites any union data inside the ChatEventUnion as the provided TurnInterruptedEvent
+func (t *ChatEventUnion) FromTurnInterruptedEvent(v TurnInterruptedEvent) error {
+	v.Type = "turn_interrupted"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTurnInterruptedEvent performs a merge with any union data inside the ChatEventUnion, using the provided TurnInterruptedEvent
+func (t *ChatEventUnion) MergeTurnInterruptedEvent(v TurnInterruptedEvent) error {
+	v.Type = "turn_interrupted"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTurnErrorEvent returns the union data inside the ChatEventUnion as a TurnErrorEvent
+func (t ChatEventUnion) AsTurnErrorEvent() (TurnErrorEvent, error) {
+	var body TurnErrorEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTurnErrorEvent overwrites any union data inside the ChatEventUnion as the provided TurnErrorEvent
+func (t *ChatEventUnion) FromTurnErrorEvent(v TurnErrorEvent) error {
+	v.Type = "turn_error"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTurnErrorEvent performs a merge with any union data inside the ChatEventUnion, using the provided TurnErrorEvent
+func (t *ChatEventUnion) MergeTurnErrorEvent(v TurnErrorEvent) error {
+	v.Type = "turn_error"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsUsageUpdatedEvent returns the union data inside the ChatEventUnion as a UsageUpdatedEvent
+func (t ChatEventUnion) AsUsageUpdatedEvent() (UsageUpdatedEvent, error) {
+	var body UsageUpdatedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromUsageUpdatedEvent overwrites any union data inside the ChatEventUnion as the provided UsageUpdatedEvent
+func (t *ChatEventUnion) FromUsageUpdatedEvent(v UsageUpdatedEvent) error {
+	v.Type = "usage_updated"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeUsageUpdatedEvent performs a merge with any union data inside the ChatEventUnion, using the provided UsageUpdatedEvent
+func (t *ChatEventUnion) MergeUsageUpdatedEvent(v UsageUpdatedEvent) error {
+	v.Type = "usage_updated"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsMessagesRetractedEvent returns the union data inside the ChatEventUnion as a MessagesRetractedEvent
+func (t ChatEventUnion) AsMessagesRetractedEvent() (MessagesRetractedEvent, error) {
+	var body MessagesRetractedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMessagesRetractedEvent overwrites any union data inside the ChatEventUnion as the provided MessagesRetractedEvent
+func (t *ChatEventUnion) FromMessagesRetractedEvent(v MessagesRetractedEvent) error {
+	v.Type = "messages_retracted"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMessagesRetractedEvent performs a merge with any union data inside the ChatEventUnion, using the provided MessagesRetractedEvent
+func (t *ChatEventUnion) MergeMessagesRetractedEvent(v MessagesRetractedEvent) error {
+	v.Type = "messages_retracted"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsNoticeEvent returns the union data inside the ChatEventUnion as a NoticeEvent
+func (t ChatEventUnion) AsNoticeEvent() (NoticeEvent, error) {
+	var body NoticeEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromNoticeEvent overwrites any union data inside the ChatEventUnion as the provided NoticeEvent
+func (t *ChatEventUnion) FromNoticeEvent(v NoticeEvent) error {
+	v.Type = "notice"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeNoticeEvent performs a merge with any union data inside the ChatEventUnion, using the provided NoticeEvent
+func (t *ChatEventUnion) MergeNoticeEvent(v NoticeEvent) error {
+	v.Type = "notice"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsInteractionRequestedEvent returns the union data inside the ChatEventUnion as a InteractionRequestedEvent
+func (t ChatEventUnion) AsInteractionRequestedEvent() (InteractionRequestedEvent, error) {
+	var body InteractionRequestedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromInteractionRequestedEvent overwrites any union data inside the ChatEventUnion as the provided InteractionRequestedEvent
+func (t *ChatEventUnion) FromInteractionRequestedEvent(v InteractionRequestedEvent) error {
+	v.Type = "interaction_requested"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeInteractionRequestedEvent performs a merge with any union data inside the ChatEventUnion, using the provided InteractionRequestedEvent
+func (t *ChatEventUnion) MergeInteractionRequestedEvent(v InteractionRequestedEvent) error {
+	v.Type = "interaction_requested"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsInteractionResolvedEvent returns the union data inside the ChatEventUnion as a InteractionResolvedEvent
+func (t ChatEventUnion) AsInteractionResolvedEvent() (InteractionResolvedEvent, error) {
+	var body InteractionResolvedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromInteractionResolvedEvent overwrites any union data inside the ChatEventUnion as the provided InteractionResolvedEvent
+func (t *ChatEventUnion) FromInteractionResolvedEvent(v InteractionResolvedEvent) error {
+	v.Type = "interaction_resolved"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeInteractionResolvedEvent performs a merge with any union data inside the ChatEventUnion, using the provided InteractionResolvedEvent
+func (t *ChatEventUnion) MergeInteractionResolvedEvent(v InteractionResolvedEvent) error {
+	v.Type = "interaction_resolved"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsCommitCreatedEvent returns the union data inside the ChatEventUnion as a CommitCreatedEvent
+func (t ChatEventUnion) AsCommitCreatedEvent() (CommitCreatedEvent, error) {
+	var body CommitCreatedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCommitCreatedEvent overwrites any union data inside the ChatEventUnion as the provided CommitCreatedEvent
+func (t *ChatEventUnion) FromCommitCreatedEvent(v CommitCreatedEvent) error {
+	v.Type = "commit_created"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeCommitCreatedEvent performs a merge with any union data inside the ChatEventUnion, using the provided CommitCreatedEvent
+func (t *ChatEventUnion) MergeCommitCreatedEvent(v CommitCreatedEvent) error {
+	v.Type = "commit_created"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsHeadChangedEvent returns the union data inside the ChatEventUnion as a HeadChangedEvent
+func (t ChatEventUnion) AsHeadChangedEvent() (HeadChangedEvent, error) {
+	var body HeadChangedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromHeadChangedEvent overwrites any union data inside the ChatEventUnion as the provided HeadChangedEvent
+func (t *ChatEventUnion) FromHeadChangedEvent(v HeadChangedEvent) error {
+	v.Type = "head_changed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeHeadChangedEvent performs a merge with any union data inside the ChatEventUnion, using the provided HeadChangedEvent
+func (t *ChatEventUnion) MergeHeadChangedEvent(v HeadChangedEvent) error {
+	v.Type = "head_changed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsHeadObservedEvent returns the union data inside the ChatEventUnion as a HeadObservedEvent
+func (t ChatEventUnion) AsHeadObservedEvent() (HeadObservedEvent, error) {
+	var body HeadObservedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromHeadObservedEvent overwrites any union data inside the ChatEventUnion as the provided HeadObservedEvent
+func (t *ChatEventUnion) FromHeadObservedEvent(v HeadObservedEvent) error {
+	v.Type = "head_observed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeHeadObservedEvent performs a merge with any union data inside the ChatEventUnion, using the provided HeadObservedEvent
+func (t *ChatEventUnion) MergeHeadObservedEvent(v HeadObservedEvent) error {
+	v.Type = "head_observed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsModelChangedEvent returns the union data inside the ChatEventUnion as a ModelChangedEvent
+func (t ChatEventUnion) AsModelChangedEvent() (ModelChangedEvent, error) {
+	var body ModelChangedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromModelChangedEvent overwrites any union data inside the ChatEventUnion as the provided ModelChangedEvent
+func (t *ChatEventUnion) FromModelChangedEvent(v ModelChangedEvent) error {
+	v.Type = "model_changed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeModelChangedEvent performs a merge with any union data inside the ChatEventUnion, using the provided ModelChangedEvent
+func (t *ChatEventUnion) MergeModelChangedEvent(v ModelChangedEvent) error {
+	v.Type = "model_changed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsQueuedMessageEvent returns the union data inside the ChatEventUnion as a QueuedMessageEvent
+func (t ChatEventUnion) AsQueuedMessageEvent() (QueuedMessageEvent, error) {
+	var body QueuedMessageEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromQueuedMessageEvent overwrites any union data inside the ChatEventUnion as the provided QueuedMessageEvent
+func (t *ChatEventUnion) FromQueuedMessageEvent(v QueuedMessageEvent) error {
+	v.Type = "queued_message"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeQueuedMessageEvent performs a merge with any union data inside the ChatEventUnion, using the provided QueuedMessageEvent
+func (t *ChatEventUnion) MergeQueuedMessageEvent(v QueuedMessageEvent) error {
+	v.Type = "queued_message"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsQueueMessageRemovedEvent returns the union data inside the ChatEventUnion as a QueueMessageRemovedEvent
+func (t ChatEventUnion) AsQueueMessageRemovedEvent() (QueueMessageRemovedEvent, error) {
+	var body QueueMessageRemovedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromQueueMessageRemovedEvent overwrites any union data inside the ChatEventUnion as the provided QueueMessageRemovedEvent
+func (t *ChatEventUnion) FromQueueMessageRemovedEvent(v QueueMessageRemovedEvent) error {
+	v.Type = "queue_message_removed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeQueueMessageRemovedEvent performs a merge with any union data inside the ChatEventUnion, using the provided QueueMessageRemovedEvent
+func (t *ChatEventUnion) MergeQueueMessageRemovedEvent(v QueueMessageRemovedEvent) error {
+	v.Type = "queue_message_removed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ChatEventUnion) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t ChatEventUnion) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "assistant_delta":
+		return t.AsAssistantDeltaEvent()
+	case "assistant_message":
+		return t.AsAssistantMessageEvent()
+	case "commit_created":
+		return t.AsCommitCreatedEvent()
+	case "content_stream_completed":
+		return t.AsContentStreamCompletedEvent()
+	case "content_stream_started":
+		return t.AsContentStreamStartedEvent()
+	case "context_message":
+		return t.AsContextMessageEvent()
+	case "conversation_started":
+		return t.AsConversationStartedEvent()
+	case "head_changed":
+		return t.AsHeadChangedEvent()
+	case "head_observed":
+		return t.AsHeadObservedEvent()
+	case "interaction_requested":
+		return t.AsInteractionRequestedEvent()
+	case "interaction_resolved":
+		return t.AsInteractionResolvedEvent()
+	case "messages_retracted":
+		return t.AsMessagesRetractedEvent()
+	case "model_changed":
+		return t.AsModelChangedEvent()
+	case "notice":
+		return t.AsNoticeEvent()
+	case "plan_delta":
+		return t.AsPlanDeltaEvent()
+	case "plan_updated":
+		return t.AsPlanUpdatedEvent()
+	case "queue_message_removed":
+		return t.AsQueueMessageRemovedEvent()
+	case "queued_message":
+		return t.AsQueuedMessageEvent()
+	case "reasoning_completed":
+		return t.AsReasoningCompletedEvent()
+	case "reasoning_delta":
+		return t.AsReasoningDeltaEvent()
+	case "reasoning_duration":
+		return t.AsReasoningDurationEvent()
+	case "subagent_completed":
+		return t.AsSubagentCompletedEvent()
+	case "subagent_started":
+		return t.AsSubagentStartedEvent()
+	case "subagent_updated":
+		return t.AsSubagentUpdatedEvent()
+	case "tool_completed":
+		return t.AsToolCompletedEvent()
+	case "tool_delta":
+		return t.AsToolDeltaEvent()
+	case "tool_started":
+		return t.AsToolStartedEvent()
+	case "turn_completed":
+		return t.AsTurnCompletedEvent()
+	case "turn_error":
+		return t.AsTurnErrorEvent()
+	case "turn_failed":
+		return t.AsTurnFailedEvent()
+	case "turn_interrupted":
+		return t.AsTurnInterruptedEvent()
+	case "turn_started":
+		return t.AsTurnStartedEvent()
+	case "usage_updated":
+		return t.AsUsageUpdatedEvent()
+	case "user_message":
+		return t.AsUserMessageEvent()
+	case "user_message_echoed":
+		return t.AsUserMessageEchoedEvent()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t ChatEventUnion) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ChatEventUnion) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsHeadStatusEvent returns the union data inside the ChatFrame as a HeadStatusEvent
+func (t ChatFrame) AsHeadStatusEvent() (HeadStatusEvent, error) {
+	var body HeadStatusEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromHeadStatusEvent overwrites any union data inside the ChatFrame as the provided HeadStatusEvent
+func (t *ChatFrame) FromHeadStatusEvent(v HeadStatusEvent) error {
+	v.Type = "status"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeHeadStatusEvent performs a merge with any union data inside the ChatFrame, using the provided HeadStatusEvent
+func (t *ChatFrame) MergeHeadStatusEvent(v HeadStatusEvent) error {
+	v.Type = "status"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsHeadDiffRefreshEvent returns the union data inside the ChatFrame as a HeadDiffRefreshEvent
+func (t ChatFrame) AsHeadDiffRefreshEvent() (HeadDiffRefreshEvent, error) {
+	var body HeadDiffRefreshEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromHeadDiffRefreshEvent overwrites any union data inside the ChatFrame as the provided HeadDiffRefreshEvent
+func (t *ChatFrame) FromHeadDiffRefreshEvent(v HeadDiffRefreshEvent) error {
+	v.Type = "diff_refresh"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeHeadDiffRefreshEvent performs a merge with any union data inside the ChatFrame, using the provided HeadDiffRefreshEvent
+func (t *ChatFrame) MergeHeadDiffRefreshEvent(v HeadDiffRefreshEvent) error {
+	v.Type = "diff_refresh"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatStateSnapshotFrame returns the union data inside the ChatFrame as a ChatStateSnapshotFrame
+func (t ChatFrame) AsChatStateSnapshotFrame() (ChatStateSnapshotFrame, error) {
+	var body ChatStateSnapshotFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatStateSnapshotFrame overwrites any union data inside the ChatFrame as the provided ChatStateSnapshotFrame
+func (t *ChatFrame) FromChatStateSnapshotFrame(v ChatStateSnapshotFrame) error {
+	v.Type = "state_snapshot"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatStateSnapshotFrame performs a merge with any union data inside the ChatFrame, using the provided ChatStateSnapshotFrame
+func (t *ChatFrame) MergeChatStateSnapshotFrame(v ChatStateSnapshotFrame) error {
+	v.Type = "state_snapshot"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatHistoryFrame returns the union data inside the ChatFrame as a ChatHistoryFrame
+func (t ChatFrame) AsChatHistoryFrame() (ChatHistoryFrame, error) {
+	var body ChatHistoryFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatHistoryFrame overwrites any union data inside the ChatFrame as the provided ChatHistoryFrame
+func (t *ChatFrame) FromChatHistoryFrame(v ChatHistoryFrame) error {
+	v.Type = "chat_history"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatHistoryFrame performs a merge with any union data inside the ChatFrame, using the provided ChatHistoryFrame
+func (t *ChatFrame) MergeChatHistoryFrame(v ChatHistoryFrame) error {
+	v.Type = "chat_history"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatEventFrame returns the union data inside the ChatFrame as a ChatEventFrame
+func (t ChatFrame) AsChatEventFrame() (ChatEventFrame, error) {
+	var body ChatEventFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatEventFrame overwrites any union data inside the ChatFrame as the provided ChatEventFrame
+func (t *ChatFrame) FromChatEventFrame(v ChatEventFrame) error {
+	v.Type = "chat_event"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatEventFrame performs a merge with any union data inside the ChatFrame, using the provided ChatEventFrame
+func (t *ChatFrame) MergeChatEventFrame(v ChatEventFrame) error {
+	v.Type = "chat_event"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatSubagentEventsFrame returns the union data inside the ChatFrame as a ChatSubagentEventsFrame
+func (t ChatFrame) AsChatSubagentEventsFrame() (ChatSubagentEventsFrame, error) {
+	var body ChatSubagentEventsFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatSubagentEventsFrame overwrites any union data inside the ChatFrame as the provided ChatSubagentEventsFrame
+func (t *ChatFrame) FromChatSubagentEventsFrame(v ChatSubagentEventsFrame) error {
+	v.Type = "subagent_events"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatSubagentEventsFrame performs a merge with any union data inside the ChatFrame, using the provided ChatSubagentEventsFrame
+func (t *ChatFrame) MergeChatSubagentEventsFrame(v ChatSubagentEventsFrame) error {
+	v.Type = "subagent_events"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatReplayDoneFrame returns the union data inside the ChatFrame as a ChatReplayDoneFrame
+func (t ChatFrame) AsChatReplayDoneFrame() (ChatReplayDoneFrame, error) {
+	var body ChatReplayDoneFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatReplayDoneFrame overwrites any union data inside the ChatFrame as the provided ChatReplayDoneFrame
+func (t *ChatFrame) FromChatReplayDoneFrame(v ChatReplayDoneFrame) error {
+	v.Type = "replay_done"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatReplayDoneFrame performs a merge with any union data inside the ChatFrame, using the provided ChatReplayDoneFrame
+func (t *ChatFrame) MergeChatReplayDoneFrame(v ChatReplayDoneFrame) error {
+	v.Type = "replay_done"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatQueueFrame returns the union data inside the ChatFrame as a ChatQueueFrame
+func (t ChatFrame) AsChatQueueFrame() (ChatQueueFrame, error) {
+	var body ChatQueueFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatQueueFrame overwrites any union data inside the ChatFrame as the provided ChatQueueFrame
+func (t *ChatFrame) FromChatQueueFrame(v ChatQueueFrame) error {
+	v.Type = "queue"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatQueueFrame performs a merge with any union data inside the ChatFrame, using the provided ChatQueueFrame
+func (t *ChatFrame) MergeChatQueueFrame(v ChatQueueFrame) error {
+	v.Type = "queue"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatPendingQuestionsFrame returns the union data inside the ChatFrame as a ChatPendingQuestionsFrame
+func (t ChatFrame) AsChatPendingQuestionsFrame() (ChatPendingQuestionsFrame, error) {
+	var body ChatPendingQuestionsFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatPendingQuestionsFrame overwrites any union data inside the ChatFrame as the provided ChatPendingQuestionsFrame
+func (t *ChatFrame) FromChatPendingQuestionsFrame(v ChatPendingQuestionsFrame) error {
+	v.Type = "pending_questions"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatPendingQuestionsFrame performs a merge with any union data inside the ChatFrame, using the provided ChatPendingQuestionsFrame
+func (t *ChatFrame) MergeChatPendingQuestionsFrame(v ChatPendingQuestionsFrame) error {
+	v.Type = "pending_questions"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatQuestionExpiredFrame returns the union data inside the ChatFrame as a ChatQuestionExpiredFrame
+func (t ChatFrame) AsChatQuestionExpiredFrame() (ChatQuestionExpiredFrame, error) {
+	var body ChatQuestionExpiredFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatQuestionExpiredFrame overwrites any union data inside the ChatFrame as the provided ChatQuestionExpiredFrame
+func (t *ChatFrame) FromChatQuestionExpiredFrame(v ChatQuestionExpiredFrame) error {
+	v.Type = "question_expired"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatQuestionExpiredFrame performs a merge with any union data inside the ChatFrame, using the provided ChatQuestionExpiredFrame
+func (t *ChatFrame) MergeChatQuestionExpiredFrame(v ChatQuestionExpiredFrame) error {
+	v.Type = "question_expired"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatShellOutputFrame returns the union data inside the ChatFrame as a ChatShellOutputFrame
+func (t ChatFrame) AsChatShellOutputFrame() (ChatShellOutputFrame, error) {
+	var body ChatShellOutputFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatShellOutputFrame overwrites any union data inside the ChatFrame as the provided ChatShellOutputFrame
+func (t *ChatFrame) FromChatShellOutputFrame(v ChatShellOutputFrame) error {
+	v.Type = "shell_output"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatShellOutputFrame performs a merge with any union data inside the ChatFrame, using the provided ChatShellOutputFrame
+func (t *ChatFrame) MergeChatShellOutputFrame(v ChatShellOutputFrame) error {
+	v.Type = "shell_output"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatTaskOutputFrame returns the union data inside the ChatFrame as a ChatTaskOutputFrame
+func (t ChatFrame) AsChatTaskOutputFrame() (ChatTaskOutputFrame, error) {
+	var body ChatTaskOutputFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatTaskOutputFrame overwrites any union data inside the ChatFrame as the provided ChatTaskOutputFrame
+func (t *ChatFrame) FromChatTaskOutputFrame(v ChatTaskOutputFrame) error {
+	v.Type = "task_output"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatTaskOutputFrame performs a merge with any union data inside the ChatFrame, using the provided ChatTaskOutputFrame
+func (t *ChatFrame) MergeChatTaskOutputFrame(v ChatTaskOutputFrame) error {
+	v.Type = "task_output"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatErrorFrame returns the union data inside the ChatFrame as a ChatErrorFrame
+func (t ChatFrame) AsChatErrorFrame() (ChatErrorFrame, error) {
+	var body ChatErrorFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatErrorFrame overwrites any union data inside the ChatFrame as the provided ChatErrorFrame
+func (t *ChatFrame) FromChatErrorFrame(v ChatErrorFrame) error {
+	v.Type = "chat_error"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatErrorFrame performs a merge with any union data inside the ChatFrame, using the provided ChatErrorFrame
+func (t *ChatFrame) MergeChatErrorFrame(v ChatErrorFrame) error {
+	v.Type = "chat_error"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ChatFrame) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t ChatFrame) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "chat_error":
+		return t.AsChatErrorFrame()
+	case "chat_event":
+		return t.AsChatEventFrame()
+	case "chat_history":
+		return t.AsChatHistoryFrame()
+	case "diff_refresh":
+		return t.AsHeadDiffRefreshEvent()
+	case "pending_questions":
+		return t.AsChatPendingQuestionsFrame()
+	case "question_expired":
+		return t.AsChatQuestionExpiredFrame()
+	case "queue":
+		return t.AsChatQueueFrame()
+	case "replay_done":
+		return t.AsChatReplayDoneFrame()
+	case "shell_output":
+		return t.AsChatShellOutputFrame()
+	case "state_snapshot":
+		return t.AsChatStateSnapshotFrame()
+	case "status":
+		return t.AsHeadStatusEvent()
+	case "subagent_events":
+		return t.AsChatSubagentEventsFrame()
+	case "task_output":
+		return t.AsChatTaskOutputFrame()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t ChatFrame) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ChatFrame) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsResourceChangedEvent returns the union data inside the ProjectEventFrame as a ResourceChangedEvent
+func (t ProjectEventFrame) AsResourceChangedEvent() (ResourceChangedEvent, error) {
+	var body ResourceChangedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResourceChangedEvent overwrites any union data inside the ProjectEventFrame as the provided ResourceChangedEvent
+func (t *ProjectEventFrame) FromResourceChangedEvent(v ResourceChangedEvent) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResourceChangedEvent performs a merge with any union data inside the ProjectEventFrame, using the provided ResourceChangedEvent
+func (t *ProjectEventFrame) MergeResourceChangedEvent(v ResourceChangedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAgentTestsChangedEvent returns the union data inside the ProjectEventFrame as a AgentTestsChangedEvent
+func (t ProjectEventFrame) AsAgentTestsChangedEvent() (AgentTestsChangedEvent, error) {
+	var body AgentTestsChangedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAgentTestsChangedEvent overwrites any union data inside the ProjectEventFrame as the provided AgentTestsChangedEvent
+func (t *ProjectEventFrame) FromAgentTestsChangedEvent(v AgentTestsChangedEvent) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAgentTestsChangedEvent performs a merge with any union data inside the ProjectEventFrame, using the provided AgentTestsChangedEvent
+func (t *ProjectEventFrame) MergeAgentTestsChangedEvent(v AgentTestsChangedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAgentStatusChangedEvent returns the union data inside the ProjectEventFrame as a AgentStatusChangedEvent
+func (t ProjectEventFrame) AsAgentStatusChangedEvent() (AgentStatusChangedEvent, error) {
+	var body AgentStatusChangedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAgentStatusChangedEvent overwrites any union data inside the ProjectEventFrame as the provided AgentStatusChangedEvent
+func (t *ProjectEventFrame) FromAgentStatusChangedEvent(v AgentStatusChangedEvent) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAgentStatusChangedEvent performs a merge with any union data inside the ProjectEventFrame, using the provided AgentStatusChangedEvent
+func (t *ProjectEventFrame) MergeAgentStatusChangedEvent(v AgentStatusChangedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ProjectEventFrame) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ProjectEventFrame) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsServerUpdatePhaseFrame returns the union data inside the ServerUpdateFrame as a ServerUpdatePhaseFrame
+func (t ServerUpdateFrame) AsServerUpdatePhaseFrame() (ServerUpdatePhaseFrame, error) {
+	var body ServerUpdatePhaseFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromServerUpdatePhaseFrame overwrites any union data inside the ServerUpdateFrame as the provided ServerUpdatePhaseFrame
+func (t *ServerUpdateFrame) FromServerUpdatePhaseFrame(v ServerUpdatePhaseFrame) error {
+	v.Kind = "phase"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeServerUpdatePhaseFrame performs a merge with any union data inside the ServerUpdateFrame, using the provided ServerUpdatePhaseFrame
+func (t *ServerUpdateFrame) MergeServerUpdatePhaseFrame(v ServerUpdatePhaseFrame) error {
+	v.Kind = "phase"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsServerUpdateLogFrame returns the union data inside the ServerUpdateFrame as a ServerUpdateLogFrame
+func (t ServerUpdateFrame) AsServerUpdateLogFrame() (ServerUpdateLogFrame, error) {
+	var body ServerUpdateLogFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromServerUpdateLogFrame overwrites any union data inside the ServerUpdateFrame as the provided ServerUpdateLogFrame
+func (t *ServerUpdateFrame) FromServerUpdateLogFrame(v ServerUpdateLogFrame) error {
+	v.Kind = "log"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeServerUpdateLogFrame performs a merge with any union data inside the ServerUpdateFrame, using the provided ServerUpdateLogFrame
+func (t *ServerUpdateFrame) MergeServerUpdateLogFrame(v ServerUpdateLogFrame) error {
+	v.Kind = "log"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsServerUpdateDoneFrame returns the union data inside the ServerUpdateFrame as a ServerUpdateDoneFrame
+func (t ServerUpdateFrame) AsServerUpdateDoneFrame() (ServerUpdateDoneFrame, error) {
+	var body ServerUpdateDoneFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromServerUpdateDoneFrame overwrites any union data inside the ServerUpdateFrame as the provided ServerUpdateDoneFrame
+func (t *ServerUpdateFrame) FromServerUpdateDoneFrame(v ServerUpdateDoneFrame) error {
+	v.Kind = "done"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeServerUpdateDoneFrame performs a merge with any union data inside the ServerUpdateFrame, using the provided ServerUpdateDoneFrame
+func (t *ServerUpdateFrame) MergeServerUpdateDoneFrame(v ServerUpdateDoneFrame) error {
+	v.Kind = "done"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ServerUpdateFrame) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"kind"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t ServerUpdateFrame) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "done":
+		return t.AsServerUpdateDoneFrame()
+	case "log":
+		return t.AsServerUpdateLogFrame()
+	case "phase":
+		return t.AsServerUpdatePhaseFrame()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t ServerUpdateFrame) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ServerUpdateFrame) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsHeadStatusEvent returns the union data inside the TerminalEvent as a HeadStatusEvent
+func (t TerminalEvent) AsHeadStatusEvent() (HeadStatusEvent, error) {
+	var body HeadStatusEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromHeadStatusEvent overwrites any union data inside the TerminalEvent as the provided HeadStatusEvent
+func (t *TerminalEvent) FromHeadStatusEvent(v HeadStatusEvent) error {
+	v.Type = "status"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeHeadStatusEvent performs a merge with any union data inside the TerminalEvent, using the provided HeadStatusEvent
+func (t *TerminalEvent) MergeHeadStatusEvent(v HeadStatusEvent) error {
+	v.Type = "status"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTerminalDataEvent returns the union data inside the TerminalEvent as a TerminalDataEvent
+func (t TerminalEvent) AsTerminalDataEvent() (TerminalDataEvent, error) {
+	var body TerminalDataEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTerminalDataEvent overwrites any union data inside the TerminalEvent as the provided TerminalDataEvent
+func (t *TerminalEvent) FromTerminalDataEvent(v TerminalDataEvent) error {
+	v.Type = "data"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTerminalDataEvent performs a merge with any union data inside the TerminalEvent, using the provided TerminalDataEvent
+func (t *TerminalEvent) MergeTerminalDataEvent(v TerminalDataEvent) error {
+	v.Type = "data"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsHeadDiffRefreshEvent returns the union data inside the TerminalEvent as a HeadDiffRefreshEvent
+func (t TerminalEvent) AsHeadDiffRefreshEvent() (HeadDiffRefreshEvent, error) {
+	var body HeadDiffRefreshEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromHeadDiffRefreshEvent overwrites any union data inside the TerminalEvent as the provided HeadDiffRefreshEvent
+func (t *TerminalEvent) FromHeadDiffRefreshEvent(v HeadDiffRefreshEvent) error {
+	v.Type = "diff_refresh"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeHeadDiffRefreshEvent performs a merge with any union data inside the TerminalEvent, using the provided HeadDiffRefreshEvent
+func (t *TerminalEvent) MergeHeadDiffRefreshEvent(v HeadDiffRefreshEvent) error {
+	v.Type = "diff_refresh"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTerminalSizeEvent returns the union data inside the TerminalEvent as a TerminalSizeEvent
+func (t TerminalEvent) AsTerminalSizeEvent() (TerminalSizeEvent, error) {
+	var body TerminalSizeEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTerminalSizeEvent overwrites any union data inside the TerminalEvent as the provided TerminalSizeEvent
+func (t *TerminalEvent) FromTerminalSizeEvent(v TerminalSizeEvent) error {
+	v.Type = "size"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTerminalSizeEvent performs a merge with any union data inside the TerminalEvent, using the provided TerminalSizeEvent
+func (t *TerminalEvent) MergeTerminalSizeEvent(v TerminalSizeEvent) error {
+	v.Type = "size"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t TerminalEvent) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t TerminalEvent) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "data":
+		return t.AsTerminalDataEvent()
+	case "diff_refresh":
+		return t.AsHeadDiffRefreshEvent()
+	case "size":
+		return t.AsTerminalSizeEvent()
+	case "status":
+		return t.AsHeadStatusEvent()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t TerminalEvent) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *TerminalEvent) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsTestsSnapshotFrame returns the union data inside the TestsFrame as a TestsSnapshotFrame
+func (t TestsFrame) AsTestsSnapshotFrame() (TestsSnapshotFrame, error) {
+	var body TestsSnapshotFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTestsSnapshotFrame overwrites any union data inside the TestsFrame as the provided TestsSnapshotFrame
+func (t *TestsFrame) FromTestsSnapshotFrame(v TestsSnapshotFrame) error {
+	v.Type = "snapshot"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTestsSnapshotFrame performs a merge with any union data inside the TestsFrame, using the provided TestsSnapshotFrame
+func (t *TestsFrame) MergeTestsSnapshotFrame(v TestsSnapshotFrame) error {
+	v.Type = "snapshot"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTestsRunnerFrame returns the union data inside the TestsFrame as a TestsRunnerFrame
+func (t TestsFrame) AsTestsRunnerFrame() (TestsRunnerFrame, error) {
+	var body TestsRunnerFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTestsRunnerFrame overwrites any union data inside the TestsFrame as the provided TestsRunnerFrame
+func (t *TestsFrame) FromTestsRunnerFrame(v TestsRunnerFrame) error {
+	v.Type = "runner"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTestsRunnerFrame performs a merge with any union data inside the TestsFrame, using the provided TestsRunnerFrame
+func (t *TestsFrame) MergeTestsRunnerFrame(v TestsRunnerFrame) error {
+	v.Type = "runner"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTestsLogFrame returns the union data inside the TestsFrame as a TestsLogFrame
+func (t TestsFrame) AsTestsLogFrame() (TestsLogFrame, error) {
+	var body TestsLogFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTestsLogFrame overwrites any union data inside the TestsFrame as the provided TestsLogFrame
+func (t *TestsFrame) FromTestsLogFrame(v TestsLogFrame) error {
+	v.Type = "log"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTestsLogFrame performs a merge with any union data inside the TestsFrame, using the provided TestsLogFrame
+func (t *TestsFrame) MergeTestsLogFrame(v TestsLogFrame) error {
+	v.Type = "log"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTestsProgressFrame returns the union data inside the TestsFrame as a TestsProgressFrame
+func (t TestsFrame) AsTestsProgressFrame() (TestsProgressFrame, error) {
+	var body TestsProgressFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTestsProgressFrame overwrites any union data inside the TestsFrame as the provided TestsProgressFrame
+func (t *TestsFrame) FromTestsProgressFrame(v TestsProgressFrame) error {
+	v.Type = "progress"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTestsProgressFrame performs a merge with any union data inside the TestsFrame, using the provided TestsProgressFrame
+func (t *TestsFrame) MergeTestsProgressFrame(v TestsProgressFrame) error {
+	v.Type = "progress"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTestsCountsFrame returns the union data inside the TestsFrame as a TestsCountsFrame
+func (t TestsFrame) AsTestsCountsFrame() (TestsCountsFrame, error) {
+	var body TestsCountsFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTestsCountsFrame overwrites any union data inside the TestsFrame as the provided TestsCountsFrame
+func (t *TestsFrame) FromTestsCountsFrame(v TestsCountsFrame) error {
+	v.Type = "counts"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTestsCountsFrame performs a merge with any union data inside the TestsFrame, using the provided TestsCountsFrame
+func (t *TestsFrame) MergeTestsCountsFrame(v TestsCountsFrame) error {
+	v.Type = "counts"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t TestsFrame) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t TestsFrame) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "counts":
+		return t.AsTestsCountsFrame()
+	case "log":
+		return t.AsTestsLogFrame()
+	case "progress":
+		return t.AsTestsProgressFrame()
+	case "runner":
+		return t.AsTestsRunnerFrame()
+	case "snapshot":
+		return t.AsTestsSnapshotFrame()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t TestsFrame) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *TestsFrame) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {

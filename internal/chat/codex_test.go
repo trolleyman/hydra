@@ -16,7 +16,7 @@ func TestNormalizeCodexTurnAndItems(t *testing.T) {
 	}
 	for _, tc := range tests {
 		got := normalizeCodex([]byte(tc.line))
-		if len(got) != 1 || got[0].eventType != tc.kind {
+		if len(got) != 1 || got[0].eventType() != tc.kind {
 			t.Errorf("%s => %+v, want %s", tc.line, got, tc.kind)
 		}
 	}
@@ -26,23 +26,23 @@ func TestNormalizeCodexInterruptedTurn(t *testing.T) {
 	for _, status := range []string{"interrupted", "cancelled", "canceled"} {
 		line := strings.Replace(`{"method":"turn/completed","params":{"turn":{"id":"t1","status":"STATUS"}}}`, "STATUS", status, 1)
 		got := normalizeCodex([]byte(line))
-		if len(got) != 1 || got[0].eventType != "turn_interrupted" {
+		if len(got) != 1 || got[0].eventType() != "turn_interrupted" {
 			t.Errorf("%s => %+v", status, got)
 		}
 	}
 	got := normalizeCodex([]byte(`{"method":"turn/completed","params":{"turn":{"id":"t1","status":"failed","error":{"message":"Turn interrupted by user"}}}}`))
-	if len(got) != 1 || got[0].eventType != "turn_interrupted" {
+	if len(got) != 1 || got[0].eventType() != "turn_interrupted" {
 		t.Fatalf("failed interrupt => %+v", got)
 	}
 	got = normalizeCodex([]byte(`{"method":"error","params":{"error":{"message":"Turn cancelled"}}}`))
-	if len(got) != 1 || got[0].eventType != "turn_interrupted" {
+	if len(got) != 1 || got[0].eventType() != "turn_interrupted" {
 		t.Fatalf("cancel error => %+v", got)
 	}
 }
 
 func TestNormalizeCodexTodoList(t *testing.T) {
 	got := normalizeCodex([]byte(`{"method":"item/completed","params":{"item":{"id":"p1","type":"todoList","items":[{"text":"inspect","completed":true},{"text":"fix","completed":false}]}}}`))
-	if len(got) != 1 || got[0].eventType != "plan_updated" {
+	if len(got) != 1 || got[0].eventType() != "plan_updated" {
 		t.Fatalf("todo = %+v", got)
 	}
 	raw, _ := json.Marshal(got[0].payload)
@@ -59,7 +59,7 @@ func TestNormalizeCodexTodoList(t *testing.T) {
 
 func TestNormalizeCodexDeltaAndRequest(t *testing.T) {
 	got := normalizeCodex([]byte(`{"method":"item/agentMessage/delta","params":{"itemId":"m1","delta":"hi"}}`))
-	if len(got) != 1 || got[0].eventType != "assistant_delta" {
+	if len(got) != 1 || got[0].eventType() != "assistant_delta" {
 		t.Fatalf("delta = %+v", got)
 	}
 	// Approval prompts are accepted by the controller, so they must not leave a
@@ -69,7 +69,7 @@ func TestNormalizeCodexDeltaAndRequest(t *testing.T) {
 		t.Fatalf("approval request = %+v", got)
 	}
 	got = normalizeCodex([]byte(`{"id":9,"method":"item/tool/requestUserInput","params":{"questions":[]}}`))
-	if len(got) != 1 || got[0].eventType != "interaction_requested" {
+	if len(got) != 1 || got[0].eventType() != "interaction_requested" {
 		t.Fatalf("request = %+v", got)
 	}
 }
@@ -83,7 +83,7 @@ func TestNormalizeCodexRichItems(t *testing.T) {
 	}
 	for _, tc := range tests {
 		got := normalizeCodex([]byte(tc.line))
-		if len(got) != 1 || got[0].eventType != tc.kind {
+		if len(got) != 1 || got[0].eventType() != tc.kind {
 			t.Errorf("%s => %+v, want %s", tc.line, got, tc.kind)
 		}
 	}
@@ -91,7 +91,7 @@ func TestNormalizeCodexRichItems(t *testing.T) {
 
 func TestNormalizeCodexCollabProjectsSubagent(t *testing.T) {
 	got := normalizeCodex([]byte(`{"method":"item/started","params":{"item":{"id":"a1","type":"collabAgentToolCall","tool":"spawn_agent","status":"inProgress","senderThreadId":"root","newThreadId":"child","prompt":"inspect"}}}`))
-	if len(got) != 2 || got[0].eventType != "tool_started" || got[1].eventType != "subagent_started" {
+	if len(got) != 2 || got[0].eventType() != "tool_started" || got[1].eventType() != "subagent_started" {
 		t.Fatalf("events = %+v", got)
 	}
 }
@@ -101,9 +101,9 @@ func TestNormalizeCodexSpawnWithoutChildIDRemainsActive(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("events = %+v", got)
 	}
-	payload := got[0].payload.(map[string]any)
-	if payload["output"] != "Async agent launched successfully. The agent is working in the background." {
-		t.Fatalf("output = %#v", payload["output"])
+	done, ok := got[0].payload.(*ToolCompleted)
+	if !ok || string(done.Output) != `"Async agent launched successfully. The agent is working in the background."` {
+		t.Fatalf("output = %#v", got[0].payload)
 	}
 }
 
@@ -123,12 +123,16 @@ func TestNormalizeCodexCamelCaseAgentControls(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("%s => %+v", tc.tool, got)
 		}
-		if name := got[0].payload.(map[string]any)["name"]; name != tc.name {
-			t.Errorf("%s name = %v, want %s", tc.tool, name, tc.name)
+		done, ok := got[0].payload.(*ToolCompleted)
+		if !ok {
+			t.Fatalf("%s payload = %T", tc.tool, got[0].payload)
+		}
+		if done.Name != tc.name {
+			t.Errorf("%s name = %v, want %s", tc.tool, done.Name, tc.name)
 		}
 		if tc.tool == "closeAgent" {
-			if output := got[0].payload.(map[string]any)["output"]; output != "Agent closed" {
-				t.Errorf("%s output = %v, want Agent closed", tc.tool, output)
+			if string(done.Output) != `"Agent closed"` {
+				t.Errorf("%s output = %s, want Agent closed", tc.tool, done.Output)
 			}
 		}
 	}
@@ -149,10 +153,11 @@ func TestNormalizeCodexFriendlyToolPayloads(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("%s => %+v", tc.line, got)
 		}
-		payload := got[0].payload.(map[string]any)
-		input, _ := payload["input"].(map[string]any)
-		if payload["name"] != tc.name || input[tc.key] == nil {
-			t.Errorf("payload = %+v, want name %q and input %q", payload, tc.name, tc.key)
+		// The cases mix item/started and item/completed on purpose: the friendly
+		// name and semantic input are the same either way.
+		name, input := toolNameAndInput(got[0].payload)
+		if name != tc.name || input[tc.key] == nil {
+			t.Errorf("payload = %+v, want name %q and input %q", got[0].payload, tc.name, tc.key)
 		}
 	}
 }
@@ -177,7 +182,7 @@ func TestCodexFileChangeName(t *testing.T) {
 
 func TestNormalizeCodexCommandAsBash(t *testing.T) {
 	got := normalizeCodex([]byte(`{"method":"item/started","params":{"item":{"id":"c1","type":"commandExecution","command":"/usr/bin/bash -lc \\\"pwd\\\"","cwd":"src"}}}`))
-	if len(got) != 1 || got[0].eventType != "tool_started" {
+	if len(got) != 1 || got[0].eventType() != "tool_started" {
 		t.Fatalf("events = %+v", got)
 	}
 	raw, _ := json.Marshal(got[0].payload)
@@ -203,13 +208,18 @@ func TestCodexChildThreadDecoration(t *testing.T) {
 	if len(specs) != 1 {
 		t.Fatalf("events = %+v", specs)
 	}
-	raw, _ := json.Marshal(withCodexSidechain(specs[0].payload, threadID, "spawn"))
+	sc, ok := specs[0].payload.(sidechainSetter)
+	if !ok {
+		t.Fatalf("payload %T cannot be marked a sidechain step", specs[0].payload)
+	}
+	sc.SetSidechain(threadID, "spawn")
+	raw, _ := json.Marshal(specs[0].payload)
 	var payload struct {
 		Sidechain bool   `json:"sidechain"`
 		AgentID   string `json:"agent_id"`
-		ParentID  string `json:"parent_item_id"`
+		ParentId  string `json:"parent_item_id"`
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil || !payload.Sidechain || payload.AgentID != "child" || payload.ParentID != "spawn" {
+	if err := json.Unmarshal(raw, &payload); err != nil || !payload.Sidechain || payload.AgentID != "child" || payload.ParentId != "spawn" {
 		t.Fatalf("payload = %s (%v)", raw, err)
 	}
 }
@@ -228,8 +238,26 @@ func TestNormalizeCodexAdditionalRichEvents(t *testing.T) {
 	}
 	for _, tc := range tests {
 		got := normalizeCodex([]byte(tc.line))
-		if len(got) != 1 || got[0].eventType != tc.kind {
+		if len(got) != 1 || got[0].eventType() != tc.kind {
 			t.Errorf("%s => %+v, want %s", tc.line, got, tc.kind)
 		}
 	}
+}
+
+// toolNameAndInput reads the display name and semantic input off a tool event,
+// whichever end of the call it is.
+func toolNameAndInput(p Payload) (string, map[string]any) {
+	var name string
+	var raw json.RawMessage
+	switch tool := p.(type) {
+	case *ToolStarted:
+		name, raw = tool.Name, tool.Input
+	case *ToolCompleted:
+		name, raw = tool.Name, tool.Input
+	default:
+		return "", nil
+	}
+	var input map[string]any
+	_ = json.Unmarshal(raw, &input)
+	return name, input
 }

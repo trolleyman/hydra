@@ -66,33 +66,16 @@ type termResizeMsg struct {
 	Rows uint   `json:"rows"`
 }
 
-type terminalEvent struct {
-	Type string `json:"type"`
-}
-
-// terminalSizeEvent reports the PTY's current window size to a freshly-attached
-// client, sent right before the scrollback replay so the client can size its
-// terminal to match (see sendTerminalSize).
-type terminalSizeEvent struct {
-	terminalEvent
-	Cols uint `json:"cols"`
-	Rows uint `json:"rows"`
-}
-
-type terminalStatusEvent struct {
-	terminalEvent
-	Status string `json:"status"`
-}
-
-// terminalDiffRefreshEvent tells the diff viewer to re-fetch. HeadMoved
-// distinguishes a new commit (HEAD moved) from a plain uncommitted edit: the
-// client re-fetches the diff text on either, but only re-snapshots the
-// per-commit artifacts (screenshots) when the commit actually changed, since
-// those are memoized by commit SHA and regenerating them on every edit would
-// be wasted work.
-type terminalDiffRefreshEvent struct {
-	terminalEvent
-	HeadMoved bool `json:"head_moved"`
+// The socket's control frames are declared once in api/openapi.yaml and
+// generated for both Go and the browser (see docs/chat-mode.md), so what the
+// daemon writes and what the client narrows on cannot drift. writeFrame is the
+// one place a frame becomes bytes.
+func writeFrame(conn *safeConn, frame any) {
+	data, err := json.Marshal(frame)
+	if err != nil {
+		return
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, data)
 }
 
 type safeConn struct {
@@ -112,19 +95,16 @@ func (c *safeConn) WriteControl(messageType int, data []byte, deadline time.Time
 	return errtrace.Wrap(c.Conn.WriteControl(messageType, data, deadline))
 }
 
+// sendStatusUpdate relays the head's computed status. Both sockets send it, so
+// it is one schema shared by both unions (HeadStatusEvent).
 func sendStatusUpdate(conn *safeConn, status string) {
-	msg := terminalStatusEvent{
-		terminalEvent: terminalEvent{Type: "status"},
-		Status:        status,
-	}
-	data, _ := json.Marshal(msg)
-	_ = conn.WriteMessage(websocket.TextMessage, data)
+	writeFrame(conn, api.HeadStatusEvent{Type: api.Status, Status: api.AgentStatus(status)})
 }
 
-func sendTerminalEvent(conn *safeConn, eventType string) {
-	msg := terminalEvent{Type: eventType}
-	data, _ := json.Marshal(msg)
-	_ = conn.WriteMessage(websocket.TextMessage, data)
+// sendReplayDone marks the boundary between a chat socket's replayed history
+// and its live stream.
+func sendReplayDone(conn *safeConn) {
+	writeFrame(conn, api.ChatReplayDoneFrame{Type: api.ReplayDone})
 }
 
 // sendTerminalSize tells the client the PTY's current window size so it can size
@@ -138,18 +118,14 @@ func sendTerminalSize(conn *safeConn, rows, cols uint16) {
 	if rows == 0 || cols == 0 {
 		return
 	}
-	msg := terminalSizeEvent{terminalEvent: terminalEvent{Type: "size"}, Cols: uint(cols), Rows: uint(rows)}
-	data, _ := json.Marshal(msg)
-	_ = conn.WriteMessage(websocket.TextMessage, data)
+	writeFrame(conn, api.TerminalSizeEvent{Type: api.Size, Cols: int(cols), Rows: int(rows)})
 }
 
 // sendDiffRefresh emits a diff_refresh event, flagging whether the worktree
 // change was a new commit (headMoved) so the client knows to also regenerate
 // the per-commit artifacts.
 func sendDiffRefresh(conn *safeConn, headMoved bool) {
-	msg := terminalDiffRefreshEvent{terminalEvent: terminalEvent{Type: "diff_refresh"}, HeadMoved: headMoved}
-	data, _ := json.Marshal(msg)
-	_ = conn.WriteMessage(websocket.TextMessage, data)
+	writeFrame(conn, api.HeadDiffRefreshEvent{Type: api.DiffRefresh, HeadMoved: headMoved})
 }
 
 // HandleShellClose terminates a single web bash shell immediately, so closing a

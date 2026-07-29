@@ -15,7 +15,7 @@ import { touchProject } from '../lib/projectRecency'
 import { useAgentNotifications } from '../lib/useAgentNotifications'
 import { useProjectFavicon } from '../lib/useProjectFavicon'
 import type { AgentResponse } from '../api'
-import { ApiError, ErrorResponse } from '../api'
+import { ApiError, ErrorResponse, ServerUpdatePhase } from '../api'
 import { apiErrorBody } from '../api/format_error'
 import { ChevronDown, ChevronRight, FolderGit2, GitBranch, Settings, LoaderCircle, Menu, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw, X } from 'lucide-react'
 import { ProviderIcon } from '../components/ReviewControls'
@@ -646,7 +646,7 @@ function RootLayout() {
         setRestarting(false)
         return
       }
-      updates.apply({ kind: 'phase', phase: 'restarting' })
+      updates.apply({ kind: 'phase', phase: ServerUpdatePhase.ServerUpdatePhaseRestarting })
       await waitForHealthy()
       window.location.reload()
       return

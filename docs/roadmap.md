@@ -49,6 +49,54 @@ before starting. Grouped by area.
   dependency; do it once cross-agent port collisions become real pain. (The egress
   work has since built on pasta - this item is the port-isolation half.)
 
+- [ ] **Reconsider `~/.cache` being writable, and give Hydra a real cache story.**
+  `internal/sandbox/defaults.go` grants every head write access to `~/.cache` as
+  a "broad XDG cache shared by many tools". On this machine that directory holds
+  an **18GB Go build cache**, a 2.5GB Google profile cache and 2.1GB of
+  google-chrome - so an agent can write entries the HOST later builds from or a
+  browser later reads. The sandbox otherwise confines writes to the worktree;
+  this is the widest hole in that, and it is a default rather than a considered
+  grant.
+
+  The mechanism to fix it already exists: `cow_paths` takes a home/absolute
+  entry, overlays it in place, and "supersedes its writable bind" - reads pass
+  through to the real directory, writes stay per-head. So `cow_paths =
+  ["~/.cache"]` keeps every cache WARM on read (the 18GB of Go objects, the
+  646MB of Playwright browsers) while making writes invisible to the host. One
+  line, already built.
+
+  What that breaks is the reason to think about it properly: writes stop
+  persisting ACROSS heads, and some are meant to. `web/scripts/build-fonts.ts`
+  keeps built webfonts in `~/.cache/hydra/fonts/<signature>/` precisely so a
+  fresh worktree restores in 0.06s instead of rebuilding for 19s, and each head
+  gets a fresh worktree. Under CoW that reverts to 19s per head.
+
+  So the shape is: **default-deny (CoW `~/.cache`), opt-in share** - one narrow
+  Hydra-owned directory bound read-write and shared across heads, for artifacts
+  that are content-addressed and cheap to distrust. Today's default is the
+  inverse, share-everything.
+
+  **Per-project, not machine-wide** (decided): encapsulation is the point of the
+  exercise, and a cache one project's agents can write is a cache another
+  project's agents should not read. The cost is real and accepted - version-pinned
+  artifacts like the webfonts are byte-identical everywhere, so each project pays
+  its own 19s build once instead of the machine paying it once. Somewhere like
+  `<project>/.hydra/local/agent-cache/`, kept clear of `.hydra/local/cache/`,
+  which is already Hydra's own per-head scratch (849 gate-policy/mcp-catalog
+  files) and not a user-facing cache.
+
+  Still open: whether consumers get a `HYDRA_CACHE_DIR` contract rather than
+  hardcoding a path (they should, so the location can move); and how to keep the
+  `~/.cache` subdirectories that genuinely need shared writes. `ms-playwright` is
+  the load-bearing one - the e2e runner's `playwright install` is a no-op only
+  because the browser is already there, and a per-head CoW would re-download
+  646MB. That argues for CoW taking a SUBSET rather than a whole directory:
+  a config that says which parts of `~/.cache` stay shared and which are
+  overlaid, instead of today's all-or-nothing entry.
+
+  Needs testing on the host: bwrap will not nest, so a sandbox-policy change
+  cannot be exercised from inside a head.
+
 ## Agent UX
 
 - [ ] **Sweep slot sessions by owner, not by ID prefix.** `Registry.KillMatching`

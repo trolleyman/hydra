@@ -97,6 +97,17 @@ export function flipTransform(current: Rect, target: Rect): string | null {
  * its final transform (fill: forwards) so the picture stays where it flew to until the
  * caller unmounts it.
  */
+/**
+ * Whether the user (or the harness) asked for reduced motion. Read per call
+ * rather than cached: the OS setting can change while the app is open, and this
+ * runs once per flight rather than per frame.
+ */
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
 export function playFlip(el: HTMLElement, opts: {
   from: Rect
   to: Rect
@@ -107,6 +118,13 @@ export function playFlip(el: HTMLElement, opts: {
   opacity?: [number, number]
 }): Animation | null {
   if (typeof el.animate !== 'function') return null
+  // The CSS half of this UI already drops its animations under reduced motion
+  // (see the @media blocks in index.css); this is the JS half, and a picture
+  // flying across the screen is exactly what that setting is asking us not to
+  // do. Returning null lands the element at its resting position with no
+  // flight - the callers already treat a null flight as "no animation
+  // available", which is how a browser without element.animate is handled.
+  if (prefersReducedMotion()) return null
   const arriving = opts.rest === 'to'
   const transform = arriving
     ? flipTransform(opts.to, opts.from)

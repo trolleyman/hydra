@@ -34,25 +34,6 @@ func metaHasFile(m artifacts.Meta, name string) bool {
 //     carried in File - so the client can render/diff that tile before the run
 //     ends. The client upserts it into the set by name; the authoritative "set"
 //     at settle reconciles the full list.
-type artifactWSMessage struct {
-	Type     string               `json:"type"`
-	Scripts  []api.ArtifactSet    `json:"scripts,omitempty"`
-	Set      *api.ArtifactSet     `json:"set,omitempty"`
-	Script   string               `json:"script,omitempty"`
-	Side     string               `json:"side,omitempty"`
-	Line     *api.ArtifactLogLine `json:"line,omitempty"`
-	Progress *string              `json:"progress,omitempty"`
-	File     *api.ArtifactFile    `json:"file,omitempty"`
-}
-
-// artifactClientMessage is a client→server message. Only "refresh" (regenerate
-// one script, like the HTTP refresh param) is supported. An optional side
-// ("left"/"right") regenerates just that side, leaving the other side cached.
-type artifactClientMessage struct {
-	Type   string `json:"type"`
-	Script string `json:"script"`
-	Side   string `json:"side,omitempty"`
-}
 
 // HandleArtifactsWS streams artifact set updates over a WebSocket so the diff
 // viewer's artifacts panel can reflect generation progress and the live log
@@ -114,7 +95,7 @@ func artifactParamsFromQuery(q url.Values) api.GetAgentArtifactsParams {
 // (log lines, settles) until the connection closes. A client refresh message
 // regenerates one script.
 func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoot, projectID string, head *heads.Head, params api.GetAgentArtifactsParams) {
-	writeMsg := func(m artifactWSMessage) error {
+	writeMsg := func(m any) error {
 		data, err := json.Marshal(m)
 		if err != nil {
 			return errtrace.Wrap(err)
@@ -126,7 +107,7 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 	if err != nil || plan == nil {
 		// Nothing to compare (no artifacts configured, etc.). Send an empty
 		// snapshot and keep the socket open until the client closes it.
-		_ = writeMsg(artifactWSMessage{Type: "snapshot", Scripts: []api.ArtifactSet{}})
+		_ = writeMsg(api.ArtifactsSnapshotFrame{Type: api.ArtifactsSnapshotFrameTypeSnapshot, Scripts: []api.ArtifactSet{}})
 		drainUntilClose(conn)
 		return
 	}
@@ -158,7 +139,7 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 
 	// Initial snapshot. buildSets triggers any needed generations, after which the
 	// subscription delivers their progress.
-	if err := writeMsg(artifactWSMessage{Type: "snapshot", Scripts: plan.buildSets(s, projectID)}); err != nil {
+	if err := writeMsg(api.ArtifactsSnapshotFrame{Type: api.ArtifactsSnapshotFrameTypeSnapshot, Scripts: plan.buildSets(s, projectID)}); err != nil {
 		return
 	}
 
@@ -181,16 +162,16 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 			if msgType != websocket.TextMessage {
 				continue
 			}
-			var msg artifactClientMessage
+			var msg api.ArtifactsClientMessage
 			if err := json.Unmarshal(data, &msg); err != nil || msg.Type != "refresh" || msg.Script == "" {
 				continue
 			}
 			// Drop the cached result and rebuild - this restarts the generation,
 			// and its progress streams back via the subscription. An optional side
 			// ("left"/"right") restarts just that side, keeping the other cached.
-			plan.invalidateSide(msg.Script, msg.Side)
+			plan.invalidateSide(msg.Script, string(msg.Side))
 			set := plan.buildSet(s, projectID, msg.Script)
-			_ = writeMsg(artifactWSMessage{Type: "set", Set: &set})
+			_ = writeMsg(api.ArtifactsSetFrame{Type: api.Set, Set: set})
 		}
 	}()
 
@@ -216,12 +197,12 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 			switch ev.Kind {
 			case "log":
 				line := api.ArtifactLogLine{Text: ev.Line.Text, Stream: api.ArtifactLogLineStream(ev.Line.Stream)}
-				if err := writeMsg(artifactWSMessage{Type: "log", Script: ref.script, Side: ref.side, Line: &line}); err != nil {
+				if err := writeMsg(api.ArtifactsLogFrame{Type: api.ArtifactsLogFrameTypeLog, Script: ref.script, Side: api.ArtifactSide(ref.side), Line: line}); err != nil {
 					return
 				}
 			case "progress":
 				p := ev.Progress
-				if err := writeMsg(artifactWSMessage{Type: "progress", Script: ref.script, Side: ref.side, Progress: &p}); err != nil {
+				if err := writeMsg(api.ArtifactsProgressFrame{Type: api.ArtifactsProgressFrameTypeProgress, Script: ref.script, Side: api.ArtifactSide(ref.side), Progress: p}); err != nil {
 					return
 				}
 			case "file":
@@ -246,12 +227,12 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 					continue
 				}
 				f := artifactFileFromDelta(projectID, ref.script, left.Key, right.Key, delta)
-				if err := writeMsg(artifactWSMessage{Type: "file", Script: ref.script, File: &f}); err != nil {
+				if err := writeMsg(api.ArtifactsFileFrame{Type: api.File, Script: ref.script, File: f}); err != nil {
 					return
 				}
 			case "settled":
 				set := plan.buildSet(s, projectID, ref.script)
-				if err := writeMsg(artifactWSMessage{Type: "set", Set: &set}); err != nil {
+				if err := writeMsg(api.ArtifactsSetFrame{Type: api.Set, Set: set}); err != nil {
 					return
 				}
 			}
