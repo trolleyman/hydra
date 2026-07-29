@@ -2468,16 +2468,41 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
 }
 
+// How much bigger the resolution a simulated artifact REPORTS (its Width/Height
+// metadata - see simReadyChangedSet) is than the box its placeholder is drawn in.
+// Every simulated file declares exactly this multiple, so scaling the SVG by it
+// makes the file's own intrinsic size agree with what the API says about it, the
+// way a real capture's does.
+//
+// That agreement matters to more than tidiness: the lightbox reserves a picture's
+// box from the declared size before the file loads (see LightboxItem.width), so a
+// placeholder that declared 1440x880 and then turned out to be a 360x220 vector
+// laid out four times too big for a frame and snapped down - a pop-in visible
+// only in simulation, and only because the two disagreed.
+//
+// The drawing itself is untouched: the coordinates below stay in the small box and
+// a viewBox scales the whole vector onto the declared one, so every tile renders
+// exactly as it did (a tile's size comes from its column width and the metadata's
+// aspect ratio, neither of which moves).
+const simArtifactScale = 4
+
+// simSVGDoc wraps one placeholder's markup (drawn in w×h coordinates) as a
+// data-URL SVG that DECLARES simArtifactScale×(w×h) - see simArtifactScale.
+func simSVGDoc(body string, w, h int) string {
+	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">%s</svg>`,
+		w*simArtifactScale, h*simArtifactScale, w, h, body)
+	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
+}
+
 // simSVG builds an inline data-URL SVG image (w×h) so the demo can render
 // artifacts without any on-disk blob serving. Mixing tall "phone" shapes with
 // wide "desktop" ones shows off the flex-wrap artifact layout: narrow shots
 // pack several per row while a wide one claims its own.
 func simSVG(label, color string, w, h int) string {
-	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">`+
+	return simSVGDoc(fmt.Sprintf(
 		`<rect width="%d" height="%d" fill="%s"/>`+
-		`<text x="%d" y="%d" font-family="sans-serif" font-size="18" fill="white" text-anchor="middle">%s</text></svg>`,
-		w, h, w, h, color, w/2, h/2, label)
-	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
+			`<text x="%d" y="%d" font-family="sans-serif" font-size="18" fill="white" text-anchor="middle">%s</text>`,
+		w, h, color, w/2, h/2, label), w, h)
 }
 
 // simSVGUI renders a minimal, abstract UI mock - a header title, a body panel,
@@ -2498,21 +2523,19 @@ func simSVGUI(title string, dark bool, accent, badgeText string, w, h int) strin
 	bx, by := w-bw-12, 12 // 12px inset
 	cw, ch := 96, 26      // centred tile (gives the slider a mid-frame change)
 	cx, cy := (w-cw)/2, (h-ch)/2
-	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">`+
+	return simSVGDoc(fmt.Sprintf(
 		`<rect width="%d" height="%d" fill="%s"/>`+
-		`<text x="16" y="30" font-family="sans-serif" font-size="16" fill="%s">%s</text>`+
-		`<rect x="12" y="48" width="%d" height="%d" rx="8" fill="%s"/>`+
-		`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
-		`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
-		`<text x="%d" y="%d" font-family="sans-serif" font-size="11" fill="white" text-anchor="middle">%s</text>`+
-		`</svg>`,
-		w, h, w, h, bg,
+			`<text x="16" y="30" font-family="sans-serif" font-size="16" fill="%s">%s</text>`+
+			`<rect x="12" y="48" width="%d" height="%d" rx="8" fill="%s"/>`+
+			`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
+			`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
+			`<text x="%d" y="%d" font-family="sans-serif" font-size="11" fill="white" text-anchor="middle">%s</text>`,
+		w, h, bg,
 		fg, title,
 		w-24, h-60, body,
 		cx, cy, cw, ch, accent,
 		bx, by, bw, bh, accent,
-		bx+bw/2, by+15, badgeText)
-	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
+		bx+bw/2, by+15, badgeText), w, h)
 }
 
 // simArtifactLog is a believable multi-line generation log for the in-flight

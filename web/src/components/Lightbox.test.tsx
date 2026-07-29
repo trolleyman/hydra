@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { Lightbox, type LightboxItem } from './Lightbox'
+import { clearMediaSizes, rememberMediaSize } from '../lib/mediaSize'
 
 // Two regression suites for the fullscreen lightbox:
 //
@@ -200,5 +201,67 @@ describe('Lightbox kinds', () => {
   it('defaults to a picture when the caller names no kind', () => {
     open(plainImage)
     expect(screen.getByAltText('shot.png')).toBeTruthy()
+  })
+})
+
+// Reserved boxes - the regression this suite exists for: stepping ←/→ through a
+// gallery used to pop each picture open. A fresh <img> has no size until the file
+// decodes, so the media laid out at nothing, the caption slid up under it, the
+// zoom frame re-measured, and the arriving flight had no box to land on - all of
+// it a frame or two after the navigation, which read as the image "loading in".
+// Handing the browser the size up front (as width/height on the <img>, which it
+// lays a replaced element out from before a byte has arrived) is what makes the
+// step still. The size comes from the entry's metadata, or - for the callers that
+// have none, markdown images and prompt attachments - from lib/mediaSize.
+describe('Lightbox picture sizing', () => {
+  beforeEach(() => clearMediaSizes())
+
+  const openAt = (items: LightboxItem[], index: number) =>
+    render(<Lightbox items={items} index={index} onIndexChange={vi.fn()} onClose={vi.fn()} />)
+
+  it('reserves the picture box from the entry metadata', () => {
+    openAt([{ ...plainImage, width: 1440, height: 880 }], 0)
+    const img = screen.getByAltText('shot.png')
+    expect(img).toHaveAttribute('width', '1440')
+    expect(img).toHaveAttribute('height', '880')
+    // ...and the caption reads the same size without waiting for the load.
+    expect(screen.getByText('1440 × 880')).toBeTruthy()
+  })
+
+  it('falls back to a remembered size when the entry carries no metadata', () => {
+    rememberMediaSize('shot.png', 780, 1688)
+    openAt([plainImage], 0)
+    const img = screen.getByAltText('shot.png')
+    expect(img).toHaveAttribute('width', '780')
+    expect(img).toHaveAttribute('height', '1688')
+  })
+
+  it('leaves the box unset when the size is unknown', () => {
+    openAt([plainImage], 0)
+    const img = screen.getByAltText('shot.png')
+    expect(img).not.toHaveAttribute('width')
+    expect(img).not.toHaveAttribute('height')
+  })
+
+  it('sizes the edge preview of the neighbour it will fly from', () => {
+    const items: LightboxItem[] = [
+      { ...plainImage, width: 100, height: 50 },
+      { url: 'next.png', filename: 'next.png', size: 1, width: 300, height: 400 },
+    ]
+    openAt(items, 0)
+    const peek = document.body.querySelector('img[src="next.png"]')
+    expect(peek).toHaveAttribute('width', '300')
+    expect(peek).toHaveAttribute('height', '400')
+  })
+
+  it('takes the measured size over the metadata once the file has loaded', () => {
+    openAt([{ ...plainImage, width: 1440, height: 880 }], 0)
+    const img = screen.getByAltText('shot.png') as HTMLImageElement
+    Object.defineProperty(img, 'naturalWidth', { value: 360, configurable: true })
+    Object.defineProperty(img, 'naturalHeight', { value: 220, configurable: true })
+    fireEvent.load(img)
+    expect(img).toHaveAttribute('width', '360')
+    expect(img).toHaveAttribute('height', '220')
+    expect(screen.getByText('360 × 220')).toBeTruthy()
   })
 })

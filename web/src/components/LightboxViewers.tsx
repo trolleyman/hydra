@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Download, File as FileIcon, FileArchive, FileText, LoaderCircle, TriangleAlert } from 'lucide-react'
 import { LIGHTBOX_MEDIA_CLASS } from '../lib/lightboxFlip'
+import { rememberMediaSize } from '../lib/mediaSize'
 import { highlightLines } from '../lib/highlightCore'
 import { langFromPath, type FileKind } from '../lib/fileKind'
 import { formatBytes } from '../lib/formatBytes'
@@ -77,7 +78,16 @@ export function DownloadLinks({ url, diff }: { url: string; diff?: { left?: stri
 // LightboxVideo plays a single (non-diff) clip fullscreen with the browser's own
 // transport. A before/after PAIR goes through LightboxDiff instead, which drives
 // both clips off one synced transport - see VideoDiffView.
-export function LightboxVideo({ url, aspect }: { url: string; aspect?: number }) {
+export function LightboxVideo({ url, aspect, onDims }: {
+  url: string
+  // The clip's aspect ratio when known ahead of load, so the panel lays out at its
+  // final shape immediately instead of collapsing to the default 300x150 box and
+  // snapping open once the metadata arrives.
+  aspect?: number
+  // Reports the clip's natural pixel size once the browser has its metadata - for
+  // the lightbox caption, and so the size is known next time (see lib/mediaSize).
+  onDims?: (d: { w: number; h: number }) => void
+}) {
   return (
     <div className={PANEL_CLASS} data-lb-picture>
       {/* autoPlay + muted + loop mirrors how the grid tiles behave, so opening a
@@ -90,6 +100,13 @@ export function LightboxVideo({ url, aspect }: { url: string; aspect?: number })
         loop
         muted
         playsInline
+        onLoadedMetadata={(e) => {
+          const { videoWidth: w, videoHeight: h } = e.currentTarget
+          if (w && h) {
+            rememberMediaSize(url, w, h)
+            onDims?.({ w, h })
+          }
+        }}
         style={{ aspectRatio: aspect }}
         className="block max-w-[90vw] max-h-[85vh]"
       />
