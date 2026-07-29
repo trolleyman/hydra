@@ -89,7 +89,7 @@ export class DefaultService {
     }
     /**
      * Get cached Claude Code subscription usage
-     * Probes the locally-installed Claude CLI (`claude /usage`) for the account's subscription quota and returns a cached snapshot. The result is cached briefly (~30s); pass refresh=true to force a fresh probe.
+     * Probes the locally-installed Claude CLI (`claude /usage`) for the account's subscription quota and returns a cached snapshot. Probing starts a Claude CLI under a PTY for a few seconds, so it is rationed: a snapshot is served for ~10 minutes before a request is allowed to re-probe, a request arriving while a probe is in flight is served the cached snapshot rather than queued, and repeated failures back off and then park the probe (retried every few hours rather than every few minutes). Pass refresh=true to force a fresh probe, which skips the cache and the backoff; forced probes are still floored at one per 30s.
      *
      * @param refresh Bypass the cache and re-probe the CLI.
      * @returns ClaudeUsageResponse OK

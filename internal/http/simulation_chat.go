@@ -502,8 +502,11 @@ var simChatEvents = []simNorm{
 	// what produced it: grep's own line numbers in the gutter with the file's
 	// language, the tail highlighted as markdown, the headings coloured as the
 	// strings they are. See web/src/lib/shellSections.ts.
-	simTool("toolu_sim_probe", "Bash", simRaw(`{"command":"cd /repo/.hydra/local/worktrees/feat-uploader-retry\ngrep -n \"rclone\" mise/config.toml || echo \"no rclone in mise/config.toml\"\necho \"=== retry helpers ===\"\ngrep -n \"backoff\\\\|attempt\" internal/artifacts/upload.go | head\necho \"=== docs tail ===\"\ntail -6 docs/artifacts.md\necho \"=== docs headings ===\"\ngrep -n '^#' docs/artifacts.md","description":"Check rclone config, the retry helpers and the docs structure"}`)),
-	simToolOut("toolu_sim_probe", "no rclone in mise/config.toml\n=== retry helpers ===\n88:// sleepBackoff waits out the jittered exponential delay for one attempt.\n100:func sleepBackoff(attempt int) {\n101:\tbase := 100 * time.Millisecond\n102:\td := base << attempt\n118:\tfor attempt := 0; attempt < maxAttempts; attempt++ {\n=== docs tail ===\nArtifacts are generated per head and diffed against the base ref, so a run\nonly uploads what actually changed.\n\n## TODO\n- Retry the upload on a 5xx\n- Surface the attempt count in the panel\n=== docs headings ===\n1:# Artifacts\n12:## Generating\n40:## TODO"),
+	// The bare `echo`s are the spacing ones an agent writes between its sections:
+	// too short to anchor on, but a step of known length all the same, which is
+	// what lets the search ABOVE each one keep its own lines.
+	simTool("toolu_sim_probe", "Bash", simRaw(`{"command":"cd /repo/.hydra/local/worktrees/feat-uploader-retry\ngrep -n \"rclone\" mise/config.toml || echo \"no rclone in mise/config.toml\"\necho \"=== retry helpers ===\"\ngrep -n \"backoff\\\\|attempt\" internal/artifacts/upload.go | head\necho\necho \"=== docs tail ===\"\ntail -6 docs/artifacts.md\necho\necho \"=== docs headings ===\"\ngrep -n '^#' docs/artifacts.md","description":"Check rclone config, the retry helpers and the docs structure"}`)),
+	simToolOut("toolu_sim_probe", "no rclone in mise/config.toml\n=== retry helpers ===\n88:// sleepBackoff waits out the jittered exponential delay for one attempt.\n100:func sleepBackoff(attempt int) {\n101:\tbase := 100 * time.Millisecond\n102:\td := base << attempt\n118:\tfor attempt := 0; attempt < maxAttempts; attempt++ {\n\n=== docs tail ===\nArtifacts are generated per head and diffed against the base ref, so a run\nonly uploads what actually changed.\n\n## TODO\n- Retry the upload on a 5xx\n- Surface the attempt count in the panel\n\n=== docs headings ===\n1:# Artifacts\n12:## Generating\n40:## TODO"),
 	// The same sectioning over the OTHER two shapes it knows. git reporting on
 	// the repository (a short status, a commit header, a diffstat) is coloured
 	// the way git's own porcelain colours it - see web/src/lib/gitOutput.ts - and
@@ -511,6 +514,13 @@ var simChatEvents = []simNorm{
 	// search's matches and still gets the gutter and the file's language.
 	simTool("toolu_sim_gitprobe", "Bash", simRaw(`{"command":"git status --short\necho \"== merge commit contents ==\"\ngit show --stat HEAD | tail -12\necho \"== remaining callers ==\"\ngrep -rn \"sleepBackoff\" internal | grep -v _test.go | head -5","description":"Check the worktree, the merge commit and who still calls the helper"}`)),
 	simToolOut("toolu_sim_gitprobe", " M internal/artifacts/upload.go\nA  internal/artifacts/backoff.go\n?? scratch/probe.ts\n== merge commit contents ==\ncommit 5d671ab0a7401035 (HEAD -> hydra/retry-uploads)\nMerge: 5d671ab0 a7401035\nAuthor: Callum Tolley <cgtrolley@gmail.com>\nDate:   Wed Jul 29 12:00:47 2026 +0100\n\n    Merge branch 'main'\n\n docs/artifacts.md              |  7 +-\n internal/artifacts/backoff.go  | 15 +++++++\n internal/artifacts/upload.go   | 32 ++++++++------\n 3 files changed, 45 insertions(+), 9 deletions(-)\n== remaining callers ==\ninternal/artifacts/upload.go:119:\t\tsleepBackoff(attempt)\ninternal/artifacts/backoff.go:9:func sleepBackoff(attempt int) {"),
+	// Two searches of the same file back to back, with no separator between them
+	// - the second asking a narrower question than the first. Where one's matches
+	// stop and the other's start is not knowable, but it does not need to be:
+	// both stretches are lines of the file they name, so the pair renders as one
+	// section with grep's `-A` context lines numbered alongside the matches.
+	simTool("toolu_sim_ctxprobe", "Bash", simRaw(`{"command":"grep -n \"func (u \\*Uploader) Put\" -A 6 internal/artifacts/upload.go\ngrep -n \"func sleepBackoff\" -A 4 internal/artifacts/backoff.go\necho \"=== sim ===\"\ngrep -n \"func simUpload\" -A 3 internal/http/simulation.go","description":"Check whether the uploader can retry"}`)),
+	simToolOut("toolu_sim_ctxprobe", "112:func (u *Uploader) Put(ctx context.Context, key string, r io.Reader) error {\n113-\tvar err error\n114-\t// The reader is replayed per attempt, so it has to be seekable.\n115-\tfor attempt := 0; attempt < maxAttempts; attempt++ {\n116-\t\tif err = u.put(ctx, key, r); err == nil {\n117-\t\t\treturn nil\n118-\t\t}\n9:func sleepBackoff(attempt int) {\n10-\tbase := 100 * time.Millisecond\n11-\td := base << attempt\n12-\tjitter := time.Duration(rand.Int63n(int64(d / 2)))\n13-\ttime.Sleep(d/2 + jitter)\n=== sim ===\n41:func simUpload(key string) simResult {\n42-\treturn simResult{Key: key, Bytes: 4096}\n43-}"),
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20). This settles the chained command
 	// opened well above.
@@ -600,6 +610,20 @@ func buildSimOlderChatEvents() []simNorm {
 			out = append(out, simUser(fmt.Sprintf("sim-old-%d", i), fmt.Sprintf("Older question #%d - loaded by scrolling up.", i/2+1)))
 		} else {
 			out = append(out, simSay(fmt.Sprintf("old-m%d", i), fmt.Sprintf("Older reply #%d from earlier in the conversation.", i/2+1)))
+		}
+		// A commit chip that exists ONLY in the paged-in history, so scrolling up
+		// has to place it back among these older messages. Two of them, either
+		// side of the halfway mark, because the bug they guard against was an
+		// ordering one: chips arriving newest-page-first were appended to a list
+		// the interleave reads in order, so every paged-in chip fell out of the
+		// merge in one clump at the load boundary instead of at its own place.
+		// They must also not animate in - they are backfill, like the messages
+		// around them.
+		switch i {
+		case 6:
+			out = append(out, simCommit("0dd0dd0d0123456789abcdef0123456789abcdef", "0dd0dd0", "Sketch the uploader's retry budget", "2026-07-09T17:59:00.007Z"))
+		case 14:
+			out = append(out, simCommit("1ee1ee1e0123456789abcdef0123456789abcdef", "1ee1ee1", "Pull the backoff constants into one place", "2026-07-09T17:59:00.016Z"))
 		}
 	}
 	return out

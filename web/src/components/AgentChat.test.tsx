@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, normalizedToProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
+import { ChatPane, compareCommitChips, normalizedToProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
@@ -423,6 +423,26 @@ describe('the image-downscale notice is not injected context', () => {
       alloc(),
     )
     expect(items).toMatchObject([{ kind: 'user' }])
+  })
+})
+
+// Commit chips arrive in whatever order their pages do: the live window first,
+// then progressively OLDER pages as you scroll up. mergedItems interleaves them
+// against the transcript in a single ordered pass, so an unsorted list dropped
+// every older chip in a clump at the load boundary instead of at its own place.
+describe('compareCommitChips', () => {
+  const chip = (ts: number, seq?: number) =>
+    ({ kind: 'commit', id: ts, sha: `${ts}`, shortSha: `${ts}`, subject: `${ts}`, ts, seq }) as const
+
+  it('orders oldest first however the pages arrived', () => {
+    const pages = [chip(300), chip(100), chip(250), chip(150)]
+    expect([...pages].sort(compareCommitChips).map((c) => c.ts)).toEqual([100, 150, 250, 300])
+  })
+
+  it('breaks a same-timestamp tie on the log sequence', () => {
+    // A merge and the commit that triggered it can share a second.
+    const same = [chip(100, 9), chip(100, 4)]
+    expect([...same].sort(compareCommitChips).map((c) => c.seq)).toEqual([4, 9])
   })
 })
 

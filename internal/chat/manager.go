@@ -558,6 +558,32 @@ func (m *Manager) Append(id, eventType string, payload any) (Event, error) {
 	return errtrace.Wrap2(s.Append(eventType, payload))
 }
 
+// RetractOrphanedTurn is called when a chat head is about to be RESUMED, before
+// the new CLI process can append anything. It compares the tail of the head's
+// normalized log against the CLI's own transcript and, if the dead process left
+// blocks behind that the CLI never committed, appends one messages_retracted
+// event naming them - so the re-run of that turn doesn't leave the browser
+// showing the agent saying the same thing twice. See orphans.go for why the
+// transcript is the arbiter.
+//
+// It returns the uuids retracted (nil when there was nothing to do, which is the
+// overwhelmingly common case). Errors reading the log are returned; an
+// unreadable transcript is not an error, it just means no retraction.
+func (m *Manager) RetractOrphanedTurn(id, transcriptDir string) ([]string, error) {
+	s, err := m.store(id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	orphans := OrphanedUUIDs(s.Events(), transcriptDir)
+	if len(orphans) == 0 {
+		return nil, nil
+	}
+	if _, err := s.Append("messages_retracted", map[string]any{"message_ids": orphans}); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return orphans, nil
+}
+
 func (m *Manager) Snapshot(id string) (Projection, error) {
 	s, err := m.store(id)
 	if err != nil {

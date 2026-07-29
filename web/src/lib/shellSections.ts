@@ -43,6 +43,11 @@ export interface MatchesView {
 export type ScriptStep =
   // A constant `echo`: prints a known string, so it anchors the output.
   | { kind: 'marker'; text: string }
+  // A constant `echo` whose text is too short to search the output for - most
+  // often the bare `echo` agents put between their greps to space the output
+  // out. It anchors nothing, but it still prints a known number of known lines,
+  // which is enough to keep it from costing its neighbours their attribution.
+  | { kind: 'echo'; text: string }
   // A contiguous slice of one file (`sed -n 40,110p f`, `head -50 f`, `cat f`).
   | { kind: 'view'; view: FileView }
   // Lines matched out of one or more files.
@@ -316,16 +321,18 @@ const GREP_SHAPE_LETTERS = new Set(['c', 'l', 'L', 'o', 'q', 'Z', 'z'])
 // Cluster letters whose argument follows the cluster (`-m5` is not modelled).
 const GREP_ARG_LETTERS = new Set(['e', 'f', 'm', 'A', 'B', 'C', 'd', 'g', 't', 'T'])
 
-// parseMarker returns the text a bare `echo` prints, or null when the step is
-// not one whose output is known in advance. Flags are refused: `-n` drops the
+// parseEcho returns the text a bare `echo` prints, or null when the step is not
+// one whose output is known in advance. Flags are refused: `-n` drops the
 // trailing newline (so the next command continues on the same line) and `-e`
 // expands escapes - either makes the printed text something other than this.
-function parseMarker(words: Word[]): string | null {
+//
+// A bare `echo` prints one empty line, so it returns '' - not null. Whether the
+// text is long enough to SEARCH for is a separate question, asked in classify.
+function parseEcho(words: Word[]): string | null {
   if (words[0].text !== 'echo' || words[0].quoted) return null
   const args = words.slice(1)
   if (args.some((w) => w.dynamic || /^-[neE]+$/.test(w.text))) return null
-  const text = args.map((w) => w.text).join(' ')
-  return text.trim().length >= MIN_MARKER_LEN ? text : null
+  return args.map((w) => w.text).join(' ')
 }
 
 interface ParsedGrep extends MatchesView {
@@ -465,8 +472,10 @@ function classify(p: Pipeline): ScriptStep {
   if (cmd.redirected) return { kind: 'silent' }
   if (!name.quoted && (SILENT.has(name.text) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(name.text))) return { kind: 'silent' }
 
-  const marker = parseMarker(cmd.words)
-  if (marker !== null && !trimmedFrom && !filtered) return { kind: 'marker', text: marker }
+  const echo = parseEcho(cmd.words)
+  if (echo !== null && !trimmedFrom && !filtered) {
+    return echo.trim().length >= MIN_MARKER_LEN ? { kind: 'marker', text: echo } : { kind: 'echo', text: echo }
+  }
 
   const matches = parseMatches(cmd.words)
   if (matches) return { kind: 'matches', match: { paths: matches.paths, numbered: matches.numbered }, command: p.raw }
@@ -516,27 +525,101 @@ function matchesAt(lines: string[], pos: number, expected: string[]): boolean {
 // stepLimit is the most lines a step can have printed, or null when it is not
 // bounded by anything the script says.
 function stepLimit(step: ScriptStep): number | null {
+  if (step.kind === 'echo') return step.text.split('\n').length
   if (step.kind !== 'view') return null
   const { start, end } = step.view
   return start != null && end != null ? end - start + 1 : null
 }
 
+// echoLines is the exact output of a step whose text the script spells out, so
+// the caller can check the lines it is about to hand over really are that step's.
+function echoLines(step: ScriptStep): string[] | null {
+  return step.kind === 'echo' ? step.text.split('\n') : null
+}
+
+// mergeSearches collapses a run of searches with nothing between them into one
+// producer. Where one grep's matches stop and the next one's start is not
+// knowable - but a search's rendering does not depend on it. Every line already
+// says which file it came from (its own `path:` prefix, or the single file the
+// searches all named), and that is all the gutter and the highlighting read. Two
+// greps back to back are what an agent writes when the second one asks a
+// narrower question than the first, and calling that pair unattributable cost
+// BOTH of them their line numbers over a boundary neither renderer wanted.
+//
+// A search whose files this module could not enumerate (a glob, a variable)
+// makes the merged path list unknown rather than contributing nothing: guessing
+// the other's file for its lines would highlight them as the wrong language.
+function mergeSearches(steps: ScriptStep[]): ScriptStep[] {
+  const out: ScriptStep[] = []
+  for (const step of steps) {
+    const prev = out[out.length - 1]
+    if (step.kind !== 'matches' || prev?.kind !== 'matches') { out.push(step); continue }
+    const known = prev.match.paths.length > 0 && step.match.paths.length > 0
+    out[out.length - 1] = {
+      kind: 'matches',
+      command: `${prev.command}; ${step.command}`,
+      match: {
+        paths: known ? [...new Set([...prev.match.paths, ...step.match.paths])] : [],
+        numbered: prev.match.numbered && step.match.numbered,
+      },
+    }
+  }
+  return out
+}
+
 // distribute hands a stretch of output to the producers that ran inside it.
-// Null when the boundaries between them are not knowable - which is the common
-// case for more than one producer, and is why agents' separator `echo`s matter.
+// Null when the boundaries between them are not knowable.
+//
+// Producers whose output the script bounds are peeled off BOTH ends - a
+// `sed -n 1,20p` prints at most twenty lines, an `echo` prints exactly the line
+// it was given - which leaves the one open-ended producer in the middle with
+// what is between them. Both ends matter: an agent writing a sectioned script
+// puts a spacing `echo` after each search as often as before it, and taking the
+// leading end only meant that blank line cost the search above it its whole
+// attribution.
 function distribute(producers: ScriptStep[], slice: string[]): string[][] | null {
   if (producers.length === 0) return null
   if (producers.length === 1) return [slice]
-  const out: string[][] = []
-  let pos = 0
-  for (let i = 0; i < producers.length; i++) {
-    if (i === producers.length - 1) { out.push(slice.slice(pos)); break }
-    const limit = stepLimit(producers[i])
-    if (limit == null) return null
-    const take = Math.min(limit, slice.length - pos)
-    out.push(slice.slice(pos, pos + take))
-    pos += take
+  const out: string[][] = producers.map(() => [])
+  let lo = 0
+  let hi = slice.length
+
+  // An `echo` whose line is not where it should be printed nothing - it sat
+  // behind a `||`, or its trailing blank was trimmed off the end of the output.
+  // Its neighbour keeps the line rather than losing one to it.
+  const fits = (step: ScriptStep, at: number): boolean => {
+    const expected = echoLines(step)
+    return !expected || matchesAt(slice, at, expected)
   }
+
+  let head = 0
+  for (; head < producers.length; head++) {
+    const limit = stepLimit(producers[head])
+    if (limit == null) break
+    const n = Math.min(limit, hi - lo)
+    if (!fits(producers[head], lo)) continue
+    out[head] = slice.slice(lo, lo + n)
+    lo += n
+  }
+  let tail = producers.length - 1
+  for (; tail > head; tail--) {
+    const limit = stepLimit(producers[tail])
+    if (limit == null) break
+    const n = Math.min(limit, hi - lo)
+    if (!fits(producers[tail], hi - n)) continue
+    out[tail] = slice.slice(hi - n, hi)
+    hi -= n
+  }
+  // More than one producer with no bound of its own leaves a boundary nothing
+  // in the script pins down - the common case, and why those separators matter.
+  if (head < tail) return null
+  // What is left in the middle goes to that one open-ended producer. When every
+  // producer was bounded there is no such gap, and any surplus (an error, a
+  // banner) rides with the last one that could have printed something the script
+  // does not spell out.
+  let rest = head === tail ? head : producers.length - 1
+  while (rest > 0 && producers[rest].kind === 'echo') rest--
+  out[rest] = out[rest].concat(slice.slice(lo, hi))
   return out
 }
 
@@ -561,7 +644,8 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
     const slice = lines.slice(pos, end)
     pos = end
     if (slice.length === 0) { pending = []; return }
-    const parts = distribute(pending, slice)
+    const producers = mergeSearches(pending)
+    const parts = distribute(producers, slice)
     if (!parts) {
       sections.push({ kind: 'plain', lines: slice })
       pending = []
@@ -569,12 +653,16 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
     }
     parts.forEach((part, i) => {
       if (part.length === 0) return
-      const step = pending[i]
+      const step = producers[i]
       const limit = stepLimit(step)
       // More lines than the range could have produced (an error, a banner, a
       // marker that did not fire) means this is not what the parse thinks it is.
       if (step.kind === 'view' && (limit == null || part.length <= limit)) {
         sections.push({ kind: 'view', view: step.view, lines: part })
+      } else if (step.kind === 'echo' && part.length <= (limit ?? 0)) {
+        // The script says what these lines are, so they render as the string it
+        // printed - the same as the separators long enough to anchor on.
+        sections.push({ kind: 'marker', lines: part })
       } else if (step.kind === 'matches') {
         sections.push({ kind: 'matches', match: step.match, command: step.command, lines: part })
       } else if (step.kind === 'git') {

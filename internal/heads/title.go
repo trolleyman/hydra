@@ -59,8 +59,10 @@ func truncateTitle(s string) string {
 const titleModel = "haiku"
 
 // titleGenTimeout caps how long the one-shot title call may run before we give
-// up and keep the prompt-derived title.
-const titleGenTimeout = 25 * time.Second
+// up and keep the prompt-derived title. With thinking off (see titleEnv) the
+// call lands in 1-3s, so this is a generous outer bound for a slow network or a
+// loaded host rather than a number the happy path goes anywhere near.
+const titleGenTimeout = 60 * time.Second
 
 // ErrNoPrompt is returned by GenerateTitle when the agent has no task text to
 // summarise (a head spawned with an empty prompt).
@@ -70,6 +72,12 @@ var ErrNoPrompt = errors.New("agent has no task prompt to summarise")
 // nothing usable (empty output). Distinct from a transport failure so a caller
 // can tell "the model said nothing" from "the call never landed".
 var ErrNoTitle = errors.New("the model did not return a usable title")
+
+// ErrTitleTimeout is returned when the `claude` call outlived titleGenTimeout.
+// It exists because the raw error in that case is a bare "signal: killed" (exec
+// SIGKILLs the child when the context expires), which told the user nothing -
+// that opaque toast is what sent us looking for this bug in the first place.
+var ErrTitleTimeout = errors.New("timed out waiting for the title model")
 
 // GenerateTitle asks the host `claude` CLI (cheapest model, non-interactive) for
 // a concise title summarising a head's task prompt. Blocking and bounded by
@@ -240,11 +248,50 @@ func generateTitle(ctx context.Context, prompt string) (string, error) {
 	)
 	// Run outside any project so a repo's CLAUDE.md can't steer the summary.
 	cmd.Dir = os.TempDir()
+	cmd.Env = titleEnv()
 	out, err := cmd.Output()
 	if err != nil {
-		return "", errtrace.Wrap(err)
+		return "", errtrace.Wrap(titleCallError(ctx, err))
 	}
 	return sanitizeGeneratedTitle(string(out)), nil
+}
+
+// titleEnv is the environment for the title call: the daemon's own environment
+// with the knobs that matter for a throwaway one-liner forced on. os/exec uses
+// the LAST value for a duplicated key, so appending overrides whatever the host
+// exported.
+func titleEnv() []string {
+	return append(os.Environ(),
+		// Extended thinking is on by default, and it is catastrophic here: asked
+		// for a 5-word title, haiku spent ~1900 thinking tokens deliberating -
+		// 20-65s per call and 10x the cost, which is what kept blowing the old
+		// 25s deadline and surfacing as "signal: killed". With it off the same
+		// call is ~1.5s and ~11 output tokens. A title needs no deliberation.
+		"MAX_THINKING_TOKENS=0",
+		// Nothing about a one-shot summary needs the CLI's background traffic.
+		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+	)
+}
+
+// maxTitleErrDetail bounds how much CLI stderr rides along in the error, which
+// ends up in a toast - enough to name the cause, not enough to bury it.
+const maxTitleErrDetail = 200
+
+// titleCallError turns the process error from the `claude` shell-out into
+// something a user can act on. Left raw it is a bare "signal: killed" on
+// timeout (exec SIGKILLs the child when ctx expires) and a bare "exit status 1"
+// otherwise, with the CLI's own diagnosis sitting unread in ExitError.Stderr.
+func titleCallError(ctx context.Context, err error) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return errtrace.Errorf("%w after %s", ErrTitleTimeout, titleGenTimeout)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if detail := truncate(firstLine(string(exitErr.Stderr)), maxTitleErrDetail); detail != "" {
+			return errtrace.Errorf("claude: %s (%w)", detail, err)
+		}
+	}
+	return errtrace.Wrap(err)
 }
 
 // sanitizeGeneratedTitle reduces raw model output to a single clean title line:

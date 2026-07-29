@@ -1,10 +1,12 @@
 // Auto-pairing for the markdown composers (HighlightedTextarea, so: the chat
 // composer, the spawn prompt, the review/commit boxes).
 //
-// Four behaviours, all off one client preference (lib/composerPrefs):
+// Five behaviours, all off one client preference (lib/composerPrefs):
 //   - typing an opener (` ( [ { " ') inserts its closer behind the caret,
 //   - typing a closer that is already there steps over it instead of doubling it,
-//   - a third backtick on its own line opens a fenced block, caret in the body,
+//   - Enter on a line that is just "```" opens a fenced block (fenceEnterEdit) -
+//     typing the third backtick does NOT, so "```" can be written as text and a
+//     language can be typed onto the fence first,
 //   - typing a mark with text selected WRAPS the selection (` ( [ { " ' * _ ~).
 //   - Backspace between an empty pair deletes both.
 //
@@ -54,15 +56,17 @@ function isEscaped(value: string, pos: number): boolean {
   return n % 2 === 1
 }
 
-// inOpenFence reports whether `pos` sits inside an unclosed ``` block. Fence
-// markers are counted by line, so an odd number of them before the caret means
-// the block is still open. Inside one, the backtick IS the fence - pairing it
-// would fight the user closing the block by hand.
-function inOpenFence(value: string, pos: number): boolean {
+// fenceCount counts the ``` lines before `pos`. Even means the next fence line
+// OPENS a block, odd means `pos` sits inside an unclosed one - where the
+// backtick IS the fence, so pairing it would fight the user closing the block by
+// hand.
+function fenceCount(value: string, pos: number): number {
   let n = 0
   for (const line of value.slice(0, pos).split('\n')) if (/^[ \t]*```/.test(line)) n++
-  return n % 2 === 1
+  return n
 }
+
+const inOpenFence = (value: string, pos: number): boolean => fenceCount(value, pos) % 2 === 1
 
 // fenceWrap wraps a multi-line selection in a fenced block rather than a code
 // span, which cannot span lines. The fence gets its own lines on both sides.
@@ -101,20 +105,6 @@ export function autoPairEdit(key: string, value: string, selStart: number, selEn
   const next = value[selStart] ?? ''
   const prev = selStart > 0 ? value[selStart - 1] : ''
 
-  // The third backtick of a "```" at the end of an otherwise-empty line opens a
-  // fenced block. The caret lands in the BODY (not after the opening fence):
-  // Enter sends the message in the chat composer, so a caret parked on the info
-  // string would be the one spot the user can't type their way out of.
-  if (key === '`') {
-    const [ls, le] = lineBounds(value, selStart)
-    const before = value.slice(ls, selStart)
-    if (le === selStart && /^[ \t]*``$/.test(before)) {
-      const indent = before.slice(0, -2)
-      const insert = `\`\n${indent}\n${indent}${FENCE}`
-      return { value: value.slice(0, selStart) + insert + value.slice(selStart), caret: selStart + 2 + indent.length }
-    }
-  }
-
   // Escaped: the mark is a literal, so it neither opens a pair nor closes one.
   // Insert it as typed - stepping over the closer ahead would swallow it and
   // leave the span open ("`\|`" + "`" must give "`\`|`", not "`\`|").
@@ -135,6 +125,53 @@ export function autoPairEdit(key: string, value: string, selStart: number, selEn
   if (key === closer && (WORD.test(prev) || prev === key)) return null
   if (key === '`' && inOpenFence(value, selStart)) return null
   return { value: value.slice(0, selStart) + key + closer + value.slice(selStart), caret: selStart + 1 }
+}
+
+// A line that is nothing but an opening fence plus an optional info string -
+// "```", "```python". The info string is deliberately a single bare token: a
+// line like "``` see below" is prose ABOUT a fence, and turning it into one on
+// Enter would be a surprise. Group 1 is the indent, which the block inherits.
+const FENCE_LINE_RE = /^([ \t]*)```[A-Za-z0-9_+.#-]*$/
+
+// A closing fence: the marker alone on its line (CommonMark 4.5).
+const FENCE_CLOSE_RE = /^[ \t]*```[ \t]*$/
+
+// fenceEnterEdit is what Enter should do with the caret at the end of a "```"
+// line - the two halves of writing a fenced block by keyboard.
+//
+//  1. The block isn't there yet: Enter writes it, so the closing fence and the
+//     body line appear together and the caret lands in the body. Typing the
+//     third backtick deliberately does nothing on its own - that would fight
+//     anyone writing "```" as literal text, and it takes the caret away from the
+//     fence before the language can be typed onto it.
+//  2. The block IS there and its body is still empty (the caret came back up to
+//     add a language): Enter steps down into that body rather than inserting a
+//     second blank line - and, in the chat composer, rather than sending the
+//     half-written block.
+//
+// Returns null anywhere else, leaving Enter to do its normal thing: on a fence
+// that CLOSES a block (an odd number of fence lines above it), on a fence whose
+// block is already closed further down, and on any line that isn't a lone fence.
+export function fenceEnterEdit(value: string, selStart: number, selEnd: number): TextareaEdit | null {
+  if (selStart !== selEnd) return null
+  const [ls, le] = lineBounds(value, selStart)
+  if (selStart !== le) return null
+  const m = FENCE_LINE_RE.exec(value.slice(ls, le))
+  if (!m || fenceCount(value, ls) % 2 !== 0) return null
+  const indent = m[1]
+  // Already opened, with an empty body waiting: step into it (case 2).
+  if (le < value.length) {
+    const [bs, be] = lineBounds(value, le + 1)
+    if (value.slice(bs, be).trim() === '' && be < value.length) {
+      const [cs, ce] = lineBounds(value, be + 1)
+      if (FENCE_CLOSE_RE.test(value.slice(cs, ce))) return { value, caret: be }
+    }
+  }
+  // Otherwise write the block - but only if this fence has no partner below, so
+  // Enter never orphans a closing fence the user already typed (case 1).
+  if (fenceCount(value, value.length) % 2 !== 1) return null
+  const insert = `\n${indent}\n${indent}${FENCE}`
+  return { value: value.slice(0, le) + insert + value.slice(le), caret: le + 1 + indent.length }
 }
 
 // backspacePairEdit deletes BOTH halves of an empty pair when the caret sits

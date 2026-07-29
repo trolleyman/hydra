@@ -1249,6 +1249,15 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	egressEnv, egressWrap := startEgress(projectRoot, head.ID, head.AgentType, &net)
 	env = append(env, egressEnv...)
 
+	// Last moment at which the normalized log still holds exactly what the DEAD
+	// process left: the resumed CLI re-runs whatever turn it was cut off in, and
+	// anything it had streamed but not committed to its transcript is about to be
+	// said a second time. Retract those blocks now, before the replacement
+	// process can append a single line (see chat.RetractOrphanedTurn).
+	if head.ChatMode {
+		reg.NotifyChatResume(head.ID, worktreePath)
+	}
+
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
 		AgentType:      head.AgentType,
 		WorktreePath:   worktreePath,
