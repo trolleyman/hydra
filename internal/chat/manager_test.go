@@ -159,6 +159,53 @@ func TestManagerDropsQueuedCommandEchoOfUserMessage(t *testing.T) {
 	}
 }
 
+// Hydra's resume nudge is written straight to the agent's stdin and never
+// recorded as a user message, so its only trace is the transcript. A --continue
+// resume forks the conversation into a FRESH transcript, re-stamping every line
+// with a new uuid, and the import re-reads that file whole - so source-id dedup
+// cannot see that it is the same message, and the nudge gained another bubble on
+// every resume. Taken from a real log ("Continue" at seq 3778 and again at
+// 10709, hours apart, different uuids).
+func TestManagerDropsReimportedTranscriptUserMessage(t *testing.T) {
+	root := t.TempDir()
+	resolve := func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" }
+	m := NewManager(resolve)
+
+	// First resume: the nudge exists only in the transcript, so it is kept.
+	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"user","uuid":"first","message":{"content":[{"type":"text","text":"Continue"}]}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+	// Second resume: same message, new transcript, new uuid.
+	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"user","uuid":"second","message":{"content":[{"type":"text","text":"Continue"}]}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+	events, _, _, _ := m.Before("head", "", 10)
+	if len(events) != 1 {
+		t.Fatalf("want one copy of the nudge, got %+v", events)
+	}
+
+	// A message the user genuinely sends is recorded by Hydra first, so it still
+	// pairs into an echo rather than being swallowed as a re-import.
+	if _, err := m.Append("head", testUserMessage("client-1", "Continue")); err != nil {
+		t.Fatal(err)
+	}
+	m.ObserveProviderLine("head", "claude_history", []byte(`{"type":"user","uuid":"third","message":{"content":[{"type":"text","text":"Continue"}]}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+	events, _, _, _ = m.Before("head", "", 10)
+	if len(events) != 3 || events[2].Type != "user_message_echoed" {
+		t.Fatalf("want the real send paired into an echo, got %+v", events)
+	}
+
+	// (The guard is restricted to claude_history rather than any claude source
+	// because only a replay can be a re-import. That is belt-and-braces: the live
+	// normalizer already drops a plain user line - Hydra records what it sends -
+	// so a live user_message never reaches this path to be tested here.)
+}
+
 func TestManagerLinksCodexChildThreadToSpawn(t *testing.T) {
 	root := t.TempDir()
 	m := NewManager(func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" })

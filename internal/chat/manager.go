@@ -198,7 +198,7 @@ func (w *worker) run(id string) {
 		}
 		for _, spec := range specs {
 			kind := spec.eventType()
-			if (item.provider == "claude" || item.provider == "claude_history") && kind == "user_message" && w.reconcileClaudeUserEcho(spec) {
+			if (item.provider == "claude" || item.provider == "claude_history") && kind == "user_message" && w.reconcileClaudeUserEcho(spec, item.provider) {
 				continue
 			}
 			if (item.provider == "claude" || item.provider == "claude_history") && kind == "notice" && w.isEchoedQueuedCommand(spec) {
@@ -261,7 +261,7 @@ func (w *worker) isEchoedQueuedCommand(spec eventSpec) bool {
 // user_message Hydra already persisted when it wrote the message to stdin.
 // The marker is intentionally durable: without it, two identical messages sent
 // in separate turns cannot be paired correctly after a daemon restart.
-func (w *worker) reconcileClaudeUserEcho(spec eventSpec) bool {
+func (w *worker) reconcileClaudeUserEcho(spec eventSpec, provider string) bool {
 	msg, ok := spec.payload.(*UserMessage)
 	if !ok || msg.Sidechain {
 		return false
@@ -271,6 +271,9 @@ func (w *worker) reconcileClaudeUserEcho(spec eventSpec) bool {
 		return false
 	}
 	pending := make([]uint64, 0, 1)
+	// Copies already in the log that came from the transcript rather than from
+	// Hydra - see the re-import case below.
+	fromTranscript := 0
 	for _, event := range w.store.Events() {
 		var payload struct {
 			Content json.RawMessage `json:"content"`
@@ -285,6 +288,7 @@ func (w *worker) reconcileClaudeUserEcho(spec eventSpec) bool {
 				continue
 			}
 			if strings.HasPrefix(event.SourceId, "claude:") {
+				fromTranscript++
 				if len(pending) > 0 {
 					pending = pending[1:]
 				}
@@ -298,7 +302,18 @@ func (w *worker) reconcileClaudeUserEcho(spec eventSpec) bool {
 		}
 	}
 	if len(pending) == 0 {
-		return false
+		// Nothing of Hydra's to pair with. If we are replaying a transcript and
+		// already hold a copy that itself came from a transcript, this is the same
+		// message a second time, not a second send: an import re-reads the whole
+		// file whenever the CLI starts a new one (a `--continue` resume forks the
+		// conversation into a fresh transcript, re-stamping every line with a new
+		// uuid), so source-id dedup cannot see it.
+		//
+		// This only bites for messages Hydra never recorded - notably its own
+		// resume nudge, which nudgeResumedChatAgent writes straight to stdin. Those
+		// gained a duplicate bubble per resume. A message the user actually sent is
+		// recorded at the queue boundary, so it pairs above and never reaches here.
+		return provider == "claude_history" && fromTranscript > 0
 	}
 	echo := UserMessageEchoed{}
 	echo.UserSeq, echo.Content = pending[0], msg.Content
