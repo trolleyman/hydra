@@ -54,6 +54,47 @@ describe('gitOutputSpans', () => {
     ])
   })
 
+  it('lowlights the address on an author line', () => {
+    expect(spans('Author: Callum Tolley <cgtrolley@gmail.com>')).toEqual([
+      [['Author:', 'dim'], [' ', ''], ['Callum Tolley', ''], [' <cgtrolley@gmail.com>', 'dim']],
+    ])
+  })
+
+  it('picks the sha out of a --oneline log', () => {
+    expect(spans('832c46c8 Merge branch \'main\'')).toEqual([
+      [['832c46c8', 'sha'], [' ', ''], ["Merge branch 'main'", '']],
+    ])
+  })
+
+  it('colours the refs a decorated --oneline log carries, and only those', () => {
+    expect(spans('832c46c8 (HEAD -> main, origin/main) Fix it', '4ff1e2a1 (tag: v1.2) Ship it')).toEqual([
+      [['832c46c8', 'sha'], [' ', ''], ['(HEAD -> main, origin/main) ', 'ref'], ['Fix it', '']],
+      [['4ff1e2a1', 'sha'], [' ', ''], ['(tag: v1.2) ', 'ref'], ['Ship it', '']],
+    ])
+    // A subject that merely opens with a parenthesis is a subject.
+    expect(spans('4ff1e2a1 (chore) bump deps')).toEqual([
+      [['4ff1e2a1', 'sha'], [' ', ''], ['(chore) bump deps', '']],
+    ])
+  })
+
+  it('dims a --graph margin and reads the line behind it', () => {
+    expect(spans('* 832c46c8 Fix it', '|\\  ', '| * 4ff1e2a1 Ship it', '|/  ')).toEqual([
+      [['* ', 'dim'], ['832c46c8', 'sha'], [' ', ''], ['Fix it', '']],
+      [['|\\  ', 'dim']],
+      [['| * ', 'dim'], ['4ff1e2a1', 'sha'], [' ', ''], ['Ship it', '']],
+      [['|/  ', 'dim']],
+    ])
+    // The same margin over a full log's commit header.
+    expect(spans('*   commit a7401035', '|\\  Merge: 5d671ab0 a7401035')).toEqual([
+      [['*   ', 'dim'], ['commit ', 'dim'], ['a7401035', 'sha']],
+      [['|\\  ', 'dim'], ['Merge:', 'dim'], [' ', ''], ['5d671ab0 a7401035', 'sha']],
+    ])
+  })
+
+  it('leaves a bulleted commit message alone rather than reading it as a graph', () => {
+    expect(spans('    * dropped the retry loop')).toEqual([[['    * dropped the retry loop', '']]])
+  })
+
   it('takes staged or not from the heading above the entry', () => {
     const out = spans(
       'On branch main',

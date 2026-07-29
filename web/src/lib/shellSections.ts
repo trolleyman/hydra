@@ -393,11 +393,20 @@ function splitAt(word: string, sep: string): [string, string | null] {
 // lib/gitOutput knows how to colour.
 const GIT_REPORTS = new Set(['status', 'show', 'log', 'diff'])
 
-// Flags that make git print something other than those shapes: a patch, a
-// machine-readable format, a custom pretty format, a commit graph.
-const GIT_REFUSED = /^(-p|-u|--patch|-U\d*|--unified(=.*)?|--numstat|--name-only|--name-status|--raw|--graph|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
+// Subcommands that print one of those shapes whatever they are asked for.
+// `status` only ever prints a status. `log` prints commit headers and their
+// messages - a patch takes an explicit `-p` - so the refused flags below are the
+// only thing that can turn either into something else.
+const GIT_ALWAYS_REPORTS = new Set(['status', 'log'])
 
-// Flags that replace `show`/`log`/`diff`'s patch with a summary of it.
+// Flags that make git print something other than those shapes: a patch, a
+// machine-readable format, a custom pretty format.
+//
+// `--graph` is NOT among them: it only puts the topology in the left margin and
+// then prints the same lines, which lib/gitOutput strips back off.
+const GIT_REFUSED = /^(-p|-u|--patch|-U\d*|--unified(=.*)?|--numstat|--name-only|--name-status|--raw|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
+
+// Flags that replace `show`/`diff`'s patch with a summary of it.
 const GIT_SUMMARY = /^(--stat(=.*)?|--shortstat|--compact-summary|--summary|--oneline|-s|--no-patch)$/
 
 // parseGitReport reports whether a command is a git call whose output is one of
@@ -420,8 +429,7 @@ function parseGitReport(words: Word[]): boolean {
   if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return false
   const args = words.slice(i + 1)
   if (args.some((w) => !w.quoted && GIT_REFUSED.test(w.text))) return false
-  // `status` only ever prints a status, long or short.
-  if (sub.text === 'status') return true
+  if (GIT_ALWAYS_REPORTS.has(sub.text)) return true
   return args.some((w) => !w.quoted && GIT_SUMMARY.test(w.text))
 }
 
@@ -431,6 +439,19 @@ function isFilter(cmd: Command): 'head' | 'tail' | null {
   const name = cmd.words[0].text
   if (name !== 'head' && name !== 'tail') return null
   return cmd.words.slice(1).every((w) => w.text.startsWith('-') && !w.quoted) ? name : null
+}
+
+// isPassthrough reports whether a command hands on what it was given byte for
+// byte: `| cat`, which agents append to a git call to stop it paging.
+//
+// Only a bare `cat` reading stdin. Every flag it takes rewrites the lines it
+// prints (`-n` numbers them, `-s` squeezes blanks, `-A` spells out the
+// invisible ones), and a `cat` naming a file of its own is printing that file
+// rather than passing the pipe along.
+function isPassthrough(cmd: Command): boolean {
+  const name = cmd.words[0]
+  if (name.text !== 'cat' || name.quoted) return false
+  return cmd.words.slice(1).every((w) => !w.quoted && w.text === '-')
 }
 
 // isLineFilter reports whether a command only DROPS lines from what the command
@@ -460,6 +481,9 @@ function classify(p: Pipeline): ScriptStep {
     const last = cmds[cmds.length - 1]
     const trim = isFilter(last)
     if (trim) trimmedFrom = trim
+    // A passthrough drops nothing, so it is not even a trim: `git log | cat`
+    // is that log, and `sed -n 1,20p f | cat` is still lines 1 to 20 of f.
+    else if (isPassthrough(last)) { /* nothing to record */ }
     else if (isLineFilter(last)) filtered = true
     else break
     cmds = cmds.slice(0, -1)

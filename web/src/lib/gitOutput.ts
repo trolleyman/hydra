@@ -1,7 +1,8 @@
 // Colour the reports git prints about the repository - `git status`, `git status
-// --short`, `git show --stat` - which otherwise reach the chat card as a wall of
-// terminal text with the one thing worth seeing in them (what changed, and in
-// which direction) spelled entirely in punctuation.
+// --short`, `git log`, `git log --oneline`, `git show --stat` - which otherwise
+// reach the chat card as a wall of terminal text with the one thing worth seeing
+// in them (what changed, and in which direction) spelled entirely in
+// punctuation.
 //
 // There is no grammar to point a highlighter at. Each of git's report lines has
 // its own fixed shape, and shapes from what are really three different formats
@@ -40,8 +41,21 @@ const SUMMARY_PARTS = /\d+ insertions?\(\+\)|\d+ deletions?\(-\)/g
 const COMMIT = /^(commit|tag) ([0-9a-f]{7,40})(.*)$/
 // The rest of a commit header: `Author: ...`, `Date: ...`, `Merge: a1b2 c3d4`.
 const HEADER = /^(Merge|Author|AuthorDate|Commit|CommitDate|Date|Reflog):( +)(.*)$/
-// `git log --oneline`.
-const ONELINE = /^([0-9a-f]{7,40}) (.+)$/
+// The address on an `Author:`/`Commit:` line. It is the same address on every
+// commit an agent is looking at, so it is furniture next to the name.
+const EMAIL = /^(.*?)( *<[^<>]*>)$/
+// `git log --oneline`: a sha, the refs pointing at it when `--decorate` asked
+// for them, then the subject.
+const ONELINE = /^([0-9a-f]{7,40}) (\([^()]*\) )?(.+)$/
+// What makes that parenthesised group a decoration rather than the opening word
+// of the subject: it names a ref the way git writes them. `(HEAD -> main)`,
+// `(origin/main)` and `(tag: v1.2)` are decorations; a subject that opens
+// `(chore) bump deps` is not, and keeps its own colour.
+const DECORATION = /HEAD|tag: |->|\//
+// `git log --graph` draws the topology in the left margin with these, then
+// prints the ordinary log line after it. At least one glyph is required, so the
+// four spaces git indents a commit message by are not read as a margin.
+const GRAPH = /^[*|\\/_ ]*[*|\\/_] */
 // `git status --short`: an index column, a worktree column, then the path.
 const SHORT = /^([ MADRCUT?!])([ MADRCUT?!]) (\S.*)$/
 // The long status's own furniture.
@@ -73,11 +87,11 @@ function pathSpans(path: string): GitSpan[] {
   ]
 }
 
-// lineSpans colours one line. `staged` is what the last section heading said, so
-// that a long status paints the same path green above "Changes not staged for
-// commit:" and red below it - which is the distinction the whole command exists
-// to draw.
-function lineSpans(line: string, staged: boolean): GitSpan[] {
+// shapeSpans colours one line, or returns null when it fits no shape. `staged`
+// is what the last section heading said, so that a long status paints the same
+// path green above "Changes not staged for commit:" and red below it - which is
+// the distinction the whole command exists to draw.
+function shapeSpans(line: string, staged: boolean): GitSpan[] | null {
   const stat = STAT.exec(line)
   if (stat) {
     const [, indent, path, bar, count, gap, graph] = stat
@@ -116,8 +130,11 @@ function lineSpans(line: string, staged: boolean): GitSpan[] {
 
   const header = HEADER.exec(line)
   if (header) {
-    const value = header[1] === 'Merge' ? SHA : ''
-    return [{ text: `${header[1]}:`, cls: DIM }, { text: header[2], cls: '' }, { text: header[3], cls: value }]
+    const label = [{ text: `${header[1]}:`, cls: DIM }, { text: header[2], cls: '' }]
+    if (header[1] === 'Merge') return [...label, { text: header[3], cls: SHA }]
+    const email = EMAIL.exec(header[3])
+    if (email) return [...label, { text: email[1], cls: '' }, { text: email[2], cls: DIM }]
+    return [...label, { text: header[3], cls: '' }]
   }
 
   const branch = BRANCH.exec(line)
@@ -156,7 +173,37 @@ function lineSpans(line: string, staged: boolean): GitSpan[] {
   }
 
   const oneline = ONELINE.exec(line)
-  if (oneline) return [{ text: oneline[1], cls: SHA }, { text: ` ${oneline[2]}`, cls: '' }]
+  if (oneline) {
+    const decoration = oneline[2] && DECORATION.test(oneline[2]) ? oneline[2] : ''
+    return [
+      { text: oneline[1], cls: SHA },
+      { text: ' ', cls: '' },
+      { text: decoration, cls: REF },
+      { text: `${decoration ? '' : (oneline[2] ?? '')}${oneline[3]}`, cls: '' },
+    ]
+  }
+
+  return null
+}
+
+// lineSpans colours one line, falling back to the line as it arrived.
+//
+// A `--graph` margin is peeled off first and dimmed, then the rest of the line
+// is classified as the ordinary log line it is - but only when that rest turns
+// out to HAVE a shape, so a commit message whose body is a bulleted list keeps
+// its `*` rather than having it read as a graph edge.
+function lineSpans(line: string, staged: boolean): GitSpan[] {
+  const shaped = shapeSpans(line, staged)
+  if (shaped) return shaped
+
+  const graph = GRAPH.exec(line)
+  if (graph) {
+    const rest = line.slice(graph[0].length)
+    // A line that is nothing but margin (`|\`, `|/`) draws an edge and says
+    // nothing else, so there is no remainder to ask about.
+    const inner = rest === '' ? [] : shapeSpans(rest, staged)
+    if (inner) return [{ text: graph[0], cls: DIM }, ...inner]
+  }
 
   return [{ text: line, cls: '' }]
 }

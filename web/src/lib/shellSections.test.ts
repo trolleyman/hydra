@@ -70,6 +70,16 @@ describe('parseScriptSteps', () => {
     expect(kinds('grep -n foo a.go | wc -l\ncat b.go')).toEqual(['unknown', 'view'])
   })
 
+  it('sees through a trailing cat, which drops nothing at all', () => {
+    // Not even a trim, so the slice keeps both of its ends.
+    expect(steps('sed -n 40,110p a.go | cat')[0]).toMatchObject({ kind: 'view', view: { start: 40, end: 110 } })
+    expect(steps('echo ---- | cat')[0]).toEqual({ kind: 'marker', text: '----' })
+    // A `cat` that rewrites the lines, or that prints a file of its own, is not
+    // passing the pipe along.
+    expect(kinds('sed -n 40,110p a.go | cat -n\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('sed -n 40,110p a.go | cat b.go\ncat b.go')).toEqual(['unknown', 'view'])
+  })
+
   it('sees through a trailing grep that only drops lines', () => {
     expect(steps('grep -rn foo src | grep -v _test.go | head -20')[0]).toEqual({
       kind: 'matches',
@@ -95,6 +105,14 @@ describe('parseScriptSteps', () => {
     expect(kinds('git status\necho ----')).toEqual(['git', 'marker'])
     expect(kinds('git -C /repo show --stat HEAD | tail -20\necho ----')).toEqual(['git', 'marker'])
     expect(kinds('git log --oneline -10\necho ----')).toEqual(['git', 'marker'])
+    // `log` prints commit headers and messages whatever it is asked for; a
+    // patch takes an explicit `-p`. `--graph` only adds a margin.
+    expect(kinds('git log\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git log -1\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git --no-pager log --graph --oneline --all\necho ----')).toEqual(['git', 'marker'])
+    // The `| cat` that stops git paging changes nothing about what it printed.
+    expect(steps('git log --oneline -1 | cat')[0]).toEqual({ kind: 'git', command: 'git log --oneline -1 | cat' })
+    expect(kinds('git log | cat | head -20\necho ----')).toEqual(['git', 'marker'])
     // A patch wants a diff view, not a line-shape colouriser - and a caller's
     // own format could put anything on any line.
     expect(kinds('git show HEAD\necho ----')).toEqual(['unknown', 'marker'])
