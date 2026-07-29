@@ -133,10 +133,66 @@ frontend work.)
    filesystem. `go build -o` over a running binary does **not** `ETXTBSY` (the Go
    linker unlinks first - verified), and existing sandbox binds pin the old
    inode, so running heads keep the binary they started with.
-6. Exit 42; systemd restarts into the new binary.
+6. **`syscall.Exec` the new binary** - not exit-42-and-let-systemd-restart. See
+   below.
 
 The daemon can do all of this itself - it is not sandboxed, it is the thing that
 *spawns* sandboxes.
+
+### Why `exec`, not exit 42
+
+Re-execing in place is better than the exit-code protocol on every axis, and the
+reasons are independent of the fd handoff in Phase C:
+
+- **No supervisor dependency.** Restart behaves identically under systemd, under
+  `mage run` in a terminal, or under nothing at all. That deletes the exit-code
+  protocol, `RestartForceExitStatus=42`, and the `StartLimit*` tuning from the
+  plan entirely.
+- **systemd never notices.** `Type=simple` tracks MainPID, and `exec` preserves
+  the PID - so pressing restart ten times cannot trip the start rate limit into
+  `failed`, which was a real wart of the exit-42 design.
+- **Zero downtime, if you keep the listener.** Extract the TCP listener's fd
+  (`(*net.TCPListener).File()`), clear `CLOEXEC`, pass the number in the
+  environment, and `net.FileListener` it on the other side. The port is then
+  never unbound: new connections queue in the accept backlog instead of getting
+  `ECONNREFUSED`. It also deletes `devServerLoop`'s
+  `time.Sleep(1 * time.Second) // Give the OS time to release the port`.
+- **It is the mechanism Phase C needs anyway**, so adopting it now means Phase C
+  adds fds incrementally rather than replacing the restart path.
+
+**Take `exec` in Phase B with no fd handoff at all.** Heads still die at that
+point - PTY masters are `CLOEXEC`, and `exec` terminates every thread but the
+caller so bwrap's parent-death signal fires regardless - so keep the explicit
+`Registry.StopAll()` for determinism rather than letting them die from a race.
+Phase C then adds fd inheritance and removes `StopAll` and `--die-with-parent`
+together.
+
+Details that will bite on day one:
+
+- **Exec the installed path, not `/proc/self/exe`.** After the swap
+  `/proc/self/exe` still resolves to the *old* inode (now `hydra.prev`, or
+  unlinked), so you would faithfully re-exec the binary you just replaced.
+- **Guard against SIGTERMing yourself.** `serveUnixSocket` calls
+  `daemon.StopDaemon` on startup, which reads the pidfile and signals it if
+  `/proc/<pid>/cmdline` contains `__daemon`
+  (`internal/daemon/upgrade.go:84`, `pidIsHydraDaemon` `:132`). After an `exec`
+  the pidfile holds *your own* PID and your cmdline still says `__daemon`, so the
+  fresh image can kill itself. A `pid == os.Getpid()` skip fixes it and is
+  correct regardless of this work.
+- **Keep exit 42 as the fallback.** `syscall.Exec` only returns on failure
+  (`ENOENT`, `EACCES`, `ENOEXEC`); on that path `os.Exit(42)` and let whatever
+  supervisor exists pick it up.
+- **Nothing deferred runs after `exec`** - no `srv.Shutdown`, no cleanup
+  closures. Drain first. But do *not* `Shutdown` the listener you are trying to
+  preserve, since that closes it; extract the fd first.
+- **Close the DB before exec** so SQLite's WAL is flushed cleanly.
+- Order: verify new binary -> drain -> close DB -> dup listener fd and clear
+  `CLOEXEC` -> `exec`.
+
+What you give up is close to nothing. The one thing the supervisor contributed
+was "if the new binary crash-loops, give up and sit in `failed`" - and that still
+works, because a crash after `exec` is an ordinary process exit and systemd's
+restart policy still applies. Verify-before-swap was always the real protection.
 
 ### API shape
 
@@ -152,9 +208,11 @@ splits into:
 Two details worth getting right:
 
 - **The stream dies on purpose.** The server that is streaming is the one about
-  to exit, so the client must treat "socket closed after the `restarting` phase"
-  as success, not as an error. The existing `/health` poll-then-reload loop
-  (`__root.tsx:598-610`) already handles the rest and needs no change.
+  to re-exec, so the client must treat "socket closed after the `restarting`
+  phase" as success, not as an error. The existing `/health` poll-then-reload
+  loop (`__root.tsx:598-610`) already handles the rest and needs no change -
+  though with the listener carried across the `exec`, connections queue rather
+  than being refused, so the poll should settle on the first attempt.
 - **Write the log to a file too**, under the existing build-log dir
   (`paths.GetBuildLogDirFromProjectRoot`, `internal/paths/paths.go:237`), so it
   survives the restart and the toast can show the completed log after the reload
@@ -189,37 +247,40 @@ lives in the daemon's memory - close it and the agent gets `SIGHUP`.
 
 Three routes:
 
-- **(a) `syscall.Exec` self-replace.** Same PID, so the process never dies, and
-  non-`CLOEXEC` fds survive `exec` - so the PTY masters can be handed to the new
-  image by passing their fd numbers plus metadata in argv/env. This is the
-  classic graceful-restart trick and fits Hydra's shape best. **Two caveats, and
-  the first needs a spike before committing to this route:** `exec` terminates
-  every thread but the caller, and Linux's parent-death signal is keyed to the
-  parent *thread*, not the process - so if the thread that forked bwrap is not
-  the one calling `exec`, `--die-with-parent` fires anyway. The fix is to drop
-  `--die-with-parent` and lean on scope-based reaping, which
-  `SweepOrphanScopes` already does. Second: scrollback rings are in memory and
-  would need passing through a temp file, or accepting their loss.
+- **(a) Carry the PTY fds across the `exec`.** Phase B already re-execs in place,
+  and non-`CLOEXEC` fds survive `exec`, so the PTY masters can be handed to the
+  new image by clearing `CLOEXEC` and passing their fd numbers plus metadata in
+  the environment - exactly what Phase B does for the listener, just more of it.
+  This is the classic graceful-restart trick and needs no new mechanism.
+  **Two caveats, the first of which is why this is spike-first:** `exec`
+  terminates every thread but the caller, and Linux keys the parent-death signal
+  to the parent *thread*, not the process - so if the thread that forked bwrap
+  isn't the one calling `exec`, `--die-with-parent` fires anyway. The fix is to
+  drop `--die-with-parent` and lean on the scope-based reaping `SweepOrphanScopes`
+  already does, but that wants proving before it is planned. Second: scrollback
+  rings live in memory and would need passing through a temp file, or accepting
+  their loss.
 - **(b) Split the process** - a small supervisor owning PTYs, plus a web/API
   server that restarts freely. Cleanest long-term, largest change.
 - **(c) A per-head shim** owning the PTY, so nothing the daemon does matters.
   Medium-large.
 
-**(a) is probably the answer**, and it has a pleasing side effect: it makes the
-dev and prod restart paths genuinely identical, which is the simplification you
-were after. But it is a spike first, not a plan yet.
+**(a) is probably the answer**, and it is now a small increment rather than a
+separate design, because Phase B adopts `exec` for its own reasons. That is the
+main argument for taking `exec` early even though Phase B gains nothing from fd
+inheritance yet.
 
 ## Audit: what else is missing
 
 - **`Development` is a boolean meaning "mage will rebuild me"**
   (`internal/cli/runtime.go:249`), so the restart button only renders under the
   mage loop. Needs to become a mode (`off` / `restart` / `update`).
-- **The systemd unit does not account for the button.** `RenderSystemdUnit`
+- **The systemd unit does not account for the button** - `RenderSystemdUnit`
   (`internal/service/systemd.go:52-53`) emits `Restart=on-failure` /
-  `RestartSec=2`. Exit 42 is non-zero so it does restart, but it counts against
-  systemd's default rate limit (5 starts / 10s), so a few quick presses land the
-  unit in `failed`. Wants `RestartForceExitStatus=42`, `Restart=always`,
-  `StartLimitBurst=10`, `StartLimitIntervalSec=60`.
+  `RestartSec=2`, and exit 42 counts against systemd's default rate limit
+  (5 starts / 10s), so a few quick presses land the unit in `failed`. Moot once
+  restart is an `exec`: the PID never changes and systemd is not involved. Noted
+  because it is the reason the exit-code design needed unit changes at all.
 - **The CLI auto-upgrade fights systemd.** `daemon.Connect` compares the invoking
   binary's stamp to the running daemon's (`internal/daemon/upgrade.go:19`, `:63`)
   and on a mismatch `StopDaemon`s it (`:84`, SIGTERM) then spawns a **detached**
@@ -236,15 +297,18 @@ were after. But it is a spike first, not a plan yet.
 `HYDRA_DEV_BUILD` / the dual stamp, add build-time precompression + the static
 asset handler change. Independently valuable, no behaviour risk.
 
-**Phase B - self-update (small/medium).** The update endpoint, the log stream,
-the toast, verify-then-swap, the systemd unit flags, `Development` as a mode,
+**Phase B - self-update via `exec` (small/medium).** The update endpoint, the log
+stream, the toast, verify-then-swap, `exec`-restart with the listener fd carried
+over, the `os.Getpid()` guard in `StopDaemon`, `Development` as a mode,
 `INVOCATION_ID` detection, linger. Then delete `Dev`, `DevExpose`, `Prod`,
 `Preview`, `DevAutoReload` and `devServerLoop`. This is where the magefile
 collapses. Restart still kills heads, so it needs a confirmation showing the live
 count.
 
-**Phase C - restart without killing heads (medium, spike first).** Route (a)
-above. Removes the confirmation from Phase B and makes "hot swap" literally true.
+**Phase C - restart without killing heads (medium, spike first).** Carry the PTY
+master fds across the `exec` that Phase B already does, drop `--die-with-parent`
+in favour of scope-based reaping, and remove `StopAll`. Removes the confirmation
+from Phase B and makes "hot swap" literally true.
 
 A and B are worth doing regardless. C is the one to prototype before planning.
 
@@ -268,5 +332,10 @@ A and B are worth doing regardless. C is the one to prototype before planning.
   show the commit it is about to build so it is never a surprise.
 - **Verify before swapping, never after.** Rollback from a dead process is not
   something to rely on; `hydra.prev` is a manual escape hatch, not the mechanism.
+- **`syscall.Exec` rather than exit-42-and-let-the-supervisor-restart.** It makes
+  restart independent of how the process was started, keeps the PID (so systemd's
+  start rate limit is never involved), and allows the listener - and later the
+  PTYs - to be carried across. Exit 42 survives only as the fallback for when
+  `exec` itself fails.
 - **No file watcher.** Auto-rebuilding a server that (pre-Phase C) kills every
   running head is not something to automate. `mage devFast` covers fast iteration.

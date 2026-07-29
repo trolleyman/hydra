@@ -205,20 +205,26 @@ before starting. Grouped by area.
   normal gzip middleware on API responses, where diff payloads are large. See
   [deployment.md](deployment.md).
 
-- [ ] **Make the installed service update itself.** `POST /api/server/update`:
-  build in the background while still serving, stream the log to a toast over a
-  WS, verify the new binary runs, atomically swap it, exit 42, let systemd
-  restart. A failed build never takes the server down. Splits today's
-  fire-and-forget `POST /api/dev/restart` into restart-only vs update, and turns
-  `Development` from a boolean meaning "mage will rebuild me"
-  (`internal/cli/runtime.go:249`) into a mode. Also needed: the unit wants
-  `RestartForceExitStatus=42` + a relaxed `StartLimit*` (exit 42 currently trips
-  systemd's 5-starts-in-10s limit into `failed`), `loginctl enable-linger`
-  offered rather than printed, and `INVOCATION_ID` stamped into the daemon
-  `.info` file so the CLI's binary-stamp auto-upgrade stops SIGTERMing a
-  service-managed daemon and respawning it detached. Lets `Dev`, `DevExpose`,
-  `Prod`, `Preview`, `DevAutoReload` and `devServerLoop` be deleted - eight ways
-  to start Hydra down to three. See [deployment.md](deployment.md).
+- [ ] **Make the installed service update itself, restarting via `exec`.**
+  `POST /api/server/update`: build in the background while still serving, stream
+  the log to a toast over a WS, verify the new binary runs, atomically swap it,
+  then `syscall.Exec` it - *not* exit-42-and-let-systemd-restart. Re-execing
+  keeps the PID (systemd's start rate limit is never involved), makes restart
+  work identically with or without a supervisor, and lets the TCP listener fd be
+  carried across so the port is never unbound - which is also the mechanism the
+  keep-heads-alive item below needs. A failed build never takes the server down.
+  Splits today's fire-and-forget `POST /api/dev/restart` into restart-only vs
+  update, and turns `Development` from a boolean meaning "mage will rebuild me"
+  (`internal/cli/runtime.go:249`) into a mode. Gotchas: exec the *installed path*,
+  since `/proc/self/exe` still resolves to the pre-swap inode; and add a
+  `pid == os.Getpid()` guard to `StopDaemon` (`internal/daemon/upgrade.go:84`)
+  or the re-exec'd process reads its own pidfile, matches `pidIsHydraDaemon`, and
+  SIGTERMs itself. Also wanted: `loginctl enable-linger` offered rather than
+  printed, and `INVOCATION_ID` stamped into the daemon `.info` file so the CLI's
+  binary-stamp auto-upgrade stops SIGTERMing a service-managed daemon and
+  respawning it detached. Lets `Dev`, `DevExpose`, `Prod`, `Preview`,
+  `DevAutoReload` and `devServerLoop` be deleted - eight ways to start Hydra down
+  to three. See [deployment.md](deployment.md).
 
 - [ ] **Restart without killing every running head** (spike first). A restart
   currently kills all live sandboxes - bwrap's `--die-with-parent`
@@ -226,12 +232,13 @@ before starting. Grouped by area.
   (`internal/session/registry.go:665`) - and they resume via `--continue`, losing
   the in-flight turn. The cgroup side is already fine (transient `hydra-*.scope`
   units outlive their creator); what binds a head to the daemon is
-  `PR_SET_PDEATHSIG` and the PTY master fd living in daemon memory. Likely route:
-  `syscall.Exec` self-replace (same PID, non-`CLOEXEC` fds survive, hand the PTY
-  masters over in argv/env), which needs `--die-with-parent` dropped in favour of
-  scope-based reaping - Linux keys the parent-death signal to the parent *thread*
-  and `exec` kills every thread but the caller. Would make dev and prod restart
-  paths identical. See [deployment.md](deployment.md).
+  `PR_SET_PDEATHSIG` and the PTY master fd living in daemon memory. Once restart
+  is a `syscall.Exec` (item above), this is a small increment: clear `CLOEXEC` on
+  the PTY masters and hand their fd numbers over in the environment, the same way
+  the listener already is. Needs `--die-with-parent` dropped in favour of
+  scope-based reaping, because Linux keys the parent-death signal to the parent
+  *thread* and `exec` kills every thread but the caller - which is the bit to
+  spike before planning. See [deployment.md](deployment.md).
 
 - [ ] **Make a second Hydra instance survivable** (only if wanted - see
   [deployment.md](deployment.md) for why one instance is probably right).
