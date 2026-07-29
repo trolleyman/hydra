@@ -27,9 +27,28 @@ narrow in a `switch` with no casts. `internal/chat` type-aliases the generated
 log and the wire are the same shape by construction. `writeFrame` in
 `internal/http/terminal.go` is the one place a frame becomes bytes.
 
-Event payloads stay deliberately open (`map[string]any` in Go,
-`Record<string, any>` in TypeScript): their fields vary per event type, and the
-provider's own recorded entry rides there for the Raw panel.
+Each event type has its own payload schema, and a provider-derived one also
+carries `ChatProviderContext` - who produced it and where it belongs. The two
+are separate schemas so each language composes them its own way: Go embeds
+both (`encoding/json` promotes embedded fields, so the wire stays flat) and
+TypeScript intersects them. What stays open is only what the PROVIDER owns -
+its recorded entry (the Raw panel's source), a tool's `input` and result, an
+interaction, usage accounting, an error - because those differ per agent type
+and per tool.
+
+The daemon builds these as typed structs (`internal/chat/events.go`), each
+declaring its own type through an `EventType()` method that `Append` derives
+from, so an event's type and its payload cannot disagree. `go vet` guards the
+one hazard embedding introduces: a payload field whose json tag collides with
+the context's would make `encoding/json` silently drop both, so a test asserts
+none do.
+
+The browser narrows the same union in `web/src/lib/chatEvents.ts`: an OpenAPI
+discriminator only works on a property within its own schema, so `payload`
+cannot key off its sibling `type`. Modelling that as one union would mean
+repeating the envelope thirty times and turning `ChatEvent` into an opaque
+generated union wrapper the event store cannot field-access, so the schema
+names each payload and thirty lines of aliases compose the discrimination.
 
 Server to client:
 

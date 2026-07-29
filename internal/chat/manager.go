@@ -343,22 +343,6 @@ func codexLineThreads(line []byte) (threadID, startedThread string) {
 	return params.ThreadID, startedThread
 }
 
-func withCodexSidechain(payload any, threadID, parentItemID string) any {
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return payload
-	}
-	var value map[string]any
-	if json.Unmarshal(raw, &value) != nil {
-		return payload
-	}
-	value["sidechain"] = true
-	value["agent_id"] = threadID
-	if parentItemID != "" {
-		value["parent_item_id"] = parentItemID
-	}
-	return value
-}
 
 func codexSpawnFromLine(line []byte) (codexSpawn, bool) {
 	var msg codexMessage
@@ -589,8 +573,6 @@ func (m *Manager) Watch(id string) (Projection, <-chan Event, func(), error) {
 	return snapshot, events, cancel, nil
 }
 
-// JSONPayload makes callbacks that already own JSON (plans, usage, content)
-// embed it without string-encoding it.
 // claudeSubagentStarted is the lifecycle event for a Claude sub-agent, built
 // from its meta sidecar (which may not exist yet, in which case only the id and
 // a running status are known).

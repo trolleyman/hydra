@@ -269,9 +269,9 @@ func (t *ToolCompleted) SetOutput(output string) { t.Output, _ = json.Marshal(ou
 // outputSetter is a tool event whose result can be filled in after the fact.
 type outputSetter interface{ SetOutput(string) }
 
-// rawPayload carries a payload that is already JSON - a plan the tracker
-// produced, a projection restored from disk - under a type that would otherwise
-// have to be reconstructed field by field.
+// rawPayload pairs an arbitrary payload with an explicit type. Producers all
+// use the typed events above; this exists for the store's own tests, which
+// exercise the projection reducer and do not care what a payload's fields are.
 type rawPayload struct {
 	eventType string
 	raw       any

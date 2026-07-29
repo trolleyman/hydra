@@ -208,7 +208,12 @@ func TestCodexChildThreadDecoration(t *testing.T) {
 	if len(specs) != 1 {
 		t.Fatalf("events = %+v", specs)
 	}
-	raw, _ := json.Marshal(withCodexSidechain(specs[0].payload, threadID, "spawn"))
+	sc, ok := specs[0].payload.(sidechainSetter)
+	if !ok {
+		t.Fatalf("payload %T cannot be marked a sidechain step", specs[0].payload)
+	}
+	sc.SetSidechain(threadID, "spawn")
+	raw, _ := json.Marshal(specs[0].payload)
 	var payload struct {
 		Sidechain bool   `json:"sidechain"`
 		AgentID   string `json:"agent_id"`
