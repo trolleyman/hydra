@@ -19,9 +19,9 @@
 // backfilled transcript would fire one small request per image, and on HTTP/1.1
 // they would queue behind the image downloads they are meant to get ahead of.
 
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { fetchAgentFileSizes } from '../api/uploads'
-import { recallMediaSize, rememberMediaSize } from './mediaSize'
+import { recallMediaSize, rememberMediaSize, useMediaSize } from './mediaSize'
 
 /** Matches the backend's per-request cap (maxAgentFileSizes). */
 const MAX_BATCH = 64
@@ -43,16 +43,10 @@ const asked = new Set<string>()
 // Set while a flush is scheduled, so N images in one commit schedule one.
 let scheduled = false
 
-// Everyone waiting for the current batch: called once its sizes are in the
-// cache, so each image re-renders and reads its own.
-const waiters = new Set<() => void>()
-
 async function flush() {
   scheduled = false
   const batches = [...pending.values()]
   pending.clear()
-  const wake = [...waiters]
-  waiters.clear()
   await Promise.all(batches.map(async (b) => {
     const entries = [...b.paths.entries()]
     for (let i = 0; i < entries.length; i += MAX_BATCH) {
@@ -60,11 +54,14 @@ async function flush() {
       const sizes = await fetchAgentFileSizes(b.projectId, b.agentId, chunk.map(([p]) => p))
       for (const [path, url] of chunk) {
         const size = sizes[path]
+        // Each answer notifies the size cache's subscribers as it lands, so
+        // there is nothing to wake here - which is the point: an image that
+        // re-mounted while this request was in flight is subscribed again and
+        // gets told anyway.
         if (size) rememberMediaSize(url, size.width, size.height)
       }
     }
   }))
-  wake.forEach((w) => w())
 }
 
 /**
@@ -82,13 +79,18 @@ export function useServerMediaSize(
   path: string | undefined,
   ctx: { projectId: string; agentId?: string } | undefined,
 ): { w: number; h: number } | null {
-  const [, bump] = useState(0)
   const projectId = ctx?.projectId
   const agentId = ctx?.agentId
+  // The answer is read from the shared cache by subscription, NOT delivered by a
+  // callback this effect registers. A chat row re-mounts freely while an ask is
+  // in flight (the transcript grows under it), and a one-shot callback captured
+  // by the pending request is simply lost when that happens - the size lands,
+  // nothing re-renders, and the picture keeps the box it did not have.
+  const size = useMediaSize(url)
   useEffect(() => {
     if (!url || !path || !projectId || !agentId) return
     // Already known - by an earlier ask, by the lightbox, by this image's own
-    // decode landing first. Nothing to do.
+    // decode landing first. Nothing to ask.
     if (recallMediaSize(url)) return
     const key = `${projectId}\0${agentId}\0${path}`
     if (asked.has(key)) return
@@ -97,9 +99,6 @@ export function useServerMediaSize(
     const batch = pending.get(batchKey) ?? { projectId, agentId, paths: new Map<string, string>() }
     batch.paths.set(path, url)
     pending.set(batchKey, batch)
-    let live = true
-    const wake = () => { if (live) bump((n) => n + 1) }
-    waiters.add(wake)
     if (!scheduled) {
       scheduled = true
       // A microtask, not a timer: React flushes a commit's effects in one task,
@@ -107,15 +106,13 @@ export function useServerMediaSize(
       // still before the browser gets round to anything else.
       queueMicrotask(() => { void flush() })
     }
-    return () => { live = false; waiters.delete(wake) }
   }, [url, path, projectId, agentId])
-  return url ? recallMediaSize(url) : null
+  return size
 }
 
 /** Forget what has been asked - tests only, so one case can't mute the next. */
 export function clearServerMediaSizeState(): void {
   pending.clear()
   asked.clear()
-  waiters.clear()
   scheduled = false
 }

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { recallMediaSize, rememberMediaSize } from './mediaSize'
+import { useEffect } from 'react'
+import { recallMediaSize, rememberMediaSize, useMediaSize } from './mediaSize'
 
 // Pixel density for images shown in chat.
 //
@@ -45,21 +45,17 @@ export function densityFromPath(path?: string | null): number {
 // picture measured here needs no measuring when it is opened - and one the
 // lightbox has already shown needs no decode here at all.
 export function useNaturalSize(url: string | null): { w: number; h: number } | null {
-  const [, bump] = useState(0)
+  // Subscribed, not bumped: the decode may land while this component is between
+  // mounts (a chat row re-mounts as the transcript grows), and a local setState
+  // is lost when it does. The cache tells whoever is subscribed at the time.
+  const size = useMediaSize(url)
   useEffect(() => {
     if (!url || recallMediaSize(url)) return
-    let cancelled = false
     const img = new Image()
-    img.onload = () => {
-      rememberMediaSize(url, img.naturalWidth, img.naturalHeight)
-      if (!cancelled) bump((n) => n + 1)
-    }
+    img.onload = () => rememberMediaSize(url, img.naturalWidth, img.naturalHeight)
     img.src = url
-    return () => {
-      cancelled = true
-    }
   }, [url])
-  return recallMediaSize(url)
+  return size
 }
 
 // logicalSize converts an image's physical pixel size to the size it should be

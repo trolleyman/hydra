@@ -62,6 +62,29 @@ describe('useServerMediaSize', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('still applies the answer to an image that re-mounted while it was in flight', async () => {
+    // The regression this hook was rewritten for. A chat row unmounts and mounts
+    // again constantly as the transcript grows, and the first version delivered
+    // the answer through a callback the pending request had captured - so a
+    // re-mount in that window dropped it on the floor: the size landed, nothing
+    // re-rendered, and the picture kept the box it never had. Subscribing to the
+    // cache instead means whoever is mounted when it lands is told.
+    let release: (v: unknown) => void = () => {}
+    const gate = new Promise((r) => { release = r })
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await gate
+      return { ok: true, json: async () => ({ sizes: { '/tmp/a.png': { width: 10, height: 20 } } }) }
+    }))
+    // Ask, then throw that instance away before the answer arrives...
+    const first = renderHook(() => useServerMediaSize(URL_FOR('/tmp/a.png'), '/tmp/a.png', CTX))
+    first.unmount()
+    // ...and mount a fresh one, as the re-rendered transcript does.
+    const second = renderHook(() => useServerMediaSize(URL_FOR('/tmp/a.png'), '/tmp/a.png', CTX))
+    expect(second.result.current).toBeNull()
+    release(null)
+    await waitFor(() => expect(second.result.current).toEqual({ w: 10, h: 20 }))
+  })
+
   it('gives up quietly on a path the backend cannot measure', async () => {
     // Absent from the answer, not zero - the caller falls back to decoding the
     // image itself, which is what it did before this existed. Re-asking would be
