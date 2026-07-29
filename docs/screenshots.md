@@ -101,6 +101,22 @@ bypass is equally load-bearing: Playwright appends Chromium's `<-loopback>` when
 proxy is set, undoing its built-in "never proxy loopback" rule, which would
 otherwise send the simulation server's own traffic to the proxy.
 
+**A missing webfont is now an error, not a quieter shot.** `settle()` explicitly
+requests each family in `REQUIRED_FONTS` and then *checks* it arrived, because
+`document.fonts.ready` answers neither question on its own: it settles only the
+faces the page has already asked for (a font used by a panel that mounts later -
+an xterm - may not be among them), and it resolves exactly the same way when the
+request FAILED. So a fallback render was indistinguishable from a good one, and
+the difference is visible: Fira Code measures 6.769px per character cell against
+the fallback's 6.601px, so every xterm row in a shot shifts and the terminal
+panels flap between runs. Failing the run is the right trade - a silent fallback
+produces a diff that looks like a real UI change and sends you hunting for one.
+
+The durable fix would be to self-host those families the way `build-fonts.ts`
+already does for Iosevka and the Nerd Symbols subset, removing the network from
+the capture path entirely. Until then the check is what keeps a flap from being
+mistaken for a change.
+
 The generator emits a `::hydra:artifact:: <name>.png` marker after writing each
 shot, so its tiles **stream** into the diff viewer as they render rather than
 appearing all at once at the end (see the streaming section in
