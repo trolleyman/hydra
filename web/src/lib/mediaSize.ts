@@ -1,26 +1,31 @@
 // Natural pixel sizes for media the app has already seen.
 //
-// The lightbox reserves a picture's box BEFORE the file loads (the width/height
-// attributes in Lightbox), which is what stops it popping in - and shoving the
-// caption, the zoom frame and the flight it is meant to be landing on - every
-// time you step to the next file with ←/→. That only works if the size is known
-// up front. Artifact entries carry it in their metadata, but a markdown image or
-// a prompt attachment carries none, so this module is the second source: every
-// copy of a file the app decodes (the lightbox's own picture, the sibling peeking
-// in at the edge, a thumbnail still on the page behind it) reports its natural
-// size here, and the next viewer to open that url gets it for nothing.
+// One app-wide answer to "how big is this file, in pixels?", because two surfaces
+// need it before the file has loaded and both need it for the same reason - an
+// <img> given no size lays out at nothing and then shoves everything around it
+// when the bytes land:
+//
+//   * the lightbox reserves a picture's box before it loads (the width/height
+//     attributes in Lightbox), so stepping ←/→ doesn't pop each one open;
+//   * a chat image is laid out at its LOGICAL size - physical px ÷ the @2x
+//     density in its name - which cannot be worked out without the physical one
+//     (see lib/imageDensity, whose useNaturalSize decodes off-screen to learn it).
+//
+// So whatever learns a size puts it here: the lightbox's picture and the sibling
+// peeking in at its edge, the comparator's probe, a video's metadata, the chat's
+// off-screen decode. A file measured on one surface is then free on the other -
+// which is the point of sharing one cache rather than one per component.
 //
 // Keyed by ABSOLUTE url, so the same file written as "/uploads/x.png" in one
 // place and as a full URL in another is one entry.
 
 interface Size { w: number; h: number }
 
-// Plenty for any session's worth of galleries; the cap only exists so a very long
-// chat full of images can't grow the map without bound. Oldest-first eviction
-// (Map preserves insertion order) - the thing you looked at least recently is the
-// one whose size is least likely to be wanted again.
-const MAX_ENTRIES = 1000
-
+// Deliberately uncapped. Entries are a url and two numbers, and evicting one is
+// worse than it sounds: the chat holds a size for as long as its image is on
+// screen, and dropping an entry under it would leave that image stuck at the
+// wrong size (its effect only re-runs when the url changes, so nothing would
+// re-measure). A transcript long enough to matter is holding far more than this.
 const sizes = new Map<string, Size>()
 
 function key(url: string | undefined | null): string | null {
@@ -38,19 +43,22 @@ function key(url: string | undefined | null): string | null {
 export function rememberMediaSize(url: string | undefined | null, w: number, h: number): void {
   const k = key(url)
   if (!k || !Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return
-  // Re-insert so a size that keeps being used stays at the young end of the map.
-  sizes.delete(k)
   sizes.set(k, { w, h })
-  if (sizes.size > MAX_ENTRIES) {
-    const oldest = sizes.keys().next()
-    if (!oldest.done) sizes.delete(oldest.value)
-  }
 }
 
-/** `url`'s natural pixel size, if it can be known without loading the file: from
- *  a previous load, or from a copy that is decoded somewhere in the page right
- *  now. Null when neither applies. */
+/** `url`'s remembered natural pixel size, or null. A plain map lookup - safe to
+ *  call from a render, however often. */
 export function recallMediaSize(url: string | undefined | null): Size | null {
+  const k = key(url)
+  return k ? (sizes.get(k) ?? null) : null
+}
+
+/** `url`'s natural pixel size without loading it: remembered, or read off a copy
+ *  that is decoded somewhere in the page right now. Null when neither applies.
+ *
+ *  This is the one that walks the DOM, so it is for a one-off (opening a viewer),
+ *  not for every render - recallMediaSize is the cheap read. */
+export function discoverMediaSize(url: string | undefined | null): Size | null {
   const k = key(url)
   if (!k) return null
   const hit = sizes.get(k)

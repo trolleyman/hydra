@@ -254,6 +254,23 @@ describe('Lightbox picture sizing', () => {
     expect(peek).toHaveAttribute('height', '400')
   })
 
+  it('lays a 2x capture out at its logical size, and still reports its pixels', () => {
+    // The same rule the chat and the artifacts grid have always used: ship the
+    // extra pixels, lay the picture out at physical / density, and one source
+    // pixel lands on one device pixel. The caption is about the FILE, so it keeps
+    // reporting what the file actually holds.
+    openAt([{ ...plainImage, width: 780, height: 1688, dpi: 2 }], 0)
+    const img = screen.getByAltText('shot.png')
+    expect(img).toHaveAttribute('width', '390')
+    expect(img).toHaveAttribute('height', '844')
+    expect(screen.getByText('780 × 1688 @2×')).toBeTruthy()
+  })
+
+  it('leaves an un-hinted picture at its pixel size', () => {
+    openAt([{ ...plainImage, width: 780, height: 1688 }], 0)
+    expect(screen.getByAltText('shot.png')).toHaveAttribute('width', '780')
+  })
+
   it('takes the measured size over the metadata once the file has loaded', () => {
     openAt([{ ...plainImage, width: 1440, height: 880 }], 0)
     const img = screen.getByAltText('shot.png') as HTMLImageElement

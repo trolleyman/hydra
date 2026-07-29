@@ -14,7 +14,8 @@ import {
   canFlip, findLightboxOrigin, mediaRectOf, playFlip, rectOf,
   whenMediaLaidOut, FLIP_NAV_MS, FLIP_OPEN_MS, LIGHTBOX_MEDIA_CLASS, type Rect,
 } from '../lib/lightboxFlip'
-import { recallMediaSize, rememberMediaSize } from '../lib/mediaSize'
+import { discoverMediaSize, rememberMediaSize } from '../lib/mediaSize'
+import { logicalSize } from '../lib/imageDensity'
 
 export interface LightboxItem {
   url: string
@@ -232,13 +233,29 @@ export function Lightbox({
     const it = items[i]
     if (!it) return null
     if (it.width && it.height) return { w: it.width, h: it.height }
-    return recallMediaSize(it.url)
+    return discoverMediaSize(it.url)
   }, [items])
   const [dims, setDims] = useState<{ w: number; h: number } | null>(() => seedDims(index))
   // Re-seed the moment the shown image changes (adjust-during-render rather than
   // in an effect, so a stale size never survives to the next paint).
   const [dimsIndex, setDimsIndex] = useState(index)
   if (dimsIndex !== index) { setDimsIndex(index); setDims(seedDims(index)) }
+  // The box an entry is LAID OUT in, as opposed to the pixels it is made of: a 2x
+  // capture is drawn at half its pixel count so one source pixel lands on one
+  // device pixel, which is the whole reason for shipping the extra pixels (see
+  // lib/imageDensity). The chat and the artifacts grid have always sized pictures
+  // this way; the lightbox is now the same, rather than being the one surface that
+  // showed a @2x shot at double size. The caption still reports the PIXELS
+  // ("780 × 1688 @2×") - that is what the number means there.
+  //
+  // Mostly invisible: a screenshot big enough to hit the max-w/max-h caps lands on
+  // the same box either way. It shows on the small ones, which now open at the
+  // size they were captured to be seen at.
+  const layoutSize = useCallback(
+    (d: { w: number; h: number } | null, item: LightboxItem | undefined) =>
+      (d ? logicalSize(d, item?.dpi ?? 1) : null),
+    [],
+  )
 
   // Comparison mode + before/after view + highlight for diff entries, held HERE (not in
   // LightboxDiff, which remounts per index) so they PERSIST as you navigate ←/→ between
@@ -407,6 +424,9 @@ export function Lightbox({
   if (!current) return null
 
   const currentKind = kindOf(current)
+  // The box the shown picture is laid out in - its pixels, taken down by its
+  // capture density. See layoutSize.
+  const pictureSize = layoutSize(dims, current)
   // A before/after comparator, and the mode controls that drive it, only exist for
   // the two kinds the artifact pipeline actually compares. A text file or an .apk
   // may still carry a `diff` (its two sides) - the viewer turns that into a pair of
@@ -439,7 +459,7 @@ export function Lightbox({
     // The sliver's own box, reserved the same way the main picture's is: a peek
     // that lays out at nothing until it decodes doesn't just pop, it leaves the
     // flight with no endpoint to measure - and ←/→ falls back to the plain slide.
-    const peekSize = seedDims(i)
+    const peekSize = layoutSize(seedDims(i), peek)
     // Translate the whole button (not just the media) so its click area travels
     // off-screen with it - only the visible sliver stays clickable, rather than a
     // full-width hit zone covering the gutter.
@@ -639,13 +659,15 @@ export function Lightbox({
                 <img
                   src={current.url}
                   alt={current.filename}
-                  // The known size, as the picture's own box. The browser sizes a
+                  // The known size, as the picture's own box - at its LOGICAL size
+                  // (see layoutSize), which is also what makes a @2x capture land
+                  // one source pixel per device pixel here. The browser sizes a
                   // replaced element from these before a single byte has arrived
                   // (max-w/max-h still clamp it, preserving the ratio), so the
                   // picture lands laid out rather than growing into place - and the
                   // measured size takes over below if the two ever disagree.
-                  width={dims?.w}
-                  height={dims?.h}
+                  width={pictureSize?.w}
+                  height={pictureSize?.h}
                   onLoad={(e) => {
                     const { naturalWidth: w, naturalHeight: h } = e.currentTarget
                     setDims({ w, h })

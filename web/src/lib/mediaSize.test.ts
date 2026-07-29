@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { clearMediaSizes, recallMediaSize, rememberMediaSize } from './mediaSize'
+import { clearMediaSizes, discoverMediaSize, recallMediaSize, rememberMediaSize } from './mediaSize'
 
 // The size cache behind the lightbox's reserved picture box. Two things have to
 // hold for it to be worth having: the same file written two ways has to be ONE
@@ -41,6 +41,20 @@ describe('mediaSize', () => {
     expect(recallMediaSize(undefined)).toBeNull()
   })
 
+  it('does not walk the page on a plain recall - that is discoverMediaSize\'s job', () => {
+    // recallMediaSize is called from renders, so it stays a map lookup.
+    const img = document.createElement('img')
+    img.src = '/uploads/chip.png'
+    Object.defineProperty(img, 'complete', { value: true })
+    Object.defineProperty(img, 'naturalWidth', { value: 780 })
+    Object.defineProperty(img, 'naturalHeight', { value: 1688 })
+    document.body.appendChild(img)
+    expect(recallMediaSize('/uploads/chip.png')).toBeNull()
+    expect(discoverMediaSize('/uploads/chip.png')).toEqual({ w: 780, h: 1688 })
+    // ...and having found it once, the cheap read knows it too.
+    expect(recallMediaSize('/uploads/chip.png')).toEqual({ w: 780, h: 1688 })
+  })
+
   it('reads the size off a copy already decoded in the page', () => {
     // The case that covers markdown images and attachment chips, which carry no
     // metadata: the thumbnail that was clicked is still on the page behind the
@@ -51,7 +65,7 @@ describe('mediaSize', () => {
     Object.defineProperty(img, 'naturalWidth', { value: 780 })
     Object.defineProperty(img, 'naturalHeight', { value: 1688 })
     document.body.appendChild(img)
-    expect(recallMediaSize('/uploads/chip.png')).toEqual({ w: 780, h: 1688 })
+    expect(discoverMediaSize('/uploads/chip.png')).toEqual({ w: 780, h: 1688 })
   })
 
   it('ignores a copy in the page that has not decoded yet', () => {
@@ -61,6 +75,6 @@ describe('mediaSize', () => {
     Object.defineProperty(img, 'naturalWidth', { value: 0 })
     Object.defineProperty(img, 'naturalHeight', { value: 0 })
     document.body.appendChild(img)
-    expect(recallMediaSize('/uploads/pending.png')).toBeNull()
+    expect(discoverMediaSize('/uploads/pending.png')).toBeNull()
   })
 })
