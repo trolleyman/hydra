@@ -34,6 +34,12 @@ export function ServerUpdateToast() {
   )
 
   const failed = outcome === 'failed'
+  // "Restarting" is still work in progress - the server is re-execing and the
+  // page is waiting for it to answer again - but `running` went false the moment
+  // the socket dropped, which is what re-execing looks like. Keying the spinner
+  // off `running` alone therefore froze it exactly when there was most to wait
+  // for. Only the two terminal outcomes stop it.
+  const busy = running || outcome === 'restarting'
   const title = failed
     ? 'Update failed'
     : outcome === 'restarting'
@@ -51,7 +57,7 @@ export function ServerUpdateToast() {
       <div className="flex items-center gap-2">
         {failed ? (
           <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
-        ) : running ? (
+        ) : busy ? (
           <Loader2 className="w-4 h-4 shrink-0 animate-spin text-blue-500" />
         ) : (
           <RotateCw className="w-4 h-4 shrink-0 text-blue-500" />

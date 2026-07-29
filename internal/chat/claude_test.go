@@ -115,6 +115,27 @@ func TestNormalizeClaudeInterruptEcho(t *testing.T) {
 	}
 }
 
+// The compaction preamble has to enter the log from the LIVE stream, at the
+// point it actually happened. It is not isMeta and not typed by the user, so it
+// used to fall through to nil and arrive only on the next transcript import -
+// which appends at the tail, stranding the pill several turns downstream. Its
+// source id must match the history path's so that import stays a no-op.
+func TestNormalizeClaudeCompactionPreambleIsLive(t *testing.T) {
+	line := []byte(`{"type":"user","uuid":"c1","message":{"content":[{"type":"text",` +
+		`"text":"This session is being continued from a previous conversation that ran out of context."}]}}`)
+
+	got := normalizeClaude(line)
+	if len(got) != 1 || got[0].eventType() != "user_message" {
+		t.Fatalf("live events = %+v", got)
+	}
+	if got[0].sourceID != "claude:c1" {
+		t.Fatalf("source id = %q", got[0].sourceID)
+	}
+	if hist := normalizeClaudeHistory(line); len(hist) != 1 || hist[0].sourceID != got[0].sourceID {
+		t.Fatalf("history source id = %+v, want the same as live", hist)
+	}
+}
+
 func TestNormalizeClaudeRichEvents(t *testing.T) {
 	tests := []struct {
 		line string
