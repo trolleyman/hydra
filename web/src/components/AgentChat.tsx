@@ -1014,10 +1014,10 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
 // eslint-disable-next-line react-refresh/only-export-components
 export function summarizeToolSearchQuery(query: string): { text: string; prose: boolean } {
   const select = /^\s*select:(.*)$/.exec(query)
-  if (!select) return { text: query, prose: true }
+  if (!select) return { text: query, prose: false }
   const names = select[1].split(',').map((n) => n.trim()).filter(Boolean)
-  if (names.length === 0) return { text: query, prose: false }
-  return { text: names.map(mcpToolLabel).join(', '), prose: false }
+  if (names.length === 0) return { text: query, prose: true }
+  return { text: names.map(mcpToolLabel).join(', '), prose: true }
 }
 
 // summarizeToolInput produces the one-line preview shown on a collapsed tool
