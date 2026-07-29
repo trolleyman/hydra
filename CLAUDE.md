@@ -294,6 +294,12 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `run_tests` / `generate_artifacts`; also lists what is deliberately NOT built)
 - **Review threads in the diff** (forge PR comments inline, replying, local-only
   notes, the origin badges) -> [docs/review-threads.md](docs/review-threads.md)
+- **Automating review with a second model** (a review agent over a head's diff:
+  sub-agent vs second chat thread vs `[tests.review]` runner vs a reviewer head
+  vs one-shot `claude -p`) -> [docs/review-agent.md](docs/review-agent.md)
+  (proposed, unbuilt; options survey + build order. Key constraint: Claude's
+  transcript dir is keyed by WORKTREE PATH, so a second agent in the head's own
+  worktree can poison its `--continue`/`--resume`)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
   max via the `[resources]` config table + the Settings "Resource limits" section)
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;

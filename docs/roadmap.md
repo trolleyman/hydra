@@ -66,6 +66,18 @@ before starting. Grouped by area.
   `[stdout]` / `[stderr]`), preserving interleaving instead of buffering and
   printing everything at once.
 
+- [ ] **A review agent over a head's diff** - get a second model to review what a
+  head wrote, without disturbing the head's own conversation. Options surveyed in
+  [review-agent.md](review-agent.md): a sub-agent (free, weakest), a second chat
+  thread on the same worktree (rejected - it shares the head's transcript dir and
+  can poison `--continue`), a `[tests.review]` runner emitting `warn` markers
+  (buildable today with no Hydra code, needs a per-runner `prefetch = false` flag
+  so it isn't a model call per commit), an `Ephemeral` reviewer head stacked on
+  `hydra/<id>` (80% built - needs a `ReviewOf` link + a button), a first-class
+  `[review.<name>]` runner writing diff-anchored findings into the gutter, and a
+  one-shot `claude -p` (good only for narrow, tool-less checks). Recommended
+  order: try the test runner, then the reviewer head, then the gutter.
+
 ## Diff viewer
 
 - [ ] **Auto-load diffs for short changes (< 1000 lines)** via the diff-files
