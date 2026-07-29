@@ -316,6 +316,36 @@ const (
 	LocalOnly ReviewThreadNoteOrigin = "local_only"
 )
 
+// Defines values for ServerUpdateDoneFrameKind.
+const (
+	ServerUpdateDoneFrameKindDone ServerUpdateDoneFrameKind = "done"
+)
+
+// Defines values for ServerUpdateEventKind.
+const (
+	ServerUpdateEventKindDone  ServerUpdateEventKind = "done"
+	ServerUpdateEventKindLog   ServerUpdateEventKind = "log"
+	ServerUpdateEventKindPhase ServerUpdateEventKind = "phase"
+)
+
+// Defines values for ServerUpdateLogFrameKind.
+const (
+	Log ServerUpdateLogFrameKind = "log"
+)
+
+// Defines values for ServerUpdatePhase.
+const (
+	ServerUpdatePhaseBuilding   ServerUpdatePhase = "building"
+	ServerUpdatePhaseRestarting ServerUpdatePhase = "restarting"
+	ServerUpdatePhaseSwapping   ServerUpdatePhase = "swapping"
+	ServerUpdatePhaseVerifying  ServerUpdatePhase = "verifying"
+)
+
+// Defines values for ServerUpdatePhaseFrameKind.
+const (
+	Phase ServerUpdatePhaseFrameKind = "phase"
+)
+
 // Defines values for ServiceStatusState.
 const (
 	Down       ServiceStatusState = "down"
@@ -2836,6 +2866,58 @@ type SandboxConfig struct {
 	RestoreRo      *[]string `json:"restore_ro"`
 	WritablePaths  *[]string `json:"writable_paths"`
 }
+
+// ServerUpdateDoneFrame The update finished without restarting - which in practice means it failed, since a success re-execs instead of sending this.
+type ServerUpdateDoneFrame struct {
+	// Error Empty means success.
+	Error string                    `json:"error,omitempty"`
+	Kind  ServerUpdateDoneFrameKind `json:"kind"`
+}
+
+// ServerUpdateDoneFrameKind defines model for ServerUpdateDoneFrame.Kind.
+type ServerUpdateDoneFrameKind string
+
+// ServerUpdateEvent One frame of an update's progress, flat: the daemon constructs and fans these out internally, so it needs one struct rather than the union below. Both describe the same wire bytes.
+type ServerUpdateEvent struct {
+	// Error Set on a failed `done` frame; empty means success.
+	Error string                `json:"error,omitempty"`
+	Kind  ServerUpdateEventKind `json:"kind"`
+
+	// Line One line of build output.
+	Line  string            `json:"line,omitempty"`
+	Phase ServerUpdatePhase `json:"phase,omitempty"`
+}
+
+// ServerUpdateEventKind defines model for ServerUpdateEvent.Kind.
+type ServerUpdateEventKind string
+
+// ServerUpdateFrame One frame, narrowed by its kind to the field that kind carries. What the browser reads.
+type ServerUpdateFrame struct {
+	union json.RawMessage
+}
+
+// ServerUpdateLogFrame One line of build output.
+type ServerUpdateLogFrame struct {
+	Kind ServerUpdateLogFrameKind `json:"kind"`
+	Line string                   `json:"line"`
+}
+
+// ServerUpdateLogFrameKind defines model for ServerUpdateLogFrame.Kind.
+type ServerUpdateLogFrameKind string
+
+// ServerUpdatePhase The stage an update has reached.
+type ServerUpdatePhase string
+
+// ServerUpdatePhaseFrame The update reached a new stage.
+type ServerUpdatePhaseFrame struct {
+	Kind ServerUpdatePhaseFrameKind `json:"kind"`
+
+	// Phase The stage an update has reached.
+	Phase ServerUpdatePhase `json:"phase"`
+}
+
+// ServerUpdatePhaseFrameKind defines model for ServerUpdatePhaseFrame.Kind.
+type ServerUpdatePhaseFrameKind string
 
 // ServiceScript A per-project long-running script the daemon supervises while the project is registered ([services.<name>] in config.toml)
 type ServiceScript struct {
@@ -5509,6 +5591,125 @@ func (t ChatFrame) MarshalJSON() ([]byte, error) {
 }
 
 func (t *ChatFrame) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsServerUpdatePhaseFrame returns the union data inside the ServerUpdateFrame as a ServerUpdatePhaseFrame
+func (t ServerUpdateFrame) AsServerUpdatePhaseFrame() (ServerUpdatePhaseFrame, error) {
+	var body ServerUpdatePhaseFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromServerUpdatePhaseFrame overwrites any union data inside the ServerUpdateFrame as the provided ServerUpdatePhaseFrame
+func (t *ServerUpdateFrame) FromServerUpdatePhaseFrame(v ServerUpdatePhaseFrame) error {
+	v.Kind = "phase"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeServerUpdatePhaseFrame performs a merge with any union data inside the ServerUpdateFrame, using the provided ServerUpdatePhaseFrame
+func (t *ServerUpdateFrame) MergeServerUpdatePhaseFrame(v ServerUpdatePhaseFrame) error {
+	v.Kind = "phase"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsServerUpdateLogFrame returns the union data inside the ServerUpdateFrame as a ServerUpdateLogFrame
+func (t ServerUpdateFrame) AsServerUpdateLogFrame() (ServerUpdateLogFrame, error) {
+	var body ServerUpdateLogFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromServerUpdateLogFrame overwrites any union data inside the ServerUpdateFrame as the provided ServerUpdateLogFrame
+func (t *ServerUpdateFrame) FromServerUpdateLogFrame(v ServerUpdateLogFrame) error {
+	v.Kind = "log"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeServerUpdateLogFrame performs a merge with any union data inside the ServerUpdateFrame, using the provided ServerUpdateLogFrame
+func (t *ServerUpdateFrame) MergeServerUpdateLogFrame(v ServerUpdateLogFrame) error {
+	v.Kind = "log"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsServerUpdateDoneFrame returns the union data inside the ServerUpdateFrame as a ServerUpdateDoneFrame
+func (t ServerUpdateFrame) AsServerUpdateDoneFrame() (ServerUpdateDoneFrame, error) {
+	var body ServerUpdateDoneFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromServerUpdateDoneFrame overwrites any union data inside the ServerUpdateFrame as the provided ServerUpdateDoneFrame
+func (t *ServerUpdateFrame) FromServerUpdateDoneFrame(v ServerUpdateDoneFrame) error {
+	v.Kind = "done"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeServerUpdateDoneFrame performs a merge with any union data inside the ServerUpdateFrame, using the provided ServerUpdateDoneFrame
+func (t *ServerUpdateFrame) MergeServerUpdateDoneFrame(v ServerUpdateDoneFrame) error {
+	v.Kind = "done"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ServerUpdateFrame) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"kind"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t ServerUpdateFrame) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "done":
+		return t.AsServerUpdateDoneFrame()
+	case "log":
+		return t.AsServerUpdateLogFrame()
+	case "phase":
+		return t.AsServerUpdatePhaseFrame()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t ServerUpdateFrame) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ServerUpdateFrame) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

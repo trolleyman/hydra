@@ -150,7 +150,10 @@ Details that bite:
 1. `POST /api/server/update` returns immediately; the build runs in a
    subprocess. **The old server keeps serving throughout.**
 2. The log streams over `/ws/server/update` as `phase` and `log` frames:
-   `building` -> `verifying` -> `swapping` -> `restarting`.
+   `building` -> `verifying` -> `swapping` -> `restarting`. Those frames are
+   declared in `api/openapi.yaml` and generated for both sides, so a phase the
+   server reaches and one the UI labels cannot drift; the browser narrows on
+   `ServerUpdateFrame`, which pairs each `kind` with the field it carries.
 3. A build failure stops there and reports. Nothing was touched, the server never
    went down. This is the whole safety argument.
 4. On success the new binary must prove it starts (`--version`) *before* anything

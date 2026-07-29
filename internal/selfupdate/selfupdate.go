@@ -27,32 +27,31 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/api"
 )
 
-// Phase names the stage an update has reached. They are sent to the UI verbatim.
+// The wire format lives in api/openapi.yaml and is generated for both the
+// daemon and the browser, so the phases the UI labels and the kinds it narrows
+// on cannot drift from what is emitted here. Event is flat because the manager
+// constructs these and fans them out internally; the browser reads the same
+// bytes through ServerUpdateFrame, which narrows each kind to the field it
+// carries.
+type Event = api.ServerUpdateEvent
+
+// Phase names the stage an update has reached. Sent to the UI verbatim.
 const (
-	PhaseBuilding   = "building"
-	PhaseVerifying  = "verifying"
-	PhaseSwapping   = "swapping"
-	PhaseRestarting = "restarting"
+	PhaseBuilding   = api.ServerUpdatePhaseBuilding
+	PhaseVerifying  = api.ServerUpdatePhaseVerifying
+	PhaseSwapping   = api.ServerUpdatePhaseSwapping
+	PhaseRestarting = api.ServerUpdatePhaseRestarting
 )
 
 // EventKind discriminates the frames sent to a subscriber.
 const (
-	KindPhase = "phase"
-	KindLog   = "log"
-	KindDone  = "done"
+	KindPhase = api.ServerUpdateEventKindPhase
+	KindLog   = api.ServerUpdateEventKindLog
+	KindDone  = api.ServerUpdateEventKindDone
 )
-
-// Event is one frame of an update's progress. Marshalled straight to the
-// websocket, so the json tags are the wire format.
-type Event struct {
-	Kind  string `json:"kind"`
-	Phase string `json:"phase,omitempty"`
-	Line  string `json:"line,omitempty"`
-	// Error is set on a KindDone frame that failed. Empty means success.
-	Error string `json:"error,omitempty"`
-}
 
 // Manager owns the one-at-a-time update job and fans its output out to however
 // many browser tabs are watching.

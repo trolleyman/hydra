@@ -6103,6 +6103,105 @@ components:
     # and appends it to a log, which needs a concrete struct - and a generated
     # oneOf is an opaque wrapper it cannot field-access.
 
+    # --- Server-update WebSocket (/ws/server/update) ---------------------------
+    #
+    # The progress of a self-update, streamed while the server rebuilds itself.
+    #
+    # How the connection ENDS is part of the contract: on success the server
+    # re-execs, so the socket dies mid-stream with no `done` frame. A client must
+    # read "closed after the restarting phase" as success and switch to polling
+    # /health. A failure sends `done` with an error and the server stays up,
+    # because nothing was swapped.
+
+    ServerUpdatePhase:
+      type: string
+      description: The stage an update has reached.
+      enum: [building, verifying, swapping, restarting]
+      # Named explicitly because `building` also appears in AgentStatus, and
+      # oapi-codegen answers a clash by prefixing every value of BOTH enums -
+      # silently renaming api.Running and friends across the codebase.
+      x-enum-varnames:
+        - ServerUpdatePhaseBuilding
+        - ServerUpdatePhaseVerifying
+        - ServerUpdatePhaseSwapping
+        - ServerUpdatePhaseRestarting
+
+    ServerUpdateEvent:
+      type: object
+      description: >-
+        One frame of an update's progress, flat: the daemon constructs and fans
+        these out internally, so it needs one struct rather than the union below.
+        Both describe the same wire bytes.
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [phase, log, done]
+        phase:
+          allOf:
+            - $ref: '#/components/schemas/ServerUpdatePhase'
+          x-go-type-skip-optional-pointer: true
+        line:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: One line of build output.
+        error:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Set on a failed `done` frame; empty means success.
+
+    ServerUpdateFrame:
+      description: >-
+        One frame, narrowed by its kind to the field that kind carries. What the
+        browser reads.
+      oneOf:
+        - $ref: '#/components/schemas/ServerUpdatePhaseFrame'
+        - $ref: '#/components/schemas/ServerUpdateLogFrame'
+        - $ref: '#/components/schemas/ServerUpdateDoneFrame'
+      discriminator:
+        propertyName: kind
+        mapping:
+          phase: '#/components/schemas/ServerUpdatePhaseFrame'
+          log: '#/components/schemas/ServerUpdateLogFrame'
+          done: '#/components/schemas/ServerUpdateDoneFrame'
+
+    ServerUpdatePhaseFrame:
+      type: object
+      description: The update reached a new stage.
+      required: [kind, phase]
+      properties:
+        kind:
+          type: string
+          enum: [phase]
+        phase:
+          $ref: '#/components/schemas/ServerUpdatePhase'
+
+    ServerUpdateLogFrame:
+      type: object
+      description: One line of build output.
+      required: [kind, line]
+      properties:
+        kind:
+          type: string
+          enum: [log]
+        line:
+          type: string
+
+    ServerUpdateDoneFrame:
+      type: object
+      description: >-
+        The update finished without restarting - which in practice means it
+        failed, since a success re-execs instead of sending this.
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [done]
+        error:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Empty means success.
+
     ChatEventEnvelope:
       type: object
       description: The fields every event carries, whatever its type.
