@@ -1009,8 +1009,12 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
 // The `select:a,b` form is an exact list of tool names, and the wire spelling of
 // an MCP one (`mcp__hydra__git_commit`) is transport detail - it reads as
 // "hydra::git_commit", the same namespace::tool shape the card heading uses.
-// Any other query is a keyword search, i.e. words the agent typed, so it stays
-// verbatim and prose. The Raw view keeps the query as sent. (Exported for tests.)
+//
+// `prose` here means "not monospace" (see summaryMono at the call site), and the
+// split follows whether the text was REWRITTEN for a human. A select: list has
+// been - those labels are not what anyone typed - so it renders as prose. A
+// keyword search is the agent's own words passed through untouched, so it stays
+// verbatim, in mono. The Raw view keeps the query as sent. (Exported for tests.)
 // eslint-disable-next-line react-refresh/only-export-components
 export function summarizeToolSearchQuery(query: string): { text: string; prose: boolean } {
   const select = /^\s*select:(.*)$/.exec(query)
