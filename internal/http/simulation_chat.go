@@ -485,10 +485,10 @@ var simChatEvents = []simNorm{
 	// worktree root, where it would not work at all.
 	simTool("toolu_sim_cwd", "Bash", simRaw(`{"command":"bun test src/lib/upload.test.ts","description":"Run the uploader tests"}`)),
 	simToolOut("toolu_sim_cwd", " 12 pass\n  0 fail"),
-	// A Bash call that is really a Read: the card takes the Read shape (file +
-	// "lines 40-53" in the header) and renders the output as numbered, Go-
-	// highlighted source rather than anonymous terminal text - see
-	// web/src/lib/fileViewCommand.ts.
+	// A Bash call that is really a Read - the shape every agent without a Read
+	// tool has to spell in shell. The card stays a Bash card, showing the command
+	// that ran, and its output renders as numbered, Go-highlighted source rather
+	// than anonymous terminal text - see web/src/lib/fileViewCommand.ts.
 	simTool("toolu_sim_sed", "Bash", simRaw(`{"command":"sed -n 40,53p internal/chat/claude.go"}`)),
 	simToolOut("toolu_sim_sed", "type claudeMessage struct {\n\tType    string          `json:\"type\"`\n\tSubtype string          `json:\"subtype,omitempty\"`\n\tMessage json.RawMessage `json:\"message,omitempty\"`\n\tUsage   json.RawMessage `json:\"usage,omitempty\"`\n}\n\n// isAPIErrorMessage reports whether an assistant event is the CLI's own\n// \"API Error\" placeholder rather than a model reply.\nfunc isAPIErrorMessage(msg claudeMessage) bool {\n\tif msg.Type != \"assistant\" {\n\t\treturn false\n\t}\n\treturn strings.HasPrefix(text(msg), \"API Error\")"),
 	// Two reads in one call, separated by the `echo` marker agents use to tell
@@ -545,8 +545,7 @@ var simChatEvents = []simNorm{
 	simTool("toolu_sim_buildlog", "Bash", simRaw(`{"command":"echo \"=== run 1 (should be no-op) ===\"\nmage build 2>&1 | head -4\necho \"=== touch a web file, run 2 ===\"\ntouch web/src/main.tsx\nmage build 2>&1 | head -4","description":"Test whether BuildWeb emits output when web changed"}`)),
 	simToolOut("toolu_sim_buildlog", "=== run 1 (should be no-op) ===\n\x1b[2m$ mage build\x1b[0m\n\x1b[32m✓\x1b[0m go build: up to date\n\x1b[32m✓\x1b[0m web build: up to date\n=== touch a web file, run 2 ===\n\x1b[2m$ mage build\x1b[0m\n\x1b[33mWARN\x1b[0m web/dist is stale - rebuilding\nvite v8.1.5 \x1b[32mbuilding for production...\x1b[0m\n\x1b[32m✓\x1b[0m 412 modules transformed."),
 	// One read, several stretches of one file - how an agent quotes the places it
-	// is about to edit. The card is still a Read (it is nothing but a read), and
-	// each stretch is numbered from its own start.
+	// is about to edit. Each stretch is numbered from its own start.
 	simTool("toolu_sim_sedmulti", "Bash", simRaw(`{"command":"sed -n '1,3p;40,43p' docs/artifacts.md"}`)),
 	simToolOut("toolu_sim_sedmulti", "# Artifacts\n\nArtifacts are files a head produces that are worth keeping: screenshots, a\n## TODO\n- Retry the upload on a 5xx\n- Surface the attempt count in the panel\n- Collect the generator's own log"),
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles

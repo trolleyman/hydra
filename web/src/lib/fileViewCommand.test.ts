@@ -1,167 +1,126 @@
 import { describe, it, expect } from 'vitest'
-import { fileViewLineInfo, parseFileViewScript, splitFileViewOutput, viewLineNumbers, type FileViewStep } from './fileViewCommand'
+import { parseSedRanges, parseView, viewLimit, viewLineNumbers } from './fileViewCommand'
 
-function views(script: string) {
-  return (parseFileViewScript(script) ?? []).flatMap((s) => (s.kind === 'view' ? [s.view] : []))
+// The command as lib/shellSections hands it over: words, with their quotes
+// removed. (That module does the lexing - it has to cope with pipes and
+// commands this one knows nothing about.)
+function words(command: string): string[] {
+  return (command.match(/'[^']*'|"[^"]*"|\S+/g) ?? []).map((w) => w.replace(/^['"]|['"]$/g, ''))
 }
 
-describe('parseFileViewScript', () => {
+function view(command: string) {
+  return parseView(words(command), command)
+}
+
+describe('parseView', () => {
   it('reads a sed line range', () => {
-    expect(views('sed -n 40,110p internal/chat/claude.go')).toEqual([
-      { path: 'internal/chat/claude.go', start: 40, end: 110, numbered: false, command: 'sed -n 40,110p internal/chat/claude.go' },
-    ])
+    expect(view('sed -n 40,110p internal/chat/claude.go')).toEqual({
+      path: 'internal/chat/claude.go',
+      start: 40,
+      end: 110,
+      ranges: undefined,
+      numbered: false,
+      command: 'sed -n 40,110p internal/chat/claude.go',
+    })
   })
 
   it('accepts the quoted, -e and single-line sed spellings', () => {
-    expect(views("sed -n '40,110p' a.go").map((v) => [v.start, v.end])).toEqual([[40, 110]])
-    expect(views("sed -n -e '5p' a.go").map((v) => [v.start, v.end])).toEqual([[5, 5]])
-    expect(views("sed -n '40,$p' a.go").map((v) => [v.start, v.end])).toEqual([[40, null]])
+    expect([view("sed -n '40,110p' a.go")].map((v) => [v?.start, v?.end])).toEqual([[40, 110]])
+    expect([view("sed -n -e '5p' a.go")].map((v) => [v?.start, v?.end])).toEqual([[5, 5]])
+    expect([view("sed -n '40,$p' a.go")].map((v) => [v?.start, v?.end])).toEqual([[40, null]])
   })
 
   it('reads a sed of several ranges as the stretches it prints', () => {
     // What an agent writes to quote several places in one file at once.
-    expect(views("sed -n '10,14p;80,84p;96,100p' docs/chat-mode.md").map((v) => [v.start, v.end, v.ranges])).toEqual([
-      [10, 100, [{ start: 10, end: 14 }, { start: 80, end: 84 }, { start: 96, end: 100 }]],
+    const v = view("sed -n '10,14p;80,84p;96,100p' docs/chat-mode.md")
+    expect([v?.start, v?.end, v?.ranges]).toEqual([
+      10, 100, [{ start: 10, end: 14 }, { start: 80, end: 84 }, { start: 96, end: 100 }],
     ])
     // One range is the ordinary read, and carries no list.
-    expect(views("sed -n '10,14p' a.go")[0].ranges).toBeUndefined()
+    expect(view("sed -n '10,14p' a.go")?.ranges).toBeUndefined()
     // Single lines, which is the other way agents spell this.
-    expect(views("sed -n '3p;9p' a.go").map((v) => [v.start, v.end])).toEqual([[3, 9]])
+    expect([view("sed -n '3p;9p' a.go")].map((v) => [v?.start, v?.end])).toEqual([[3, 9]])
   })
 
   it('reads cat, head and tail', () => {
-    expect(views('cat a.go').map((v) => [v.start, v.end, v.numbered])).toEqual([[1, null, false]])
-    expect(views('cat -n a.go').map((v) => [v.start, v.end, v.numbered])).toEqual([[1, null, true]])
-    expect(views('head -n 50 a.go').map((v) => [v.start, v.end])).toEqual([[1, 50]])
-    expect(views('head -50 a.go').map((v) => [v.start, v.end])).toEqual([[1, 50]])
-    expect(views('head a.go').map((v) => [v.start, v.end])).toEqual([[1, 10]])
-    expect(views('tail -n +200 a.go').map((v) => [v.start, v.end])).toEqual([[200, null]])
-    expect(views('tail -n 20 a.go').map((v) => [v.start, v.end])).toEqual([[null, null]])
+    expect([view('cat a.go')].map((v) => [v?.start, v?.end, v?.numbered])).toEqual([[1, null, false]])
+    expect([view('cat -n a.go')].map((v) => [v?.start, v?.end, v?.numbered])).toEqual([[1, null, true]])
+    expect([view('head -n 50 a.go')].map((v) => [v?.start, v?.end])).toEqual([[1, 50]])
+    expect([view('head -50 a.go')].map((v) => [v?.start, v?.end])).toEqual([[1, 50]])
+    expect([view('head a.go')].map((v) => [v?.start, v?.end])).toEqual([[1, 10]])
+    expect([view('tail -n +200 a.go')].map((v) => [v?.start, v?.end])).toEqual([[200, null]])
+    expect([view('tail -n 20 a.go')].map((v) => [v?.start, v?.end])).toEqual([[null, null]])
   })
 
   it('reads a git blob as a read of the path in it', () => {
     // The revision goes: the command above the content already says which one,
     // and what the renderer wants from a path is its language, which does not
     // change with the revision.
-    expect(views('git show main:web/src/App.tsx').map((v) => [v.path, v.start, v.end])).toEqual([
+    expect([view('git show main:web/src/App.tsx')].map((v) => [v?.path, v?.start, v?.end])).toEqual([
       ['web/src/App.tsx', 1, null],
     ])
-    expect(views('git show HEAD~2:a.go').map((v) => [v.path])).toEqual([['a.go']])
-    expect(views('git show :a.go').map((v) => [v.path])).toEqual([['a.go']])
-    expect(views('git -C /repo show main:a.go').map((v) => [v.path])).toEqual([['a.go']])
+    expect(view('git show HEAD~2:a.go')?.path).toBe('a.go')
+    expect(view('git show :a.go')?.path).toBe('a.go')
+    expect(view('git -C /repo show main:a.go')?.path).toBe('a.go')
     // Everything else git prints is a report about the repository, not a file.
-    expect(parseFileViewScript('git show HEAD')).toBeNull()
-    expect(parseFileViewScript('git show --stat main:a.go')).toBeNull()
-    expect(parseFileViewScript('git show main:a.go b.go')).toBeNull()
-    expect(parseFileViewScript('git show main:')).toBeNull()
-    expect(parseFileViewScript('git log --oneline')).toBeNull()
+    expect(view('git show HEAD')).toBeNull()
+    expect(view('git show --stat main:a.go')).toBeNull()
+    expect(view('git show main:a.go b.go')).toBeNull()
+    expect(view('git show main:')).toBeNull()
+    expect(view('git log --oneline')).toBeNull()
   })
 
   it('keeps the path as written', () => {
-    expect(views('cat ~/.claude/settings.json')[0].path).toBe('~/.claude/settings.json')
-    expect(views("sed -n 1,5p 'my file.go'")[0].path).toBe('my file.go')
+    expect(view('cat ~/.claude/settings.json')?.path).toBe('~/.claude/settings.json')
+    expect(view("sed -n 1,5p 'my file.go'")?.path).toBe('my file.go')
   })
 
   it('refuses anything that is not a plain read of one named file', () => {
-    // Pipes, redirects and substitutions make the output something else.
-    expect(parseFileViewScript('sed -n 40,110p a.go | head -20')).toBeNull()
-    expect(parseFileViewScript('cat a.go > b.go')).toBeNull()
-    expect(parseFileViewScript('cat $FILE')).toBeNull()
-    expect(parseFileViewScript('cat "$(ls)"')).toBeNull()
-    expect(parseFileViewScript('cat *.go')).toBeNull()
     // sed that edits or transforms, not prints.
-    expect(parseFileViewScript('sed -i s/a/b/ a.go')).toBeNull()
-    expect(parseFileViewScript("sed -n 's/a/b/p' a.go")).toBeNull()
+    expect(view('sed -i s/a/b/ a.go')).toBeNull()
+    expect(view("sed -n 's/a/b/p' a.go")).toBeNull()
     // Ranges that overlap print the line they share twice, and one that runs to
     // `$` swallows everything after it - neither is a sequence of stretches.
-    expect(parseFileViewScript("sed -n '1,10p;5,20p' a.go")).toBeNull()
-    expect(parseFileViewScript("sed -n '20,25p;1,5p' a.go")).toBeNull()
-    expect(parseFileViewScript("sed -n '1,$p;40,50p' a.go")).toBeNull()
+    expect(view("sed -n '1,10p;5,20p' a.go")).toBeNull()
+    expect(view("sed -n '20,25p;1,5p' a.go")).toBeNull()
+    expect(view("sed -n '1,$p;40,50p' a.go")).toBeNull()
     // Byte counts and follow mode are not line ranges.
-    expect(parseFileViewScript('head -c 100 a.go')).toBeNull()
-    expect(parseFileViewScript('tail -f log.txt')).toBeNull()
+    expect(view('head -c 100 a.go')).toBeNull()
+    expect(view('tail -f log.txt')).toBeNull()
     // Several files interleave `==> name <==` banners.
-    expect(parseFileViewScript('head -20 a.go b.go')).toBeNull()
-    expect(parseFileViewScript('cat a.go b.go')).toBeNull()
-    // A step that is neither a view nor an echo poisons the whole script.
-    expect(parseFileViewScript('cd web && cat a.go')).toBeNull()
-    expect(parseFileViewScript('cat a.go && rm a.go')).toBeNull()
-    expect(parseFileViewScript('go test ./...')).toBeNull()
-    // An echo alone is not a read.
-    expect(parseFileViewScript('echo hello')).toBeNull()
-    // Flags that change what echo prints break the output split.
-    expect(parseFileViewScript('cat a.go; echo -n ---; cat b.go')).toBeNull()
-  })
-
-  it('reads a chain of views and echo separators', () => {
-    const steps = parseFileViewScript('sed -n 1,2p a.go; echo ---; sed -n 5,6p b.go')
-    expect(steps?.map((s) => (s.kind === 'view' ? s.view.path : `echo:${s.text}`))).toEqual(['a.go', 'echo:---', 'b.go'])
-  })
-
-  it('treats newlines and && as step separators', () => {
-    expect(views('cat a.go\ncat b.go').map((v) => v.path)).toEqual(['a.go', 'b.go'])
-    expect(views('head -3 a.go && head -3 b.go').map((v) => v.path)).toEqual(['a.go', 'b.go'])
+    expect(view('head -20 a.go b.go')).toBeNull()
+    expect(view('cat a.go b.go')).toBeNull()
+    // A `cat` flag that rewrites the bytes it prints.
+    expect(view('cat -A a.go')).toBeNull()
+    // Not a read at all.
+    expect(view('go test ./...')).toBeNull()
   })
 })
 
-describe('splitFileViewOutput', () => {
-  const steps = (script: string) => parseFileViewScript(script) as FileViewStep[]
-
-  it('gives a single view all the output', () => {
-    const sections = splitFileViewOutput(steps('sed -n 3,5p a.go'), 'three\nfour\nfive\n')
-    expect(sections).toHaveLength(1)
-    expect(sections![0]).toMatchObject({ path: 'a.go', start: 3, lines: ['three', 'four', 'five'] })
+describe('parseSedRanges', () => {
+  it('reads a list of prints in file order', () => {
+    expect(parseSedRanges('1,3p;40,42p')).toEqual([{ start: 1, end: 3 }, { start: 40, end: 42 }])
+    expect(parseSedRanges('9p')).toEqual([{ start: 9, end: 9 }])
+    expect(parseSedRanges('1,3p;5,$p')).toEqual([{ start: 1, end: 3 }, { start: 5, end: null }])
   })
 
-  it('cuts at echo markers', () => {
-    const sections = splitFileViewOutput(steps('sed -n 1,2p a.go; echo ---; sed -n 5,6p b.go'), 'a1\na2\n---\nb5\nb6')
-    expect(sections?.map((s) => [s.path, s.start, s.lines])).toEqual([
-      ['a.go', 1, ['a1', 'a2']],
-      ['b.go', 5, ['b5', 'b6']],
-    ])
+  it('refuses what it cannot put in order', () => {
+    expect(parseSedRanges('5,20p;1,10p')).toBeNull()
+    expect(parseSedRanges('1,10p;10,20p')).toBeNull()
+    expect(parseSedRanges('1,$p;40,50p')).toBeNull()
+    expect(parseSedRanges('1,3p;s/a/b/p')).toBeNull()
+    expect(parseSedRanges('')).toBeNull()
   })
+})
 
-  it('prefers the marker where the range puts it over an identical file line', () => {
-    // The file's own text contains the separator - the section must not stop there.
-    const sections = splitFileViewOutput(steps('sed -n 1,3p a.go; echo ---; sed -n 1,1p b.go'), 'a1\n---\na3\n---\nb1')
-    expect(sections?.map((s) => s.lines)).toEqual([['a1', '---', 'a3'], ['b1']])
-  })
-
-  it('falls back to the range length for back-to-back views', () => {
-    const sections = splitFileViewOutput(steps('sed -n 1,2p a.go; sed -n 9,9p b.go'), 'a1\na2\nb9')
-    expect(sections?.map((s) => [s.path, s.lines])).toEqual([
-      ['a.go', ['a1', 'a2']],
-      ['b.go', ['b9']],
-    ])
-  })
-
-  it('gives up when the output does not match the script', () => {
-    // A marker that never appears.
-    expect(splitFileViewOutput(steps('cat a.go; echo ---; cat b.go'), 'a1\na2')).toBeNull()
-    // More lines than the range could have produced (an error line, a banner).
-    expect(splitFileViewOutput(steps('sed -n 1,2p a.go'), 'a1\na2\na3')).toBeNull()
-    // Two open-ended reads have no boundary at all.
-    expect(splitFileViewOutput(steps('cat a.go; cat b.go'), 'a1\nb1')).toBeNull()
-    // Nothing printed (the file did not exist and the error went to stderr).
-    expect(splitFileViewOutput(steps('cat a.go'), '   \n')).toBeNull()
-  })
-
-  it('accepts a range the file ended before', () => {
-    const sections = splitFileViewOutput(steps('sed -n 1,500p a.go'), 'only\ntwo')
-    expect(sections?.[0].lines).toEqual(['only', 'two'])
-  })
-
-  it('bounds a multi-range view by the total it prints, not by its span', () => {
-    // 1-2 and 9-9 is three lines, not nine: a section that took the span would
-    // have swallowed the marker and the read after it.
-    const sections = splitFileViewOutput(
-      steps("sed -n '1,2p;9,9p' a.go; echo ---; sed -n 5,5p b.go"),
-      'a1\na2\na9\n---\nb5',
-    )
-    expect(sections?.map((s) => [s.path, s.lines])).toEqual([
-      ['a.go', ['a1', 'a2', 'a9']],
-      ['b.go', ['b5']],
-    ])
+describe('viewLimit', () => {
+  it('counts what the command asked for, not the span it covers', () => {
+    expect(viewLimit({ start: 40, end: 42, ranges: undefined })).toBe(3)
+    // 1-2 and 9-9 is three lines, not nine.
+    expect(viewLimit({ start: 1, end: 9, ranges: [{ start: 1, end: 2 }, { start: 9, end: 9 }] })).toBe(3)
+    // Open-ended, so nothing bounds it.
+    expect(viewLimit({ start: 1, end: null, ranges: undefined })).toBeNull()
+    expect(viewLimit({ start: null, end: null, ranges: undefined })).toBeNull()
   })
 })
 
@@ -176,26 +135,10 @@ describe('viewLineNumbers', () => {
   })
 
   it('numbers several ranges only when every one of them printed in full', () => {
-    const view = { start: 10, end: 82, ranges: [{ start: 10, end: 12 }, { start: 80, end: 82 }] }
-    expect(viewLineNumbers(view, 6)).toEqual(['10', '11', '12', '80', '81', '82'])
+    const v = { start: 10, end: 82, ranges: [{ start: 10, end: 12 }, { start: 80, end: 82 }] }
+    expect(viewLineNumbers(v, 6)).toEqual(['10', '11', '12', '80', '81', '82'])
     // One stretch came up short and nothing says which, so every number after
     // it would be wrong: no gutter beats a gutter that lies.
-    expect(viewLineNumbers(view, 5)).toEqual([])
-  })
-})
-
-describe('fileViewLineInfo', () => {
-  it('phrases a range the way a Read does', () => {
-    expect(fileViewLineInfo({ start: 40, end: 110 })).toBe('lines 40-110')
-    expect(fileViewLineInfo({ start: 1, end: 50 })).toBe('first 50 lines')
-    expect(fileViewLineInfo({ start: 40, end: null })).toBe('from line 40')
-    expect(fileViewLineInfo({ start: 1, end: null })).toBe('')
-    expect(fileViewLineInfo({ start: null, end: null })).toBe('')
-  })
-
-  it('says how many stretches a multi-range read printed, and how far they reach', () => {
-    expect(fileViewLineInfo({
-      start: 10, end: 100, ranges: [{ start: 10, end: 14 }, { start: 96, end: 100 }],
-    })).toBe('2 ranges, lines 10-100')
+    expect(viewLineNumbers(v, 5)).toEqual([])
   })
 })

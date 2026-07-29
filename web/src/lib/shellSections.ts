@@ -14,12 +14,11 @@
 // file line numbers it printed, a git report in git's own colours (lib/
 // gitOutput), and the separators as the strings they are.
 //
-// The neighbouring lib/fileViewCommand answers a STRICTER version of the same
-// question - "is this whole script nothing but reads?", which promotes the card
-// to a Read - and is all-or-nothing: one unrecognised step and it declines. This
-// one has to cope with the ordinary case where most of a script is opaque, so it
-// is lenient by design and degrades per section: a stretch it cannot attribute
-// renders as plain terminal text, and the sections around it still don't.
+// The neighbouring lib/fileViewCommand answers one question for it - "is this
+// step a plain read of one named file, and which of its lines?" - and answers it
+// strictly. This module is lenient by design around that: most of a real script
+// is opaque, so it degrades per section, and a stretch it cannot attribute
+// renders as plain terminal text while the sections around it still don't.
 //
 // What it will not do is guess. A step whose output length it cannot bound, a
 // pipeline that transforms what it read, an `echo` carrying a variable - each
