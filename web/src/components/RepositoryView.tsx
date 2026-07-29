@@ -12,7 +12,7 @@ import { ApiError } from '../api'
 import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../api'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
-  ChevronDown, ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
+  ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
   GitBranch, GitCompareArrows, ArrowRightLeft, Menu,
   LoaderCircle, Settings2, FileQuestion, FileSymlink, CornerDownRight,
   Images, Camera, ExternalLink,
@@ -22,6 +22,7 @@ import { canCopyImages, copyImageToClipboard } from '../lib/clipboard'
 import { copyWithToast, showCopyToast } from '../lib/copyToast'
 import { useCopyFlash } from '../lib/useCopyFlash'
 import { CopyStateIcon } from './CopyStateIcon'
+import { CollapseSlide } from './CollapseSlide'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { Tooltip } from './Tooltip'
@@ -495,15 +496,24 @@ function TreeRow({
           style={pad}
           className="w-full flex items-center gap-1.5 pr-2 py-1 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors cursor-pointer text-left"
         >
-          {isOpen ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-gray-400" />}
+          {/* One chevron rotated 90deg when open (not a Down/Right swap), so the
+              twist tweens alongside the children's slide. */}
+          <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-gray-400 transition-transform duration-200 ease-in-out ${isOpen ? 'rotate-90' : ''}`} />
           {showIcons && (node.artifact === 'dir'
             ? <Images className="w-4 h-4 shrink-0 text-pink-500" />
             : isOpen ? <FolderOpen className="w-4 h-4 shrink-0 text-blue-500" /> : <Folder className="w-4 h-4 shrink-0 text-blue-500" />)}
           <span className="truncate optical-center">{node.name}</span>
         </button>
-        {isOpen && node.children.map((child) => (
-          <TreeRow key={child.path} node={child} depth={depth + 1} expanded={expanded} toggle={toggle} selectedPath={selectedPath} fileLink={fileLink} showIcons={showIcons} />
-        ))}
+        {/* Slide the children open/shut instead of snapping them in and out.
+            CollapseSlide keeps them mounted through the closing glide and drops
+            them afterwards, so a shut directory still costs nothing to render -
+            which is what the old `isOpen && ...` bought and what a
+            keep-everything-mounted tween would have thrown away on a big repo. */}
+        <CollapseSlide open={isOpen}>
+          {node.children.map((child) => (
+            <TreeRow key={child.path} node={child} depth={depth + 1} expanded={expanded} toggle={toggle} selectedPath={selectedPath} fileLink={fileLink} showIcons={showIcons} />
+          ))}
+        </CollapseSlide>
       </div>
     )
   }

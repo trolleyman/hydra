@@ -277,10 +277,15 @@ export const promptScrollKey = (projectId: string, compact: boolean): string =>
 
 // Running count of generically-named pasted images (image1.png, image2.png, ...)
 // for the spawn form, per project and per layout - mirrors promptDraftKey so the
-// numbering stays separate across projects and survives a reload (the
-// attachments themselves are in-session only; see lib/spawnDrafts.ts).
+// numbering stays separate across projects and survives a reload.
 export const imageCounterKey = (projectId: string, compact: boolean): string =>
   `hydra-image-counter-${compact ? 'compact' : 'full'}-${projectId}`
+
+// The settled uploads attached to that draft, stored as their on-disk paths -
+// the half of an attachment that outlives the page (see lib/draftAttachments).
+// Mirrors promptDraftKey so a box's text and its attachments come back together.
+export const spawnAttachmentsKey = (projectId: string, compact: boolean): string =>
+  `hydra-prompt-attachments-${compact ? 'compact' : 'full'}-${projectId}`
 
 // ── Shared safe accessors ────────────────────────────────────────────────────
 // localStorage can throw (privacy mode, quota, disabled storage); these swallow

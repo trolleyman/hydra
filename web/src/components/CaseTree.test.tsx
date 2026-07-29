@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { CaseTree } from './CaseTree'
 import type { TestCase } from '../api/models/TestCase'
 import type { TestCaseStatus } from '../api/models/TestCaseStatus'
@@ -44,5 +44,80 @@ describe('CaseTree row keys', () => {
   it('renders duplicate cases distinctly (dedup suffix)', () => {
     render(renderTree([mk('dup', 'passed'), mk('dup', 'passed')]))
     expect(screen.getAllByText('dup')).toHaveLength(2)
+  })
+})
+
+// A case at web/src/<dir>/<file>, so a tree built from several has real depth to
+// unfold: web/src, then a dir row, then a file row, then the cases.
+function at(dir: string, file: string, name: string): TestCase {
+  return { name, status: 'passed' as TestCaseStatus, path: `web/src/${dir}/${file}` }
+}
+
+// Shaped so nothing collapses away under us: two cases per file (or hoistedCase
+// folds the chain into one leaf row) and two files under `components` (or
+// compact() merges it into "components/Chat.test.tsx"). `lib` deliberately has
+// only the one file, so it DOES merge - the level counting below expects it.
+const DEEP: TestCase[] = [
+  at('components', 'Chat.test.tsx', 'renders'),
+  at('components', 'Chat.test.tsx', 'scrolls'),
+  at('components', 'Diff.test.tsx', 'diffs'),
+  at('components', 'Diff.test.tsx', 'merges'),
+  at('lib', 'paths.test.ts', 'joins'),
+  at('lib', 'paths.test.ts', 'splits'),
+]
+
+describe('CaseTree defaultExpanded', () => {
+  it('unfolds the whole tree by default', () => {
+    render(<CaseTree cases={DEEP} visible={DEEP} useScope={false} />)
+    expect(screen.getByText('renders')).toBeTruthy()
+    expect(screen.getByText('joins')).toBeTruthy()
+  })
+
+  it('opens one level per click when defaultExpanded is off', () => {
+    render(<CaseTree cases={DEEP} visible={DEEP} useScope={false} defaultExpanded={false} />)
+    // Only the root row is on screen; nothing below it is even mounted.
+    expect(screen.getByText('web/src')).toBeTruthy()
+    expect(screen.queryByText('components')).toBeNull()
+    expect(screen.queryByText('renders')).toBeNull()
+
+    // One click reveals its children - and stops there.
+    fireEvent.click(screen.getByText('web/src'))
+    expect(screen.getByText('components')).toBeTruthy()
+    expect(screen.getByText('lib/paths.test.ts')).toBeTruthy()
+    expect(screen.queryByText('Chat.test.tsx')).toBeNull()
+
+    // The next level down behaves the same way.
+    fireEvent.click(screen.getByText('components'))
+    expect(screen.getByText('Chat.test.tsx')).toBeTruthy()
+    expect(screen.queryByText('renders')).toBeNull()
+
+    fireEvent.click(screen.getByText('Chat.test.tsx'))
+    expect(screen.getByText('renders')).toBeTruthy()
+    // The sibling the user never opened stays shut.
+    expect(screen.queryByText('joins')).toBeNull()
+  })
+
+  it('lets a lifted toggle set survive the tree unmounting', () => {
+    // What the result sections do: hold the override set above the tree, so
+    // folding a section and reopening it restores what was expanded inside.
+    const toggled = new Set<string>()
+    const tree = () => (
+      <CaseTree
+        cases={DEEP}
+        visible={DEEP}
+        useScope={false}
+        defaultExpanded={false}
+        toggled={toggled}
+        onToggle={(k) => { toggled.add(k) }}
+      />
+    )
+    const { rerender, unmount } = render(tree())
+    fireEvent.click(screen.getByText('web/src'))
+    rerender(tree())
+    expect(screen.getByText('components')).toBeTruthy()
+
+    unmount()
+    render(tree())
+    expect(screen.getByText('components')).toBeTruthy()
   })
 })

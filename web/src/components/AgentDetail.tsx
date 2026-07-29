@@ -15,6 +15,7 @@ import { SeparatedRow } from './SeparatedRow'
 import { AgentTopBarContent, type AgentTopBarAction, type AgentTopBarMenuItem } from './AgentTopBar'
 import { TopBarPortal } from './TopBarPortal'
 import { AttachmentChips } from './AttachmentChips'
+import { CollapseSlide } from './CollapseSlide'
 import { Lightbox } from './Lightbox'
 import { uploadBlobUrl } from '../api/uploads'
 import type { Attachment } from '../lib/spawnDrafts'
@@ -180,16 +181,14 @@ const CollapsiblePrompt = memo(function CollapsiblePrompt({ prompt, projectId, a
           </span>
         )}
       </button>
-      {/* Animate the body open/closed with a 0fr->1fr grid row (height:auto can't
-          transition); the inner wrapper clips its overflow while collapsing. The
+      {/* The shared glide (see CollapseSlide). keepMounted: one prompt's
+          markdown, cheap to hold and scrolled to wherever the user left it. The
           markdown renders straight into the card - no nested PromptBlock box. */}
-      <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-        <div className="overflow-hidden">
-          <div className="px-3 pb-3 max-h-96 overflow-y-auto">
-            <PromptContent prompt={prompt} projectId={projectId} />
-          </div>
+      <CollapseSlide open={open} keepMounted>
+        <div className="px-3 pb-3 max-h-96 overflow-y-auto">
+          <PromptContent prompt={prompt} projectId={projectId} />
         </div>
-      </div>
+      </CollapseSlide>
     </div>
   )
 })

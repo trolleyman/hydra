@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ComponentType, type ReactNode } from 'react'
+import { Fragment, useCallback, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { Link, type LinkProps } from '@tanstack/react-router'
 import { TriangleAlert, Box, Braces, Check, ChevronRight, Folder, FolderOpen, SkipForward, Sparkles, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
 import type { TestCase } from '../api/models/TestCase'
@@ -6,6 +6,7 @@ import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 import { getFileIcon } from '../lib/fileIcons'
 import { useCopyFlash } from '../lib/useCopyFlash'
 import { CopyStateIcon } from './CopyStateIcon'
+import { CollapseSlide } from './CollapseSlide'
 import { AnsiText } from './AnsiText'
 
 // CaseTree renders test cases as a collapsible location tree (TESTS_PLAN.md
@@ -304,14 +305,17 @@ function FixButton({ onFix, title }: { onFix: () => void; title: string }) {
 
 // RepoLinkButton is the hover-revealed "open in the repository browser"
 // affordance, deep-linking a row to its file/dir (and line) at the tested ref.
-// It renders a real <Link> (an <a href>), so left-click navigates in-app while
-// middle-click / Ctrl-click open the target in a new tab natively. stopPropagation
+// It renders a real <Link> (an <a href>) with target="_blank", so it opens a NEW
+// tab and the tests panel you were reading - filters, expanded cards, the tree
+// state you dug through to reach this row - stays put behind it. stopPropagation
 // keeps a left-click from also toggling the row it sits on; it doesn't touch
-// default navigation, so the SPA nav (and the browser's new-tab handling) survive.
+// default navigation, so the browser's own new-tab handling survives.
 function RepoLinkButton({ target, title }: { target: LinkProps; title: string }) {
   return (
     <Link
       {...target}
+      target="_blank"
+      rel="noopener noreferrer"
       onClick={(e) => e.stopPropagation()}
       title={title}
       aria-label={title}
@@ -484,7 +488,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo, onFix
         ) : null}
         <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} what={loc ? 'test path' : 'test name'} />
         {onOpenInRepo && c.path && !c.path_missing ? (
-          <RepoLinkButton target={onOpenInRepo(c.path as string, c.line)} title={`Open ${loc || c.path} in repository`} />
+          <RepoLinkButton target={onOpenInRepo(c.path as string, c.line)} title={`Open ${loc || c.path} in repository (new tab)`} />
         ) : null}
         {c.duration_ms != null && c.duration_ms > 0 ? (
           <span className="ml-auto font-mono text-[10px] text-gray-400 shrink-0">{c.duration_ms}ms</span>
@@ -517,10 +521,10 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo, onFix
   )
 }
 
-function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo, onFixCase, missingPaths }: {
+function NodeView({ node, depth, isExpanded, onToggle, useScope, onOpenInRepo, onFixCase, missingPaths }: {
   node: TreeNode
   depth: number
-  collapsed: Set<string>
+  isExpanded: (key: string) => boolean
   onToggle: (key: string) => void
   useScope: boolean
   onOpenInRepo?: OpenInRepo
@@ -533,7 +537,7 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo, on
   if (hoisted) {
     return <CaseRow c={hoisted.c} segs={hoisted.segs} showLocation={useScope} indent={depth} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} />
   }
-  const isCollapsed = collapsed.has(node.key)
+  const open = isExpanded(node.key)
   const isDir = nodeIsDir(node)
   const copyPath = node.pathParts.join('/')
   // A file node (not a dir) whose path isn't in the checkout: mark it and drop
@@ -556,32 +560,30 @@ function NodeView({ node, depth, collapsed, onToggle, useScope, onOpenInRepo, on
         style={{ paddingLeft: `${depth * INDENT_STEP + NODE_PAD}px` }}
       >
         {/* One chevron, rotated 90° when expanded, so the twist animates. */}
-        <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`} />
-        <RowSegments segs={node.segs} isDir={isDir} expanded={!isCollapsed} pathMissing={pathMissing} />
+        <ChevronRight className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+        <RowSegments segs={node.segs} isDir={isDir} expanded={open} pathMissing={pathMissing} />
         {copyPath && node.kind === 'path' ? <CopyButton text={copyPath} title={`Copy ${copyPath}`} what="test path" /> : null}
-        {onOpenInRepo && copyPath && !pathMissing ? <RepoLinkButton target={onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository`} /> : null}
+        {onOpenInRepo && copyPath && !pathMissing ? <RepoLinkButton target={onOpenInRepo(copyPath)} title={`Open ${copyPath} in repository (new tab)`} /> : null}
         <NodeBadges counts={node.counts} />
       </div>
-      {/* Animated expand/collapse: a 0fr↔1fr grid row transition slides the
-          children open/closed (they stay mounted so the height can tween and the
-          collapse state persists). */}
-      <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
-        <div className="overflow-hidden min-h-0">
-          <NodeChildren node={node} depth={depth + 1} connect collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} missingPaths={missingPaths} />
-        </div>
-      </div>
+      {/* Animated expand/collapse; the children mount on open and are dropped a
+          beat after close, so a shut subtree of a huge green run builds no rows
+          at all (see CollapseSlide). */}
+      <CollapseSlide open={open}>
+        <NodeChildren node={node} depth={depth + 1} connect isExpanded={isExpanded} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} missingPaths={missingPaths} />
+      </CollapseSlide>
     </div>
   )
 }
 
-function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useScope, onOpenInRepo, onFixCase, missingPaths }: {
+function NodeChildren({ node, depth, connect = false, isExpanded, onToggle, useScope, onOpenInRepo, onFixCase, missingPaths }: {
   node: TreeNode
   depth: number
   // Draw a `tree`-style connector left of each child, linking it to the parent
   // (see ChildConnector). Off at the tree's flush-left root, on for nested
   // levels; the parent sits at depth-1.
   connect?: boolean
-  collapsed: Set<string>
+  isExpanded: (key: string) => boolean
   onToggle: (key: string) => void
   useScope: boolean
   onOpenInRepo?: OpenInRepo
@@ -614,7 +616,7 @@ function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useSc
     ...children.map((child) => ({
       key: child.key,
       hasChevron: hoistedCase(child) === null,
-      el: <NodeView node={child} depth={depth} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} missingPaths={missingPaths} />,
+      el: <NodeView node={child} depth={depth} isExpanded={isExpanded} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} missingPaths={missingPaths} />,
     })),
     ...cases.map((c) => ({
       key: rowKeys.get(c)!,
@@ -638,7 +640,7 @@ function NodeChildren({ node, depth, connect = false, collapsed, onToggle, useSc
   )
 }
 
-export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = false, onOpenInRepo, onFixCase, collapsed: collapsedProp, onToggle: onToggleProp }: {
+export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = false, defaultExpanded = true, onOpenInRepo, onFixCase, toggled: toggledProp, onToggle: onToggleProp }: {
   // ALL of the runner's cases - badges tally these regardless of filters.
   cases: TestCase[]
   // The filter/search-surviving subset actually rendered as rows.
@@ -650,13 +652,22 @@ export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = fa
   // (the result-section header) sitting at depth-1. Off for the flush-left main
   // tree, on when embedded under a section.
   rootConnect?: boolean
+  // Whether a node nobody has touched renders open. True for the main tree,
+  // where the status filter has already narrowed the set to what you asked for
+  // and unfolding it all is the point. False when the tree is a fold-away pile
+  // you opened deliberately - the passing/skipped result sections - where
+  // expanding one row and getting a thousand is not "expanded", it's a wall:
+  // there each level opens one step at a time, VS Code style.
+  defaultExpanded?: boolean
   // Deep-link rows to the repository browser (omitted → no link affordance).
   onOpenInRepo?: OpenInRepo
   // Offer "ask the agent to fix this" on failing rows (omitted → no affordance).
   onFixCase?: FixCase
-  // Collapse state can be lifted out (persisted per agent). When omitted the
-  // tree keeps its own ephemeral state.
-  collapsed?: Set<string>
+  // Node keys the user has flipped AWAY from `defaultExpanded` - so with the
+  // default open this is the set of collapsed nodes, and with it shut, the set
+  // of opened ones. Can be lifted out (persisted per agent, or kept above a
+  // section that unmounts its tree); omitted → the tree keeps its own state.
+  toggled?: Set<string>
   onToggle?: (key: string) => void
 }) {
   const visibleSet = useMemo(() => new Set(visible), [visible])
@@ -668,22 +679,26 @@ export function CaseTree({ cases, visible, useScope, depth = 0, rootConnect = fa
     () => new Set(cases.filter((c) => c.path_missing && c.path).map((c) => c.path as string)),
     [cases],
   )
-  // Everything starts expanded (the filter already narrows the set); the set
-  // records what the user closed. Keyed by node identity so it survives both
-  // re-renders and axis switches (keys differ per axis, which is fine).
-  const [internalCollapsed, setInternalCollapsed] = useState<Set<string>>(new Set())
-  const collapsed = collapsedProp ?? internalCollapsed
+  // The set records only what the user flipped away from `defaultExpanded`,
+  // keyed by node identity so it survives both re-renders and axis switches
+  // (keys differ per axis, which is fine).
+  const [internalToggled, setInternalToggled] = useState<Set<string>>(new Set())
+  const toggled = toggledProp ?? internalToggled
   const onToggle = onToggleProp ?? ((key: string) =>
-    setInternalCollapsed((prev) => {
+    setInternalToggled((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
       return next
     }))
+  const isExpanded = useCallback(
+    (key: string) => (toggled.has(key) ? !defaultExpanded : defaultExpanded),
+    [toggled, defaultExpanded],
+  )
   if (visible.length === 0) return null
   return (
     <div className="flex flex-col">
-      <NodeChildren node={root} depth={depth} connect={rootConnect} collapsed={collapsed} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} missingPaths={missingPaths} />
+      <NodeChildren node={root} depth={depth} connect={rootConnect} isExpanded={isExpanded} onToggle={onToggle} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} missingPaths={missingPaths} />
     </div>
   )
 }

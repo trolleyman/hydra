@@ -30,6 +30,7 @@ import { buildRepoSplat } from './lib/repoSplat'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { buildWordRangeMaps, renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS, type WordRange } from './lib/wordDiff'
 import { Tooltip } from './components/Tooltip'
+import { CollapseSlide } from './components/CollapseSlide'
 import { ResizeGrip } from './components/ResizeGrip'
 import { pinCardToTop, scrollCardToTop, scrollToDiffLine } from './lib/diffScroll'
 import { useMeasuredHeight, useMeasuredWidth } from './lib/useMeasuredHeight'
@@ -119,15 +120,19 @@ function fileDiffText(file: DiffFile): string {
 // RepoOpenButton deep-links the file to the repository browser at the agent's
 // branch - the diff-header sibling of the tests panel's "open in repository"
 // affordance (CaseTree's RepoLinkButton). It renders a real <Link> (an <a href>)
-// so middle-click / Ctrl-click open it in a new tab natively; stopPropagation
-// keeps a left-click from also toggling the header's collapse. Styled to match
-// the adjacent CopyButton rather than the test row's hover-reveal look, since
-// the header's actions are always visible.
+// with target="_blank", so it opens a NEW tab and the diff you were reading -
+// scroll position, expanded files, review drafts and all - stays put behind it;
+// that's the whole point of the affordance (you're cross-referencing, not
+// leaving). stopPropagation keeps a left-click from also toggling the header's
+// collapse. Styled to match the adjacent CopyButton rather than the test row's
+// hover-reveal look, since the header's actions are always visible.
 function RepoOpenButton({ target }: { target: LinkProps }) {
   return (
-    <Tooltip content="Open in repository">
+    <Tooltip content="Open in repository (new tab)">
       <Link
         {...target}
+        target="_blank"
+        rel="noopener noreferrer"
         onClick={(e) => e.stopPropagation()}
         className="inline-flex p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
       >
@@ -2709,21 +2714,17 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
           <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate optical-center">{node.name}</span>
           <ChevronDown className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
         </button>
-        {/* Children stay mounted and their height animates via the grid-rows
-            0fr<->1fr trick (the inner wrapper is overflow-hidden), so expand /
-            collapse glides open and shut without measuring heights. */}
-        <div
-          className="grid transition-[grid-template-rows] duration-200 ease-out"
-          style={{ gridTemplateRows: isOpen ? '1fr' : '0fr' }}
-        >
-          <div className="overflow-hidden min-h-0">
-            {node.children.map((child) => (
-              <TreeNodeView key={child.path} node={child} depth={depth + 1}
-                collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
-                onFileClick={onFileClick} activeFilePath={activeFilePath} />
-            ))}
-          </div>
-        </div>
+        {/* The shared glide. keepMounted: a diff's file tree is a few dozen rows
+            whose per-file state (the active highlight) is worth keeping alive
+            while a folder is shut - unlike the whole-repo tree in
+            RepositoryView, which drops its closed subtrees. */}
+        <CollapseSlide open={isOpen} keepMounted>
+          {node.children.map((child) => (
+            <TreeNodeView key={child.path} node={child} depth={depth + 1}
+              collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
+              onFileClick={onFileClick} activeFilePath={activeFilePath} />
+          ))}
+        </CollapseSlide>
       </div>
     )
   }
