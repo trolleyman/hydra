@@ -162,10 +162,41 @@ describe('parseScriptSteps', () => {
   it('declines a script with nothing to describe', () => {
     expect(parseScriptSteps('go test ./...')).toBeNull()
     expect(parseScriptSteps('cd web && bun run lint')).toBeNull()
-    // Shapes it will not model at all.
+    // A heredoc body is DATA: the `cat a.go` inside this one is a line of the
+    // file being written, not a step that read one.
     expect(parseScriptSteps("cat <<'EOF' > f\ncat a.go\nEOF")).toBeNull()
+    // A group is one opaque producer, so this describes nothing either.
     expect(parseScriptSteps('(cat a.go)')).toBeNull()
+    // Shapes it will not model at all.
     expect(parseScriptSteps('cat a.go &')).toBeNull()
+    expect(parseScriptSteps("cat 'a.go")).toBeNull()
+  })
+
+  it('steps over a heredoc rather than refusing the whole script', () => {
+    // The body is stdin for the command above it - nothing in it ran, and
+    // nothing in it reached the transcript.
+    expect(kinds("python3 - <<'PY'\nprint('x')\nPY\ngrep -n foo a.go")).toEqual(['unknown', 'matches'])
+    expect(kinds('cat <<-EOF\n\tbody\n\tEOF\ncat a.go')).toEqual(['unknown', 'view'])
+    // An unterminated body runs to the end, as the shell would have taken it.
+    expect(kinds("cat a.go\npython3 - <<'PY'\nprint('x')")).toEqual(['view', 'unknown'])
+    // A here-string's word is data too, not a file this read.
+    expect(kinds('grep -c foo <<< "$text"\ncat a.go')).toEqual(['unknown', 'view'])
+    // An arithmetic shift is not a heredoc.
+    expect(kinds('echo $(( 1 << 2 ))\ncat a.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('steps over a group as one opaque producer', () => {
+    // The `echo` separators around it still anchor, which is the whole point:
+    // one unmodellable step used to cost every other step in the script its
+    // attribution.
+    expect(kinds('echo ----\n(gzip -dc x.gz | grep -o y | head -5)\necho ====\ncat a.go')).toEqual([
+      'marker', 'unknown', 'marker', 'view',
+    ])
+    expect(kinds('{ cat a.go; echo x; }\ncat b.go')).toEqual(['unknown', 'view'])
+    // A brace EXPANSION is a word, not a group.
+    expect(kinds('cat src/{a,b}.go\ncat b.go')).toEqual(['unknown', 'view'])
+    // A group that never closes is not one.
+    expect(parseScriptSteps('(cat a.go\ncat b.go')).toBeNull()
   })
 })
 
@@ -216,6 +247,34 @@ describe('splitScriptOutput', () => {
     // The file's own text contains the marker; the section must not stop there.
     const sections = splitScriptOutput(steps('sed -n 1,3p a.go\necho ---\nsed -n 1,1p b.go'), 'a1\n---\na3\n---\nb1')
     expect(sections?.map((s) => s.lines)).toEqual([['a1', '---', 'a3'], ['---'], ['b1']])
+  })
+
+  it('splits a search off an unmodellable neighbour by its own prefixes', () => {
+    // Neither an `ls` nor the search after it is bounded by anything the script
+    // says - but every line the search printed announces where it came from,
+    // and no line of the `ls` does.
+    const split = splitScriptOutput(
+      steps('ls web/scripts/lib/\ngrep -rn gstatic web/scripts/lib/*.ts'),
+      'browserProxy.ts\nfontCache.ts\nweb/scripts/lib/fontCache.ts:19:const FONT_HOSTS = /x/',
+    )
+    expect(split?.map((s) => [s.kind, s.lines])).toEqual([
+      ['plain', ['browserProxy.ts', 'fontCache.ts']],
+      ['matches', ['web/scripts/lib/fontCache.ts:19:const FONT_HOSTS = /x/']],
+    ])
+    // The same the other way round, and with the bare `12:` a single-file
+    // search numbers its output with.
+    const before = splitScriptOutput(
+      steps('grep -n foo a.go\nls dir/'),
+      '12:foo()\n30:foo()\na.txt\nb.txt',
+    )
+    expect(before?.map((s) => [s.kind, s.lines])).toEqual([
+      ['matches', ['12:foo()', '30:foo()']],
+      ['plain', ['a.txt', 'b.txt']],
+    ])
+    // A search that prints NO prefix (one named file, no `-n`) says nothing
+    // about where its lines end, so there is nothing to split on and the card
+    // keeps its plain output panel.
+    expect(splitScriptOutput(steps('ls dir/\ngrep foo a.go'), 'a.txt\nfoo()')).toBeNull()
   })
 
   it('falls back to plain text where it cannot tell the producers apart', () => {

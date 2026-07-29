@@ -91,6 +91,10 @@ interface Word {
   dynamic: boolean
   // Some part of it was quoted, so it is data rather than a command name.
   quoted: boolean
+  // It BEGINS quoted, which is the stricter question to ask of something that
+  // looks like a flag: `"-v"` is a pattern that happens to start with a dash,
+  // but `--include="*.ts"` is a flag whose VALUE is quoted.
+  quotedStart: boolean
 }
 
 interface Command {
@@ -198,13 +202,86 @@ function readWordAt(code: string, at: number): (Word & { end: number }) | null {
     text += ch
     i++
   }
-  return { end: i, text, dynamic, quoted }
+  return { end: i, text, dynamic, quoted, quotedStart: /['"\\]/.test(code[at] ?? '') }
+}
+
+// A bare heredoc delimiter has to look like an identifier, which is what keeps
+// an arithmetic left shift - `$(( 1 << 2 ))` - from being read as one.
+const HEREDOC_DELIM = /^[A-Za-z_][A-Za-z0-9_.-]*$/
+
+// readHeredoc parses a `<<`/`<<-` operator at `at` and finds where its body
+// ends, so the lexer can step over a region that is DATA. Null when what follows
+// is not a plausible heredoc.
+//
+// The body is skipped rather than modelled: it is stdin for the command the
+// operator belongs to, so nothing in it is a command and nothing in it reaches
+// the transcript. The one thing that matters is not lexing it as shell, which
+// would turn a file's worth of text into commands.
+function readHeredoc(script: string, at: number): { opEnd: number; delim: string; strip: boolean } | null {
+  let i = at + 2
+  const strip = script[i] === '-'
+  if (strip) i++
+  while (script[i] === ' ' || script[i] === '\t') i++
+  let delim = ''
+  const quote = script[i]
+  if (quote === "'" || quote === '"') {
+    const close = script.indexOf(quote, i + 1)
+    if (close === -1) return null
+    delim = script.slice(i + 1, close)
+    i = close + 1
+  } else {
+    while (i < script.length && !WORD_END.test(script[i])) { delim += script[i]; i++ }
+    if (!HEREDOC_DELIM.test(delim)) return null
+  }
+  return delim === '' ? null : { opEnd: i, delim, strip }
+}
+
+// skipHeredocBodies steps over the bodies queued on the line that just ended,
+// returning where shell resumes. An unterminated body (a truncated script) runs
+// to the end, which is what the shell would have done with it.
+function skipHeredocBodies(script: string, from: number, pending: { delim: string; strip: boolean }[]): number {
+  let pos = from
+  for (const h of pending) {
+    while (pos < script.length) {
+      const nl = script.indexOf('\n', pos)
+      const end = nl === -1 ? script.length : nl
+      const raw = script.slice(pos, end)
+      const body = h.strip ? raw.replace(/^\t+/, '') : raw
+      pos = nl === -1 ? script.length : nl + 1
+      if (body.replace(/\r$/, '') === h.delim) break
+    }
+  }
+  return pos
+}
+
+// skipGroup steps over a `( ... )` (or `{ ...; }`) from its opening bracket,
+// respecting quotes, and returns the index just past its close - or -1 when it
+// never closes. The group is then one opaque command: it prints something this
+// module cannot describe, which is what `unknown` is for, and refusing the whole
+// script over it cost every OTHER step in the script its attribution.
+function skipGroup(script: string, at: number): number {
+  const open = script[at]
+  const close = open === '(' ? ')' : '}'
+  let depth = 0
+  for (let i = at; i < script.length; i++) {
+    const ch = script[i]
+    if (ch === "'" || ch === '"') {
+      const end = ch === '"' ? closingDouble(script, i) : script.indexOf("'", i + 1)
+      if (end === -1) return -1
+      i = end
+      continue
+    }
+    if (ch === '\\') { i++; continue }
+    if (ch === open) depth++
+    else if (ch === close && --depth === 0) return i + 1
+  }
+  return -1
 }
 
 // lexPipelines cuts a script into the pipelines the shell runs one after
 // another - the pieces separated by `;`, `&&`, `||` and newlines - each split
 // into its `|`-separated commands. Null for a script whose shape this cannot
-// model at all (a subshell, a heredoc, a backgrounded command).
+// model at all (a backgrounded command, an unterminated quote).
 function lexPipelines(script: string): Pipeline[] | null {
   const pipelines: Pipeline[] = []
   let cmds: Command[] = []
@@ -215,6 +292,8 @@ function lexPipelines(script: string): Pipeline[] | null {
   let lastEnd = -1
   let i = 0
   const n = script.length
+  // Heredocs opened on the line being lexed, whose bodies start after it.
+  let heredocs: { delim: string; strip: boolean }[] = []
 
   const endCmd = (at: number) => {
     if (words.length > 0) cmds.push({ words, raw: script.slice(cmdStart, at).trim(), redirected })
@@ -231,7 +310,19 @@ function lexPipelines(script: string): Pipeline[] | null {
 
   while (i < n) {
     const ch = script[i]
-    if (ch === '\n' || ch === ';') { endPipeline(i, i + 1); i++; continue }
+    if (ch === '\n' || ch === ';') {
+      endPipeline(i, i + 1)
+      i++
+      // The bodies of any heredocs this line opened sit here, between the line
+      // and the next command.
+      if (heredocs.length > 0) {
+        i = skipHeredocBodies(script, i, heredocs)
+        heredocs = []
+        pipeStart = i
+        cmdStart = i
+      }
+      continue
+    }
     if (ch === '&') {
       if (script[i + 1] === '&') { endPipeline(i, i + 2); i += 2; continue }
       // A backgrounded command's output arrives whenever it arrives, so no
@@ -245,9 +336,18 @@ function lexPipelines(script: string): Pipeline[] | null {
       i++
       continue
     }
-    // A subshell reorders nothing but nests, and its `(` would be read as a word
-    // boundary rather than a group.
-    if (ch === '(' || ch === ')') return null
+    // A group runs commands this module is not going to describe, but it is ONE
+    // producer's worth of output, so it is stepped over as a single opaque word
+    // rather than costing the whole script its parse.
+    if (ch === '(' || (ch === '{' && WORD_END.test(script[i + 1] ?? ' '))) {
+      const end = skipGroup(script, i)
+      if (end === -1) return null
+      words.push({ text: script.slice(i, end), dynamic: true, quoted: false, quotedStart: false })
+      i = end
+      lastEnd = i
+      continue
+    }
+    if (ch === ')' || ch === '}') return null
     if (ch === ' ' || ch === '\t' || ch === '\r') { i++; continue }
     // A `#` opens a comment only at the start of a word, which is where we are.
     if (ch === '#') {
@@ -256,9 +356,25 @@ function lexPipelines(script: string): Pipeline[] | null {
       continue
     }
     if (ch === '<' || ch === '>') {
-      // A heredoc body is data, and lexing it as shell would turn a file's worth
-      // of text into commands.
-      if (script.startsWith('<<', i)) return null
+      // A here-string's word is data on stdin: consumed and dropped, like a
+      // redirect target.
+      if (script.startsWith('<<<', i)) {
+        i += 3
+        while (script[i] === ' ' || script[i] === '\t') i++
+        const target = readWordAt(script, i)
+        if (!target) return null
+        i = target.end > i ? target.end : i + 1
+        continue
+      }
+      // A heredoc's BODY is data too, but it does not start until after this
+      // line, so the operator is noted here and the body stepped over there.
+      if (script.startsWith('<<', i)) {
+        const doc = readHeredoc(script, i)
+        if (!doc) return null
+        heredocs.push({ delim: doc.delim, strip: doc.strip })
+        i = doc.opEnd
+        continue
+      }
       // `2>` redirects a stream: the digit belongs to the operator, not to the
       // command's arguments. Only when it is written flush against it.
       let fd = ''
@@ -354,7 +470,10 @@ function parseMatches(words: Word[]): ParsedGrep | null {
   let patternGiven = false
   for (let i = 0; i < args.length; i++) {
     const w = args[i]
-    if (w.quoted || !w.text.startsWith('-') || w.text === '-') { operands.push(w); continue }
+    // `quotedStart`, not `quoted`: `--include="*.ts"` is a flag carrying a
+    // quoted value, and counting it as a file operand put a path that is not a
+    // path into the section's file list.
+    if (w.quotedStart || !w.text.startsWith('-') || w.text === '-') { operands.push(w); continue }
     const [flag, inlineValue] = splitAt(w.text, '=')
     if (GREP_SHAPE_FLAGS.has(flag)) return null
     if (flag === '-n' || flag === '--line-number') { numbered = true; continue }
@@ -640,6 +759,32 @@ function mergeSearches(steps: ScriptStep[]): ScriptStep[] {
   return out
 }
 
+// searchExtent is how many lines at one END of a stretch carry the prefixes a
+// search writes on its own output - `path:12:`, `12:`, `path:` - and so cannot
+// have come from whatever ran on the other side of it.
+//
+// This is the one boundary in this module that comes from the OUTPUT's shape
+// rather than from the script, and it is here because the script cannot say
+// where it is: an `ls dir` followed by a `grep -rn x dir/*.ts` bounds neither
+// producer, so both used to lose their attribution to one plain block even
+// though every line of the search announces itself and no line of the `ls`
+// does.
+//
+// Null when the search prints no prefix at all (one named file, no `-n`), which
+// is exactly when there is nothing to tell the two apart by.
+function searchExtent(step: ScriptStep, slice: string[], lo: number, hi: number, from: 'start' | 'end'): number | null {
+  if (step.kind !== 'matches') return null
+  const shapes: RegExp[] = []
+  if (step.match.numbered) shapes.push(PATH_NUMBERED, NUMBERED)
+  if (step.match.paths.length !== 1) shapes.push(PATH_ONLY)
+  if (shapes.length === 0) return null
+  // A `--` between context groups is the search's own, and carries no prefix.
+  const owns = (line: string) => line.trim() === '--' || shapes.some((re) => re.test(line))
+  let n = 0
+  while (hi - lo - n > 0 && owns(slice[from === 'start' ? lo + n : hi - n - 1])) n++
+  return n > 0 ? n : null
+}
+
 // distribute hands a stretch of output to the producers that ran inside it.
 // Null when the boundaries between them are not knowable.
 //
@@ -650,6 +795,9 @@ function mergeSearches(steps: ScriptStep[]): ScriptStep[] {
 // puts a spacing `echo` after each search as often as before it, and taking the
 // leading end only meant that blank line cost the search above it its whole
 // attribution.
+//
+// A search at either end is bounded too, by its own prefixes rather than by a
+// count - see searchExtent.
 function distribute(producers: ScriptStep[], slice: string[]): string[][] | null {
   if (producers.length === 0) return null
   if (producers.length === 1) return [slice]
@@ -667,7 +815,7 @@ function distribute(producers: ScriptStep[], slice: string[]): string[][] | null
 
   let head = 0
   for (; head < producers.length; head++) {
-    const limit = stepLimit(producers[head])
+    const limit = stepLimit(producers[head]) ?? searchExtent(producers[head], slice, lo, hi, 'start')
     if (limit == null) break
     const n = Math.min(limit, hi - lo)
     if (!fits(producers[head], lo)) continue
@@ -676,7 +824,7 @@ function distribute(producers: ScriptStep[], slice: string[]): string[][] | null
   }
   let tail = producers.length - 1
   for (; tail > head; tail--) {
-    const limit = stepLimit(producers[tail])
+    const limit = stepLimit(producers[tail]) ?? searchExtent(producers[tail], slice, lo, hi, 'end')
     if (limit == null) break
     const n = Math.min(limit, hi - lo)
     if (!fits(producers[tail], hi - n)) continue
