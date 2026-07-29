@@ -334,6 +334,21 @@ area; do not re-derive it by reading source. Skip them otherwise.
   serving previews over TLS) -> [docs/remote-access.md](docs/remote-access.md)
   (BUILT; plain-HTTP + auth-key, ngrok, Tailscale serve/Funnel, reverse-proxy;
   `previewURL` protocol-relative so preview links follow the page scheme)
-
+- **Deploying Hydra, or changing how it is built/restarted** (`mage
+  deploy:service`, the systemd unit, the in-app update, minify vs source maps,
+  response compression) -> [docs/deployment.md](docs/deployment.md) (BUILT: ONE
+  build flavour - minified *with* source maps, precompressed to `.br`+`.gz` at
+  build time by `web/scripts/precompress.ts` (original deleted, so the binary
+  shrinks) and served by `internal/cli.serveAsset`;
+  `internal/http.CompressionMiddleware` now covers only dynamic responses;
+  `HYDRA_DEV_BUILD` gone. `POST
+  /api/server/update` builds while still serving, streams the log over
+  `/ws/server/update`, verifies, swaps atomically and re-execs via
+  `internal/selfupdate` - `syscall.Exec` keeps the PID and carries the web
+  listener across, so no supervisor and no exit-code protocol. `Dev`/`DevExpose`/
+  `Prod`/`Preview`/`DevAutoReload` deleted. NOT built: carrying agent PTYs across
+  the restart, so a restart still stops running heads - a spike showed it needs
+  `Pdeathsig`/`--die-with-parent` dropped first, trading away the
+  crashed-daemon-can't-orphan guarantee)
 The open backlog (ideas/gaps not yet built) lives in
 [docs/roadmap.md](docs/roadmap.md).

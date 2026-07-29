@@ -118,7 +118,7 @@ func renderDeploy(cfg DeployConfig) string {
 		"#\n" +
 		"# This file only stores the key. The web UI binds to localhost by default;\n" +
 		"# exposing it on the network is an explicit, separate action - run\n" +
-		"# `mage prod` (production) or `mage devExpose` (development) to bind 0.0.0.0,\n" +
+		"# `mage deploy:service`, or HYDRA_API_ADDR=0.0.0.0:PORT, to bind 0.0.0.0,\n" +
 		"# both of which refuse to start without this key.\n" +
 		"\n"
 	s += "auth_key = " + tomlStringValue(cfg.AuthKey) + "\n"

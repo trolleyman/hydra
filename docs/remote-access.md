@@ -5,6 +5,10 @@ box it is reachable only from the machine it runs on. This doc covers reaching
 it from other devices (a laptop, a phone) and, when you do, getting a real
 HTTPS *secure context* rather than plain HTTP.
 
+For the *lifecycle* side of deploying - running Hydra as a systemd service
+instead of a foreground `mage dev`, and running a dev instance alongside it -
+see [deployment.md](deployment.md).
+
 ## Why HTTPS matters here (secure context)
 
 A pile of browser APIs only exist in a *secure context* - an `https://` origin,

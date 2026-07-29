@@ -268,7 +268,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		Sessions:        reg,
 		DB:              store,
 		StartTime:       time.Now(),
-		Development:     os.Getenv("HYDRA_DEV_RESTART") == "1",
+		SelfUpdate:      newSelfUpdateManager(projectRoot),
 		Artifacts:       artifactReg,
 		Tests:           testReg,
 		Services:        svcMgr,
@@ -462,7 +462,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	mux := buildMux(server, auth)
 	return &daemonRuntime{
 		server:      server,
-		handler:     httppkg.LoggingMiddleware(auth.Middleware(mux)),
+		handler:     httppkg.CompressionMiddleware(httppkg.LoggingMiddleware(auth.Middleware(mux))),
 		store:       store,
 		reg:         reg,
 		services:    svcMgr,
@@ -516,6 +516,7 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/artifacts", server.HandleArtifactsWS)
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/tests", server.HandleTestsWS)
 	mux.HandleFunc("/ws/projects/{project_id}/events", server.HandleEventsWS)
+	mux.HandleFunc("/ws/server/update", server.HandleServerUpdateWS)
 	mux.HandleFunc("POST /shells/projects/{project_id}/agents/{id}/close", server.HandleShellClose)
 	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)

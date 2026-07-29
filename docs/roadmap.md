@@ -244,3 +244,50 @@ before starting. Grouped by area.
 ## Chat mode
 
 - [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
+
+## Deployment
+
+- [x] **One build flavour: minified + source maps, gzipped on the way out.**
+  Done. `minify` and `sourcemap` were both derived from `mode === 'development'`,
+  which made "production" and "debuggable" look mutually exclusive. Measured:
+  today's unminified bundle was 7.3 MB of JS on the wire; it is 3.9 MB minified
+  and 121 KB after gzip. `HYDRA_DEV_BUILD`, its five `os.Setenv` calls and the
+  dual build stamp are gone with it - along with the trap where heads inherited
+  `HYDRA_DEV_BUILD=1` and silently built dev bundles. Compression is a runtime
+  middleware (`internal/http/compress.go`) rather than build-time
+  precompression, so API responses benefit too. Build-time precompression would
+  additionally shrink the binary by ~12 MB - still open, if that matters.
+
+- [x] **The installed service updates itself, restarting via `syscall.Exec`.**
+  Done. `POST /api/server/update` builds while still serving, streams the log to
+  a toast, verifies the new binary starts, swaps it atomically and re-execs. A
+  failed build changes nothing. Re-execing keeps the PID, so no supervisor is
+  involved and the web listener is carried across (the port is never unbound).
+  `Dev`, `DevExpose`, `Prod`, `Preview`, `DevAutoReload` and `devServerLoop` are
+  deleted - eight ways to start Hydra down to three. See
+  [deployment.md](deployment.md).
+
+- [ ] **Restart without killing every running head.** Spiked, deliberately not
+  built. A PTY master crosses `syscall.Exec` fine - the same trick the web
+  listener already uses - but *only* with the parent-death signal dropped: with
+  `Pdeathsig` set, as every sandbox has it via `internal/scope.StartFunc`, the
+  exec SIGKILLs the child even though the process never died, because Linux keys
+  `PR_SET_PDEATHSIG` to the parent THREAD and `exec` kills every thread but the
+  caller. (It depends on which thread forked - forking and exec'ing on one thread
+  lets the child survive and gives a false green light.) So the cheap route
+  trades away the guarantee that a *crashed* daemon cannot orphan a sandbox,
+  leaving `SweepOrphanScopes`-at-next-boot as the only backstop; it would also
+  need that sweep taught to skip the units it just adopted. Splitting the PTY
+  owner into a supervisor that never restarts buys the same thing without the
+  trade. Until then a restart stops running heads, they resume with `--continue`,
+  and the UI confirms first. See [deployment.md](deployment.md).
+
+- [ ] **Make a second Hydra instance survivable** (only if wanted - see
+  [deployment.md](deployment.md) for why one instance is probably right).
+  `SweepOrphanScopes` (`internal/sandbox/scope_linux.go:160`) reaps *all*
+  `hydra-*.scope` units at daemon boot, so a second instance kills the first's
+  live agent sandboxes; needs a per-instance scope prefix. Plus an instance name
+  namespacing `~/.config/hydra/projects.json`, `uuid.txt`, the shared
+  `~/.local/share/hydra/logs/hydra.log` and the daemon runtime key, and a
+  templated `hydra@<instance>.service`. Note simulation mode (`mage demo`) is
+  already fully isolated and covers most frontend work.

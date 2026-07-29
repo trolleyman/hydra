@@ -28,7 +28,12 @@ func binaryStamp() (string, error) {
 	return fmt.Sprintf("%d-%d", info.ModTime().UnixNano(), info.Size()), nil
 }
 
-// writeDaemonFiles records the daemon's PID and binary stamp. Called at startup.
+// WriteDaemonFiles records the daemon's PID and binary stamp. Called at startup.
+//
+// The info file is line-based: the binary stamp first, then optional key=value
+// lines. Today the only key is managed=systemd, written when systemd started us
+// (it puts INVOCATION_ID in every service's environment). Older single-line info
+// files still parse, since only the first line is ever compared.
 func WriteDaemonFiles(projectRoot string) error {
 	pp, err := pidPath(projectRoot)
 	if err != nil {
@@ -45,7 +50,41 @@ func WriteDaemonFiles(projectRoot string) error {
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-	return errtrace.Wrap(os.WriteFile(ip, []byte(stamp), 0o600))
+	body := stamp
+	if os.Getenv("INVOCATION_ID") != "" {
+		body += "\nmanaged=systemd"
+	}
+	return errtrace.Wrap(os.WriteFile(ip, []byte(body), 0o600))
+}
+
+// readDaemonInfo returns the recorded binary stamp and whether a service manager
+// owns the running daemon.
+func readDaemonInfo(projectRoot string) (stamp string, serviceManaged bool, ok bool) {
+	ip, err := infoPath(projectRoot)
+	if err != nil {
+		return "", false, false
+	}
+	data, err := os.ReadFile(ip)
+	if err != nil {
+		return "", false, false
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, l := range lines[1:] {
+		if strings.TrimSpace(l) == "managed=systemd" {
+			serviceManaged = true
+		}
+	}
+	return lines[0], serviceManaged, true
+}
+
+// IsServiceManaged reports whether the project's running daemon was started by a
+// service manager. Such a daemon must not be evicted behind the manager's back:
+// SIGTERMing it and spawning a detached replacement leaves systemd's unit
+// inactive while an unsupervised daemon runs (or, with Restart=always, two of
+// them racing for the socket).
+func IsServiceManaged(projectRoot string) bool {
+	_, managed, _ := readDaemonInfo(projectRoot)
+	return managed
 }
 
 // removeDaemonFiles cleans up the PID/info files at shutdown.
@@ -61,19 +100,15 @@ func RemoveDaemonFiles(projectRoot string) {
 // isStale reports whether the running daemon was started from a now-replaced
 // binary (i.e. the user rebuilt hydra). Best-effort: returns false on any error.
 func isStale(projectRoot string) bool {
-	ip, err := infoPath(projectRoot)
-	if err != nil {
-		return false
-	}
-	recorded, err := os.ReadFile(ip)
-	if err != nil {
+	recorded, _, ok := readDaemonInfo(projectRoot)
+	if !ok {
 		return false
 	}
 	current, err := binaryStamp()
 	if err != nil {
 		return false
 	}
-	return string(recorded) != current
+	return recorded != current
 }
 
 // StopDaemon stops the project's running daemon (if any) and waits for its
@@ -100,6 +135,17 @@ func StopDaemon(ctx context.Context, projectRoot string) error {
 	}
 	if data, err := os.ReadFile(pp); err == nil {
 		if pid, err := strconv.Atoi(string(data)); err == nil && pid > 0 {
+			// Never signal ourselves. A daemon that restarts by re-execing keeps
+			// its PID, so the pidfile it re-reads on the way back up names the
+			// process now reading it - and its /proc cmdline still says
+			// `__daemon`, so pidIsHydraDaemon would happily agree it is a daemon
+			// worth killing. Without this the first thing a restarted daemon does
+			// is SIGTERM itself.
+			if pid == os.Getpid() {
+				RemoveDaemonFiles(projectRoot)
+				_ = os.Remove(sock)
+				return nil
+			}
 			// Belt-and-suspenders: only signal a PID we can confirm is a hydra
 			// daemon. The socket ping above already implies a live daemon, but a
 			// stale pidfile plus PID reuse could otherwise point us at an

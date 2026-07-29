@@ -2939,10 +2939,16 @@ type SpawnAgentRequest struct {
 
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
+	// CanRestart Whether the server can restart itself in place (re-exec). False on platforms without exec.
+	CanRestart *bool `json:"can_restart,omitempty"`
+
+	// CanUpdate Whether the server can rebuild itself from source and restart into the result. Requires the daemon's project root to be a Hydra checkout with mage available.
+	CanUpdate *bool `json:"can_update,omitempty"`
+
 	// DefaultProjectId Project ID of the default (CWD) project
 	DefaultProjectId *string `json:"default_project_id,omitempty"`
 
-	// Development Whether the server is running in development mode
+	// Development Whether the server is being served out of a Hydra source checkout, which is what enables developer affordances such as the Chrome DevTools workspace endpoint.
 	Development *bool `json:"development,omitempty"`
 
 	// ProjectRoot Absolute path to the default project root (server CWD)
@@ -5664,9 +5670,6 @@ type ServerInterface interface {
 	// Preview the .hydra/config.toml at a filesystem path for the add-project trust prompt (read-only, does not register the project)
 	// (GET /api/config-toml-preview)
 	PreviewConfigToml(w http.ResponseWriter, r *http.Request, params PreviewConfigTomlParams)
-	// Trigger a server rebuild and restart (dev mode only)
-	// (POST /api/dev/restart)
-	DevRestart(w http.ResponseWriter, r *http.Request)
 	// List all known projects
 	// (GET /api/projects)
 	ListProjects(w http.ResponseWriter, r *http.Request)
@@ -5853,6 +5856,12 @@ type ServerInterface interface {
 	// Resolve a hand-typed folder path to an absolute one (expands "~" and resolves relative paths against home) and report what is there
 	// (GET /api/resolve-path)
 	ResolvePath(w http.ResponseWriter, r *http.Request, params ResolvePathParams)
+	// Restart the server in place, running the binary already installed
+	// (POST /api/server/restart)
+	RestartServer(w http.ResponseWriter, r *http.Request)
+	// Rebuild the server from source, then restart into the result
+	// (POST /api/server/update)
+	UpdateServer(w http.ResponseWriter, r *http.Request)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -5912,20 +5921,6 @@ func (siw *ServerInterfaceWrapper) PreviewConfigToml(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PreviewConfigToml(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// DevRestart operation middleware
-func (siw *ServerInterfaceWrapper) DevRestart(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DevRestart(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8306,6 +8301,34 @@ func (siw *ServerInterfaceWrapper) ResolvePath(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// RestartServer operation middleware
+func (siw *ServerInterfaceWrapper) RestartServer(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestartServer(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateServer operation middleware
+func (siw *ServerInterfaceWrapper) UpdateServer(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateServer(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetStatus operation middleware
 func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -8483,7 +8506,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc("GET "+options.BaseURL+"/.well-known/appspecific/com.chrome.devtools.json", wrapper.GetDevToolsConfig)
 	m.HandleFunc("GET "+options.BaseURL+"/api/config-toml-preview", wrapper.PreviewConfigToml)
-	m.HandleFunc("POST "+options.BaseURL+"/api/dev/restart", wrapper.DevRestart)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects", wrapper.AddProject)
 	m.HandleFunc("PUT "+options.BaseURL+"/api/projects/order", wrapper.ReorderProjects)
@@ -8546,6 +8568,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/services/restart", wrapper.RestartServices)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/track-remote", wrapper.EnsureTrackRemote)
 	m.HandleFunc("GET "+options.BaseURL+"/api/resolve-path", wrapper.ResolvePath)
+	m.HandleFunc("POST "+options.BaseURL+"/api/server/restart", wrapper.RestartServer)
+	m.HandleFunc("POST "+options.BaseURL+"/api/server/update", wrapper.UpdateServer)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/api/usage/claude", wrapper.GetClaudeUsage)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
@@ -8614,30 +8638,6 @@ type PreviewConfigToml500JSONResponse ErrorResponse
 func (response PreviewConfigToml500JSONResponse) VisitPreviewConfigTomlResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type DevRestartRequestObject struct {
-}
-
-type DevRestartResponseObject interface {
-	VisitDevRestartResponse(w http.ResponseWriter) error
-}
-
-type DevRestart200Response struct {
-}
-
-func (response DevRestart200Response) VisitDevRestartResponse(w http.ResponseWriter) error {
-	w.WriteHeader(200)
-	return nil
-}
-
-type DevRestart403JSONResponse ErrorResponse
-
-func (response DevRestart403JSONResponse) VisitDevRestartResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -11034,6 +11034,63 @@ func (response ResolvePath500JSONResponse) VisitResolvePathResponse(w http.Respo
 	return json.NewEncoder(w).Encode(response)
 }
 
+type RestartServerRequestObject struct {
+}
+
+type RestartServerResponseObject interface {
+	VisitRestartServerResponse(w http.ResponseWriter) error
+}
+
+type RestartServer202Response struct {
+}
+
+func (response RestartServer202Response) VisitRestartServerResponse(w http.ResponseWriter) error {
+	w.WriteHeader(202)
+	return nil
+}
+
+type RestartServer403JSONResponse ErrorResponse
+
+func (response RestartServer403JSONResponse) VisitRestartServerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateServerRequestObject struct {
+}
+
+type UpdateServerResponseObject interface {
+	VisitUpdateServerResponse(w http.ResponseWriter) error
+}
+
+type UpdateServer202Response struct {
+}
+
+func (response UpdateServer202Response) VisitUpdateServerResponse(w http.ResponseWriter) error {
+	w.WriteHeader(202)
+	return nil
+}
+
+type UpdateServer403JSONResponse ErrorResponse
+
+func (response UpdateServer403JSONResponse) VisitUpdateServerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateServer409JSONResponse ErrorResponse
+
+func (response UpdateServer409JSONResponse) VisitUpdateServerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetStatusRequestObject struct {
 }
 
@@ -11110,9 +11167,6 @@ type StrictServerInterface interface {
 	// Preview the .hydra/config.toml at a filesystem path for the add-project trust prompt (read-only, does not register the project)
 	// (GET /api/config-toml-preview)
 	PreviewConfigToml(ctx context.Context, request PreviewConfigTomlRequestObject) (PreviewConfigTomlResponseObject, error)
-	// Trigger a server rebuild and restart (dev mode only)
-	// (POST /api/dev/restart)
-	DevRestart(ctx context.Context, request DevRestartRequestObject) (DevRestartResponseObject, error)
 	// List all known projects
 	// (GET /api/projects)
 	ListProjects(ctx context.Context, request ListProjectsRequestObject) (ListProjectsResponseObject, error)
@@ -11299,6 +11353,12 @@ type StrictServerInterface interface {
 	// Resolve a hand-typed folder path to an absolute one (expands "~" and resolves relative paths against home) and report what is there
 	// (GET /api/resolve-path)
 	ResolvePath(ctx context.Context, request ResolvePathRequestObject) (ResolvePathResponseObject, error)
+	// Restart the server in place, running the binary already installed
+	// (POST /api/server/restart)
+	RestartServer(ctx context.Context, request RestartServerRequestObject) (RestartServerResponseObject, error)
+	// Rebuild the server from source, then restart into the result
+	// (POST /api/server/update)
+	UpdateServer(ctx context.Context, request UpdateServerRequestObject) (UpdateServerResponseObject, error)
 	// Get system status
 	// (GET /api/status)
 	GetStatus(ctx context.Context, request GetStatusRequestObject) (GetStatusResponseObject, error)
@@ -11382,30 +11442,6 @@ func (sh *strictHandler) PreviewConfigToml(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PreviewConfigTomlResponseObject); ok {
 		if err := validResponse.VisitPreviewConfigTomlResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// DevRestart operation middleware
-func (sh *strictHandler) DevRestart(w http.ResponseWriter, r *http.Request) {
-	var request DevRestartRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.DevRestart(ctx, request.(DevRestartRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "DevRestart")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(DevRestartResponseObject); ok {
-		if err := validResponse.VisitDevRestartResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -13168,6 +13204,54 @@ func (sh *strictHandler) ResolvePath(w http.ResponseWriter, r *http.Request, par
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ResolvePathResponseObject); ok {
 		if err := validResponse.VisitResolvePathResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestartServer operation middleware
+func (sh *strictHandler) RestartServer(w http.ResponseWriter, r *http.Request) {
+	var request RestartServerRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestartServer(ctx, request.(RestartServerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestartServer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestartServerResponseObject); ok {
+		if err := validResponse.VisitRestartServerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateServer operation middleware
+func (sh *strictHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
+	var request UpdateServerRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateServer(ctx, request.(UpdateServerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateServer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateServerResponseObject); ok {
+		if err := validResponse.VisitUpdateServerResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

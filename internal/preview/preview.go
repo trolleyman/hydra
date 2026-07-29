@@ -340,7 +340,7 @@ func (m *Manager) ensureSlot(root string, spec config.PreviewScript, version Ver
 // range on the manager's bind host. Busy ports (other daemons, dev servers,
 // our own slots) are skipped.
 //
-// A WILDCARD bind host (0.0.0.0 - an exposed deploy, `mage prod` /
+// A WILDCARD bind host (0.0.0.0 - an exposed deploy, `mage deploy:service` /
 // HYDRA_API_ADDR=0.0.0.0:...) has a failure mode a loopback bind does not: it
 // collides with anything already holding that port on a *specific* address,
 // even though nothing holds the wildcard. `tailscale serve --https=$p

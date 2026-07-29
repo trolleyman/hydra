@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"braces.dev/errtrace"
@@ -50,7 +51,16 @@ func Connect(ctx context.Context, projectRoot string) (*Client, error) {
 	// Auto-upgrade: if the running daemon was started from a now-replaced
 	// binary, drain + restart it so the new code takes effect. Heads are
 	// resumed on the new daemon's boot.
-	if running && isStale(projectRoot) {
+	// A service-managed daemon is not ours to evict: SIGTERMing it and spawning
+	// a detached replacement would leave systemd's unit inactive with an
+	// unsupervised daemon running behind it. Say so and keep talking to the one
+	// that is there - it is only running older code, which is a smaller problem
+	// than two daemons fighting over one socket.
+	if running && isStale(projectRoot) && IsServiceManaged(projectRoot) {
+		fmt.Fprintln(os.Stderr,
+			"note: the running hydra daemon is service-managed and was started from an older binary.\n"+
+				"      Use the web UI's update button, or `systemctl --user restart hydra`, to pick this one up.")
+	} else if running && isStale(projectRoot) {
 		if err := StopDaemon(ctx, projectRoot); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
