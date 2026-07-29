@@ -50,6 +50,20 @@ type Result struct {
 	ArgsPreview string
 }
 
+// cmdBoundary matches the position immediately before a command NAME in a shell
+// line: the start of the string, or a separator that genuinely separates
+// commands. It is shared by every tripwire below that has to tell "the agent is
+// running X" from "the string X appears in an argument".
+//
+// A `|` written as `\|` is NOT such a separator - it is a grep/sed alternation
+// inside a quoted pattern. Treating it as one made the tripwires deny an
+// innocent `grep "pkill\|killall" ...`, which is the same class of false
+// positive scrubCommitText was written for. RE2 has no lookbehind, so the pipe
+// case consumes the character before the `|`; every use below is a
+// MatchString/FindStringSubmatch and never indexes into the subject, so
+// consuming it is harmless.
+const cmdBoundary = `(?:^|[\n;&(]|(?:^|[^\\])\|)\s*`
+
 // globalInstallRe matches Bash commands that install system- or user-global
 // software, which the pre-prompt forbids. It is a deliberate tripwire, not an
 // airtight boundary (a determined agent can re-encode a command) - the real
@@ -73,35 +87,62 @@ var globalInstallRe = regexp.MustCompile(`(?i)\b(` +
 // up inside an argument, a quoted grep pattern, or a commit message, and matching
 // those would hard-deny a perfectly legitimate command. `--dry-run` is excluded
 // by the caller.
-var gitPushRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-[^\s]+\s+)*push\b`)
+var gitPushRe = regexp.MustCompile(`(?i)` + cmdBoundary + `git\s+(?:-[^\s]+\s+)*push\b`)
 
-// procKillRe matches a `pkill` or `killall` INVOCATION at a command boundary
-// (start, or right after a `;`, `&`, `|`, `(`, or newline), tolerating a leading
-// `sudo`. These kill processes by NAME/command-line pattern, and every agent runs
-// as `claude --append-system-prompt "<the whole system prompt>"`, so that argv
-// contains most words an agent might pkill on (e.g. a leftover dev server whose
-// name also appears in the prompt) - a generic pattern silently matches the
-// agent's own process and any co-tenant sessions sharing the head's PID namespace,
-// killing the session mid-command. Anchoring to the command position (like
-// gitPushRe) keeps a bare mention in an argument, echo, or grep pattern from
-// tripping. Kill-by-PID (`kill "$PID"`) and job specs are unaffected.
-var procKillRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*(?:sudo\s+)?(?:pkill|killall)\b`)
+// procKillRe matches a `pkill` or `killall` INVOCATION at a command boundary,
+// tolerating a leading `sudo`. These kill processes by NAME/command-line pattern,
+// and every agent runs as `claude --append-system-prompt "<the whole system
+// prompt>"`, so that argv contains most words an agent might pkill on (e.g. a
+// leftover dev server whose name also appears in the prompt) - a generic pattern
+// silently matches the agent's own process and any co-tenant sessions sharing the
+// head's PID namespace, killing the session mid-command. Anchoring to the command
+// position (like gitPushRe) keeps a bare mention in an argument, echo, or grep
+// pattern from tripping. Kill-by-PID (`kill "$PID"`) and job specs are unaffected.
+var procKillRe = regexp.MustCompile(`(?i)` + cmdBoundary + `(?:sudo\s+)?(?:pkill|killall)\b`)
+
+// procLookupRe / killRe catch the SPELLED-OUT form of the same hazard:
+// `kill $(pgrep -f <pattern>)`, `pgrep -f <pattern> | xargs kill`, `kill $(pidof
+// x)`. pkill is exactly pgrep+kill in one binary, so denying only the binary
+// stopped the honest spelling and waved through the compound one - which is how
+// an agent came to write `kill $(pgrep -f "hydra.*server --simulation" | head -1)`
+// in a session whose own argv, like every head's, contains that very string.
+//
+// They are deliberately two regexes ANDed by the caller rather than one pattern:
+// a bare `pgrep -f foo` only LISTS pids and is a perfectly reasonable thing to
+// run, and `kill "$PID"` on a pid you captured yourself is the recommended way
+// out. It is only the combination - resolve by name/command-line, then signal
+// whatever came back - that can take out the session.
+var procLookupRe = regexp.MustCompile(`(?i)` + cmdBoundary + `(?:sudo\s+)?(?:pgrep|pidof)\b`)
+var killRe = regexp.MustCompile(`(?i)` + cmdBoundary + `(?:sudo\s+)?(?:xargs\s+(?:-[^\s]+\s+)*)?kill\b`)
+
+// killByPatternReason is the deny message for both spellings above. It is
+// written to be read by the AGENT, mid-task, as the whole explanation it will
+// get: what was refused, why it is dangerous HERE specifically, and the two
+// commands that do the job safely. The alternatives matter as much as the
+// refusal - an agent told only "no" tends to reach for the next spelling of the
+// same thing, which is precisely how the pgrep form got written after the pkill
+// form was denied.
+const killByPatternReason = "Killing processes by NAME or command-line pattern is not allowed - that includes pkill, killall, and the spelled-out `kill $(pgrep ...)` / `pgrep ... | xargs kill`. " +
+	"The pattern is matched against each process's WHOLE command line, and every agent here runs as `claude --append-system-prompt \"<the entire system prompt>\"` - so that argv contains the project name, the worktree path, and most words you might match on, including the example commands in the prompt itself. " +
+	"A pattern that looks specific therefore matches your own process and every co-tenant head in this sandbox, and the kill ends your session mid-command. " +
+	"Instead: kill by the PID you captured when you launched it (`PID=$!` right after the launch, then `kill \"$PID\"`), or by the port it holds (`fuser -k <port>/tcp`). " +
+	"A bare `pgrep -f <pattern>` with no kill is fine if you only want to look."
 
 // gitCommitRe matches a `git commit` invocation at a command boundary. Like
 // gitPushRe it skips leading flags, but it also skips a `-c KEY=VAL` config pair
 // (a separate-arg value, e.g. `git -c user.name=x commit`) so that common inline
 // form can't slip a commit past the deny. Used both to scope commit-message
 // scrubbing and to route raw commits to the git_commit tool.
-var gitCommitRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*commit\b`)
+var gitCommitRe = regexp.MustCompile(`(?i)` + cmdBoundary + `git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*commit\b`)
 
 // gitToolSubcmdRe matches a raw `git <sub>` write-subcommand that has a
 // mcp__hydra__git_* equivalent, for the readonly-mode redirect. Same boundary +
 // leading-flag skipping as gitCommitRe.
-var gitToolSubcmdRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*(commit|add|reset|revert|rebase|cherry-pick|merge|stash)\b`)
+var gitToolSubcmdRe = regexp.MustCompile(`(?i)` + cmdBoundary + `git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*(commit|add|reset|revert|rebase|cherry-pick|merge|stash)\b`)
 
 // gitInvocationRe matches any git invocation at a command boundary, used to
 // confine the read-only advice below to failures that actually came from git.
-var gitInvocationRe = regexp.MustCompile(`(?i)(?:^|[\n;&|(])\s*git\s`)
+var gitInvocationRe = regexp.MustCompile(`(?i)` + cmdBoundary + `git\s`)
 
 // readOnlyFSRe matches the OS error a write to the read-only .git produces.
 var readOnlyFSRe = regexp.MustCompile(`(?i)read-only file system`)
@@ -345,11 +386,8 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 				Reason:   "modifying Claude settings/hooks from the shell is not allowed (it would let the agent disable its own gate)",
 			}
 		}
-		if procKillRe.MatchString(cmd) {
-			return Result{
-				Decision: Deny,
-				Reason:   "pkill/killall are not allowed - they match processes by name/command-line and will also match this agent's own process (its whole system prompt rides in the `--append-system-prompt` argv) and co-tenant sessions in the same sandbox, killing your session. Kill a background process by its captured PID (`kill \"$PID\"`) or by port (`fuser -k <port>/tcp`) instead.",
-			}
+		if procKillRe.MatchString(cmd) || (procLookupRe.MatchString(cmd) && killRe.MatchString(cmd)) {
+			return Result{Decision: Deny, Reason: killByPatternReason}
 		}
 		if gitPushRe.MatchString(cmd) && !strings.Contains(cmd, "--dry-run") {
 			// git push leaves the sandbox and writes to a remote. We deny it

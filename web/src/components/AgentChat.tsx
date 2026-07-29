@@ -173,7 +173,12 @@ function mergeChipLabel(subject: string, count: number): string {
 
 // Shared styling for commit/merge pills - the same centered notification look as
 // notice/cmdout chips.
-const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none'
+// py-[3px], not py-0.5: the labels inside carry .optical-center, which trims each
+// one to its cap-to-baseline ink so the monospace sha and the sans subject share a
+// baseline. That trim also takes the line box's spare ascender/descender out of the
+// pill's height (~4px), which left the text sitting tight against the border - so
+// the padding gives back what the trim removed rather than leaving the chip shorter.
+const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-[3px] text-[11px] text-stone-500 dark:text-stone-400 select-none'
 const COMMIT_HOVER = 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors'
 
 // MergeCommitChip renders a merge as a single pill that expands to list the commits
@@ -196,7 +201,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
       >
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
         <GitMerge className="w-3 h-3 shrink-0" />
-        <span className="truncate">{label}</span>
+        <span className="truncate optical-center">{label}</span>
       </button>
       <Expandable open={expanded && shown > 0} className="w-full">
         <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
@@ -211,8 +216,9 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               title={clickable ? `Show ${m.shortSha} in the diff view` : m.shortSha}
             >
               <GitCommitHorizontal className="w-3 h-3 shrink-0" />
-              <span className="font-mono shrink-0">{m.shortSha}</span>
-              <span className="truncate">{m.subject}</span>
+              {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
+              <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
+              <span className="truncate optical-center">{m.subject}</span>
             </div>
           ))}
           {shown < count && (
@@ -9426,8 +9432,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               title={clickable ? `Committed ${item.shortSha} - click to show this commit's diff` : `Committed ${item.shortSha}`}
             >
               <GitCommitHorizontal className="w-3 h-3 shrink-0" />
-              <span className="font-mono shrink-0">{item.shortSha}</span>
-              <span className="truncate">{item.subject}</span>
+              {/* The sha is monospace and the subject is not, so their line boxes
+                  differ and `items-center` would centre each one separately -
+                  putting two baselines in a row three words long. optical-center
+                  trims each label to its own cap-to-baseline ink, which is what
+                  then gets centred (see CLAUDE.md, "Labels beside icons"). */}
+              <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
+              <span className="truncate optical-center">{item.subject}</span>
             </div>
           </div>
         )
