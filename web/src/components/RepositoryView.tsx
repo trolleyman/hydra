@@ -574,15 +574,18 @@ function CodeView({ content, lang, wrap, highlightRange, onSelectLine }: { conte
               onMouseDown={onSelectLine ? (e) => { if (e.shiftKey) e.preventDefault() } : undefined}
               onClick={onSelectLine ? (e) => onSelectLine(ln, e.shiftKey) : undefined}
               title={onSelectLine ? `Select line ${ln}` : undefined}
-              style={{ width: `calc(${gutterWidth} + 1.5rem)` }}
-              className={`sticky left-0 z-10 shrink-0 select-none text-right pr-3 pl-2 border-r ${onSelectLine ? 'cursor-pointer hover:text-blue-500 dark:hover:text-blue-400' : ''} ${isHi
+              // The rule sits BETWEEN the numbers and the code (8px / 10px), the
+              // spacing the chat's Read card uses - it used to hug the code with
+              // 12px of empty gutter behind it.
+              style={{ width: `calc(${gutterWidth} + 1rem)` }}
+              className={`sticky left-0 z-10 shrink-0 select-none text-right pr-2 pl-2 border-r ${onSelectLine ? 'cursor-pointer hover:text-blue-500 dark:hover:text-blue-400' : ''} ${isHi
                 ? 'text-amber-700 dark:text-amber-300 bg-amber-100/70 dark:bg-amber-400/10 border-amber-200 dark:border-amber-500/20'
                 : 'text-gray-400 dark:text-gray-600 bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800'}`}
             >
               {ln}
             </span>
             <code
-              className={`bg-transparent flex-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
+              className={`bg-transparent flex-1 pl-2.5 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
               dangerouslySetInnerHTML={{ __html: html || ' ' }}
             />
           </div>

@@ -145,7 +145,11 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
           // narrows its wrap column relative to this backdrop, the two layers
           // wrap text at different widths, and the mismatch drifts the visible
           // (highlighted) text away from the real (selectable) text.
-          style={{ scrollbarGutter: 'stable' }}
+          // overflow-anchor: none for the same reason ShellEditor's highlight
+          // layer sets it: this layer is scroll-DRIVEN, so letting Chrome's
+          // scroll anchoring adjust its scrollTop when the highlighted content
+          // re-lays out is exactly a desync from the textarea below.
+          style={{ scrollbarGutter: 'stable', overflowAnchor: 'none' }}
           // prompt-input-font pins Roboto Flex on BOTH layers so their metrics
           // match exactly and the backdrop's *italic* runs can slant via the
           // font's slnt axis without drifting the textarea caret (see index.css).
