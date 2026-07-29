@@ -187,3 +187,17 @@ before starting. Grouped by area.
 ## Chat mode
 
 - [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
+
+## Deployment
+
+- [ ] **Deploy Hydra as a service, and run a dev instance beside it.** The daily
+  driver today is `mage dev` - a foreground rebuild loop serving an unminified,
+  source-mapped bundle off the working tree. `mage deploy:service` already
+  installs a systemd --user unit, but only one can exist (`hydra.service` is
+  hardcoded), its `Restart=on-failure` does not account for the restart button's
+  exit 42 against systemd's start rate limit, and the CLI's binary-stamp
+  auto-upgrade SIGTERMs a service-managed daemon and respawns it detached. Two
+  instances are additionally blocked on user-global state that nothing
+  namespaces: `~/.config/hydra/projects.json`, `uuid.txt`, and the single
+  `~/.local/share/hydra/logs/hydra.log`. Plan (instance name, restart-vs-update
+  split, verified atomic binary swap) in [deployment.md](deployment.md).
