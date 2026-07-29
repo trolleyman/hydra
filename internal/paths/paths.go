@@ -306,6 +306,25 @@ func GetReviewJsonFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetReviewDirFromProjectRoot(projectRoot), id+".json")
 }
 
+// GetReviewCheckoutDirFromProjectRoot returns the persistent detached worktree a
+// head's review slot works in (docs/review-agent.md). Distinct from
+// GetReviewDirFromProjectRoot above, which is the forge MR state - unrelated.
+//
+// Deliberately NOT a checkout.Pool slot. A pooled slot is recycled between runs,
+// and a Claude conversation is keyed by its working directory
+// (~/.claude/projects/<slug(path)>), so a moving path would hand the reviewer a
+// fresh transcript on every re-acquire - a reviewer that forgets everything. A
+// stable path also means exactly one session ever writes that transcript dir,
+// which is what makes the reviewer's own `--continue` resume unambiguous (the
+// head's is not, which is why it needs an explicit session id). Lives at
+// .hydra/local/review-checkouts/<id>/.
+func GetReviewCheckoutsBaseDirFromProjectRoot(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-checkouts")
+}
+func GetReviewCheckoutDirFromProjectRoot(projectRoot, id string) string {
+	return filepath.Join(GetReviewCheckoutsBaseDirFromProjectRoot(projectRoot), id)
+}
+
 // GetSubagentsDirFromProjectRoot returns the per-head directory tracking the
 // head's currently-live Claude sub-agents (Task tool). trigger-hook drops a
 // marker file per running sub-agent so the main agent's Stop hook can tell a

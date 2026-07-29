@@ -1631,6 +1631,10 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
 		removeCowDir(head.ProjectPath, head.ID)
 		removeHeadTmpDir(head.ProjectPath, head.ID)
+		// The review slot's own detached checkout. Its session died with the
+		// SlotPrefix sweep above, but the worktree is a real git registration and
+		// outlives the process.
+		RemoveReviewCheckout(head.ProjectPath, head.ID)
 	}
 
 	if store != nil {
@@ -1783,6 +1787,10 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
 		removeCowDir(head.ProjectPath, head.ID)
 		removeClaudeSessionDir(head)
+		// The review slot's checkout and its own transcript dir (keyed by that
+		// checkout's path, so removeClaudeSessionDir above does not reach it).
+		RemoveReviewCheckout(head.ProjectPath, head.ID)
+		RemoveReviewSessionDir(head.ProjectPath, head.ID)
 	}
 
 	if store == nil {
