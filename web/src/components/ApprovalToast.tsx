@@ -61,7 +61,16 @@ const ChipClause: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 // container the chat's host-run tool card uses. Every other kind keeps the
 // neutral surface: amber here means "this one leaves the sandbox", and it only
 // says that if it isn't worn by the routine asks too.
-const HOST_SURFACE = 'bg-amber-50/70 dark:bg-amber-500/10 border-amber-300/70 dark:border-amber-500/30'
+//
+// The tint is SEMI-TRANSPARENT by design (it reads as amber over the card, not
+// as a flat amber block) - so it is painted as a layer over the card's own
+// opaque background rather than replacing it. Replacing it is what made this one
+// card see-through: alone among the kinds it dropped `bg-white`/`dark:bg-gray-800`,
+// and a floating toast has no opaque page behind it, so the chat showed through.
+// The chat's tool card can wear the same alpha safely only because it sits ON the
+// page. `border` is separate because a border colour composites over whatever is
+// behind it either way.
+const HOST_SURFACE = { tint: 'bg-amber-50/70 dark:bg-amber-500/10', border: 'border-amber-300/70 dark:border-amber-500/30' }
 
 // Per-kind visual identity: icon, its tinted square, the card title, the
 // kind/RW badge, and (optionally) a non-default card surface.
@@ -70,7 +79,7 @@ function kindVisual(data: ApprovalToastData): {
   iconWrap: string
   title: string
   badge: { text: string; tone: BadgeTone } | null
-  surface?: string
+  surface?: { tint: string; border: string }
 } {
   switch (data.kind) {
     case 'mcp':
@@ -301,8 +310,14 @@ export const ApprovalCard: React.FC<{
     <div
       role="alertdialog"
       aria-label={title}
-      className={`relative ${TOAST_CARD_WIDTH} overflow-hidden rounded-2xl border shadow-xl ${surface ?? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}
+      className={`relative isolate ${TOAST_CARD_WIDTH} overflow-hidden rounded-2xl border shadow-xl bg-white dark:bg-gray-800 ${surface?.border ?? 'border-gray-200 dark:border-gray-700'}`}
     >
+      {/* The kind tint, as a layer OVER the card's own opaque background rather
+          than instead of it - see HOST_SURFACE. `-z-10` puts it under the content
+          without needing a positioned wrapper around all of it, and `isolate` on
+          the card keeps that negative layer from escaping behind the card (a
+          plain `relative` is not a stacking context, so it would have). */}
+      {surface && <div aria-hidden className={`absolute inset-0 -z-10 ${surface.tint}`} />}
       {data.crossProject && <CrossProjectBanner project={data.crossProject} tone="warning" />}
       <div className="p-4">
         <div className="flex items-start gap-3">

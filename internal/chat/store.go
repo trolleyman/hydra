@@ -65,7 +65,27 @@ type Store struct {
 	projection     Projection
 	now            func() time.Time
 	subscribers    map[chan Event]struct{}
+	// lastSync is when the log was last flushed to the device; see syncInterval.
+	lastSync time.Time
 }
+
+// syncInterval is the most often an append will fsync the event log.
+//
+// Every append used to fsync, which on a busy head is one device flush per event
+// - and a chat head emits thousands (assistant deltas, usage updates, tool
+// calls). Measured on the machine this was found on, hydra was the largest source
+// of fsyncs on the entire system, three times the next process, against a
+// per-write wait of ~56ms. On ext4 an fsync forces a journal commit that
+// unrelated writers to the same filesystem then queue behind, which is how a
+// daemon writing only ~1.3 MB/s can stall a desktop.
+//
+// Coalescing bounds what a power cut can lose to one interval's worth of events,
+// which is the right trade here: an application crash loses nothing either way
+// (the bytes are already written and the OS still flushes them - fsync only
+// defends against losing power or the kernel), and most of a chat log is
+// reconstructible from the provider's own transcript, which importClaudeHistory
+// replays and AppendSource dedups.
+const syncInterval = 2 * time.Second
 
 func Open(projectRoot, id string) (*Store, error) {
 	s := &Store{
@@ -207,8 +227,11 @@ func (s *Store) AppendSource(sourceID string, payload Payload) (ev Event, append
 		return Event{}, false, errtrace.Wrap(err)
 	}
 	_, writeErr := f.Write(append(line, '\n'))
-	if writeErr == nil {
+	// Flush at most every syncInterval rather than on every event. The write has
+	// already happened; this only decides when it reaches the device.
+	if now := s.now(); writeErr == nil && now.Sub(s.lastSync) >= syncInterval {
 		writeErr = f.Sync()
+		s.lastSync = now
 	}
 	closeErr := f.Close()
 	if writeErr != nil {

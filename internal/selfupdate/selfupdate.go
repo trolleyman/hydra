@@ -28,6 +28,8 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/scope"
 )
 
 // The wire format lives in api/openapi.yaml and is generated for both the
@@ -309,8 +311,27 @@ func (m *Manager) swap(newPath string) error {
 func (m *Manager) runLogged(ctx context.Context, name string, args ...string) error {
 	m.emit(Event{Kind: KindLog, Line: "$ " + name + " " + strings.Join(args, " ")})
 
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = m.SourceRoot
+	// Run the build inside a transient scope carrying the source project's
+	// resource limits, the same as every other workload the daemon launches.
+	//
+	// It is the one build guaranteed to run while someone is watching - they
+	// clicked Update - and until now it was the only unconstrained one: a full
+	// `mage build` is a vite bundle plus a GOMAXPROCS-wide `go build`, which is
+	// enough disk traffic to stall the whole machine (see scripts/io-stall.sh).
+	// Nothing here is sandboxed - it is the daemon rebuilding its own source, and
+	// bwrap would break the toolchain's caches - so this is scope.Apply for the
+	// cgroup only.
+	spec := &sandbox.Spec{
+		Path: name,
+		Args: append([]string{name}, args...),
+		Dir:  m.SourceRoot,
+	}
+	unit := sandbox.ScopeUnit("update", "build")
+	if scope.Apply(m.SourceRoot, unit, spec) {
+		defer sandbox.StopScope(unit)
+	}
+
+	cmd := scope.Command(ctx, spec)
 
 	// Both streams share one pipe so the log reads the way it would in a
 	// terminal - mage prints its commands to stdout and the compilers write
@@ -322,7 +343,13 @@ func (m *Manager) runLogged(ctx context.Context, name string, args ...string) er
 	drained := make(chan struct{})
 	go func() { defer close(drained); m.pump(pr) }()
 
-	runErr := cmd.Run()
+	// scope.Start rather than cmd.Run so the build dies with the daemon instead of
+	// being orphaned to systemd - a build outliving the server that asked for it
+	// is exactly the runaway this scoping exists to prevent.
+	runErr := scope.Start(cmd)
+	if runErr == nil {
+		runErr = cmd.Wait()
+	}
 	_ = pw.Close()
 	<-drained
 

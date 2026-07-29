@@ -542,7 +542,21 @@ type = "stdout"
 ## caps (cpu_quota/memory_max/tasks_max) apply even on an idle box and are opt-in.
 ## A hard cap is silently skipped where its cgroup controller is not delegated to
 ## the user systemd manager (cpu/io often are not).
-# [resources]
+[resources]
+# io_weight is left at its default 50 deliberately: on this machine it does
+# nothing at all (nvme0n1 uses the `none` scheduler and blk-iocost is
+# unconfigured, so cgroup io.weight is accepted and ignored). The two caps below
+# are cgroup io.max, which needs no particular scheduler and always takes effect.
+#
+# Sized to be invisible to ordinary work and to clip only a burst: a head was
+# measured writing 417MB in 60s, and it is bursts filling the device queue that
+# stall everything else, not the sustained average. Raise them if a build feels
+# slower; lower them if the desktop still hitches while a head is busy.
+#
+# NOTE these apply to SCOPED workloads only - agent, preview, service, artifact.
+# The daemon's own IO is not covered.
+io_write_bandwidth_max = 100  # MB/s
+io_read_bandwidth_max  = 300  # MB/s
 # cpu_weight = 50   # 1-10000, soft CPU share under contention (default 50; below the daemon's 100)
 # io_weight  = 50   # 1-10000, soft block-IO share under contention (default 50)
 # cpu_quota  = 200  # hard CPU cap in percent of one core (200 = 2 cores); omit = no cap

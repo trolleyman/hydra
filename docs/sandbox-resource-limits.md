@@ -105,10 +105,42 @@ unset, not the source of truth.
 | Config field | systemd `--property` | Type / format | Default | Notes |
 |---|---|---|---|---|
 | `cpu_weight` | `CPUWeight=<n>` | int 1-10000 | 50 | Soft; only bites under contention. Below the daemon's 100 so it yields. |
-| `io_weight` | `IOWeight=<n>` | int 1-10000 | 50 | Soft, like cpu_weight. Needs a weight-capable IO scheduler. |
+| `io_weight` | `IOWeight=<n>` | int 1-10000 | 50 | Soft, like cpu_weight. **Inert unless the host runs bfq or blk-iocost** - see below. |
 | `cpu_quota` | `CPUQuota=<n>%` | int percent (200 = 2 cores) | unset (no cap) | Hard cap even when the box is idle. |
 | `memory_max` | `MemoryMax=<n>M` | int MB | unset (no cap) | Hard ceiling; cgroup is OOM-killed past it. |
 | `tasks_max` | `TasksMax=<n>` | int | unset (no cap) | Caps processes/threads; guards fork-bomb / PID exhaustion. |
+| `io_read_bandwidth_max` | `IOReadBandwidthMax=<path> <n>M` | int MB/s | unset (no cap) | Per-device hard cap (cgroup `io.max`); path = the project root. |
+| `io_write_bandwidth_max` | `IOWriteBandwidthMax=<path> <n>M` | int MB/s | unset (no cap) | As above. The cap that reliably bites when a head stalls the machine. |
+
+### The io_weight trap
+
+`io_weight` is the limit most likely to look applied and do nothing. cgroup v2
+`io.weight` is implemented by **BFQ** (per device) or by **blk-iocost**; with
+neither, systemd writes it, the kernel accepts it, and it has no effect at all.
+A typical NVMe ships with the `none` scheduler and no iocost configuration, which
+is exactly that case - so the default 50/50 buys no IO protection whatsoever, and
+nothing about the property being accepted reveals it.
+
+Check the host with:
+
+```
+cat /sys/block/nvme0n1/queue/scheduler   # [none] mq-deadline  -> no bfq
+cat /sys/fs/cgroup/io.cost.qos           # empty -> no iocost
+```
+
+`ScopesAvailable` probes for this at startup and logs a warning when weights are
+inert. Two ways out:
+
+- **`io_write_bandwidth_max` / `io_read_bandwidth_max`** (preferred). These are
+  blk-throttle, which works on any scheduler with no host setup. Absolute rather
+  than proportional, so pick a number that leaves the desktop headroom rather
+  than one that merely ranks the workloads.
+- **Make weights work on the host**: `echo bfq > /sys/block/<dev>/queue/scheduler`
+  (persist via udev), or configure blk-iocost. BFQ costs throughput on fast NVMe;
+  iocost is the better fit there but needs a per-device model.
+
+`scripts/io-stall.sh` measures whether any of this is actually the problem before
+you tune it.
 
 Recommended defaults: **weights on (50/50), hard caps off (unset)**. Hard caps can
 break legitimate workloads (an OOM-kill mid-render, a quota that starves a build),
@@ -157,6 +189,8 @@ io_weight  = 50
 cpu_quota  = 200   # percent; 2 cores. omit = no cap
 memory_max = 2048  # MB. omit = no cap
 tasks_max  = 512   # omit = no cap
+io_read_bandwidth_max  = 200  # MB/s. omit = no cap
+io_write_bandwidth_max = 100  # MB/s. omit = no cap
 ```
 
 - New struct `ResourceLimits` with `*int` fields (nil = inherit/unset), so a layer
