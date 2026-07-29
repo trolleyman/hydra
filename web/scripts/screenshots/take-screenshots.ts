@@ -518,6 +518,18 @@ try {
           viewport: pg.viewport ?? { width: 1280, height: 800 },
           deviceScaleFactor: dpi,
           colorScheme: theme,
+          // Ask the app not to animate in the first place, rather than stopping
+          // it afterwards. The injected animation:none stylesheet cannot reach a
+          // Web Animation (element.animate), but the code that STARTS one checks
+          // this - so the lightbox's FLIP flight never begins and there is no
+          // window in which a shot can catch it mid-flight. settle() still
+          // finishes anything left running, as a backstop for animation that
+          // does not consult the setting.
+          //
+          // Safe for the shots' appearance: every @media (prefers-reduced-motion)
+          // block in index.css only sets `animation: none`, which the injected
+          // stylesheet already did. Nothing is substituted or laid out differently.
+          reducedMotion: 'reduce',
         })
         // Pin Date/now to a fixed instant (matching the server's simNow) so the
         // UI's "elapsed"/"X ago" labels are byte-stable across the two renders.
