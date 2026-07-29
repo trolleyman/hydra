@@ -100,7 +100,7 @@ describe('font catalogue', () => {
   })
 
   it('resolves an unknown or wrong-category id to the role default', () => {
-    expect(fontStackFor('code', 'no-such-font')).toBe(FONT_BY_ID.get('iosevka')!.stack)
+    expect(fontStackFor('code', 'no-such-font')).toBe(FONT_BY_ID.get('fira-code')!.stack)
     // A mono font is a perfectly real font, just not one the chat role offers.
     expect(fontStackFor('chat', 'iosevka')).toBe(FONT_BY_ID.get('merriweather')!.stack)
     expect(fontStackFor('chat', 'inter')).toBe(FONT_BY_ID.get('inter')!.stack)
@@ -121,7 +121,7 @@ describe('loadFont', () => {
 
   it('ignores a stored id the role does not offer', () => {
     localStorage.setItem(StorageKeys.fontUi, 'iosevka')
-    expect(loadFont('ui')).toBe('system-sans')
+    expect(loadFont('ui')).toBe('inter')
   })
 
   // The pre-selector chat toggle wrote 'sans' only when serif was turned OFF, so
@@ -139,7 +139,7 @@ describe('loadFont', () => {
 
   it('leaves the other roles alone when only the legacy marker is set', () => {
     localStorage.setItem(StorageKeys.chatSerif, 'sans')
-    expect(loadFont('ui')).toBe('system-sans')
+    expect(loadFont('ui')).toBe(FONT_ROLE_SPEC.ui.defaultId)
     expect(loadFont('code')).toBe(FONT_ROLE_SPEC.code.defaultId)
     expect(loadFont('terminal')).toBe(FONT_ROLE_SPEC.terminal.defaultId)
   })
