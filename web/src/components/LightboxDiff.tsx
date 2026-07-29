@@ -5,6 +5,7 @@ import { ABControlsContext, IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { ZoomPan } from './ZoomPan'
 import { Tooltip } from './Tooltip'
 import { LIGHTBOX_MEDIA_CLASS } from '../lib/lightboxFlip'
+import { rememberMediaSize } from '../lib/mediaSize'
 
 // LightboxDiff renders a before/after artifact pair fullscreen inside the
 // lightbox: the same comparison modes as the diff grid (before/after toggle, slider,
@@ -73,6 +74,9 @@ export function LightboxDiff({ left, right, name, kind = 'image', fps, mode, vie
       if (cancelled || !w || !h) return
       setMeasured(w / h)
       onDims?.({ w, h })
+      // Feed the app-wide size cache too, so re-opening this pair (or peeking at it
+      // from the entry beside it) already knows the box - see lib/mediaSize.
+      rememberMediaSize(url, w, h)
     }
     if (kind === 'video') {
       const el = document.createElement('video')

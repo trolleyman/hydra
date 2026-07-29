@@ -160,6 +160,18 @@ export const StorageKeys = {
   // views can be configured independently.
   repoDiffFileView: 'hydra-repo-diff-file-view',
 
+  // 'false' when the user has turned OFF soft wrapping in the lightbox's text
+  // viewer (a long line then scrolls the pane sideways, under a sticky
+  // line-number gutter). Absent = on, the default: a lightbox is opened to READ
+  // a file, and a log line running off the right edge is the one thing that
+  // stops. Kept separate from repoWrap - the repository browser is a different
+  // surface with its own habit. See LightboxViewers.
+  lightboxWrap: 'hydra-lightbox-wrap',
+  // 'false' when the user has switched the lightbox's markdown viewer to the
+  // file's source instead of the rendered document. Absent = rendered, the
+  // default. See LightboxViewers.
+  lightboxMarkdownRendered: 'hydra-lightbox-markdown-rendered',
+
   // '1' when a test/screenshot harness wants to drive the toast store from page
   // context (see lib/toastHarness). Dormant unless explicitly set - only the
   // screenshot script seeds it (via addInitScript), never the app itself - so it
@@ -284,10 +296,15 @@ export const promptScrollKey = (projectId: string, compact: boolean): string =>
 
 // Running count of generically-named pasted images (image1.png, image2.png, ...)
 // for the spawn form, per project and per layout - mirrors promptDraftKey so the
-// numbering stays separate across projects and survives a reload (the
-// attachments themselves are in-session only; see lib/spawnDrafts.ts).
+// numbering stays separate across projects and survives a reload.
 export const imageCounterKey = (projectId: string, compact: boolean): string =>
   `hydra-image-counter-${compact ? 'compact' : 'full'}-${projectId}`
+
+// The settled uploads attached to that draft, stored as their on-disk paths -
+// the half of an attachment that outlives the page (see lib/draftAttachments).
+// Mirrors promptDraftKey so a box's text and its attachments come back together.
+export const spawnAttachmentsKey = (projectId: string, compact: boolean): string =>
+  `hydra-prompt-attachments-${compact ? 'compact' : 'full'}-${projectId}`
 
 // ── Shared safe accessors ────────────────────────────────────────────────────
 // localStorage can throw (privacy mode, quota, disabled storage); these swallow

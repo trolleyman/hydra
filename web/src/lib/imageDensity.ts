@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
+import { recallMediaSize, rememberMediaSize, useMediaSize } from './mediaSize'
 
 // Pixel density for images shown in chat.
 //
@@ -34,30 +35,27 @@ export function densityFromPath(path?: string | null): number {
   return Number.isFinite(d) && d >= 1 && d <= 4 ? d : 1
 }
 
-// naturalSizeCache is module-level so a re-render (or a second card showing the
-// same image) doesn't re-decode.
-const naturalSizeCache = new Map<string, { w: number; h: number }>()
-
 // useNaturalSize decodes an image off-screen to learn its intrinsic size, so the
 // visible <img> can be given an explicit width from its FIRST layout rather than
 // painting at full size and then snapping smaller once React learns the density.
 // The browser cache makes the visible load free. Returns null until known.
+//
+// The size is kept in the app-wide cache (lib/mediaSize), not one private to this
+// module: it is the same question the lightbox asks about the same files, so a
+// picture measured here needs no measuring when it is opened - and one the
+// lightbox has already shown needs no decode here at all.
 export function useNaturalSize(url: string | null): { w: number; h: number } | null {
-  const [, bump] = useState(0)
+  // Read through the shared cache rather than into local state, so the FIRST
+  // decode of a file answers for every copy of it: a chat row re-mounts as the
+  // transcript grows, and a message can show the same picture twice.
+  const size = useMediaSize(url)
   useEffect(() => {
-    if (!url || naturalSizeCache.has(url)) return
-    let cancelled = false
+    if (!url || recallMediaSize(url)) return
     const img = new Image()
-    img.onload = () => {
-      if (img.naturalWidth > 0) naturalSizeCache.set(url, { w: img.naturalWidth, h: img.naturalHeight })
-      if (!cancelled) bump((n) => n + 1)
-    }
+    img.onload = () => rememberMediaSize(url, img.naturalWidth, img.naturalHeight)
     img.src = url
-    return () => {
-      cancelled = true
-    }
   }, [url])
-  return url ? (naturalSizeCache.get(url) ?? null) : null
+  return size
 }
 
 // logicalSize converts an image's physical pixel size to the size it should be

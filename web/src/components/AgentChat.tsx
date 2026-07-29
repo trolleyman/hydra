@@ -43,6 +43,7 @@ import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { fileViewLineInfo, parseFileViewScript, splitFileViewOutput, type FileViewSection } from '../lib/fileViewCommand'
+import { gitOutputSpans, type GitSpan } from '../lib/gitOutput'
 import { parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
 import { formatBytes } from '../lib/formatBytes'
@@ -67,14 +68,15 @@ import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { WorkSpark } from './WorkSpark'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
-import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { type Attachment, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { nextAttachmentId } from '../lib/draftAttachments'
 import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
 // langFromPath (the extension -> Prism language map a Read tool's output is
 // highlighted by, item 3) now lives in lib/fileKind, beside the file-type
 // classifier, so the lightbox's text viewer highlights by the same table.
 import { langFromPath } from '../lib/fileKind'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
-import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
+import { loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments, isImageResizeNotice } from '../lib/uploadAttachments'
@@ -2161,6 +2163,10 @@ interface ScriptOutputRow {
   num: string
   // The line's content, already highlighted.
   html: string
+  // Pre-coloured pieces instead of `html`, for a line git wrote about the
+  // repository rather than one it read out of a file (lib/gitOutput): there is
+  // no grammar to run over those, just shapes, so they arrive as spans.
+  spans?: GitSpan[]
   // The `path:` a multi-file search printed in front of the line, shown lowlit
   // so the file it names does not read as part of the line's code.
   prefix?: string
@@ -2211,6 +2217,10 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
   for (const section of sections) {
     if (section.kind === 'matches') {
       rows.push(...scriptMatchRows(section))
+      continue
+    }
+    if (section.kind === 'git') {
+      for (const spans of gitOutputSpans(section.lines)) rows.push({ num: '', html: '', spans, tone: 'code' })
       continue
     }
     if (section.kind !== 'view') {
@@ -2271,7 +2281,9 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
               className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
             >
               {row.prefix && <span className="text-stone-400 dark:text-stone-500">{row.prefix}:</span>}
-              <span dangerouslySetInnerHTML={{ __html: row.html }} />
+              {row.spans
+                ? row.spans.map((s, j) => <span key={j} className={s.cls}>{s.text}</span>)
+                : <span dangerouslySetInnerHTML={{ __html: row.html }} />}
             </span>
           </Fragment>
         ))}
@@ -5970,8 +5982,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const [autoRetry, setAutoRetry] = useState(0)
   const retryStreakRef = useRef(0)
   // The composer draft (text + attachments) is restored per agent so it survives
-  // switching agents/reloads (item 30): text from agentViewPrefs, attachments
-  // from the in-memory chatDrafts cache.
+  // switching agents and reloads (item 30): the text from agentViewPrefs, the
+  // attachments from chatDrafts - live chips (object URLs and all) on a switch,
+  // rebuilt from their uploaded paths after a reload.
   //
   // Undo/redo spans BOTH the typed text and the attachment chips: an image/file
   // paste (and its "[filename]" marker) calls preventDefault, so the browser's
@@ -5982,7 +5995,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   if (!initialComposer.current) {
     initialComposer.current = makeSnapshot(
       loadAgentViewPrefs(projectId, agentId).chatDraft ?? '',
-      loadChatAttachments(chatDraftKey(projectId, agentId)),
+      loadChatAttachments(projectId, agentId),
       0,
       0,
     )
@@ -8753,8 +8766,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const attachmentsRef = useRef<Attachment[]>(attachments)
   useEffect(() => {
     attachmentsRef.current = attachments
-    // Mirror to the per-agent cache so a switch away restores them.
-    saveChatAttachments(chatDraftKey(projectId, agentId), attachments)
+    // Mirror to the per-agent caches so a switch away - or a reload - restores
+    // them. Running on every change (rather than only on unmount) is what makes
+    // the reload case work: a reload tears the page down without unmounting.
+    saveChatAttachments(projectId, agentId, attachments)
   }, [attachments, projectId, agentId])
   // Every preview object URL minted this session. We can't revoke on remove (an
   // undo can bring the chip back) or on unmount (the attachments are stashed to
@@ -8766,7 +8781,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // thumbnails. They're freed on send, or when the page fully reloads.
   useEffect(
     () => () => {
-      saveChatAttachments(chatDraftKey(projectId, agentId), attachmentsRef.current)
+      saveChatAttachments(projectId, agentId, attachmentsRef.current)
       patchAgentViewPrefs(projectId, agentId, { chatDraft: inputRef.current || undefined })
     },
     [projectId, agentId],

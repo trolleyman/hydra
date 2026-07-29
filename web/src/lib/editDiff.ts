@@ -182,3 +182,28 @@ export function buildEditRows(oldStr: string, newStr: string, hunks?: EditHunk[]
 export function hasLineNumbers(rows: EditRow[]): boolean {
   return rows.some((r) => r.oldNum != null || r.newNum != null)
 }
+
+// numberRows fills in 1..N line numbers for a WHOLE-file diff - two complete
+// files compared against each other, where a row's position IS its line number
+// on the side it belongs to.
+//
+// buildEditRows leaves them null because its usual caller diffs an Edit's
+// fragment, and numbering a fragment 1..N would claim it starts at the top of
+// the file. That doesn't apply when both entire files are in hand: the lightbox
+// compares a changed text artifact's before and after, so the numbers are real
+// and are what let you say where the change is.
+export function numberRows(rows: EditRow[]): EditRow[] {
+  let oldNum = 1
+  let newNum = 1
+  return rows.map((row) => {
+    if (row.type === 'gap') return row
+    const numbered = {
+      ...row,
+      oldNum: row.type === 'add' ? null : oldNum,
+      newNum: row.type === 'del' ? null : newNum,
+    }
+    if (row.type !== 'add') oldNum++
+    if (row.type !== 'del') newNum++
+    return numbered
+  })
+}

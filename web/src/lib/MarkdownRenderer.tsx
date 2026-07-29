@@ -11,6 +11,7 @@ import { UPLOAD_PATH_RE } from './uploadAttachments'
 import { useLightbox } from '../stores/lightboxStore'
 import { markdownGalleryAt } from './markdownGallery'
 import { densityFromPath, logicalSize, useNaturalSize } from './imageDensity'
+import { rememberMediaSize } from './mediaSize'
 import { IMAGE_REFLOW_MS, markSelfReflow } from './selfReflow'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 
@@ -219,7 +220,15 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
       // The pixels landing is the second half of the same reflow as the size
       // landing above - and the one that actually takes the space, when the
       // decode beat the layout to it.
-      onLoad={() => markSelfReflow(IMAGE_REFLOW_MS)}
+      onLoad={(e) => {
+        markSelfReflow(IMAGE_REFLOW_MS)
+        // The bytes are the last word on how big this picture is. Usually it
+        // just confirms what we laid it out at; it matters when an agent has
+        // rewritten the file since it was measured (the blob endpoint sends
+        // no-cache for the same reason), and it means the lightbox opens on the
+        // real size rather than a stale one.
+        rememberMediaSize(url, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)
+      }}
       onError={() => setFailedSrc(src ?? null)}
       // Opens the whole markdown block's images, at this one - so ←/→ step
       // between the pictures of THIS message and stop at its edges (see

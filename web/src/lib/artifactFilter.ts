@@ -24,12 +24,22 @@ export function isPdfArtifact(name: string): boolean {
   return /\.pdf$/i.test(name)
 }
 
+// A text artifact - a report, a build log, a generated schema or fixture. The
+// backend collects these (textExts in internal/artifacts, which this list
+// mirrors) and serves them inline; the lightbox previews one in its text viewer,
+// and renders a before/after pair as a diff. Like a PDF, there is nothing useful
+// to show at tile size, so it gets the card.
+export function isTextArtifact(name: string): boolean {
+  return /\.(txt|log|md|json|jsonl|ndjson|csv|tsv|xml|ya?ml|toml|diff|patch|sql|html?|css|properties)$/i.test(name)
+}
+
 // Files with no inline preview at all: the download-class packages above plus
-// PDFs, which are shown as a card in the grid and only rendered full-size in the
-// lightbox. These share a tile, are excluded from dimension probing, and lay out
-// at a fixed flat aspect rather than one measured off media they don't have.
+// PDFs and text files, which are shown as a card in the grid and only rendered
+// full-size in the lightbox. These share a tile, are excluded from dimension
+// probing, and lay out at a fixed flat aspect rather than one measured off media
+// they don't have.
 export function isFileTileArtifact(name: string): boolean {
-  return isDownloadArtifact(name) || isPdfArtifact(name)
+  return isDownloadArtifact(name) || isPdfArtifact(name) || isTextArtifact(name)
 }
 
 // Extensions rendered as download tiles (name + size + save link) instead of

@@ -179,12 +179,54 @@ var downloadExts = map[string]string{
 	".deb": "application/vnd.debian.binary-package",
 }
 
+// textExts maps collectible text output extensions to their content types - a
+// report, a build log, a generated schema or fixture: the things a script
+// already writes next to its screenshots and that used to be dropped on the
+// floor because they were neither media nor a package.
+//
+// They are compared by byte hash like the download class (there is no pixel
+// ratio to compute), but they are NOT downloads: the web UI previews them in
+// the lightbox's text viewer, which also renders the before/after pair as a
+// diff. Served inline, so the browser can fetch one as text.
+//
+// Deliberately a narrower list than the lightbox's own fileKind allowlist: this
+// one governs what a script may drop in an output directory, so it stays to the
+// formats an artifact run plausibly emits rather than every source extension.
+var textExts = map[string]string{
+	".txt":        "text/plain",
+	".log":        "text/plain",
+	".md":         "text/markdown",
+	".json":       "application/json",
+	".csv":        "text/csv",
+	".tsv":        "text/tab-separated-values",
+	".xml":        "text/xml",
+	".yaml":       "text/yaml",
+	".yml":        "text/yaml",
+	".toml":       "text/plain",
+	".diff":       "text/plain",
+	".patch":      "text/plain",
+	".sql":        "text/plain",
+	".html":       "text/html",
+	".htm":        "text/html",
+	".css":        "text/css",
+	".ndjson":     "application/x-ndjson",
+	".jsonl":      "application/x-ndjson",
+	".properties": "text/plain",
+}
+
 // IsDownloadName reports whether name is a download-class artifact (see
 // downloadExts) rather than rendered media. Exported for the HTTP layer, which
 // serves these as attachments; the web UI mirrors the same extension list in
 // isDownloadArtifact (web/src/lib/artifactFilter.ts).
 func IsDownloadName(name string) bool {
 	_, ok := downloadExts[strings.ToLower(filepath.Ext(name))]
+	return ok
+}
+
+// IsTextName reports whether name is a text-class artifact (see textExts). The
+// web UI mirrors this list in isTextArtifact (web/src/lib/artifactFilter.ts).
+func IsTextName(name string) bool {
+	_, ok := textExts[strings.ToLower(filepath.Ext(name))]
 	return ok
 }
 
@@ -1507,6 +1549,9 @@ func (m *Manager) BlobPath(script, key, file string) (path, contentType string, 
 		ct, ok = downloadExts[ext]
 	}
 	if !ok {
+		ct, ok = textExts[ext]
+	}
+	if !ok {
 		return "", "", errtrace.Wrap(fmt.Errorf("unsupported artifact type %q", ext))
 	}
 	base := m.entryDir(script, key)
@@ -1820,7 +1865,8 @@ func scanFileWarn(dir, name string) (FileMeta, []string, bool) {
 	ext := strings.ToLower(filepath.Ext(name))
 	_, media := mediaExts[ext]
 	_, download := downloadExts[ext]
-	if !media && !download {
+	_, text := textExts[ext]
+	if !media && !download && !text {
 		return FileMeta{}, nil, false // skips .meta sidecars too (not a known extension)
 	}
 	p := filepath.Join(dir, filepath.FromSlash(name))
@@ -1833,7 +1879,8 @@ func scanFileWarn(dir, name string) (FileMeta, []string, bool) {
 	for _, w := range warns {
 		warnings = append(warnings, name+": "+w)
 	}
-	// Download-class files (an .apk, a .zip) have no pixel size to measure.
+	// Download-class files (an .apk, a .zip) and text ones have no pixel size to
+	// measure.
 	width, height := 0, 0
 	if media {
 		width, height = mediaPixelSize(p, name)

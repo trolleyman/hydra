@@ -2480,16 +2480,48 @@ func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Requ
 	api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{}})
 }
 
+// How much bigger the resolution a simulated artifact REPORTS (its Width/Height
+// metadata - see simReadyChangedSet) is than the box its placeholder is drawn in.
+// Every simulated file declares exactly this multiple, so scaling the SVG by it
+// makes the file's own intrinsic size agree with what the API says about it, the
+// way a real capture's does.
+//
+// That agreement matters to more than tidiness: the lightbox reserves a picture's
+// box from the declared size before the file loads (see LightboxItem.width), so a
+// placeholder that declared 1440x880 and then turned out to be a 360x220 vector
+// laid out four times too big for a frame and snapped down - a pop-in visible
+// only in simulation, and only because the two disagreed.
+//
+// The drawing itself is untouched: the coordinates below stay in the small box and
+// a viewBox scales the whole vector onto the declared one, so every tile renders
+// exactly as it did (a tile's size comes from its column width and the metadata's
+// aspect ratio, neither of which moves).
+const simArtifactScale = 4
+
+// simSVGDoc wraps one placeholder's markup (drawn in w×h coordinates) as a
+// data-URL SVG that DECLARES simArtifactScale×(w×h) - see simArtifactScale.
+func simSVGDoc(body string, w, h int) string {
+	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">%s</svg>`,
+		w*simArtifactScale, h*simArtifactScale, w, h, body)
+	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
+}
+
+// simTextURL builds an inline data URL serving `body` under `mime`, so a text
+// artifact needs no more blob serving than the SVG images do - the lightbox's
+// text viewer fetches the URL it is given, and a data URL is one.
+func simTextURL(mime, body string) string {
+	return "data:" + mime + ";charset=utf-8;base64," + base64.StdEncoding.EncodeToString([]byte(body))
+}
+
 // simSVG builds an inline data-URL SVG image (w×h) so the demo can render
 // artifacts without any on-disk blob serving. Mixing tall "phone" shapes with
 // wide "desktop" ones shows off the flex-wrap artifact layout: narrow shots
 // pack several per row while a wide one claims its own.
 func simSVG(label, color string, w, h int) string {
-	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">`+
+	return simSVGDoc(fmt.Sprintf(
 		`<rect width="%d" height="%d" fill="%s"/>`+
-		`<text x="%d" y="%d" font-family="sans-serif" font-size="18" fill="white" text-anchor="middle">%s</text></svg>`,
-		w, h, w, h, color, w/2, h/2, label)
-	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
+			`<text x="%d" y="%d" font-family="sans-serif" font-size="18" fill="white" text-anchor="middle">%s</text>`,
+		w, h, color, w/2, h/2, label), w, h)
 }
 
 // simSVGUI renders a minimal, abstract UI mock - a header title, a body panel,
@@ -2510,21 +2542,19 @@ func simSVGUI(title string, dark bool, accent, badgeText string, w, h int) strin
 	bx, by := w-bw-12, 12 // 12px inset
 	cw, ch := 96, 26      // centred tile (gives the slider a mid-frame change)
 	cx, cy := (w-cw)/2, (h-ch)/2
-	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">`+
+	return simSVGDoc(fmt.Sprintf(
 		`<rect width="%d" height="%d" fill="%s"/>`+
-		`<text x="16" y="30" font-family="sans-serif" font-size="16" fill="%s">%s</text>`+
-		`<rect x="12" y="48" width="%d" height="%d" rx="8" fill="%s"/>`+
-		`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
-		`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
-		`<text x="%d" y="%d" font-family="sans-serif" font-size="11" fill="white" text-anchor="middle">%s</text>`+
-		`</svg>`,
-		w, h, w, h, bg,
+			`<text x="16" y="30" font-family="sans-serif" font-size="16" fill="%s">%s</text>`+
+			`<rect x="12" y="48" width="%d" height="%d" rx="8" fill="%s"/>`+
+			`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
+			`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s"/>`+
+			`<text x="%d" y="%d" font-family="sans-serif" font-size="11" fill="white" text-anchor="middle">%s</text>`,
+		w, h, bg,
 		fg, title,
 		w-24, h-60, body,
 		cx, cy, cw, ch, accent,
 		bx, by, bw, bh, accent,
-		bx+bw/2, by+15, badgeText)
-	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(doc))
+		bx+bw/2, by+15, badgeText), w, h)
 }
 
 // simArtifactLog is a believable multi-line generation log for the in-flight
@@ -2602,9 +2632,141 @@ func simLogURL(script, key string) string {
 	return "/artifacts/projects/sim-project/log?script=" + script + "&key=" + key
 }
 
+// The bodies behind the "files" set's text artifacts. Each pair is a before and
+// an after that differ in a few lines, so the lightbox has a real diff to show;
+// the log's long lines are there to exercise wrapping, and the .go pair to
+// exercise syntax highlighting on both sides of a diff.
+//
+// The timestamps are deliberately NOT in the changed lines: a log whose every
+// line carries a clock reads as "all of it changed", which shows the diff off
+// badly and is not what a real report-vs-report comparison looks like. Here the
+// unchanged lines stay unchanged, so the demo has context rows, two edited lines
+// (with word-level marks inside them) and one added line.
+const simDeployLogBefore = "resolving 214 packages\n" +
+	"building web/ ... a very long line, deliberately: compiling src/components/AgentChat.tsx with the swc transform and the css pipeline, " +
+	"then emitting the bundle, the sourcemap and the asset manifest into dist/\n" +
+	"uploading dist/ (4.2 MB)\n" +
+	"deploy 3f2a91c to staging\n" +
+	"ok\n"
+
+const simDeployLogAfter = "resolving 216 packages\n" +
+	"building web/ ... a very long line, deliberately: compiling src/components/AgentChat.tsx with the swc transform and the css pipeline, " +
+	"then emitting the bundle, the sourcemap and the asset manifest into dist/\n" +
+	"uploading dist/ (4.4 MB)\n" +
+	"deploy 9b71e04 to staging\n" +
+	"warning: 2 assets over the 500 KB budget\n" +
+	"ok\n"
+
+// A generated schema - the shape of collectible text output that carries real
+// syntax to highlight, on both sides of a diff. Deliberately a .sql and not a
+// .go: the artifact pipeline collects reports and generated files (textExts in
+// internal/artifacts), not arbitrary source, and a fixture that showed
+// otherwise would be documenting a state the product cannot produce.
+const simSchemaBefore = "-- generated by `mage schema:dump` - do not edit\n" +
+	"CREATE TABLE uploads (\n" +
+	"  id      INTEGER PRIMARY KEY,\n" +
+	"  key     TEXT NOT NULL,\n" +
+	"  size    INTEGER NOT NULL DEFAULT 0\n" +
+	");\n\n" +
+	"CREATE INDEX uploads_key ON uploads (key);\n"
+
+const simSchemaAfter = "-- generated by `mage schema:dump` - do not edit\n" +
+	"CREATE TABLE uploads (\n" +
+	"  id       INTEGER PRIMARY KEY,\n" +
+	"  key      TEXT NOT NULL,\n" +
+	"  size     INTEGER NOT NULL DEFAULT 0,\n" +
+	"  attempts INTEGER NOT NULL DEFAULT 0\n" +
+	");\n\n" +
+	"CREATE INDEX uploads_key ON uploads (key);\n" +
+	"CREATE INDEX uploads_attempts ON uploads (attempts) WHERE attempts > 0;\n"
+
+const simReleaseNotes = "# Release notes\n\n" +
+	"The lightbox renders a markdown artifact as a **document**, with a Source\n" +
+	"switch for the file behind it.\n\n" +
+	"## What is in the box\n\n" +
+	"- every viewer the lightbox has, one file each\n" +
+	"- a `before`/`after` pair for the text ones, so the diff view has something to show\n" +
+	"- a long line or two, so wrapping has something to wrap\n\n" +
+	"| File | Shows |\n| --- | --- |\n" +
+	"| `deploy.log` | wrapping, the line-number gutter, a text diff |\n" +
+	"| `schema.sql` | syntax highlighting on both sides of a diff |\n" +
+	"| `bundle.tgz` | the \"no preview\" download card |\n\n" +
+	"```go\nfunc sleepBackoff(attempt int) {\n\td := 100 * time.Millisecond << attempt\n\ttime.Sleep(d)\n}\n```\n\n" +
+	"> Rendered by the same <Markdown variant=\"doc\"> a README gets in the\n> repository browser.\n"
+
+// simLightboxSet is the demo set holding ONE artifact of every kind the lightbox
+// can open - image, video, text, markdown, source, and a binary with no preview -
+// with a before and an after wherever a diff makes sense. It exists so every
+// viewer (and the text diff) can be opened by hand in simulation, which no other
+// set covers: the screenshots set is all images plus one .webm and one .apk.
+//
+// It hangs off agent-chat rather than agent-1 deliberately. agent-1's panel is
+// what take-screenshots captures (the artifact grid, the A/B modes, the
+// lightbox shots), so a set added there would land in half a dozen screenshots;
+// agent-chat is only ever captured viewportOnly at the top of its page, above
+// where this card sits.
+func simLightboxSet() api.ArtifactSet {
+	return api.ArtifactSet{
+		Name:    "files",
+		Status:  api.ArtifactSetStatusReady,
+		Changed: true,
+		Files: []api.ArtifactFile{
+			{
+				Name:       "deploy.log",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				LeftUrl:    ptr(simTextURL("text/plain", simDeployLogBefore)),
+				RightUrl:   ptr(simTextURL("text/plain", simDeployLogAfter)),
+				Size:       ptr(int64(len(simDeployLogAfter))),
+			},
+			{
+				Name:       "schema.sql",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				LeftUrl:    ptr(simTextURL("text/plain", simSchemaBefore)),
+				RightUrl:   ptr(simTextURL("text/plain", simSchemaAfter)),
+				Size:       ptr(int64(len(simSchemaAfter))),
+			},
+			{
+				Name:       "RELEASE-NOTES.md",
+				ChangeType: api.ArtifactFileChangeTypeAdded,
+				RightUrl:   ptr(simTextURL("text/markdown", simReleaseNotes)),
+				Size:       ptr(int64(len(simReleaseNotes))),
+			},
+			{
+				Name:       "preview.png",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				LeftUrl:    ptr(simSVGUI("Preview", false, "#64748b", "Draft", 360, 220)),
+				RightUrl:   ptr(simSVGUI("Preview", false, "#16a34a", "Live", 360, 220)),
+				Width:      ptr(1440), Height: ptr(880),
+				ChangeRatio: ptr(0.03),
+			},
+			{
+				Name:       "loader-animation.webm",
+				ChangeType: api.ArtifactFileChangeTypeModified,
+				LeftUrl:    ptr(simWebM(simVideoBefore)),
+				RightUrl:   ptr(simWebM(simVideoAfter)),
+				Width:      ptr(280), Height: ptr(150),
+				ChangeRatio: ptr(0.5),
+			},
+			{
+				// No preview is possible for this one - it is here so the download
+				// card is one ←/→ step away from the viewers that do render.
+				Name:       "bundle.tgz",
+				ChangeType: api.ArtifactFileChangeTypeAdded,
+				RightUrl:   ptr("/artifacts/projects/sim-project/blob?script=files&key=commit/bbbb&file=bundle.tgz"),
+				Size:       ptr(int64(9437184)),
+			},
+		},
+	}
+}
+
 // simArtifactSets returns the mock artifact sets for the simulated agent, shared
 // by the HTTP poll handler and the streaming WS handler.
 func simArtifactSets(id string) []api.ArtifactSet {
+	// The one-of-every-lightbox-viewer demo - see simLightboxSet for why it hangs
+	// off the chat agent.
+	if id == "agent-chat" {
+		return []api.ArtifactSet{simLightboxSet()}
+	}
 	if id != "agent-1" {
 		return []api.ArtifactSet{}
 	}

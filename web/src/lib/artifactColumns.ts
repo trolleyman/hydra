@@ -65,6 +65,18 @@ export function useArtifactSpans() {
 // half - a deliberately generous default (phones were a sixth before, which read as
 // too small); the global size slider in the diff settings nudges the whole grid up
 // or down from here, and dragging a tile overrides one tile.
+// A file/document card - a package, a PDF, a text report - has no media to
+// measure, but it does have a natural size: an icon, a byte count and up to two
+// download buttons. FILE_TILE_PX is the width it reads comfortably at, handed to
+// the grid as its logical media width so the same "never lay a tile out wider
+// than it is" cap that stops a phone screenshot filling the row applies to these
+// too. Without it they took the whole row each, on the flat aspect below.
+export const FILE_TILE_PX = 380
+// The floor underneath that cap: enough for the icon, the size and BOTH download
+// buttons side by side. Narrower and the buttons wrap, which is what made a
+// full-width card look like the only option.
+export const FILE_TILE_MIN_PX = 250
+
 export function defaultSpanForAspect(aspect: number | undefined): number {
   if (aspect == null) return 2
   if (aspect < 0.8) return 2   // portrait / phone

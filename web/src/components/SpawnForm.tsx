@@ -14,7 +14,8 @@ import { AttachmentChips } from './AttachmentChips'
 import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { spawnGeometry } from '../lib/terminalGeometry'
-import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { nextAttachmentId } from '../lib/draftAttachments'
 import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
 import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime, pasteMarkerText, stripPasteMarker } from '../lib/pastedText'
 import { usePasteMarkersStore } from '../lib/composerPrefs'
@@ -496,32 +497,57 @@ export const SpawnForm = memo(function SpawnForm({
   }
 
   // Per-project attachments + image counter, swapped in/out as the project (or
-  // layout) changes so each box keeps its own - just like the text draft. The
-  // attachments live in an in-session module cache (their thumbnails are object
-  // URLs that can't be persisted); the counter is mirrored to localStorage.
+  // layout) changes so each box keeps its own - just like the text draft. See
+  // spawnDrafts for the two tiers behind load/saveAttachments: a live cache that
+  // carries object URLs and in-flight uploads across a project switch, over a
+  // localStorage mirror of the settled uploads' paths that survives a reload.
   const storeKey = projectId ? spawnDraftKey(projectId, compact) : null
-  const prevStoreKeyRef = useRef<string | null>(null)
+  // The box the cache calls below belong to, remembered because they run when
+  // it is already the OUTGOING one (a project switch, or unmount).
+  const prevStoreRef = useRef<{ key: string; projectId: string; compact: boolean } | null>(null)
 
   useEffect(() => {
-    const prev = prevStoreKeyRef.current
-    if (prev === storeKey) return
+    const prev = prevStoreRef.current
+    if ((prev?.key ?? null) === storeKey) return
     // Stash the outgoing project's attachments before loading the new one's.
-    if (prev) saveAttachments(prev, attachmentsRef.current)
+    if (prev) saveAttachments(prev.projectId, prev.compact, attachmentsRef.current)
     // A pasted block stashed for one box can't be "re-pasted" into another, and
     // undo history doesn't carry across a project switch.
     lastPasteRef.current = null
     pastedTextCounterRef.current = 0
     const loadedPrompt = draftKey ? (readLocal(draftKey) ?? '') : ''
-    resetHistory(makeSnapshot(loadedPrompt, storeKey ? loadAttachments(storeKey) : [], 0, 0))
-    prevStoreKeyRef.current = storeKey
-  }, [storeKey, draftKey, resetHistory])
+    resetHistory(makeSnapshot(loadedPrompt, projectId ? loadAttachments(projectId, compact) : [], 0, 0))
+    prevStoreRef.current = storeKey && projectId ? { key: storeKey, projectId, compact } : null
+  }, [storeKey, draftKey, projectId, compact, resetHistory])
 
-  // Persist the current box's attachments to the cache on unmount (the
-  // full-page form remounts when navigating between projects).
+  // Mirror the attachments to the caches on every change, not only when the box
+  // goes away: a page RELOAD runs no unmount, so a save deferred to teardown is
+  // exactly the save that never happens - which is how a draft's attachments
+  // used to vanish while its text came back. Cheap (a short list of paths), and
+  // it keeps the durable tier in step with each upload as it settles.
+  //
+  // The first pass for a given box writes nothing: the load effect above hands
+  // the hydrated list to resetHistory, so on that commit `attachments` is still
+  // the OUTGOING box's (or the initial empty one) and saving it here would wipe
+  // the very draft being restored. The following render carries the real list
+  // and writes it back unchanged.
+  const mirroredKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!projectId || !storeKey) return
+    if (mirroredKeyRef.current !== storeKey) {
+      mirroredKeyRef.current = storeKey
+      return
+    }
+    saveAttachments(projectId, compact, attachments)
+  }, [attachments, projectId, compact, storeKey])
+
+  // Persist the current box's attachments on unmount too (the full-page form
+  // remounts when navigating between projects), so an edit made in the same tick
+  // as the teardown isn't lost.
   useEffect(() => {
     return () => {
-      const key = prevStoreKeyRef.current
-      if (key) saveAttachments(key, attachmentsRef.current)
+      const prev = prevStoreRef.current
+      if (prev) saveAttachments(prev.projectId, prev.compact, attachmentsRef.current)
     }
   }, [])
 
@@ -760,7 +786,7 @@ export const SpawnForm = memo(function SpawnForm({
       objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
       objectUrlsRef.current.clear()
       resetHistory(makeSnapshot('', [], 0, 0))
-      if (storeKey) saveAttachments(storeKey, [])
+      if (projectId) saveAttachments(projectId, compact, [])
       setLightboxIndex(null)
       pastedTextCounterRef.current = 0
       lastPasteRef.current = null
