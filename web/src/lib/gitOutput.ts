@@ -15,12 +15,12 @@
 // recognised as one of those git calls, which is what makes shapes this loose
 // safe to key on: `M web/src/x.tsx` means "modified" here and means nothing at
 // all in the output of any other command.
+import { IGNORE_TOKEN_CLASSES, ignoreTokens } from './ignoreHighlight'
+import type { OutputSpan } from './outputSpan'
 
-export interface GitSpan {
-  text: string
-  // Tailwind classes to colour the text with; '' takes the panel's own colour.
-  cls: string
-}
+// The shape every function here returns - named for what it is a span OF, since
+// this module is one of several that colour a tool's output (see lib/duOutput).
+export type GitSpan = OutputSpan
 
 // The staged/unstaged split is the whole point of a status, so it gets the
 // green/red pair the diff viewer uses. Everything git prints as scaffolding -
@@ -80,6 +80,14 @@ const HUNK = /^(@@+[-+0-9, ]+@@+)(.*)$/
 const NO_NEWLINE = /^\\ No newline at end of file/
 // `git status --short`: an index column, a worktree column, then the path.
 const SHORT = /^([ MADRCUT?!])([ MADRCUT?!]) (\S.*)$/
+// `git check-ignore -v`: which rule, in which file, on which line, decided a
+// path - `web/.gitignore:9:iosevka-*.woff2\tweb/public/fonts/iosevka-400.woff2`.
+// With `-n` the same shape carries an empty source for a path that is NOT
+// ignored (`::\tpath`).
+//
+// The tab is what makes this safe to key on: nothing else git prints puts a
+// `source:line:` in front of one.
+const CHECK_IGNORE = /^([^\t:]*):(\d*):([^\t]*)\t(.*)$/
 // The long status's own furniture.
 const BRANCH = /^(On branch |HEAD detached at |HEAD detached from )(.*)$/
 const SECTION = /^(Changes to be committed|Changes not staged for commit|Untracked files|Unmerged paths|Ignored files|Changes staged for commit):$/
@@ -96,6 +104,24 @@ const BARE_ENTRY = /^(\t)(\S.*)$/
 function columnClass(code: string, side: string): string {
   if (code === ' ') return ''
   return code === '?' || code === '!' ? DIM : side
+}
+
+// checkIgnoreSpans colours one line of a `git check-ignore -v`: where the rule
+// lives, the rule itself, and the path it was asked about.
+//
+// The two things worth reading are the rule and the path it caught, so both keep
+// the panel's colour and only the `source:line:` in front of them dims - the
+// same split the diffstat draws between a path and its `|`. Inside the rule the
+// machinery is marked in the ignore file's own colours (lib/ignoreHighlight), so
+// a `*` reads as a wildcard here exactly as it does in the .gitignore it was
+// quoted out of.
+function checkIgnoreSpans(source: string, num: string, pattern: string, path: string): GitSpan[] {
+  return [
+    { text: `${source}:${num}:`, cls: DIM },
+    ...ignoreTokens(pattern).map((t) => ({ text: t.text, cls: IGNORE_TOKEN_CLASSES[t.kind] })),
+    { text: '\t', cls: '' },
+    { text: path, cls: '' },
+  ]
 }
 
 // A rename is printed as one path: `R  old/name -> new/name`.
@@ -151,6 +177,12 @@ function patchSpans(line: string): GitSpan[] {
 // path green above "Changes not staged for commit:" and red below it - which is
 // the distinction the whole command exists to draw.
 function shapeSpans(line: string, staged: boolean): GitSpan[] | null {
+  // Asked first: it is the most specific shape here (a `source:line:` AND a
+  // tab), and its pattern column can hold anything - including text that would
+  // otherwise read as a diffstat row.
+  const ignored = CHECK_IGNORE.exec(line)
+  if (ignored) return checkIgnoreSpans(ignored[1], ignored[2], ignored[3], ignored[4])
+
   const stat = STAT.exec(line)
   if (stat) {
     const [, indent, path, bar, count, gap, graph] = stat

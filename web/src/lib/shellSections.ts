@@ -26,7 +26,7 @@
 // one makes its section (only its section) plain, because a file name and line
 // numbers attached to text from somewhere else would be worse than no
 // highlighting at all.
-import { parseSedRange, parseView, type FileView } from './fileViewCommand'
+import { parseSedRange, parseView, viewLimit, type FileView } from './fileViewCommand'
 
 // A grep-shaped step: output that is a set of lines from one or more files,
 // non-contiguous, optionally carrying its own line numbers.
@@ -55,6 +55,8 @@ export type ScriptStep =
   // git reporting on the repository rather than printing a file: a status, a
   // commit header, a diffstat, a patch (see lib/gitOutput).
   | { kind: 'git'; command: string }
+  // A `du`: how big each of these is, one path per line (see lib/duOutput).
+  | { kind: 'du'; command: string }
   // Prints nothing, so it takes no output (`cd`, an assignment, a redirect).
   | { kind: 'silent' }
   // Prints something this module cannot describe.
@@ -65,6 +67,7 @@ export type ScriptSection =
   | { kind: 'view'; view: FileView; lines: string[] }
   | { kind: 'matches'; match: MatchesView; command: string; lines: string[] }
   | { kind: 'git'; command: string; lines: string[] }
+  | { kind: 'du'; command: string; lines: string[] }
   | { kind: 'plain'; lines: string[] }
 
 // Steps beyond this are not a script anyone is reading the output of, and the
@@ -509,11 +512,17 @@ function splitAt(word: string, sep: string): [string, string | null] {
 }
 
 // git subcommands whose output is a report on the repository - a status, a
-// commit header, a diffstat, a patch - which are the shapes lib/gitOutput knows
-// how to colour. Each of them prints one of those whatever it is asked for, so
-// the refused flags below are the only thing that can turn one into something
-// else.
-const GIT_REPORTS = new Set(['status', 'show', 'log', 'diff'])
+// commit header, a diffstat, a patch, the rule that ignores a path - which are
+// the shapes lib/gitOutput knows how to colour. Each of them prints one of those
+// whatever it is asked for, so the refused flags below are the only thing that
+// can turn one into something else.
+const GIT_REPORTS = new Set(['status', 'show', 'log', 'diff', 'check-ignore'])
+
+// Flags that make a git command print nothing and answer with its exit status
+// alone - `git check-ignore -q "$f" && echo ...`, `git diff --quiet`. Their
+// output is not "unattributable", it is empty, and saying so keeps the step from
+// claiming lines its neighbours printed.
+const GIT_QUIET = /^(-q|--quiet)$/
 
 // Flags that make git print something OTHER than those shapes: a machine
 // readable listing, a format chosen by the caller that could put anything on any
@@ -524,15 +533,15 @@ const GIT_REPORTS = new Set(['status', 'show', 'log', 'diff'])
 // which lib/gitOutput now reads.
 const GIT_REFUSED = /^(--numstat|--name-only|--name-status|--raw|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
 
-// parseGitReport reports whether a command is a git call whose output is one of
-// the reports lib/gitOutput colours: a status, a commit header, a diffstat, a
-// patch.
+// parseGitReport says what a git call prints: one of the reports lib/gitOutput
+// colours - a status, a commit header, a diffstat, a patch, an ignore rule -
+// 'quiet' when it prints nothing at all, or null when it is neither.
 //
 // Narrow on purpose. Everything outside this set prints a listing or a format
 // chosen by the caller, and a `--pretty` this module has not read can put
 // anything on any line.
-function parseGitReport(words: Word[]): boolean {
-  if (words[0].text !== 'git' || words[0].quoted) return false
+function parseGitReport(words: Word[]): 'report' | 'quiet' | null {
+  if (words[0].text !== 'git' || words[0].quoted) return null
   // git's own options come before the subcommand; `-C` and `-c` take the word
   // after them, and none of them change what the subcommand prints.
   let i = 1
@@ -541,8 +550,32 @@ function parseGitReport(words: Word[]): boolean {
     i++
   }
   const sub = words[i]
-  if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return false
-  return !words.slice(i + 1).some((w) => !w.quoted && GIT_REFUSED.test(w.text))
+  if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return null
+  const args = words.slice(i + 1).filter((w) => !w.quoted)
+  if (args.some((w) => GIT_QUIET.test(w.text))) return 'quiet'
+  return args.some((w) => GIT_REFUSED.test(w.text)) ? null : 'report'
+}
+
+// Flags that make `du` print something other than "a size, then the path it
+// measured": a NUL-separated stream, a timestamp column between the two, a list
+// of names read from a file (which prints the same shape, but `--files0-from=-`
+// makes the command a filter on the one before it rather than a measurement of
+// its own).
+// The `-0` is written as a cluster as often as on its own (`du -sh0`), so it is
+// matched as a LETTER of one rather than as a word.
+const DU_REFUSED = /^(--null|--time(=.*)?|--files0-from(=.*)?)$|^-[A-Za-z0-9]*0/
+
+// isDu reports whether a command is a `du` printing its ordinary two-column
+// listing (see lib/duOutput).
+//
+// The operands are not read, and may be anything - a glob, a variable, a `~`
+// path. What du prints does not depend on knowing WHICH directories it was
+// given, only that each line is a size and a name, which is the opposite of a
+// file view (where the path is the whole point, because it says what language
+// the lines are).
+function isDu(words: Word[]): boolean {
+  if (words[0].text !== 'du' || words[0].quoted) return false
+  return !words.slice(1).some((w) => !w.quoted && DU_REFUSED.test(w.text))
 }
 
 // isFilter reports whether a command only trims what the command before it in
@@ -583,6 +616,29 @@ function isLineFilter(cmd: Command): { numbered: boolean } | null {
   return grep !== null && grep.fileCount === 0 ? { numbered: grep.numbered } : null
 }
 
+// `sort` flags that make it print something other than the lines it was given:
+// a set (dropping duplicates), a verdict about the order, a NUL-separated
+// stream, output redirected to a file.
+const SORT_REFUSED = /^(-u|--unique|-c|-C|--check(=.*)?|-z|--zero-terminated|-o|--output(=.*)?|-m|--merge)$/
+
+// isReorderFilter reads a `| sort -rh`: every line the command before it printed,
+// byte for byte, in a different ORDER.
+//
+// That is only harmless for output whose lines stand on their own - which is
+// exactly why it is refused below for a file view (line 3 of a sorted stream is
+// not line 3 of anything) and for a git report (whose shapes are read in the
+// order git wrote them), and allowed for a `du`, where each line already carries
+// both of the things it is about, and for a search, where every line carries its
+// own file and number.
+//
+// It must also name no file of its own: a `sort f` is reading that file rather
+// than the pipe.
+function isReorderFilter(cmd: Command): boolean {
+  const name = cmd.words[0]
+  if (name.text !== 'sort' || name.quoted) return false
+  return cmd.words.slice(1).every((w) => !w.quotedStart && w.text.startsWith('-') && !SORT_REFUSED.test(w.text))
+}
+
 // isRangeFilter reads a `| sed -n '449,466p'`: a contiguous slice of what the
 // command before it printed, taken by line number. Like isLineFilter, it must
 // name no file of its own.
@@ -600,7 +656,7 @@ function isRangeFilter(cmd: Command): { start: number; end: number | null } | nu
 // a `cat f`, a `git show rev:f`. That is what makes a filter's own line numbers,
 // or the range it slices out, line up with the file's.
 function wholeFile(view: FileView): boolean {
-  return view.start === 1 && view.end == null && !view.numbered
+  return view.start === 1 && view.end == null && !view.numbered && !view.ranges
 }
 
 // classify decides what one pipeline contributes to the output.
@@ -616,12 +672,15 @@ function classify(p: Pipeline): ScriptStep {
   // producer is not one.
   let numbered = false
   let sliced: { start: number; end: number | null } | null = null
+  // A `| sort`: the same lines, in an order the producer did not choose.
+  let reordered = false
   while (cmds.length > 1) {
     const last = cmds[cmds.length - 1]
     const trim = isFilter(last)
     const line = isLineFilter(last)
     const range = isRangeFilter(last)
     if (trim) trimmedFrom = trim
+    else if (isReorderFilter(last)) reordered = true
     // A passthrough drops nothing, so it is not even a trim: `git log | cat`
     // is that log, and `sed -n 1,20p f | cat` is still lines 1 to 20 of f.
     else if (isPassthrough(last)) { /* nothing to record */ }
@@ -648,13 +707,26 @@ function classify(p: Pipeline): ScriptStep {
   }
 
   const matches = parseMatches(cmd.words)
-  // A search's output is lines from all over a file, so a filter's own numbers
-  // or line range describe the STREAM and nothing that could be pointed at.
+  // A search's output is lines from all over a file, so a filter's own NUMBERS
+  // describe the stream and nothing that could be pointed at. A range sliced out
+  // of it is different: `rg -n pat f | sed -n 1,40p` only drops lines, and every
+  // line that survives is still that file's, still carrying the number the
+  // search printed in front of it.
   if (matches) {
-    return numbered || sliced
+    return numbered
       ? unknown
       : { kind: 'matches', match: { paths: matches.paths, numbered: matches.numbered }, command: p.raw }
   }
+
+  // Every `du` line stands on its own - a size and the thing that size is - so
+  // it survives being sorted, trimmed and grepped. Only a filter's own line
+  // numbers make it something else: they would ride in the text as a `12:`
+  // prefix that lib/duOutput has no shape for.
+  if (isDu(cmd.words)) return numbered ? unknown : { kind: 'du', command: p.raw }
+
+  // Everything below reads a FILE, or a report whose lines are read in the
+  // order they were written; a sort makes neither of them what it says.
+  if (reordered) return unknown
 
   // Asked BEFORE the git report below, because `git show <rev>:<path>` is the
   // one git command that prints a file rather than a report about one.
@@ -682,7 +754,11 @@ function classify(p: Pipeline): ScriptStep {
         return { kind: 'matches', match: { paths: [view.path], numbered }, command: p.raw }
       }
       // A `| head` keeps the start of what was printed and drops the end; a
-      // `| tail` keeps an end this parser cannot number.
+      // `| tail` keeps an end this parser cannot number. Against a view of
+      // SEVERAL stretches neither can be numbered at all - which stretch the cut
+      // fell in is exactly what is no longer knowable - so the step is one this
+      // module declines to describe rather than one it describes wrongly.
+      if (trimmedFrom && view.ranges) return unknown
       if (trimmedFrom === 'head') return { kind: 'view', view: { ...view, end: null } }
       if (trimmedFrom === 'tail') return { kind: 'view', view: { ...view, start: null, end: null } }
       return { kind: 'view', view }
@@ -691,7 +767,9 @@ function classify(p: Pipeline): ScriptStep {
 
   // A filter's line numbers would ride in the text as a `12:` prefix that
   // lib/gitOutput has no shape for.
-  if (parseGitReport(cmd.words)) return numbered ? unknown : { kind: 'git', command: p.raw }
+  const git = parseGitReport(cmd.words)
+  if (git === 'quiet') return { kind: 'silent' }
+  if (git === 'report') return numbered ? unknown : { kind: 'git', command: p.raw }
 
   return unknown
 }
@@ -703,7 +781,7 @@ export function parseScriptSteps(script: string): ScriptStep[] | null {
   const pipelines = lexPipelines(script)
   if (!pipelines || pipelines.length === 0 || pipelines.length > MAX_STEPS) return null
   const steps = pipelines.map(classify)
-  const describes = new Set(['marker', 'view', 'matches', 'git'])
+  const describes = new Set(['marker', 'view', 'matches', 'git', 'du'])
   return steps.some((s) => describes.has(s.kind)) ? steps : null
 }
 
@@ -719,8 +797,7 @@ function matchesAt(lines: string[], pos: number, expected: string[]): boolean {
 function stepLimit(step: ScriptStep): number | null {
   if (step.kind === 'echo') return step.text.split('\n').length
   if (step.kind !== 'view') return null
-  const { start, end } = step.view
-  return start != null && end != null ? end - start + 1 : null
+  return viewLimit(step.view)
 }
 
 // echoLines is the exact output of a step whose text the script spells out, so
@@ -888,6 +965,8 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
         sections.push({ kind: 'matches', match: step.match, command: step.command, lines: part })
       } else if (step.kind === 'git') {
         sections.push({ kind: 'git', command: step.command, lines: part })
+      } else if (step.kind === 'du') {
+        sections.push({ kind: 'du', command: step.command, lines: part })
       } else {
         sections.push({ kind: 'plain', lines: part })
       }
@@ -942,6 +1021,19 @@ const NUMBERED = /^(\d+)[:-](.*)$/
 const PATH_NUMBERED = /^([^:\s][^:]*):(\d+)[:-](.*)$/
 const PATH_ONLY = /^([\w./~@+-]*[/.][\w./~@+-]*):(.*)$/
 
+// namesOneFile reports whether the search's operands pin every line it printed
+// to ONE file, which is what makes a leading `path:` on a line something to be
+// suspicious of - it is far more likely a colon in that file's own text.
+//
+// One operand is not enough to conclude it: `rg pat internal/` and
+// `grep -rn foo src` each name exactly one thing, search a whole tree under it
+// and print a `path:` in front of every line. So the operand also has to LOOK
+// like a file - a basename carrying an extension - which is the most a parser
+// that never touches a filesystem can ask.
+function namesOneFile(paths: string[]): boolean {
+  return paths.length === 1 && /\.[^./]+$/.test(paths[0].split('/').pop() ?? '')
+}
+
 // parseMatchLines reads the prefixes off a search's output. The SHAPE is taken
 // from the lines themselves rather than from the flags, because the same tool
 // prints different ones (`rg` numbers its output for a terminal and not for a
@@ -960,7 +1052,7 @@ export function parseMatchLines(lines: string[], paths: string[]): MatchLine[] {
     ? NUMBERED
     : majority(PATH_NUMBERED)
       ? PATH_NUMBERED
-      : paths.length !== 1 && majority(PATH_ONLY)
+      : !namesOneFile(paths) && majority(PATH_ONLY)
         ? PATH_ONLY
         : null
   if (!shape) return lines.map(bare)

@@ -11,9 +11,8 @@
 // lined up under its own code, and what lets the gutter cell stretch the full
 // height of the line it numbers so its dividing rule has no gaps.
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { hasLanguage } from '../lib/prism'
 import { ensureLanguage } from '../lib/prismLazy'
-import { highlightLines } from '../lib/highlightCore'
+import { canHighlight, highlightLines } from '../lib/highlightCore'
 import { inRange, type LineRange } from '../lib/lineRange'
 import { CODE_TEXT } from '../lib/diffMetrics'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
@@ -56,13 +55,13 @@ export function CodePane({ content, lang, wrap, className, highlightRange, onSel
   // its worker), then re-highlight: hasGrammar flips false->true once it lands.
   const [, bumpLoaded] = useState(0)
   useEffect(() => {
-    if (hasLanguage(lang)) return
+    if (canHighlight(lang)) return
     let cancelled = false
     ensureLanguage(lang).then((ok) => { if (ok && !cancelled) bumpLoaded((n) => n + 1) })
     return () => { cancelled = true }
   }, [lang])
 
-  const hasGrammar = hasLanguage(lang)
+  const hasGrammar = canHighlight(lang)
   const lines = useMemo(
     () => splitHighlighted(content, lang),
     // hasGrammar: re-run once a lazily-loaded grammar lands.
@@ -133,13 +132,13 @@ export function DiffPane({ rows, lang, wrap, className }: {
 }) {
   const [, bumpLoaded] = useState(0)
   useEffect(() => {
-    if (hasLanguage(lang)) return
+    if (canHighlight(lang)) return
     let cancelled = false
     ensureLanguage(lang).then((ok) => { if (ok && !cancelled) bumpLoaded((n) => n + 1) })
     return () => { cancelled = true }
   }, [lang])
 
-  const hasGrammar = hasLanguage(lang)
+  const hasGrammar = canHighlight(lang)
   // Each SIDE is highlighted as one run of code, not line by line, so a
   // multi-line construct colourises correctly - and each side is reassembled
   // whole (a context line belongs to both) so neither is highlighted as if the

@@ -9,6 +9,9 @@ function tag(cls: string): string {
   if (cls.includes('red')) return 'del'
   if (cls.includes('amber')) return 'sha'
   if (cls.includes('sky')) return 'ref'
+  // A span carrying a fragment of a language takes Prism's own token classes -
+  // the ignore pattern in a `check-ignore -v` line.
+  if (cls.startsWith('token ')) return cls.slice('token '.length)
   return 'dim'
 }
 
@@ -161,6 +164,30 @@ describe('gitOutputSpans', () => {
     // ...on either side of the patch.
     expect(out[4]).toEqual([['commit ', 'dim'], ['5d671ab0', 'sha']])
     expect(out[5]).toEqual([['    - and the backoff with it', '']])
+  })
+
+  it('reads a check-ignore as the rule it names', () => {
+    expect(spans(
+      'web/public/fonts/.gitignore:9:iosevka-*.woff2\tweb/public/fonts/iosevka-400-normal.woff2',
+      '.gitignore:35:/.iosevka-build.json\tweb/.iosevka-build.json',
+    )).toEqual([
+      [
+        ['web/public/fonts/.gitignore:9:', 'dim'],
+        ['iosevka-', ''], ['*', 'operator'], ['.woff2', ''],
+        ['\t', ''], ['web/public/fonts/iosevka-400-normal.woff2', ''],
+      ],
+      [
+        ['.gitignore:35:', 'dim'],
+        ['/', 'punctuation'], ['.iosevka-build.json', ''],
+        ['\t', ''], ['web/.iosevka-build.json', ''],
+      ],
+    ])
+  })
+
+  it('reads the empty source `-n` prints for a path nothing ignores', () => {
+    expect(spans('::\tweb/public/fonts/OFL.txt')).toEqual([
+      [['::', 'dim'], ['\t', ''], ['web/public/fonts/OFL.txt', '']],
+    ])
   })
 
   it('leaves a line it has no shape for alone', () => {

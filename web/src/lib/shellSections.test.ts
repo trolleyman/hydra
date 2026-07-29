@@ -151,10 +151,65 @@ describe('parseScriptSteps', () => {
     expect(kinds('git commit -m x\necho ----')).toEqual(['unknown', 'marker'])
   })
 
+  it('keeps a search through a sed slice, which only drops lines', () => {
+    // The lines that survive are still that file's, still carrying the numbers
+    // the search printed in front of them.
+    expect(steps('rg -n "OutputPanel" src/components/AgentChat.tsx | sed -n 1,40p')[0]).toMatchObject({
+      kind: 'matches',
+      match: { paths: ['src/components/AgentChat.tsx'], numbered: true },
+    })
+    // A filter numbering the STREAM is still refused: line 3 of a search's
+    // output is not line 3 of anything.
+    expect(kinds('rg foo src | grep -n bar\ncat b.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('reads a du, however its operands are spelled', () => {
+    expect(steps('du -sh ~/.cache/* | sort -rh | head -8')[0]).toEqual({
+      kind: 'du', command: 'du -sh ~/.cache/* | sort -rh | head -8',
+    })
+    // A glob, a variable, a bare directory: what du prints does not depend on
+    // knowing which paths it was given.
+    expect(kinds('du -sh "$DIR"\necho ----')).toEqual(['du', 'marker'])
+    expect(kinds('du -h --max-depth=2 web | sort -h\necho ----')).toEqual(['du', 'marker'])
+    // A `| grep -v` drops lines; each one that survives is still a measurement.
+    expect(kinds('du -sh * | grep -v node_modules | head\necho ----')).toEqual(['du', 'marker'])
+  })
+
+  it('refuses a du whose lines are not a size and a path', () => {
+    // NUL-separated, and a timestamp column between the two.
+    expect(kinds('du -sh0 x\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('du --time -sh x\ncat b.go')).toEqual(['unknown', 'view'])
+    // A `grep -n` numbers the STREAM, which rides in the text as a prefix.
+    expect(kinds('du -sh * | grep -n cache\ncat b.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('lets a sort reorder what stands on its own, and nothing else', () => {
+    // A file view's numbering, and a git report's shapes, are read in the order
+    // they were printed.
+    expect(kinds('sed -n 1,20p a.go | sort\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('git status --short | sort\ncat b.go')).toEqual(['unknown', 'view'])
+    // A sort that prints something other than the lines it was given.
+    expect(kinds('du -sh * | sort -u\ncat b.go')).toEqual(['unknown', 'view'])
+    // A search's lines each carry their own file and number.
+    expect(kinds('grep -rn foo src | sort\necho ----')).toEqual(['matches', 'marker'])
+  })
+
+  it('reads a check-ignore as the report it is', () => {
+    expect(steps('git check-ignore -v web/.iosevka-build.json')[0]).toEqual({
+      kind: 'git', command: 'git check-ignore -v web/.iosevka-build.json',
+    })
+    expect(kinds('git check-ignore -v a b c 2>&1 | head -3\necho ----')).toEqual(['git', 'marker'])
+  })
+
   it('treats what prints nothing as silent', () => {
     expect(kinds('cd web\nDIR=x\nexport A=1\ncat a.go > out.txt\ncat b.go')).toEqual([
       'silent', 'silent', 'silent', 'silent', 'view',
     ])
+    // A git call answering with its exit status alone prints NOTHING, which is
+    // not the same as printing something this cannot describe: an agent's
+    // `check-ignore -q` guard must not claim the lines its neighbours printed.
+    expect(kinds('git check-ignore -q x\ncat b.go')).toEqual(['silent', 'view'])
+    expect(kinds('git diff --quiet\ncat b.go')).toEqual(['silent', 'view'])
     // stderr going to /dev/null is not stdout going anywhere.
     expect(kinds('cat a.go 2>/dev/null\necho ----')).toEqual(['view', 'marker'])
   })
@@ -386,6 +441,18 @@ describe('parseMatchLines', () => {
     expect(parseMatchLines(['src/a.go:func a()', 'src/b.go:func b()'], [])).toEqual([
       { path: 'src/a.go', num: '', text: 'func a()', separator: false },
       { path: 'src/b.go', num: '', text: 'func b()', separator: false },
+    ])
+  })
+
+  it('reads the prefix when the one operand named a directory, not a file', () => {
+    // `rg pat internal/` names one thing, searches a whole tree under it and
+    // prints a `path:` in front of every line - which is the file each line
+    // wants to be numbered and highlighted as.
+    expect(parseMatchLines(['internal/chat/manager.go:specs = n(item.line)'], ['internal/'])).toEqual([
+      { path: 'internal/chat/manager.go', num: '', text: 'specs = n(item.line)', separator: false },
+    ])
+    expect(parseMatchLines(['src/a.go:12:func a()'], ['src'])).toEqual([
+      { path: 'src/a.go', num: '12', text: 'func a()', separator: false },
     ])
   })
 

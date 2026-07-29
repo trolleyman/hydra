@@ -16,6 +16,13 @@
 // stays an ordinary Bash card. Attaching a filename and line numbers to text
 // that is not that file's would be far worse than no highlighting at all.
 
+// A stretch of a file, by line number. `end` is null when the command asked for
+// everything from `start` on (`cat`, `sed -n '40,$p'`).
+export interface ViewRange {
+  start: number
+  end: number | null
+}
+
 export interface FileView {
   // The file operand exactly as the command wrote it (relative, ~-prefixed, ...).
   path: string
@@ -25,6 +32,14 @@ export interface FileView {
   // 1-based last line the command asked for, or null when open-ended (`cat`,
   // `sed -n '40,$p'`).
   end: number | null
+  // The stretches the command printed, when there is more than one - a
+  // `sed -n '10,14p;80,84p'`, which agents write to quote several places in one
+  // file at once. `start`/`end` then span the LOT (first start, last end), and
+  // are no longer a count of what was printed: viewLimit is.
+  //
+  // Absent for the ordinary single-range read, so nothing that only understands
+  // `start`/`end` has to learn about this.
+  ranges?: ViewRange[]
   // The output already carries its own line numbers (`cat -n`), so the renderer
   // must read them out of the text rather than count from `start`.
   numbered: boolean
@@ -137,7 +152,7 @@ function lexSteps(script: string): RawStep[] | null {
 //
 // Exported for lib/shellSections, where the same script with no file operand is
 // a filter that narrows what the command before it printed.
-export function parseSedRange(expr: string): { start: number; end: number | null } | null {
+export function parseSedRange(expr: string): ViewRange | null {
   const m = /^(\d+)(?:,(\d+|\$))?p$/.exec(expr)
   if (!m) return null
   const start = Number(m[1])
@@ -146,6 +161,64 @@ export function parseSedRange(expr: string): { start: number; end: number | null
   if (m[2] === '$') return { start, end: null }
   const end = Number(m[2])
   return end >= start ? { start, end } : null
+}
+
+// parseSedRanges reads a whole sed script of prints - `10,14p;80,84p;96,100p`,
+// which is how an agent quotes several places in one file in one command.
+//
+// sed streams the file once and prints a line as it reaches it, so the output is
+// these stretches in FILE order however they were written. That only stays
+// knowable while they are disjoint and ascending: overlapping ranges print the
+// line they share twice (once per `p`), and a range that opens before the one
+// written above it prints its lines earlier than its position here suggests. So
+// anything but strictly ascending and non-touching is refused rather than
+// guessed at.
+export function parseSedRanges(expr: string): ViewRange[] | null {
+  const ranges: ViewRange[] = []
+  for (const part of expr.split(';')) {
+    const range = parseSedRange(part.trim())
+    if (!range) return null
+    const prev = ranges[ranges.length - 1]
+    // Only the last range may run to the end of the file - one that does
+    // swallows everything after it.
+    if (prev && (prev.end === null || range.start <= prev.end)) return null
+    ranges.push(range)
+  }
+  return ranges.length > 0 ? ranges : null
+}
+
+// viewLimit is how many lines a view can have printed, or null when nothing in
+// the command bounds it (a `cat`, a `sed -n '40,$p'`). It is the sum over the
+// ranges, which for the ordinary single-range read is `end - start + 1`.
+export function viewLimit(view: Pick<FileView, 'start' | 'end' | 'ranges'>): number | null {
+  const ranges = view.ranges ?? (view.start != null ? [{ start: view.start, end: view.end }] : [])
+  let total = 0
+  for (const r of ranges) {
+    if (r.end == null) return null
+    total += r.end - r.start + 1
+  }
+  return ranges.length > 0 ? total : null
+}
+
+// viewLineNumbers gives the file line number each line of a view's output
+// carries, as strings for the gutter, or [] when they cannot be known.
+//
+// A single range numbers straight from its start, and keeps doing so when the
+// output comes up SHORT - the file ended first, and only the tail is missing.
+// Several ranges cannot: a short read there means one of the stretches ended
+// early, and nothing in the output says which, so every number after it would be
+// wrong. They are numbered only when the line count proves every range printed
+// in full - and the alternative, when it does not, is no gutter rather than a
+// gutter that lies.
+export function viewLineNumbers(view: Pick<FileView, 'start' | 'end' | 'ranges'>, count: number): string[] {
+  const ranges = view.ranges
+  if (!ranges) {
+    if (view.start == null) return []
+    return Array.from({ length: count }, (_, i) => String(view.start! + i))
+  }
+  if (viewLimit(view) !== count) return []
+  return ranges.flatMap((r) =>
+    Array.from({ length: (r.end ?? r.start) - r.start + 1 }, (_, i) => String(r.start + i)))
 }
 
 // parseCount reads head/tail's line count off its flags. Returns the count and
@@ -218,9 +291,16 @@ export function parseView(words: string[], raw: string): FileView | null {
     if (args[0] !== '-n') return null
     const rest = args[1] === '-e' ? args.slice(2) : args.slice(1)
     if (rest.length !== 2 || !isOperand(rest[1])) return null
-    const range = parseSedRange(rest[0])
-    if (!range) return null
-    return { ...base, path: rest[1], start: range.start, end: range.end }
+    const ranges = parseSedRanges(rest[0])
+    if (!ranges) return null
+    const last = ranges[ranges.length - 1]
+    return {
+      ...base,
+      path: rest[1],
+      start: ranges[0].start,
+      end: last.end,
+      ranges: ranges.length > 1 ? ranges : undefined,
+    }
   }
 
   if (tool === 'cat') {
@@ -332,7 +412,7 @@ export function splitFileViewOutput(steps: FileViewStep[], output: string): File
       continue
     }
     const view = step.view
-    const limit = view.start != null && view.end != null ? view.end - view.start + 1 : null
+    const limit = viewLimit(view)
     const next = steps[i + 1]
     let extent: number
     if (next?.kind === 'echo') {
@@ -366,7 +446,15 @@ export function splitFileViewOutput(steps: FileViewStep[], output: string): File
 
 // fileViewLineInfo phrases a view's range for the card header, matching the
 // wording a real Read's offset/limit gets ("lines 40-110", "from line 40").
-export function fileViewLineInfo(view: { start: number | null; end: number | null }): string {
+export function fileViewLineInfo(view: Pick<FileView, 'start' | 'end' | 'ranges'>): string {
+  // Several stretches: naming each one would run past the header, so it says how
+  // many there are and how far they reach - the numbers themselves are in the
+  // gutter beside the lines they belong to.
+  if (view.ranges && view.ranges.length > 1) {
+    const last = view.ranges[view.ranges.length - 1]
+    const span = last.end == null ? `from line ${view.ranges[0].start}` : `lines ${view.ranges[0].start}-${last.end}`
+    return `${view.ranges.length} ranges, ${span}`
+  }
   if (view.start != null && view.end != null) {
     return view.start === 1 ? `first ${view.end} lines` : `lines ${view.start}-${view.end}`
   }

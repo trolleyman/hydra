@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fileViewLineInfo, parseFileViewScript, splitFileViewOutput, type FileViewStep } from './fileViewCommand'
+import { fileViewLineInfo, parseFileViewScript, splitFileViewOutput, viewLineNumbers, type FileViewStep } from './fileViewCommand'
 
 function views(script: string) {
   return (parseFileViewScript(script) ?? []).flatMap((s) => (s.kind === 'view' ? [s.view] : []))
@@ -16,6 +16,17 @@ describe('parseFileViewScript', () => {
     expect(views("sed -n '40,110p' a.go").map((v) => [v.start, v.end])).toEqual([[40, 110]])
     expect(views("sed -n -e '5p' a.go").map((v) => [v.start, v.end])).toEqual([[5, 5]])
     expect(views("sed -n '40,$p' a.go").map((v) => [v.start, v.end])).toEqual([[40, null]])
+  })
+
+  it('reads a sed of several ranges as the stretches it prints', () => {
+    // What an agent writes to quote several places in one file at once.
+    expect(views("sed -n '10,14p;80,84p;96,100p' docs/chat-mode.md").map((v) => [v.start, v.end, v.ranges])).toEqual([
+      [10, 100, [{ start: 10, end: 14 }, { start: 80, end: 84 }, { start: 96, end: 100 }]],
+    ])
+    // One range is the ordinary read, and carries no list.
+    expect(views("sed -n '10,14p' a.go")[0].ranges).toBeUndefined()
+    // Single lines, which is the other way agents spell this.
+    expect(views("sed -n '3p;9p' a.go").map((v) => [v.start, v.end])).toEqual([[3, 9]])
   })
 
   it('reads cat, head and tail', () => {
@@ -61,7 +72,11 @@ describe('parseFileViewScript', () => {
     // sed that edits or transforms, not prints.
     expect(parseFileViewScript('sed -i s/a/b/ a.go')).toBeNull()
     expect(parseFileViewScript("sed -n 's/a/b/p' a.go")).toBeNull()
-    expect(parseFileViewScript("sed -n '1,5p;20,25p' a.go")).toBeNull()
+    // Ranges that overlap print the line they share twice, and one that runs to
+    // `$` swallows everything after it - neither is a sequence of stretches.
+    expect(parseFileViewScript("sed -n '1,10p;5,20p' a.go")).toBeNull()
+    expect(parseFileViewScript("sed -n '20,25p;1,5p' a.go")).toBeNull()
+    expect(parseFileViewScript("sed -n '1,$p;40,50p' a.go")).toBeNull()
     // Byte counts and follow mode are not line ranges.
     expect(parseFileViewScript('head -c 100 a.go')).toBeNull()
     expect(parseFileViewScript('tail -f log.txt')).toBeNull()
@@ -135,6 +150,38 @@ describe('splitFileViewOutput', () => {
     const sections = splitFileViewOutput(steps('sed -n 1,500p a.go'), 'only\ntwo')
     expect(sections?.[0].lines).toEqual(['only', 'two'])
   })
+
+  it('bounds a multi-range view by the total it prints, not by its span', () => {
+    // 1-2 and 9-9 is three lines, not nine: a section that took the span would
+    // have swallowed the marker and the read after it.
+    const sections = splitFileViewOutput(
+      steps("sed -n '1,2p;9,9p' a.go; echo ---; sed -n 5,5p b.go"),
+      'a1\na2\na9\n---\nb5',
+    )
+    expect(sections?.map((s) => [s.path, s.lines])).toEqual([
+      ['a.go', ['a1', 'a2', 'a9']],
+      ['b.go', ['b5']],
+    ])
+  })
+})
+
+describe('viewLineNumbers', () => {
+  it('counts a single range from its start, however short the output came back', () => {
+    expect(viewLineNumbers({ start: 40, end: 42, ranges: undefined }, 3)).toEqual(['40', '41', '42'])
+    // The file ended first: only the tail is missing, so what did arrive is
+    // still numbered.
+    expect(viewLineNumbers({ start: 40, end: 500, ranges: undefined }, 2)).toEqual(['40', '41'])
+    // A plain `tail` counts back from an end nothing here knows.
+    expect(viewLineNumbers({ start: null, end: null, ranges: undefined }, 3)).toEqual([])
+  })
+
+  it('numbers several ranges only when every one of them printed in full', () => {
+    const view = { start: 10, end: 82, ranges: [{ start: 10, end: 12 }, { start: 80, end: 82 }] }
+    expect(viewLineNumbers(view, 6)).toEqual(['10', '11', '12', '80', '81', '82'])
+    // One stretch came up short and nothing says which, so every number after
+    // it would be wrong: no gutter beats a gutter that lies.
+    expect(viewLineNumbers(view, 5)).toEqual([])
+  })
 })
 
 describe('fileViewLineInfo', () => {
@@ -144,5 +191,11 @@ describe('fileViewLineInfo', () => {
     expect(fileViewLineInfo({ start: 40, end: null })).toBe('from line 40')
     expect(fileViewLineInfo({ start: 1, end: null })).toBe('')
     expect(fileViewLineInfo({ start: null, end: null })).toBe('')
+  })
+
+  it('says how many stretches a multi-range read printed, and how far they reach', () => {
+    expect(fileViewLineInfo({
+      start: 10, end: 100, ranges: [{ start: 10, end: 14 }, { start: 96, end: 100 }],
+    })).toBe('2 ranges, lines 10-100')
   })
 })
