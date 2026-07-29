@@ -32,12 +32,12 @@ import {
   SquareMinus,
   SquarePlus,
   SquareTerminal,
+  TriangleAlert,
   Wrench,
   X,
 } from 'lucide-react'
 import { SiGit } from '@icons-pack/react-simple-icons'
 import { AgentStatus } from '../api'
-import { api } from '../stores/apiClient'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
@@ -93,12 +93,12 @@ import type { ToolResultLink } from '../lib/toolResultLink'
 import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
 
-// ChatPane renders a chat-mode head: it speaks the chat framing
-// on the same terminal WebSocket - {"type":"claude_event"} frames carrying
-// verbatim Claude stream-json events out, {"type":"user_message"|"interrupt"|
-// "set_model"} frames in - and reduces the event stream into a message list.
-// On (re)connect the backend replays the whole conversation from the session's
-// scrollback ring (--replay-user-messages includes user turns), so the reducer
+// ChatPane renders a chat-mode head: it speaks the chat framing on the same
+// terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
+// frames carrying Hydra's provider-neutral normalized events out (see
+// internal/chat), {"type":"user_message"|"interrupt"|"set_model"} frames in -
+// and reduces that stream into a message list. On (re)connect the backend sends
+// the current state plus the newest window of durable history, so the reducer
 // always starts from scratch. Unlike the terminal panel it FOLLOWS the app
 // theme, with Claude-app-inspired light (cream) and dark (warm gray) surfaces.
 
@@ -484,9 +484,6 @@ interface ProviderEvent {
   // total_cost_usd is a notional API-rate figure, not money actually billed,
   // and the per-turn footer hides it.
   apiKeySource?: string
-  // Set by the CLI on the synthesized assistant message it emits when a turn
-  // fails mid-response ("API Error: ... The response above may be incomplete.").
-  isApiErrorMessage?: boolean
   // Sub-agent (Task tool) markers: a sidechain event is one of a sub-agent's
   // own inner steps, not part of the main conversation; agentId names which
   // sub-agent. The reducer routes these into that sub-agent's card instead of
@@ -504,16 +501,10 @@ interface ProviderEvent {
   // SKILL.md body. The reducer routes these out of the normal chat flow (a
   // collapsed meta card / a skill card) instead of rendering them as a user turn.
   isMeta?: boolean
-  // A background/async sub-agent's completion <task-notification> is written to
-  // the main transcript not as a user turn but as bookkeeping records the chat
-  // socket relays live: a queue-operation (XML on top-level `content`) and an
-  // attachment (XML on `attachment.prompt`). handleProviderEvent settles the sub
-  // off whichever carries it (see handleTaskNotification).
+  // A <task-notification> bookkeeping record (a background sub-agent finishing,
+  // a background command completing) arrives as a notice carrying its XML here.
+  // handleProviderEvent settles the sub off it (see handleTaskNotification).
   content?: string
-  // attachment.prompt is a string for <task-notification> records, and an array
-  // of content blocks for queued_command records (a queued message consumed
-  // into a running turn - see queuedCommandText).
-  attachment?: { type?: string; prompt?: string | { type?: string; text?: string }[]; commandMode?: string }
   // Raw API event carried by stream_event lines (--include-partial-messages):
   // message_start carries the message's initial usage, message_delta the running
   // output-token count - fed to the live "working" indicator (item 48).
@@ -681,10 +672,10 @@ function entryString(entry: unknown, key: string): string {
   return typeof value === 'string' ? value : ''
 }
 
-// Bridge the provider-neutral backend timeline into the mature presentation
-// reducer while Claude's legacy wire format is being retired. Provider details
-// stop at this boundary; paging and live delivery use the same conversion.
-// (Exported for tests.)
+// Convert one provider-neutral backend event into the presentation shapes the
+// card renderers below understand. Provider details stop at this boundary, and
+// paging and live delivery share the conversion, so a scrolled-back page
+// renders exactly like the live session did. (Exported for tests.)
 // eslint-disable-next-line react-refresh/only-export-components
 export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning = false): ProviderEvent[] {
   const p = ev.payload ?? {}
@@ -886,32 +877,6 @@ function isAgentCompletionNotification(text: string): boolean {
   return status === 'completed' && /^Agent\b/i.test(summary)
 }
 
-// queuedCommandText extracts the message text from a queued_command attachment
-// record. When the CLI consumes a queued message INTO A RUNNING TURN (mid-turn
-// steering - the queue-operation "remove" path), it writes NO plain `user`
-// event; this attachment, with the text on attachment.prompt content blocks,
-// is the message's only durable trace - so replay must rebuild the user bubble
-// from it or the message vanishes on the next reattach. (A message consumed
-// while the CLI is idle gets a real user event and never reaches this path.)
-function queuedCommandText(ev: ProviderEvent): string | null {
-  const att = ev.attachment
-  if (ev.type !== 'attachment' || att?.type !== 'queued_command') return null
-  const prompt = att.prompt
-  if (typeof prompt === 'string') {
-    // A background task's <task-notification> rides the same attachment type
-    // with a string prompt - that's a notice, never a user message (the
-    // reducers consume it before reaching here; this guard is belt+braces).
-    const t = prompt.trim()
-    return !t || isTaskNotification(t) ? null : t
-  }
-  if (!Array.isArray(prompt)) return null
-  const text = prompt
-    .filter((b) => !!b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text)
-    .join('\n')
-    .trim()
-  return text || null
-}
 
 // detectContextNote recognises the CLI-injected "session continued" preamble that
 // leads a conversation after a context compaction (auto/ran-out-of-context or an
@@ -5333,13 +5298,9 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
   for (const ev of events) {
     const evTs = parseEventTs(ev)
     if (evTs != null) lastTs = evTs
-    // A <task-notification> bookkeeping record (queue-operation XML on
-    // `content`, attachment XML on `attachment.prompt`): render its chip in
-    // place, like the live relay does.
-    const notifText =
-      (typeof ev.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
-      (typeof ev.attachment?.prompt === 'string' && isTaskNotification(ev.attachment.prompt) && ev.attachment.prompt) ||
-      ''
+    // A <task-notification> bookkeeping record, carried as a notice's text:
+    // render its chip in place, like the live relay does.
+    const notifText = typeof ev.content === 'string' && isTaskNotification(ev.content) ? ev.content : ''
     if (notifText) {
       pushNotification(notifText)
       continue
@@ -5348,16 +5309,6 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
       const notice = ev.subagentNotice
       if (notice.key) subCompletions.add(notice.key)
       push({ kind: 'notice', text: `${notice.label} finished${notice.description ? ': ' + notice.description : ''}`, subagentKey: notice.key, noEntrance: true })
-      continue
-    }
-    // A queued message consumed into a running turn: its queued_command
-    // attachment is its only durable record (no plain user event exists) -
-    // rebuild the user bubble from it, settling the prior turn's footer like
-    // any real user turn.
-    const queuedText = queuedCommandText(ev)
-    if (queuedText != null) {
-      flushHistFooter()
-      push({ kind: 'user', text: queuedText })
       continue
     }
     if (ev.type === 'shellcmd' && ev.shell) {
@@ -5392,15 +5343,6 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
       }
     } else if (ev.type === 'assistant') {
       const content = ev.message?.content
-      if (ev.isApiErrorMessage) {
-        const text = Array.isArray(content)
-          ? content.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
-          : typeof content === 'string'
-            ? content
-            : ''
-        push({ kind: 'result', isError: true, errorText: text.trim() || undefined })
-        continue
-      }
       if (!Array.isArray(content)) continue
       const msgId = ev.message?.id ?? ''
       let seen = seenBlocks.get(msgId)
@@ -5862,7 +5804,6 @@ const SettledMessages = memo(
 )
 
 export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit }: ChatProps) {
-  const usesNormalizedEvents = agentType === 'claude' || agentType === 'codex'
   const [items, setItems] = useState<ChatItem[]>([])
   // Wall-clock time per item id (epoch ms) - the message side of the
   // commit-chip interleave. Stamped by the reducers: replayed events carry the
@@ -5872,74 +5813,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const itemTsRef = useRef<Map<number, number>>(new Map())
   // ── Commit chips ─────────────────────────────────────────────────────────
   // The branch's commits (oldest first), rendered as notification chips
-  // interleaved into the transcript (see mergedItems). Fetched on mount /
-  // reconnect and again on every head_moved diff_refresh frame - git is the
-  // durable record, so replay needs no persisted chat event.
+  // interleaved into the transcript (see mergedItems). Built from the durable
+  // commit_created events (see recordNormalizedCommit) - the daemon reconciles
+  // git against the conversation, so the browser never fetches them itself.
   const [commitChips, setCommitChips] = useState<CommitChipItem[]>([])
-  // Chip bookkeeping: `cache` keeps each sha's chip (and id) identity-stable
-  // across refetches so SettledRow's memo holds; ids allocate far above the
-  // live reducer's (from 1) and the history pager's (negative), so they never
-  // collide. Chips from the first fetch are noEntrance - only commits that
-  // land while the transcript is on screen animate in. inflight/again coalesce
-  // concurrent fetches (a burst of head_moved frames) into one trailing rerun.
+  // Chip bookkeeping: `cache` keeps each sha's chip (and id) identity-stable so
+  // SettledRow's memo holds; ids allocate far above the live reducer's (from 1)
+  // and the history pager's (negative), so they never collide.
   const chipStateRef = useRef({
     cache: new Map<string, CommitChipItem>(),
     nextId: 2_000_000_000,
-    sig: '',
-    loadedOnce: false,
-    inflight: false,
-    again: false,
   })
-  const fetchCommitsRef = useRef<() => void>(() => {})
-  const fetchCommits = useCallback(() => {
-    if (usesNormalizedEvents) return
-    const st = chipStateRef.current
-    if (st.inflight) {
-      st.again = true
-      return
-    }
-    st.inflight = true
-    api.default.getAgentCommits(projectId ?? '', agentId)
-      .then((commits) => {
-        const firstLoad = !st.loadedOnce
-        st.loadedOnce = true
-        // Only rebuild state when the list actually changed, so an idle
-        // refetch never re-renders the transcript.
-        const sig = commits.map((c) => c.sha).join('\0')
-        if (sig === st.sig) return
-        st.sig = sig
-        const chips = commits.map((c) => {
-          let chip = st.cache.get(c.sha)
-          if (!chip) {
-            chip = {
-              kind: 'commit',
-              id: st.nextId++,
-              sha: c.sha,
-              shortSha: c.short_sha,
-              subject: (c.subject ?? c.message).split('\n')[0].trim(),
-              ts: Date.parse(c.timestamp) || 0,
-              noEntrance: firstLoad || undefined,
-            }
-            st.cache.set(c.sha, chip)
-          }
-          return chip
-        })
-        chips.sort((a, b) => a.ts - b.ts)
-        setCommitChips(chips)
-      })
-      .catch(() => {})
-      .then(() => {
-        st.inflight = false
-        if (st.again) {
-          st.again = false
-          fetchCommitsRef.current()
-        }
-      })
-  }, [agentId, projectId, usesNormalizedEvents])
-  fetchCommitsRef.current = fetchCommits
-  useEffect(() => {
-    fetchCommits()
-  }, [fetchCommits, reconnectAttempt])
   // Thinking-block durations the daemon measured, keyed by assistant message id
   // (delivered as hydra_thinking events - replayed from the head's sidecar on
   // connect, then live). The reducer reads this when it builds a thinking item;
@@ -6024,6 +5908,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // in one batch without the entrance animation. null while replaying.
   const [liveFromId, setLiveFromId] = useState<number | null>(null)
   const [connected, setConnected] = useState(false)
+  // The daemon's chat_error frame: this head's normalized event log could not be
+  // opened, so the connection will render nothing. Surfaced as a banner because
+  // an empty transcript otherwise reads as a head that simply never spoke.
+  const [chatError, setChatError] = useState<string | null>(null)
   // Auto-reconnect: without it the pane sits on a dead socket forever after any
   // drop (a daemon restart/upgrade, the terminal<->chat mode toggle's session
   // relaunch, a network blip) - nothing else ever bumps reconnectAttempt, so
@@ -6085,12 +5973,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Id of the optimistic "Set model to ..." confirmation (item 31), so the CLI's
   // real echo can supersede it. null when none is pending.
   const optimisticModelIdRef = useRef<number | null>(null)
-  // Load-older infinite scroll (item 25): the uuid of the current oldest history
-  // line (the paging anchor), a decreasing id space for prepended history (kept
-  // well below the optimistic range so it never collides), an in-flight guard,
-  // whether the transcript start has been reached, and the scrollHeight snapshot
-  // used to keep the viewport anchored across a prepend.
-  const oldestUuidRef = useRef<string | null>(null)
+  // Load-older infinite scroll (item 25): the event cursor of the current
+  // oldest loaded history (the paging anchor), a decreasing id space for
+  // prepended history (kept well below the optimistic range so it never
+  // collides), an in-flight guard, whether the log's start has been reached,
+  // and the scrollHeight snapshot used to keep the viewport anchored across a
+  // prepend.
   const oldestEventCursorRef = useRef<string | null>(null)
   // Sub-agents whose full step history we've already asked the daemon for this
   // connection (opening their tab). A sub-agent's steps may live outside the
@@ -6150,7 +6038,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const composerHeightRef = useRef(composerHeight)
   const composerDragRef = useRef<{ startY: number; startRows: number; lineHeight: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
-  const normalizedAvailableRef = useRef(false)
   // Pending task_output requests (the expandable background-command chip
   // fetching its output file), resolved by the matching task_output frame.
   const taskOutputWaitersRef = useRef(new Map<string, (res: { content?: string; error?: string }) => void>())
@@ -6299,12 +6186,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   useEffect(() => {
     // Reconnect/re-navigation reset: this clears a dozen pieces of live state AND
-    // several refs (normalizedAvailableRef, itemTsRef, thoughtDurationsRef...) in one
-    // atomic pass before the transcript replays. The ref writes must stay in an
-    // effect, so this whole reset stays here rather than moving to render.
+    // several refs (itemTsRef, thoughtDurationsRef...) in one atomic pass before
+    // the history replays. The ref writes must stay in an effect, so this whole
+    // reset stays here rather than moving to render.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setItems([])
-    normalizedAvailableRef.current = false
+    setChatError(null)
     itemTsRef.current = new Map()
     setStream(null)
     // Restore the persisted plan (not []) so a reconnect / re-navigation shows
@@ -6326,7 +6213,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     optimisticIdRef.current = -1
     optimisticModelIdRef.current = null
     // Reset load-older paging for the fresh backfill.
-    oldestUuidRef.current = null
     oldestEventCursorRef.current = null
     requestedSubsRef.current = new Set()
     historyIdRef.current = -1_000_000
@@ -6631,10 +6517,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }
       return sub
     }
-    // A subagent_meta frame links a sub-agent to its Task tool_use (so the Task
-    // card upgrades into the SubagentCard in place) and labels it. A frame
-    // without a tool_use id (a sub whose sidecar lacked one) has no card to fold
-    // into, so it gets a standalone 'subagent' item instead.
+    // A sub-agent's lifecycle event links it to its Task tool_use (so the Task
+    // card upgrades into the SubagentCard in place) and labels it. One without a
+    // tool_use id (a sub whose sidecar lacked one) has no card to fold into, so
+    // it gets a standalone 'subagent' item instead.
     // toolUseId -> real sub key, learned from meta frames, so a live line that
     // carries only parent_tool_use_id lands in the linked sub (not a placeholder).
     const toolUseToSub = new Map<string, string>()
@@ -6824,9 +6710,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           }
         }
       }
-      // A PRE-WINDOW notification relayed for bookkeeping only
-      // (notification_backfill): apply the completion, render nothing - the
-      // chip belongs to a part of the conversation that isn't loaded.
+      // A PRE-WINDOW notification, applied for bookkeeping only: settle the
+      // completion, render nothing - the chip belongs to a part of the
+      // conversation that isn't loaded.
       if (quiet) return
       // The canonical subagent_completed event already rendered this task's
       // completion chip (and the settle above ran); the resume echo of the same
@@ -7110,16 +6996,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
     // handleHistoryBefore prepends an older-history batch (item 25): reduce the
     // events, snapshot the scroll height so the viewport can be re-anchored
-    // after the prepend (a layout effect does the adjust), advance the oldest
-    // anchor, and mark the end reached.
+    // after the prepend (a layout effect does the adjust), and mark the end
+    // reached. The paging anchor itself is the frame's next_cursor, advanced by
+    // the chat_history handler.
     const handleHistoryBefore = (events: ProviderEvent[], done: boolean) => {
       loadingOlderRef.current = false
       setLoadingOlder(false)
       if (events.length > 0) {
         const older = reduceHistoryEvents(events, () => historyIdRef.current--, thoughtDurationsRef.current, itemTsRef.current, toolResults)
-        // Advance the anchor to the oldest event of this batch.
-        const anchor = events.find((e) => typeof e.uuid === 'string' && e.uuid)?.uuid
-        if (anchor) oldestUuidRef.current = anchor
         if (older.length > 0) {
           pendingPrependRef.current = scrollRef.current?.scrollHeight ?? 0
           setItems((prev) => [...older, ...prev])
@@ -7247,16 +7131,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         push({ kind: 'contextNote', text, outOfContext: ctxNote.outOfContext })
         return
       }
-      // The stdout echo of a message already rendered from its queued_command
-      // attachment (a queued message consumed into a running turn): the
-      // attachment is the durable, correctly-placed copy - drop the echo.
-      const qi = queuedCmdTexts.indexOf(text)
-      if (qi >= 0) {
-        queuedCmdTexts.splice(qi, 1)
-        markTurnStart()
-        settlePendingSend(text)
-        return
-      }
       // The echo of a message we already showed optimistically (item 26): just
       // confirm that copy (clear its sending flag) instead of rendering a
       // duplicate. The echo can arrive after the turn's response, so relying on
@@ -7290,56 +7164,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
-      plainUserTexts.push(text)
       push({ kind: 'user', text, noEntrance: fromQueue })
-    }
-
-    // One-shot dedup between a queued_command attachment and the stdout echo of
-    // the same message: whichever renders first is remembered here so the other
-    // is dropped (they carry different uuids, so the socket's uuid dedup can't
-    // pair them).
-    const queuedCmdTexts: string[] = []
-    const plainUserTexts: string[] = []
-
-    // routeQueuedCommand renders a queued_command attachment - the only durable
-    // record of a queued message consumed into a RUNNING turn (see
-    // queuedCommandText). Routed through routeUserText so the sender's own
-    // optimistic/queued bubbles fold into the settled item.
-    const routeQueuedCommand = (text: string, ts: number | null) => {
-      const pi = plainUserTexts.indexOf(text)
-      if (pi >= 0) {
-        // Its stdout echo already rendered the bubble (ring replay order).
-        plainUserTexts.splice(pi, 1)
-        return
-      }
-      routeUserText(text, ts)
-      queuedCmdTexts.push(text)
     }
 
     const handleProviderEvent = (ev: ProviderEvent) => {
       // A background/async sub-agent's completion arrives NOT as a user turn but
-      // as a <task-notification> bookkeeping record the chat socket relays live
-      // off the main transcript: a queue-operation (XML on `content`) or an
-      // attachment (XML on `attachment.prompt`). Settle off it up front, whatever
-      // the event type, so a finished background sub-agent's card stops reading
-      // "working" the moment it ends. A notification later consumed by a real
-      // user turn routes through routeUserText instead, and dedups there.
-      const notifText =
-        (typeof ev.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
-        (typeof ev.attachment?.prompt === 'string' &&
-          isTaskNotification(ev.attachment.prompt) &&
-          ev.attachment.prompt) ||
-        ''
+      // as a <task-notification> bookkeeping record, carried as a notice's text.
+      // Settle off it up front, whatever the event type, so a finished background
+      // sub-agent's card stops reading "working" the moment it ends. A
+      // notification later consumed by a real user turn routes through
+      // routeUserText instead, and dedups there.
+      const notifText = typeof ev.content === 'string' && isTaskNotification(ev.content) ? ev.content : ''
       if (notifText) {
         handleTaskNotification(notifText, parseEventTs(ev))
-        return
-      }
-      // A queued message consumed into a running turn: its queued_command
-      // attachment (relayed by the backfill and the live notification tailer)
-      // is its only durable record - render the user bubble from it.
-      const queuedText = queuedCommandText(ev)
-      if (queuedText != null) {
-        routeQueuedCommand(queuedText, parseEventTs(ev))
         return
       }
       // A sub-agent's inner step: route it into that sub-agent's card, never the
@@ -7362,10 +7199,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const evTs = parseEventTs(ev)
       const prevTs = prevEventTs
       if (evTs != null) prevEventTs = evTs
-      // The first event carrying a uuid is the oldest loaded so far - the anchor
-      // for load-older paging (item 25). Only set once (backfill is oldest-first;
-      // a prepend updates it to something older).
-      if (ev.uuid && oldestUuidRef.current === null) oldestUuidRef.current = ev.uuid
       switch (ev.type) {
         case 'system': {
           if (ev.subtype === 'init') {
@@ -7476,20 +7309,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         }
         case 'assistant': {
           const content = ev.message?.content
-          // A turn that failed mid-response comes back as an ordinary assistant
-          // message flagged isApiErrorMessage; render it as an error box (like a
-          // result error) rather than a normal reply so it reads as the failure
-          // it is. The head is also flipped into the `error` status server-side.
-          if (ev.isApiErrorMessage) {
-            const text = Array.isArray(content)
-              ? content.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
-              : typeof content === 'string'
-                ? content
-                : ''
-            push({ kind: 'result', isError: true, errorText: text.trim() || undefined })
-            clearStream()
-            return
-          }
           if (!Array.isArray(content)) return
           clearSending()
           // Remember this turn's latest stop_reason so the result footer can flag
@@ -7893,17 +7712,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         head_moved?: boolean
         event?: ProviderEvent
         messages?: { id?: string; content?: unknown }[]
-        agentId?: string
-        toolUseId?: string
-        agentType?: string
-        description?: string
-        parentAgentId?: string
         events?: ProviderEvent[]
         done?: boolean
         file?: string
         content?: string
         error?: string
-        plan?: string
         state?: ChatProjectionSnapshot
         next_cursor?: string
         normalizedEvents?: NormalizedChatEvent[]
@@ -7925,14 +7738,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         case 'diff_refresh':
           onDiffRefreshRef.current?.(msg.head_moved ?? false)
-          // HEAD moved = a commit landed (or the branch was rewritten): refresh
-          // the commit chips so the new one appears within the poll interval.
-          if (msg.head_moved && !usesNormalizedEvents) fetchCommitsRef.current()
+          // The commit chips need no refresh here: a landed commit arrives as a
+          // durable commit_created event (see recordNormalizedCommit).
           return
-        case 'claude_event':
-          // Compatibility-only frame. Structured providers consume the
-          // sequenced backend event stream instead.
-          if (!normalizedAvailableRef.current && msg.event) handleProviderEvent(msg.event)
+        case 'chat_error':
+          // The daemon could not open this head's normalized event log, so this
+          // connection will render nothing. Say so - a silently empty chat is
+          // indistinguishable from a head that never said anything.
+          setChatError(typeof msg.error === 'string' && msg.error ? msg.error : 'Could not load this conversation')
           return
         case 'shell_output': {
           // A live chunk of a running "!command"'s output: append it to the
@@ -7952,8 +7765,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'state_snapshot': {
-          if (!usesNormalizedEvents) return
-          normalizedAvailableRef.current = true
           // Persisted "/" autocomplete list, so old heads whose system:init has
           // scrolled past the replayed history window still populate the popup.
           if (Array.isArray(msg.state?.slash_commands) && msg.state.slash_commands.length) {
@@ -7982,8 +7793,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'chat_event': {
-          if (!usesNormalizedEvents) return
-          normalizedAvailableRef.current = true
           const normalized = msg.event as unknown as NormalizedChatEvent | undefined
           if (!normalized || !firstNormalizedDelivery(normalized) || !keepNormalizedUserEvent(normalized)) return
           // Status frames and normalized chat events travel independently. A
@@ -8079,8 +7888,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'chat_history': {
-          if (!usesNormalizedEvents) return
-          normalizedAvailableRef.current = true
           const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
             .filter(firstNormalizedDelivery)
             .filter(keepNormalizedUserEvent)
@@ -8152,8 +7959,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // through the live handler into the sub-agent's card. Deduped by seq,
           // so overlap with the already-loaded window (or a later scroll) is a
           // no-op.
-          if (!usesNormalizedEvents) return
-          normalizedAvailableRef.current = true
           const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
             .filter(firstNormalizedDelivery)
             .filter(keepNormalizedUserEvent)
@@ -8173,30 +7978,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           flushSubagents()
           return
         }
-        case 'notification_backfill': {
-          if (normalizedAvailableRef.current) return
-          // A <task-notification> record from BEFORE the backfill window,
-          // relayed so a long-finished background task/agent still settles on
-          // reconnect. Settle-only: no notice chip (its place in the
-          // conversation isn't loaded), no working-clock anchor.
-          const ev = msg.event
-          const notifText =
-            (typeof ev?.content === 'string' && isTaskNotification(ev.content) && ev.content) ||
-            (typeof ev?.attachment?.prompt === 'string' &&
-              isTaskNotification(ev.attachment.prompt) &&
-              ev.attachment.prompt) ||
-            (typeof ev?.message?.content === 'string' && isTaskNotification(ev.message.content) && ev.message.content) ||
-            ''
-          if (notifText) handleTaskNotification(notifText, null, true)
-          return
-        }
-        case 'subagent_meta':
-          if (normalizedAvailableRef.current) return
-          // Links a sub-agent to its Task tool_use (folding it into that card)
-          // and labels it; arrives ahead of the sub's events live, and per-sub
-          // during backfill. Tolerates arriving after events too.
-          handleSubagentMeta(msg.agentId ?? '', msg.toolUseId ?? '', msg.agentType ?? '', msg.description ?? '', msg.parentAgentId ?? '')
-          return
         case 'task_output': {
           // Answer to a task_output request: hand it to the waiting chip.
           const waiter = taskOutputWaitersRef.current.get(msg.file ?? '')
@@ -8312,21 +8093,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // reload-after-navigate case, where local state was reset).
           reconcileQueue(msg.messages ?? [])
           return
-        case 'history_before':
-          if (normalizedAvailableRef.current) return
-          // A load-older page (item 25): older conversation events to prepend.
-          handleHistoryBefore(msg.events ?? [], msg.done === true)
-          return
-        case 'plan': {
-          // The daemon's stream-tracked plan (sent once per attach, after the
-          // backfill). It supersedes anything assembled from the tail window
-          // or restored from storage - without it a plan whose Task* creates
-          // predate the backfill window (a head that ran unwatched, a
-          // byte-dense conversation) never resurfaces.
-          const entries = parseServerPlan(typeof msg.plan === 'string' ? msg.plan : '')
-          if (entries.length) plan.adoptServer(entries)
-          return
-        }
       }
     }
     ws.onclose = () => {
@@ -8352,7 +8118,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       wsRef.current = null
       setConnected(false)
     }
-  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry, usesNormalizedEvents])
+  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry])
 
   // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
   // labels, the live/done state and the final report. A NESTED sub-agent's
@@ -8770,16 +8536,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // requestOlderHistory asks the daemon for the batch older than the current
   // oldest line, when the user scrolls near the top (item 25).
   function requestOlderHistory() {
-    const normalized = usesNormalizedEvents && normalizedAvailableRef.current
-    const anchor = normalized ? oldestEventCursorRef.current : oldestUuidRef.current
+    const anchor = oldestEventCursorRef.current
     if (loadingOlderRef.current || allHistoryLoaded || !replayDone || !anchor) return
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     loadingOlderRef.current = true
     setLoadingOlder(true)
-    ws.send(normalized
-      ? JSON.stringify({ type: 'load_events_before', cursor: anchor, limit: 100 })
-      : JSON.stringify({ type: 'load_before', before: anchor }))
+    ws.send(JSON.stringify({ type: 'load_events_before', cursor: anchor, limit: 100 }))
   }
 
   // requestSubagentEvents fetches a sub-agent's full step history the first time
@@ -8788,11 +8551,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // conversation window, so a sub-agent that ran before that window would show
   // an empty tab until the user scrolled the main history back to it. The daemon
   // reply is deduped by seq (firstNormalizedDelivery), so a later scroll re-
-  // delivering the same events is harmless. Only the normalized path (Claude /
-  // Codex) has this split; the legacy transcript path backfills every sub-agent
-  // sidecar up front.
+  // delivering the same events is harmless.
   function requestSubagentEvents(subID: string) {
-    if (!usesNormalizedEvents || !subID || requestedSubsRef.current.has(subID)) return
+    if (!subID || requestedSubsRef.current.has(subID)) return
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     requestedSubsRef.current.add(subID)
@@ -9978,7 +9739,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} links={subagentLinks} />
           ) : (
           <>
-          {!replayDone && items.length === 0 && (
+          {chatError && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-300/70 bg-red-50/60 px-2.5 py-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-300">
+              <TriangleAlert className="w-3.5 h-3.5 shrink-0 mt-px" />
+              <span>
+                <span className="font-medium">This conversation could not be loaded.</span>{' '}
+                {chatError}
+              </span>
+            </div>
+          )}
+          {!replayDone && !chatError && items.length === 0 && (
             <div className="text-xs text-stone-400 dark:text-stone-500 italic py-2">
               {connected ? 'Loading conversation...' : 'Connecting...'}
             </div>

@@ -32,6 +32,7 @@ import type { ReviewConfigResponse } from '../models/ReviewConfigResponse';
 import type { ReviewReplyRequest } from '../models/ReviewReplyRequest';
 import type { ReviewThreadsResponse } from '../models/ReviewThreadsResponse';
 import type { ServiceStatusResponse } from '../models/ServiceStatusResponse';
+import type { SetProjectHiddenRequest } from '../models/SetProjectHiddenRequest';
 import type { SetProjectIconRequest } from '../models/SetProjectIconRequest';
 import type { SpawnAgentRequest } from '../models/SpawnAgentRequest';
 import type { StatusResponse } from '../models/StatusResponse';
@@ -211,6 +212,32 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'PUT',
             url: '/api/projects/{project_id}/icon',
+            path: {
+                'project_id': projectId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request`,
+                404: `Not Found`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Hide a project from the project lists (or show it again)
+     * @param projectId
+     * @param requestBody
+     * @returns void
+     * @throws ApiError
+     */
+    public setProjectHidden(
+        projectId: string,
+        requestBody: SetProjectHiddenRequest,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'PUT',
+            url: '/api/projects/{project_id}/hidden',
             path: {
                 'project_id': projectId,
             },

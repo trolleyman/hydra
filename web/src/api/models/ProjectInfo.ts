@@ -24,6 +24,10 @@ export type ProjectInfo = {
      */
     builtin?: boolean;
     /**
+     * True when the user has hidden this project. A hidden project is left out of the project dropdown and the Ctrl+` switcher unless it is the project currently selected, and is always listed while the dropdown is in "Edit list" mode (which is where it is hidden/shown again). Per-machine, like the list order - it is stored in the local project list, not in the project's committed config.
+     */
+    hidden?: boolean;
+    /**
      * Optional custom project icon that replaces the default folder glyph. Interpreted by its content by the web UI: an emoji is rendered as-is; a lucide-react icon name (e.g. "Rocket") renders that icon; a value ending in an image extension (.png/.svg/.ico/.jpg/...) is an image - an http(s) or data: URI is used directly, any other value is a path served from the project by the backend. Empty = the default folder icon.
      */
     icon?: string;

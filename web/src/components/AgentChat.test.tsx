@@ -200,9 +200,11 @@ describe('a streamed reply settles into the same DOM node', () => {
   })
 
   const TEXT = 'The loader merges the per-environment file over the base.'
-  // One stream_event frame, flushed so the assertions see the render it caused.
-  const stream = (ws: RecordingWebSocket, event: unknown) =>
-    act(() => ws.emit({ type: 'claude_event', event: { type: 'stream_event', event } }))
+  // One normalized chat event, flushed so the assertions see the render it
+  // caused. Seq is the client's dedup key, so every frame needs its own.
+  let seq = 0
+  const emit = (ws: RecordingWebSocket, type: string, payload: unknown) =>
+    act(() => ws.emit({ type: 'chat_event', event: { seq: ++seq, type, timestamp: '', payload } }))
 
   it('keeps the live paragraph node when the completed message arrives', async () => {
     renderChat()
@@ -212,8 +214,7 @@ describe('a streamed reply settles into the same DOM node', () => {
     // stream path only runs after it.
     act(() => ws.emit({ type: 'replay_done' }))
 
-    stream(ws, { type: 'content_block_start', content_block: { type: 'text' } })
-    stream(ws, { type: 'content_block_delta', delta: { type: 'text_delta', text: TEXT } })
+    emit(ws, 'assistant_delta', { message_id: 'msg_1', text: TEXT })
 
     // The paced reveal walks the text in over a few frames.
     const live = await waitFor(() => {
@@ -222,21 +223,11 @@ describe('a streamed reply settles into the same DOM node', () => {
       return p as HTMLElement
     })
 
-    // message_stop lands as its own frame, ahead of the settled message: the
-    // rendered block has to survive that gap too, or the text blinks out.
-    stream(ws, { type: 'message_stop' })
-    expect(document.contains(live)).toBe(true)
-    expect(document.querySelector('[data-md-root] p')?.textContent).toBe(TEXT)
-
     // The settled message. Asserted straight after the render it causes, with
     // nothing else awaited in between, so this is the swap itself and not some
-    // later re-render putting an equivalent node back.
-    act(() => {
-      ws.emit({
-        type: 'claude_event',
-        event: { type: 'assistant', message: { id: 'msg_1', content: [{ type: 'text', text: TEXT }] } },
-      })
-    })
+    // later re-render putting an equivalent node back. The client closes the
+    // stream in the same batch, so the rendered block never blinks out.
+    emit(ws, 'assistant_message', { message_id: 'msg_1', text: TEXT })
     expect(document.querySelectorAll('[data-md-root]')).toHaveLength(1)
     expect(document.contains(live)).toBe(true)
     expect(document.querySelector('[data-md-root] p')).toBe(live)
@@ -265,16 +256,13 @@ describe('an expanded tool card survives its run becoming a step group', () => {
   })
 
   // A settled tool call: the card, then its answer.
+  let seq = 0
   const call = (ws: RecordingWebSocket, id: string, name: string) =>
     act(() => {
-      ws.emit({
-        type: 'claude_event',
-        event: { type: 'assistant', message: { id: `msg_${id}`, content: [{ type: 'tool_use', id, name, input: { file_path: '/w/a.txt' } }] } },
-      })
-      ws.emit({
-        type: 'claude_event',
-        event: { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } },
-      })
+      const emit = (type: string, payload: unknown) =>
+        ws.emit({ type: 'chat_event', event: { seq: ++seq, type, timestamp: '', payload } })
+      emit('tool_started', { id, name, input: { file_path: '/w/a.txt' } })
+      emit('tool_completed', { id, content: 'ok' })
     })
 
   // Only a ToolCard header carries an explicit role="button" AND aria-expanded;
