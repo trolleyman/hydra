@@ -53,8 +53,8 @@ and `web/src/DiffViewer.tsx`):
   used to exist for. The chosen **Code font and size** are inputs to this, not
   just to the paint (a family wraps at a different column, a size changes the row
   height outright), so both are in the measure effect's deps and the row classes
-  take their size from `--app-font-code-step` rather than a literal `text-xs` -
-  see `CODE_TEXT`/`CODE_LEADING` in `diffMetrics` and the size note in
+  carry the chosen size rather than a literal `text-xs` - see
+  `CODE_TEXT`/`CODE_LEADING` in `diffMetrics` and the size note in
   `web/src/lib/fonts.ts`.
 - Copying out of the chat yields **markdown source**, not the flattened rendered
   text: the transcript's scroll container owns an `onCopy`
