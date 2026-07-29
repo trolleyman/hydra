@@ -318,13 +318,15 @@ area; do not re-derive it by reading source. Skip them otherwise.
   serving previews over TLS) -> [docs/remote-access.md](docs/remote-access.md)
   (BUILT; plain-HTTP + auth-key, ngrok, Tailscale serve/Funnel, reverse-proxy;
   `previewURL` protocol-relative so preview links follow the page scheme)
-- **Deploying Hydra as a service, or running a dev + prod instance side by side**
-  (`mage deploy:service`, the systemd unit, the UI restart button's exit-42
-  rebuild loop, source maps in dev vs prod) ->
-  [docs/deployment.md](docs/deployment.md) (proposed, unbuilt plan; audits what
-  blocks two instances - the shared `~/.config/hydra/projects.json`, the
-  hardcoded unit name, the CLI auto-upgrade vs systemd conflict - and splits
-  "restart" from "update")
+- **Deploying Hydra as a service** (`mage deploy:service`, the systemd unit, the
+  UI restart button's exit-42 rebuild loop, minify vs source maps, whether to run
+  a second instance) -> [docs/deployment.md](docs/deployment.md) (proposed,
+  unbuilt plan; concludes ONE instance built minified *with* source maps -
+  `minify` and `sourcemap` are independent Vite options Hydra ties together, and
+  untying them costs the browser nothing. Also: `SweepOrphanScopes` is global so
+  a second daemon reaps the first's live sandboxes; simulation mode is already
+  fully isolated; the CLI binary-stamp auto-upgrade fights a systemd-managed
+  daemon)
 
 The open backlog (ideas/gaps not yet built) lives in
 [docs/roadmap.md](docs/roadmap.md).

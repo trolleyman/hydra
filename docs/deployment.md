@@ -1,278 +1,265 @@
-# Deploying Hydra: the prod/dev instance split
+# Deploying Hydra: one instance or two?
 
-Status: **proposed, unbuilt** (audit + plan). The pieces that already exist are
-marked BUILT inline.
+Status: **proposed, unbuilt** (audit + plan). Pieces that already exist are marked
+BUILT inline.
+
+Short version: **one instance, built minified *with* source maps, is almost
+certainly what you want.** Minification and source maps are independent Vite
+options that Hydra happens to have tied together; untying them removes the whole
+reason to run a second instance for debuggability. Two instances buy exactly one
+thing - somewhere to test a change without restarting the server your agents are
+running on - and cost more than they look like they do.
 
 ## Background: what actually runs today
 
-The day-to-day Hydra on this machine is `mage dev`. That is worth stating
-plainly, because it explains every problem below:
+The day-to-day Hydra on this machine is `mage dev`, which matters because it
+explains everything below:
 
 - `Dev()` (`magefiles/magefile.go:1302`) sets `HYDRA_DEV_BUILD=1` and enters
-  `devServerLoop` (`:1328`), which builds `.mage/hydra` from the **working tree**
-  and runs it in the foreground.
+  `devServerLoop` (`:1328`), building `.mage/hydra` from the **working tree** and
+  running it in the foreground.
 - `HYDRA_DEV_BUILD=1` makes `BuildWeb` (`:1161`, flag read at `:1163`) run Vite
-  with `--mode development`, which turns off minification and turns on source
-  maps (`web/vite.config.ts:105-109`).
-- The UI's restart button (`web/src/routes/__root.tsx:577` `handleRestart`) calls
+  with `--mode development`, which turns minification off and source maps on
+  (`web/vite.config.ts:106,109`).
+- The UI restart button (`web/src/routes/__root.tsx:577` `handleRestart`) calls
   `POST /api/dev/restart` -> `Server.DevRestart` (`internal/http/handlers.go:1513`)
-  -> `os.Exit(42)` (`devRestartExitCode`, `:56`). `devServerLoop` catches exit 42,
-  **rebuilds**, and starts the new binary. The button only renders when the
-  server reports `development: true`, which is `HYDRA_DEV_RESTART=1`
+  -> `os.Exit(42)` (`devRestartExitCode`, `:56`). `devServerLoop` catches 42,
+  **rebuilds**, and starts the new binary. The button renders only when the
+  server reports `development: true`, i.e. `HYDRA_DEV_RESTART=1`
   (`internal/cli/runtime.go:249`).
 
-So the current setup is a development loop being used as a production server. It
-dies with the terminal, it serves an unminified bundle with source maps, and its
-binary tracks whatever is in the working tree of `/home/callum/code/hydra`.
+So a development loop is being used as a production server: it dies with the
+terminal, serves an unminified bundle, and its binary tracks the working tree.
 
-There is already a real deploy path, `mage deploy:service`
-(`magefiles/magefile.go:921`, BUILT): it builds a production binary to
-`~/.local/bin/hydra`, provisions the bundled sandbox tools, and writes a
-`systemd --user` unit via `service.RenderSystemdUnit`
-(`internal/service/systemd.go:31`). It is not installed on this machine
-(no `~/.local/bin/hydra`, no `~/.config/systemd/user/hydra.service`), and it has
-the gaps listed under "Audit" below.
+`mage deploy:service` (`magefiles/magefile.go:921`, BUILT) already builds a
+production binary to `~/.local/bin/hydra` and writes a `systemd --user` unit via
+`service.RenderSystemdUnit` (`internal/service/systemd.go:31`). It is not
+installed on this machine.
+
+## The build flavour question, measured
+
+`minify` and `sourcemap` are independent Vite options. `vite.config.ts` currently
+derives both from one flag, which makes "production" and "debuggable" look like
+opposites. They aren't. Measured on this tree (Hydra's own frontend):
+
+| flavour | JS served | maps | JS gzipped | binary |
+|---|---|---|---|---|
+| minified, no maps (`mage build`) | 3.9 MB | - | 1.1 MB | 37.4 MB |
+| unminified + maps (**what you run today**) | 7.3 MB | 13.0 MB | 1.5 MB | 53.9 MB |
+| **minified + maps** (recommended) | 3.9 MB | 12.4 MB | 1.1 MB | 49.9 MB |
+
+The things to read off it:
+
+- **Minified + maps costs the browser nothing over minified alone.** Identical
+  3.9 MB of JS; DevTools fetches the `.map` files only when it is open. Full
+  original-source debugging, zero cost when you are not debugging.
+- **The server does not compress** (no gzip / `Content-Encoding` anywhere in
+  `internal/cli/server_frontend.go` or the HTTP middleware), so raw size *is*
+  wire size. Today's unminified bundle really is ~1.9x the bytes on every cold
+  load - noticeable over Tailscale from a phone, invisible on loopback.
+- **The only real cost of maps is binary size**: +12.5 MB, because `web/dist` is
+  embedded with `//go:embed all:dist` (`web/embed.go`). Still smaller than the
+  53.9 MB binary you are running today.
+
+So the choice the question assumed - "prod means giving up debuggability" - isn't
+a real choice. Take both.
 
 ## Requirements
 
-Splitting out what each half of the ask actually demands, because they pull
-against each other.
-
 **Deploying properly means:**
 
-1. The server survives the terminal closing, logging out, and a reboot.
-2. It restarts itself on a crash.
-3. It runs a **fixed artifact**, not a live checkout. This is the whole point of
-   deploying: a half-finished edit in the repo must not be able to take down the
-   server you are running your work on.
-4. Production frontend build: minified, no source maps.
-5. Logs land somewhere queryable (journal), not a scrollback buffer.
-6. A deliberate, unchanging network posture.
+1. Survives the terminal closing, logout, and reboot.
+2. Restarts itself on a crash.
+3. Runs a **fixed artifact**, not a live checkout - a half-finished edit must not
+   be able to take down the server you work on.
+4. Logs land in the journal, not a scrollback buffer.
+5. A deliberate, unchanging network posture.
 
 **"Still restart it to refresh changes" means:**
 
-7. A one-click way to get merged changes into the running server.
-8. That path must never leave you with a dead server (bad build, bad binary).
+6. A one-click way to get merged changes into the running server.
+7. That path must never leave you with a dead server.
 
-Requirement 3 and requirement 7 are in direct conflict *only if you conflate two
-different operations*. They separate cleanly:
+3 and 6 conflict only if you conflate two operations. They separate cleanly:
 
-- **Restart** = re-exec the artifact already on disk. Picks up a binary someone
-  installed, re-reads config, clears leaked state. No build, no toolchain needed,
-  cannot fail to produce a binary.
-- **Update** = build a new artifact, prove it starts, swap it atomically, then
-  restart. Can fail, and when it fails nothing has changed yet.
+- **Restart** = re-exec the artifact on disk. No toolchain, no build, cannot fail
+  to produce a binary.
+- **Update** = build a new artifact, prove it starts, swap atomically, restart.
+  Can fail - and when it does, nothing has changed yet.
 
-Prod gets both, as separate actions. Dev keeps today's fused "rebuild and
-restart", because in dev a failed build costing you the server is fine.
+**One requirement that falls out of the code, not the ask:**
 
-**Two more requirements that fall out of the code, not the ask:**
+8. **Restarting is expensive.** bwrap runs with `--die-with-parent`
+   (`internal/sandbox/linux.go:181`) and the drain calls `Registry.StopAll()`
+   (`internal/session/registry.go:665`). A restart kills **every running head**;
+   they return via `--continue`, but an in-flight turn is lost. So restart is a
+   deliberate act, gated on a confirmation, never wired to a file watcher.
 
-9. **Restarting is not free.** bwrap is launched with `--die-with-parent`
-   (`internal/sandbox/linux.go:181`) and the drain path calls
-   `Registry.StopAll()` (`internal/session/registry.go:665`). A server restart
-   therefore kills **every running head**; they come back via `--continue`
-   (lazily on attach, or `resumeHeadsOnBoot`), but an in-flight turn is lost.
-   Restart must be a deliberate act, and must never be wired to a file watcher on
-   the prod instance.
-10. **Two instances must not manage the same project.** Same project root means
-    the same `.hydra/local/worktrees/`, the same `hydra/<id>` branch namespace,
-    and two daemons independently resuming the same heads. This is a correctness
-    requirement, not a preference.
+Requirement 8 is the *only* argument for a second instance, and it is worth
+sizing honestly before paying for it.
 
-## Audit: what already works, what is missing
+## Do you want two instances?
 
-### Works
+### What they buy
 
-- Per-project isolation of the daemon socket, pid, lock and info files:
-  `sha256(projectRoot)[:16]` under `$XDG_RUNTIME_DIR/hydra/`
-  (`internal/daemon/socket.go`).
-- Per-project DB (`.hydra/local/state/db.sqlite3`), worktrees, status dirs
-  (`internal/paths`).
-- Bind address override via `HYDRA_API_ADDR` (`internal/cli/server.go:121`), with
-  a hard refusal to bind non-loopback without an auth key.
-- Preview port range configurable per project: `preview_ports`
-  (`internal/config/config.go:967`, default `26601-26699`).
-- Dev vs prod frontend build already exists (`HYDRA_DEV_BUILD`).
-- `go build -o` over a running binary does **not** fail with `ETXTBSY` - the Go
-  linker unlinks the output first (verified). Running processes and existing
-  sandbox bind mounts keep the old inode, which is what we want.
+One thing: somewhere to exercise a Hydra change without restarting the server
+running your agents (requirement 8). That is real, but note you already tolerate
+the alternative - today every test of a backend change restarts `mage dev` and
+kills whatever was running.
 
-### Missing / broken
+Not debuggability - the table above covers that with one instance.
 
-- **No instance concept.** Nothing namespaces a Hydra installation. Grep for
-  `HYDRA_INSTANCE` / `profile` in `internal/paths`, `internal/cli`,
-  `internal/config` returns nothing.
-- **User-global state is shared between any two instances:**
-  - `~/.config/hydra/projects.json` - the project list
-    (`internal/projects/projects.go:70,78`)
-  - `~/.config/hydra/uuid.txt` (`:20`) and `~/.config/hydra/config.toml`
-    (`internal/config/config.go:1064`)
-  - `~/.local/share/hydra/logs/hydra.log` (`internal/cli/root.go:66`) - two
-    processes rotating one file independently loses lines.
+### What they cost
 
-  The shared project list is the blocker for requirement 10: both instances would
-  see, and try to manage, the same projects.
-- **The systemd unit name is hardcoded** `hydra.service`
-  (`magefiles/magefile.go`, in `Deploy.Service`), so only one can be installed.
-- **The unit's restart semantics do not cover the restart button.**
+Beyond the isolation plumbing (below), there is a collision that makes a naive
+second instance **actively destructive**, not merely untidy:
+
+- **`SweepOrphanScopes()` (`internal/sandbox/scope_linux.go:160`) is global.** It
+  runs at every daemon boot, lists *all* `hydra-*.scope` systemd units, and kills
+  them on the reasoning that "we own no live sessions yet, so every one is
+  stale". Boot a second instance and it reaps the **first instance's live agent
+  sandboxes**. Fixing this needs a per-instance scope prefix, not just a config
+  path split.
+- **User-global state is shared**: `~/.config/hydra/projects.json`
+  (`internal/projects/projects.go:70,78`), `uuid.txt` (`:20`), and the single
+  `~/.local/share/hydra/logs/hydra.log` (`internal/cli/root.go:66`). Both
+  instances would see - and `resumeHeadsOnBoot` would act on - the same projects.
+- **The systemd unit name is hardcoded** `hydra.service`, so only one installs.
+- Ongoing human cost: two project lists, two port blocks, and the standing
+  discipline that they never manage the same project (same worktrees dir, same
+  `hydra/<id>` branch namespace, two daemons resuming the same heads).
+
+### What you already have instead
+
+- **Simulation mode is fully isolated, today.** `runSimulationServer`
+  (`internal/cli/server.go:152`) returns *before* `setupRuntime` /
+  `serveUnixSocket`, so it touches no daemon socket, no DB, no `projects.json`,
+  and never calls `SweepOrphanScopes`. `mage demo` is a genuinely safe second
+  instance right now - mock data only, but that covers most frontend work.
+- `mage devFast` gives Vite HMR against a real backend, but that backend is a
+  real daemon and carries every collision above.
+
+### Verdict
+
+**One instance.** The debuggability argument dissolves once minify and sourcemap
+are untied, and the remaining argument (restart kills my heads) is better
+answered by fixing restarts than by running a second server. Revisit two
+instances only if that actually starts to hurt.
+
+## Audit: what's missing for a single deployed instance
+
+- **`Development` is a boolean tied to the rebuild loop.** The restart button
+  only appears when `HYDRA_DEV_RESTART=1`, which today means "mage will rebuild
+  me". A deployed server wants the button with *restart-only* semantics, so this
+  needs to become a mode.
+- **The unit's restart semantics don't cover the button.**
   `RenderSystemdUnit` emits `Restart=on-failure` / `RestartSec=2`
-  (`internal/service/systemd.go:52-53`). Exit 42 is non-zero so it *does*
-  restart - but it counts against systemd's default start rate limit
-  (5 starts / 10s), so a few quick restarts put the unit in `failed`. There is no
-  `RestartForceExitStatus`, no `StartLimit*` tuning.
-- **`Development` is tied to the rebuild loop.** The restart button only appears
-  when `HYDRA_DEV_RESTART=1`, which today means "mage will rebuild me". A
-  systemd-managed prod server wants the button with *restart-only* semantics, so
-  the flag needs to become a mode, not a boolean.
+  (`internal/service/systemd.go:52-53`). Exit 42 is non-zero so it does restart,
+  but it counts against systemd's default start rate limit (5 starts / 10s), so a
+  few quick clicks land the unit in `failed`. No `RestartForceExitStatus`, no
+  `StartLimit*` tuning.
 - **The CLI auto-upgrade fights systemd.** `daemon.Connect` compares the invoking
   binary's stamp against the running daemon's (`internal/daemon/upgrade.go:19`
-  `binaryStamp`, `:63` `isStale`) and, if they differ, calls `StopDaemon` (`:84`,
-  SIGTERM) and then `EnsureRunning` to spawn a detached `hydra __daemon`. Against
-  a systemd-managed daemon that is wrong either way: with `Restart=on-failure`
+  `binaryStamp`, `:63` `isStale`) and, on a mismatch, calls `StopDaemon` (`:84`,
+  SIGTERM) then `EnsureRunning` to spawn a **detached** `hydra __daemon`. Against
+  a service-managed daemon that is wrong either way: with `Restart=on-failure`
   the SIGTERM exits 0, the unit goes inactive, and an unmanaged daemon is now
   running; with `Restart=always` systemd restarts and two daemons race for the
-  socket. Nothing currently detects that the daemon is service-managed.
-- **`Deploy.Service` does not enable linger**, so the unit dies at logout unless
-  the user runs `loginctl enable-linger` from the printed instructions.
+  socket.
+- **`Deploy.Service` never enables linger**, so the unit dies at logout unless
+  the user runs the printed `loginctl enable-linger`.
+- **`HYDRA_DEV_BUILD` leaks into every head.** A head spawned by a `mage dev`
+  daemon inherits `HYDRA_DEV_BUILD=1` and `HYDRA_DEV_RESTART=1` in its sandbox
+  environment (verified with `printenv` inside a head), so any `mage build` an
+  agent runs silently produces a *development* frontend. Harmless while the
+  server is itself a dev build; a real trap once `mage deploy:service` is run
+  from a shell that inherited it, because it would install a dev bundle as prod.
 
-## Proposal
+## Plan
 
-### Shape
+### Phase 0: untie minify from sourcemap
 
-Two instances, disjoint project sets, disjoint port blocks.
+`web/vite.config.ts` - keep `minify: isDev ? false : 'esbuild'`, change
+`sourcemap: isDev` to `sourcemap: true`. One line, and it is most of the value in
+this doc. Costs +12.5 MB of binary; buys original-source stack traces in the
+server you actually run.
 
-| | prod | dev |
-|---|---|---|
-| lifecycle | `systemd --user`, linger, restart on failure | `mage dev` in a terminal |
-| binary | `~/.local/bin/hydra`, installed artifact | `.mage/hydra`, from the working tree |
-| frontend | minified, no source maps | unminified, source maps |
-| web port | 26600 | 26700 |
-| previews | 26601-26699 | 26701-26799 |
-| projects | all your real work, incl. the Hydra repo | scratch / the worktree under test |
-| restart button | restart-only (re-exec the artifact) | rebuild + restart (today's behaviour) |
-| update | explicit "update and restart" action | n/a, every restart is an update |
+(`sourcemap: 'hidden'` - maps emitted, no `//# sourceMappingURL` comment - is the
+stricter production spelling, but it means DevTools won't pick them up
+automatically, which defeats the point for a single-user tool. Plain `true`.)
 
-**The non-obvious part: heads that develop Hydra belong on prod, not dev.** Dev
-is the instance you restart constantly, and a restart kills every running head
-(requirement 9). So prod is where agents live, and dev is the throwaway you point
-at a worktree to *look at* what an agent built. Dev needs no systemd, no auth key
-and no durability; it is a viewer, not a workhorse.
+### Phase 1: split restart from update
 
-### Phase 1: make two instances possible (the only hard blocker)
+- Turn `Server.Development bool` into a mode: `off` / `restart` / `rebuild`, from
+  `HYDRA_DEV_RESTART` (`1` stays `rebuild`; `restart` is what the unit sets). The
+  button renders for both, with wording following the mode ("Restart the server"
+  vs "Rebuild and restart the server").
+- `RenderSystemdUnit`: add `RestartForceExitStatus=42`, `Restart=always`, and
+  relax the rate limit (`StartLimitBurst=10`, `StartLimitIntervalSec=60`). The
+  existing `/health` poll in `handleRestart` (`__root.tsx:598-610`) needs no
+  change.
+- **Confirm before restarting when heads are live**, showing the count and saying
+  plainly that in-flight turns are lost (requirement 8).
 
-Add an instance name, defaulting to `default`, sourced from `HYDRA_INSTANCE` (and
-a `--instance` flag on the root command). It namespaces exactly three things:
+### Phase 2: `Deploy.Service` polish
 
-- the user config dir: `~/.config/hydra/` -> `~/.config/hydra/instances/<name>/`
-  for `projects.json` and `uuid.txt`, with a one-time migration of the existing
-  files into `instances/default/`. Leave `~/.config/hydra/config.toml` shared:
-  the user-scope config layer is genuinely machine-wide, and duplicating it would
-  surprise.
-- the log file: `hydra.log` -> `hydra-<name>.log` for a non-default instance.
-- the daemon runtime key: fold the instance into the `sha256` input in
-  `internal/daemon/socket.go` so the same project root under two instances gets
-  two sockets. Not strictly needed if the roots differ, but it makes "same root,
-  two instances" fail cleanly rather than by one SIGTERMing the other.
-
-Everything else is already per-project-root or already env-overridable. Ports are
-config, not code: dev sets `HYDRA_API_ADDR=localhost:26700` and
-`preview_ports = "26701-26799"` in its boot project's config.
-
-Escape hatch that works **today, with no code change**: `os.UserConfigDir()`
-honours `XDG_CONFIG_HOME`, so pointing the dev instance at a different
-`XDG_CONFIG_HOME` separates `projects.json`. Do not rely on it - that variable is
-inherited by every child process, including the agent sandboxes, so `git`,
-`claude` and friends would go looking for their config in the wrong place.
-
-### Phase 2: split restart from update
-
-- Turn `Server.Development bool` into a mode: `off` / `restart` / `rebuild`,
-  derived from `HYDRA_DEV_RESTART` (`1` stays `rebuild` for compatibility;
-  `restart` is what the unit sets). The button renders for `restart` and
-  `rebuild`, with the tooltip and toast wording following the mode ("Restart the
-  server" vs "Rebuild and restart the server").
-- Teach the unit to honour it: add `RestartForceExitStatus=42`,
-  `Restart=always`, and relax the rate limit (`StartLimitBurst=10`,
-  `StartLimitIntervalSec=60`) in `RenderSystemdUnit`. The existing health-poll
-  loop in `handleRestart` (`__root.tsx:598-610`) already works unchanged, since
-  it just polls `/health` until the new process answers.
-- **Warn before a prod restart when heads are live.** Requirement 9 makes this
-  the difference between a safe button and a footgun: confirm with a count of
-  running heads, and say plainly that in-flight turns are lost and each head will
-  resume with `--continue`.
-
-### Phase 3: update-and-restart
-
-An explicit action, distinct from restart, that the daemon can run itself - the
-daemon is *not* inside a sandbox, it is the thing that spawns them, so it can run
-the toolchain directly.
-
-1. Build to `~/.local/bin/hydra.new` (frontend embedded, production Vite mode).
-2. Smoke-test it: run `hydra.new --version` (or a dedicated `hydra selfcheck`
-   that boots the runtime against a temp root and exits). Abort on failure -
-   nothing has been swapped, the running server is untouched.
-3. `os.Rename` `hydra` -> `hydra.prev`, `hydra.new` -> `hydra`. Atomic on the
-   same filesystem. Existing sandbox binds pin the old inode, so running heads
-   keep the binary they started with.
-4. Exit 42; systemd starts the new one.
-
-Rollback is `mv hydra.prev hydra && systemctl --user restart hydra` from a
-terminal. Verifying *before* the swap is what keeps requirement 8: the only
-surviving failure mode is "passes selfcheck, crashes at runtime", and the start
-rate limit stops that looping.
-
-Whether the trigger lives in the UI or stays `mage deploy:service` + restart is a
-judgement call worth deferring until phases 1-2 are in use. The mage target is
-already sufficient and has no new failure modes.
-
-### Phase 4: `Deploy.Service` polish
-
-- Take an instance name and render `hydra@<instance>.service` (or
-  `hydra-<name>.service`), so prod and a second deployment can coexist.
 - Offer to run `loginctl enable-linger` rather than only printing it.
-- Make the daemon record that it is service-managed - systemd sets
-  `INVOCATION_ID` in the service environment, so `WriteDaemonFiles`
-  (`internal/daemon/upgrade.go:32`) can stamp `managed=systemd` into the `.info`
-  file. `isStale` then skips the SIGTERM-and-respawn takeover and tells the user
-  to `systemctl --user restart` instead. This closes the CLI/systemd conflict
-  above.
+- Stamp `managed=systemd` into the daemon `.info` file (`WriteDaemonFiles`,
+  `internal/daemon/upgrade.go:32`) - systemd sets `INVOCATION_ID` in the service
+  environment, so detection is free. `isStale` then skips the
+  SIGTERM-and-respawn takeover and tells the user to `systemctl --user restart`.
+- Strip `HYDRA_DEV_BUILD` / `HYDRA_DEV_RESTART` from the environment the target
+  builds in, so a deploy from a `mage dev` shell can't ship a dev bundle.
+
+### Phase 3 (optional): update-and-restart
+
+The daemon is not sandboxed - it is what spawns sandboxes - so it can run the
+toolchain itself: build to `~/.local/bin/hydra.new`, smoke-test it
+(`hydra --version`, or a `selfcheck` that boots the runtime against a temp root),
+`os.Rename` `hydra`->`hydra.prev` and `hydra.new`->`hydra`, then exit 42.
+Verifying *before* the swap is what satisfies requirement 7. `go build -o` over a
+running binary does **not** fail with `ETXTBSY` (the Go linker unlinks the output
+first - verified), and existing sandbox binds pin the old inode, so running heads
+keep the binary they started with.
+
+Worth deferring: `mage deploy:service` plus a restart already does this manually,
+with no new failure modes.
+
+### Not planned: making restarts cheap
+
+Detaching agent sessions from the daemon's lifetime would remove requirement 8
+entirely - and with it the last argument for a second instance. It is a large
+change to the session registry, `--die-with-parent`, and the scope reaper, so it
+belongs in its own doc. Flagged here because it is the *right* fix for the
+problem two instances were being considered for.
 
 ## Decisions and rejected alternatives
 
-- **Prod keeps no source maps at all.** `sourcemap: 'hidden'` (maps emitted, no
-  `//# sourceMappingURL` comment) is the usual production answer, but `dist/` is
-  embedded into the binary with `//go:embed all:dist` (`web/embed.go`), so hidden
-  maps would ride along as several MB of binary. Excluding `*.map` from the embed
-  and shipping them beside the binary is possible but is a lot of machinery for a
-  single-user deployment where the dev instance *is* the symbolication tool: run
-  the same commit under dev and reproduce. Revisit if Hydra ever ships to someone
-  who cannot rebuild it.
-- **Prod restart does not rebuild.** Rebuilding requires Go, Node and a source
-  checkout at runtime, and a failed build during a restart leaves no server at
-  all. That is precisely requirement 8.
-- **No file watcher on prod.** `mage preview` / `mage devAutoReload` exist for
-  that and are dev tools; auto-restarting a server that kills every running head
-  on restart is not something to automate.
-- **User-scope `config.toml` stays shared** between instances. It is documented
-  as machine-wide, and splitting it would make a setting silently not apply.
-- **Not building a supervisor that outlives the daemon.** Detaching agent
-  sessions from the daemon's lifetime would make restarts cheap and would remove
-  requirement 9 entirely, but it is a large change to the session registry,
-  `--die-with-parent`, and the scope reaper. Worth its own doc if restarts ever
-  become routine.
+- **Source maps in prod, minified.** Reversing the earlier draft of this doc,
+  which recommended no maps in prod on binary-size grounds. 12.5 MB on a 37 MB
+  binary is a poor trade against never being able to read a stack trace from the
+  server you actually use. The one caveat: maps hand out full original source to
+  anyone who can load the UI. That is fine for a loopback/Tailscale deployment of
+  your own code; reconsider before putting Hydra behind a public ngrok Funnel.
+- **No second instance for now**, per the section above.
+- **Prod restart does not rebuild.** Rebuilding needs Go, Node and a checkout at
+  runtime, and a failed build during a restart leaves no server at all.
+- **No file watcher on the deployed instance.** `mage preview` /
+  `mage devAutoReload` exist for that and are dev tools; auto-restarting a server
+  that kills every running head is not something to automate.
+- **User-scope `config.toml` stays shared** even if instances ever land - it is
+  documented as machine-wide, and splitting it would make a setting silently not
+  apply.
 
 ## Rough sizing
 
-- Phase 1 (instance namespacing): small. One resolver in `internal/paths` plus
-  threading through `internal/projects`, `internal/cli/root.go` and
-  `internal/daemon/socket.go`, plus a migration.
-- Phase 2 (restart vs rebuild modes + unit flags): small. Mostly
-  `internal/http/handlers.go`, `internal/cli/runtime.go`,
-  `internal/service/systemd.go` and one button in `__root.tsx`.
-- Phase 3 (update-and-restart): medium, and optional - `mage deploy:service`
-  plus a restart already covers it manually.
-- Phase 4 (`Deploy.Service` polish + systemd-managed detection): small.
+- Phase 0: one line.
+- Phase 1: small - `internal/http/handlers.go`, `internal/cli/runtime.go`,
+  `internal/service/systemd.go`, one button in `__root.tsx`.
+- Phase 2: small.
+- Phase 3: medium, and optional.
 
-Phases 1 and 2 together are what unlock the setup the whole doc is about;
-3 and 4 are convenience.
+If two instances are ever revived, add: an instance name (`HYDRA_INSTANCE`)
+namespacing `projects.json` / `uuid.txt` / the log file / the daemon runtime key,
+a per-instance `hydra-<instance>-*.scope` prefix so `SweepOrphanScopes` stops
+reaping its neighbour, and a templated `hydra@<instance>.service` unit.

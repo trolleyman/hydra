@@ -190,14 +190,32 @@ before starting. Grouped by area.
 
 ## Deployment
 
-- [ ] **Deploy Hydra as a service, and run a dev instance beside it.** The daily
-  driver today is `mage dev` - a foreground rebuild loop serving an unminified,
-  source-mapped bundle off the working tree. `mage deploy:service` already
-  installs a systemd --user unit, but only one can exist (`hydra.service` is
-  hardcoded), its `Restart=on-failure` does not account for the restart button's
-  exit 42 against systemd's start rate limit, and the CLI's binary-stamp
-  auto-upgrade SIGTERMs a service-managed daemon and respawns it detached. Two
-  instances are additionally blocked on user-global state that nothing
-  namespaces: `~/.config/hydra/projects.json`, `uuid.txt`, and the single
-  `~/.local/share/hydra/logs/hydra.log`. Plan (instance name, restart-vs-update
-  split, verified atomic binary swap) in [deployment.md](deployment.md).
+- [ ] **Build the frontend minified *with* source maps.** One line in
+  `web/vite.config.ts` (`sourcemap: isDev` -> `sourcemap: true`). `minify` and
+  `sourcemap` are independent Vite options the config ties together, which makes
+  "production" and "debuggable" look mutually exclusive. Measured: minified+maps
+  serves the same 3.9 MB of JS as minified alone (DevTools fetches maps only when
+  open) and costs +12.5 MB of binary, vs the 7.3 MB unminified bundle being
+  served today. See [deployment.md](deployment.md).
+
+- [ ] **Deploy Hydra as a service.** The daily driver today is `mage dev` - a
+  foreground rebuild loop serving an unminified bundle off the working tree.
+  `mage deploy:service` already installs a systemd --user unit, but its
+  `Restart=on-failure` does not account for the restart button's exit 42 against
+  systemd's start rate limit, `Development` is a boolean meaning "mage will
+  rebuild me" rather than a restart-vs-rebuild mode, linger is only printed not
+  offered, and the CLI's binary-stamp auto-upgrade SIGTERMs a service-managed
+  daemon and respawns it detached (detectable via `INVOCATION_ID`). Also
+  `HYDRA_DEV_BUILD=1` leaks into every head's sandbox env, so a deploy from a
+  `mage dev` shell would ship a dev bundle. Plan in
+  [deployment.md](deployment.md).
+
+- [ ] **Make a second Hydra instance survivable** (only if wanted - see
+  [deployment.md](deployment.md) for why one instance is probably right).
+  `SweepOrphanScopes` (`internal/sandbox/scope_linux.go:160`) reaps *all*
+  `hydra-*.scope` units at daemon boot, so a second instance kills the first's
+  live agent sandboxes; needs a per-instance scope prefix. Plus an instance name
+  namespacing `~/.config/hydra/projects.json`, `uuid.txt`, the shared
+  `~/.local/share/hydra/logs/hydra.log` and the daemon runtime key, and a
+  templated `hydra@<instance>.service`. Note simulation mode (`mage demo`) is
+  already fully isolated and covers most frontend work.
