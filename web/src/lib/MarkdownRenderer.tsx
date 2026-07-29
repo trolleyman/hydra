@@ -11,6 +11,7 @@ import { UPLOAD_PATH_RE } from './uploadAttachments'
 import { useLightbox } from '../stores/lightboxStore'
 import { markdownGalleryAt } from './markdownGallery'
 import { densityFromPath, logicalSize, useNaturalSize } from './imageDensity'
+import { IMAGE_REFLOW_MS, markSelfReflow } from './selfReflow'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
@@ -168,6 +169,24 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
   const density = densityFromPath(src)
   const natural = useNaturalSize(url)
   const logical = natural ? logicalSize(natural, density) : null
+  // An image is the one thing in a chat message whose height arrives LATER than
+  // it does: it mounts with no box at all (nothing knows its size until the
+  // off-screen decode lands) and then, a layout or two on, is suddenly several
+  // hundred pixels tall. A chat pane following a live turn reads a scrollTop
+  // that moved on its own as the reader scrolling away, and the shrink the
+  // image replaced can coalesce with its own growth into one scroll event where
+  // only scrollTop looks like it moved - so a big picture landing at the end of
+  // a streaming message could unpin the view and stop it following. Declaring
+  // the reflow is what tells the pane it was us (see lib/selfReflow).
+  //
+  // Depends on the size's NUMBERS, not the object: logicalSize builds a fresh
+  // one per render, and re-marking every render would hold the window open for
+  // the whole message and swallow a genuine scroll-up.
+  const logicalW = logical?.w ?? 0
+  const logicalH = logical?.h ?? 0
+  useLayoutEffect(() => {
+    if (logicalW > 0) markSelfReflow(IMAGE_REFLOW_MS)
+  }, [logicalW, logicalH])
   if (!url || failedSrc === src) {
     return (
       <span
@@ -197,6 +216,10 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
       // than the blob URL we rewrote it to (lib/copyMarkdown).
       data-md-src={src}
       loading="lazy"
+      // The pixels landing is the second half of the same reflow as the size
+      // landing above - and the one that actually takes the space, when the
+      // decode beat the layout to it.
+      onLoad={() => markSelfReflow(IMAGE_REFLOW_MS)}
       onError={() => setFailedSrc(src ?? null)}
       // Opens the whole markdown block's images, at this one - so ←/→ step
       // between the pictures of THIS message and stop at its edges (see
