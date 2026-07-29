@@ -649,6 +649,16 @@ func migrateClaudeSessionDirsIn(projectsDir, oldWorktreesDir, newWorktreesDir st
 // letter or digit becomes '-' (no collapsing of runs), so e.g.
 // /home/u/code/hydra/.hydra/local/worktrees/x ->
 // -home-u-code-hydra--hydra-local-worktrees-x.
+// ClaudeProjectDir resolves the directory where Claude Code records a worktree's
+// transcripts (~/.claude/projects/<slug>), or "" when it can't be determined.
+func ClaudeProjectDir(worktree string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || worktree == "" {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "projects", ClaudeProjectsSlug(worktree))
+}
+
 func ClaudeProjectsSlug(p string) string {
 	b := make([]byte, len(p))
 	for i := 0; i < len(p); i++ {

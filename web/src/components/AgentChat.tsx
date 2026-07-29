@@ -178,7 +178,12 @@ function mergeChipLabel(subject: string, count: number): string {
 
 // Shared styling for commit/merge pills - the same centered notification look as
 // notice/cmdout chips.
-const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none'
+// py-[3px], not py-0.5: the labels inside carry .optical-center, which trims each
+// one to its cap-to-baseline ink so the monospace sha and the sans subject share a
+// baseline. That trim also takes the line box's spare ascender/descender out of the
+// pill's height (~4px), which left the text sitting tight against the border - so
+// the padding gives back what the trim removed rather than leaving the chip shorter.
+const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-[3px] text-[11px] text-stone-500 dark:text-stone-400 select-none'
 const COMMIT_HOVER = 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors'
 
 // MergeCommitChip renders a merge as a single pill that expands to list the commits
@@ -201,7 +206,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
       >
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
         <GitMerge className="w-3 h-3 shrink-0" />
-        <span className="truncate">{label}</span>
+        <span className="truncate optical-center">{label}</span>
       </button>
       <Expandable open={expanded && shown > 0} className="w-full">
         <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
@@ -216,8 +221,9 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               title={clickable ? `Show ${m.shortSha} in the diff view` : m.shortSha}
             >
               <GitCommitHorizontal className="w-3 h-3 shrink-0" />
-              <span className="font-mono shrink-0">{m.shortSha}</span>
-              <span className="truncate">{m.subject}</span>
+              {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
+              <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
+              <span className="truncate optical-center">{m.subject}</span>
             </div>
           ))}
           {shown < count && (
@@ -312,7 +318,10 @@ type ChatItem =
   // mergedItems). Clicking one points the diff viewer at just that commit.
   // A merge chip (isMerge) collapses the commits it brought in: mergedCount is the
   // true total, merged is a capped preview list the chip expands to show.
-  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[] }
+  // `seq` is the source event's log sequence - the tie-break when two commits
+  // share a `ts`, so the chip list has one total order no matter what order the
+  // pages that produced it arrived in.
+  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[] }
 
 // A sub-agent (Claude Task tool) run, assembled from its sidechain events.
 // Keyed by agentId in the `subagents` map (a live line that carries only a
@@ -351,6 +360,18 @@ interface SubagentView {
 
 type ToolItem = Extract<ChatItem, { kind: 'tool' }>
 type CommitChipItem = Extract<ChatItem, { kind: 'commit' }>
+
+// compareCommitChips orders the chip list the way mergedItems needs to read it:
+// oldest first, with the source event's log sequence breaking a tie (two commits
+// in the same second, or a merge and the commit that triggered it). Chips arrive
+// out of order - the live window first, then older pages as you scroll up - so
+// the list is re-sorted on every insert rather than appended to.
+// eslint-disable-next-line react-refresh/only-export-components
+export function compareCommitChips(a: CommitChipItem, b: CommitChipItem): number {
+  if (a.ts !== b.ts) return a.ts - b.ts
+  if (a.seq != null && b.seq != null && a.seq !== b.seq) return a.seq - b.seq
+  return 0
+}
 
 // isSubRunning reports whether a sub-agent is still working: the parent Task
 // card's tool_result (or its turn ending, `ended`) is the precise done signal
@@ -7574,7 +7595,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }
     }
 
-    const recordNormalizedCommit = (normalized: NormalizedChatEvent) => {
+    // `live` is false for anything that came out of a chat_history page. Those
+    // pages are backfill by definition - the first few arrive the moment the
+    // pane opens, and later ones as you scroll up - so they must not animate in,
+    // the same way a backfilled tool card or message doesn't. (The chip ids sit
+    // far above the live reducer's, so SettledMessages' `id >= liveFromId` gate
+    // is always true for them and noEntrance is the only thing holding them.)
+    const recordNormalizedCommit = (normalized: NormalizedChatEvent, live: boolean) => {
       if (normalized.type !== 'commit_created') return
       const payload = normalized.payload ?? {}
       const sha = typeof payload.sha === 'string' ? payload.sha : ''
@@ -7586,11 +7613,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         shortSha: typeof payload.short_sha === 'string' ? payload.short_sha : sha.slice(0, 7),
         subject: typeof payload.subject === 'string' ? payload.subject : 'Commit',
         ts: Date.parse(normalized.timestamp) || Date.now(),
-        noEntrance: replaying || undefined,
+        seq: Number.isFinite(normalized.seq) ? normalized.seq : undefined,
+        noEntrance: !live || undefined,
         ...mergeFieldsFromPayload(payload),
       }
       st.cache.set(sha, chip)
-      setCommitChips((prev) => [...prev, chip])
+      // Keep the list sorted by ts: mergedItems walks it in one pass against the
+      // items' stamped times, so it has to be ordered. Appending alone was not
+      // enough - scrolling up loads OLDER pages, whose chips would land after
+      // newer ones already in hand and then all fall out of the merge in a clump
+      // at the load boundary.
+      setCommitChips((prev) => [...prev, chip].sort(compareCommitChips))
     }
     const normalizedStreams = new Set<string>()
     // A reconnect boundary or version-skewed server can deliver the same
@@ -7885,7 +7918,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 						appendToolOutput(toolID, delta)
 						return
           }
-          recordNormalizedCommit(normalized)
+          recordNormalizedCommit(normalized, !replaying)
           if (replaying && normalized.type === 'assistant_message') {
             const text = typeof normalized.payload?.text === 'string' ? normalized.payload.text : ''
             if (text && replayedAssistantTexts.has(text)) return
@@ -7909,7 +7942,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             .filter(keepNormalizedUserEvent)
           oldestEventCursorRef.current = msg.next_cursor ?? null
           for (const event of normalized) {
-            recordNormalizedCommit(event)
+            recordNormalizedCommit(event, false)
             rememberNormalizedToolMetadata(event)
           }
           if (loadingOlderRef.current) {
@@ -9406,8 +9439,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               title={clickable ? `Committed ${item.shortSha} - click to show this commit's diff` : `Committed ${item.shortSha}`}
             >
               <GitCommitHorizontal className="w-3 h-3 shrink-0" />
-              <span className="font-mono shrink-0">{item.shortSha}</span>
-              <span className="truncate">{item.subject}</span>
+              {/* The sha is monospace and the subject is not, so their line boxes
+                  differ and `items-center` would centre each one separately -
+                  putting two baselines in a row three words long. optical-center
+                  trims each label to its own cap-to-baseline ink, which is what
+                  then gets centred (see CLAUDE.md, "Labels beside icons"). */}
+              <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
+              <span className="truncate optical-center">{item.subject}</span>
             </div>
           </div>
         )

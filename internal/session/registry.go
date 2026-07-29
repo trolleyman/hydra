@@ -51,6 +51,7 @@ type Registry struct {
 	onChatPlanChange  func(id, planJSON string)
 	onChatModel       func(id, model string)
 	onChatLine        func(id, provider string, line []byte)
+	onChatResume      func(id, worktree string)
 }
 
 // NewRegistry returns an empty registry.
@@ -172,6 +173,33 @@ func (r *Registry) ObserveChatModel(id, model string) {
 	r.mu.RUnlock()
 	if fn != nil && model != "" {
 		go fn(id, model)
+	}
+}
+
+// SetOnChatResume registers a callback invoked SYNCHRONOUSLY just before a
+// chat-mode head's replacement process is started, with the head id and its
+// worktree. The daemon wires it to retract the blocks a process that died
+// mid-turn left in the normalized log but never committed to the CLI's
+// transcript - the resumed process re-runs that turn, so without this the
+// browser ends up showing the same reply twice (see chat.RetractOrphanedTurn).
+//
+// Unlike the other hooks this one is deliberately NOT dispatched on a goroutine:
+// it has to finish while the log tail is still exactly what the dead process
+// left, i.e. before the new process can append to it.
+func (r *Registry) SetOnChatResume(fn func(id, worktree string)) {
+	r.mu.Lock()
+	r.onChatResume = fn
+	r.mu.Unlock()
+}
+
+// NotifyChatResume runs the resume hook, if one is registered. Called by
+// heads.ResumeHead for chat-mode heads only.
+func (r *Registry) NotifyChatResume(id, worktree string) {
+	r.mu.RLock()
+	fn := r.onChatResume
+	r.mu.RUnlock()
+	if fn != nil {
+		fn(id, worktree)
 	}
 }
 
