@@ -164,7 +164,10 @@ export const FONT_ROLE_SPEC: Record<FontRole, FontRoleSpec> = {
     label: 'Interface',
     cssVar: '--app-font-ui',
     categories: ['sans', 'serif'],
-    defaultId: 'system-sans',
+    // Inter rather than the system stack, so the shell looks the same on every
+    // OS instead of inheriting whatever the machine's UI font happens to be
+    // (Cantarell, Segoe UI, SF). System sans is still one click away.
+    defaultId: 'inter',
   },
   // Chat-mode prose, agent and user alike. Code inside it keeps its mono class,
   // so it follows the Code font instead.
@@ -182,15 +185,21 @@ export const FONT_ROLE_SPEC: Record<FontRole, FontRoleSpec> = {
     label: 'Code',
     cssVar: '--app-font-code',
     categories: ['mono'],
-    defaultId: 'iosevka',
+    // Fira Code, matching the terminal - one monospace across the app unless the
+    // user says otherwise. It also comes off the Google Fonts stylesheet, where
+    // Iosevka is self-hosted from public/fonts and only exists once
+    // scripts/build-fonts.ts has run, so this is the choice that renders as
+    // intended in a fresh checkout too.
+    defaultId: 'fira-code',
   },
   terminal: {
     label: 'Terminal',
     cssVar: '--app-font-terminal',
     categories: ['mono'],
-    // NOT Iosevka, despite it being the default for code, and the reason is
-    // emoji. xterm gives an emoji two cells; the browser draws it from the
-    // colour emoji font at ~1.2em regardless of the mono font in use. Measured
+    // NOT Iosevka, and the reason is emoji - it is why the terminal picked Fira
+    // Code first, back when code defaulted to Iosevka. xterm gives an emoji two
+    // cells; the browser draws it from the colour emoji font at ~1.2em
+    // regardless of the mono font in use. Measured
     // at the 13px terminal size: Iosevka's cell is 7px, so an emoji covers 114%
     // of its two cells and clips the glyph beside it, where Fira Code's 8px cell
     // makes it an exact 100% fit. Iosevka Term is still offered, and is still

@@ -31,6 +31,7 @@ import {
 } from '../DiffViewer'
 import { buildFileTree, compactTree as compactDiffTree, getGroupedFiles } from '../lib/fileTree'
 import { scrollCardToTop } from '../lib/diffScroll'
+import { PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES } from '../lib/diffBody'
 import { type ImageDiffMode } from './ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
@@ -574,15 +575,18 @@ function CodeView({ content, lang, wrap, highlightRange, onSelectLine }: { conte
               onMouseDown={onSelectLine ? (e) => { if (e.shiftKey) e.preventDefault() } : undefined}
               onClick={onSelectLine ? (e) => onSelectLine(ln, e.shiftKey) : undefined}
               title={onSelectLine ? `Select line ${ln}` : undefined}
-              style={{ width: `calc(${gutterWidth} + 1.5rem)` }}
-              className={`sticky left-0 z-10 shrink-0 select-none text-right pr-3 pl-2 border-r ${onSelectLine ? 'cursor-pointer hover:text-blue-500 dark:hover:text-blue-400' : ''} ${isHi
+              // The rule sits BETWEEN the numbers and the code (8px / 10px), the
+              // spacing the chat's Read card uses - it used to hug the code with
+              // 12px of empty gutter behind it.
+              style={{ width: `calc(${gutterWidth} + 1rem)` }}
+              className={`sticky left-0 z-10 shrink-0 select-none text-right pr-2 pl-2 border-r ${onSelectLine ? 'cursor-pointer hover:text-blue-500 dark:hover:text-blue-400' : ''} ${isHi
                 ? 'text-amber-700 dark:text-amber-300 bg-amber-100/70 dark:bg-amber-400/10 border-amber-200 dark:border-amber-500/20'
                 : 'text-gray-400 dark:text-gray-600 bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800'}`}
             >
               {ln}
             </span>
             <code
-              className={`bg-transparent flex-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
+              className={`bg-transparent flex-1 pl-2.5 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
               dangerouslySetInnerHTML={{ __html: html || ' ' }}
             />
           </div>
@@ -1253,16 +1257,23 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     })
   }, [])
 
-  // Re-fetch one file at a wider context for the huge-file network-expand path
-  // (FileDiff's fallback), patching the new hunks into the existing diff.
+  // Revealing context in a file the bulk response left windowed (FileDiff's
+  // `-U3` fallback). Same deal as the agent diff's expandFileDiff: ask for that
+  // one file in full and let it switch to the client-side reveal model, so later
+  // expanders are instant and only open the gap they belong to; a file too big
+  // even for that comes back at the wider windowed context in the same response.
   const expandDiffFile = useCallback(async (path: string, context = 3) => {
-    fileContextsRef.current.set(path, context)
-    setFileContexts(new Map(fileContextsRef.current))
     try {
-      const fileDiff = await api.default.getRepositoryDiff(projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, path, context)
+      const fileDiff = await api.default.getRepositoryDiff(projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, path, context,
+        true, PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES)
       const updated = fileDiff.files.find((x) => x.path === path)
+      const promoted = !!updated?.expanded
+      if (!promoted) {
+        fileContextsRef.current.set(path, context)
+        setFileContexts(new Map(fileContextsRef.current))
+      }
       setDiff((prev) => prev
-        ? { ...prev, files: prev.files.map((f) => f.path === path ? { ...f, hunks: updated?.hunks ?? [] } : f) }
+        ? { ...prev, files: prev.files.map((f) => f.path === path ? { ...f, hunks: updated?.hunks ?? [], expanded: promoted } : f) }
         : prev)
     } catch (e) {
       console.error('Failed to fetch repository file diff:', e)

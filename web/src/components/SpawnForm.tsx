@@ -24,8 +24,7 @@ import { useProjectStore } from '../stores/projectStore'
 import { PRPicker } from './PRPicker'
 import { Badge } from './Badge'
 import type { ReviewRef } from '../api/models/ReviewRef'
-
-type AgentTypeOption = 'claude' | 'gemini' | 'copilot' | 'codex'
+import { type AgentTypeOption, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
@@ -72,18 +71,6 @@ const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
 function modelLabel(agent: AgentTypeOption, model: string): string {
   if (!model) return ''
   return AGENT_MODELS[agent].find((m) => m.id === model)?.label ?? model
-}
-
-// The remembered-model map (agent type → model alias) persisted in localStorage,
-// so picking a model seeds the next spawn of that same agent type.
-function readModelMap(): Record<string, string> {
-  try {
-    const raw = readLocal(StorageKeys.defaultModel)
-    const parsed = raw ? JSON.parse(raw) : null
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {}
-  } catch {
-    return {}
-  }
 }
 
 // AgentModelPicker is a compact trigger (brand icon + optional model label) that
@@ -225,13 +212,7 @@ export const SpawnForm = memo(function SpawnForm({
   compact?: boolean
   disabled?: boolean
 }) {
-  const [agentType, setAgentType] = useState<AgentTypeOption>(() => {
-    const saved = readLocal(StorageKeys.defaultAgentType)
-    if (saved && (saved === 'claude' || saved === 'gemini' || saved === 'copilot' || saved === 'codex')) {
-      return saved as AgentTypeOption
-    }
-    return 'claude'
-  })
+  const [agentType, setAgentType] = useState<AgentTypeOption>(readDefaultAgentType)
   // Model alias for the CLI's --model flag ('' = the CLI's own default). Seeded
   // from the remembered map for the initial agent type; the picker sets agent +
   // model together, and the effect below persists the pick per agent type.
@@ -239,7 +220,7 @@ export const SpawnForm = memo(function SpawnForm({
   // Chat mode: drive Claude or Codex via its structured protocol and
   // show a chat view instead of a terminal. Remembered like the agent/model;
   // defaults ON when the user has never touched the toggle (only 'false' opts out).
-  const [chatMode, setChatMode] = useState(() => readLocal(StorageKeys.defaultChatMode) !== 'false')
+  const [chatMode, setChatMode] = useState(readDefaultChatMode)
   // Per-head git-isolation override ('' = use the project's policy default, so the
   // request omits git_isolation). See docs/git-isolation.md. Not persisted: a locked
   // .git is a deliberate per-spawn choice, defaulted to the project policy.

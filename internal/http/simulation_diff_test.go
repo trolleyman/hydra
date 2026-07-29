@@ -62,3 +62,68 @@ func TestSimFullContextDiffsAreContiguous(t *testing.T) {
 		}
 	}
 }
+
+// TestSimSingleFilePromotionExpands covers the other half of the same rule. The
+// bulk request's cap (6000) leaves a change deep in a big file windowed - that
+// is what the client's "-U3 hunks + expand" fallback renders - but when the
+// reader clicks one of that file's expanders the client re-asks for it alone
+// with a much larger cap, and it must then come back expanded and contiguous,
+// so every later reveal is client-side and touches only the gap clicked.
+func TestSimSingleFilePromotionExpands(t *testing.T) {
+	const deepFile = "web/src/components/AgentChat.tsx"
+	s := &SimulationServer{Development: true}
+	full := true
+
+	path := deepFile
+	get := func(maxFullLines int) api.DiffFile {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/diff", nil)
+		s.GetAgentDiff(rec, req, "proj", "agent-1", api.GetAgentDiffParams{
+			FullContext:  &full,
+			MaxFullLines: &maxFullLines,
+			Path:         &path,
+		})
+		var resp api.DiffResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		for _, f := range resp.Files {
+			if f.Path == deepFile {
+				return f
+			}
+		}
+		t.Fatalf("%s missing from response", deepFile)
+		return api.DiffFile{}
+	}
+
+	if f := get(6000); f.Expanded != nil && *f.Expanded {
+		t.Errorf("bulk cap: want %s left windowed, got expanded", deepFile)
+	}
+
+	f := get(20000)
+	if f.Expanded == nil || !*f.Expanded {
+		t.Fatalf("promotion cap: want %s expanded", deepFile)
+	}
+	if len(f.Hunks) != 1 {
+		t.Fatalf("want a single whole-file hunk, got %d", len(f.Hunks))
+	}
+	if f.Hunks[0].OldStart != 1 || f.Hunks[0].NewStart != 1 {
+		t.Errorf("want the hunk to start at line 1, got old %d new %d", f.Hunks[0].OldStart, f.Hunks[0].NewStart)
+	}
+	prevOld, prevNew := 0, 0
+	for _, l := range f.Hunks[0].Lines {
+		if l.OldLineNum != nil {
+			if prevOld != 0 && *l.OldLineNum != prevOld+1 {
+				t.Fatalf("old line jumped %d -> %d", prevOld, *l.OldLineNum)
+			}
+			prevOld = *l.OldLineNum
+		}
+		if l.NewLineNum != nil {
+			if prevNew != 0 && *l.NewLineNum != prevNew+1 {
+				t.Fatalf("new line jumped %d -> %d", prevNew, *l.NewLineNum)
+			}
+			prevNew = *l.NewLineNum
+		}
+	}
+}

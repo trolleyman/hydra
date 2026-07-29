@@ -2313,11 +2313,19 @@ func simContext(params api.GetAgentDiffParams) int {
 // viewer drives its full-content reveal model - compact, with "··· N lines ···"
 // collapses and no fabricated edge arrows. Otherwise it just widens each hunk's
 // surrounding context (network-expand on demand).
+// The cap is the caller's max_full_lines, so the simulation reproduces both
+// sides of the real server's behaviour: the bulk request (6000) leaves a change
+// deep in a big file windowed, and the client's on-demand single-file promotion
+// (a much larger cap) expands that same file.
 func simApplyContext(files []api.DiffFile, params api.GetAgentDiffParams) []api.DiffFile {
 	if params.FullContext != nil && *params.FullContext {
+		maxFullLines := 6000
+		if params.MaxFullLines != nil {
+			maxFullLines = *params.MaxFullLines
+		}
 		out := make([]api.DiffFile, len(files))
 		for i, f := range files {
-			out[i] = simReconstructFull(f)
+			out[i] = simReconstructFull(f, maxFullLines)
 		}
 		return simStampBlobSHAs(out)
 	}
@@ -2355,15 +2363,14 @@ func simStampBlobSHAs(files []api.DiffFile) []api.DiffFile {
 // side stays the source of truth for gap sizing (it's monotonic in the
 // fixtures); new line numbers are derived so the result is always a valid,
 // contiguous diff.
-func simReconstructFull(f api.DiffFile) api.DiffFile {
+func simReconstructFull(f api.DiffFile, maxFullLines int) api.DiffFile {
 	if f.Binary || len(f.Hunks) == 0 {
 		return f
 	}
-	// A change deep in a large file can't be sensibly reconstructed as a
-	// whole-file hunk - it would be thousands of synthetic context lines, past the
-	// client's FULL_MAX_LINES cap anyway - so leave it windowed, mirroring the real
-	// server's max_full_lines behaviour.
-	if last := f.Hunks[len(f.Hunks)-1]; last.OldStart > 3000 || last.NewStart > 3000 {
+	// A change deeper into the file than the cap can only reconstruct to more
+	// lines than the cap allows, so skip the work. The exact rule (reconstructed
+	// length vs the cap, as the real server applies it) is checked below.
+	if last := f.Hunks[len(f.Hunks)-1]; last.OldStart > maxFullLines || last.NewStart > maxFullLines {
 		return f
 	}
 	ext := ""
@@ -2400,6 +2407,11 @@ func simReconstructFull(f api.DiffFile) api.DiffFile {
 			}
 			lines = append(lines, nl)
 		}
+	}
+	// The real server drops the expanded version when it blew past the cap (a few
+	// changed lines scattered through a long file) and keeps the windowed hunks.
+	if len(lines) > maxFullLines {
+		return f
 	}
 	f.Hunks = []api.DiffHunk{{Header: f.Hunks[0].Header, OldStart: 1, NewStart: 1, Lines: lines}}
 	f.Expanded = ptr(true)
