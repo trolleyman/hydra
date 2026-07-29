@@ -185,6 +185,12 @@ describe('highlightShell', () => {
     expect(tokensAround(highlightShell(plain), 'export function')).toEqual(['token string'])
   })
 
+  it('marks the backslash of an escaped literal without colouring what it escapes', () => {
+    const html = highlightShell('grep -n "func (m \\*Manager) Retract" -A 4 f.go')
+    expect(tokensAround(html, '\\')).toEqual(['token punctuation'])
+    expect(tokensAround(html, '*Manager) Retract')).toEqual(['token string'])
+  })
+
   it('highlights an inline python program as python', () => {
     const html = highlightShell('python3 -c "import json\nprint(json.dumps({}))"')
     expect(tokensAround(html, 'import')).toContain('token keyword')

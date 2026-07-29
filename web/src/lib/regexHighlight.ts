@@ -8,7 +8,9 @@
 // and every character of that arrives the same colour, which hides the only
 // question the reader has - where are the alternations? So this splits a pattern
 // into the parts that MATCH SOMETHING (anchors, alternation, groups,
-// quantifiers, character classes) and the parts that are just text.
+// quantifiers, character classes) and the parts that are just text, with the
+// backslash of an escaped literal marked so an escaped `\*` can be told from a
+// string that happens to contain one.
 //
 // FLAVOUR IS THE WHOLE PROBLEM. `\|` is alternation in a POSIX basic regex - a
 // bare `grep` - and a literal pipe in an extended one; `|` is the reverse. A
@@ -34,7 +36,11 @@ export interface RegexToken {
   // 'literal' - matches itself, and reads as the string it is.
   // 'meta'    - structure: an anchor, an alternation, a group, a quantifier.
   // 'class'   - a set of characters: `[a-z]`, `\d`, `\w`.
-  kind: 'literal' | 'meta' | 'class'
+  // 'escape'  - the BACKSLASH of an escaped literal, on its own. The character
+  //   it escapes stays literal, because that character is exactly what the
+  //   pattern matches - `\*` matches an asterisk. Marking just the backslash
+  //   says "the author escaped this" without implying the star does anything.
+  kind: 'literal' | 'meta' | 'class' | 'escape'
 }
 
 // The characters a basic regex needs a backslash in FRONT of to mean, and an
@@ -121,8 +127,12 @@ export function regexTokens(pattern: string, flavour: RegexFlavour): RegexToken[
       if (!extended && BRE_ESCAPED_META.has(next)) push(out, pattern.slice(i, i + 2), 'meta')
       else if (SHORTHAND.test(next)) push(out, pattern.slice(i, i + 2), 'class')
       // An escaped metacharacter is the character itself - `\.` is a full stop -
-      // so it reads as the text it matches.
-      else push(out, pattern.slice(i, i + 2), 'literal')
+      // so the character reads as the text it matches and only the backslash in
+      // front of it is marked as regex syntax.
+      else {
+        push(out, '\\', 'escape')
+        push(out, next, 'literal')
+      }
       i += 2
       continue
     }

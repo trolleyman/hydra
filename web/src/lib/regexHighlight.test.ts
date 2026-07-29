@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { applyFlavourFlag, grepFlavour, regexTokens, takesArgument, type RegexFlavour } from './regexHighlight'
 
 // A pattern's tokens as `text` with a one-letter kind, so a case reads as the
-// pattern it is about: `.` literal, `M` meta, `C` character class.
+// pattern it is about: `.` literal, `M` meta, `C` character class, `E` the
+// backslash of an escaped literal.
 function toks(pattern: string, flavour: RegexFlavour): string[] {
-  return regexTokens(pattern, flavour).map((t) => `${{ literal: '.', meta: 'M', class: 'C' }[t.kind]}${t.text}`)
+  const kinds = { literal: '.', meta: 'M', class: 'C', escape: 'E' }
+  return regexTokens(pattern, flavour).map((t) => `${kinds[t.kind]}${t.text}`)
 }
 
 // Nothing may be dropped: the caller renders these over the source text.
@@ -16,15 +18,25 @@ describe('regexTokens', () => {
   it('reads a basic regex, where the backslash MAKES the operator', () => {
     expect(toks('"type": "\\|terminalEvent\\|\\.Append(', 'bre')).toEqual([
       '."type": "', 'M\\|', '.terminalEvent', 'M\\|',
-      // `\.` is a full stop and `(` is a bracket - neither does anything here.
-      '.\\.Append(',
+      // `\.` is a full stop and `(` is a bracket - neither does anything here,
+      // so only the backslash saying the stop is escaped is marked.
+      'E\\', '..Append(',
     ])
   })
 
   it('reads an extended regex, where the backslash UNMAKES it', () => {
-    expect(toks('(foo|bar)+\\.go$', 'ere')).toEqual(['M(', '.foo', 'M|', '.bar', 'M)+', '.\\.go', 'M$'])
+    expect(toks('(foo|bar)+\\.go$', 'ere')).toEqual(['M(', '.foo', 'M|', '.bar', 'M)+', 'E\\', '..go', 'M$'])
     // The same characters, the other way round, in the basic dialect.
     expect(toks('(foo|bar)', 'bre')).toEqual(['.(foo|bar)'])
+  })
+
+  it('marks the backslash of an escaped literal, and not the character', () => {
+    // The star is what the pattern matches, so it stays the text it is; the
+    // backslash is what says so. (A bare `grep` searching for a Go pointer.)
+    expect(toks('func (m \\*Manager) Retract', 'bre')).toEqual(['.func (m ', 'E\\', '.*Manager) Retract'])
+    // An unescaped one in the same dialect IS a quantifier, so the two read
+    // differently rather than both reading as plain text.
+    expect(toks('func (m *Manager)', 'bre')).toEqual(['.func (m ', 'M*', '.Manager)'])
   })
 
   it('picks out character classes and the shorthands for them', () => {

@@ -435,11 +435,14 @@ function escapeHtml(s: string): string {
 const TOK_STRING = 'token string'
 const TOK_VARIABLE = 'token variable'
 const TOK_SUBST = 'token interpolation'
-// A regex's own two colours, over the string colour its inert text keeps: the
+// A regex's own colours, over the string colour its inert text keeps: the
 // structure reads as the operators it is, and a character class as a thing that
-// stands for something the way a variable does.
+// stands for something the way a variable does. The backslash of an escaped
+// literal is punctuation - deliberately the quietest of the three, since what it
+// marks is a character that does nothing but match itself.
 const TOK_META = 'token operator'
 const TOK_CLASS = 'token variable'
+const TOK_ESCAPE = 'token punctuation'
 
 function span(cls: string, text: string): string {
   return text === '' ? '' : `<span class="${cls}">${escapeHtml(text)}</span>`
@@ -476,11 +479,11 @@ function stringBody(text: string, expand: boolean): string {
 
 // regexBody renders a search pattern: still a string, with the parts that match
 // something rather than being something picked out of it (lib/regexHighlight).
+const REGEX_TOKENS = { meta: TOK_META, class: TOK_CLASS, escape: TOK_ESCAPE, literal: TOK_STRING }
+
 function regexBody(text: string, flavour: RegexFlavour): string {
   let out = ''
-  for (const token of regexTokens(text, flavour)) {
-    out += span(token.kind === 'meta' ? TOK_META : token.kind === 'class' ? TOK_CLASS : TOK_STRING, token.text)
-  }
+  for (const token of regexTokens(text, flavour)) out += span(REGEX_TOKENS[token.kind], token.text)
   return out
 }
 
