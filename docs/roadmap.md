@@ -95,33 +95,18 @@ before starting. Grouped by area.
   people comment/edit/delete on the forge directly and a local copy claiming to
   be authoritative would need endless reconciliation.
 
-- [ ] **Extract the worktree slot pool out of `internal/artifacts`.** There is no
-  separate `tests.slotPool` - `internal/tests` already imports `internal/artifacts`
-  and calls `artifacts.NewSlotPool` (`internal/tests/manager.go:112`) with its own
-  dir and cap, so the code is shared but the instances are not. The tell that it
-  lives in the wrong package is `internal/artifacts/exports.go`, a shim existing
-  solely so `internal/tests` can reach an unexported type. Move it to
-  `internal/checkout` (or `internal/worktreepool`) and delete the shim. Worth doing
-  before the review slot becomes a third consumer.
+  The review slot that was meant to feed this is now BUILT
+  ([review-agent.md](review-agent.md)), so it currently has nowhere to put a
+  finding - it can only talk. That makes this the next piece, not a nice-to-have.
 
-- [ ] **A "Review" session slot.** A reviewer agent modelled on the bash shell
-  tabs rather than a spawned head - `<head>-review`, no DB row, no branch, and
-  invisible to `ListHeads` by construction (it is DB-first). It gets its own
-  **persistent** detached checkout at `.hydra/local/review/<head-id>/` - not a
-  pooled slot, because a recycled path means a new transcript on every re-acquire
-  and a reviewer that forgets everything - plus `git_isolation = readonly` and
-  blocked git MCP tools so it cannot write to the repo at all, and a "Review"
-  entry in the chat view dropdown. Explicitly NOT the head's own worktree: that
-  collides on the transcript dir and races the head's edits. A stable checkout
-  path also makes bare `--continue` safe there (one session owns that transcript
-  dir), so resume-on-attach needs no session-id bookkeeping. One slot per head by
-  default, keyed per head rather than per commit (review is a conversation across
-  rounds); extra slots distinguished by lens, not count, and briefed to reply to
-  existing threads rather than restate them. New code is a Claude-argv sibling of
-  `StartShellSession` (which hardcodes `/bin/bash` + an empty `gate.Policy{}`).
-  Gotcha: `resolveGitIsolation` falls back to `off` when the agent type lacks git
-  tools, so that fallback must become conditional or the reviewer silently loses
-  its isolation. Design + alternatives in [review-agent.md](review-agent.md).
+- [ ] **Finish the review slot's open ends** ([review-agent.md](review-agent.md)):
+  exercise it against a live head (it has never launched a real Claude in a real
+  checkout - the simulation server does not spawn sandboxes), a status dot on the
+  Review tab, syncing the checkout forward as the head commits
+  (`EnsureReviewCheckout` takes a ref, but nothing calls it between turns, so a
+  long-lived reviewer keeps looking at the commit it started on), and lens-named
+  extra slots (`<head>@review-security` - the naming leaves room, nothing creates
+  them).
 
 ## Diff viewer
 

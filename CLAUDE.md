@@ -294,14 +294,17 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `run_tests` / `generate_artifacts`; also lists what is deliberately NOT built)
 - **Review threads in the diff** (forge PR comments inline, replying, local-only
   notes, the origin badges) -> [docs/review-threads.md](docs/review-threads.md)
-- **Review agent + a real comment system** (a "Review" session slot modelled on
-  the shell tabs - no DB row, no branch, own detached checkout, read-only git -
-  plus server-side comments agents read/append via tools, notified by id rather
-  than injected as text) -> [docs/review-agent.md](docs/review-agent.md)
-  (proposed, unbuilt; the comment store is the valuable half and stands alone.
-  Key constraint: Claude's transcript dir is keyed by WORKTREE PATH, so a second
-  agent in the head's own worktree can poison its `--continue`/`--resume` - which
-  is why the reviewer gets its own tree)
+- **Review agent + a real comment system** (the "Review" tab: a session slot
+  modelled on the shell tabs - no DB row, no branch, own detached checkout,
+  read-only git + blocked git tools - plus the *unbuilt* server-side comment
+  store agents would read/append via tools, notified by id rather than injected
+  as text) -> [docs/review-agent.md](docs/review-agent.md) (slot BUILT:
+  `internal/heads/reviewslot.go`, `?review=true` on the terminal WS, `TabKind`
+  in `AgentTerminal.tsx` - but never yet run against a live head. The comment
+  store is the valuable half, stands alone, and is still open. Key constraint:
+  Claude's transcript dir is keyed by WORKTREE PATH, so a second agent in the
+  head's own worktree can poison its `--continue`/`--resume` - which is why the
+  reviewer gets its own tree, and why that tree must not be a recycled pool slot)
 - **Restructuring the agent page** (should it be GitHub/GitLab-shaped? inspector
   tabs vs the current five-panel stack, activity as chat rows vs an Activity tab,
   URL sub-view state) -> [docs/agent-page-tabs.md](docs/agent-page-tabs.md)

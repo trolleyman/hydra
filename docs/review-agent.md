@@ -1,21 +1,32 @@
 # Review agent + a real comment system
 
-Status: **proposed, unbuilt.** This is a design, not an options survey - the
-survey it grew out of is kept as an appendix at the bottom.
+Status: **the review slot is BUILT; the comment system is not.** This is a
+design doc, not an options survey - the survey it grew out of is kept as an
+appendix at the bottom.
 
 Two halves that only work together:
 
-1. **A review slot** - a "Review" entry in the chat view dropdown opens a chat
-   with a reviewer agent that has its own disposable checkout, no branch, and no
-   ability to write to git.
-2. **A server-side comment system** - comments stop being ephemeral text piped
-   into an agent's context and become durable, addressable objects that agents
-   read and append to through tools.
+1. **A review slot** - **BUILT.** A "Review" entry in the tab dropdown (beside
+   Sandboxed / Regular shell) opens a tab holding a reviewer agent with its own
+   disposable checkout, no branch, and no ability to write to git.
+   `internal/heads/reviewslot.go`, `?review=true` on the terminal WS,
+   `TabKind = 'review'` in `AgentTerminal.tsx`.
+2. **A server-side comment system** - **not built.** Comments would stop being
+   ephemeral text piped into an agent's context and become durable, addressable
+   objects that agents read and append to through tools.
 
-The second is the more valuable half. It is worth building even if no review
-agent ever ships, because it fixes the existing "Comment to agent" flow, which
-today formats a markdown blob and injects it into the transcript where it cannot
-be re-read, re-anchored, or survive a compaction.
+The second is the more valuable half, and it is still open. It is worth building
+even if the reviewer were thrown away, because it fixes the existing "Comment to
+agent" flow, which today formats a markdown blob and injects it into the
+transcript where it cannot be re-read, re-anchored, or survive a compaction.
+Until it exists the reviewer can only *talk* - it cannot leave anything anchored
+to a line.
+
+> **Caveat on "BUILT": the reviewer has never actually run.** Everything is
+> covered by unit tests, typecheck, and a Playwright pass against the simulation
+> server - but the simulation server does not spawn real sandboxes, so
+> `StartReviewSession` has not yet launched a real Claude process in a real
+> checkout. That needs a live head to exercise.
 
 Related: [review-threads.md](review-threads.md) (the forge-thread half that
 exists), [agent-page-tabs.md](agent-page-tabs.md) (the URL sub-view state a
@@ -205,7 +216,7 @@ path means a new transcript, so the reviewer forgets everything on every
 re-acquire. Holding a slot forever instead just starves a 4-slot pool.
 
 So the reviewer wants a **dedicated, persistent directory** -
-`.hydra/local/review/<head-id>/` - created once and checked out forward in place.
+`.hydra/local/review-checkouts/<head-id>/` - created once and checked out forward in place.
 The pool is for ephemeral runs; a conversational reviewer is not one. See
 [Surviving a restart](#surviving-a-restart), which turns out to be the same
 requirement.
@@ -296,9 +307,10 @@ is a precise, once-per-task moment to fire on.
 Yes, and most of it falls out of decisions already made:
 
 - **Comments** are server-side by construction. Free.
-- **The reviewer's conversation** needs the lazy resume-on-attach path heads
-  already have (`ResumeHead` when the session is dead but the tree remains):
-  opening the Review view revives it rather than starting fresh.
+- **The reviewer's conversation** - BUILT, and it fell out for free:
+  `StartReviewSession` is idempotent, so the `?review=true` attach doubles as
+  both the lazy-create path and the revive-after-restart one. Opening the Review
+  tab brings it back rather than starting fresh.
 
 The neat part is that the own-tree decision makes resume *safe* here. Bare
 `--continue` is unreliable in a head's worktree only because something else may
@@ -310,41 +322,61 @@ need one.
 **That only holds if the checkout path is stable**, which is the argument against
 a pooled slot above. Same requirement, arrived at from the other direction.
 
-### The dropdown entry
+### Where it lives in the UI: a tab, from the `+` dropdown
 
-`ChatViewSelector` (`web/src/components/AgentChat.tsx:4120`) is the right home -
-it is already the "which conversation am I looking at" control. But adding Review
-to it is a **category change** worth making deliberately: every entry today is a
-*view over one head's transcript* (the main conversation plus its sub-agent
-sidechains). A review slot is a different process, a different session and a
-different transcript.
+**BUILT**, and worth recording that the first attempt put it in the wrong place.
 
-Once the selector is a session switcher, the bash shell tabs arguably belong in
-it too - and they currently live in an entirely separate control, the `+`
-split-button in `AgentTerminal.tsx`. Two switchers for "what is in this pane" is
-the outcome to avoid. Ship the narrow version (Review joins, shells stay put),
-but know that is the direction.
+Review is a **tab**, opened from the `+` split-button menu in
+`AgentTerminal.tsx` alongside Sandboxed shell / Regular shell (host). That menu
+is the "open another session attached to this head" control: each entry spawns a
+slot (`<head>@shell`, `<head>@shell-host`), and Review is the same kind of thing
+(`<head>@review`, a sibling). Putting it there makes the UI mirror the model the
+backend already has.
 
-Even in the narrow version: **put a divider between Review and the sub-agents.**
-Sub-agents are *children of* the main conversation; Review is a *sibling of* it.
-A flat list erases that, and the hierarchy is the only cue for why one of them
-disappears when a turn ends and the other does not.
+The first attempt instead added a row to `ChatViewSelector`, the chat view
+dropdown. That was wrong for a reason this doc had already argued - the selector
+switches *views over one transcript*, and a session is a different category, so
+"two switchers for what is in this pane" is exactly what it warned against - but
+it also had a plain defect that the reasoning missed:
 
-Three things matter more than the dropdown itself:
+> `ChatViewSelector` renders inside `ChatPane`, and `AgentTerminal` only renders
+> `ChatPane` when `chatMode` is true. So a **terminal-mode head could not reach
+> its reviewer at all** - even though the review slot is its own Claude chat
+> session regardless of how the head it is attached to runs. The tab dropdown
+> sits outside that branch and works for both.
 
-- **Make the entry lazy.** A reviewer that does not exist yet renders as an
-  action, and opening it is what creates it. Pre-spawning a checkout and a model
-  session per head - most never opened - is real cost for nothing.
-- **Status has to show on the *closed* trigger.** Mid-turn, unread comments,
-  stale because the tip moved: if that is only visible once the dropdown is open,
-  nobody will open it. Same argument as tabs needing status affordances in
-  [agent-page-tabs.md](agent-page-tabs.md).
-- **The pane must be unmistakably a different agent.** This is the one likely to
-  bite: switching to Review and forgetting you are not talking to your head is
-  easy, and the failure is silent - you tell it to "just fix that" and it cannot,
-  because it has no git and a throwaway tree. A changed dropdown label is not
-  enough; the pane wants persistent identity (a tinted header or a badge), and
-  the composer should say what this agent cannot do.
+What the tab shape settles:
+
+- **Identity.** A permanent label next to Chat, rather than a dropdown chip you
+  have to notice. This was the risk flagged as most likely to bite - switching to
+  Review, forgetting you are not talking to your head, and telling it to "just
+  fix that", which fails silently because it has no git and a throwaway tree.
+- **Both at once.** Tabs are peers, so reading a finding and then telling the
+  head about it is a tab click, not a modal switch through a dropdown.
+- **Room for status.** A tab is always visible, so a dot on it beats any
+  affordance on a collapsed dropdown. (Not built yet - see the open list.)
+- **Less code.** The tab strip already does multiple-mounts-one-visible, which
+  the first attempt hand-rolled with two wrapper divs and a `chatPane` state.
+
+Decisions inside that shape:
+
+- **A divider above it in the menu.** The other two entries are shells; the
+  reviewer is a second agent. Same reasoning as the divider the first attempt put
+  between Review and the sub-agents.
+- **Idempotent open.** Clicking Review when the tab exists focuses it rather than
+  adding a second - the backend keys exactly one review session per head. The
+  shells add a tab each time and carry a per-tab token; Review has a fixed id.
+- **Lazy.** The tab (and therefore the checkout and the model session) is created
+  on first open. A head nobody reviews never pays for one.
+- **Persisted** (`agentViewPrefs.reviewTabOpen`), unlike the pane choice it
+  replaced. "I have a reviewer open" is real state: the backend session is
+  long-lived, one slot per head, and reattaching is free. A bool rather than a
+  list like `bashTabs`, since there is only ever one.
+- **Closable**, like a shell tab; the head's own tab is not. Closing ends the
+  session but leaves the checkout, so reopening resumes the same conversation.
+
+Still open: a **status dot on the tab** (mid-turn, or stale because the tip
+moved), and telling the user in the *composer* what this agent cannot do.
 
 ### How many reviewers
 
@@ -562,13 +594,28 @@ reports on code that never existed.
    shipped into a broken namespace.
 4. ~~**Extract the slot pool**~~ - **DONE.** `internal/checkout` (`Pool`, `Slot`)
    and `internal/sched`; `internal/artifacts/exports.go` is gone.
-5. **The review slot.** A Claude-argv sibling of `StartShellSession`, its own
-   persistent checkout under `.hydra/local/review/<head-id>/`,
-   `git_isolation = readonly` with git tools blocked, resume-on-attach, and a
-   "Review" entry in the chat view dropdown.
+5. ~~**The review slot**~~ - **DONE**, and built out of order: it landed before
+   the comment store (1-2), so the reviewer currently talks but cannot leave a
+   finding anchored to a line. `internal/heads/reviewslot.go`
+   (`StartReviewSession`, `EnsureReviewCheckout` at
+   `.hydra/local/review-checkouts/<head-id>/`, `RemoveReviewCheckout` /
+   `RemoveReviewSessionDir` on kill/purge), `?review=true` routing in
+   `internal/http/terminal.go`, and the Review tab in `AgentTerminal.tsx`.
 6. **@-mentions**, if wanted - `@<head-id>` / `@self` on a comment, routing
    through the same notification path. At this point it is routing plus a
    loop-cap rule, because both ends already exist.
+
+Still open on the built slot, none of it blocking:
+
+- **Exercise it against a live head.** It has never launched a real Claude in a
+  real checkout (see the caveat at the top).
+- **A status dot on the Review tab**, and a composer note saying what the
+  reviewer cannot do.
+- **Syncing the checkout forward** as the head commits. `EnsureReviewCheckout`
+  takes a ref and moves an existing tree, but nothing calls it between turns yet,
+  so a long-lived reviewer keeps looking at the commit it started on.
+- **Lens-named extra slots** (`<head>@review-security`). The naming leaves room;
+  nothing creates them.
 
 ## Deliberately not
 
