@@ -20,8 +20,15 @@
 //
 // The .woff2 output is NOT committed - it is gitignored and produced at build
 // time. `npm run build` runs this first (see the prebuild script), and it is a
-// no-op once the cache stamp matches, so only a fresh checkout, a version bump
-// or a change to the subsets below pays the download.
+// no-op once the cache stamp matches.
+//
+// A real build costs ~19s, nearly all of it CPU spent subsetting, and a fresh
+// worktree has no output and no stamp - so with a worktree per head that was
+// ~19s each, every time, for identical bytes. The built faces are therefore also
+// kept in ~/.cache/hydra/fonts/<signature>/: the first build anywhere fills it
+// and every worktree after that copies (~6MB, ~0.06s) without touching the
+// network or a subsetter. Only a version bump or an edit to the subsets below
+// changes the signature and pays the real cost again.
 //
 //     cd web && npm run build-fonts          # or: node scripts/build-fonts.ts
 //     cd web && npm run build-fonts -- --force
@@ -48,7 +55,8 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import subsetFont from 'subset-font'
@@ -352,6 +360,91 @@ const signature = createHash('sha256')
   .digest('hex')
   .slice(0, 16)
 
+// A build costs ~19s, nearly all of it CPU spent subsetting - and the outputs are
+// gitignored, so EVERY fresh worktree paid it again. Hydra gives each head its
+// own worktree, so that was ~19s per head for bytes that are identical whenever
+// the signature is.
+//
+// So the built faces are also kept outside the checkout, keyed by that
+// signature. The first build anywhere fills the cache; every worktree after it
+// copies (~6MB, milliseconds) and touches neither the network nor a subsetter.
+// ~/.cache is bound writable inside a Hydra sandbox, so heads both read and
+// populate it.
+const CACHE_ROOT = join(
+  process.env.XDG_CACHE_HOME || join(homedir(), '.cache'),
+  'hydra',
+  'fonts',
+)
+const CACHE_DIR = join(CACHE_ROOT, signature)
+const CACHE_MANIFEST = 'sizes.json'
+
+// restoreFromCache copies a previous build of this exact signature into OUT_DIR.
+// Returns the sizes it restored, or null if there is no complete copy to use.
+function restoreFromCache(): Record<string, number> | null {
+  const manifest = join(CACHE_DIR, CACHE_MANIFEST)
+  if (!existsSync(manifest)) return null
+  let sizes: Record<string, number>
+  try {
+    sizes = JSON.parse(readFileSync(manifest, 'utf8')) as Record<string, number>
+  } catch {
+    return null
+  }
+  // Verify before trusting it: a cache interrupted mid-write would otherwise
+  // hand back a truncated face that renders as tofu.
+  for (const [name, size] of Object.entries(sizes)) {
+    const src = join(CACHE_DIR, name)
+    if (!existsSync(src) || statSync(src).size !== size) return null
+  }
+  for (const name of Object.keys(sizes)) {
+    const dest = join(OUT_DIR, name)
+    mkdirSync(dirname(dest), { recursive: true })
+    // Copied, not hardlinked: a later --force rewrites these paths in place, and
+    // a shared inode would corrupt the cache for every other worktree.
+    copyFileSync(join(CACHE_DIR, name), dest)
+  }
+  return sizes
+}
+
+// saveToCache stores this build for every other worktree. Best-effort: a full
+// disk or a read-only cache root must not fail a build that already succeeded.
+function saveToCache(sizes: Record<string, number>): void {
+  const tmp = `${CACHE_DIR}.tmp-${process.pid}`
+  try {
+    rmSync(tmp, { recursive: true, force: true })
+    for (const name of Object.keys(sizes)) {
+      const dest = join(tmp, name)
+      mkdirSync(dirname(dest), { recursive: true })
+      copyFileSync(join(OUT_DIR, name), dest)
+    }
+    writeFileSync(join(tmp, CACHE_MANIFEST), JSON.stringify(sizes))
+    mkdirSync(CACHE_ROOT, { recursive: true })
+    // Another worktree may have won the race; its copy is byte-identical (same
+    // signature), so keep it and drop ours.
+    if (existsSync(CACHE_DIR)) rmSync(tmp, { recursive: true, force: true })
+    else renameSync(tmp, CACHE_DIR)
+  } catch (err) {
+    rmSync(tmp, { recursive: true, force: true })
+    console.log(`  (not cached: ${(err as Error).message})`)
+    return
+  }
+  // Old signatures are dead weight once nothing builds them - a version bump
+  // would otherwise leave 6MB behind for every version ever built.
+  try {
+    for (const entry of readdirSync(CACHE_ROOT)) {
+      if (entry !== signature) rmSync(join(CACHE_ROOT, entry), { recursive: true, force: true })
+    }
+  } catch {
+    // A concurrent build may be mid-rename; leaving a stale dir is harmless.
+  }
+}
+
+function writeStamp(sizes: Record<string, number>): void {
+  writeFileSync(
+    STAMP,
+    JSON.stringify({ iosevka: IOSEVKA_VERSION, nerdFonts: NERD_FONTS_VERSION, signature, sizes }, null, 2) + '\n',
+  )
+}
+
 function upToDate(): boolean {
   if (FORCE || !existsSync(STAMP)) return false
   try {
@@ -378,6 +471,16 @@ if (upToDate()) {
 }
 
 mkdirSync(OUT_DIR, { recursive: true })
+
+if (!FORCE) {
+  const cached = restoreFromCache()
+  if (cached) {
+    writeStamp(cached)
+    const mb = Object.values(cached).reduce((a, b) => a + b, 0) / 1024 / 1024
+    console.log(`fonts: restored ${Object.keys(cached).length} file(s), ${mb.toFixed(1)}MB from ${CACHE_DIR}`)
+    process.exit(0)
+  }
+}
 console.log(
   `fonts: cutting Iosevka v${IOSEVKA_VERSION} (${cps.length} code points) ` +
     `+ Nerd Fonts symbols v${NERD_FONTS_VERSION} (${nerdText.length})`,
@@ -436,8 +539,6 @@ for (const { pkg, family, slug } of FAMILIES) {
 
 Object.assign(sizes, await vendorGoogle())
 
-writeFileSync(
-  STAMP,
-  JSON.stringify({ iosevka: IOSEVKA_VERSION, nerdFonts: NERD_FONTS_VERSION, signature, sizes }, null, 2) + '\n',
-)
+writeStamp(sizes)
+saveToCache(sizes)
 console.log(`fonts: done (${(Object.values(sizes).reduce((a, b) => a + b, 0) / 1024 / 1024).toFixed(1)}MB total)`)

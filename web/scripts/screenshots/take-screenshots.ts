@@ -173,11 +173,11 @@ async function waitForServer(url: string, timeoutMs: number) {
 const REQUIRED_FONTS = ['Fira Code', 'Inter']
 
 // settle waits for the page to be visually stable before a capture, without a
-// fixed sleep: web fonts finished loading, plus two animation frames so any
-// pending layout/paint (and React commit) has flushed. With CSS animations and
-// transitions disabled (see the injected stylesheet), this is deterministic and
-// far quicker than a blanket waitForTimeout. Note the page freezes short
-// setTimeouts but leaves requestAnimationFrame intact, so the rAF wait works.
+// fixed sleep: fonts loaded, every running animation jumped to its end, then two
+// animation frames so any pending layout/paint (and React commit) has flushed.
+// Far quicker than a blanket waitForTimeout, and deterministic. Note the page
+// freezes short setTimeouts but leaves requestAnimationFrame intact, so the rAF
+// wait works.
 //
 // document.fonts.ready alone is NOT enough, for two reasons. It only settles the
 // faces the page has already ASKED for, and a font used by a panel that mounts
@@ -192,6 +192,26 @@ async function settle(page: import('playwright').Page) {
     // rather than being absent from the set fonts.ready settles.
     await Promise.all(families.map((f) => document.fonts.load(`16px "${f}"`).catch(() => [])))
     await document.fonts.ready
+
+    // Jump every running animation to its end state. The injected stylesheet
+    // (animation:none;transition:none) only reaches CSS - a Web Animation
+    // started with element.animate() ignores it completely, and the lightbox's
+    // FLIP flight (src/lib/lightboxFlip.ts) is exactly that. Without this the
+    // picture is captured wherever the flight happened to be: the same shot came
+    // out 28px wide one run and 171px the next, which reads as a real layout
+    // change and is not one.
+    //
+    // finish() throws on an animation with no end (an infinite spinner), so
+    // those are cancelled instead - a stopped spinner is what the CSS rule was
+    // already doing to its keyframed siblings.
+    for (const animation of document.getAnimations()) {
+      try {
+        animation.finish()
+      } catch {
+        animation.cancel()
+      }
+    }
+
     await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
     return families.filter((f) => !document.fonts.check(`16px "${f}"`))
   }, REQUIRED_FONTS)

@@ -116,6 +116,18 @@ creates, and aborted a failed fetch so it would fall back rather than hang - whi
 made the silent-fallback render *more* likely, not less. Vendoring removes the
 class: there is nothing to race and nothing to time out.
 
+**Running animations are jumped to their end before every capture.** The injected
+`animation:none;transition:none` stylesheet only reaches CSS - a Web Animation
+started with `element.animate()` ignores it entirely, and the lightbox's FLIP
+flight (`src/lib/lightboxFlip.ts`) is exactly that. So `settle()` walks
+`document.getAnimations()` and finishes each one (cancelling the endless ones,
+which have no end state to jump to). Without it the same picture came out 28px
+wide one run and 171px the next - `spawn-image-lightbox-dark` and
+`artifact-image-lightbox-dark` caught the flight at different points, which reads
+as a real layout change and is not one. `waitForStableRect` covers the other half
+of that problem (a box that moves AFTER settle returns, from an async measure);
+this covers the box that is still moving when it is called.
+
 `settle()` still verifies it. It explicitly requests each family in
 `REQUIRED_FONTS` and then *checks* it arrived, because `document.fonts.ready`
 answers neither question on its own - it settles only faces the page has already
