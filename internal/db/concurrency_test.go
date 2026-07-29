@@ -101,3 +101,22 @@ func TestConcurrentReadersWithWriter(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// synchronous(NORMAL) is what makes WAL cheap: the default FULL fsyncs on every
+// commit, and this daemon commits constantly (a status/activity row per tool
+// call, per head). It was the largest source of fsyncs on the machine this was
+// found on, and on ext4 each one forces a journal commit that unrelated writers
+// queue behind. NORMAL cannot corrupt the database - WAL replay still recovers a
+// torn commit - so the only exposure is losing the last commits to a power cut.
+func TestStoreUsesNormalSynchronous(t *testing.T) {
+	store := newTestStore(t)
+
+	// PRAGMA synchronous reports an integer: 0 OFF, 1 NORMAL, 2 FULL, 3 EXTRA.
+	var syncWrite int
+	if err := store.db.Raw("PRAGMA synchronous").Scan(&syncWrite).Error; err != nil {
+		t.Fatalf("writer synchronous: %v", err)
+	}
+	if syncWrite != 1 {
+		t.Errorf("writer synchronous = %d, want 1 (NORMAL)", syncWrite)
+	}
+}

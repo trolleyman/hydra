@@ -37,7 +37,14 @@ const maxReadConns = 4
 // off. WAL is mandatory here: it's what lets the read pool run concurrently with
 // the writer at all.
 func pragmas(queryOnly bool) string {
-	p := "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(on)"
+	// synchronous(NORMAL) is the standard pairing for WAL: the WAL is fsynced at
+	// checkpoints rather than on every commit. It cannot corrupt the database -
+	// WAL replay still recovers a torn commit - the only exposure is losing the
+	// last commits to a power cut or kernel panic, which for agent status rows is
+	// the right trade. The default (FULL) fsyncs per transaction, and this daemon
+	// commits constantly: it was the largest source of fsyncs on the machine, and
+	// on ext4 each one forces a journal commit that unrelated writers queue behind.
+	p := "?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(on)"
 	if queryOnly {
 		// Defence in depth: the read pool must never write (a stray write would
 		// contend with the writer for the file lock and reintroduce SQLITE_BUSY).
