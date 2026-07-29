@@ -99,7 +99,7 @@ export function CodePane({ content, lang, wrap, className, highlightRange, onSel
                 serializes as the newline it stands for, and keeps the row one
                 line tall without a min-height. */}
             <code
-              className={`bg-transparent flex-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
+              className={`bg-transparent flex-1 pr-3 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
               dangerouslySetInnerHTML={{ __html: html || '<br>' }}
             />
           </div>
@@ -182,7 +182,7 @@ export function DiffPane({ rows, lang, wrap, className }: {
                 </Fragment>
               ))}
             </span>
-            <code className={`bg-transparent flex-1 pl-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}>
+            <code className={`bg-transparent flex-1 pl-1 pr-3 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}>
               {/* The marker sits INSIDE the copied text (and the numbers
                   outside, select-none), so what you copy is a diff you can
                   paste rather than a column of numbers. */}

@@ -20,7 +20,7 @@ import type { LightboxItem } from './Lightbox'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { computeVisibleFiles } from '../lib/artifactFilter'
 import { loadTagFilter, saveTagFilter, type ArtifactTagFilter } from '../lib/artifactPrefs'
-import { useArtifactSpans } from '../lib/artifactColumns'
+import { useArtifactSpans, FILE_TILE_PX, FILE_TILE_MIN_PX } from '../lib/artifactColumns'
 import { Tooltip } from './Tooltip'
 
 // RepositoryArtifactsView renders one [[artifacts]] script's output for a single
@@ -395,13 +395,16 @@ export function RepositoryArtifactsView({
               items={visibleFiles.map((f) => ({
                 key: f.name,
                 node: <MediaCell file={f} gallery={gallery} />,
-                // Card tiles (packages, PDFs) have no media dimensions; a flat wide
-                // aspect keeps their compact tile from being placed as a tall column.
+                // Card tiles (packages, PDFs, text) have no media dimensions; a flat
+                // wide aspect keeps their compact tile from being placed as a tall
+                // column, and FILE_TILE_PX gives them the natural width the same cap
+                // uses for media - so a card sits at card size, not a whole row.
                 aspect: isFileTileArtifact(f.name) ? 3.2 : dims[f.name]?.aspect,
-                pxWidth: dims[f.name]?.pxWidth,
+                pxWidth: isFileTileArtifact(f.name) ? FILE_TILE_PX : dims[f.name]?.pxWidth,
                 dpi: dims[f.name]?.dpi,
-                // Videos need a minimum tile width for their transport controls.
-                minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
+                // Videos need a minimum tile width for their transport controls, and
+                // a card needs one for its download buttons.
+                minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : isFileTileArtifact(f.name) ? FILE_TILE_MIN_PX : undefined,
                 // Video uses horizontal drag for scrubbing, so it resizes via the edge
                 // handle only; images resize by dragging the media (see MasonryGrid).
                 bodyResizable: !isVideoArtifact(f.name) && !isFileTileArtifact(f.name),

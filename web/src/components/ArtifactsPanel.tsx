@@ -20,7 +20,7 @@ import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
 import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
-import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
+import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect, FILE_TILE_PX, FILE_TILE_MIN_PX } from '../lib/artifactColumns'
 import { VideoDiffView, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { ImageDiffView, SegmentedToggle, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
 import { ABControlsContext, IMAGE_DIFF_MODES } from './artifactDiffContext'
@@ -836,14 +836,17 @@ const FileGrid = memo(function FileGrid({ files, mode, scale = 1, spans, onSpanC
     () => files.map((f) => ({
       key: f.name,
       node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} gallery={diffGallery} index={galleryIndex.get(f.name)} />,
-      // Card tiles (packages, PDFs) have no media dimensions; a flat wide aspect
-      // keeps their compact tile from being placed as a tall column.
+      // Card tiles (packages, PDFs, text) have no media dimensions; a flat wide
+      // aspect keeps their compact tile from being placed as a tall column, and
+      // FILE_TILE_PX gives them the natural width the same cap uses for media -
+      // so a card sits at card size rather than claiming the whole row.
       aspect: isFileTileArtifact(f.name) ? 3.2 : dims[f.name]?.aspect,
-      pxWidth: dims[f.name]?.pxWidth,
+      pxWidth: isFileTileArtifact(f.name) ? FILE_TILE_PX : dims[f.name]?.pxWidth,
       dpi: dims[f.name]?.dpi,
       // Videos need a minimum tile width for their transport controls (see
-      // VIDEO_MIN_TILE_PX); images have no such chrome.
-      minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
+      // VIDEO_MIN_TILE_PX), and a card needs one for its download buttons;
+      // images have no such chrome.
+      minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : isFileTileArtifact(f.name) ? FILE_TILE_MIN_PX : undefined,
       // Every tile - image AND video - resizes by dragging its media (data-tile-drag).
       // Controls that own their own horizontal drag (the slider divider, the onion
       // opacity range, the video transport bar) opt out with data-no-tile-drag /

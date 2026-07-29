@@ -309,7 +309,17 @@ export function LightboxText({ url, filename, diff }: {
   ]
 
   return (
-    <div className={`${PANEL_CLASS} flex flex-col w-[min(1100px,90vw)] h-[82vh]`} data-lb-picture>
+    // Sized to the file, not to the viewport: a five-line diff gets a five-line
+    // panel instead of a screenful of empty pane under it. w-max/h-auto take the
+    // content's own size, the max-* pair caps them where the old fixed box was,
+    // and the min-* pair keeps a one-line file (or the spinner before any of it
+    // has arrived) from collapsing to something smaller than the header's own
+    // controls. Under wrapping the content's max-content width is its longest
+    // UNWRAPPED line, so a log still hits the cap and wraps there.
+    <div
+      className={`${PANEL_CLASS} flex flex-col w-max h-auto max-w-[min(1100px,90vw)] max-h-[82vh] min-w-[min(36rem,90vw)] min-h-[7rem]`}
+      data-lb-picture
+    >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-white/10 shrink-0">
         <FileText className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
         {/* optical-center: flexbox centres the label's LINE box, which reserves
