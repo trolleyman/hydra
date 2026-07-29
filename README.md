@@ -96,7 +96,7 @@ See `AGENTS.md`/`CLAUDE.md`/`GEMINI.md` for more instructions.
   pipeline works and how to add a screenshot.
 - [Agent page internals](docs/web-agent-page.md) - the diff viewer, sticky
   headers, and per-agent view state in the web UI.
-- [Codex chat](docs/codex-chat.md) - design notes for Codex CLI chat-mode
-  heads (app-server transport).
+- [Chat mode](docs/chat-mode.md) - how Claude and Codex chat-mode heads work:
+  the normalized event log, the socket protocol, and how the chat renders.
 - [macOS support](docs/macos-support.md) - darwin sandbox audit and plan.
 - [Windows support](docs/windows-support.md) - Windows audit and plan.

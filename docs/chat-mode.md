@@ -1,0 +1,388 @@
+# Chat mode
+
+A chat-mode head talks to its provider through a structured protocol instead of
+a PTY, and Hydra renders the conversation itself. Two providers support it:
+Claude (`claude -p --input-format stream-json --output-format stream-json`) and
+Codex (`codex app-server --listen stdio://`). `sandbox.AgentArgv` rejects chat
+mode for any other agent type.
+
+Both providers converge on one contract. The daemon normalizes every provider
+line into Hydra's own sequenced event log (`internal/chat`), and that log is the
+only thing a chat socket carries. Nothing provider-shaped reaches the browser as
+transport: a provider's own payload rides *inside* a normalized event, where the
+Raw panel can show it, but it never determines the wire format or the reducer.
+
+## The wire protocol
+
+A chat head shares `/ws/.../terminal` with terminal heads, but every frame is
+text (see `internal/http/chat_ws.go`).
+
+Server to client:
+
+| Frame | Meaning |
+| --- | --- |
+| `state_snapshot` | the projection (current state) and its `through` watermark |
+| `chat_history` | one page of durable events, oldest-first, with `next_cursor` and `done` |
+| `chat_event` | one live normalized event |
+| `subagent_events` | one sub-agent's full step history |
+| `replay_done` | the initial window has been delivered |
+| `queue` | the head's still-queued messages |
+| `pending_questions` | which question cards the provider is still blocked on |
+| `question_expired` | an answer was refused; its request had already been retired |
+| `shell_output` | a live chunk of a running composer `!command` |
+| `task_output` | the contents of a background task's output file |
+| `chat_error` | this head's event log could not be opened |
+| `status`, `diff_refresh` | the shared control events terminal heads also get |
+
+Client to server: `user_message`, `interrupt`, `set_model`, `control_response`,
+`shell_command`, `shell_stop`, `dequeue`, `load_events_before`, `load_subagent`,
+`task_output`. Binary frames and resize messages are ignored - there is no PTY.
+
+`chat_error` exists because the socket has no fallback. If `Flush`/`Watch` fails
+(an unknown head, a store that will not open) the connection renders nothing,
+and an empty transcript is indistinguishable from a head that never spoke - so
+the daemon logs at ERROR and the pane shows a banner instead.
+
+## The event log and the projection
+
+`internal/chat` owns both halves of the durable state.
+
+**The log** is an append-only JSONL file under the head's state directory, one
+event per line: `seq`, `source_id`, `type`, `timestamp`, `payload`. `seq` is
+per-head, monotonic, and the sole wire and cursor identity - provider object ids
+stay inside payloads. `AppendSource` deduplicates by `source_id`, so re-reading
+a transcript window or re-observing a line appends nothing new; that idempotence
+is what makes reconnect, recovery and multi-attach safe.
+
+**The projection** is bounded current state, versioned and checkpointed with the
+`seq` it was folded through:
+
+```json
+{
+  "version": 1,
+  "through": 1842,
+  "plan": [{ "id": "2", "status": "in_progress", "content": "Run tests" }],
+  "subagents": {
+    "agent-7": { "status": "running", "parent_item_id": "tool-4" }
+  },
+  "turn": { "id": "turn-9", "status": "running" },
+  "interaction": null,
+  "model": "gpt-5.4"
+}
+```
+
+It holds plan entries, the sub-agent graph, the active turn, any outstanding
+interaction, model, usage totals, queued messages and the observed Git head.
+Complete messages, tool output, reasoning and sub-agent transcripts stay in the
+paged log: a snapshot may reference their item ids but does not grow with the
+conversation. The checkpoint is replaced atomically (temp file plus rename) at
+plan changes, sub-agent lifecycle changes, interactive requests, turn
+completion/failure and clean shutdown, plus a small event/time threshold during
+long turns; token deltas do not trigger one. Restart loads the checkpoint and
+replays only `seq > through`. Reducers are idempotent, because a crash between
+appending an event and replacing the checkpoint legitimately replays the last
+event twice.
+
+The visible history window is never the source of truth for current state.
+
+## Ingestion
+
+The session registry ingests provider output whether or not a browser is
+attached: `Registry.SetOnChatLine` hands each complete line to
+`Manager.ObserveProviderLine`, which queues it to a per-head worker that
+normalizes and persists in arrival order. A WebSocket pump must not ingest the
+same stream again - token deltas have no stable provider id, so double
+observation duplicates live text and destabilizes bottom-follow rendering.
+
+Two sources sit outside stdout, and the chat pump polls them because current
+CLIs put neither on the main stream:
+
+- `subagents/*.jsonl` growth - a sub-agent's inner steps
+  (`ObserveClaudeSidechain`);
+- the main transcript's `<task-notification>` records - a background sub-agent's
+  completion, the only live signal that settles its card.
+
+Both go to the manager, not the socket, and come back out as ordinary
+normalized events.
+
+## The Claude driver
+
+`internal/chat/claude.go` maps stream-json to normalized events: `system:init`
+to `conversation_started`, assistant content blocks to `assistant_message` /
+`reasoning_completed` / `tool_started`, `tool_result` blocks to
+`tool_completed`, `result` to `turn_completed`/`turn_failed`, `control_request`
+to `interaction_requested`, partial `stream_event` lines to
+`assistant_delta`/`reasoning_delta` and `usage_updated`.
+
+Some lines produce nothing on purpose. The CLI's internal placeholders - the
+resume nudge and its synthetic reply, the note it logs when it downscales an
+image - are dropped by `claudestream.IsHiddenChatMessage` before normalization,
+in the one place both live and imported lines pass through. A live plain-text
+`user` line is also dropped: Hydra records a submitted message at the input
+boundary, so the provider's echo of it would be a duplicate.
+
+Hydra persists a submitted user message before handing it to the provider, and
+Claude can repeat it through `--replay-user-messages` with a different UUID.
+Ingestion pairs that echo with the pending Hydra event and persists a
+`user_message_echoed` reconciliation marker rather than a second visible
+message; the marker keeps repeated identical messages unambiguous after a
+restart.
+
+`Manager.Flush` performs a one-shot import before a client's first attach: the
+thinking-duration sidecar, then the newest transcript from
+`~/.claude/projects/<worktree-slug>/`, then each sub-agent sidecar for that
+session. It records a crash-safe byte watermark and deduplicates by source id,
+so a head that ran unwatched - or predates the event log - still backfills.
+
+Claude keeps its stream-json `set_model` control request, issued through the
+same registry operation Codex's model selection uses.
+
+## The Codex driver
+
+For a fresh head the controller launches `codex app-server --listen stdio://`
+with pipes inside the existing Hydra sandbox (the outer sandbox remains the
+enforcement boundary), sends `initialize` with a stable Hydra client identity
+then `initialized`, and calls `thread/start` with the worktree as `cwd`. The
+returned thread id is persisted on the agent row: two heads can share a project
+and Codex home, so `--last` is ambiguous and exact ids are part of head identity.
+The spawn prompt goes out as `turn/start`.
+
+Before starting or resuming a thread the controller calls `model/list` and
+resolves the account-specific `isDefault` entry to its canonical `model` id,
+which avoids inheriting a stale config alias the current account rejects. Older
+app-server versions without `model/list` fall back to the requested or
+configured behaviour rather than failing initialization. When no model was
+explicitly selected the selector reads `Default`: an omitted app-server model
+deliberately uses the user's own Codex configuration, and the thread lifecycle
+never echoes a concrete replacement id. A model change is held by the controller
+and applied to the next `turn/start`; an active turn is not mutated.
+
+Resume repeats initialization, calls `thread/resume` with the persisted thread
+id, reads back through `thread/read`, translates the returned items with the
+live normalizer, and only then drains a queued resumed turn.
+
+Interrupt calls `turn/interrupt` with the active thread and turn ids. Cancelled,
+canceled and interrupted statuses - including failed turns whose error
+identifies a cancellation - all normalize to a durable `turn_interrupted` event,
+which is also a turn boundary for queue draining and status. If app-server ends
+a delta-only assistant item without `item/completed`, the backend first settles
+the accumulated text as a partial `assistant_message`, so replay retains both
+what the user saw before Ctrl+C and the explicit interruption boundary.
+
+An ordinary follow-up sent during a turn is queued, not mapped to `turn/steer`:
+steering changes the active turn and is a distinct action, not the default
+meaning of typing while busy.
+
+## Attach and history paging
+
+On attach the daemon takes one consistent snapshot and watermark under the
+projection lock, then:
+
+1. sends `state_snapshot` with the projection and its `through`,
+2. sends the newest page of displayable events (`chat_history`),
+3. sends `replay_done`, then the queue snapshot,
+4. streams live events with `seq` above the watermark.
+
+Taking both under one lock removes the attach race where a plan or sub-agent
+changes between snapshotting and subscribing.
+
+`load_events_before` pages backwards with an opaque cursor (the sequence
+number), returning the preceding displayable events in order. One page mixes
+event kinds freely:
+
+```text
+assistant_message
+tool_started
+tool_completed
+commit_created
+assistant_message
+```
+
+The browser prepends a page as one ordered batch and deduplicates every event by
+`seq`, so the boundaries between the initial window, an older page and live
+delivery are safe. `done` means the log's beginning was reached.
+
+**Paging is display-only.** A historical `plan_updated`, `subagent_started` or
+`head_changed` in an older page renders its card where appropriate but never
+rewinds the current-state projection from `state_snapshot`. That separation is
+what lets a user scroll to the beginning of a long conversation while a live
+turn continues, without the plan or active sub-agent panel jumping backwards.
+
+A sub-agent's steps can sit entirely outside the loaded window, so opening its
+tab sends `load_subagent` and gets that sub-agent's full history back
+(`Store.SubagentEvents`) rather than requiring the main conversation to be paged
+back to where it ran.
+
+## Status, plans, tools and approvals
+
+Head status is driven from turn events, not hooks: `turn_started` to `running`,
+a completed turn to `finished` (or `waiting` after a user interrupt), a failed
+turn or top-level error to `errored`, and an outstanding server request to
+`needs_input`. The daemon persists the transition at the turn boundary; a
+connected chat also consumes the live events so the sidebar and Stop control
+settle immediately instead of waiting for the next project-status refresh.
+Replayed history cannot change current head status. Structured provider failures
+stay in the payload - the browser unwraps app-server's nested JSON errors and
+renders the provider type, HTTP status and human-readable message.
+
+Head lifecycle follows both `turn/started` and `item/started`; the latter is a
+bounded fallback for resumed or version-skewed streams where item activity
+becomes visible before the turn notification, keeping status running (and Stop
+available) while work is demonstrably still arriving.
+
+`plan_updated` is both a projection checkpoint and a plan-panel input. Codex
+`{step,status}` entries normalize to the shared `PlanEntry` shape. Claude's
+tracker emits a checkpoint after TaskCreate and TaskUpdate but renders no
+synthetic Update Plan card, because the original Task cards already carry the
+timeline; Codex keeps a visible Update Plan card because app-server emits no
+separate plan tool item.
+
+Command, file-change, MCP, web-search and other item variants map to generic
+tool cards, and an unknown item type keeps a compact fallback card so protocol
+additions do not break the chat.
+
+Codex runs with bypassed approvals because the process is already inside Hydra's
+sandbox, and app-server turns are configured equivalently. Server-request
+handling is still defensive: Hydra replies automatically only to the classes it
+already auto-allows and surfaces genuinely interactive elicitation as a
+normalized request card. App-server is never left blocked merely because no
+browser is attached.
+
+## Git commits as sequenced events
+
+Commit chips are durable normalized events, not a second data set merged into
+the transcript by timestamp - provider output, filesystem polling, HTTP fetches
+and author timestamps are independent clocks, so timestamps cannot guarantee a
+commit renders after the tool card that created it.
+
+The driver holds an observed Git HEAD for the worktree. At a completed command
+or other potentially mutating tool boundary it finalizes the `tool_completed`
+event, resolves HEAD, and if it moved enumerates the commits reachable from the
+new HEAD but not the old one, oldest first, appending one `commit_created` per
+commit before advancing the observed HEAD and emitting the diff refresh. Because
+both events share the per-head sequence, the commit always renders after the
+output that produced it. Each event carries SHA, short SHA, subject, author and
+committer time, and the causal tool item id when known; deduplication is by SHA.
+
+This is not tied to Bash. Commits can come from an MCP tool, a hook, a
+background process or a user shell, so the check runs after every item that can
+mutate the worktree and again at turn boundaries. The lightweight HEAD watcher
+remains as a fallback for changes outside those boundaries and calls the same
+reconciliation function; an externally detected commit has no causal tool id and
+is sequenced where it is observed.
+
+Non-fast-forward movement is handled explicitly: a fast-forward yields
+`commit_created` events, while a reset/rebase/checkout yields `head_changed`
+with old and new HEAD and makes the projection reconcile its visible commit set.
+Pretending every changed SHA was newly committed would leave stale or duplicate
+chips. The commits endpoint is still the source for the diff selector and the
+full branch inventory; it is not the source of chat chronology.
+
+## Queued messages
+
+A queued message lives only in the checkpointed queue projection and rides in
+`state_snapshot` with its stable client-generated id, enqueue sequence and
+content. It is deliberately absent from history - the provider has not received
+a turn yet. Dequeuing removes it from the projection and emits no conversation
+event.
+
+Draining the queue is one logical transition: append a durable `user_message`
+carrying the same client id, remove that id from the queue projection, advance
+the watermark, then deliver the provider turn. The browser reconciles its
+pending bubble into the settled message by client id rather than rendering a
+second one, and the message then pages normally with the rest of the log. On
+reconnect a message is therefore observed either in the queue snapshot or as a
+durable event (or, mid-delivery, as a marked sending entry) - never as neither
+and never as both. Loading an older page cannot disturb the queued-message tray.
+
+Delivery carries a small state (`queued`, `sending`, `accepted`) rather than
+treating the stdin write as infallible. Recovery retries only when the provider
+protocol honours an idempotency or client id; otherwise Hydra surfaces an
+uncertain delivery state instead of silently sending a possibly duplicated turn.
+
+## Presentation
+
+`AgentChat.tsx` consumes normalized events and converts each into the
+presentation shapes its card renderers already understand
+(`normalizedToProviderEvents`). Normal cards show semantic fields; the
+provider's own payload stays available under Raw, and blocks Hydra reconstructed
+rather than received are marked synthetic so Raw does not present them as
+protocol payloads the provider never sent.
+
+**Streaming.** The first delta opens the live block and the completed message
+closes and replaces it in the same render batch, so a preview cannot briefly
+disappear before the final Markdown is committed. Provider content-boundary
+notifications are state hints, not a second set of presentation events. A
+sub-agent's deltas are not routed into the main bubble - its completed blocks
+arrive through its own card.
+
+**Sub-agents.** `subagent_completed` is the single presentation event for a
+completion chip; Claude's task-notification normalizer emits it instead of also
+emitting a notice, and the browser deduplicates by `seq` across history and live
+catch-up. Codex Agent items use their spawning tool id as a temporary sub-agent
+identity, merged into the durable projection once app-server reports the child
+thread id, so live display, replay and completion notices all refer to one rich
+card. Because `spawnAgent` completion does not always carry the child thread id,
+the ingestion worker remembers pending spawn items and links the next unseen
+sidechain thread to the oldest pending spawn; the same correlation is rebuilt
+while processing `thread/read`. A sidechain transcript folds into its
+originating agent tool card instead of creating a second standalone card, and
+Claude's machine-readable continuation/usage trailer is stripped from the
+visible report.
+
+**Reasoning.** Reasoning text and reasoning duration are separate events. Some
+Claude models expose an empty reasoning block but still report a measured
+duration; replay pairs the two in either order and renders the duration-only
+block as `Thought for Xs`, so hidden reasoning stays visible without inventing
+thought content.
+
+**Rich items.** Codex `fileChange` items are classified as Write, Edit, Move or
+Delete cards and render each affected path as a syntax-highlighted unified diff.
+Web search starts with an unknown query because app-server supplies it on
+`item/completed`; the card is patched in place when that metadata arrives rather
+than exposing the temporary item id. A completed tool event can carry richer
+input than its earlier started event, and a sidechain report can be separated
+from its spawn by a page boundary, so the browser retains completed tool
+metadata by item id and enriches the matching start card - a remount or
+scroll-back renders the same search query, plan activity and sub-agent report as
+the original live session.
+
+**Shell output.** Command strings are decoded as shell-quoted arguments,
+including concatenated quote segments and nested `bash -lc`. An interactive
+launcher such as `bash -lc bash` may receive its real command through stdin;
+where app-server exposes that only as the first PTY echo, the UI promotes the
+echo to the command panel, labels it inferred terminal input, and renders the
+cleaned remaining transcript as output. CRLF is a newline; only a bare carriage
+return has overwrite semantics. Common ANSI SGR colours render; full terminal
+emulation is out of scope.
+
+## Simulation fixtures
+
+`/agent/agent-chat` and `/agent/agent-chat-codex` serve canned conversations
+over the same contract (`internal/http/simulation_chat.go`). The fixtures are
+written directly as normalized events, and each one names the rendering
+behaviour it guards, so the simulation is a fair test of the reducer rather than
+a happy path. The simulated socket also answers `load_events_before` and
+`load_subagent`, so pagination is exercised the way a real client uses it.
+
+`internal/http/simulation_chat_test.go` asserts the invariants that make the
+fixtures worth having: paging the canned log with the returned cursor visits
+every event exactly once in order, the initial window is the newest events, each
+sub-agent has steps to show when its tab opens, and the derived snapshot settles
+every sub-agent the log completed.
+
+## Design decisions
+
+- **One app-server process per chat head.** This matches Hydra's process and
+  session ownership and isolates lifecycle, cwd, environment, sandbox and
+  crashes. A shared daemon would complicate ownership and make one process a
+  blast radius for unrelated heads.
+- **Exact thread ids, persisted.** `resume --last` is unsafe in a multi-head
+  orchestrator.
+- **Normalize at the daemon boundary.** Rendering two raw provider protocols in
+  one React reducer would couple the UI to both CLI release trains.
+- **Queue-first semantics.** An ordinary follow-up is queued, not steered.
+- **A Hydra-owned event log rather than private provider transcripts.**
+  App-server exposes thread reading and listing APIs, but owning the log keeps
+  rendering stable across installed Codex versions and gives a home to events
+  that are UI state rather than conversation items.
