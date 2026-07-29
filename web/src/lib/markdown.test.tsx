@@ -41,11 +41,18 @@ describe('renderMarkdown', () => {
     expect(under.container.querySelector('strong > em')?.textContent).toBe('y')
   })
 
-  it('renders ~single~ and ~~double~~ tilde as strikethrough', () => {
-    const one = render(<span>{renderMarkdown('a ~b~ c')}</span>)
-    expect(one.container.querySelector('del')?.textContent).toBe('b')
+  it('renders ~~double~~ tilde as strikethrough', () => {
     const two = render(<span>{renderMarkdown('a ~~b~~ c')}</span>)
     expect(two.container.querySelector('del')?.textContent).toBe('b')
+  })
+
+  // A single `~` is a home path, not a delimiter. Two of them in one message -
+  // "~/.config" and "~/.cache", which is an ordinary sentence here - used to
+  // strike through everything in between.
+  it('leaves home paths alone rather than striking between them', () => {
+    const paths = render(<span>{renderMarkdown('CoW ~/.config and ~/.cache please')}</span>)
+    expect(paths.container.querySelector('del')).toBeNull()
+    expect(paths.container.textContent).toBe('CoW ~/.config and ~/.cache please')
   })
 
   it('bolds a heading line and drops the # marker', () => {
@@ -144,8 +151,12 @@ describe('renderMarkdownSource', () => {
   })
 
   it('shows real strikethrough and slants italic via the metric-safe slnt class', () => {
-    const strike = render(<span>{renderMarkdownSource('a ~b~ c')}</span>)
+    const strike = render(<span>{renderMarkdownSource('a ~~b~~ c')}</span>)
     expect(strike.container.querySelector('.line-through')?.textContent).toBe('b')
+    // The composer highlighter must agree with the renderer: a lone `~` is a
+    // path, so nothing between two of them is struck.
+    const paths = render(<span>{renderMarkdownSource('CoW ~/.config and ~/.cache')}</span>)
+    expect(paths.container.querySelector('.line-through')).toBeNull()
     // Italic slants through .md-src-italic (Roboto Flex slnt axis, advance-width
     // preserving), NOT a real cursive <em>/.italic that would drift the caret.
     const italic = render(<span>{renderMarkdownSource('a *b* c')}</span>)

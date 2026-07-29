@@ -90,13 +90,15 @@ const GOOGLE_CSS = 'google.css'
 
 const WEB_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = join(WEB_DIR, 'public', 'fonts')
-// Records what the files in OUT_DIR were built from. A build whose inputs match
-// skips the network entirely; anything else (version bump, edited subset, a
-// half-written file) rebuilds. Gitignored, like the fonts - and kept OUT of
-// public/, which vite copies wholesale into dist/ and web/embed.go then bakes
-// into the binary. A build receipt does not belong in a shipped artifact.
+// Records what the files in OUT_DIR were built from - all of it, not just
+// Iosevka: the Nerd Fonts symbols and the mirrored Google families too. A build
+// whose inputs match skips the network entirely; anything else (version bump,
+// edited subset, a half-written file) rebuilds. Gitignored, like the fonts - and
+// kept OUT of public/, which vite copies wholesale into dist/ and web/embed.go
+// then bakes into the binary. A build receipt does not belong in a shipped
+// artifact.
 
-const STAMP = join(WEB_DIR, '.iosevka-build.json')
+const STAMP = join(WEB_DIR, '.fonts-build.json')
 
 const FORCE = process.argv.includes('--force')
 

@@ -89,9 +89,15 @@ function codeSpanAt(rest: string): Extract<Seg, { kind: 'code' }> | null {
 
 // Inline patterns, tried in order at each position. The longer markers must
 // precede the shorter ones that prefix them so the longer marker wins: `***`/
-// `___` before `**`/`__` before `*`/`_`, and `~~` before `~`. Each pattern is
-// anchored to the current scan position and forbids newlines inside the span so
-// an unclosed marker doesn't swallow the rest of the text.
+// `___` before `**`/`__` before `*`/`_`. Each pattern is anchored to the current
+// scan position and forbids newlines inside the span so an unclosed marker
+// doesn't swallow the rest of the text.
+//
+// Strikethrough needs BOTH tildes, per the GFM spec. A single `~` is not a
+// delimiter here because `~` is how everyone writes a home path, and one message
+// mentioning two of them - "~/.config" and "~/.cache" - struck through
+// everything in between. That is not a rare shape in a tool whose subject is
+// files: it is most of them.
 const PATTERNS: { kind: InlineKind; re: RegExp }[] = [
   { kind: 'bolditalic', re: /^\*\*\*([^\n]+?)\*\*\*/ },
   { kind: 'bolditalic', re: /^___([^\n]+?)___/ },
@@ -100,7 +106,6 @@ const PATTERNS: { kind: InlineKind; re: RegExp }[] = [
   { kind: 'italic', re: /^\*([^\n]+?)\*/ },
   { kind: 'italic', re: /^_([^\n]+?)_/ },
   { kind: 'strike', re: /^~~([^\n]+?)~~/ },
-  { kind: 'strike', re: /^~([^\n]+?)~/ },
 ]
 
 // Heading: 1-6 `#` at the start of a line, at least one space/tab, then the rest

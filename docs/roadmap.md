@@ -71,17 +71,28 @@ before starting. Grouped by area.
   fresh worktree restores in 0.06s instead of rebuilding for 19s, and each head
   gets a fresh worktree. Under CoW that reverts to 19s per head.
 
-  So the shape is probably: **default-deny (CoW `~/.cache`), opt-in share** - one
-  narrow, Hydra-owned directory bound read-write and shared across heads, for
-  artifacts that are content-addressed and cheap to distrust. Today's default is
-  the inverse, share-everything. Open questions: where it lives (machine-wide
-  keeps version-pinned artifacts like the fonts shared across projects, which
-  `<project>/.hydra/local/` would not - and that directory is already Hydra's own
-  per-head scratch, 849 gate-policy/mcp-catalog files); whether consumers get a
-  `HYDRA_CACHE_DIR` contract rather than hardcoding a path; and which existing
-  `~/.cache` subdirectories genuinely need shared writes (`ms-playwright` is the
-  one that looks load-bearing - the e2e runner's `playwright install` is a no-op
-  only because the browser is already there).
+  So the shape is: **default-deny (CoW `~/.cache`), opt-in share** - one narrow
+  Hydra-owned directory bound read-write and shared across heads, for artifacts
+  that are content-addressed and cheap to distrust. Today's default is the
+  inverse, share-everything.
+
+  **Per-project, not machine-wide** (decided): encapsulation is the point of the
+  exercise, and a cache one project's agents can write is a cache another
+  project's agents should not read. The cost is real and accepted - version-pinned
+  artifacts like the webfonts are byte-identical everywhere, so each project pays
+  its own 19s build once instead of the machine paying it once. Somewhere like
+  `<project>/.hydra/local/agent-cache/`, kept clear of `.hydra/local/cache/`,
+  which is already Hydra's own per-head scratch (849 gate-policy/mcp-catalog
+  files) and not a user-facing cache.
+
+  Still open: whether consumers get a `HYDRA_CACHE_DIR` contract rather than
+  hardcoding a path (they should, so the location can move); and how to keep the
+  `~/.cache` subdirectories that genuinely need shared writes. `ms-playwright` is
+  the load-bearing one - the e2e runner's `playwright install` is a no-op only
+  because the browser is already there, and a per-head CoW would re-download
+  646MB. That argues for CoW taking a SUBSET rather than a whole directory:
+  a config that says which parts of `~/.cache` stay shared and which are
+  overlaid, instead of today's all-or-nothing entry.
 
   Needs testing on the host: bwrap will not nest, so a sandbox-policy change
   cannot be exercised from inside a head.
