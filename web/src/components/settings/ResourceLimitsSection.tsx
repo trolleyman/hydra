@@ -76,7 +76,8 @@ export function ResourceLimitsSection({
             onChange={(v) => set('io_weight', v)}
             tip={
               <>
-                <p>Relative block-IO share under contention (systemd IOWeight, 1-10000). Soft, like CPU weight; needs a weight-capable IO scheduler.</p>
+                <p>Relative block-IO share under contention (systemd IOWeight, 1-10000). Soft, like CPU weight.</p>
+                <p className="mt-1.5">This only does anything if the host uses the bfq scheduler or has blk-iocost configured. On a typical NVMe it has neither, so the value is accepted and then ignored - use "IO write max" below for a limit that always bites.</p>
                 <p className="mt-1.5">Leave empty for the built-in default (50).</p>
               </>
             }
@@ -104,6 +105,33 @@ export function ResourceLimitsSection({
               <>
                 <p>Hard memory ceiling in MB (systemd MemoryMax). The cgroup is OOM-killed if it exceeds this.</p>
                 <p className="mt-1.5">Leave empty for no cap. Opt-in - too low a ceiling can OOM-kill a workload mid-run. May be ignored if the memory controller is not delegated to the user systemd manager.</p>
+              </>
+            }
+          />
+          <Field
+            label="IO read max"
+            value={r.io_read_bandwidth_max}
+            placeholder="no cap"
+            suffix="MB/s"
+            onChange={(v) => set('io_read_bandwidth_max', v)}
+            tip={
+              <>
+                <p>Hard read ceiling for the device holding this project (systemd IOReadBandwidthMax, i.e. cgroup io.max).</p>
+                <p className="mt-1.5">Leave empty for no cap.</p>
+              </>
+            }
+          />
+          <Field
+            label="IO write max"
+            value={r.io_write_bandwidth_max}
+            placeholder="no cap"
+            suffix="MB/s"
+            onChange={(v) => set('io_write_bandwidth_max', v)}
+            tip={
+              <>
+                <p>Hard write ceiling for the device holding this project (systemd IOWriteBandwidthMax, i.e. cgroup io.max).</p>
+                <p className="mt-1.5">This is the one to reach for when a single busy head makes the whole machine unresponsive. Unlike IO weight it needs no particular IO scheduler, so it always takes effect - weights do nothing unless the host uses bfq or blk-iocost, which a typical NVMe does not.</p>
+                <p className="mt-1.5">Leave empty for no cap.</p>
               </>
             }
           />

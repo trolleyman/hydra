@@ -749,13 +749,25 @@ type ResourceLimits struct {
 	// TasksMax is a hard cap on processes/threads (systemd TasksMax); guards
 	// against fork bombs / PID exhaustion. nil / 0 = no cap.
 	TasksMax *int `toml:"tasks_max"`
+	// IOReadBandwidthMax / IOWriteBandwidthMax are hard throughput ceilings in
+	// MB/s (systemd IOReadBandwidthMax=/IOWriteBandwidthMax=, i.e. cgroup io.max),
+	// applied to the device backing the project root. nil / 0 = no cap.
+	//
+	// Reach for these rather than io_weight when a single head can still stall the
+	// machine: weights only work under BFQ or blk-iocost, and on a typical NVMe
+	// (`none` scheduler, iocost unconfigured) io_weight is accepted and does
+	// nothing. These are blk-throttle, which needs no host setup. The daemon logs
+	// a warning at startup when it detects that io_weight is inert.
+	IOReadBandwidthMax  *int `toml:"io_read_bandwidth_max"`
+	IOWriteBandwidthMax *int `toml:"io_write_bandwidth_max"`
 }
 
 // isEmpty reports whether no field is set at this layer (all pointers nil), so
 // the renderer emits the commented example instead of an empty [resources] table.
 func (r ResourceLimits) isEmpty() bool {
 	return r.CPUWeight == nil && r.IOWeight == nil && r.CPUQuota == nil &&
-		r.MemoryMax == nil && r.TasksMax == nil
+		r.MemoryMax == nil && r.TasksMax == nil &&
+		r.IOReadBandwidthMax == nil && r.IOWriteBandwidthMax == nil
 }
 
 // Merge merges another ResourceLimits into this one: per-field last-wins, so a
@@ -776,6 +788,12 @@ func (r *ResourceLimits) Merge(other ResourceLimits) {
 	}
 	if other.TasksMax != nil {
 		r.TasksMax = other.TasksMax
+	}
+	if other.IOReadBandwidthMax != nil {
+		r.IOReadBandwidthMax = other.IOReadBandwidthMax
+	}
+	if other.IOWriteBandwidthMax != nil {
+		r.IOWriteBandwidthMax = other.IOWriteBandwidthMax
 	}
 }
 
@@ -890,10 +908,17 @@ type Config struct {
 // unset hard caps stay 0 (no cap). This is the single seam the four call sites
 // (agent, preview, service, artifact) use, so limits never leak config into the
 // sandbox package.
-func (c Config) ResolveResourceLimits() sandbox.ScopeLimits {
+//
+// ioPath is the project root: the IO bandwidth caps are per-device, and systemd
+// resolves a plain path to the device backing it. It is a parameter rather than
+// a config field because it is never the user's to choose - passing it here is
+// what stops a call site configuring a cap that then silently has no device to
+// apply to.
+func (c Config) ResolveResourceLimits(ioPath string) sandbox.ScopeLimits {
 	limits := sandbox.ScopeLimits{
 		CPUWeight: sandbox.ScopeCPUWeight,
 		IOWeight:  sandbox.ScopeIOWeight,
+		IOPath:    ioPath,
 	}
 	r := c.Resources
 	if r == nil {
@@ -910,6 +935,12 @@ func (c Config) ResolveResourceLimits() sandbox.ScopeLimits {
 	}
 	if r.MemoryMax != nil {
 		limits.MemoryMax = *r.MemoryMax
+	}
+	if r.IOReadBandwidthMax != nil {
+		limits.IOReadBandwidthMax = *r.IOReadBandwidthMax
+	}
+	if r.IOWriteBandwidthMax != nil {
+		limits.IOWriteBandwidthMax = *r.IOWriteBandwidthMax
 	}
 	if r.TasksMax != nil {
 		limits.TasksMax = *r.TasksMax
@@ -3780,6 +3811,8 @@ func resourceFieldLines(r ResourceLimits) []string {
 	addInt("cpu_quota", r.CPUQuota)
 	addInt("memory_max", r.MemoryMax)
 	addInt("tasks_max", r.TasksMax)
+	addInt("io_read_bandwidth_max", r.IOReadBandwidthMax)
+	addInt("io_write_bandwidth_max", r.IOWriteBandwidthMax)
 	return out
 }
 
@@ -3791,15 +3824,23 @@ func resourcesExampleLines() []string {
 		docPrefix + " project (agent, preview, service, artifact) via its transient systemd scope, so",
 		docPrefix + " one runaway workload yields to the daemon and interactive work instead of",
 		docPrefix + " starving the box. Weights are soft (they only bite under contention); the hard",
-		docPrefix + " caps (cpu_quota/memory_max/tasks_max) apply even on an idle box and are opt-in.",
+		docPrefix + " caps apply even on an idle box and are opt-in.",
 		docPrefix + " A hard cap is silently skipped where its cgroup controller is not delegated to",
 		docPrefix + " the user systemd manager (cpu/io often are not).",
+		docPrefix + "",
+		docPrefix + " If a single head can still stall the whole machine, io_weight is probably",
+		docPrefix + " doing nothing: weights need the bfq scheduler or blk-iocost, and a typical",
+		docPrefix + " NVMe has neither, so the property is accepted and ignored. The bandwidth",
+		docPrefix + " caps below are blk-throttle instead, which always bites. The daemon logs a",
+		docPrefix + " warning at startup when it detects io_weight is inert.",
 		"# [resources]",
 		fmt.Sprintf("# cpu_weight = %d   # 1-10000, soft CPU share under contention (default %d; below the daemon's 100)", sandbox.ScopeCPUWeight, sandbox.ScopeCPUWeight),
 		fmt.Sprintf("# io_weight  = %d   # 1-10000, soft block-IO share under contention (default %d)", sandbox.ScopeIOWeight, sandbox.ScopeIOWeight),
 		"# cpu_quota  = 200  # hard CPU cap in percent of one core (200 = 2 cores); omit = no cap",
 		"# memory_max = 2048 # hard memory ceiling in MB (OOM-killed past it); omit = no cap",
 		"# tasks_max  = 512  # hard cap on processes/threads; omit = no cap",
+		"# io_read_bandwidth_max  = 200 # hard read ceiling in MB/s for this project's device; omit = no cap",
+		"# io_write_bandwidth_max = 100 # hard write ceiling in MB/s; the one that stops a head freezing the desktop",
 	}
 }
 

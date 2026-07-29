@@ -12,9 +12,17 @@ import (
 // regardless of what the host's user manager actually delegates.
 func withControllers(t *testing.T, cpu, io, memory, pids bool) {
 	t.Helper()
-	oc, oi, om, op := cpuOK, ioOK, memoryOK, pidsOK
-	cpuOK, ioOK, memoryOK, pidsOK = cpu, io, memory, pids
-	t.Cleanup(func() { cpuOK, ioOK, memoryOK, pidsOK = oc, oi, om, op })
+	withIOMax(t, cpu, io, io, memory, pids)
+}
+
+// withIOMax is withControllers with the per-device cap probe (ioMaxOK) set
+// independently of IOWeight's, which is the combination that matters: the caps
+// are the half that still works when weight-based control is inert.
+func withIOMax(t *testing.T, cpu, io, ioMax, memory, pids bool) {
+	t.Helper()
+	oc, oi, ox, om, op := cpuOK, ioOK, ioMaxOK, memoryOK, pidsOK
+	cpuOK, ioOK, ioMaxOK, memoryOK, pidsOK = cpu, io, ioMax, memory, pids
+	t.Cleanup(func() { cpuOK, ioOK, ioMaxOK, memoryOK, pidsOK = oc, oi, ox, om, op })
 }
 
 func TestAllProps(t *testing.T) {
@@ -57,5 +65,37 @@ func TestAllPropsDropsUndelegatedControllers(t *testing.T) {
 	want := []string{"--property=MemoryMax=2048M", "--property=TasksMax=512"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("allProps (cpu/io undelegated):\n got %v\nwant %v", got, want)
+	}
+}
+
+// The bandwidth caps are per-device, so they only emit with a path to resolve.
+func TestAllPropsIOBandwidthCaps(t *testing.T) {
+	withControllers(t, true, true, true, true)
+	limits := ScopeLimits{IOPath: "/srv/proj", IOReadBandwidthMax: 200, IOWriteBandwidthMax: 100}
+	got := allProps(limits)
+	want := []string{
+		"--property=IOReadBandwidthMax=/srv/proj 200M",
+		"--property=IOWriteBandwidthMax=/srv/proj 100M",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("bandwidth caps:\n got %v\nwant %v", got, want)
+	}
+
+	// No path: nothing to resolve to a device, so both caps are dropped rather
+	// than emitted against a guess.
+	if got := allProps(ScopeLimits{IOReadBandwidthMax: 200, IOWriteBandwidthMax: 100}); len(got) != 0 {
+		t.Errorf("caps without a path: want none, got %v", got)
+	}
+}
+
+// The whole point of the caps is that they survive where IOWeight does not, so
+// the two must not share a gate.
+func TestAllPropsCapsSurviveWithoutIOWeight(t *testing.T) {
+	limits := ScopeLimits{IOWeight: 40, IOPath: "/srv/proj", IOWriteBandwidthMax: 100}
+	withIOMax(t, false, false, true, false, false)
+	got := allProps(limits)
+	want := []string{"--property=IOWriteBandwidthMax=/srv/proj 100M"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("caps without IOWeight:\n got %v\nwant %v", got, want)
 	}
 }

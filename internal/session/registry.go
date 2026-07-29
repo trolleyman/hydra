@@ -33,7 +33,7 @@ type StartOptions struct {
 	Ephemeral bool
 	// Limits are the resolved cgroup limits applied to this session's transient
 	// systemd scope (see sandbox.WrapScope). The zero value emits no properties;
-	// callers pass config.ResolveResourceLimits() for the workload's project.
+	// callers pass config.ResolveResourceLimits(root) for the workload's project.
 	Limits sandbox.ScopeLimits
 }
 
