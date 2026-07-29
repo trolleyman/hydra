@@ -43,14 +43,23 @@ type ScopeLimits struct {
 }
 
 // ScopeUnit builds the transient scope unit name for a workload kind + id, e.g.
-// ScopeUnit("preview", "my-head") -> "hydra-preview-my-head.scope". Pass an empty
-// kind for the agent itself -> "hydra-my-head.scope".
+// ScopeUnit("preview", "my-head") -> "hydra-preview-my-head-2f3a1b9c.scope". Pass
+// an empty kind for the agent itself -> "hydra-my-head-2f3a1b9c.scope".
+//
+// The trailing ScopeHash is what makes the name injective. sanitizeUnit is lossy
+// (every character systemd disallows collapses to '_'), so distinct ids can
+// sanitize to the same name - `foo@shell` (a head's shell slot, see
+// heads.SlotSep) and a head explicitly named `foo_shell` both yield `foo_shell`.
+// That matters because a same-named unit is not merely confusing: WrapScope
+// calls StopScope(unit) first to clear a stale unit from a prior life, so one
+// workload starting would tear down the other's *live* cgroup. Hashing the
+// unsanitized id keeps the readable name and makes the collision impossible.
 func ScopeUnit(kind, id string) string {
 	name := scopeUnitPrefix
 	if kind != "" {
 		name += kind + "-"
 	}
-	return name + sanitizeUnit(id) + ".scope"
+	return name + sanitizeUnit(id) + "-" + ScopeHash(id) + ".scope"
 }
 
 // ScopeHash returns a short stable token for s, for use in a scope id that must

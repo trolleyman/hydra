@@ -114,6 +114,11 @@ interface ChatProps {
   // Clicking a commit chip: point the diff viewer at just that commit (and
   // reveal the diff pane). Absent -> chips render non-clickable.
   onSelectCommit?: (sha: string) => void
+  // This pane IS the head's review slot: a separate agent in its own detached
+  // checkout, reviewing the head's diff (docs/review-agent.md). It has its own
+  // socket, its own transcript and its own conversation - so a pane mounted with
+  // this set shares no chat state with the main one.
+  review?: boolean
 }
 
 interface NormalizedChatEvent {
@@ -4336,7 +4341,7 @@ function ChatViewSelector({
                 {rowBusy(r) && (
                   <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
                 )}
-                {r.key === 'main' && (
+                {isCurrent && (
                   <ChevronRight
                     className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
                   />
@@ -5831,7 +5836,7 @@ const SettledMessages = memo(
     a.subagents === b.subagents,
 )
 
-export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit }: ChatProps) {
+export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit, review }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
   // Wall-clock time per item id (epoch ms) - the message side of the
   // commit-chip interleave. Stamped by the reducers: replayed events carry the
@@ -7740,7 +7745,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     let activeNormalizedAssistantStream = ''
     let activeNormalizedReasoningStream = ''
 
-    const ws = new WebSocket(getWsUrl(agentId, projectId))
+    const ws = new WebSocket(getWsUrl(agentId, projectId, { review }))
     wsRef.current = ws
     let retryTimer: number | null = null
     let openedAt: number | null = null
@@ -8162,7 +8167,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       wsRef.current = null
       setConnected(false)
     }
-  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry])
+    // `review` picks the socket (and therefore the whole conversation), so it
+    // belongs here - though in practice the two panes are separate mounts.
+  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry, review])
 
   // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
   // labels, the live/done state and the final report. A NESTED sub-agent's

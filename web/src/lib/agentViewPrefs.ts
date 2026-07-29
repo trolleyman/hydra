@@ -27,6 +27,10 @@ export type AgentViewPrefs = {
   terminalHeight?: number
   collapsedFiles?: string[]
   bashTabs?: BashTabPref[]
+  // Whether the head's review tab is open. Not a list like bashTabs: there is
+  // exactly one review slot per head (the backend keys it `<head>@review`), so
+  // there is nothing per-tab to remember.
+  reviewTabOpen?: boolean
   activeTabId?: string
   // Tests-panel view modes (the two orthogonal cog checkboxes, both off by
   // default): group cases into per-status sections, and group the tree by
