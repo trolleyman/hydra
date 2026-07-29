@@ -28,14 +28,14 @@ import (
 //
 //	server -> client: the shared control events (status, diff_refresh), plus
 //	  {"type":"state_snapshot","state":<projection>} for the head's current
-//	  state, {"type":"chat_event","event":<normalized event>} per live event,
+//	  state, {"type":"chat_event","event":<chat event>} per live event,
 //	  {"type":"chat_history",...} for a paged window, and
 //	  {"type":"replay_done"} once the initial window has been relayed.
 //	client -> server: {"type":"user_message","content":[<content blocks>]} to
 //	  deliver a user turn, and {"type":"interrupt"} to cancel the in-flight
 //	  turn. Binary frames and resize messages are ignored (no PTY).
 //
-// Every chat frame carries provider-neutral normalized events (internal/chat).
+// Every chat frame carries provider-neutral chat events (internal/chat).
 // The raw per-provider stdout relay this started as is gone: chat mode is only
 // permitted for the providers internal/chat normalizes (see
 // sandbox.AgentArgv), and the daemon ingests their stdout itself
@@ -90,7 +90,7 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 	}
 	switch msg.Type {
 	case "load_events_before":
-		s.sendNormalizedHistory(conn, sessionID, msg.Cursor, msg.Limit)
+		s.sendChatHistory(conn, sessionID, msg.Cursor, msg.Limit)
 		return
 	case "load_subagent":
 		// The client opened a sub-agent's tab: send that sub-agent's full step
@@ -274,13 +274,13 @@ func shellCommandUserContent(res heads.ShellCommandResult) json.RawMessage {
 	return raw
 }
 
-func (s *Server) sendNormalizedHistory(conn *safeConn, agentID, cursor string, limit int) {
+func (s *Server) sendChatHistory(conn *safeConn, agentID, cursor string, limit int) {
 	if s.ChatEvents == nil {
 		return
 	}
 	events, next, done, err := s.ChatEvents.Before(agentID, cursor, limit)
 	if err != nil {
-		log.Printf("chat ws: normalized history for %q: %v", agentID, err)
+		log.Printf("chat ws: chat history for %q: %v", agentID, err)
 		return
 	}
 	writeFrame(conn, api.ChatHistoryFrame{
@@ -302,7 +302,7 @@ func (s *Server) sendSubagentEvents(conn *safeConn, agentID, subID string) {
 	})
 }
 
-func sendNormalizedEvent(conn *safeConn, event chat.Event) bool {
+func sendChatEvent(conn *safeConn, event chat.Event) bool {
 	data, err := json.Marshal(api.ChatEventFrame{Type: api.ChatEventFrameTypeChatEvent, Event: event})
 	if err != nil {
 		return true
@@ -466,33 +466,33 @@ func claudeProjectDir(worktree string) string {
 	return filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree))
 }
 
-// pumpChatOutput relays a chat session's normalized events to the socket until
+// pumpChatOutput relays a chat session's events to the socket until
 // the session exits or the socket dies: the current-state snapshot and the
 // newest history window first, then replay_done, then the queued-message
 // snapshot, then live events.
 //
 // The head's own stdout is NOT a source here. The daemon ingests it centrally
 // (Registry.SetOnChatLine -> Manager.ObserveProviderLine) whether or not a
-// browser is attached, so this pump only reads the durable normalized log the
+// browser is attached, so this pump only reads the durable event log the
 // manager writes. What it does still do is drive the two transcript tails: a
 // sub-agent's inner steps and a background sub-agent's completion notification
 // never reach stdout, so they are polled here and handed to the manager, which
-// normalizes them onto the same log and back out through `normalized` below.
+// normalizes them onto the same log and back out through `events` below.
 func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, agentID, worktree string) {
-	var normalized <-chan chat.Event
+	var events <-chan chat.Event
 	if s.ChatEvents == nil {
 		sendChatError(conn, agentID, "chat events unavailable", errors.New("no chat event manager"))
 	} else if err := s.ChatEvents.Flush(agentID); err != nil {
-		sendChatError(conn, agentID, "flush normalized events", err)
+		sendChatError(conn, agentID, "flush chat events", err)
 	} else if snapshot, live, cancel, err := s.ChatEvents.Watch(agentID); err != nil {
-		sendChatError(conn, agentID, "watch normalized events", err)
+		sendChatError(conn, agentID, "watch chat events", err)
 	} else {
 		defer cancel()
-		normalized = live
+		events = live
 		writeFrame(conn, api.ChatStateSnapshotFrame{Type: api.StateSnapshot, State: snapshot})
 		// The initial display window ends exactly at the snapshot watermark;
 		// live contains only events appended after it.
-		s.sendNormalizedHistory(conn, agentID, fmt.Sprintf("%d", snapshot.Through+1), 100)
+		s.sendChatHistory(conn, agentID, fmt.Sprintf("%d", snapshot.Through+1), 100)
 	}
 	dir := claudeProjectDir(worktree)
 	// Which of the questions just replayed is the CLI actually still blocked on.
@@ -536,12 +536,12 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 		select {
 		case <-att.Done:
 			return
-		case ev, ok := <-normalized:
+		case ev, ok := <-events:
 			if !ok {
-				normalized = nil
+				events = nil
 				continue
 			}
-			if !sendNormalizedEvent(conn, ev) {
+			if !sendChatEvent(conn, ev) {
 				return
 			}
 		case growth := <-subGrowth:

@@ -3881,7 +3881,7 @@ func (s *SimulationServer) GetDevToolsConfig(w http.ResponseWriter, r *http.Requ
 // can be exercised without a real file.
 const simChatImageB64 = "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"
 
-func sendSimNormalizedChatEvent(conn *safeConn, seq int64, eventType string, payload map[string]any) {
+func sendSimChatEvent(conn *safeConn, seq int64, eventType string, payload map[string]any) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return
@@ -3989,7 +3989,7 @@ func handleSimCodexChatWS(conn *safeConn) {
 		}}},
 	}
 	for i, event := range events {
-		sendSimNormalizedChatEvent(conn, int64(i+1), event.typ, event.p)
+		sendSimChatEvent(conn, int64(i+1), event.typ, event.p)
 	}
 	sendReplayDone(conn)
 	for {
@@ -4391,11 +4391,11 @@ func (s *SimulationServer) handleSimApprovalsWS(conn *safeConn) {
 			}
 			sendStatusUpdate(conn, "needs_input")
 		case "set_model":
-			sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "model_changed", map[string]any{"model": msg.Model})
+			sendSimChatEvent(conn, int64(nextSimChatSeq()), "model_changed", map[string]any{"model": msg.Model})
 		case "interrupt":
 			sendSimNorm(conn, simTurnInterrupted())
 		case "user_message":
-			sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
+			sendSimChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
 				"id": fmt.Sprintf("sim-approvals-user-%d", round), "content": msg.Content,
 			})
 			streamSimReply(conn, fmt.Sprintf("msg_approvals_reply_%d", round), "Simulated reply: pick a card from the question above and I'll raise it.")
@@ -4558,13 +4558,13 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 			s.askRunning.Store(false)
 			sendStatusUpdate(conn, "waiting")
 		case "set_model":
-			sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "model_changed", map[string]any{"model": msg.Model})
+			sendSimChatEvent(conn, int64(nextSimChatSeq()), "model_changed", map[string]any{"model": msg.Model})
 		case "interrupt":
 			sendSimNorm(conn, simTurnInterrupted())
 			sendSimNorm(conn, simTurnFailed())
 		case "user_message":
 			turn++
-			sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
+			sendSimChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
 				"id": fmt.Sprintf("sim-ask-user-%d", turn), "content": msg.Content,
 			})
 			streamSimReply(conn, fmt.Sprintf("msg_ask_reply_%d", turn), "Simulated reply: noted. The pending question card above stays answerable.")
@@ -4725,12 +4725,12 @@ func handleSimHistoryWS(conn *safeConn) {
 		switch msg.Type {
 		case "user_message":
 			turn++
-			sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
+			sendSimChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
 				"id": fmt.Sprintf("sim-history-live-%d", turn), "content": msg.Content,
 			})
 			streamSimReply(conn, fmt.Sprintf("msg_hist_reply_%d", turn), "Simulated reply: the sqlc port is done for every table above.")
 		case "set_model":
-			sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "model_changed", map[string]any{"model": msg.Model})
+			sendSimChatEvent(conn, int64(nextSimChatSeq()), "model_changed", map[string]any{"model": msg.Model})
 		}
 	}
 }

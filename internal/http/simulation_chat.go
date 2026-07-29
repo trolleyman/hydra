@@ -713,7 +713,7 @@ func nextSimChatSeq() int {
 
 // sendSimNorm relays one normalized event as a live chat_event frame.
 func sendSimNorm(conn *safeConn, ev simNorm) {
-	sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), ev.typ, ev.payload)
+	sendSimChatEvent(conn, int64(nextSimChatSeq()), ev.typ, ev.payload)
 }
 
 // --- Live streaming -----------------------------------------------------------
@@ -857,7 +857,7 @@ func handleSimChatWS(conn *safeConn) {
 	// event). A slash command answers with local output instead.
 	processTurn := func(content json.RawMessage) {
 		turn++
-		sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
+		sendSimChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
 			"id": fmt.Sprintf("sim-live-user-%d", turn), "content": content,
 		})
 		text := firstTextBlock(content)
@@ -913,7 +913,7 @@ func handleSimChatWS(conn *safeConn) {
 			// The daemon records the change as a model_changed event. The CLI's own
 			// "Set model to ..." echo is a plain user line, which normalization
 			// drops - the composer's optimistic confirmation is what the user sees.
-			sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "model_changed", map[string]any{"model": msg.Model})
+			sendSimChatEvent(conn, int64(nextSimChatSeq()), "model_changed", map[string]any{"model": msg.Model})
 		case "interrupt":
 			sendSimNorm(conn, simTurnInterrupted())
 			sendSimNorm(conn, simTurnFailed())
@@ -1064,7 +1064,7 @@ func simRunShellCommand(conn *safeConn, cmd, id string, stop <-chan struct{}) {
 	if stopped {
 		shell["stopped"] = true
 	}
-	sendSimNormalizedChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
+	sendSimChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
 		"id":      id,
 		"content": simTextContent("I ran a shell command from the chat.\n\nCommand:\n```\n" + cmd + "\n```"),
 		"shell":   shell,
