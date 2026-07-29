@@ -4,10 +4,12 @@ package usage
 
 import (
 	"context"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,32 +20,74 @@ import (
 
 const (
 	probeCols = 100
-	probeRows = 40
-	// probeIdle is how long the screen must be quiet (no new bytes) before we
-	// consider the TUI settled and capture it. The `/usage` screen never exits
-	// on its own, so this is what ends the probe in the common case.
-	probeIdle = 1500 * time.Millisecond
+	// probeIdle is how long the screen must be quiet (no new bytes) before we give
+	// up on it. The `/usage` screen never exits on its own, so this is the backstop
+	// that ends a probe whose quota block never appeared. It has to be generous -
+	// the CLI prints its banner, then goes quiet for a beat while it starts up and
+	// again while it fetches quota - and being generous is free, because the
+	// success path doesn't wait for it: the loop stops the moment both quota bars
+	// are readable (see the scan() call below).
+	probeIdle = 3 * time.Second
 	// probeMax bounds the whole probe regardless of CLI behaviour.
-	probeMax = 20 * time.Second
+	probeMax = 15 * time.Second
+	// probeKillGrace is how long after probeMax the watchdog waits before tearing
+	// the emulator and PTY down from underneath the read loop. It only fires if
+	// the loop is wedged somewhere it can't observe ctx (see startWatchdog).
+	probeKillGrace = 3 * time.Second
 	// renderThrottle caps how often we re-render the emulator grid to plain text
-	// and re-scan for prompts. The `/usage` TUI animates (spinners while quota
-	// loads), emitting many tiny chunks; rendering the full 100x40 grid on every
-	// chunk pegged a CPU core for the whole probe. Throttling bounds that work to
-	// a handful of renders per second without affecting idle detection (idle is
-	// reset on raw bytes, not on renders) or prompt latency.
-	renderThrottle = 150 * time.Millisecond
+	// and re-scan it. The `/usage` TUI animates while quota loads, emitting many
+	// tiny chunks; rendering the whole grid on every chunk pegged a CPU core for
+	// the length of the probe. Throttling bounds that to a handful of renders per
+	// second without affecting idle detection (idle is reset on raw bytes, not on
+	// renders) or prompt latency.
+	renderThrottle = 200 * time.Millisecond
+	// probeMaxBytes caps how much output we will feed the emulator. A CLI stuck in
+	// a repaint loop would otherwise spin us until probeMax burning CPU; past this
+	// much output the screen is either parseable already or never will be.
+	probeMaxBytes = 4 << 20
+	// maxPromptAnswers caps how many Enter keypresses the probe will send, so a
+	// screen that keeps matching a prompt fragment can't turn into a keystroke
+	// firehose into an interactive CLI.
+	maxPromptAnswers = 3
+)
+
+// probeVariant is one way of invoking the CLI. `--ax-screen-reader` renders the
+// TUI as flat text with no animation or box drawing: about a third of the bytes,
+// a fraction of the repaints, and far less to misparse. It is a recent flag, so
+// when the CLI rejects it we fall back to driving the ordinary TUI.
+type probeVariant struct {
+	name string
+	args []string
+	// rows is the emulator height. Screen-reader output is a linear transcript
+	// that scrolls, so it needs a grid tall enough to still hold the quota block
+	// at the end; the ordinary TUI paints one screenful in place, and giving it a
+	// huge terminal would only make it repaint more.
+	rows int
+}
+
+var (
+	screenReaderVariant = probeVariant{
+		name: "screen-reader",
+		args: []string{"--ax-screen-reader", "/usage", "--allowed-tools", ""},
+		rows: 200,
+	}
+	legacyTUIVariant = probeVariant{
+		name: "tui",
+		args: []string{"/usage", "--allowed-tools", ""},
+		rows: 50,
+	}
 )
 
 // promptResponses are TUI prompt fragments the probe answers with Enter, so a
-// trust/onboarding dialog doesn't block `/usage` from rendering. Matches the
-// fragments ClaudeBar handles.
+// trust/onboarding dialog doesn't block `/usage` from rendering. Kept deliberately
+// narrow: the `/usage` screen itself carries hints ("Esc to cancel") that earlier
+// versions of this list matched, and pressing Enter on the usage screen dismisses
+// the very thing we came to read.
 var promptResponses = []string{
-	"Esc to cancel",
+	"Do you trust",
+	"Yes, I trust this folder",
 	"Ready to code here?",
 	"Press Enter to continue",
-	"ctrl+t to disable",
-	"Yes, I trust this folder",
-	"Do you trust",
 }
 
 // HostEnv returns the daemon's environment with CLAUDE_CODE_OAUTH_TOKEN removed
@@ -75,25 +119,59 @@ func HostEnv() []string {
 func Probe(ctx context.Context, bin, workDir string, env []string) (Snapshot, error) {
 	path, err := exec.LookPath(bin)
 	if err != nil {
-		return Snapshot{CapturedAt: time.Now(), Error: "claude CLI not found in PATH"}, nil
+		return Snapshot{CapturedAt: time.Now(), Error: "claude CLI not found in PATH", Permanent: true}, nil
 	}
 
+	snap, screen, err := probeOnce(ctx, path, workDir, env, screenReaderVariant)
+	if err != nil {
+		return Snapshot{}, errtrace.Wrap(err)
+	}
+	// An older CLI rejects --ax-screen-reader outright (and exits in ~100ms, so
+	// this costs next to nothing). Retry on the ordinary TUI once.
+	if !snap.Available && strings.Contains(screen, "unknown option") {
+		log.Printf("usage: CLI rejected --ax-screen-reader; retrying on the plain TUI")
+		snap, _, err = probeOnce(ctx, path, workDir, env, legacyTUIVariant)
+		if err != nil {
+			return Snapshot{}, errtrace.Wrap(err)
+		}
+	}
+	return snap, nil
+}
+
+// probeOnce runs a single CLI invocation and returns the parsed snapshot along
+// with the rendered screen it was parsed from (the screen is what lets the caller
+// tell "this CLI doesn't know the flag" from "the quota block never appeared").
+func probeOnce(ctx context.Context, path, workDir string, env []string, v probeVariant) (Snapshot, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeMax)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, path, "/usage", "--allowed-tools", "")
+	cmd := exec.CommandContext(ctx, path, v.args...)
 	cmd.Env = env
 	cmd.Dir = workDir
+	// Wait must not outlive the probe: with the PTY closed there is nothing left
+	// to copy, but this makes it unconditional.
+	cmd.WaitDelay = time.Second
 
 	start := time.Now()
-	log.Printf("usage: probe start: bin=%q dir=%q (idle=%s, max=%s)", path, workDir, probeIdle, probeMax)
+	log.Printf("usage: probe start: bin=%q dir=%q variant=%s (idle=%s, max=%s)", path, workDir, v.name, probeIdle, probeMax)
 
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: probeRows, Cols: probeCols})
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(v.rows), Cols: probeCols}) //nolint:gosec // rows are small constants
 	if err != nil {
 		log.Printf("usage: probe failed to start PTY: %v", err)
-		return Snapshot{}, errtrace.Wrap(err)
+		return Snapshot{}, "", errtrace.Wrap(err)
 	}
+
+	em := vt.NewEmulator(probeCols, v.rows)
+
+	// done lets the helper goroutines exit promptly when the main loop stops
+	// consuming (idle/timeout/early exit), so neither can be stranded.
+	done := make(chan struct{})
+	var closeOnce sync.Once
+	stop := func() { closeOnce.Do(func() { close(done) }) }
+
 	defer func() {
+		stop()
+		closeReplies(em)
 		_ = ptmx.Close()
 		if cmd.Process != nil {
 			// Kill the whole process group, not just the direct child: `claude` is
@@ -108,12 +186,44 @@ func Probe(ctx context.Context, bin, workDir string, env []string) (Snapshot, er
 		_ = cmd.Wait()
 	}()
 
-	em := vt.NewEmulator(probeCols, probeRows)
+	// The CLI queries the terminal on startup (primary device attributes, cursor
+	// position, ...). The emulator answers those queries by writing into an
+	// unbuffered io.Pipe, so unless something reads that pipe the FIRST query
+	// wedges em.Write forever - which is exactly what used to hang this probe (and,
+	// through the cache mutex, every request behind it). Copy the replies back to
+	// the PTY, which is both the unblock and the correct terminal behaviour: the
+	// CLI is waiting for those answers.
+	go func() {
+		buf := make([]byte, 256)
+		for {
+			n, rerr := em.Read(buf)
+			if n > 0 {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				_, _ = ptmx.Write(buf[:n])
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
 
-	// done lets the reader goroutine exit promptly when the main loop stops
-	// consuming (idle/timeout), so a full channel can't strand it.
-	done := make(chan struct{})
-	defer close(done)
+	// Backstop: em.Write is not interruptible by ctx, so if it ever blocks again
+	// for a reason the reply drain doesn't cover, only tearing things down from
+	// outside can free it. Closing the reply channel is what does that - a query
+	// handler writing into a closed pipe fails instead of waiting for a reader.
+	watchdog := time.AfterFunc(probeMax+probeKillGrace, func() {
+		log.Printf("usage: probe watchdog fired after %s; tearing down", probeMax+probeKillGrace)
+		closeReplies(em)
+		_ = ptmx.Close()
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+	})
+	defer watchdog.Stop()
 
 	chunks := make(chan []byte, 16)
 	go func() {
@@ -137,6 +247,7 @@ func Probe(ctx context.Context, bin, workDir string, env []string) (Snapshot, er
 	}()
 
 	responded := make(map[string]bool)
+	answers := 0
 	idle := time.NewTimer(probeIdle)
 	defer idle.Stop()
 
@@ -145,25 +256,31 @@ func Probe(ctx context.Context, bin, workDir string, env []string) (Snapshot, er
 		renders    int
 		lastRender time.Time
 		reason     string
+		screen     string
+		snap       Snapshot
 	)
-	// render re-derives the screen text and answers any newly-visible prompts. It
-	// is throttled (see renderThrottle) unless force is set, so a chatty TUI can't
-	// drive an unbounded number of full-grid renders. force is used on the final
-	// render so the parse always sees the latest screen.
-	render := func(force bool) {
+	// scan re-derives the screen text, answers any newly-visible prompt, and
+	// reparses. It is throttled (see renderThrottle) unless force is set, so a
+	// chatty TUI can't drive an unbounded number of full-grid renders. It returns
+	// true once the screen holds a complete snapshot, which ends the probe without
+	// waiting out the idle timer.
+	scan := func(force bool) bool {
 		if !force && time.Since(lastRender) < renderThrottle {
-			return
+			return false
 		}
 		lastRender = time.Now()
 		renders++
-		screen := renderPlain(em)
+		screen = renderPlain(em, v.rows)
 		for _, p := range promptResponses {
-			if !responded[p] && strings.Contains(screen, p) {
+			if !responded[p] && answers < maxPromptAnswers && strings.Contains(screen, p) {
 				responded[p] = true
+				answers++
 				log.Printf("usage: probe answering prompt %q with Enter", p)
 				_, _ = ptmx.Write([]byte("\r"))
 			}
 		}
+		snap = Parse(screen, time.Now())
+		return snap.Complete()
 	}
 
 loop:
@@ -172,7 +289,8 @@ loop:
 		case c, ok := <-chunks:
 			if !ok {
 				reason = "cli-exited"
-				break loop // CLI exited
+				scan(true)
+				break loop
 			}
 			totalBytes += len(c)
 			_, _ = em.Write(c)
@@ -183,7 +301,7 @@ loop:
 				case c2, ok2 := <-chunks:
 					if !ok2 {
 						reason = "cli-exited"
-						render(true)
+						scan(true)
 						break loop
 					}
 					totalBytes += len(c2)
@@ -192,7 +310,15 @@ loop:
 					drained = false
 				}
 			}
-			render(false)
+			if scan(false) {
+				reason = "parsed"
+				break loop
+			}
+			if totalBytes > probeMaxBytes {
+				reason = "byte-cap"
+				scan(true)
+				break loop
+			}
 			if !idle.Stop() {
 				select {
 				case <-idle.C:
@@ -214,23 +340,46 @@ loop:
 		}
 	}
 
-	snap := Parse(renderPlain(em), time.Now())
-	log.Printf("usage: probe done: reason=%s dur=%s bytes=%d renders=%d available=%t error=%q",
-		reason, time.Since(start).Round(time.Millisecond), totalBytes, renders, snap.Available, snap.Error)
+	if reason != "parsed" {
+		// The loop may have exited before the throttle let a scan through.
+		scan(true)
+	}
+	snap.CapturedAt = time.Now()
+	log.Printf("usage: probe done: variant=%s reason=%s dur=%s bytes=%d renders=%d available=%t error=%q",
+		v.name, reason, time.Since(start).Round(time.Millisecond), totalBytes, renders, snap.Available, snap.Error)
 	if !snap.Available {
 		// The screen didn't parse into usable quota - log a compact preview so a
 		// future TUI restyle (or an auth/onboarding wall) is diagnosable from logs.
-		log.Printf("usage: probe screen preview (unparsed):\n%s", screenPreview(renderPlain(em)))
+		log.Printf("usage: probe screen preview (unparsed):\n%s", screenPreview(screen))
 	}
-	return snap, nil
+	return snap, screen, nil
+}
+
+// closeReplies shuts the emulator's reply channel: the io.Pipe its query
+// handlers write into. Closing it from the writer side ends the drain goroutine
+// (whose Read returns EOF) and makes any later reply write fail fast instead of
+// waiting for a reader that is no longer there.
+//
+// Deliberately NOT vt.Emulator.Close, which would do the same job: that flips an
+// unsynchronised `closed` field which the drain goroutine reads on every Read -
+// a data race the race detector rightly flags. An *io.PipeWriter is safe to
+// close from another goroutine, so we close that instead.
+func closeReplies(em *vt.Emulator) {
+	if pw, ok := em.InputPipe().(*io.PipeWriter); ok {
+		_ = pw.CloseWithError(io.EOF)
+		return
+	}
+	// The drain goroutine can only be woken by closing the pipe, so if vt ever
+	// stops handing one out, say so rather than leaking silently.
+	log.Printf("usage: vt.Emulator.InputPipe is no longer an *io.PipeWriter; the probe's reply drain will outlive it")
 }
 
 // screenPreview trims a rendered screen to its non-blank lines (capped) for
 // logging, so an unparsed `/usage` screen is diagnosable without dumping the
-// full 40-row grid of mostly-empty lines.
+// full grid of mostly-empty lines.
 func screenPreview(screen string) string {
 	var out []string
-	for _, line := range strings.Split(screen, "\n") {
+	for line := range strings.SplitSeq(screen, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
@@ -245,9 +394,9 @@ func screenPreview(screen string) string {
 
 // renderPlain reads the emulator's screen grid into plain text (one line per
 // row, trailing spaces trimmed), discarding styling and box glyphs' colour.
-func renderPlain(em *vt.Emulator) string {
+func renderPlain(em *vt.Emulator, rows int) string {
 	var b strings.Builder
-	for y := range probeRows {
+	for y := range rows {
 		var line strings.Builder
 		for x := range probeCols {
 			c := em.CellAt(x, y)
