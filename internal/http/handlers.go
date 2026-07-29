@@ -1904,6 +1904,13 @@ func (s *Server) GenerateAgentTitle(ctx context.Context, request api.GenerateAge
 			Error:   api.ErrorResponseErrorBadRequest,
 			Details: "this agent has no task prompt to summarise",
 		}, nil
+	case errors.Is(err, heads.ErrTitleTimeout):
+		log.Printf("api: generate title for %s: %v", request.Id, err)
+		return api.GenerateAgentTitle502JSONResponse{
+			Code:    502,
+			Error:   api.ErrorResponseErrorInternalError,
+			Details: "the title model took too long to answer - try again",
+		}, nil
 	case err != nil:
 		log.Printf("api: generate title for %s: %v", request.Id, err)
 		return api.GenerateAgentTitle502JSONResponse{
