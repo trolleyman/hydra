@@ -16,43 +16,27 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
 const ProjectionVersion = 1
 
-// Event is one durable item in a head's normalized chat timeline. Seq is its
-// monotonically increasing per-head cursor and stable wire identity. Payload is
-// type-specific but provider-neutral JSON.
-type Event struct {
-	Seq       uint64          `json:"seq"`
-	SourceID  string          `json:"source_id,omitempty"`
-	Type      string          `json:"type"`
-	Timestamp time.Time       `json:"timestamp"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
-}
+// The chat event log and projection are declared once, in api/openapi.yaml, and
+// generated for both Go and the browser (see docs/chat-mode.md). These aliases
+// give the package its own names for them, so a chat socket serializes exactly
+// what the schema describes and the two cannot drift.
+//
+// Event is one durable normalized event. Seq is the per-head, monotonically
+// increasing cursor and stable wire identity; Payload is type-specific but
+// provider-neutral JSON.
+type Event = api.ChatEvent
 
-type TurnState struct {
-	ID     string `json:"id,omitempty"`
-	Status string `json:"status,omitempty"`
-}
+type TurnState = api.ChatTurnState
 
-type SubagentState struct {
-	ID           string `json:"id"`
-	ParentID     string `json:"parent_id,omitempty"`
-	ParentItemID string `json:"parent_item_id,omitempty"`
-	AgentType    string `json:"agent_type,omitempty"`
-	Description  string `json:"description,omitempty"`
-	Prompt       string `json:"prompt,omitempty"`
-	Status       string `json:"status,omitempty"`
-	Activity     string `json:"activity,omitempty"`
-}
+type SubagentState = api.ChatSubagentState
 
-type QueuedState struct {
-	ID      string          `json:"id"`
-	Status  string          `json:"status"`
-	Content json.RawMessage `json:"content"`
-}
+type QueuedState = api.ChatQueuedState
 
 // StreamState is the block a response is in the middle of producing: the text
 // accumulated from every delta no completed message has settled yet. It is
@@ -60,35 +44,16 @@ type QueuedState struct {
 // it never bloats the persisted projection - its only job is to let a client
 // attaching mid-response render the whole partial block instead of just the
 // tail it happens to catch live.
-type StreamState struct {
-	Kind      string `json:"kind"` // "text" or "thinking"
-	MessageID string `json:"message_id,omitempty"`
-	Text      string `json:"text"`
-}
+type StreamState = api.ChatStreamState
+
+const (
+	StreamKindText     = api.Text
+	StreamKindThinking = api.Thinking
+)
 
 // Projection is bounded current operational state. Full messages and tool
 // output remain in the event log and are intentionally absent here.
-type Projection struct {
-	Version     int                      `json:"version"`
-	Through     uint64                   `json:"through"`
-	Plan        json.RawMessage          `json:"plan,omitempty"`
-	Subagents   map[string]SubagentState `json:"subagents,omitempty"`
-	Turn        *TurnState               `json:"turn,omitempty"`
-	Interaction json.RawMessage          `json:"interaction,omitempty"`
-	Model       string                   `json:"model,omitempty"`
-	// SlashCommands the CLI advertised on its system:init. Persisted so the
-	// composer's "/" autocomplete survives resume/re-attach - the list is only
-	// emitted on the live init line, never in the transcript, so an old head
-	// whose init has scrolled past the replay window would otherwise show none.
-	SlashCommands []string               `json:"slash_commands,omitempty"`
-	Usage         json.RawMessage        `json:"usage,omitempty"`
-	Queue         map[string]QueuedState `json:"queue,omitempty"`
-	Head          string                 `json:"head,omitempty"`
-	Imports       map[string]int64       `json:"imports,omitempty"`
-	// Read-only: filled on the copies Watch/Snapshot hand out, never applied or
-	// persisted (see StreamState).
-	Stream *StreamState `json:"stream,omitempty"`
-}
+type Projection = api.ChatProjection
 
 // Store serializes appends and projection updates for one head.
 type Store struct {
@@ -165,8 +130,8 @@ func (s *Store) load() error {
 			break
 		}
 		s.events = append(s.events, ev)
-		if ev.SourceID != "" {
-			s.sourceIDs[ev.SourceID] = ev.Seq
+		if ev.SourceId != "" {
+			s.sourceIDs[ev.SourceId] = ev.Seq
 		}
 		validBytes += i + 1
 		if ev.Seq > s.projection.Through {
@@ -227,7 +192,7 @@ func (s *Store) AppendSource(sourceID, eventType string, payload any) (ev Event,
 	if n := len(s.events); n > 0 && s.events[n-1].Seq >= seq {
 		seq = s.events[n-1].Seq + 1
 	}
-	ev = Event{Seq: seq, SourceID: sourceID, Type: eventType, Timestamp: s.now().UTC(), Payload: raw}
+	ev = Event{Seq: seq, SourceId: sourceID, Type: eventType, Timestamp: s.now().UTC(), Payload: raw}
 	line, err := json.Marshal(ev)
 	if err != nil {
 		return Event{}, false, errtrace.Wrap(err)
@@ -442,18 +407,18 @@ func (s *Store) pendingStream() *StreamState {
 	}
 	var pending *StreamState
 	for _, ev := range s.events[i:] {
-		kind := ""
+		var kind api.ChatStreamStateKind
 		switch ev.Type {
 		case "assistant_delta":
-			kind = "text"
+			kind = StreamKindText
 		case "reasoning_delta":
-			kind = "thinking"
+			kind = StreamKindThinking
 		default:
 			continue
 		}
 		var v struct {
 			Text      string `json:"text"`
-			MessageID string `json:"message_id"`
+			MessageId string `json:"message_id"`
 			Sidechain bool   `json:"sidechain"`
 		}
 		if json.Unmarshal(ev.Payload, &v) != nil || v.Sidechain {
@@ -461,8 +426,8 @@ func (s *Store) pendingStream() *StreamState {
 		}
 		// A kind switch inside the run (reasoning that ran straight into text
 		// without a completed message between) starts a fresh block.
-		if pending == nil || pending.Kind != kind || pending.MessageID != v.MessageID {
-			pending = &StreamState{Kind: kind, MessageID: v.MessageID}
+		if pending == nil || pending.Kind != kind || pending.MessageId != v.MessageId {
+			pending = &StreamState{Kind: kind, MessageId: v.MessageId}
 		}
 		pending.Text += v.Text
 	}
@@ -475,8 +440,8 @@ func (s *Store) pendingStream() *StreamState {
 type statePayload struct {
 	ID            string          `json:"id,omitempty"`
 	Status        string          `json:"status,omitempty"`
-	ParentID      string          `json:"parent_id,omitempty"`
-	ParentItemID  string          `json:"parent_item_id,omitempty"`
+	ParentId      string          `json:"parent_id,omitempty"`
+	ParentItemId  string          `json:"parent_item_id,omitempty"`
 	AgentType     string          `json:"agent_type,omitempty"`
 	Description   string          `json:"description,omitempty"`
 	Prompt        string          `json:"prompt,omitempty"`
@@ -502,12 +467,12 @@ func apply(p *Projection, ev Event) {
 	case "subagent_started", "subagent_updated", "subagent_completed":
 		cur := p.Subagents[v.ID]
 		terminal := cur.Status == "completed" || cur.Status == "failed" || cur.Status == "cancelled"
-		cur.ID = v.ID
-		if v.ParentID != "" {
-			cur.ParentID = v.ParentID
+		cur.Id = v.ID
+		if v.ParentId != "" {
+			cur.ParentId = v.ParentId
 		}
-		if v.ParentItemID != "" {
-			cur.ParentItemID = v.ParentItemID
+		if v.ParentItemId != "" {
+			cur.ParentItemId = v.ParentItemId
 		}
 		if v.AgentType != "" {
 			cur.AgentType = v.AgentType
@@ -530,7 +495,7 @@ func apply(p *Projection, ev Event) {
 		// result. Keep the more meaningful terminal state until the next turn
 		// starts instead of letting that implementation detail overwrite it.
 		if !(ev.Type == "turn_failed" && p.Turn != nil && p.Turn.Status == "interrupted") {
-			p.Turn = &TurnState{ID: v.ID, Status: v.Status}
+			p.Turn = &TurnState{Id: v.ID, Status: v.Status}
 		}
 	case "interaction_requested":
 		p.Interaction = cloneRaw(v.Interaction)
@@ -548,7 +513,7 @@ func apply(p *Projection, ev Event) {
 	case "usage_updated":
 		p.Usage = cloneRaw(v.Usage)
 	case "queued_message":
-		p.Queue[v.ID] = QueuedState{ID: v.ID, Status: v.Status, Content: cloneRaw(v.Content)}
+		p.Queue[v.ID] = QueuedState{Id: v.ID, Status: v.Status, Content: cloneRaw(v.Content)}
 	case "queue_message_removed", "user_message":
 		if v.ID != "" {
 			delete(p.Queue, v.ID)

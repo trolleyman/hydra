@@ -5179,21 +5179,23 @@ components:
     TerminalEvent:
       description: One server-to-client control event on a terminal-mode socket.
       oneOf:
-        - $ref: '#/components/schemas/TerminalStatusEvent'
+        - $ref: '#/components/schemas/HeadStatusEvent'
         - $ref: '#/components/schemas/TerminalDataEvent'
-        - $ref: '#/components/schemas/TerminalDiffRefreshEvent'
+        - $ref: '#/components/schemas/HeadDiffRefreshEvent'
         - $ref: '#/components/schemas/TerminalSizeEvent'
       discriminator:
         propertyName: type
         mapping:
-          status: '#/components/schemas/TerminalStatusEvent'
+          status: '#/components/schemas/HeadStatusEvent'
           data: '#/components/schemas/TerminalDataEvent'
-          diff_refresh: '#/components/schemas/TerminalDiffRefreshEvent'
+          diff_refresh: '#/components/schemas/HeadDiffRefreshEvent'
           size: '#/components/schemas/TerminalSizeEvent'
 
-    TerminalStatusEvent:
+    HeadStatusEvent:
       type: object
-      description: The head's computed status changed.
+      description: >-
+        The head's computed status changed. Sent on both sockets, so it belongs
+        to both unions rather than being modelled twice.
       required: [type, status]
       properties:
         type:
@@ -5214,9 +5216,11 @@ components:
           type: string
           description: Base64 encoded binary data or plain string
 
-    TerminalDiffRefreshEvent:
+    HeadDiffRefreshEvent:
       type: object
-      description: The worktree changed; the diff viewer should re-fetch.
+      description: >-
+        The worktree changed; the diff viewer should re-fetch. Sent on both
+        sockets, so it belongs to both unions rather than being modelled twice.
       required: [type, head_moved]
       properties:
         type:
@@ -5478,8 +5482,8 @@ components:
         One server-to-client frame on a chat-mode socket. Each member declares
         its own single value for `type`, so a client narrows on it directly.
       oneOf:
-        - $ref: '#/components/schemas/ChatStatusFrame'
-        - $ref: '#/components/schemas/ChatDiffRefreshFrame'
+        - $ref: '#/components/schemas/HeadStatusEvent'
+        - $ref: '#/components/schemas/HeadDiffRefreshEvent'
         - $ref: '#/components/schemas/ChatStateSnapshotFrame'
         - $ref: '#/components/schemas/ChatHistoryFrame'
         - $ref: '#/components/schemas/ChatEventFrame'
@@ -5494,8 +5498,8 @@ components:
       discriminator:
         propertyName: type
         mapping:
-          status: '#/components/schemas/ChatStatusFrame'
-          diff_refresh: '#/components/schemas/ChatDiffRefreshFrame'
+          status: '#/components/schemas/HeadStatusEvent'
+          diff_refresh: '#/components/schemas/HeadDiffRefreshEvent'
           state_snapshot: '#/components/schemas/ChatStateSnapshotFrame'
           chat_history: '#/components/schemas/ChatHistoryFrame'
           chat_event: '#/components/schemas/ChatEventFrame'
@@ -5507,28 +5511,6 @@ components:
           shell_output: '#/components/schemas/ChatShellOutputFrame'
           task_output: '#/components/schemas/ChatTaskOutputFrame'
           chat_error: '#/components/schemas/ChatErrorFrame'
-
-    ChatStatusFrame:
-      type: object
-      description: The head's computed status changed. Shares its shape with the terminal socket.
-      required: [type, status]
-      properties:
-        type:
-          type: string
-          enum: [status]
-        status:
-          $ref: '#/components/schemas/AgentStatus'
-
-    ChatDiffRefreshFrame:
-      type: object
-      description: The worktree changed; the diff viewer should re-fetch.
-      required: [type]
-      properties:
-        type:
-          type: string
-          enum: [diff_refresh]
-        head_moved:
-          type: boolean
 
     ChatStateSnapshotFrame:
       type: object

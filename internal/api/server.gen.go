@@ -73,11 +73,6 @@ const (
 	ChatClientMessageTypeUserMessage      ChatClientMessageType = "user_message"
 )
 
-// Defines values for ChatDiffRefreshFrameType.
-const (
-	ChatDiffRefreshFrameTypeDiffRefresh ChatDiffRefreshFrameType = "diff_refresh"
-)
-
 // Defines values for ChatErrorFrameType.
 const (
 	ChatError ChatErrorFrameType = "chat_error"
@@ -123,11 +118,6 @@ const (
 	StateSnapshot ChatStateSnapshotFrameType = "state_snapshot"
 )
 
-// Defines values for ChatStatusFrameType.
-const (
-	ChatStatusFrameTypeStatus ChatStatusFrameType = "status"
-)
-
 // Defines values for ChatStreamStateKind.
 const (
 	Text     ChatStreamStateKind = "text"
@@ -170,6 +160,16 @@ const (
 	ErrorResponseErrorNotFound      ErrorResponseError = "not_found"
 	ErrorResponseErrorPathNotFound  ErrorResponseError = "path_not_found"
 	ErrorResponseErrorUnauthorized  ErrorResponseError = "unauthorized"
+)
+
+// Defines values for HeadDiffRefreshEventType.
+const (
+	DiffRefresh HeadDiffRefreshEventType = "diff_refresh"
+)
+
+// Defines values for HeadStatusEventType.
+const (
+	Status HeadStatusEventType = "status"
 )
 
 // Defines values for MergeConflictErrorError.
@@ -225,19 +225,9 @@ const (
 	Data TerminalDataEventType = "data"
 )
 
-// Defines values for TerminalDiffRefreshEventType.
-const (
-	TerminalDiffRefreshEventTypeDiffRefresh TerminalDiffRefreshEventType = "diff_refresh"
-)
-
 // Defines values for TerminalSizeEventType.
 const (
 	Size TerminalSizeEventType = "size"
-)
-
-// Defines values for TerminalStatusEventType.
-const (
-	TerminalStatusEventTypeStatus TerminalStatusEventType = "status"
 )
 
 // Defines values for TestCaseStatus.
@@ -643,15 +633,6 @@ type ChatClientMessage struct {
 // ChatClientMessageType defines model for ChatClientMessage.Type.
 type ChatClientMessageType string
 
-// ChatDiffRefreshFrame The worktree changed; the diff viewer should re-fetch.
-type ChatDiffRefreshFrame struct {
-	HeadMoved *bool                    `json:"head_moved,omitempty"`
-	Type      ChatDiffRefreshFrameType `json:"type"`
-}
-
-// ChatDiffRefreshFrameType defines model for ChatDiffRefreshFrame.Type.
-type ChatDiffRefreshFrameType string
-
 // ChatErrorFrame This head's normalized event log could not be opened, so the connection will render nothing. There is no fallback to degrade to, and an empty transcript is indistinguishable from a head that never spoke.
 type ChatErrorFrame struct {
 	Error string             `json:"error"`
@@ -805,16 +786,6 @@ type ChatStateSnapshotFrame struct {
 
 // ChatStateSnapshotFrameType defines model for ChatStateSnapshotFrame.Type.
 type ChatStateSnapshotFrameType string
-
-// ChatStatusFrame The head's computed status changed. Shares its shape with the terminal socket.
-type ChatStatusFrame struct {
-	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
-	Status AgentStatus         `json:"status"`
-	Type   ChatStatusFrameType `json:"type"`
-}
-
-// ChatStatusFrameType defines model for ChatStatusFrame.Type.
-type ChatStatusFrameType string
 
 // ChatStreamState The block a response is in the middle of producing, accumulated from every delta no completed message has settled yet. Derived on read, so a client attaching mid-response renders the whole partial block rather than the tail it happens to catch live.
 type ChatStreamState struct {
@@ -1089,6 +1060,26 @@ type GeneratedTitleResponse struct {
 	// Title The generated title. Not persisted - the client offers it as a draft.
 	Title string `json:"title"`
 }
+
+// HeadDiffRefreshEvent The worktree changed; the diff viewer should re-fetch. Sent on both sockets, so it belongs to both unions rather than being modelled twice.
+type HeadDiffRefreshEvent struct {
+	// HeadMoved True when this refresh was triggered by a new commit (HEAD moved), as opposed to an uncommitted working-tree change. The diff viewer uses it to also re-snapshot per-commit artifacts (screenshots), which are memoized by commit SHA, while a plain working-tree change only re-fetches the diff text.
+	HeadMoved bool                     `json:"head_moved"`
+	Type      HeadDiffRefreshEventType `json:"type"`
+}
+
+// HeadDiffRefreshEventType defines model for HeadDiffRefreshEvent.Type.
+type HeadDiffRefreshEventType string
+
+// HeadStatusEvent The head's computed status changed. Sent on both sockets, so it belongs to both unions rather than being modelled twice.
+type HeadStatusEvent struct {
+	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
+	Status AgentStatus         `json:"status"`
+	Type   HeadStatusEventType `json:"type"`
+}
+
+// HeadStatusEventType defines model for HeadStatusEvent.Type.
+type HeadStatusEventType string
 
 // ListReviewsResponse The open PRs/MRs available to adopt, plus the forge auth state so the picker can show a "run gh/glab auth login" hint (docs/pr-adoption.md).
 type ListReviewsResponse struct {
@@ -1870,16 +1861,6 @@ type TerminalDataEvent struct {
 // TerminalDataEventType defines model for TerminalDataEvent.Type.
 type TerminalDataEventType string
 
-// TerminalDiffRefreshEvent The worktree changed; the diff viewer should re-fetch.
-type TerminalDiffRefreshEvent struct {
-	// HeadMoved True when this refresh was triggered by a new commit (HEAD moved), as opposed to an uncommitted working-tree change. The diff viewer uses it to also re-snapshot per-commit artifacts (screenshots), which are memoized by commit SHA, while a plain working-tree change only re-fetches the diff text.
-	HeadMoved bool                         `json:"head_moved"`
-	Type      TerminalDiffRefreshEventType `json:"type"`
-}
-
-// TerminalDiffRefreshEventType defines model for TerminalDiffRefreshEvent.Type.
-type TerminalDiffRefreshEventType string
-
 // TerminalEvent One server-to-client control event on a terminal-mode socket.
 type TerminalEvent struct {
 	union json.RawMessage
@@ -1894,16 +1875,6 @@ type TerminalSizeEvent struct {
 
 // TerminalSizeEventType defines model for TerminalSizeEvent.Type.
 type TerminalSizeEventType string
-
-// TerminalStatusEvent The head's computed status changed.
-type TerminalStatusEvent struct {
-	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
-	Status AgentStatus             `json:"status"`
-	Type   TerminalStatusEventType `json:"type"`
-}
-
-// TerminalStatusEventType defines model for TerminalStatusEvent.Type.
-type TerminalStatusEventType string
 
 // TestCase defines model for TestCase.
 type TestCase struct {
@@ -2375,23 +2346,23 @@ type SetProjectIconJSONRequestBody = SetProjectIconRequest
 // CommitRepositoryJSONRequestBody defines body for CommitRepository for application/json ContentType.
 type CommitRepositoryJSONRequestBody = CommitRepositoryRequest
 
-// AsChatStatusFrame returns the union data inside the ChatFrame as a ChatStatusFrame
-func (t ChatFrame) AsChatStatusFrame() (ChatStatusFrame, error) {
-	var body ChatStatusFrame
+// AsHeadStatusEvent returns the union data inside the ChatFrame as a HeadStatusEvent
+func (t ChatFrame) AsHeadStatusEvent() (HeadStatusEvent, error) {
+	var body HeadStatusEvent
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromChatStatusFrame overwrites any union data inside the ChatFrame as the provided ChatStatusFrame
-func (t *ChatFrame) FromChatStatusFrame(v ChatStatusFrame) error {
+// FromHeadStatusEvent overwrites any union data inside the ChatFrame as the provided HeadStatusEvent
+func (t *ChatFrame) FromHeadStatusEvent(v HeadStatusEvent) error {
 	v.Type = "status"
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergeChatStatusFrame performs a merge with any union data inside the ChatFrame, using the provided ChatStatusFrame
-func (t *ChatFrame) MergeChatStatusFrame(v ChatStatusFrame) error {
+// MergeHeadStatusEvent performs a merge with any union data inside the ChatFrame, using the provided HeadStatusEvent
+func (t *ChatFrame) MergeHeadStatusEvent(v HeadStatusEvent) error {
 	v.Type = "status"
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -2403,23 +2374,23 @@ func (t *ChatFrame) MergeChatStatusFrame(v ChatStatusFrame) error {
 	return err
 }
 
-// AsChatDiffRefreshFrame returns the union data inside the ChatFrame as a ChatDiffRefreshFrame
-func (t ChatFrame) AsChatDiffRefreshFrame() (ChatDiffRefreshFrame, error) {
-	var body ChatDiffRefreshFrame
+// AsHeadDiffRefreshEvent returns the union data inside the ChatFrame as a HeadDiffRefreshEvent
+func (t ChatFrame) AsHeadDiffRefreshEvent() (HeadDiffRefreshEvent, error) {
+	var body HeadDiffRefreshEvent
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromChatDiffRefreshFrame overwrites any union data inside the ChatFrame as the provided ChatDiffRefreshFrame
-func (t *ChatFrame) FromChatDiffRefreshFrame(v ChatDiffRefreshFrame) error {
+// FromHeadDiffRefreshEvent overwrites any union data inside the ChatFrame as the provided HeadDiffRefreshEvent
+func (t *ChatFrame) FromHeadDiffRefreshEvent(v HeadDiffRefreshEvent) error {
 	v.Type = "diff_refresh"
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergeChatDiffRefreshFrame performs a merge with any union data inside the ChatFrame, using the provided ChatDiffRefreshFrame
-func (t *ChatFrame) MergeChatDiffRefreshFrame(v ChatDiffRefreshFrame) error {
+// MergeHeadDiffRefreshEvent performs a merge with any union data inside the ChatFrame, using the provided HeadDiffRefreshEvent
+func (t *ChatFrame) MergeHeadDiffRefreshEvent(v HeadDiffRefreshEvent) error {
 	v.Type = "diff_refresh"
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -2760,7 +2731,7 @@ func (t ChatFrame) ValueByDiscriminator() (interface{}, error) {
 	case "chat_history":
 		return t.AsChatHistoryFrame()
 	case "diff_refresh":
-		return t.AsChatDiffRefreshFrame()
+		return t.AsHeadDiffRefreshEvent()
 	case "pending_questions":
 		return t.AsChatPendingQuestionsFrame()
 	case "question_expired":
@@ -2774,7 +2745,7 @@ func (t ChatFrame) ValueByDiscriminator() (interface{}, error) {
 	case "state_snapshot":
 		return t.AsChatStateSnapshotFrame()
 	case "status":
-		return t.AsChatStatusFrame()
+		return t.AsHeadStatusEvent()
 	case "subagent_events":
 		return t.AsChatSubagentEventsFrame()
 	case "task_output":
@@ -2794,23 +2765,23 @@ func (t *ChatFrame) UnmarshalJSON(b []byte) error {
 	return err
 }
 
-// AsTerminalStatusEvent returns the union data inside the TerminalEvent as a TerminalStatusEvent
-func (t TerminalEvent) AsTerminalStatusEvent() (TerminalStatusEvent, error) {
-	var body TerminalStatusEvent
+// AsHeadStatusEvent returns the union data inside the TerminalEvent as a HeadStatusEvent
+func (t TerminalEvent) AsHeadStatusEvent() (HeadStatusEvent, error) {
+	var body HeadStatusEvent
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromTerminalStatusEvent overwrites any union data inside the TerminalEvent as the provided TerminalStatusEvent
-func (t *TerminalEvent) FromTerminalStatusEvent(v TerminalStatusEvent) error {
+// FromHeadStatusEvent overwrites any union data inside the TerminalEvent as the provided HeadStatusEvent
+func (t *TerminalEvent) FromHeadStatusEvent(v HeadStatusEvent) error {
 	v.Type = "status"
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergeTerminalStatusEvent performs a merge with any union data inside the TerminalEvent, using the provided TerminalStatusEvent
-func (t *TerminalEvent) MergeTerminalStatusEvent(v TerminalStatusEvent) error {
+// MergeHeadStatusEvent performs a merge with any union data inside the TerminalEvent, using the provided HeadStatusEvent
+func (t *TerminalEvent) MergeHeadStatusEvent(v HeadStatusEvent) error {
 	v.Type = "status"
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -2850,23 +2821,23 @@ func (t *TerminalEvent) MergeTerminalDataEvent(v TerminalDataEvent) error {
 	return err
 }
 
-// AsTerminalDiffRefreshEvent returns the union data inside the TerminalEvent as a TerminalDiffRefreshEvent
-func (t TerminalEvent) AsTerminalDiffRefreshEvent() (TerminalDiffRefreshEvent, error) {
-	var body TerminalDiffRefreshEvent
+// AsHeadDiffRefreshEvent returns the union data inside the TerminalEvent as a HeadDiffRefreshEvent
+func (t TerminalEvent) AsHeadDiffRefreshEvent() (HeadDiffRefreshEvent, error) {
+	var body HeadDiffRefreshEvent
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromTerminalDiffRefreshEvent overwrites any union data inside the TerminalEvent as the provided TerminalDiffRefreshEvent
-func (t *TerminalEvent) FromTerminalDiffRefreshEvent(v TerminalDiffRefreshEvent) error {
+// FromHeadDiffRefreshEvent overwrites any union data inside the TerminalEvent as the provided HeadDiffRefreshEvent
+func (t *TerminalEvent) FromHeadDiffRefreshEvent(v HeadDiffRefreshEvent) error {
 	v.Type = "diff_refresh"
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergeTerminalDiffRefreshEvent performs a merge with any union data inside the TerminalEvent, using the provided TerminalDiffRefreshEvent
-func (t *TerminalEvent) MergeTerminalDiffRefreshEvent(v TerminalDiffRefreshEvent) error {
+// MergeHeadDiffRefreshEvent performs a merge with any union data inside the TerminalEvent, using the provided HeadDiffRefreshEvent
+func (t *TerminalEvent) MergeHeadDiffRefreshEvent(v HeadDiffRefreshEvent) error {
 	v.Type = "diff_refresh"
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -2923,11 +2894,11 @@ func (t TerminalEvent) ValueByDiscriminator() (interface{}, error) {
 	case "data":
 		return t.AsTerminalDataEvent()
 	case "diff_refresh":
-		return t.AsTerminalDiffRefreshEvent()
+		return t.AsHeadDiffRefreshEvent()
 	case "size":
 		return t.AsTerminalSizeEvent()
 	case "status":
-		return t.AsTerminalStatusEvent()
+		return t.AsHeadStatusEvent()
 	default:
 		return nil, errors.New("unknown discriminator value: " + discriminator)
 	}

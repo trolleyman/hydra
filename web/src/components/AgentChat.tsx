@@ -37,7 +37,7 @@ import {
   X,
 } from 'lucide-react'
 import { SiGit } from '@icons-pack/react-simple-icons'
-import { AgentStatus } from '../api'
+import { AgentStatus, type ChatEvent, type ChatFrame } from '../api'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
@@ -115,23 +115,12 @@ interface ChatProps {
   onSelectCommit?: (sha: string) => void
 }
 
-interface NormalizedChatEvent {
-  seq: number
-  source_id?: string
-  type: string
-  timestamp: string
-  payload?: Record<string, unknown>
-}
-
-interface ChatProjectionSnapshot {
-  plan?: unknown
-  slash_commands?: string[]
-  turn?: { id?: string; status?: string }
-  // The block being produced right now, accumulated from the deltas that landed
-  // before this client attached (see seedStream).
-  stream?: { kind?: string; message_id?: string; text?: string }
-  subagents?: Record<string, { id?: string; parent_id?: string; parent_item_id?: string; agent_type?: string; description?: string; prompt?: string; status?: string; activity?: string }>
-}
+// The socket's events and frames are declared in api/openapi.yaml and generated
+// for both the daemon and this component (see docs/chat-mode.md), so what the
+// daemon writes and what this switch narrows on cannot drift. Payloads stay
+// deliberately open: their shape varies per event type, and the provider's own
+// recorded entry rides there for the Raw panel.
+type NormalizedChatEvent = ChatEvent
 
 // Omit that distributes over a union (plain Omit collapses ChatItem to its
 // common properties, losing each variant's own fields).
@@ -7706,27 +7695,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
     ws.onmessage = (e: MessageEvent) => {
       if (typeof e.data !== 'string') return
-      let msg: {
-        type?: string
-        status?: string
-        head_moved?: boolean
-        event?: ProviderEvent
-        messages?: { id?: string; content?: unknown }[]
-        events?: ProviderEvent[]
-        done?: boolean
-        file?: string
-        content?: string
-        error?: string
-        state?: ChatProjectionSnapshot
-        next_cursor?: string
-        normalizedEvents?: NormalizedChatEvent[]
-        id?: string
-        chunk?: string
-        // pending_questions / question_expired: the daemon's word on which
-        // AskUserQuestion requests the CLI is still blocked on (see below).
-        requests?: { requestId?: string; toolUseId?: string }[]
-        requestId?: string
-      }
+      let msg: ChatFrame
       try {
         msg = JSON.parse(e.data)
       } catch {
@@ -7734,10 +7703,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }
       switch (msg.type) {
         case 'status':
-          if (msg.status) onStatusUpdateRef.current?.(msg.status.toLowerCase())
+          onStatusUpdateRef.current?.(msg.status.toLowerCase())
           return
         case 'diff_refresh':
-          onDiffRefreshRef.current?.(msg.head_moved ?? false)
+          onDiffRefreshRef.current?.(msg.head_moved)
           // The commit chips need no refresh here: a landed commit arrives as a
           // durable commit_created event (see recordNormalizedCommit).
           return
@@ -7745,7 +7714,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // The daemon could not open this head's normalized event log, so this
           // connection will render nothing. Say so - a silently empty chat is
           // indistinguishable from a head that never said anything.
-          setChatError(typeof msg.error === 'string' && msg.error ? msg.error : 'Could not load this conversation')
+          setChatError(msg.error || 'Could not load this conversation')
           return
         case 'shell_output': {
           // A live chunk of a running "!command"'s output: append it to the
@@ -7888,7 +7857,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           return
         }
         case 'chat_history': {
-          const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
+          const normalized = msg.events
             .filter(firstNormalizedDelivery)
             .filter(keepNormalizedUserEvent)
           oldestEventCursorRef.current = msg.next_cursor ?? null
@@ -7959,7 +7928,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // through the live handler into the sub-agent's card. Deduped by seq,
           // so overlap with the already-loaded window (or a later scroll) is a
           // no-op.
-          const normalized = (msg.normalizedEvents ?? (msg.events as unknown as NormalizedChatEvent[]) ?? [])
+          const normalized = msg.events
             .filter(firstNormalizedDelivery)
             .filter(keepNormalizedUserEvent)
           for (const rawEvent of normalized) rememberNormalizedToolMetadata(rawEvent)
@@ -7980,9 +7949,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         }
         case 'task_output': {
           // Answer to a task_output request: hand it to the waiting chip.
-          const waiter = taskOutputWaitersRef.current.get(msg.file ?? '')
+          const waiter = taskOutputWaitersRef.current.get(msg.file)
           if (waiter) {
-            taskOutputWaitersRef.current.delete(msg.file ?? '')
+            taskOutputWaitersRef.current.delete(msg.file)
             waiter({ content: msg.content, error: msg.error })
           }
           return
@@ -7993,7 +7962,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // definite "none" (every replayed question card is dead); the frame
           // not arriving at all leaves the fallback in place.
           livePendingQuestions = new Set(
-            (msg.requests ?? []).map((r) => r.requestId).filter((id): id is string => !!id),
+            msg.requests.map((r) => r.requestId),
           )
           return
         case 'question_expired':
@@ -8091,7 +8060,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // bubbles: keep in-flight "sending" ones and any queued bubble the
           // server still has, and add server-queued messages we're missing (the
           // reload-after-navigate case, where local state was reset).
-          reconcileQueue(msg.messages ?? [])
+          reconcileQueue(msg.messages)
           return
       }
     }

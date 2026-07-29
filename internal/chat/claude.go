@@ -31,7 +31,7 @@ type claudeEnvelope struct {
 	ParentToolUseID string   `json:"parent_tool_use_id,omitempty"`
 	Content         string   `json:"content,omitempty"`
 	DurationMS      int64    `json:"duration_ms,omitempty"`
-	MessageID       string   `json:"message_id,omitempty"`
+	MessageId       string   `json:"message_id,omitempty"`
 	TotalCostUSD    float64  `json:"total_cost_usd,omitempty"`
 	Message         struct {
 		ID         string          `json:"id,omitempty"`
@@ -185,7 +185,7 @@ func normalizeClaude(line []byte) []eventSpec {
 	case "stream_event":
 		return normalizeClaudeStream(ev.Event)
 	case "hydra_thinking":
-		return []eventSpec{{sourceID: "claude:thinking:" + ev.MessageID, eventType: "reasoning_duration", payload: map[string]any{"message_id": ev.MessageID, "duration_ms": ev.DurationMS}}}
+		return []eventSpec{{sourceID: "claude:thinking:" + ev.MessageId, eventType: "reasoning_duration", payload: map[string]any{"message_id": ev.MessageId, "duration_ms": ev.DurationMS}}}
 	}
 	if ev.Content != "" {
 		if spec := claudeAgentCompletionSpec(ev.Content); spec != nil {

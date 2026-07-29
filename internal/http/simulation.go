@@ -3882,13 +3882,13 @@ func (s *SimulationServer) GetDevToolsConfig(w http.ResponseWriter, r *http.Requ
 const simChatImageB64 = "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"
 
 func sendSimNormalizedChatEvent(conn *safeConn, seq int64, eventType string, payload map[string]any) {
-	event := map[string]any{
-		"seq": seq, "type": eventType,
-		"timestamp": simNow().Add(time.Duration(seq) * time.Millisecond).Format(time.RFC3339Nano),
-		"payload":   payload,
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return
 	}
-	frame, _ := json.Marshal(map[string]any{"type": "chat_event", "event": event})
-	_ = conn.WriteMessage(websocket.TextMessage, frame)
+	writeFrame(conn, api.ChatEventFrame{Type: api.ChatEventFrameTypeChatEvent, Event: api.ChatEvent{
+		Seq: uint64(seq), Type: eventType, Timestamp: simNow().Add(time.Duration(seq) * time.Millisecond), Payload: raw,
+	}})
 }
 
 // handleSimCodexChatWS replays deliberately provider-neutral Codex shapes. Its
@@ -3909,11 +3909,13 @@ func handleSimCodexChatWS(conn *safeConn) {
 	// snapshot; the live stream below only carries this block's remaining
 	// deltas. The seeded prefix must render immediately and the continuation
 	// must land in the SAME bubble, settling to one message.
-	state, _ := json.Marshal(map[string]any{"type": "state_snapshot", "state": map[string]any{
-		"subagents": map[string]any{},
-		"stream":    map[string]any{"kind": "text", "message_id": "sim-codex-seed", "text": "This reply began before you attached"},
+	writeFrame(conn, api.ChatStateSnapshotFrame{Type: api.StateSnapshot, State: api.ChatProjection{
+		Version:   1,
+		Subagents: map[string]api.ChatSubagentState{},
+		Stream: &api.ChatStreamState{
+			Kind: api.Text, MessageId: "sim-codex-seed", Text: "This reply began before you attached",
+		},
 	}})
-	_ = conn.WriteMessage(websocket.TextMessage, state)
 	events := []struct {
 		typ string
 		p   map[string]any
@@ -3989,28 +3991,12 @@ func handleSimCodexChatWS(conn *safeConn) {
 	for i, event := range events {
 		sendSimNormalizedChatEvent(conn, int64(i+1), event.typ, event.p)
 	}
-	sendTerminalEvent(conn, "replay_done")
+	sendReplayDone(conn)
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			return
 		}
 	}
-}
-
-// simChatClientMsg mirrors the chat client -> server frame shapes the
-// simulated chat sockets understand (see chat_ws.go chatClientMsg).
-type simChatClientMsg struct {
-	Type     string          `json:"type"`
-	ID       string          `json:"id"`
-	Queued   bool            `json:"queued"`
-	Cursor   string          `json:"cursor"`
-	Limit    int             `json:"limit"`
-	SubID    string          `json:"sub_id"`
-	Content  json.RawMessage `json:"content"`
-	Model    string          `json:"model"`
-	Response json.RawMessage `json:"response"`
-	File     string          `json:"file"`
-	Command  string          `json:"command"`
 }
 
 // simQueuedMsg is one held message in the sim's stand-in chat queue.
@@ -4062,22 +4048,27 @@ func simQueuePopAll(id string) []simQueuedMsg {
 // sendSimQueueFrame relays the session's current queue snapshot (the frame the
 // daemon sends after replay_done and on reconnect).
 func sendSimQueueFrame(conn *safeConn, id string) {
-	frame, _ := json.Marshal(map[string]any{"type": "queue", "messages": simQueueList(id)})
-	_ = conn.WriteMessage(websocket.TextMessage, frame)
+	// Built through the generated frame type, so the simulation cannot send a
+	// shape the schema forbids - an empty queue is [], never null.
+	msgs := make([]api.ChatQueuedMessage, 0, len(simQueueList(id)))
+	for _, m := range simQueueList(id) {
+		msgs = append(msgs, api.ChatQueuedMessage{Id: m.ID, Content: m.Content})
+	}
+	writeFrame(conn, api.ChatQueueFrame{Type: api.Queue, Messages: msgs})
 }
 
 // readSimChatClientMsg blocks for the next parseable text frame; ok=false on
 // socket death.
-func readSimChatClientMsg(conn *safeConn) (simChatClientMsg, bool) {
+func readSimChatClientMsg(conn *safeConn) (api.ChatClientMessage, bool) {
 	for {
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
-			return simChatClientMsg{}, false
+			return api.ChatClientMessage{}, false
 		}
 		if msgType != websocket.TextMessage {
 			continue
 		}
-		var msg simChatClientMsg
+		var msg api.ChatClientMessage
 		if json.Unmarshal(data, &msg) != nil || msg.Type == "" {
 			continue
 		}
@@ -4357,7 +4348,7 @@ func (s *SimulationServer) handleSimApprovalsWS(conn *safeConn) {
 	for _, ev := range simApprovalsEvents("toolu_approvals_q1", "sim-approvals-req-1") {
 		sendSimNorm(conn, ev)
 	}
-	sendTerminalEvent(conn, "replay_done")
+	sendReplayDone(conn)
 
 	for {
 		msg, ok := readSimChatClientMsg(conn)
@@ -4486,13 +4477,11 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 	// Only the second question is still open - the first one's turn ended
 	// without it (see simExpiredQuestionInput), which is exactly the
 	// distinction the real daemon draws from the live stdout stream.
-	if frame, err := json.Marshal(chatPendingQuestionsFrame{
-		terminalEvent: terminalEvent{Type: "pending_questions"},
-		Requests:      []claudestream.PendingAsk{{RequestID: "sim-ask-req-1", ToolUseID: "toolu_ask_1"}},
-	}); err == nil {
-		_ = conn.WriteMessage(websocket.TextMessage, frame)
-	}
-	sendTerminalEvent(conn, "replay_done")
+	writeFrame(conn, api.ChatPendingQuestionsFrame{
+		Type:     api.PendingQuestions,
+		Requests: []api.ChatPendingAsk{{RequestId: "sim-ask-req-1", ToolUseId: "toolu_ask_1"}},
+	})
+	sendReplayDone(conn)
 
 	turn := 0
 	for {
@@ -4505,12 +4494,7 @@ func (s *SimulationServer) handleSimAskWS(conn *safeConn) {
 			// An answer to anything but the open question is refused, as the
 			// daemon refuses one for a request the CLI has already retired.
 			if reqID := claudestream.ControlResponseRequestID(msg.Response); reqID != "sim-ask-req-1" {
-				if frame, err := json.Marshal(chatQuestionExpiredFrame{
-					terminalEvent: terminalEvent{Type: "question_expired"},
-					RequestID:     reqID,
-				}); err == nil {
-					_ = conn.WriteMessage(websocket.TextMessage, frame)
-				}
+				writeFrame(conn, api.ChatQuestionExpiredFrame{Type: api.QuestionExpired, RequestId: reqID})
 				continue
 			}
 			// Extract the answers map (and any per-question notes) the question
@@ -4731,7 +4715,7 @@ func handleSimHistoryWS(conn *safeConn) {
 	for _, ev := range simHistoryEvents() {
 		sendSimNorm(conn, ev)
 	}
-	sendTerminalEvent(conn, "replay_done")
+	sendReplayDone(conn)
 	turn := 0
 	for {
 		msg, ok := readSimChatClientMsg(conn)
@@ -4785,7 +4769,7 @@ func handleSimWorkingWS(conn *safeConn) {
 	for _, ev := range simWorkingEvents {
 		sendSimNorm(conn, ev)
 	}
-	sendTerminalEvent(conn, "replay_done")
+	sendReplayDone(conn)
 
 	// The client still sends (queued messages, model switches, interrupts); drain
 	// them so the socket stays healthy, and stop streaming when it goes away.

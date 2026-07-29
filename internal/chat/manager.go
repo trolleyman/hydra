@@ -57,7 +57,7 @@ type worker struct {
 type codexSpawn struct {
 	ToolID   string
 	Prompt   string
-	ParentID string
+	ParentId string
 }
 
 func NewManager(resolve ContextResolver) *Manager {
@@ -176,13 +176,13 @@ func (w *worker) run(id string) {
 					specs = append([]eventSpec{{
 						sourceID:  "codex:subagent:" + threadID,
 						eventType: "subagent_started",
-						payload:   map[string]any{"id": threadID, "parent_id": spawn.ParentID, "parent_item_id": spawn.ToolID, "agent_type": "codex", "description": spawn.Prompt, "prompt": spawn.Prompt, "status": "running"},
+						payload:   map[string]any{"id": threadID, "parent_id": spawn.ParentId, "parent_item_id": spawn.ToolID, "agent_type": "codex", "description": spawn.Prompt, "prompt": spawn.Prompt, "status": "running"},
 					}}, specs...)
 				}
 				for i := range specs {
 					specs[i].payload = withCodexSidechain(specs[i].payload, threadID, spawn.ToolID)
 					if (specs[i].eventType == "turn_completed" || specs[i].eventType == "turn_failed") && linked {
-						specs = append(specs, eventSpec{sourceID: "codex:subagent:" + threadID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": threadID, "parent_id": spawn.ParentID, "parent_item_id": spawn.ToolID, "agent_type": "codex", "description": spawn.Prompt, "prompt": spawn.Prompt, "status": "completed"}})
+						specs = append(specs, eventSpec{sourceID: "codex:subagent:" + threadID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": threadID, "parent_id": spawn.ParentId, "parent_item_id": spawn.ToolID, "agent_type": "codex", "description": spawn.Prompt, "prompt": spawn.Prompt, "status": "completed"}})
 					}
 				}
 			}
@@ -230,7 +230,7 @@ func (w *worker) reconcileClaudeUserEcho(spec eventSpec) bool {
 			if userMessageContentKey(stored) != key {
 				continue
 			}
-			if strings.HasPrefix(event.SourceID, "claude:") {
+			if strings.HasPrefix(event.SourceId, "claude:") {
 				if len(pending) > 0 {
 					pending = pending[1:]
 				}
@@ -371,7 +371,7 @@ func codexSpawnFromLine(line []byte) (codexSpawn, bool) {
 	if json.Unmarshal(params.Item, &item) != nil || item.Type != "collabAgentToolCall" || codexCollabTool(item.Tool) != "spawnagent" {
 		return codexSpawn{}, false
 	}
-	return codexSpawn{ToolID: item.ID, Prompt: item.Prompt, ParentID: item.SenderThreadID}, item.ID != ""
+	return codexSpawn{ToolID: item.ID, Prompt: item.Prompt, ParentId: item.SenderThreadID}, item.ID != ""
 }
 
 func causalItemID(payload any) string {

@@ -31,7 +31,7 @@ func TestStoreAppendProjectAndPage(t *testing.T) {
 	appendEvent("commit_created", map[string]any{"head": "abc", "sha": "abc"})
 
 	p := s.Snapshot()
-	if p.Through != 5 || p.Head != "abc" || p.Subagents["sub"].Status != "running" || p.Queue["m2"].ID != "m2" {
+	if p.Through != 5 || p.Head != "abc" || p.Subagents["sub"].Status != "running" || p.Queue["m2"].Id != "m2" {
 		t.Fatalf("unexpected projection: %+v", p)
 	}
 	var plan []map[string]any

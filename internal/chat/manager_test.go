@@ -147,16 +147,16 @@ func TestManagerLinksCodexChildThreadToSpawn(t *testing.T) {
 		var payload struct {
 			AgentID      string `json:"agent_id"`
 			ID           string `json:"id"`
-			ParentItemID string `json:"parent_item_id"`
+			ParentItemId string `json:"parent_item_id"`
 		}
 		_ = json.Unmarshal(event.Payload, &payload)
 		switch event.Type {
 		case "subagent_started":
-			started = payload.ID == "child" && payload.ParentItemID == "spawn-1"
+			started = payload.ID == "child" && payload.ParentItemId == "spawn-1"
 		case "assistant_message":
-			report = payload.AgentID == "child" && payload.ParentItemID == "spawn-1"
+			report = payload.AgentID == "child" && payload.ParentItemId == "spawn-1"
 		case "subagent_completed":
-			completed = payload.ID == "child" && payload.ParentItemID == "spawn-1"
+			completed = payload.ID == "child" && payload.ParentItemId == "spawn-1"
 		}
 	}
 	if !started || !report || !completed {

@@ -207,9 +207,9 @@ func TestCodexChildThreadDecoration(t *testing.T) {
 	var payload struct {
 		Sidechain bool   `json:"sidechain"`
 		AgentID   string `json:"agent_id"`
-		ParentID  string `json:"parent_item_id"`
+		ParentId  string `json:"parent_item_id"`
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil || !payload.Sidechain || payload.AgentID != "child" || payload.ParentID != "spawn" {
+	if err := json.Unmarshal(raw, &payload); err != nil || !payload.Sidechain || payload.AgentID != "child" || payload.ParentId != "spawn" {
 		t.Fatalf("payload = %s (%v)", raw, err)
 	}
 }

@@ -15,7 +15,21 @@ Raw panel can show it, but it never determines the wire format or the reducer.
 ## The wire protocol
 
 A chat head shares `/ws/.../terminal` with terminal heads, but every frame is
-text (see `internal/http/chat_ws.go`).
+text.
+
+Both sockets are declared once, in `api/openapi.yaml`, and generated for the
+daemon (`internal/api`) and the browser (`web/src/api/models`). Each frame
+declares its own single value for `type` and the parent is a `oneOf` with a
+discriminator, so `ChatFrame` and `TerminalEvent` are real discriminated unions:
+Go gets a constant per frame, TypeScript gets `type: 'chat_event'` literals that
+narrow in a `switch` with no casts. `internal/chat` type-aliases the generated
+`ChatEvent` and `ChatProjection` rather than declaring its own, so the durable
+log and the wire are the same shape by construction. `writeFrame` in
+`internal/http/terminal.go` is the one place a frame becomes bytes.
+
+Event payloads stay deliberately open (`map[string]any` in Go,
+`Record<string, any>` in TypeScript): their fields vary per event type, and the
+provider's own recorded entry rides there for the Raw panel.
 
 Server to client:
 
