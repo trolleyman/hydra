@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
+import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   Archive,
   ArrowDown,
@@ -52,6 +52,7 @@ import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
+import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
 import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
@@ -79,7 +80,8 @@ import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planS
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments, isImageResizeNotice } from '../lib/uploadAttachments'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
-import { useChatBashIndentStore, useChatCodeLinesStore, useChatFontStore, useChatStepsStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatBashIndentStore, useChatCodeLinesStore, useChatStepsStore, useChatStreamStore } from '../lib/chatPrefs'
+import { useChatIsSerif } from '../lib/fontPrefs'
 import { providerErrorText } from '../lib/providerError'
 import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval'
 import { approvalMatchesTool } from '../lib/approvalMatch'
@@ -1724,6 +1726,13 @@ function modelDisplayLabel(model: string): string {
     if (lower.includes(m.id)) return m.label
   }
   for (const m of CODEX_MODELS) if (lower.includes(m.id)) return m.label
+  // A BARE alias. The CLI accepts `/model opus`, and then reports `opus` - which
+  // matches no entry above, because those deliberately carry full ids so the two
+  // Opus versions stay distinguishable. Without this the chip rendered the raw
+  // lowercase alias ("opus") next to labels that are all title case. The version
+  // is genuinely unknown here, so the label says "Opus" and does not guess one.
+  const bare: Record<string, string> = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku', fable: 'Fable' }
+  if (bare[lower]) return bare[lower]
   return model.replace(/^claude-/, '')
 }
 
@@ -1741,23 +1750,6 @@ function useDelayedUnmount(open: boolean, ms = 250): boolean {
     return () => clearTimeout(t)
   }, [open, ms])
   return open || mounted
-}
-
-// A step folding away shrinks the transcript by its own height, which clamps
-// scrollTop down - and a scrollTop that drops on its own is exactly what a user
-// scrolling up looks like. onScroll already forgives a shrink it can SEE
-// (scrollHeight went down between two scroll events), but a fold overlaps with
-// the next step arriving, so the two height changes can coalesce into one event
-// where the height is unchanged and only scrollTop moved: read as a scroll-up,
-// which unpinned the view and stopped the chat following a live turn from the
-// first fold onwards. So a fold declares itself for the length of its animation
-// and onScroll trusts that over the geometry.
-let selfReflowUntil = 0
-function markSelfReflow(ms = 400) {
-  selfReflowUntil = Math.max(selfReflowUntil, Date.now() + ms)
-}
-function inSelfReflow(): boolean {
-  return Date.now() < selfReflowUntil
 }
 
 // Expandable animates its child open/closed by transitioning a MEASURED
@@ -1964,7 +1956,7 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, stop
   )
 }
 
-function WebSearchOutput({ text, serif }: { text: string; serif: boolean }) {
+function WebSearchOutput({ text }: { text: string }) {
   const parsed = (() => {
     const match = /(?:^|\n)Links:\s*(\[[\s\S]*?\])\s*(?:\n\n|$)/.exec(text)
     if (!match) return { body: text, links: [] as { title: string; url: string }[] }
@@ -1979,7 +1971,7 @@ function WebSearchOutput({ text, serif }: { text: string; serif: boolean }) {
     }
   })()
   return (
-    <div className={`space-y-2 break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+    <div className="space-y-2 break-words leading-relaxed chat-font">
       {parsed.links.length > 0 && (
         <div className="rounded-md border border-stone-200 dark:border-white/[0.06] bg-[#fdfcf9] dark:bg-[#1d1c1a] px-2.5 py-2 font-sans">
           <div className="mb-1 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500">Sources</div>
@@ -2408,7 +2400,6 @@ function parseMemory(raw: string): { reminder: string | null; yaml: string; body
 // frontmatter as a highlighted code box, and the body as normal markdown prose -
 // no line-number gutter.
 function MemoryPanel({ text }: { text: string }) {
-  const serif = useChatFontStore((s) => s.serif)
   const { reminder, yaml, body } = useMemo(() => parseMemory(text), [text])
   const yamlHtml = useMemo(() => (yaml ? highlightHtml(yaml, 'yaml') : null), [yaml])
   const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
@@ -2426,7 +2417,7 @@ function MemoryPanel({ text }: { text: string }) {
           : <pre className={codeCls}>{yaml}</pre>
       )}
       {body && (
-        <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}>
+        <div className="break-words leading-relaxed chat-font">
           <Markdown text={body} />
         </div>
       )}
@@ -2448,12 +2439,12 @@ function LabeledField({ label, children }: { label: string; children: ReactNode 
 // TaskToolFields renders a TaskCreate / TaskUpdate input as labeled fields -
 // subject and description as markdown prose - instead of raw JSON. A TaskUpdate's
 // id/status ride on a compact line above.
-function TaskToolFields({ input, serif }: { input: Record<string, unknown>; serif: boolean }) {
+function TaskToolFields({ input }: { input: Record<string, unknown> }) {
   const taskId = typeof input.taskId === 'string' || typeof input.taskId === 'number' ? String(input.taskId) : ''
   const status = typeof input.status === 'string' ? (input.status as string) : ''
   const subject = typeof input.subject === 'string' ? (input.subject as string) : ''
   const description = typeof input.description === 'string' ? (input.description as string) : ''
-  const proseCls = `break-words leading-relaxed ${serif ? 'font-serif' : ''}`
+  const proseCls = 'break-words leading-relaxed chat-font'
   return (
     <div className="space-y-1.5">
       {(taskId || status) && (
@@ -2496,7 +2487,7 @@ function gitAddSpecs(input: Record<string, unknown>): { path: string; lines: str
 // stated outright, because "which of my changes did that actually capture?" is
 // the question the JSON never answered: `git add -A` is the default, so the
 // interesting cases (a path list, or a pre-built index) have to be visible.
-function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: Record<string, unknown>; serif: boolean; worktree: string | null }) {
+function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<string, unknown>; worktree: string | null }) {
   const str = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '')
   const strs = (key: string) => (Array.isArray(input[key]) ? (input[key] as unknown[]).filter((v): v is string => typeof v === 'string') : [])
   const path = (p: string) => collapseHome(trimWorktreePaths(p, worktree))
@@ -2531,7 +2522,7 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
             and the panel already frames it. Rendered as markdown with paragraph
             reflow (hardBreaks={false}) - messages are hard-wrapped at ~72
             columns, so a <br> per source newline would shred every paragraph. */}
-        <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 ${serif ? 'font-serif' : ''}`}>
+        <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 chat-font`}>
           <Markdown text={str('message')} hardBreaks={false} />
         </div>
         {paths.length > 0 && (
@@ -2636,7 +2627,7 @@ function GitToolFields({ tool, input, serif, worktree }: { tool: string; input: 
               <span className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
                 <span className="font-medium text-stone-600 dark:text-stone-300">{String(step.action ?? '')}</span>
                 {sha(String(step.commit ?? ''))}
-                {message && <span className={`truncate text-stone-500 dark:text-stone-400 ${serif ? 'font-serif' : ''}`}>{message}</span>}
+                {message && <span className="truncate text-stone-500 dark:text-stone-400 chat-font">{message}</span>}
               </span>,
             )
           })}
@@ -2689,14 +2680,12 @@ function AgentChip({
 // duplicates) said the same thing three times and buried the actual message.
 function SendMessageFields({
   input,
-  serif,
   recipientLabel,
   recipientId,
   recipientRunning,
   onOpenChat,
 }: {
   input: Record<string, unknown>
-  serif: boolean
   recipientLabel: string
   recipientId: string
   recipientRunning?: boolean
@@ -2711,7 +2700,7 @@ function SendMessageFields({
       ([key]) => !SEND_MESSAGE_ECHO_KEYS.has(key) && key !== 'to' && key !== 'summary' && key !== 'message' && !key.startsWith('_'),
     ),
   )
-  const proseCls = `break-words leading-relaxed ${serif ? 'font-serif' : ''}`
+  const proseCls = 'break-words leading-relaxed chat-font'
   return (
     <div className="space-y-1.5">
       {recipientId && (
@@ -2822,6 +2811,29 @@ function LowlitPath({ path }: { path: string }) {
   return <>{dir && <span className="text-stone-400/70 dark:text-stone-500/70">{dir}</span>}<span className="text-stone-400 dark:text-stone-500">{name}</span></>
 }
 
+// Which cards the reader has expanded, by tool-use id: state that has to
+// outlive the card's React instance, but not the visit.
+//
+// A card's fold cannot live in useState alone, because the card does not stay
+// mounted: the moment a second tool call lands beside it, planStepRows
+// re-parents the run into a new StepGroup, and React reconciles a row that
+// changes parent as unmount + mount rather than as a move (the key only matches
+// among siblings of the same parent). Local state would take the expanded card
+// the reader was in the middle of reading away from them, mid-turn, for no
+// reason they could see.
+//
+// The map is owned by the PANE (a ref, handed down through this context) and
+// dies with it, so leaving the page and coming back renders the transcript
+// quiet again - the same tidying a step group does (see StepGroup), for the
+// same reason: what you unfolded chasing one thing is not what you want waiting
+// for you on the next visit. Only cards the reader actually TOUCHED get an
+// entry, so within a visit it holds one boolean per click and nothing per
+// transcript.
+//
+// The default is a fallback for a card rendered outside a pane; every real one
+// is under the provider in ChatPane.
+const ToolFoldContext = createContext<Map<string, boolean>>(new Map())
+
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
 // tool card in the transcript (item 16). Props are stable per settled item.
 // recipient* / openSub describe a SendMessage's target agent. They are passed
@@ -2846,7 +2858,16 @@ const ToolCard = memo(function ToolCard({
   recipientRunning?: boolean
   openSub?: (key: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const folds = useContext(ToolFoldContext)
+  const [open, setOpen] = useState(() => folds.get(item.toolUseId) ?? false)
+  // Toggling records the choice so it survives the card's next remount (see
+  // ToolFoldContext). The auto-open below deliberately doesn't - an approval
+  // opens the card by itself on every mount for as long as it is parked.
+  const toggleOpen = () => {
+    const next = !open
+    folds.set(item.toolUseId, next)
+    setOpen(next)
+  }
   const [showRaw, setShowRaw] = useState(false)
   const [imgLightbox, setImgLightbox] = useState<number | null>(null)
   // The thumbnail clicked, so the lightbox flies the picture out of it.
@@ -2854,7 +2875,6 @@ const ToolCard = memo(function ToolCard({
   // Eagerly decode result images (the card mounts collapsed the moment the
   // result lands), so opening later measures the true expanded height.
   const imageDims = useImageDims(item.resultImages)
-  const serif = useChatFontStore((s) => s.serif)
   const pending = item.result === undefined && !item.ended
 	const visibleResult = item.result ?? item.runningOutput
   const rawInput = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
@@ -3134,8 +3154,9 @@ const ToolCard = memo(function ToolCard({
       <div
         role="button"
         tabIndex={0}
-        onClick={() => setOpen((o) => !o)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o) } }}
+        aria-expanded={open}
+        onClick={toggleOpen}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleOpen() } }}
         className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300 cursor-pointer select-none hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
       >
         <div className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left">
@@ -3236,16 +3257,15 @@ const ToolCard = memo(function ToolCard({
               ) : isSendMessage && input ? (
                 <SendMessageFields
                   input={input}
-                  serif={serif}
                   recipientLabel={recipientName}
                   recipientId={messageTo}
                   recipientRunning={recipientRunning}
                   onOpenChat={openRecipientChat}
                 />
               ) : isTaskTool && input ? (
-                <TaskToolFields input={input} serif={serif} />
+                <TaskToolFields input={input} />
               ) : gitTool && input && !hideInput ? (
-                <GitToolFields tool={gitTool} input={input} serif={serif} worktree={worktree} />
+                <GitToolFields tool={gitTool} input={input} worktree={worktree} />
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
               )}
@@ -3298,11 +3318,11 @@ const ToolCard = memo(function ToolCard({
                     : mem && !item.isError
 						? <MemoryPanel text={renderedResult} />
                       : isTaskTool && !item.isError
-							? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
+							? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
                         : isWebSearch && !item.isError
-                          ? <WebSearchOutput text={renderedResult} serif={serif} />
+                          ? <WebSearchOutput text={renderedResult} />
                         : isWebFetch && !item.isError
-                          ? <div className={`break-words leading-relaxed ${serif ? 'font-serif' : ''}`}><Markdown text={renderedResult} /></div>
+                          ? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
                         : fileViewSections
                           ? <FileViewSections sections={fileViewSections} />
                         : scriptSections
@@ -3582,7 +3602,6 @@ function shellCwdsFor(items: ChatItem[], worktree: string | null): Map<string, s
 function SubagentTimeline({
   sub,
   worktree,
-  serif,
   skipId,
   links,
   // Whether this timeline may fold its own runs of steps. Off inside a folded
@@ -3594,7 +3613,6 @@ function SubagentTimeline({
 }: {
   sub: SubagentView
   worktree: string | null
-  serif: boolean
   skipId?: number
   links?: SubagentLinks
   fold?: boolean
@@ -3623,7 +3641,6 @@ function SubagentTimeline({
             sub={nested}
             tool={it}
             worktree={worktree}
-            serif={serif}
             links={links}
             onOpenChat={() => links.openSubView(nested.agentId)}
           />
@@ -3633,7 +3650,7 @@ function SubagentTimeline({
     }
     if (it.kind === 'assistant')
       return (
-        <div key={it.id} className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+        <div key={it.id} className="chat-leading-xs chat-font">
           <Markdown text={it.text} />
         </div>
       )
@@ -3796,7 +3813,7 @@ function reportSkipId(sub: SubagentView, report: SubReport | null): number | und
 
 // SubagentReport renders a sub-agent's final report (an error result as an error
 // panel), under a small "Report" heading.
-function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }) {
+function SubagentReport({ report }: { report: SubReport }) {
   return (
     <div>
       <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
@@ -3805,7 +3822,7 @@ function SubagentReport({ report, serif }: { report: SubReport; serif: boolean }
       {report.isError ? (
         <OutputPanel text={report.text} lang="" isError />
       ) : (
-        <div className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+        <div className="chat-leading-xs chat-font">
           <Markdown text={report.text} />
         </div>
       )}
@@ -3839,14 +3856,12 @@ function FinishedReportCard({
   label,
   desc,
   report,
-  serif,
   onOpenChat,
   openLabel,
 }: {
   label: string
   desc?: string
   report: SubReport | null
-  serif: boolean
   onOpenChat?: () => void
   openLabel?: string
 }) {
@@ -3881,7 +3896,7 @@ function FinishedReportCard({
           report.isError ? (
             <OutputPanel text={report.text} lang="" isError />
           ) : (
-            <div className={`chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+            <div className="chat-leading-xs chat-font">
               <Markdown text={report.text} />
             </div>
           )
@@ -3906,7 +3921,6 @@ const SubagentCard = memo(function SubagentCard({
   sub,
   tool,
   worktree,
-  serif,
   onOpenChat,
   finishedBadge,
   links,
@@ -3914,7 +3928,6 @@ const SubagentCard = memo(function SubagentCard({
   sub: SubagentView
   tool?: ToolItem
   worktree: string | null
-  serif: boolean
   onOpenChat?: () => void
   finishedBadge?: boolean
   links?: SubagentLinks
@@ -4010,7 +4023,7 @@ const SubagentCard = memo(function SubagentCard({
               <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                 Prompt
               </div>
-              <div className={`break-words chat-leading-xs ${serif ? 'font-serif' : ''}`}>
+              <div className="break-words chat-leading-xs chat-font">
                 <Markdown text={sub.prompt} />
               </div>
             </div>
@@ -4028,12 +4041,12 @@ const SubagentCard = memo(function SubagentCard({
               </button>
               <Expandable open={stepsOpen}>
                 <div className="mt-1.5 space-y-1.5 border-l-2 border-violet-200/60 dark:border-violet-500/20 pl-2.5">
-                  <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} />
+                  <SubagentTimeline sub={sub} worktree={worktree} skipId={reportSkipId(sub, report)} links={links} />
                 </div>
               </Expandable>
             </div>
           )}
-          {report && <SubagentReport report={report} serif={serif} />}
+          {report && <SubagentReport report={report} />}
         </div>
       </Expandable>
     </div>
@@ -4048,13 +4061,11 @@ function SubagentChatView({
   sub,
   tool,
   worktree,
-  serif,
   links,
 }: {
   sub: SubagentView
   tool?: ToolItem
   worktree: string | null
-  serif: boolean
   links?: SubagentLinks
 }) {
   const running = isSubRunning(sub, tool)
@@ -4085,15 +4096,15 @@ function SubagentChatView({
           full view only - the folded SubagentCard keeps its labelled Prompt. */}
       {sub.prompt && (
         <div className="flex flex-col items-end gap-1">
-          <div className={`${USER_BUBBLE_CLASS} leading-relaxed ${serif ? 'font-serif' : ''}`}>
+          <div className={`${USER_BUBBLE_CLASS} leading-relaxed chat-font`}>
             <Markdown text={sub.prompt} />
           </div>
         </div>
       )}
       <div className="flex flex-col gap-3 text-xs">
-        <SubagentTimeline sub={sub} worktree={worktree} serif={serif} skipId={reportSkipId(sub, report)} links={links} fold />
+        <SubagentTimeline sub={sub} worktree={worktree} skipId={reportSkipId(sub, report)} links={links} fold />
       </div>
-      {report && <SubagentReport report={report} serif={serif} />}
+      {report && <SubagentReport report={report} />}
       {/* whitespace-nowrap for the same reason as the main working line: the
           label swaps between "Working..." and the longer "Waiting on
           sub-agents...", and a wrap there would shift the mark. */}
@@ -5110,7 +5121,7 @@ const SkillCard = memo(function SkillCard({ name, text }: { name: string; text: 
         className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
         aria-expanded={open}
       >
-        <Sparkles className="w-3 h-3 shrink-0" />
+        <Sparkles className="w-3 h-3 shrink-0" fill="currentColor" />
         <span className="truncate">Skill loaded: {name}</span>
         <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -5976,6 +5987,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // The main view's scroll spot, parked while a sub-agent view is open so
   // coming back lands where the reader left off.
   const mainScrollRef = useRef<{ top: number; pinned: boolean } | null>(null)
+  // The tool cards the reader has unfolded on this visit, owned here so they
+  // are forgotten when the pane goes away (see ToolFoldContext).
+  const toolFoldsRef = useRef<Map<string, boolean>>(new Map())
   // Chat pane width, tracked so the plan panel collapses when there's no room
   // to sit it alongside the transcript.
   const [paneWidth, setPaneWidth] = useState(0)
@@ -6178,8 +6192,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const unreadKey = `${agentId}\0${projectId}`
   if (openedUnread.key !== unreadKey) setOpenedUnread({ key: unreadKey, unread: unreadNow })
   else if (openedUnread.unread == null && unreadNow != null) setOpenedUnread({ key: unreadKey, unread: unreadNow })
-  // Whether agent prose renders serif (item 9, the default) - a Browser setting.
-  const serif = useChatFontStore((s) => s.serif)
+  // Whether the chosen chat font (Settings -> Browser -> Fonts) is a serif. The
+  // family itself arrives through the .chat-font class; this only picks the
+  // serif TREATMENT - larger size, looser leading, real semibold - which reads
+  // better for a serif and wrong for a sans. Still threaded through the memo
+  // comparators below because it changes how every settled row renders.
+  const serif = useChatIsSerif()
   // Which head the tool cards below can answer parked approvals for. Null with no
   // project (nothing to POST a decision to), which just leaves the toast.
   const approvalCtx = useMemo(() => (projectId ? { projectId, agentId } : null), [projectId, agentId])
@@ -8458,6 +8476,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
   useEffect(() => {
     mainScrollRef.current = null
+    // Which tool cards the reader unfolded is per-head too (see
+    // ToolFoldContext). The pane itself outlives a head switch, so the map has
+    // to be emptied here as well as by dying with the pane.
+    toolFoldsRef.current.clear()
   }, [agentId, projectId])
 
   // Stable identity (per chatView) so the subagentLinks memo below doesn't
@@ -9598,7 +9620,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>
         )
       case 'assistant':
-        return <div className={`max-w-[95%] ${serif ? 'chat-serif' : 'chat-leading'}`}>{renderAssistantText(item.text)}</div>
+        return <div className={`max-w-[95%] chat-font ${serif ? 'chat-serif' : 'chat-leading'}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
         return <ThinkingCard text={item.text} durationMs={item.durationMs} />
       case 'tool': {
@@ -9607,7 +9629,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         const sub = subByToolUse[item.toolUseId]
         if (sub)
           return (
-            <SubagentCard sub={sub} tool={item} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
+            <SubagentCard sub={sub} tool={item} worktree={worktreePath} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
           )
         // ExitPlanMode gets a dedicated card that renders the plan markdown.
         if (item.name === 'ExitPlanMode') return <PlanCard item={item} />
@@ -9626,7 +9648,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 label={label}
                 desc={desc}
                 report={{ text: parsed.output!, isError: parsed.status !== undefined && parsed.status !== 'completed' }}
-                serif={serif}
                 onOpenChat={linked ? () => openSubView(linked.agentId) : undefined}
               />
             )
@@ -9662,7 +9683,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         // another card renders this sub, the standalone copy is a duplicate.
         if (sub.parentAgentId) return null
         if (sub.toolUseId && taskToolByUse[sub.toolUseId]) return null
-        return <SubagentCard sub={sub} worktree={worktreePath} serif={serif} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
+        return <SubagentCard sub={sub} worktree={worktreePath} links={subagentLinks} onOpenChat={() => openSubView(sub.agentId)} />
       }
       case 'question': {
         // Its control_request channel dies with the turn that raised it, and
@@ -9868,6 +9889,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // brand accent instead of Claude's unconditionally.
     <ChatAgentTypeContext.Provider value={agentType ?? 'claude'}>
     <ChatApprovalContext.Provider value={approvalCtx}>
+    {/* A card the reader unfolds has to survive its run folding into a step
+        group, which remounts it - the map is how, and living here is what makes
+        it forgotten when the pane does (see ToolFoldContext). */}
+    <ToolFoldContext.Provider value={toolFoldsRef.current}>
     <div
       className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
       onKeyDown={onPaneKeyDown}
@@ -9931,7 +9956,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         >
           <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
           {viewSub ? (
-            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} serif={serif} links={subagentLinks} />
+            <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} links={subagentLinks} />
           ) : (
           <>
           {!replayDone && items.length === 0 && (
@@ -10147,13 +10172,29 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   <Plus className="w-4 h-4" />
                 </button>
               </Tooltip>
+              {/* This group holds three runs of text at three different sizes -
+                  "Enter to queue" at 10px, the context percentage at 11px, the
+                  model name at 12px - plus two icon buttons. Plain items-center
+                  aligns each item's LINE BOX, and a bigger line box reserves more
+                  room above the cap, so three sizes centred put three different
+                  baselines on screen.
+                  The fix is NOT items-baseline. That aligns the text but breaks
+                  the buttons: a button has no text baseline, so it falls back to
+                  its bottom margin edge and hangs off the labels; and the line's
+                  cross-centre (max-ascent over max-descent) sits above the text's
+                  ink, so a `self-center` button then reads high.
+                  Instead every label carries `.optical-center`, which trims its
+                  box to the cap-to-baseline ink. Once each item's box IS its ink,
+                  plain items-center aligns the ink - the baselines land within
+                  ~0.7px (half the cap-height difference between 10px and 12px)
+                  and the buttons centre on the same ink the text does. */}
               <div className="ml-auto flex items-center gap-1.5">
                 {/* Item 6: surface what Enter will do only when it isn't the
                     obvious thing - i.e. the message will queue, draining into
                     the running turn at its next step (terminal-style
                     steering); otherwise show nothing. */}
                 {canSend && isTurnRunning && (
-                  <span className="hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 select-none">
+                  <span className="optical-center hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 select-none">
                     Enter to queue
                   </span>
                 )}
@@ -10167,7 +10208,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     side="top"
                   >
                     <span
-                      className={`hidden sm:inline text-[11px] tabular-nums select-none ${
+                      className={`optical-center hidden sm:inline text-[11px] tabular-nums select-none ${
                         contextPct < 10
                           ? 'text-red-500 dark:text-red-400'
                           : contextPct < 20
@@ -10190,7 +10231,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                           : 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-700 dark:hover:text-stone-200'
                       }`}
                     >
-                      {modelLabel}
+                      {/* Trimmed like the labels beside it, so the button's
+                          symmetric py-1 makes its box centre the label's ink
+                          centre - which is what the group then aligns on. */}
+                      <span className="optical-center">{modelLabel}</span>
                       <ChevronDown className="w-3 h-3" />
                     </button>
                   </Tooltip>
@@ -10265,6 +10309,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         />
       )}
     </div>
+    </ToolFoldContext.Provider>
     </ChatApprovalContext.Provider>
     </ChatAgentTypeContext.Provider>
   )

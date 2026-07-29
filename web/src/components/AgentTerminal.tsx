@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, type TerminalDiffRefreshEvent, type TerminalSizeEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
@@ -17,6 +18,7 @@ import { useShortcutsStore } from '../stores/shortcutsStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { saveLastGeometry } from '../lib/terminalGeometry'
 import { loadChatDefaultHeight, DEFAULT_CHAT_HEIGHT } from '../lib/chatPrefs'
+import { useFontStack } from '../lib/fontPrefs'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { ChatPane } from './AgentChat'
@@ -56,6 +58,15 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   const worktreePath = useAgentStore((s) =>
     (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
   )
+  // The chosen terminal font (Settings -> Browser -> Fonts), as a real
+  // font-family string: xterm measures the cell off this and takes an option,
+  // not a class, so a CSS variable would never reach it.
+  const terminalFont = useFontStack('terminal')
+  // Held in a ref as well so the connect effect can read the current value
+  // without listing it as a dependency - a font change must not tear the
+  // WebSocket down and replay the scrollback. The effect below applies it to a
+  // live terminal instead.
+  const terminalFontRef = useRef(terminalFont)
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -251,7 +262,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
-      fontFamily: '"Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, "Courier New", monospace',
+      fontFamily: terminalFontRef.current,
       theme: {
         background: '#111827',
         foreground: '#d1d5db',
@@ -328,6 +339,22 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       },
     })
 
+    // Unicode 11 character widths. xterm's built-in table is Unicode 6, which
+    // predates the emoji width rules: it gives ✅ 🚀 and friends ONE column,
+    // where the browser paints them at ~2 (measured: 16px of ink in an 8px cell).
+    // Everything on the other end of the PTY - glibc's wcwidth, ncurses, Go's
+    // runewidth, the agent CLIs - has said 2 for years, so the built-in table is
+    // the odd one out, and matching it is what keeps a TUI's columns lined up.
+    //
+    // The unicode11 addon rather than unicode-graphemes: the latter is the only
+    // one that would also widen an explicit ⚠️ (U+26A0 U+FE0F) to two columns,
+    // because it clusters the variation selector with its base - but upstream
+    // marks it experimental and warns it "may introduce unexpected and
+    // non-standard behaviour", which is not a thing to put under every agent's
+    // terminal by default.
+    term.loadAddon(new Unicode11Addon())
+    term.unicode.activeVersion = '11'
+
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(el)
@@ -335,6 +362,20 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
     termRef.current = term
     fitAddonRef.current = fitAddon
+
+    // xterm measures the character cell once, at open(). If the chosen webfont
+    // hasn't arrived yet it measures the fallback, and the grid stays that size
+    // - visibly wrong columns, and a cols/rows the PTY was never told about.
+    // Re-measure once the face is actually loaded. document.fonts.load resolves
+    // immediately for a system stack, so this costs nothing in that case.
+    document.fonts
+      .load(`${term.options.fontSize}px ${terminalFontRef.current}`)
+      .then(() => {
+        if (cancelled || termRef.current !== term) return
+        term.clearTextureAtlas()
+        fitAndSend.current(true)
+      })
+      .catch(() => {})
 
     const url = getWsUrl(agentId, projectId, shell, sandboxed, shellId)
     const ws = new WebSocket(url)
@@ -647,6 +688,27 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     // for a pane's lifetime (TerminalPane is keyed by tab id), so listing them can't
     // cause spurious reconnects. onStatusUpdate/onDiffRefresh are read via refs above.
   }, [agentId, projectId, reconnectAttempt, shell, sandboxed, shellId])
+
+  // Apply a font change to the live terminal. A different family means a
+  // different cell width, so the grid has to be re-measured and the new
+  // cols/rows pushed to the PTY - the agent sees this as a window resize, which
+  // is the honest thing for it to see. The ref check makes the mount run a
+  // no-op: the connect effect above already opened the terminal with this font.
+  useEffect(() => {
+    if (terminalFontRef.current === terminalFont) return
+    terminalFontRef.current = terminalFont
+    const term = termRef.current
+    if (!term) return
+    term.options.fontFamily = terminalFont
+    document.fonts
+      .load(`${term.options.fontSize}px ${terminalFont}`)
+      .catch(() => {})
+      .finally(() => {
+        if (termRef.current !== term) return
+        term.clearTextureAtlas()
+        fitAndSend.current(true)
+      })
+  }, [terminalFont])
 
   return (
     <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">

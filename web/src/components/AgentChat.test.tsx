@@ -77,11 +77,13 @@ function imagePasteEvent() {
 // A fresh agent id per render: the composer's draft attachments live in an
 // in-memory cache keyed by agent, which would otherwise leak chips (and the
 // image-number counter) from one test into the next.
+// (`agentId` is overridable for the one test that has to render the SAME head
+// twice - a pane's own state must not survive it going away.)
 let agentSeq = 0
-function renderChat() {
+function renderChat(agentId = `agent-${++agentSeq}`) {
   return render(
     <ChatPane
-      agentId={`agent-${++agentSeq}`}
+      agentId={agentId}
       projectId="proj"
       active
       reconnectAttempt={0}
@@ -238,6 +240,94 @@ describe('a streamed reply settles into the same DOM node', () => {
     expect(document.querySelectorAll('[data-md-root]')).toHaveLength(1)
     expect(document.contains(live)).toBe(true)
     expect(document.querySelector('[data-md-root] p')).toBe(live)
+  })
+})
+
+// A tool card you expanded must stay expanded when the NEXT tool call lands.
+// The second call is what earns the run a "N steps" group (planStepRows), and
+// the group is a new parent - React reconciles a row that changes parent as
+// unmount + mount, not as a move - so a fold state living only in the card's
+// useState was thrown away and the card you were reading closed itself
+// mid-turn.
+describe('an expanded tool card survives its run becoming a step group', () => {
+  beforeAll(() => {
+    vi.stubGlobal('WebSocket', RecordingWebSocket)
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    sockets.length = 0
+    localStorage.clear()
+  })
+
+  // A settled tool call: the card, then its answer.
+  const call = (ws: RecordingWebSocket, id: string, name: string) =>
+    act(() => {
+      ws.emit({
+        type: 'claude_event',
+        event: { type: 'assistant', message: { id: `msg_${id}`, content: [{ type: 'tool_use', id, name, input: { file_path: '/w/a.txt' } }] } },
+      })
+      ws.emit({
+        type: 'claude_event',
+        event: { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } },
+      })
+    })
+
+  // Only a ToolCard header carries an explicit role="button" AND aria-expanded;
+  // the group's own header is a real <button>, so it can't be confused for one.
+  const cardHeader = (name: string) =>
+    [...document.querySelectorAll('[role="button"][aria-expanded]')].find((el) =>
+      el.textContent?.includes(name),
+    ) as HTMLElement | undefined
+
+  it('keeps the card open when a second call folds the run into a group', async () => {
+    renderChat()
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => ws.emit({ type: 'replay_done' }))
+
+    call(ws, 'toolu_grp_1', 'Read')
+    const read = cardHeader('Read')
+    expect(read).toBeDefined()
+    expect(read).toHaveAttribute('aria-expanded', 'false')
+
+    act(() => read!.click())
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+
+    // The second call: the run now earns a group, and the Read card moves inside
+    // it. It must come back open, not folded.
+    call(ws, 'toolu_grp_2', 'Grep')
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+    // The card the reader never touched is unaffected - the fix restores a
+    // choice, it doesn't open everything.
+    expect(cardHeader('Grep')).toHaveAttribute('aria-expanded', 'false')
+    // The group's own header grows in a frame later (GrowIn), so it settles
+    // after the cards it now owns - proof the run really did fold.
+    await screen.findByText('2 steps')
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  // The other half of the rule: the memory belongs to the VISIT. What you
+  // unfolded chasing one thing is not what you want waiting for you when you
+  // come back, so the pane owns the map and it dies with the pane.
+  it('forgets the card again once the pane goes away', async () => {
+    const { unmount } = renderChat('agent-refold')
+    await connectedComposer()
+    act(() => sockets[0].emit({ type: 'replay_done' }))
+    call(sockets[0], 'toolu_refold', 'Read')
+    act(() => cardHeader('Read')!.click())
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+
+    unmount()
+    renderChat('agent-refold')
+    await connectedComposer()
+    act(() => sockets[1].emit({ type: 'replay_done' }))
+    call(sockets[1], 'toolu_refold', 'Read')
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'false')
   })
 })
 

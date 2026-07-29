@@ -1,4 +1,4 @@
-import { AlertTriangle } from 'lucide-react'
+import { TriangleAlert } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { api } from '../stores/apiClient'
 import { useServerData } from '../lib/useServerData'
@@ -31,7 +31,7 @@ export function ServiceHealthWarning({ projectId }: { projectId: string | null }
       content={`Service${failed.length > 1 ? 's' : ''} failed: ${failed.join(', ')}. Open Settings to restart.`}
     >
       <span className="inline-flex" aria-label="service failure">
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+        <TriangleAlert className="w-3.5 h-3.5 text-amber-500" />
       </span>
     </Tooltip>
   )

@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, type ReactNode } from 'react'
-import { AlertCircle, AlertTriangle, ArrowRight, ExternalLink, Info, HelpCircle, GitPullRequestArrow, Trash2, RotateCcw, FolderSync, Sparkles, X, Clock, LoaderCircle, Bot } from 'lucide-react'
+import { AlertCircle, TriangleAlert, ArrowRight, ExternalLink, Info, HelpCircle, GitPullRequestArrow, Trash2, RotateCcw, FolderSync, Sparkles, X, Clock, LoaderCircle, Bot } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
 import { BranchPill } from './BranchPill'
+import { withBranchPills } from '../lib/branchPills'
 import { UrlText } from './HostName'
 import { Markdown } from '../lib/MarkdownRenderer'
 import type { DialogDetails } from '../stores/dialogStore'
@@ -46,17 +47,21 @@ export const Dialog: React.FC = () => {
 
   if (!isOpen) return null
 
+  // The plain dialog used to hang a bare coloured glyph off its header while every
+  // rich variant sat in a tinted tile. Same object, two looks - so it gets the
+  // tile too, at the toast's 9x9 rather than the rich panel's 10x10 (this header
+  // row is shorter). Warning reads AMBER here, matching the toast's warning tone.
   const getIcon = () => {
     switch (type) {
       case 'error':
-        return <AlertCircle className="w-6 h-6 text-red-500" />
+        return <DialogIconTile tone="red" size="sm"><AlertCircle className="w-[18px] h-[18px]" /></DialogIconTile>
       case 'warning':
-        return <AlertCircle className="w-6 h-6 text-amber-500" />
+        return <DialogIconTile tone="amber" size="sm"><TriangleAlert className="w-[18px] h-[18px]" /></DialogIconTile>
       case 'confirm':
-        return <HelpCircle className="w-6 h-6 text-blue-500" />
+        return <DialogIconTile tone="blue" size="sm"><HelpCircle className="w-[18px] h-[18px]" /></DialogIconTile>
       case 'info':
       default:
-        return <Info className="w-6 h-6 text-blue-500" />
+        return <DialogIconTile tone="blue" size="sm"><Info className="w-[18px] h-[18px]" /></DialogIconTile>
     }
   }
 
@@ -106,7 +111,7 @@ export const Dialog: React.FC = () => {
           onCancel={handleCancel}
         >
           {details?.note ? (
-            <p className="text-[12.5px] leading-snug text-amber-700 dark:text-amber-400">{details.note}</p>
+            <p className="text-[12.5px] leading-snug text-amber-700 dark:text-amber-400">{withBranchPills(details.note)}</p>
           ) : null}
         </RichConfirmPanel>
       ) : variant === 'updateBase' ? (
@@ -167,8 +172,11 @@ export const Dialog: React.FC = () => {
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-[#232b3a]">
             <div className="flex items-center gap-3">
               {getIcon()}
-              <h3 id="dialog-title" className="text-lg font-semibold text-gray-900 dark:text-[#eef1f6]">
-                {title}
+              {/* .optical-center: this header centres the title against the icon
+                  tile, and items-center centres the title's LINE BOX - descender
+                  room the words mostly don't use - so it read ~1px high. */}
+              <h3 id="dialog-title" className="optical-center text-lg font-semibold text-gray-900 dark:text-[#eef1f6]">
+                {withBranchPills(title)}
               </h3>
             </div>
             <IconButton onClick={handleCancel}>
@@ -178,7 +186,7 @@ export const Dialog: React.FC = () => {
 
           <div className="px-6 py-4">
             <p className="text-sm text-gray-600 dark:text-[#8b94a6] whitespace-pre-wrap leading-relaxed">
-              {message}
+              {withBranchPills(message)}
             </p>
           </div>
 
@@ -237,10 +245,13 @@ function RichConfirmPanel({
         <div className="flex items-start gap-3.5">
           <DialogIconTile tone={tone}>{icon}</DialogIconTile>
           <div className="flex flex-col gap-1 min-w-0 pt-0.5">
+            {/* Branch names arrive backticked from the call site and render as
+                inline mono pills - the same convention the toasts use, so a
+                branch reads as a branch wherever it is named. */}
             <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
-              {title}
+              {withBranchPills(title)}
             </h3>
-            <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{description}</p>
+            <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(description)}</p>
           </div>
         </div>
         {children}
@@ -291,9 +302,9 @@ function SendPromptPanel({
           </DialogIconTile>
           <div className="flex flex-col gap-1 min-w-0 pt-0.5">
             <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
-              {title}
+              {withBranchPills(title)}
             </h3>
-            <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{description}</p>
+            <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(description)}</p>
           </div>
         </div>
         <div>
@@ -385,13 +396,13 @@ function MergeGatePanel({
         <div className="flex items-start gap-3.5">
           {/* Blue spinner while work is in progress (agent or tests); amber warning otherwise. */}
           <DialogIconTile tone={spinner ? 'blue' : 'amber'}>
-            {spinner ? <LoaderCircle className="w-5 h-5 animate-spin" /> : <AlertTriangle className="w-5 h-5" />}
+            {spinner ? <LoaderCircle className="w-5 h-5 animate-spin" /> : <TriangleAlert className="w-5 h-5" />}
           </DialogIconTile>
           <div className="flex flex-col gap-1 min-w-0 pt-0.5">
             <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
-              {title}
+              {withBranchPills(title)}
             </h3>
-            <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{description}</p>
+            <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(description)}</p>
           </div>
         </div>
         <BranchChip
@@ -425,8 +436,8 @@ function MergeGatePanel({
 function CautionNote({ note }: { note: string }) {
   return (
     <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 text-xs font-medium text-amber-700 dark:text-amber-300">
-      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-      <span>{note}</span>
+      <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
+      <span>{withBranchPills(note)}</span>
     </div>
   )
 }
@@ -520,8 +531,9 @@ function UpdateBasePanel({
         <DialogIconTile tone="blue">
           <FolderSync className="w-5 h-5" />
         </DialogIconTile>
-        <h3 id="dialog-title" className="flex-1 text-lg font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
-          {title}
+        {/* .optical-center - see the plain dialog header above. */}
+        <h3 id="dialog-title" className="optical-center flex-1 text-lg font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
+          {withBranchPills(title)}
         </h3>
         <IconButton onClick={onCancel} aria-label="Close">
           <X className="w-5 h-5" />
@@ -564,7 +576,7 @@ function KillDetails({ details }: { details?: DialogDetails }) {
     <>
       {lost > 0 && (
         <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 text-xs font-medium text-red-600 dark:text-red-400">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
           <span>
             {lost} unmerged file{lost !== 1 ? 's' : ''} in this worktree will be lost.
           </span>

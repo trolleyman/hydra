@@ -1,6 +1,7 @@
 import { ApiError } from '../api'
 import { apiErrorBody, formatError } from '../api/format_error'
 import { useToastStore } from '../stores/toastStore'
+import { pillText } from './branchPills'
 
 // Discriminated result so callers can branch on success even when the action
 // resolves to `undefined`/`void` (e.g. a fire-and-forget POST) - a bare
@@ -84,13 +85,18 @@ export async function runWithToast<T>(
       // Structured HTTP body: show it as a (JSON) code block and pin the status
       // into the headline - "Failed to switch mode `501 Not Implemented`". The
       // status pill is its own visual chip, so it carries no brackets.
-      const message = status ? `${opts.errorPrefix} \`${status}\`` : opts.errorPrefix
+      // The status text is the server's, so it goes through pillText too - the
+      // backticks around it are ours and still make the chip.
+      const message = status ? pillText`${opts.errorPrefix} \`${status}\`` : opts.errorPrefix
       useToastStore.getState().show({ message, code, codeLang: lang, type: 'error' })
     } else if (opts.errorPrefix && !humanDetail && looksLikeCode(detail)) {
       // No structured body, but the raw detail reads as code (e.g. a stack trace).
       useToastStore.getState().show({ message: opts.errorPrefix, code: detail, type: 'error' })
     } else {
-      const message = opts.errorPrefix ? `${opts.errorPrefix}: ${detail}` : detail
+      // pillText, not a plain string: `detail` is the server's own error text
+      // and a backtick in it would otherwise open a branch pill mid-sentence.
+      // The prefix is ours, so its backticks still render as pills.
+      const message = opts.errorPrefix ? pillText`${opts.errorPrefix}: ${detail}` : pillText`${detail}`
       useToastStore.getState().show({ message, type: 'error' })
     }
     return { ok: false, error }

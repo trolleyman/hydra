@@ -20,6 +20,7 @@ import { apiErrorBody } from '../api/format_error'
 import { ChevronDown, ChevronRight, FolderGit2, GitBranch, Settings, LoaderCircle, Menu, PanelLeftClose, PanelLeftOpen, RotateCw, ArrowUp, ArrowDown, RefreshCw, X } from 'lucide-react'
 import { ProviderIcon } from '../components/ReviewControls'
 import { useApplyTheme } from '../lib/theme'
+import { useApplyFonts } from '../lib/fontPrefs'
 import { useSidebarStore, SIDEBAR_DESKTOP_QUERY } from '../lib/sidebar'
 import { useMediaQuery } from '../lib/layout'
 import { useTopBarSlot } from '../lib/topBarSlot'
@@ -397,9 +398,11 @@ function RootLayout() {
     document.addEventListener('pointerup', onUp)
   }, [])
 
-  // Apply the theme (`dark` class on <html>) from the shared theme store; the
-  // control itself now lives on the Settings page.
+  // Apply the theme (`dark` class on <html>) and the chosen fonts (the
+  // --app-font-* variables on <html>) from their shared stores; the controls
+  // themselves now live on the Settings page.
   useApplyTheme()
+  useApplyFonts()
 
   // The four server-data loops - agent list, push status, archived history and
   // system status - are each owned by a dedicated hook built on useServerData

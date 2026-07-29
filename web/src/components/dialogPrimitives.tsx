@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { TILE_TONE, TILE_GLYPH } from '../lib/tileTone'
 
 // Shared building blocks for the app's rich confirmation dialogs (the merge /
 // kill confirmations in Dialog.tsx and the merge-conflict panel in DiffViewer).
@@ -7,15 +8,10 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react'
 // lands everywhere. Colours come paired with `dark:` variants so they read in
 // both themes.
 
+// A dialog's tone is a subset of the shared tile vocabulary (lib/tileTone), so
+// the icon tile on a confirmation dialog and the one on a toast are literally
+// the same square - change it there and it lands on both.
 export type DialogTone = 'emerald' | 'red' | 'amber' | 'indigo' | 'blue'
-
-const TILE_TONE: Record<DialogTone, string> = {
-  emerald: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400',
-  red: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400',
-  amber: 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400',
-  indigo: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400',
-  blue: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400',
-}
 
 const CONFIRM_TONE: Record<DialogTone, string> = {
   emerald: 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm',
@@ -25,10 +21,21 @@ const CONFIRM_TONE: Record<DialogTone, string> = {
   blue: 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm',
 }
 
-// The rounded icon tile shown at the top-left of a rich dialog header.
-export function DialogIconTile({ tone, children }: { tone: DialogTone; children: ReactNode }) {
+// The rounded icon tile shown at the top-left of a dialog header. `sm` is the
+// toast's 9x9 square, for the plain dialog's shorter header row; the rich panels
+// keep the roomier default.
+export function DialogIconTile({
+  tone,
+  size = 'md',
+  children,
+}: {
+  tone: DialogTone
+  size?: 'sm' | 'md'
+  children: ReactNode
+}) {
+  const box = size === 'sm' ? 'w-9 h-9' : 'w-10 h-10'
   return (
-    <span className={`w-10 h-10 shrink-0 rounded-xl flex items-center justify-center ${TILE_TONE[tone]}`}>
+    <span className={`${box} shrink-0 rounded-xl flex items-center justify-center ${TILE_GLYPH} ${TILE_TONE[tone]}`}>
       {children}
     </span>
   )

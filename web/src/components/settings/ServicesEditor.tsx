@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { X, Plus, AlertTriangle, Server, RotateCw, CheckCircle2, Loader2, PauseCircle } from 'lucide-react'
+import { X, Plus, TriangleAlert, Server, RotateCw, CheckCircle2, LoaderCircle, PauseCircle } from 'lucide-react'
 import { api } from '../../stores/apiClient'
 import type { ServiceScript, ServiceStatus } from '../../api'
 import { InfoTooltip } from '../InfoTooltip'
@@ -20,8 +20,8 @@ function ServiceStateBadge({ status }: { status: ServiceStatus | undefined }) {
   }
   const map: Record<string, { label: string; cls: string; icon: ReactNode }> = {
     up: { label: 'Running', cls: 'text-emerald-600 dark:text-emerald-400', icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
-    restarting: { label: 'Restarting', cls: 'text-amber-600 dark:text-amber-400', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" /> },
-    failed: { label: 'Failed', cls: 'text-red-600 dark:text-red-400', icon: <AlertTriangle className="w-3.5 h-3.5" /> },
+    restarting: { label: 'Restarting', cls: 'text-amber-600 dark:text-amber-400', icon: <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> },
+    failed: { label: 'Failed', cls: 'text-red-600 dark:text-red-400', icon: <TriangleAlert className="w-3.5 h-3.5" /> },
     down: { label: 'Stopped', cls: 'text-gray-500 dark:text-gray-400', icon: <X className="w-3.5 h-3.5" /> },
     paused: { label: 'Paused', cls: 'text-slate-500 dark:text-slate-400', icon: <PauseCircle className="w-3.5 h-3.5" /> },
   }
@@ -230,13 +230,13 @@ export function ServicesEditor({
                   </div>
                   {host && (
                     <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5">
-                      <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+                      <TriangleAlert className="w-3.5 h-3.5 mt-px shrink-0" />
                       <span>Runs unsandboxed on the host with full access to your credentials. Only use for trusted commands.</span>
                     </div>
                   )}
                   {statusByName.get(svc.name)?.state === 'failed' && statusByName.get(svc.name)?.message && (
                     <div className="flex items-start gap-1.5 text-[11px] text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-2.5 py-1.5">
-                      <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+                      <TriangleAlert className="w-3.5 h-3.5 mt-px shrink-0" />
                       <span className="font-mono break-all">{statusByName.get(svc.name)?.message}</span>
                     </div>
                   )}

@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
 import type { AgentConfig, McpServer, NetworkConfig, PolicyConfig, ProjectInfo, SandboxConfig } from '../../api'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, AlertTriangle, Lock } from 'lucide-react'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, TriangleAlert, Lock } from 'lucide-react'
 import { InfoTooltip } from '../InfoTooltip'
 import { ShellEditor } from '../ShellEditor'
 import { Markdown } from '../../lib/MarkdownRenderer'
@@ -467,7 +467,7 @@ export function ConfigForm({
           <SegmentedControl options={NETWORK_MODES} labels={NETWORK_MODE_LABELS} value={mode} onChange={setMode} />
           {NETWORK_MODE_WARNINGS[mode] && (
             <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5 motion-safe:animate-egress-warn-in">
-              <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+              <TriangleAlert className="w-3.5 h-3.5 mt-px shrink-0" />
               <span>{NETWORK_MODE_WARNINGS[mode]}</span>
             </div>
           )}

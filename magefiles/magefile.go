@@ -746,7 +746,14 @@ func (Deploy) Tailscale() error {
 	}
 
 	// Build the web UI mapping once, so what we print is exactly what we run.
-	uiArgs := []string{"serve", "--bg", "http://127.0.0.1:" + port}
+	// The UI is served on its OWN port rather than the default 443: the previews
+	// already take a port each, so keeping the UI on hydraPort() makes the whole
+	// deployment one contiguous range (26600-26699 by default) that an ACL or a
+	// firewall can name in a single rule. It also leaves 443 free for whatever
+	// else the machine serves. Tailscale binds this on the node's tailnet
+	// addresses only, so it does not collide with a loopback-bound Hydra on the
+	// same port number.
+	uiArgs := []string{"serve", "--bg", "--https=" + port, "http://127.0.0.1:" + port}
 
 	fmt.Printf("%s%sHydra Tailscale setup%s\n\n", colorBold, colorCyan, colorReset)
 	if haveTailscale {
@@ -761,7 +768,7 @@ func (Deploy) Tailscale() error {
 
 	fmt.Printf("%sExpose the web UI privately over your tailnet:%s\n", colorBold, colorReset)
 	fmt.Printf("     %stailscale %s%s\n", colorBold, strings.Join(uiArgs, " "), colorReset)
-	fmt.Printf("   -> %shttps://%s/%s  (trusted cert, secure context, tailnet-only)\n\n", colorCyan, host, colorReset)
+	fmt.Printf("   -> %shttps://%s:%s/%s  (trusted cert, secure context, tailnet-only)\n\n", colorCyan, host, port, colorReset)
 
 	fmt.Printf("%sExpose live server previews (ports %d-%d, one TLS mapping each):%s\n", colorBold, plo, phi, colorReset)
 	fmt.Printf("     %sfor p in $(seq %d %d); do tailscale serve --bg --https=$p http://127.0.0.1:$p; done%s\n", colorBold, plo, phi, colorReset)
@@ -798,7 +805,7 @@ func (Deploy) Tailscale() error {
 		printTailscaleServeHint(out)
 		return errtrace.Wrap(fmt.Errorf("tailscale serve (web UI): %w", err))
 	}
-	fmt.Printf("%s✓ Web UI served at https://%s/%s\n", colorGreen, host, colorReset)
+	fmt.Printf("%s✓ Web UI served at https://%s:%s/%s\n", colorGreen, host, port, colorReset)
 
 	if promptYesNo(reader, fmt.Sprintf("Also serve the %d preview ports (%d-%d)?", previewCount, plo, phi), false) {
 		fmt.Printf("Serving %d preview ports (this takes a moment)...\n", previewCount)

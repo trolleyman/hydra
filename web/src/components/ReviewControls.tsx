@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { GitPullRequest, GitPullRequestCreate, GitMerge, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink, Lock, ArrowUp, ArrowDown } from 'lucide-react'
+import { GitPullRequest, CircleCheck, CircleX, LoaderCircle, MessageSquare, ExternalLink, Lock, ArrowUp, ArrowDown } from 'lucide-react'
 // lucide-react dropped brand glyphs in v1, so the forge icons come from
 // simple-icons instead (@icons-pack/react-simple-icons).
 import { SiGithub, SiGitlab } from '@icons-pack/react-simple-icons'
@@ -13,6 +13,7 @@ import { ResizeHandle } from '../lib/ResizeHandle'
 import { CopyStateIcon } from './CopyStateIcon'
 import { useCopyFlash } from '../lib/useCopyFlash'
 import { copyWithToast } from '../lib/copyToast'
+import { DialogIconTile } from './dialogPrimitives'
 
 // FieldLabel is the Create MR dialog's field caption: sentence case (like the
 // DialogSectionLabel) and tight to the input below it.
@@ -393,9 +394,15 @@ export function CreateMRDialog({
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="w-full max-w-lg rounded-xl bg-white dark:bg-gray-900 shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col max-h-[90vh]">
-        <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
-          <ProviderIcon provider={config?.provider} className="w-5 h-5" />
-          <h2 className="text-base font-semibold">Create {providerLabel}</h2>
+        {/* The tile, like every other rich dialog header - this was the one
+            that hung a bare glyph off the heading. Blue to match the Create MR
+            button that opens it; `.optical-center` because the heading is being
+            centred against the tile (see CLAUDE.md). */}
+        <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3">
+          <DialogIconTile tone="blue" size="sm">
+            <ProviderIcon provider={config?.provider} className="w-[18px] h-[18px]" />
+          </DialogIconTile>
+          <h2 className="optical-center text-base font-semibold">Create {providerLabel}</h2>
         </div>
         <div className="px-5 py-4 overflow-auto flex flex-col gap-3">
           {/* Only an explicit false warns: the auth check runs in the background
@@ -466,8 +473,13 @@ export function CreateMRDialog({
           )}
           <div className="flex justify-end gap-2">
             <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
+            {/* Blue, not emerald: this dialog IS the Create MR button, which is
+                blue in the top bar - and its own header tile is blue for the same
+                reason. Emerald is the merge identity (the Merge button, the merge
+                dialog, the merged toast), so a green confirm here read as if it
+                were about to merge something. */}
             <DialogConfirmButton
-              tone="emerald"
+              tone="blue"
               onClick={() => onConfirm({ downstream_branch: branch.trim(), remote, target_branch: target.trim(), title: title.trim(), description, draft })}
               disabled={submitting || !branch.trim() || !target.trim()}
             >
@@ -478,10 +490,4 @@ export function CreateMRDialog({
       </div>
     </div>
   )
-}
-
-// mrIcon returns the icon for the publish/view-MR action button: a
-// create-pull-request glyph before the MR exists, a merge glyph once linked.
-export function MRIcon({ linked, className }: { linked: boolean; className?: string }) {
-  return linked ? <GitMerge className={className} /> : <GitPullRequestCreate className={className} />
 }

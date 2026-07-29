@@ -121,12 +121,29 @@ the layout still sees the trimmed height. So it is safe on a truncating label.
 **What it does not undo: a row whose height comes only from its label gets a
 couple of px shorter**, because shrinking that box is the whole point. That is
 usually fine (the file trees just read a touch denser); give the row its own
-height (`h-7`/`h-8`, as the top-bar buttons do) if it isn't. Not for prose
-either - trimming a multi-line block collapses the leading between its lines.
+height (`h-7`/`h-8`, as the top-bar buttons do) if it isn't. It also means a
+**sibling's** margin may need adjusting: on the agent toast, trimming the title
+closed the gap to the status line under it, which now carries a compensating
+`mt`.
+
+**It is fine on a block that wraps.** `text-box-trim: trim-both` trims the
+block's FIRST line at the top and its LAST line at the bottom; the leading
+*between* lines is untouched. (An earlier version of this note claimed the
+opposite - "trimming a multi-line block collapses the leading between its
+lines" - and that is wrong. A two-line toast message keeps its leading exactly,
+verified in the browser.) So it is the right tool whenever a text block, of any
+number of lines, has to sit optically centred against something - which is why
+the toast bodies use it to centre against their icon tile.
+
+What it is still **not** for is a block whose top and bottom spacing you want to
+read as prose margins: trimming pulls the block's outer edges in to the ink, so
+a paragraph in a column of paragraphs will sit tighter than its neighbours.
 
 Applied at: the top-bar action buttons, the repository + diff file trees, the
 sidebar project path, the collapsible card headers (previews / services / tests),
-the Settings section headings, and the chat rows beside a `WorkSpark`.
+the Settings section headings, the chat rows beside a `WorkSpark`, and the toast
+bodies (title, status line and plain message - see `Toaster` /
+`AgentTransitionRow` / `AgentNameLink`).
 
 **Correct the label, never the icon.** Both work - trimming the text down and
 nudging the mark up land in the same place - but the trim derives the offset from
@@ -137,6 +154,53 @@ honestly centred and the label carries the class. Note the trim needs LINE BOXES
 to act on: a flex container has none, so a label wrapper that is itself
 `flex items-center gap-*` must become an inline span (with the gap moved onto its
 separator) before the class does anything - see the chat result footer.
+
+The rule bans the magic CONSTANT, not touching the icon. When a mark has to ride
+inside the text flow - `AgentNameLink`'s Bot is inline so a wrapped title wraps
+back under it instead of being indented past it - size it in `em` and offset it
+in `cap`: `h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)]` puts the glyph's centre
+on the cap-box centre for any font at any size, and stays honest.
+
+### Baseline alignment in flex rows (CSS Flexbox 8.3)
+
+A row that mixes type sizes - a 10px hint, an 11px percentage, a 12px chip - and
+uses `items-center` puts three different baselines on screen, because centring
+aligns each item's LINE BOX and a bigger line box reserves more room above the
+cap. Two ways out, and they are not interchangeable:
+
+- **`items-baseline`** when the row is text and chips. Correct, but see the trap
+  below.
+- **`items-center` with `.optical-center` on every label** when the row also
+  holds icon buttons. Once each item's box IS its ink, centring aligns the ink,
+  and the buttons centre on the same thing the text does. This is what the chat
+  composer's footer uses.
+
+**The trap: a flex container only exposes a baseline to its parent if one of its
+own items takes part in baseline alignment.** With `align-items: center` none do,
+so the container synthesizes a baseline from its border box and lands several px
+off - and no amount of alignment on the PARENT can fix it. This bit three
+different components before it was understood:
+
+- the chat model-picker button (`flex items-center`) sat 4px above the labels
+  beside it;
+- `BranchPill` was an `inline-flex items-center` carrying `align-baseline`, which
+  therefore did nothing - it rode 2.8px high in every sentence naming a branch.
+  It is an `inline-block` now: one text child, nothing to lay out, and its
+  baseline is its text's baseline;
+- giving an icon button `self-center` inside an `items-baseline` row centres it
+  in the line's cross size (max-ascent over max-descent), whose midpoint sits
+  ABOVE the text's ink - so it reads ~1px high.
+
+`Badge`'s text-only variant is a plain span, so it cooperates; its icon-bearing
+and `xs` variants are flex containers and will not.
+
+When judging any of this, measure - do not squint. Drop a zero-height
+`inline-block` probe into the text (it sits exactly on the baseline, so its
+`getBoundingClientRect().top` IS the baseline) and take cap height from a canvas
+`measureText('H').actualBoundingBoxAscent`. Deriving a baseline from an element's
+own box does NOT work once `.optical-center` is on it: the class's 0.35em padding
+inflates the reported rect, and two measurements in a row wrongly concluded the
+class did nothing.
 
 ### Hostnames and URLs: `HostName` / `UrlText`
 
