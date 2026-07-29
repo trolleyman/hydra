@@ -73,6 +73,15 @@ describe('scanShellEmbeds', () => {
     expect(embeds("cat <<'EOF'\nplain text\nEOF\n")[0].lang).toBeNull()
   })
 
+  it('reads a `tee` operand as the file it writes, and ignores a discard', () => {
+    // What an agent writes to create a file it is about to run.
+    expect(embeds("tee -a scripts/probe.ts <<'EOF'\nconst x: number = 1\nEOF\n")[0].lang).toBe('typescript')
+    // The `> /dev/null` that keeps `tee` from echoing names no language, and
+    // must not shadow the file beside it.
+    expect(embeds("tee web/x.css > /dev/null <<'EOF'\na{}\nEOF\n")[0].lang).toBe('css')
+    expect(embeds("cat > /dev/null <<'EOF'\nplain\nEOF\n")[0].lang).toBeNull()
+  })
+
   it('handles <<- (tab-stripped) terminators and back-to-back heredocs', () => {
     const code = 'cat <<-EOF\n\tbody\n\tEOF\ncat <<A <<B\none\nA\ntwo\nB\n'
     expect(embeds(code).map((e) => code.slice(e.bodyStart, e.bodyEnd))).toEqual(['\tbody\n', 'one\n', 'two\n'])

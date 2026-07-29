@@ -186,6 +186,19 @@ func normalizeClaude(line []byte) []eventSpec {
 			interrupted.Status = "interrupted"
 			return []eventSpec{{sourceID: base, payload: interrupted}}
 		}
+		// The compaction preamble is CLI-injected, not typed, so the "Hydra
+		// already recorded it" rule below does not apply - and the CLI does not
+		// flag it isMeta either, so without this it falls through to nil and only
+		// ever enters the log when importClaudeHistory next reads the transcript.
+		// That import appends at the tail, so the "Continued from a previous
+		// conversation" pill surfaced however many turns later the next attach
+		// happened to be. The source id matches the history path's exactly, so
+		// that later import dedups to a no-op.
+		if isClaudeCompactionPreamble(userText) {
+			resumed := &UserMessage{ProviderContext: claudeContext(ev)}
+			resumed.Id, resumed.Content = ev.UUID, ev.Message.Content
+			return []eventSpec{{sourceID: base, payload: resumed}}
+		}
 		// Claude records an agent's completion notification TWICE: as the
 		// standalone bookkeeping record (collapsed below) and as the user turn that
 		// resumed the parent. Collapse both to the same canonical source id so the
@@ -340,6 +353,15 @@ func claudeAgentCompletionSpec(text string) []eventSpec {
 	done := &SubagentCompleted{}
 	done.Id, done.Status = taskID, "completed"
 	return []eventSpec{{sourceID: "claude:subagent:" + taskID + ":completed", payload: done}}
+}
+
+// isClaudeCompactionPreamble recognises the summary the CLI injects as the first
+// user turn after a context compaction (auto/ran-out-of-context or an explicit
+// /compact). The client matches the same opening to collapse it behind the
+// "Continued from a previous conversation" pill.
+func isClaudeCompactionPreamble(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text),
+		"This session is being continued from a previous conversation")
 }
 
 func normalizeClaudeHistory(line []byte) []eventSpec {

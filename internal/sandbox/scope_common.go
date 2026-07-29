@@ -40,6 +40,25 @@ type ScopeLimits struct {
 	CPUQuota  int // CPUQuota=<n>% hard cap (200 = 2 cores); <=0 omits
 	MemoryMax int // MemoryMax=<n>M hard cap in MB; <=0 omits
 	TasksMax  int // TasksMax=<n> process/thread cap; <=0 omits
+
+	// IOPath names the filesystem the bandwidth caps below apply to - systemd
+	// resolves it to the backing block device, so it is a plain path (the project
+	// root) rather than a device node. Empty drops both caps: io.max is per-device
+	// and there is nothing sane to guess.
+	IOPath string
+	// IOReadBandwidthMax / IOWriteBandwidthMax are hard throughput ceilings in
+	// MB/s (systemd IOReadBandwidthMax=/IOWriteBandwidthMax=, i.e. cgroup io.max).
+	// <=0 omits.
+	//
+	// These exist because IOWeight often does nothing. Weight-based IO control is
+	// implemented by BFQ or by blk-iocost; on a machine whose NVMe uses the `none`
+	// scheduler with iocost unconfigured - a common default - systemd writes
+	// io.weight, the kernel accepts it, and it has no effect whatsoever. io.max is
+	// blk-throttle, which works on any scheduler with no host setup, so it is the
+	// only ceiling that reliably bites. Nothing can detect the inert case from the
+	// property being accepted, which is why weights alone are not enough.
+	IOReadBandwidthMax  int
+	IOWriteBandwidthMax int
 }
 
 // ScopeUnit builds the transient scope unit name for a workload kind + id, e.g.

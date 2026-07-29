@@ -1258,11 +1258,13 @@ func toAPIResourceLimits(r *config.ResourceLimits) *api.ResourceLimits {
 		return nil
 	}
 	return &api.ResourceLimits{
-		CpuWeight: copyIntPtr(r.CPUWeight),
-		IoWeight:  copyIntPtr(r.IOWeight),
-		CpuQuota:  copyIntPtr(r.CPUQuota),
-		MemoryMax: copyIntPtr(r.MemoryMax),
-		TasksMax:  copyIntPtr(r.TasksMax),
+		CpuWeight:           copyIntPtr(r.CPUWeight),
+		IoWeight:            copyIntPtr(r.IOWeight),
+		CpuQuota:            copyIntPtr(r.CPUQuota),
+		MemoryMax:           copyIntPtr(r.MemoryMax),
+		TasksMax:            copyIntPtr(r.TasksMax),
+		IoReadBandwidthMax:  copyIntPtr(r.IOReadBandwidthMax),
+		IoWriteBandwidthMax: copyIntPtr(r.IOWriteBandwidthMax),
 	}
 }
 
@@ -1284,11 +1286,13 @@ func fromAPIResourceLimits(r *api.ResourceLimits) *config.ResourceLimits {
 		return &n
 	}
 	return &config.ResourceLimits{
-		CPUWeight: clamp(r.CpuWeight),
-		IOWeight:  clamp(r.IoWeight),
-		CPUQuota:  clamp(r.CpuQuota),
-		MemoryMax: clamp(r.MemoryMax),
-		TasksMax:  clamp(r.TasksMax),
+		CPUWeight:           clamp(r.CpuWeight),
+		IOWeight:            clamp(r.IoWeight),
+		CPUQuota:            clamp(r.CpuQuota),
+		MemoryMax:           clamp(r.MemoryMax),
+		TasksMax:            clamp(r.TasksMax),
+		IOReadBandwidthMax:  clamp(r.IoReadBandwidthMax),
+		IOWriteBandwidthMax: clamp(r.IoWriteBandwidthMax),
 	}
 }
 

@@ -63,9 +63,10 @@ func TestConfigMergeResources(t *testing.T) {
 // TestResolveResourceLimits checks defaults are filled for unset weights while
 // hard caps stay unset (0), and explicit values win.
 func TestResolveResourceLimits(t *testing.T) {
-	// nil Resources: default weights, no caps.
-	got := Config{}.ResolveResourceLimits()
-	want := sandbox.ScopeLimits{CPUWeight: sandbox.ScopeCPUWeight, IOWeight: sandbox.ScopeIOWeight}
+	// nil Resources: default weights, no caps. The io path is threaded through
+	// regardless - it names the device, not a limit.
+	got := Config{}.ResolveResourceLimits("/srv/proj")
+	want := sandbox.ScopeLimits{CPUWeight: sandbox.ScopeCPUWeight, IOWeight: sandbox.ScopeIOWeight, IOPath: "/srv/proj"}
 	if got != want {
 		t.Errorf("nil resources: got %+v, want %+v", got, want)
 	}
@@ -73,17 +74,22 @@ func TestResolveResourceLimits(t *testing.T) {
 	// Explicit values override defaults; caps come through; unset weight falls to
 	// the default.
 	got = Config{Resources: &ResourceLimits{
-		CPUWeight: iptr(20),
-		CPUQuota:  iptr(200),
-		MemoryMax: iptr(2048),
-		TasksMax:  iptr(512),
-	}}.ResolveResourceLimits()
+		CPUWeight:           iptr(20),
+		CPUQuota:            iptr(200),
+		MemoryMax:           iptr(2048),
+		TasksMax:            iptr(512),
+		IOReadBandwidthMax:  iptr(200),
+		IOWriteBandwidthMax: iptr(100),
+	}}.ResolveResourceLimits("/srv/proj")
 	want = sandbox.ScopeLimits{
-		CPUWeight: 20,
-		IOWeight:  sandbox.ScopeIOWeight,
-		CPUQuota:  200,
-		MemoryMax: 2048,
-		TasksMax:  512,
+		CPUWeight:           20,
+		IOWeight:            sandbox.ScopeIOWeight,
+		CPUQuota:            200,
+		MemoryMax:           2048,
+		TasksMax:            512,
+		IOPath:              "/srv/proj",
+		IOReadBandwidthMax:  200,
+		IOWriteBandwidthMax: 100,
 	}
 	if got != want {
 		t.Errorf("explicit resources: got %+v, want %+v", got, want)

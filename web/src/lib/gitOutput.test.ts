@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { gitOutputSpans } from './gitOutput'
+import { gitOutputSpans, parseBlameLine } from './gitOutput'
 
 // The colour a span carries, named rather than spelled, so a case reads as the
 // line it is about rather than as a list of Tailwind classes.
@@ -9,6 +9,9 @@ function tag(cls: string): string {
   if (cls.includes('red')) return 'del'
   if (cls.includes('amber')) return 'sha'
   if (cls.includes('sky')) return 'ref'
+  // A span carrying a fragment of a language takes Prism's own token classes -
+  // the ignore pattern in a `check-ignore -v` line.
+  if (cls.startsWith('token ')) return cls.slice('token '.length)
   return 'dim'
 }
 
@@ -163,8 +166,74 @@ describe('gitOutputSpans', () => {
     expect(out[5]).toEqual([['    - and the backoff with it', '']])
   })
 
+  it('reads a check-ignore as the rule it names', () => {
+    expect(spans(
+      'web/public/fonts/.gitignore:9:iosevka-*.woff2\tweb/public/fonts/iosevka-400-normal.woff2',
+      '.gitignore:35:/.iosevka-build.json\tweb/.iosevka-build.json',
+    )).toEqual([
+      [
+        ['web/public/fonts/.gitignore:9:', 'dim'],
+        ['iosevka-', ''], ['*', 'operator'], ['.woff2', ''],
+        ['\t', ''], ['web/public/fonts/iosevka-400-normal.woff2', ''],
+      ],
+      [
+        ['.gitignore:35:', 'dim'],
+        ['/', 'punctuation'], ['.iosevka-build.json', ''],
+        ['\t', ''], ['web/.iosevka-build.json', ''],
+      ],
+    ])
+  })
+
+  it('reads the empty source `-n` prints for a path nothing ignores', () => {
+    expect(spans('::\tweb/public/fonts/OFL.txt')).toEqual([
+      [['::', 'dim'], ['\t', ''], ['web/public/fonts/OFL.txt', '']],
+    ])
+  })
+
+  it('reads a branch listing, and says which one you are on', () => {
+    expect(spans(
+      '* main       a7401035 [origin/main: ahead 2] Fix it',
+      '  feat/x     5d671ab0 Ship it',
+    )).toEqual([
+      [['* ', 'ref'], ['main', 'ref'], ['       ', ''], ['a7401035', 'sha'], [' ', ''], ['[origin/main: ahead 2] Fix it', 'dim']],
+      [['  ', 'dim'], ['feat/x', ''], ['     ', ''], ['5d671ab0', 'sha'], [' ', ''], ['Ship it', 'dim']],
+    ])
+  })
+
+  it('reads a remote, a stash and a shortlog', () => {
+    expect(spans('origin\tgit@github.com:trolleyman/hydra.git (fetch)')).toEqual([
+      [['origin', 'ref'], ['\t', ''], ['git@github.com:trolleyman/hydra.git', ''], [' (fetch)', 'dim']],
+    ])
+    expect(spans('stash@{0}: WIP on main: a7401035 Fix it')).toEqual([
+      [['stash@{0}', 'ref'], [': ', 'dim'], ['WIP on main: ', 'dim'], ['a7401035', 'sha'], [' Fix it', '']],
+    ])
+    expect(spans('    42\tCallum Tolley')).toEqual([
+      [['    ', ''], ['42', 'sha'], ['\t', ''], ['Callum Tolley', '']],
+    ])
+  })
+
   it('leaves a line it has no shape for alone', () => {
     // A commit message body, indented four spaces by `git show`.
     expect(spans('    Merge branch \'main\'', '')).toEqual([[["    Merge branch 'main'", '']], []])
+  })
+})
+
+describe('parseBlameLine', () => {
+  it('splits a blame line into its commit, its context and its code', () => {
+    expect(parseBlameLine('a7401035 (Callum Tolley 2026-07-29 16:57:41 +0100  12) func main() {')).toEqual({
+      sha: 'a7401035',
+      meta: '(Callum Tolley 2026-07-29 16:57:41 +0100',
+      num: '12',
+      code: 'func main() {',
+    })
+    // A boundary commit, and a blank line of the file.
+    expect(parseBlameLine('^5d671ab (Callum Tolley 2026-07-29 16:57:41 +0100   3)')).toMatchObject({
+      sha: '^5d671ab', num: '3', code: '',
+    })
+  })
+
+  it('declines anything that is not one', () => {
+    expect(parseBlameLine('fatal: no such path')).toBeNull()
+    expect(parseBlameLine('')).toBeNull()
   })
 })

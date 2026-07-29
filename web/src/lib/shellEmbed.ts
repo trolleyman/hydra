@@ -118,6 +118,10 @@ const BARE_DELIM = /^[A-Za-z_][A-Za-z0-9_.-]*$/
 // Characters that end an unquoted word.
 const WORD_END = /[\s;|&<>()]/
 
+// A redirect target that is not a file: what is written to it is thrown away,
+// so it says nothing about the language of what was written.
+const DISCARD = /^\/dev\/(null|stdout|stderr|tty|fd\/\d+)$/
+
 // scanShellEmbeds finds the embedded-language regions of a shell snippet, in
 // source order and never overlapping. Exported for tests.
 export function scanShellEmbeds(code: string): ShellEmbed[] {
@@ -135,6 +139,9 @@ export function scanShellEmbeds(code: string): ShellEmbed[] {
   let lineLang: string | null = null
   // The previous token was a redirection operator, so the next word is a file.
   let redirect = false
+  // The command being scanned is a `tee`, so its first operand is a file it
+  // writes - the same thing a `>` says.
+  let teeTarget = false
   // The command being scanned is a search (grep, rg, ...): which dialect it
   // parses its pattern as - null once a `-F` says there is no regex in it - and
   // where in its arguments the pattern is.
@@ -145,6 +152,7 @@ export function scanShellEmbeds(code: string): ShellEmbed[] {
   let skipArg = false
   const endCommand = () => {
     cmdLang = null
+    teeTarget = false
     expectCode = null
     redirect = false
     searching = false
@@ -247,8 +255,25 @@ export function scanShellEmbeds(code: string): ShellEmbed[] {
     expectCode = null
     if (redirect) {
       redirect = false
-      const fileLang = getLanguage(word.literal)
-      if (fileLang !== 'plaintext') lineLang ??= fileLang
+      // `> /dev/null` names no file worth reading a language off, and must not
+      // be taken as one: `tee web/x.css > /dev/null <<'EOF'` writes CSS.
+      if (!DISCARD.test(word.literal)) {
+        const fileLang = getLanguage(word.literal)
+        if (fileLang !== 'plaintext') lineLang ??= fileLang
+      }
+      continue
+    }
+    // `tee f` writes its stdin to a file the same way `> f` does, so a heredoc
+    // piped into one is that file's language. Only the first operand: the rest
+    // are more copies of the same content.
+    if (teeTarget) {
+      // Its flags (`-a`, `-i`) come first and name nothing; the first OPERAND is
+      // the file.
+      if (!word.quoted && !word.literal.startsWith('-')) {
+        teeTarget = false
+        const fileLang = getLanguage(word.literal)
+        if (fileLang !== 'plaintext') lineLang ??= fileLang
+      }
       continue
     }
     if (cmdLang && isInlineCodeFlag(word.literal, cmdLang)) {
@@ -294,6 +319,7 @@ export function scanShellEmbeds(code: string): ShellEmbed[] {
         cmdLang = interp
         lineLang ??= interp
       }
+      if (word.literal === 'tee') teeTarget = true
       const flavour = grepFlavour(word.literal)
       if (flavour) {
         searching = true

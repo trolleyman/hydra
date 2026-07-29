@@ -12,6 +12,8 @@
 // separate because the backend's collectible-extension allowlists
 // (internal/artifacts) are narrower than what a user can attach to a prompt.
 
+import { isIgnoreFile } from './ignoreHighlight'
+
 export type FileKind = 'image' | 'video' | 'pdf' | 'text' | 'binary'
 
 // Still images the browser renders in an <img>. .webp is here rather than under
@@ -64,6 +66,9 @@ const LANG_BY_EXT: Record<string, string> = {
 }
 
 export function langFromPath(path: string): string {
+  // By NAME first: `.gitignore` has no extension, and the family it belongs to
+  // (`.dockerignore`, `.hydraignore`) is open-ended - see lib/ignoreHighlight.
+  if (isIgnoreFile(path)) return 'gitignore'
   const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase()
   return ext ? (LANG_BY_EXT[ext] ?? '') : ''
 }

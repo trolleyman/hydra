@@ -1167,6 +1167,10 @@ func BuildWeb() error {
 	}
 
 	if !webChanged && !apiChanged {
+		// Say so rather than skipping in silence. This build's output is also the
+		// server's self-update log, where "no web lines at all" is indistinguishable
+		// from "the frontend was never rebuilt".
+		fmt.Println("web: already up to date - skipping the frontend build")
 		return nil
 	}
 

@@ -2,6 +2,7 @@
 // thread (synchronous fallback for tiny inputs) and the highlight Web Worker
 // (`highlight.worker.ts`). Keeping these pure and in their own module means the
 // worker bundle pulls in Prism's grammars without dragging in any React/DOM code.
+import { highlightIgnore, isIgnoreLanguage } from './ignoreHighlight'
 import { hasLanguage } from './prism'
 import { escapeText, highlightTree, treeToHtml, treeToLines } from './prismHtml'
 import { highlightShell, isShellLanguage } from './shellEmbed'
@@ -58,12 +59,14 @@ export function splitHighlightedLines(html: string): string[] {
 //
 // A shell snippet detours through lib/shellEmbed, which highlights heredoc
 // bodies and inline interpreter code (`python3 -c "..."`) as the language they
-// actually are instead of as more bash.
+// actually are instead of as more bash; an ignore file through
+// lib/ignoreHighlight, which marks the machinery in each pattern.
 export function highlightHtml(code: string, language: string): string | null {
   if (!code) return null
-  // The shell check comes BEFORE hasLanguage: `zsh` and `ksh` are names Prism
-  // does not know (its bash grammar answers to bash/sh/shell only), but they are
-  // shell scripts and highlightShell renders them with the bash grammar.
+  // These checks come BEFORE hasLanguage: neither name is a grammar Prism can
+  // load. `zsh` and `ksh` are shell scripts (its bash grammar answers to
+  // bash/sh/shell only) and `gitignore` is highlighted here rather than by a
+  // grammar at all - see canHighlight.
   if (isShellLanguage(language)) {
     try {
       return highlightShell(code)
@@ -71,9 +74,20 @@ export function highlightHtml(code: string, language: string): string | null {
       return null
     }
   }
+  if (isIgnoreLanguage(language)) return highlightIgnore(code)
   if (!hasLanguage(language)) return null
   const tree = highlightTree(code, language)
   return tree == null ? null : treeToHtml(tree.children)
+}
+
+// canHighlight reports whether anything here can colour `language` right now -
+// a registered Prism grammar, or one of the two languages this module renders
+// without one (a shell snippet, an ignore file). It is what a caller should ask
+// before falling back to plain text or reaching for prismLazy: hasLanguage alone
+// answers "is there a grammar", which is a narrower question and got `gitignore`
+// rendered plain in the diff viewer while the same file colourised in the chat.
+export function canHighlight(language: string): boolean {
+  return isShellLanguage(language) || isIgnoreLanguage(language) || hasLanguage(language)
 }
 
 // How many times highlightLines will restart after losing the thread, and how
@@ -94,7 +108,9 @@ function lastTokenedLine(lines: string[], from: number): number {
 // linesOnce highlights a run of code and returns per-line HTML, without the
 // resync loop. Null when the language isn't highlightable at all.
 function linesOnce(code: string, language: string): string[] | null {
-  if (isShellLanguage(language)) {
+  // The two languages with no grammar behind them compose HTML directly, so
+  // there is no tree to split - the markup is cut at the newlines instead.
+  if (isShellLanguage(language) || isIgnoreLanguage(language)) {
     const html = highlightHtml(code, language)
     return html == null ? null : splitHighlightedLines(html)
   }

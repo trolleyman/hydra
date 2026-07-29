@@ -1,10 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, linkOptions, type LinkProps } from '@tanstack/react-router'
-import { highlightHtml, highlightLines } from './lib/highlightCore'
+import { canHighlight, highlightHtml, highlightLines } from './lib/highlightCore'
 import { highlightSides } from './lib/highlightClient'
 import { getLanguage } from './lib/language'
-import { hasLanguage } from './lib/prism'
 import { ensureLanguage } from './lib/prismLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
@@ -1213,12 +1212,12 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // langReady flips false→true once it lands, re-running the sync highlight below.
   const [, bumpGrammar] = useState(0)
   useEffect(() => {
-    if (hasLanguage(lang)) return
+    if (canHighlight(lang)) return
     let cancelled = false
     ensureLanguage(lang).then((ok) => { if (ok && !cancelled) bumpGrammar((n) => n + 1) })
     return () => { cancelled = true }
   }, [lang])
-  const langReady = lang === 'plaintext' || hasLanguage(lang)
+  const langReady = lang === 'plaintext' || canHighlight(lang)
   const syncHighlight = useMemo(
     () => (highlightSource && highlightSource.length <= HL_SYNC_MAX
       ? buildHighlightMaps(highlightSource, langReady ? lang : 'plaintext')

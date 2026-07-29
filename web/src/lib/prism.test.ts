@@ -3,6 +3,7 @@ import { refractor, hasLanguage } from './prism'
 import { ensureLanguage } from './prismLazy'
 import { LAZY_LANGUAGES } from './prismLazyRegistry'
 import { getLanguage, shebangLanguage } from './language'
+import { canHighlight } from './highlightCore'
 import { highlightToHtml } from './prismHtml'
 
 describe('getLanguage', () => {
@@ -28,6 +29,14 @@ describe('getLanguage', () => {
     expect(getLanguage('deploy/Dockerfile')).toBe('docker')
     expect(getLanguage('Makefile')).toBe('makefile')
     expect(getLanguage('go.mod')).toBe('plaintext')
+  })
+
+  it('reads the ignore-file family by name', () => {
+    // No extension to key on, and the family is open-ended - see
+    // lib/ignoreHighlight, which highlights the result without a Prism grammar.
+    expect(getLanguage('web/.gitignore')).toBe('gitignore')
+    expect(getLanguage('.dockerignore')).toBe('gitignore')
+    expect(getLanguage('.hydraignore')).toBe('gitignore')
   })
 
   it('falls back to plaintext for unknown extensions', () => {
@@ -68,13 +77,15 @@ describe('getLanguage', () => {
       'a.ps1', 'a.bat', 'a.yaml', 'a.toml', 'a.ini', 'a.properties', 'a.sql',
       'a.graphql', 'a.proto', 'a.md', 'a.tex', 'a.m', 'a.glsl', 'a.f90', 'a.vim',
       'a.pp', 'a.vala', 'a.hx', 'a.cr', 'a.cmake', 'a.feature', 'a.diff',
-      'Dockerfile', 'Makefile', 'CMakeLists.txt', 'Gemfile',
+      'Dockerfile', 'Makefile', 'CMakeLists.txt', 'Gemfile', '.gitignore',
     ]
     const names = new Set(paths.map((p) => getLanguage(p)))
     for (const shebang of ['python3', 'ruby', 'perl', 'node', 'deno', 'lua', 'awk', 'osascript', 'julia', 'racket', 'make']) {
       names.add(getLanguage('script', `#!/usr/bin/env ${shebang}`))
     }
-    const missing = [...names].filter((n) => n !== 'plaintext' && !hasLanguage(n) && !(n in LAZY_LANGUAGES))
+    // canHighlight, not hasLanguage: `gitignore` is coloured by
+    // lib/ignoreHighlight rather than by a grammar, and is not a typo.
+    const missing = [...names].filter((n) => n !== 'plaintext' && !canHighlight(n) && !(n in LAZY_LANGUAGES))
     expect(missing).toEqual([])
   })
 })

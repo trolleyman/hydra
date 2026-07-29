@@ -45,12 +45,17 @@ import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
-import { fileViewLineInfo, parseFileViewScript, splitFileViewOutput, type FileViewSection } from '../lib/fileViewCommand'
-import { gitOutputSpans, type GitSpan } from '../lib/gitOutput'
+import { FILE_BANNER, viewLineNumbers } from '../lib/fileViewCommand'
+import { buildOutputSpans } from '../lib/buildOutput'
+import { diskOutputSpans } from '../lib/diskOutput'
+import { searchSummarySpans } from '../lib/searchSummary'
+import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
+import type { OutputSpan } from '../lib/outputSpan'
 import { parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
 import { formatBytes } from '../lib/formatBytes'
-import { highlightHtml, highlightLines } from '../lib/highlightCore'
+import { highlightHtml, highlightLines, splitHighlightedLines } from '../lib/highlightCore'
+import { escapeText } from '../lib/prismHtml'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
@@ -1839,17 +1844,66 @@ function CodePanel({ code, lang }: { code: string; lang: string }) {
   return <pre className={cls}>{code}</pre>
 }
 
+// separatorHtml colours the `echo` separators an agent wrote into a script whose
+// output could not be sectioned at all - because it carries ANSI colour, or
+// because too little of the script was describable (see lib/shellSections).
+//
+// Those headings are the reader's only map of a long build log, and they are the
+// one thing in it the script proves: this line is that `echo`, whatever the
+// commands around it did. So they get the same string colour a sectioned
+// script's separators get, and every other line is left exactly as it arrived -
+// ANSI colours and all.
+//
+// Null when nothing matched, so the caller keeps its ordinary rendering.
+function separatorHtml(text: string, markers: string[]): string | null {
+  const wanted = new Set(markers.flatMap((m) => m.split('\n')).map((l) => l.trimEnd()).filter(Boolean))
+  const plain = stripAnsi(text).split('\n')
+  // What a compiler or a test runner said, for the (very common) card whose
+  // whole output is a build log - see lib/buildOutput. Only over lines the
+  // terminal did NOT colour itself: where it did, its colours are better
+  // informed than any shape read off the text.
+  const built = buildOutputSpans(plain)
+  if (wanted.size === 0 && !built) return null
+  // The ANSI is rendered first and then cut at the newlines, so a colour that
+  // spans lines survives the split (splitHighlightedLines re-opens it).
+  const raw = text.split('\n')
+  const rendered = hasAnsi(text) ? splitHighlightedLines(ansiToHtml(text)) : plain.map(escapeText)
+  if (rendered.length !== plain.length || raw.length !== plain.length) return null
+  let found = false
+  const out = plain.map((line, i) => {
+    if (wanted.has(line.trimEnd())) {
+      found = true
+      return `<span class="token string">${escapeText(line)}</span>`
+    }
+    const spans = built?.[i]
+    if (spans && !hasAnsi(raw[i]) && spans.some((sp) => sp.cls !== '')) {
+      found = true
+      return spans.map((sp) => (sp.cls ? `<span class="${sp.cls}">${escapeText(sp.text)}</span>` : escapeText(sp.text))).join('')
+    }
+    return rendered[i]
+  })
+  return found ? out.join('\n') : null
+}
+
 // OutputPanel renders a tool's textual output on the shared quiet panel,
 // syntax highlighted when a language is known (item 3, e.g. a Read of a .ts
 // file). The card border/status carries failure semantics; keeping the output
 // neutral means a long mostly-successful script does not become a wall of red.
-function OutputPanel({ text, lang }: { text: string; lang: string; isError?: boolean }) {
+//
+// `markers` are the constant strings the command's own script printed, when it
+// had any - see separatorHtml.
+function OutputPanel({ text, lang, markers }: { text: string; lang: string; isError?: boolean; markers?: string[] }) {
   // Code output (a Read of a known extension) is stripped of any stray ANSI and
   // syntax highlighted; terminal output (bash) keeps its ANSI colours, rendered
   // to spans. Neither path ever shows raw escape garbage.
+  const markerKey = markers?.join('\n') ?? ''
   const html = useMemo(
-    () => (lang ? highlightHtml(stripAnsi(text), lang) : hasAnsi(text) ? ansiToHtml(text) : null),
-    [text, lang],
+    () => {
+      if (lang) return highlightHtml(stripAnsi(text), lang)
+      return separatorHtml(text, markerKey ? markerKey.split('\n') : [])
+        ?? (hasAnsi(text) ? ansiToHtml(text) : null)
+    },
+    [text, lang, markerKey],
   )
   const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
   if (html != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
@@ -2130,58 +2184,31 @@ function ReadOutputPanel({ text, lang }: { text: string; lang: string }) {
   return <GutterCodePanel nums={parsed.nums} code={parsed.code} lang={lang} />
 }
 
-// FileViewBody renders one file view's slice of a read-shaped shell command's
-// output (see lib/fileViewCommand): the file's own line numbers in the gutter,
-// highlighted by its extension. A `cat -n` brings its numbers with it, and a
-// plain `tail` knows no line numbers at all - it still gets the highlighting.
-function FileViewBody({ section }: { section: FileViewSection }) {
-  const lang = langFromPath(section.path)
-  const text = section.lines.join('\n')
-  if (section.lines.length === 0) return <OutputPanel text="" lang="" />
-  if (section.numbered) return <ReadOutputPanel text={text} lang={lang} />
-  if (section.start == null) return <OutputPanel text={text} lang={lang} />
-  const start = section.start
-  return <GutterCodePanel nums={section.lines.map((_, i) => String(start + i))} code={section.lines} lang={lang} />
-}
-
-// FileViewSections renders the file content a read-shaped shell command printed,
-// one block per file it looked at. Each block is captioned with the step that
-// produced it: the card header calls this a Read, so the command it is really a
-// Read of belongs where you can see it without opening the Raw JSON - and with
-// several files in one call, that caption is also what tells them apart.
-function FileViewSections({ sections }: { sections: FileViewSection[] }) {
-  return (
-    <div className="space-y-1.5">
-      {sections.map((section, i) => (
-        <div key={i}>
-          {/* Plain non-interactive truncated text: native title is the right
-              tool here (see the tooltip conventions in CLAUDE.md). */}
-          <div
-            className="mb-0.5 truncate font-mono text-[10px] text-stone-400 dark:text-stone-500 select-none"
-            title={section.command}
-          >
-            {section.command}
-          </div>
-          <FileViewBody section={section} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
 // One rendered line of a shell script's sectioned output.
 interface ScriptOutputRow {
   // The line's number in the file it came from ('' when it has none).
   num: string
   // The line's content, already highlighted.
   html: string
-  // Pre-coloured pieces instead of `html`, for a line git wrote about the
-  // repository rather than one it read out of a file (lib/gitOutput): there is
-  // no grammar to run over those, just shapes, so they arrive as spans.
-  spans?: GitSpan[]
+  // Pre-coloured pieces instead of `html`, for a line a TOOL wrote rather than
+  // one it read out of a file - what git said about the repository
+  // (lib/gitOutput), what `du` or `df` measured (lib/diskOutput), what a build
+  // said went wrong (lib/buildOutput). There is no grammar to
+  // run over those, just shapes, so they arrive as spans.
+  spans?: OutputSpan[]
   // The `path:` a multi-file search printed in front of the line, shown lowlit
   // so the file it names does not read as part of the line's code.
   prefix?: string
+  // A prefix the tool wrote in its OWN colours rather than one to lowlight - the
+  // commit, author and date in front of each line of a blame.
+  prefixSpans?: OutputSpan[]
+  // The file this line's NUMBER counts in, when the script named one. A
+  // sectioned script's gutter is several files' numbering stacked in one column
+  // - the numbers restart, and nothing on the row says at which file - so the
+  // gutter cell carries it as a tooltip. (A native title, deliberately: this is
+  // one element per output line, which is exactly the long-list case the
+  // tooltip convention in CLAUDE.md keeps native.)
+  file?: string
   // 'code' is a line of some file, 'marker' a separator the script echoed, and
   // 'plain' output nothing could be said about.
   tone: 'code' | 'marker' | 'plain'
@@ -2204,10 +2231,19 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   const rows: ScriptOutputRow[] = []
   let run: MatchLine[] = []
   let runLang = ''
+  // The file every line of the section came from, when the search named exactly
+  // one - a line's own `path:` prefix says it otherwise, and is shown.
+  const onlyPath = section.match.paths.length === 1 ? section.match.paths[0] : ''
   const flush = () => {
     if (run.length === 0) return
     const html = highlightLines(run.map((l) => l.text).join('\n'), runLang || 'plaintext')
-    run.forEach((l, i) => rows.push({ num: l.num, html: html[i] ?? '', prefix: l.path || undefined, tone: 'code' }))
+    run.forEach((l, i) => rows.push({
+      num: l.num,
+      html: html[i] ?? '',
+      prefix: l.path || undefined,
+      file: l.path || onlyPath || undefined,
+      tone: 'code',
+    }))
     run = []
   }
   for (const line of parseMatchLines(section.lines, section.match.paths)) {
@@ -2220,6 +2256,73 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
     if (lang !== runLang) flush()
     runLang = lang
     run.push(line)
+  }
+  flush()
+  return rows
+}
+
+// scriptBlameRows renders a `git blame f`: each line of the file behind the
+// commit that last touched it. The prefix is git's - the sha in the colour a sha
+// takes everywhere else, the author and date lowlit behind it - and what follows
+// is a line of that file, so it is numbered by blame's own numbers and
+// highlighted as the file's language.
+//
+// The code is highlighted as ONE run, because that is what it is: a blame prints
+// the file in order, so a multi-line construct colourises correctly.
+function scriptBlameRows(section: Extract<ScriptSection, { kind: 'blame' }>): ScriptOutputRow[] {
+  const parsed = section.lines.map(parseBlameLine)
+  const lang = langFromPath(section.path)
+  // A line blame's shape does not fit (a `fatal:` on stderr) contributes an
+  // empty line to the run, so the highlighting of the lines around it still
+  // lines up with them.
+  const html = highlightLines(parsed.map((b) => b?.code ?? '').join('\n'), lang || 'plaintext')
+  return parsed.map((blame, i) => (blame
+    ? {
+      num: blame.num,
+      html: html[i] ?? '',
+      prefixSpans: blamePrefixSpans(blame),
+      file: section.path,
+      tone: 'code' as const,
+    }
+    : { num: '', html: escapeText(section.lines[i]), tone: 'plain' as const }))
+}
+
+// scriptBannerRows renders a `head -20 a.go b.go`: several files' contents with
+// the `==> name <==` banner head/tail print between them. Each stretch is
+// highlighted as the file its banner names and numbered from the line the
+// command asked for, and the banner itself renders as the separator it is - the
+// same treatment an `echo` heading gets, because it does the same job.
+//
+// The banner is the ONLY thing that says which file a stretch is. So a stretch
+// with no banner in front of it (output that began before the first one, a
+// truncated read) is plain text rather than a guess.
+function scriptBannerRows(section: Extract<ScriptSection, { kind: 'banners' }>): ScriptOutputRow[] {
+  const rows: ScriptOutputRow[] = []
+  let path = ''
+  let run: string[] = []
+  // How many lines of each file the command asked for. `head` prints a BLANK
+  // line between files, which is the separator's and not the file's - so a run
+  // longer than the count has that tail rendered as the spacing it is, rather
+  // than numbered as a line the file does not have.
+  const limit = section.view.start != null && section.view.end != null
+    ? section.view.end - section.view.start + 1
+    : null
+  const flush = () => {
+    if (run.length === 0) return
+    const own = limit != null ? run.slice(0, limit) : run
+    const nums = path ? viewLineNumbers(section.view, own.length) : []
+    const html = highlightLines(own.join('\n'), (path && langFromPath(path)) || 'plaintext')
+    run.forEach((line, i) => rows.push(i < own.length
+      ? { num: nums[i] ?? '', html: html[i] ?? '', file: path || undefined, tone: path ? 'code' : 'plain' }
+      : { num: '', html: escapeText(line), tone: 'plain' }))
+    run = []
+  }
+  for (const line of section.lines) {
+    const banner = FILE_BANNER.exec(line)
+    if (!banner) { run.push(line); continue }
+    flush()
+    path = banner[1]
+    rows.push({ num: '', html: `<span class="token string">${escapeText(line)}</span>`, tone: 'marker' })
   }
   flush()
   return rows
@@ -2241,15 +2344,67 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       for (const spans of gitOutputSpans(section.lines)) rows.push({ num: '', html: '', spans, tone: 'code' })
       continue
     }
-    if (section.kind !== 'view') {
-      // 'plaintext' is not a grammar, so this is just the escaped lines - which
-      // is what both a separator and unattributable output want.
+    if (section.kind === 'summary') {
+      for (const spans of searchSummarySpans(section.summary, section.lines)) {
+        rows.push({ num: '', html: '', spans, tone: 'code' })
+      }
+      continue
+    }
+    if (section.kind === 'blame') {
+      rows.push(...scriptBlameRows(section))
+      continue
+    }
+    if (section.kind === 'banners') {
+      rows.push(...scriptBannerRows(section))
+      continue
+    }
+    if (section.kind === 'disk') {
+      for (const spans of diskOutputSpans(section.tool, section.lines)) {
+        rows.push({ num: '', html: '', spans, tone: 'code' })
+      }
+      continue
+    }
+    if (section.kind === 'plain') {
+      // Three answers, in the order of who knows most about the line.
+      //
+      // The TERMINAL knows best: where a tool coloured a line itself, that
+      // colour is better informed than any shape read off the text, and it is
+      // the only structure such a stretch has.
+      //
+      // Failing that: is this a compiler, a linter or a test runner talking?
+      // That is answered by the LINE and not by the command, because the command
+      // that printed it (`mage build`, `make`, `npm run lint`) is unknowable -
+      // see lib/buildOutput.
+      //
+      // Failing both, it is the plain terminal text it arrived as.
+      const raw = section.raw
+      const ansi = raw ? splitHighlightedLines(ansiToHtml(raw.join('\n'))) : null
+      // Splitting the rendered ANSI must give one entry per line; a mismatch
+      // would pair a line with another line's colours.
+      const coloured = ansi && ansi.length === section.lines.length ? ansi : null
+      const built = buildOutputSpans(section.lines)
       const escaped = highlightLines(section.lines.join('\n'), 'plaintext')
-      const marker = section.kind === 'marker'
-      escaped.forEach((html) => rows.push({
+      section.lines.forEach((_, i) => {
+        if (coloured && raw && hasAnsi(raw[i])) {
+          rows.push({ num: '', html: coloured[i], tone: 'plain' })
+          return
+        }
+        const spans = built?.[i]
+        if (spans && spans.some((sp) => sp.cls !== '')) {
+          rows.push({ num: '', html: '', spans, tone: 'plain' })
+          return
+        }
+        rows.push({ num: '', html: escaped[i] ?? '', tone: 'plain' })
+      })
+      continue
+    }
+    if (section.kind === 'marker') {
+      // A separator is the string the script printed, so it takes the string
+      // colour whatever the terminal did with it.
+      highlightLines(section.lines.join('\n'), 'plaintext').forEach((line) => rows.push({
         num: '',
-        html: marker ? `<span class="token string">${html}</span>` : html,
-        tone: marker ? 'marker' : 'plain',
+        html: `<span class="token string">${line}</span>`,
+        tone: 'marker',
       }))
       continue
     }
@@ -2257,15 +2412,19 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
     // A `cat -n` brought its own numbers; a range knows where it started; a
     // plain `tail` counts back from an end nothing here knows, so it gets the
     // highlighting without the gutter.
-    const nums: string[] = []
     const code: string[] = []
+    const own: string[] = []
     for (const line of section.lines) {
       const numbered = view.numbered ? /^\s{0,6}(\d+)\t(.*)$/.exec(line) : null
-      nums.push(numbered ? numbered[1] : view.start != null && !view.numbered ? String(view.start + code.length) : '')
+      own.push(numbered ? numbered[1] : '')
       code.push(numbered ? numbered[2] : line)
     }
+    // The file's own numbering, counted from the range (or ranges) the command
+    // asked for - unless the output brought its own, which only a `cat -n` does.
+    const counted = view.numbered ? [] : viewLineNumbers(view, code.length)
+    const nums = code.map((_, i) => own[i] || counted[i] || '')
     const html = highlightLines(code.join('\n'), langFromPath(view.path) || 'plaintext')
-    nums.forEach((num, i) => rows.push({ num, html: html[i] ?? '', tone: 'code' }))
+    nums.forEach((num, i) => rows.push({ num, html: html[i] ?? '', file: view.path, tone: 'code' }))
   }
   return rows
 }
@@ -2292,13 +2451,20 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
             {gutter && (
-              <span className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]">{row.num}</span>
+              <span
+                // Plain non-interactive text in a long list: native title is the
+                // right tool here (see the tooltip conventions in CLAUDE.md).
+                title={row.file ? (row.num ? `${row.file}:${row.num}` : row.file) : undefined}
+                className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
+              >{row.num}</span>
             )}
             <span
               data-copy-line
               className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
             >
               {row.prefix && <span className="text-stone-400 dark:text-stone-500">{row.prefix}:</span>}
+              {row.prefixSpans?.map((sp, j) => <span key={j} className={sp.cls}>{sp.text}</span>)}
+              {row.prefixSpans && ' '}
               {row.spans
                 ? row.spans.map((s, j) => <span key={j} className={s.cls}>{s.text}</span>)
                 : <span dangerouslySetInnerHTML={{ __html: row.html }} />}
@@ -2974,51 +3140,41 @@ const ToolCard = memo(function ToolCard({
       ? (input.description as string)
       : ''
 
-  // A Bash step that only LOOKS at files (`sed -n 40,110p f`, `cat f`, `head
-  // -50 f`) is a Read spelled in shell - the shape every agent without a Read
-  // tool has to use. Such a card takes the Read presentation: the file and its
-  // line range in the header, and the output rendered as numbered, syntax-
-  // highlighted source instead of a wall of anonymous terminal text.
+  // A shell script says a great deal about its own output. The constant `echo`s
+  // an agent puts between its steps mark where each command's output begins, and
+  // the command in between names the file its lines came from - so the wall of
+  // terminal text can be given back its structure: file content highlighted by
+  // extension and numbered by the range the command asked for, grep's own line
+  // numbers in a gutter, git and `du` in their own colours, the separators
+  // coloured as the strings they are (see lib/shellSections).
   //
-  // The parse is of the COMMAND alone, so the header settles the moment the call
-  // starts rather than flipping shape when the output lands; the split of the
-  // output is separate, and when it disagrees with the script only the body
-  // falls back to the plain command + output panels (see lib/fileViewCommand).
+  // A Bash step that only LOOKS at files (`sed -n 40,110p f`, `cat f`, `head -50
+  // f`) - the Read every agent without a Read tool has to spell in shell - is
+  // one case of that rather than a card of its own. It reads as the command it
+  // was, with its content rendered as source; a card that renamed itself "Read"
+  // hid the script that actually ran.
   //
-  // Plain consts, not useMemo: both derive from `item`, which the reducer
-  // mutates in place (see the ToolCard memo note), and a manual dependency on a
-  // mutated value makes the React compiler skip optimizing the WHOLE card. It
-  // memoizes these for us instead.
-  const fileViewSteps = isBash && !isHostRun ? parseFileViewScript(unwrapBashLoginCommand(bashSource)) : null
-  const fileViews = fileViewSteps?.flatMap((s) => (s.kind === 'view' ? [s.view] : [])) ?? []
-  const isReadShell = fileViews.length > 0
-  // Deduped: several ranges of ONE file are one file in the header.
-  const readShellPaths: string[] = []
-  for (const view of fileViews) {
-    const path = collapseHome(trimWorktreePaths(view.path, worktree))
-    if (!readShellPaths.includes(path)) readShellPaths.push(path)
-  }
-  const fileViewSections =
-    fileViewSteps && renderedResult !== undefined && !item.isError
-      ? splitFileViewOutput(fileViewSteps, stripAnsi(renderedResult))
-      : null
-
-  // A script that is not ALL reads still says a great deal about its own output.
-  // The constant `echo`s an agent puts between its steps mark where each
-  // command's output begins, and the command in between names the file its lines
-  // came from - so the wall of terminal text can be given back its structure:
-  // file content highlighted by extension, grep's own line numbers in a gutter,
-  // the separators coloured as strings (see lib/shellSections).
+  // Not over an error: stderr interleaves with stdout in an order no parse of
+  // the script can predict, so every section boundary would be a guess. ANSI
+  // colour is fine - it is stripped for the matching and the highlighting, and
+  // put back for the stretches that render as terminal text (lib/shellSections).
   //
-  // Only where the Read presentation above did not already claim the output, and
-  // never over ANSI colour (a `grep --color` line is not the file's own text) or
-  // an error (stderr interleaves with stdout in an order no parse of the script
-  // can predict, so every section boundary would be a guess).
-  const scriptSteps = isBash && fileViewSections === null ? parseScriptSteps(unwrapBashLoginCommand(bashSource)) : null
+  // A plain const, not useMemo: it derives from `item`, which the reducer mutates
+  // in place (see the ToolCard memo note), and a manual dependency on a mutated
+  // value makes the React compiler skip optimizing the WHOLE card. It memoizes
+  // this for us instead.
+  const scriptSteps = isBash ? parseScriptSteps(unwrapBashLoginCommand(bashSource)) : null
   const scriptSections =
-    scriptSteps && renderedResult !== undefined && !item.isError && !hasAnsi(renderedResult)
+    scriptSteps && renderedResult !== undefined && !item.isError
       ? splitScriptOutput(scriptSteps, renderedResult)
       : null
+  // What the script's own `echo`s printed, for the output that gets NO sections:
+  // a build log carrying ANSI, a script of steps too opaque to attribute. The
+  // separators in it are still the strings the script says they are, so they are
+  // still coloured as such (see separatorHtml).
+  const scriptMarkers = scriptSections
+    ? undefined
+    : scriptSteps?.flatMap((s) => (s.kind === 'marker' ? [s.text] : []))
 
   // Read specifics (items 1, 3, 5): the file it read, a "memory <name>" alias
   // for auto-memory files, the line range for the header, whether the input is
@@ -3042,17 +3198,11 @@ const ToolCard = memo(function ToolCard({
   // Only for the single-file form: ranges pooled across several files would read
   // as one list belonging to none of them.
   const gitAddLines = gitAddSpecList.length === 1 ? gitAddSpecList[0].lines : []
-  // A read-shaped shell command fills the same slot from its own range. Only
-  // when it looked at ONE file: several ranges pooled in the header would read
-  // as one list belonging to none of them (as for git_add above), and each
-  // section states its own command anyway.
   const lineInfo = isRead
     ? readLineInfo(input)
-    : fileViews.length === 1
-      ? fileViewLineInfo(fileViews[0])
-      : gitAddLines.length > 0
-        ? `lines ${gitAddLines.join(', ')}`
-        : ''
+    : gitAddLines.length > 0
+      ? `lines ${gitAddLines.join(', ')}`
+      : ''
   const simpleRead =
     isRead && input != null && Object.keys(input).every((k) => k === 'file_path' || k === 'offset' || k === 'limit')
   const outputLang = isRead ? langFromPath(readPath) : ''
@@ -3106,11 +3256,8 @@ const ToolCard = memo(function ToolCard({
   // description / task subject / prose input field (a ScheduleWakeup prompt)
   // are prose (sans) already.
   const isPathSummary =
-    isReadShell ||
-    (!isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string'))
-  const summaryPaths = isReadShell
-    ? readShellPaths
-    : isFileChanges
+    !isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string')
+  const summaryPaths = isFileChanges
       ? changedPaths
       : gitAddPaths.length > 0
         ? gitAddPaths.map((p) => collapseHome(trimWorktreePaths(p, worktree)))
@@ -3126,14 +3273,11 @@ const ToolCard = memo(function ToolCard({
   // A single-file git_add is the same case as a plain Read: its header already
   // carries the path and the line ranges, so the panel would only repeat them.
   const gitAddSimple = gitTool === 'git_add' && gitAddPaths.length === 1
-  // A read-shaped shell command whose output split cleanly needs no Command
-  // panel either: every section is captioned with the step that produced it, so
-  // the panel would print the same script twice.
-  const hideInput = simpleRead || emptyInput || gitAddSimple || fileViewSections !== null
+  const hideInput = simpleRead || emptyInput || gitAddSimple
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
-  const hasInput = fileViewSections !== null ? false : isBash || !hideInput
-  const Icon = isHostRun ? ShieldAlert : isReadShell ? FileText : TOOL_ICONS[item.name] ?? Wrench
+  const hasInput = isBash || !hideInput
+  const Icon = isHostRun ? ShieldAlert : TOOL_ICONS[item.name] ?? Wrench
 
   // The security gate may have parked THIS call for the user (a host-run, an
   // unvetted MCP tool, ...). When it has, the card answers for itself instead of
@@ -3193,7 +3337,7 @@ const ToolCard = memo(function ToolCard({
             className={`w-3 h-3 shrink-0 self-center text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
           />
           <Icon className={`w-3 h-3 shrink-0 self-center ${item.isError ? 'text-red-500 dark:text-red-400' : isHostRun ? 'text-red-500/90 dark:text-red-400/90' : 'text-stone-400 dark:text-stone-500'}`} />
-          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : isReadShell ? 'Read' : gitTool ? gitToolHeading(gitTool, input) : displayToolName(item.name)}</span>
+          <span className="font-medium shrink-0">{isHostRun ? 'Host run' : gitTool ? gitToolHeading(gitTool, input) : displayToolName(item.name)}</span>
           {/* A host run leaves the sandbox - say so in the collapsed header, where
               it can't be missed, not only in the body. */}
           {isHostRun && (
@@ -3249,7 +3393,7 @@ const ToolCard = memo(function ToolCard({
             <CodePanel code={rawJson} lang="json" />
           ) : (
             <>
-              {isBash && !fileViewSections ? (
+              {isBash ? (
                 <div>
                   {interactiveTranscript && (
                     <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
@@ -3352,13 +3496,11 @@ const ToolCard = memo(function ToolCard({
                           ? <WebSearchOutput text={renderedResult} />
                         : isWebFetch && !item.isError
                           ? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
-                        : fileViewSections
-                          ? <FileViewSections sections={fileViewSections} />
                         : scriptSections
                           ? <ScriptOutputPanel sections={scriptSections} />
                         : isRead && !item.isError
 								? <ReadOutputPanel text={renderedResult} lang={outputLang} />
-								: <OutputPanel text={renderedResult} lang={outputLang} isError={item.isError} />
+								: <OutputPanel text={renderedResult} lang={outputLang} isError={item.isError} markers={scriptMarkers} />
                   )}
                 </div>
               )}

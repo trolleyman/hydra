@@ -27,7 +27,7 @@ import (
 // run on an error path; runners that always defer StopScope can ignore it.
 func Apply(projectRoot, unit string, spec *sandbox.Spec) bool {
 	limits, _ := config.Load(projectRoot)
-	return sandbox.WrapScope(unit, spec, limits.ResolveResourceLimits())
+	return sandbox.WrapScope(unit, spec, limits.ResolveResourceLimits(projectRoot))
 }
 
 // Command builds the exec.Cmd for a launch spec - the Path/Args/Dir/Env/ExtraFiles

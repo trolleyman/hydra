@@ -2868,8 +2868,14 @@ type ResourceLimits struct {
 	// CpuWeight Relative CPU share under contention (systemd CPUWeight, 1-10000). null uses the default (50).
 	CpuWeight *int `json:"cpu_weight"`
 
+	// IoReadBandwidthMax Hard read ceiling in MB/s for the device backing the project root (systemd IOReadBandwidthMax, i.e. cgroup io.max). null/0 = no cap.
+	IoReadBandwidthMax *int `json:"io_read_bandwidth_max"`
+
 	// IoWeight Relative block-IO share under contention (systemd IOWeight, 1-10000). null uses the default (50).
 	IoWeight *int `json:"io_weight"`
+
+	// IoWriteBandwidthMax Hard write ceiling in MB/s (systemd IOWriteBandwidthMax, i.e. cgroup io.max). Unlike io_weight this needs no particular IO scheduler, so it is the cap that reliably bites - weights are inert unless the host uses bfq or blk-iocost. null/0 = no cap.
+	IoWriteBandwidthMax *int `json:"io_write_bandwidth_max"`
 
 	// MemoryMax Hard memory ceiling in MB (systemd MemoryMax); the cgroup is OOM-killed past it. null/0 = no cap.
 	MemoryMax *int `json:"memory_max"`

@@ -26,5 +26,13 @@ export type ResourceLimits = {
      * Hard cap on processes/threads (systemd TasksMax); guards against fork bombs / PID exhaustion. null/0 = no cap.
      */
     tasks_max?: number | null;
+    /**
+     * Hard read ceiling in MB/s for the device backing the project root (systemd IOReadBandwidthMax, i.e. cgroup io.max). null/0 = no cap.
+     */
+    io_read_bandwidth_max?: number | null;
+    /**
+     * Hard write ceiling in MB/s (systemd IOWriteBandwidthMax, i.e. cgroup io.max). Unlike io_weight this needs no particular IO scheduler, so it is the cap that reliably bites - weights are inert unless the host uses bfq or blk-iocost. null/0 = no cap.
+     */
+    io_write_bandwidth_max?: number | null;
 };
 

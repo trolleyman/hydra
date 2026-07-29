@@ -485,10 +485,10 @@ var simChatEvents = []simNorm{
 	// worktree root, where it would not work at all.
 	simTool("toolu_sim_cwd", "Bash", simRaw(`{"command":"bun test src/lib/upload.test.ts","description":"Run the uploader tests"}`)),
 	simToolOut("toolu_sim_cwd", " 12 pass\n  0 fail"),
-	// A Bash call that is really a Read: the card takes the Read shape (file +
-	// "lines 40-53" in the header) and renders the output as numbered, Go-
-	// highlighted source rather than anonymous terminal text - see
-	// web/src/lib/fileViewCommand.ts.
+	// A Bash call that is really a Read - the shape every agent without a Read
+	// tool has to spell in shell. The card stays a Bash card, showing the command
+	// that ran, and its output renders as numbered, Go-highlighted source rather
+	// than anonymous terminal text - see web/src/lib/fileViewCommand.ts.
 	simTool("toolu_sim_sed", "Bash", simRaw(`{"command":"sed -n 40,53p internal/chat/claude.go"}`)),
 	simToolOut("toolu_sim_sed", "type claudeMessage struct {\n\tType    string          `json:\"type\"`\n\tSubtype string          `json:\"subtype,omitempty\"`\n\tMessage json.RawMessage `json:\"message,omitempty\"`\n\tUsage   json.RawMessage `json:\"usage,omitempty\"`\n}\n\n// isAPIErrorMessage reports whether an assistant event is the CLI's own\n// \"API Error\" placeholder rather than a model reply.\nfunc isAPIErrorMessage(msg claudeMessage) bool {\n\tif msg.Type != \"assistant\" {\n\t\treturn false\n\t}\n\treturn strings.HasPrefix(text(msg), \"API Error\")"),
 	// Two reads in one call, separated by the `echo` marker agents use to tell
@@ -521,6 +521,55 @@ var simChatEvents = []simNorm{
 	// section with grep's `-A` context lines numbered alongside the matches.
 	simTool("toolu_sim_ctxprobe", "Bash", simRaw(`{"command":"grep -n \"func (u \\*Uploader) Put\" -A 6 internal/artifacts/upload.go\ngrep -n \"func sleepBackoff\" -A 4 internal/artifacts/backoff.go\necho \"=== sim ===\"\ngrep -n \"func simUpload\" -A 3 internal/http/simulation.go","description":"Check whether the uploader can retry"}`)),
 	simToolOut("toolu_sim_ctxprobe", "112:func (u *Uploader) Put(ctx context.Context, key string, r io.Reader) error {\n113-\tvar err error\n114-\t// The reader is replayed per attempt, so it has to be seekable.\n115-\tfor attempt := 0; attempt < maxAttempts; attempt++ {\n116-\t\tif err = u.put(ctx, key, r); err == nil {\n117-\t\t\treturn nil\n118-\t\t}\n9:func sleepBackoff(attempt int) {\n10-\tbase := 100 * time.Millisecond\n11-\td := base << attempt\n12-\tjitter := time.Duration(rand.Int63n(int64(d / 2)))\n13-\ttime.Sleep(d/2 + jitter)\n=== sim ===\n41:func simUpload(key string) simResult {\n42-\treturn simResult{Key: key, Bytes: 4096}\n43-}"),
+	// The ignore family, end to end. A `.gitignore` is a file of PATTERNS, so it
+	// is highlighted as one (web/src/lib/ignoreHighlight.ts): the negation and
+	// the wildcards are marked and the path text is left alone. The
+	// `git check-ignore -v` at the end prints the rule that caught each path -
+	// coloured by web/src/lib/gitOutput.ts, with the pattern itself in those same
+	// ignore colours, so a `*` reads as a wildcard wherever it turns up.
+	simTool("toolu_sim_ignore", "Bash", simRaw(`{"command":"sed -n '12,18p' .gitignore\necho \"=== web/public/fonts/.gitignore ===\"\ncat web/public/fonts/.gitignore\necho \"=== which rule catches them ===\"\ngit check-ignore -v web/public/fonts/iosevka-400-normal.woff2 web/.iosevka-build.json","description":"Read both ignore files, and ask git which rule wins"}`)),
+	simToolOut("toolu_sim_ignore", "# Self-hosted webfonts (Iosevka, the Nerd Fonts symbol fallback).\n# Not committed - `cd web && npm run build-fonts` fetches them.\n/web/public/fonts/iosevka-*.woff2\n/web/public/fonts/nerd-symbols-*.woff2\n/web/public/fonts/google.css\n/web/public/fonts/google/\n/web/.iosevka-build.json\n=== web/public/fonts/.gitignore ===\n# Generated font files - see web/scripts/build-fonts.ts.\niosevka-*.woff2\n!iosevka-400-normal.woff2\ngoogle.css\ngoogle/\n=== which rule catches them ===\nweb/public/fonts/.gitignore:2:iosevka-*.woff2\tweb/public/fonts/iosevka-400-normal.woff2\n.gitignore:18:/web/.iosevka-build.json\tweb/.iosevka-build.json"),
+	// A `du` sorted biggest-first, and a search of a whole DIRECTORY. The sizes
+	// are marked against the paths they measure (web/src/lib/diskOutput.ts); the
+	// `| sort` in front of the `| head` is a filter that reorders lines and
+	// leaves them byte for byte. The search names one operand and prints a
+	// `path:` in front of every line, which is what says where each line came
+	// from and which language to colour it as.
+	simTool("toolu_sim_du", "Bash", simRaw(`{"command":"du -sh ~/.cache/* 2>/dev/null | sort -rh | head -5\necho \"=== who reads the cache dir ===\"\nrg \"CacheDir\" internal/ | head -3","description":"Check what sharing ~/.cache actually buys"}`)),
+	simToolOut("toolu_sim_du", "18G\t/home/callum/.cache/go\n2.5G\t/home/callum/.cache/Google\n658M\t/home/callum/.cache/aube\n646M\t/home/callum/.cache/ms-playwright\n484M\t/home/callum/.cache/uv\n=== who reads the cache dir ===\ninternal/paths/paths.go:func CacheDir(root string) string {\ninternal/heads/seed.go:\tcache := paths.CacheDir(root)\ninternal/sandbox/linux.go:\t\tro = append(ro, paths.CacheDir(o.Root))"),
+	// A script whose output can NOT be sectioned - every step is a build command
+	// this cannot describe, and the log carries ANSI colour, where a section
+	// boundary would be a guess. The `echo` headings in it are still the strings
+	// the script says they are, so they are still coloured as such: they are the
+	// reader's only map of a long build log.
+	simTool("toolu_sim_buildlog", "Bash", simRaw(`{"command":"echo \"=== run 1 (should be no-op) ===\"\nmage build 2>&1 | head -4\necho \"=== touch a web file, run 2 ===\"\ntouch web/src/main.tsx\nmage build 2>&1 | head -4","description":"Test whether BuildWeb emits output when web changed"}`)),
+	simToolOut("toolu_sim_buildlog", "=== run 1 (should be no-op) ===\n\x1b[2m$ mage build\x1b[0m\n\x1b[32m✓\x1b[0m go build: up to date\n\x1b[32m✓\x1b[0m web build: up to date\n=== touch a web file, run 2 ===\n\x1b[2m$ mage build\x1b[0m\n\x1b[33mWARN\x1b[0m web/dist is stale - rebuilding\nvite v8.1.5 \x1b[32mbuilding for production...\x1b[0m\n\x1b[32m✓\x1b[0m 412 modules transformed."),
+	// One read, several stretches of one file - how an agent quotes the places it
+	// is about to edit. Each stretch is numbered from its own start.
+	simTool("toolu_sim_sedmulti", "Bash", simRaw(`{"command":"sed -n '1,3p;40,43p' docs/artifacts.md"}`)),
+	simToolOut("toolu_sim_sedmulti", "# Artifacts\n\nArtifacts are files a head produces that are worth keeping: screenshots, a\n## TODO\n- Retry the upload on a 5xx\n- Surface the attempt count in the panel\n- Collect the generator's own log"),
+	// A test run and a build, which is the output an agent stares at hardest.
+	// Neither is attributable to a command - the same diagnostics come out of
+	// `go build`, `mage`, `make` or a test runner - so they are read by the LINE
+	// (web/src/lib/buildOutput.ts): the location says where, the verdict says
+	// whether it passed, and the prose between them stays prose.
+	simTool("toolu_sim_tests", "Bash", simRaw(`{"command":"go test ./internal/artifacts/ ./internal/chat/ 2>&1 | head -12\necho \"=== and the frontend ===\"\ncd web && aube run lint 2>&1 | tail -4","description":"Run the tests and the frontend typecheck"}`)),
+	simToolOut("toolu_sim_tests", "=== RUN   TestPutRetry\n    upload_test.go:41: expected 5 attempts, got 1\n--- FAIL: TestPutRetry (0.02s)\nFAIL\ngithub.com/trolleyman/hydra/internal/artifacts\t0.512s\nok  \tgithub.com/trolleyman/hydra/internal/chat\t0.606s\n?   \tgithub.com/trolleyman/hydra/internal/tui\t[no test files]\n=== and the frontend ===\nweb/src/lib/upload.ts:42:11: error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.\nweb/src/lib/upload.ts:58:3: warning: 'attempt' is assigned a value but never used\nFound 2 errors in 1 file."),
+	// A `head`/`tail` over SEVERAL files. The `==> name <==` banners say which
+	// stretch is which - better than the command does, since its operands are a
+	// glob - so each stretch is highlighted as the file its banner names and
+	// numbered from the line the command asked for.
+	simTool("toolu_sim_banners", "Bash", simRaw(`{"command":"head -4 internal/artifacts/*.go","description":"Skim the top of each artifacts file"}`)),
+	simToolOut("toolu_sim_banners", "==> internal/artifacts/backoff.go <==\npackage artifacts\n\nimport (\n\t\"math/rand\"\n\n==> internal/artifacts/upload.go <==\npackage artifacts\n\nimport (\n\t\"context\""),
+	// A blame, and the two disk listings. A blame prints the FILE, so it keeps
+	// its own line numbers and its language behind git's prefix; `df` and `ls -l`
+	// are tables whose measurement column is the point (web/src/lib/diskOutput.ts).
+	simTool("toolu_sim_blame", "Bash", simRaw(`{"command":"git blame -L 9,12 internal/artifacts/backoff.go\necho \"=== room left on the disk ===\"\ndf -h /\necho \"=== and what is in there ===\"\nls -l internal/artifacts/","description":"Check who wrote the backoff, and what is left on disk"}`)),
+	simToolOut("toolu_sim_blame", "5d671ab0 (Callum Tolley 2026-07-29 12:00:47 +0100  9) func sleepBackoff(attempt int) {\n5d671ab0 (Callum Tolley 2026-07-29 12:00:47 +0100 10) \tbase := 100 * time.Millisecond\na7401035 (Callum Tolley 2026-07-29 16:57:41 +0100 11) \td := base << attempt\na7401035 (Callum Tolley 2026-07-29 16:57:41 +0100 12) \tjitter := time.Duration(rand.Int63n(int64(d / 2)))\n=== room left on the disk ===\nFilesystem      Size  Used Avail Use% Mounted on\n/dev/nvme0n1p2  1.8T  1.2T  522G  70% /\n=== and what is in there ===\ntotal 24\n-rw-rw-r-- 1 callum callum  4096 Jul 29 16:57 backoff.go\n-rw-rw-r-- 1 callum callum 12288 Jul 29 16:57 upload.go"),
+	// What a search says ABOUT the files rather than what it found in them: a
+	// count per file, then the files that matched (web/src/lib/searchSummary.ts).
+	simTool("toolu_sim_summary", "Bash", simRaw(`{"command":"grep -rc \"sleepBackoff\" internal/artifacts\necho \"=== which files mention it at all ===\"\nrg -l \"sleepBackoff\" internal | sort","description":"Count the callers, then list the files"}`)),
+	simToolOut("toolu_sim_summary", "internal/artifacts/backoff.go:1\ninternal/artifacts/upload.go:3\ninternal/artifacts/store.go:0\n=== which files mention it at all ===\ninternal/artifacts/backoff.go\ninternal/artifacts/upload.go\ninternal/http/simulation.go"),
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20). This settles the chained command
 	// opened well above.

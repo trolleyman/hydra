@@ -1,3 +1,5 @@
+import { isIgnoreFile } from './ignoreHighlight'
+
 // File-extension → Prism grammar name, shared by the diff viewer (DiffViewer)
 // and the repository file browser (RepositoryView) so both detect the same set.
 // Names here may be eager (bundled, see prism.ts) or lazy (loaded on demand, see
@@ -8,6 +10,11 @@
 // language.test.ts asserts every name here is a real Prism grammar, so a typo or
 // a rename after a refractor upgrade fails the build rather than silently
 // dropping a language to plain text.
+//
+// One name in here is NOT a Prism grammar: `gitignore` is highlighted by
+// lib/ignoreHighlight, the way a shell snippet is highlighted by lib/shellEmbed.
+// highlightCore.canHighlight is the question to ask about a name from here -
+// "can anything colour this?" - rather than prism.hasLanguage alone.
 const EXT_LANG_MAP: Record<string, string> = {
   // Web / TS-JS
   ts: 'typescript', tsx: 'tsx', mts: 'typescript', cts: 'typescript',
@@ -137,6 +144,10 @@ export function getLanguage(filePath: string, head?: string | null): string {
   const filename = filePath.split('/').pop() ?? filePath
   const lower = filename.toLowerCase()
   if (FILENAME_LANG_MAP[lower]) return FILENAME_LANG_MAP[lower]
+  // Asked by NAME rather than by extension: `.gitignore` has no extension at
+  // all, and the family it belongs to (`.dockerignore`, `.hydraignore`, ...) is
+  // open-ended - anything named `.<something>ignore` is the same format.
+  if (isIgnoreFile(lower)) return 'gitignore'
   const ext = lower.split('.').pop() ?? ''
   return EXT_LANG_MAP[ext] ?? (head ? shebangLanguage(head) : null) ?? 'plaintext'
 }

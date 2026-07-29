@@ -229,6 +229,19 @@ share their box model exactly, so the padding/font classes go in
 wrapper as `focus-within:` - the input is on top, and a ring drawn there frames
 the text from above.
 
+### `rg -r` is not "recursive"
+
+`rg` walks the tree already: `rg pat internal/` and a bare `rg pat` are both
+recursive, and there is no flag to ask for it. `-r` is `--replace`, so
+`rg -rn "pat" dir` replaces every match with `n` (the `n` you meant as
+`--line-number`) and prints the rewritten lines with no numbers - output that
+reads like a search with strange results rather than like a mistake, which is
+how it survives review.
+
+The flags you actually want when the defaults are hiding files: `--hidden`,
+`--no-ignore`, or `-u`/`-uu` for both. `-r`/`-R` for recursion belongs to
+`grep`.
+
 ### No raw control bytes in source
 
 Never embed raw control characters (NUL etc.) in source files - a single raw NUL

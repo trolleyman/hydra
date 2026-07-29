@@ -257,3 +257,52 @@ func TestAppendSourceDeduplicatesProviderReplay(t *testing.T) {
 		t.Fatalf("restart duplicate: appended=%v err=%v", appended, err)
 	}
 }
+
+// A busy chat head emits thousands of events, and every append used to fsync -
+// one device flush each. On ext4 an fsync forces a journal commit that unrelated
+// writers queue behind, so this made the daemon the largest source of fsyncs on
+// the machine while it wrote barely 1.3 MB/s. Appends now flush at most once per
+// syncInterval; every event is still written immediately, only the flush is
+// coalesced.
+func TestStoreCoalescesFsyncs(t *testing.T) {
+	s, err := Open(t.TempDir(), "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Unix(1000, 0)
+	s.now = func() time.Time { return clock }
+
+	synced := 0
+	// Count flushes by watching lastSync advance - it moves only when we fsync.
+	appendOne := func(text string) {
+		before := s.lastSync
+		msg := AssistantMessage{}
+		msg.Text = text
+		if _, err := s.Append(msg); err != nil {
+			t.Fatal(err)
+		}
+		if !s.lastSync.Equal(before) {
+			synced++
+		}
+	}
+
+	appendOne("first") // lastSync is zero, so this one flushes
+	for i := 0; i < 50; i++ {
+		clock = clock.Add(10 * time.Millisecond) // 500ms total, under the interval
+		appendOne("burst")
+	}
+	if synced != 1 {
+		t.Errorf("flushes during a 500ms burst of 51 events = %d, want 1", synced)
+	}
+
+	clock = clock.Add(syncInterval)
+	appendOne("after the interval")
+	if synced != 2 {
+		t.Errorf("flushes after passing syncInterval = %d, want 2", synced)
+	}
+
+	// Every event is still in the log regardless of when it was flushed.
+	if got := len(s.Events()); got != 52 {
+		t.Errorf("events = %d, want 52", got)
+	}
+}
