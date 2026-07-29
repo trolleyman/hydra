@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { clearMediaSizes, discoverMediaSize, recallMediaSize, rememberMediaSize } from './mediaSize'
+import { renderHook, act } from '@testing-library/react'
+import { clearMediaSizes, discoverMediaSize, recallMediaSize, rememberMediaSize, useMediaSize } from './mediaSize'
 
 // The size cache behind the lightbox's reserved picture box. Two things have to
 // hold for it to be worth having: the same file written two ways has to be ONE
@@ -76,5 +77,30 @@ describe('mediaSize', () => {
     Object.defineProperty(img, 'naturalHeight', { value: 0 })
     document.body.appendChild(img)
     expect(discoverMediaSize('/uploads/pending.png')).toBeNull()
+  })
+
+  // The cache is a React external store, not something each component copies
+  // into its own state, so a size learned by SOMEONE ELSE reaches whoever is
+  // showing that file. The lightbox measuring a picture the chat has on screen
+  // is the real case; a second copy of one image in a message is the other.
+  it('re-renders a component showing a file another one just measured', () => {
+    const { result } = renderHook(() => useMediaSize('/uploads/shot.png'))
+    expect(result.current).toBeNull()
+    act(() => rememberMediaSize('/uploads/shot.png', 780, 1688))
+    expect(result.current).toEqual({ w: 780, h: 1688 })
+  })
+
+  it('does not churn a reader when the same size is recorded again', () => {
+    let renders = 0
+    const { result } = renderHook(() => { renders++; return useMediaSize('/uploads/shot.png') })
+    act(() => rememberMediaSize('/uploads/shot.png', 780, 1688))
+    const settled = renders
+    const size = result.current
+    // The visible <img>'s onLoad re-records what it was already laid out at.
+    act(() => rememberMediaSize('/uploads/shot.png', 780, 1688))
+    expect(renders).toBe(settled)
+    // ...and the snapshot keeps its identity, which is what stops the store
+    // reading as changed on every check.
+    expect(result.current).toBe(size)
   })
 })

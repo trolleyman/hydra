@@ -62,7 +62,6 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/egress"
 	"github.com/trolleyman/hydra/internal/git"
-	"github.com/trolleyman/hydra/internal/mediasize"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/scope"
@@ -625,10 +624,8 @@ func decodeImage(path string) (image.Image, error) {
 }
 
 // mediaPixelSize returns the natural pixel dimensions of an artifact file,
-// best-effort. Images are measured from their header only (internal/mediasize,
-// shared with the chat's agent-file endpoint, which measures the pictures an
-// agent embeds in a message for the same reason - so the web side can lay a
-// picture out before it has the bytes); video is measured with ffprobe. Either
+// best-effort. Images are measured from their header only (image.DecodeConfig -
+// no full pixel decode); video is measured with ffprobe when it is on PATH. Either
 // branch returns (0, 0) when the size can't be determined (unsupported/corrupt
 // file, ffprobe missing/errored): the dimensions are optional cache metadata, so a
 // zero result is simply omitted and the client measures the bytes itself instead.
@@ -636,7 +633,16 @@ func mediaPixelSize(path, name string) (width, height int) {
 	if isVideoFile(name) {
 		return videoPixelSize(path)
 	}
-	return mediasize.ImagePixelSize(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0
+	}
+	defer f.Close()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return 0, 0
+	}
+	return cfg.Width, cfg.Height
 }
 
 // videoPixelSize reads a video's coded frame size with `ffprobe`, best-effort.

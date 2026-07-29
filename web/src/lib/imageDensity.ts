@@ -45,9 +45,9 @@ export function densityFromPath(path?: string | null): number {
 // picture measured here needs no measuring when it is opened - and one the
 // lightbox has already shown needs no decode here at all.
 export function useNaturalSize(url: string | null): { w: number; h: number } | null {
-  // Subscribed, not bumped: the decode may land while this component is between
-  // mounts (a chat row re-mounts as the transcript grows), and a local setState
-  // is lost when it does. The cache tells whoever is subscribed at the time.
+  // Read through the shared cache rather than into local state, so the FIRST
+  // decode of a file answers for every copy of it: a chat row re-mounts as the
+  // transcript grows, and a message can show the same picture twice.
   const size = useMediaSize(url)
   useEffect(() => {
     if (!url || recallMediaSize(url)) return

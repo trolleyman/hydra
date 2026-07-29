@@ -39,16 +39,15 @@ function key(url: string | undefined | null): string | null {
   }
 }
 
-// Everyone waiting to be told a size landed. This is a React external store (see
-// useMediaSize), NOT a list of one-shot callbacks: a component that re-mounts
-// while an answer is in flight - which a chat row does constantly as the
-// transcript grows - has to end up subscribed again with no way to miss the
-// notification in between. Getting that wrong is invisible in a test and shows
-// up as "the size arrives and nothing uses it".
+// Components currently reading a size (see useMediaSize). The cache is a React
+// external store rather than something each component copies into its own state:
+// a size can be learned by a DIFFERENT component than the one waiting for it -
+// the lightbox measuring a picture the chat has on screen, or one chat image's
+// decode answering for a second copy of the same file - and whoever is mounted
+// when that happens should be told, not just whoever asked.
 const listeners = new Set<() => void>()
 
-/** Subscribe to size arrivals. Returns the unsubscribe. */
-export function subscribeMediaSizes(onChange: () => void): () => void {
+function subscribe(onChange: () => void): () => void {
   listeners.add(onChange)
   return () => { listeners.delete(onChange) }
 }
@@ -61,8 +60,8 @@ export function rememberMediaSize(url: string | undefined | null, w: number, h: 
   if (!k || !Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return
   const had = sizes.get(k)
   // Re-recording the same numbers must not replace the object: recallMediaSize
-  // is a React snapshot, and handing back a fresh object for an unchanged size
-  // would re-render (or, in useSyncExternalStore's eyes, never settle).
+  // is useMediaSize's snapshot, and a fresh object for an unchanged size would
+  // read as a change every time and never settle.
   if (had && had.w === w && had.h === h) return
   sizes.set(k, { w, h })
   listeners.forEach((l) => l())
@@ -76,14 +75,9 @@ export function recallMediaSize(url: string | undefined | null): Size | null {
   return k ? (sizes.get(k) ?? null) : null
 }
 
-/** `url`'s size, re-rendering when it lands. The size cache is an external
- *  store, so subscribing is what makes this immune to the mount/unmount timing
- *  a one-shot callback gets wrong. */
+/** `url`'s size, re-rendering whoever is mounted when it lands. */
 export function useMediaSize(url: string | undefined | null): Size | null {
-  return useSyncExternalStore(
-    subscribeMediaSizes,
-    useCallback(() => recallMediaSize(url), [url]),
-  )
+  return useSyncExternalStore(subscribe, useCallback(() => recallMediaSize(url), [url]))
 }
 
 /** `url`'s natural pixel size without loading it: remembered, or read off a copy

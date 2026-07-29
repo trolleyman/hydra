@@ -181,7 +181,6 @@ func runSimulationServer() error {
 	// Images an agent embedded in a chat message by local path (mirrors the real
 	// server's non-OpenAPI route), so the inline-image rendering can be demoed.
 	mux.HandleFunc("GET /agent-files/projects/{project_id}/agents/{id}/blob", server.HandleAgentFileBlob)
-	mux.HandleFunc("POST /agent-files/projects/{project_id}/agents/{id}/sizes", server.HandleAgentFileSizes)
 
 	// Persisted build logs behind the artifacts / tests "Show build log" toggles
 	// (mirrors the real server's non-OpenAPI routes), so those toggles can be

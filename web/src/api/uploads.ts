@@ -48,40 +48,6 @@ export function agentFileUrl(projectId: string, agentId: string, path: string): 
   return `/agent-files/projects/${pid}/agents/${aid}/blob?path=${encodeURIComponent(path)}`
 }
 
-/**
- * Natural pixel sizes for a batch of agent-referenced image paths, read off each
- * file's header by the backend - so a chat picture's box can be reserved before
- * its bytes are fetched, instead of the browser having to download the image to
- * find out how tall it is. Backed by POST .../agents/{id}/sizes.
- *
- * A path the backend can't measure (gone, unreadable, a format its decoders don't
- * cover) is simply MISSING from the result rather than zero - the caller falls
- * back to measuring the image itself. A failed request is the same thing for
- * every path at once, so it resolves to an empty map rather than throwing: this
- * is an optimisation, and the fallback is the behaviour that existed before it.
- */
-export async function fetchAgentFileSizes(
-  projectId: string,
-  agentId: string,
-  paths: string[],
-): Promise<Record<string, { width: number; height: number }>> {
-  if (paths.length === 0) return {}
-  const pid = encodeURIComponent(projectId)
-  const aid = encodeURIComponent(agentId)
-  try {
-    const res = await fetch(`/agent-files/projects/${pid}/agents/${aid}/sizes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths }),
-    })
-    if (!res.ok) return {}
-    const body = (await res.json()) as { sizes?: Record<string, { width: number; height: number }> }
-    return body.sizes ?? {}
-  } catch {
-    return {}
-  }
-}
-
 const IMAGE_RE = /^image\//
 
 /**

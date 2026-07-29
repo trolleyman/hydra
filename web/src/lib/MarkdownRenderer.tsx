@@ -11,7 +11,6 @@ import { UPLOAD_PATH_RE } from './uploadAttachments'
 import { useLightbox } from '../stores/lightboxStore'
 import { markdownGalleryAt } from './markdownGallery'
 import { densityFromPath, logicalSize, useNaturalSize } from './imageDensity'
-import { useServerMediaSize } from './serverMediaSize'
 import { rememberMediaSize } from './mediaSize'
 import { IMAGE_REFLOW_MS, markSelfReflow } from './selfReflow'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
@@ -169,24 +168,7 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
   const url = src ? resolveImageSrc(src, ctx) : null
   const label = alt || (src ? src.split('/').pop() || src : 'image')
   const density = densityFromPath(src)
-  // Two ways to learn how big this picture is, both writing to the same cache:
-  //
-  //   * ask the backend, which reads the file's header on disk (one batched
-  //     round trip for every image in this render - see lib/serverMediaSize),
-  //   * decode it off-screen, which needs the whole file.
-  //
-  // The ask is the one that gets the box reserved BEFORE the bytes arrive, which
-  // is the point; the decode stays as the answer for everything the backend
-  // can't measure - a data:/blob: URL with no file behind it, a surface with no
-  // head, a format its decoders don't cover - and as the correction if the two
-  // ever disagree. Whichever lands first fills the cache, and useNaturalSize
-  // skips its decode entirely when the size is already there.
-  // Both hooks run unconditionally (`??` between two hook calls would skip one
-  // and break the order) and both read the same cache, so this simply prefers
-  // whichever has an answer.
-  const served = useServerMediaSize(url, src, ctx)
-  const decoded = useNaturalSize(url)
-  const natural = served ?? decoded
+  const natural = useNaturalSize(url)
   const logical = natural ? logicalSize(natural, density) : null
   // An image is the one thing in a chat message whose height arrives LATER than
   // it does: it mounts with no box at all (nothing knows its size until the
