@@ -2,8 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatConversationStartedPayload = (ChatProviderContext & {
+/**
+ * The provider announced its session.
+ */
+export type ChatConversationStartedPayload = {
     conversation_id?: string;
     model?: string;
     /**
@@ -11,5 +13,5 @@ export type ChatConversationStartedPayload = (ChatProviderContext & {
      */
     api_key_source?: string;
     slash_commands?: Array<string>;
-});
+};
 

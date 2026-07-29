@@ -5510,6 +5510,12 @@ components:
         What a provider-derived display event carries besides its own fields: who
         produced it and where it belongs. Sidechain events are a sub-agent's own
         steps, folded into that sub-agent's card rather than the main flow.
+
+        Deliberately a separate schema rather than allOf'd into each payload: Go
+        embeds it alongside the payload (encoding/json promotes embedded fields,
+        so the wire stays flat) and TypeScript intersects the two. Flattening it
+        into every payload would mean copying eight fields at every construction
+        site in the daemon.
       properties:
         uuid:
           type: string
@@ -5603,122 +5609,127 @@ components:
           x-go-type-skip-optional-pointer: true
 
     ChatConversationStartedPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: The provider announced its session.
-          properties:
-            conversation_id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            model:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            api_key_source:
-              type: string
-              x-go-type-skip-optional-pointer: true
-              description: '"none" means subscription auth, so turn footers hide the notional cost.'
-            slash_commands:
-              type: array
-              items:
-                type: string
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: The provider announced its session.
+      properties:
+        conversation_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        model:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        api_key_source:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: '"none" means subscription auth, so turn footers hide the notional cost.'
+        slash_commands:
+          type: array
+          items:
+            type: string
+          x-go-type-skip-optional-pointer: true
 
     ChatUserMessagePayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: A user turn. Hydra records this at the input boundary.
-          properties:
-            id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-              description: The client-generated id, so a queued bubble reconciles to it.
-            content:
-              type: object
-              additionalProperties: true
-              x-go-type: json.RawMessage
-              x-go-type-skip-optional-pointer: true
-              description: Content blocks, or a bare string for a provider command echo.
-            shell:
-              $ref: '#/components/schemas/ChatShellResult'
+      type: object
+      description: A user turn. Hydra records this at the input boundary.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The client-generated id, so a queued bubble reconciles to it.
+        content:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: Content blocks, or a bare string for a provider command echo.
+        shell:
+          $ref: '#/components/schemas/ChatShellResult'
+
+    ChatUserMessageEchoedPayload:
+      type: object
+      description: >-
+        Reconciles a provider's echo of a message Hydra already recorded. The
+        marker is durable on purpose: without it, two identical messages sent in
+        separate turns cannot be paired correctly after a daemon restart.
+      properties:
+        user_seq:
+          type: integer
+          format: int64
+          x-go-type: uint64
+          x-go-type-skip-optional-pointer: true
+          description: The sequence of the user_message this echo belongs to.
+        content:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
 
     ChatContextMessagePayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: >-
-            Machine-injected context that rode in a user envelope but was never
-            typed - a compaction preamble, a skill's auto-loaded body.
-          properties:
-            content:
-              type: object
-              additionalProperties: true
-              x-go-type: json.RawMessage
-              x-go-type-skip-optional-pointer: true
-            is_meta:
-              type: boolean
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: >-
+        Machine-injected context that rode in a user envelope but was never
+        typed - a compaction preamble, a skill's auto-loaded body.
+      properties:
+        content:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        is_meta:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
 
     ChatAssistantMessagePayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: A settled assistant message; it replaces its streamed preview.
-          properties:
-            message_id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            text:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            partial:
-              type: boolean
-              x-go-type-skip-optional-pointer: true
-              description: Set when an interrupt settled the deltas received so far.
+      type: object
+      description: A settled assistant message; it replaces its streamed preview.
+      properties:
+        message_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        text:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        partial:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+          description: Set when an interrupt settled the deltas received so far.
 
     ChatReasoningCompletedPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: >-
-            A settled thinking block. Some models expose an empty one and report
-            only a duration, which still renders as "Thought for Xs".
-          properties:
-            message_id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            text:
-              type: string
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: >-
+        A settled thinking block. Some models expose an empty one and report
+        only a duration, which still renders as "Thought for Xs".
+      properties:
+        message_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        text:
+          type: string
+          x-go-type-skip-optional-pointer: true
 
     ChatDeltaPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: >-
-            One token delta. The first opens the live block; the completed message
-            closes and replaces it. Not persisted to the display log.
-          properties:
-            message_id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            text:
-              type: string
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: >-
+        One token delta. The first opens the live block; the completed message
+        closes and replaces it. Not persisted to the display log.
+      properties:
+        message_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        text:
+          type: string
+          x-go-type-skip-optional-pointer: true
 
     ChatItemDeltaPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: One delta against a tool or plan item, keyed by that item's id.
-          properties:
-            id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            text:
-              type: string
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: One delta against a tool or plan item, keyed by that item's id.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        text:
+          type: string
+          x-go-type-skip-optional-pointer: true
 
     ChatReasoningDurationPayload:
       type: object
@@ -5735,223 +5746,208 @@ components:
           x-go-type-skip-optional-pointer: true
 
     ChatContentStreamPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: A provider content-boundary hint; a state signal, not a card.
-          properties:
-            kind:
-              type: string
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: A provider content-boundary hint; a state signal, not a card.
+      properties:
+        kind:
+          type: string
+          x-go-type-skip-optional-pointer: true
 
     ChatToolStartedPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: A tool call.
-          properties:
-            id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            name:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            input:
-              type: object
-              additionalProperties: true
-              x-go-type: json.RawMessage
-              x-go-type-skip-optional-pointer: true
-              description: >-
-                The provider's own block input, verbatim - the shape is the
-                tool's, so this is where an agent-type-specific payload lives.
-                Codex additionally carries its native item under `_raw`.
-            status:
-              type: string
-              x-go-type-skip-optional-pointer: true
-              description: Present on Codex items; its absence is what marks a Claude block.
-            output:
-              type: string
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: A tool call.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        name:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        input:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The provider's own block input, verbatim - the shape is the
+            tool's, so this is where an agent-type-specific payload lives.
+            Codex additionally carries its native item under `_raw`.
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Present on Codex items; its absence is what marks a Claude block.
+        output:
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            Whatever the tool produced, as the provider sent it - a string, an
+            object, an error. Provider-owned, like `input`.
 
     ChatToolCompletedPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: A tool call's result.
-          properties:
-            id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            name:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            content:
-              type: object
-              additionalProperties: true
-              x-go-type: json.RawMessage
-              x-go-type-skip-optional-pointer: true
-              description: The provider's verbatim result blocks, when it sent any.
-            input:
-              type: object
-              additionalProperties: true
-              x-go-type: json.RawMessage
-              x-go-type-skip-optional-pointer: true
-              description: >-
-                Codex reveals semantic tool fields only on completion, so a
-                completed event can carry richer input than its start.
-            output:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            status:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            is_error:
-              type: boolean
-              x-go-type-skip-optional-pointer: true
-            patch:
-              type: object
-              additionalProperties: true
-              x-go-type: json.RawMessage
-              x-go-type-skip-optional-pointer: true
-              description: >-
-                An Edit's own structuredPatch, so the card renders a diff against
-                the file's real line numbers rather than two loose fragments.
+      type: object
+      description: A tool call's result.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        name:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        content:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: The provider's verbatim result blocks, when it sent any.
+        input:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            Codex reveals semantic tool fields only on completion, so a
+            completed event can carry richer input than its start.
+        output:
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: Whatever the tool produced, as the provider sent it.
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        is_error:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+        patch:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            An Edit's own structuredPatch, so the card renders a diff against
+            the file's real line numbers rather than two loose fragments.
 
     ChatPlanUpdatedPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: A plan checkpoint. Also folded into the projection.
-          properties:
-            provider:
-              type: string
-              x-go-type-skip-optional-pointer: true
-              description: >-
-                Which provider produced it. Claude's Task cards already carry the
-                timeline, so only Codex renders a visible Update Plan card.
-            plan:
-              type: array
-              items:
-                $ref: '#/components/schemas/ChatPlanEntry'
-              x-go-type: json.RawMessage
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: A plan checkpoint. Also folded into the projection.
+      properties:
+        provider:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            Which provider produced it. Claude's Task cards already carry the
+            timeline, so only Codex renders a visible Update Plan card.
+        plan:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatPlanEntry'
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
 
     ChatSubagentPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: A sub-agent's lifecycle. subagent_completed is the one completion chip.
-          properties:
-            id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            parent_id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            parent_item_id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            agent_type:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            description:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            prompt:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            status:
-              type: string
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: >-
+        A sub-agent's lifecycle. subagent_completed is the one completion chip.
+        The tool call that spawned it rides in ChatProviderContext's
+        parent_item_id, which is the same field.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        parent_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        agent_type:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        description:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        prompt:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
 
     ChatTurnPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: A turn boundary - the unit queue draining and head status key off.
-          properties:
-            id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            status:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            result:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            cost_usd:
-              type: number
-              x-go-type-skip-optional-pointer: true
-            error:
-              type: object
-              additionalProperties: true
-              x-go-type: json.RawMessage
-              x-go-type-skip-optional-pointer: true
-              description: >-
-                The provider's structured failure. The browser unwraps
-                app-server's nested JSON to show its type, status and message.
+      type: object
+      description: A turn boundary - the unit queue draining and head status key off.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        result:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        cost_usd:
+          type: number
+          format: double
+          x-go-type-skip-optional-pointer: true
+        error:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The provider's structured failure. The browser unwraps
+            app-server's nested JSON to show its type, status and message.
 
     ChatUsageUpdatedPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: >-
-            Token accounting. One carrying a message_id opens a message's count; the
-            rest tick it up, which is what the live working indicator counts.
-          properties:
-            message_id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            usage:
-              type: object
-              additionalProperties: true
-              x-go-type: json.RawMessage
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: >-
+        Token accounting. One carrying a message_id opens a message's count; the
+        rest tick it up, which is what the live working indicator counts.
+      properties:
+        message_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        usage:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
 
     ChatMessagesRetractedPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: >-
-            A safety retry evicted blocks the provider had already streamed. The
-            client must drop these ids or the flagged text lingers.
-          properties:
-            message_ids:
-              type: array
-              items:
-                type: string
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: >-
+        A safety retry evicted blocks the provider had already streamed. The
+        client must drop these ids or the flagged text lingers.
+      properties:
+        message_ids:
+          type: array
+          items:
+            type: string
+          x-go-type-skip-optional-pointer: true
 
     ChatNoticePayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: Harness bookkeeping shown as a compact chip.
-          properties:
-            text:
-              type: string
-              x-go-type-skip-optional-pointer: true
+      type: object
+      description: Harness bookkeeping shown as a compact chip.
+      properties:
+        text:
+          type: string
+          x-go-type-skip-optional-pointer: true
 
     ChatInteractionPayload:
-      allOf:
-        - $ref: '#/components/schemas/ChatProviderContext'
-        - type: object
-          description: >-
-            The provider is blocked on the user (an AskUserQuestion elicitation), or
-            that request was answered.
-          properties:
-            provider:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            request_id:
-              type: string
-              x-go-type-skip-optional-pointer: true
-            interaction:
-              type: object
-              additionalProperties: true
-              x-go-type: json.RawMessage
-              x-go-type-skip-optional-pointer: true
-              description: The provider's own request, forwarded verbatim.
+      type: object
+      description: >-
+        The provider is blocked on the user (an AskUserQuestion elicitation), or
+        that request was answered.
+      properties:
+        provider:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        request_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        interaction:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: The provider's own request, forwarded verbatim.
 
     ChatCommitCreatedPayload:
       type: object
@@ -6006,6 +6002,33 @@ components:
           type: string
           x-go-type-skip-optional-pointer: true
         head:
+          type: string
+          x-go-type-skip-optional-pointer: true
+
+    ChatQueuedMessagePayload:
+      type: object
+      description: >-
+        A message the daemon is holding because a turn was running. It lives in
+        the queue projection only; when it drains it becomes a durable
+        user_message carrying the same id.
+      properties:
+        id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        content:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    ChatQueueMessageRemovedPayload:
+      type: object
+      description: A queued message was recalled or drained, so it leaves the queue.
+      properties:
+        id:
           type: string
           x-go-type-skip-optional-pointer: true
 

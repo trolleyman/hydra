@@ -2,9 +2,11 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatReasoningCompletedPayload = (ChatProviderContext & {
+/**
+ * A settled thinking block. Some models expose an empty one and report only a duration, which still renders as "Thought for Xs".
+ */
+export type ChatReasoningCompletedPayload = {
     message_id?: string;
     text?: string;
-});
+};
 

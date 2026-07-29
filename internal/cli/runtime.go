@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net"
 	"net/http"
@@ -165,8 +166,8 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		ctx := chat.HeadContext{ProjectRoot: agent.ProjectPath, Worktree: paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID), Prompt: agent.Prompt, AgentType: agent.AgentType, Plan: agent.Plan}
 		return ctx, true
 	})
-	chatQueues.SetEventSink(func(id, eventType string, payload any) {
-		if _, err := chatEvents.Append(id, eventType, payload); err != nil {
+	chatQueues.SetEventSink(func(id string, payload chat.Payload) {
+		if _, err := chatEvents.Append(id, payload); err != nil {
 			log.Printf("warn: persist normalized queue event for %s: %v", id, err)
 		}
 	})
@@ -184,7 +185,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 			return // unknown or archived head - nothing to record.
 		}
 		heads.RecordThinkingDuration(agent.ProjectPath, id, messageID, durationMS)
-		if _, err := chatEvents.Append(id, "reasoning_duration", map[string]any{"message_id": messageID, "duration_ms": durationMS}); err != nil {
+		measured := chat.ReasoningDuration{}
+		measured.MessageId, measured.DurationMs = messageID, durationMS
+		if _, err := chatEvents.Append(id, measured); err != nil {
 			log.Printf("warn: persist normalized thinking duration for %s: %v", id, err)
 		}
 	})
@@ -211,7 +214,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// every /model change) - daemon-side, so a mid-session model change is
 	// captured even with no browser attached. The registry dedupes per session.
 	reg.SetOnChatModel(func(id, model string) {
-		if _, err := chatEvents.Append(id, "model_changed", map[string]any{"model": model}); err != nil {
+		changed := chat.ModelChanged{}
+		changed.Model = model
+		if _, err := chatEvents.Append(id, changed); err != nil {
 			log.Printf("warn: persist normalized model for %s: %v", id, err)
 		}
 		if err := store.UpdateAgentModel(id, model); err != nil {
@@ -225,7 +230,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		if err := store.UpdateAgentPlan(id, planJSON); err != nil {
 			log.Printf("warn: persist plan for %s: %v", id, err)
 		}
-		if _, err := chatEvents.Append(id, "plan_updated", chat.JSONPayload(map[string]any{"provider": "claude"}, "plan", []byte(planJSON))); err != nil {
+		updated := chat.PlanUpdated{}
+		updated.Provider, updated.Plan = "claude", json.RawMessage(planJSON)
+		if _, err := chatEvents.Append(id, updated); err != nil {
 			log.Printf("warn: persist normalized plan for %s: %v", id, err)
 		}
 	})

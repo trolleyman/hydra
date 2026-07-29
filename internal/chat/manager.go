@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -81,14 +82,21 @@ func (m *Manager) store(id string) (*Store, error) {
 	w := &worker{store: s, in: make(chan observedLine, 1024), ctx: ctx, codexSubs: map[string]codexSpawn{}, codexAssistantDeltas: pendingCodexAssistantDeltas(s.events)}
 	m.workers[id] = w
 	if s.Snapshot().Through == 0 && ctx.Prompt != "" {
-		_, _, _ = s.AppendSource("hydra:initial-prompt", "user_message", map[string]any{"id": "initial", "content": []map[string]any{{"type": "text", "text": ctx.Prompt}}})
+		prompt, _ := json.Marshal([]map[string]any{{"type": "text", "text": ctx.Prompt}})
+		initial := UserMessage{}
+		initial.Id, initial.Content = "initial", prompt
+		_, _, _ = s.AppendSource("hydra:initial-prompt", initial)
 	}
 	if len(s.Snapshot().Plan) == 0 && ctx.Plan != "" && json.Valid([]byte(ctx.Plan)) {
-		_, _, _ = s.AppendSource("hydra:initial-plan", "plan_updated", JSONPayload(map[string]any{"provider": ctx.AgentType}, "plan", []byte(ctx.Plan)))
+		seed := PlanUpdated{}
+		seed.Provider, seed.Plan = ctx.AgentType, json.RawMessage(ctx.Plan)
+		_, _, _ = s.AppendSource("hydra:initial-plan", seed)
 	}
 	if s.Snapshot().Head == "" && ctx.Worktree != "" {
 		if head, err := git.ResolveRef(ctx.Worktree, "HEAD"); err == nil {
-			_, _ = s.Append("head_observed", map[string]any{"head": head})
+			observed := HeadObserved{}
+			observed.Head = head
+			_, _ = s.Append(observed)
 		}
 	}
 	go w.run(id)
@@ -122,14 +130,7 @@ func (m *Manager) ObserveClaudeSidechain(id, agentID string, meta *claudestream.
 	if err != nil {
 		return
 	}
-	payload := map[string]any{"id": agentID, "agent_type": "claude", "status": "running"}
-	if meta != nil {
-		payload["agent_type"] = meta.AgentType
-		payload["description"] = meta.Description
-		payload["parent_id"] = meta.ParentAgentID
-		payload["parent_item_id"] = meta.ToolUseID
-	}
-	_, _, _ = w.store.AppendSource("claude:subagent:"+agentID, "subagent_started", payload)
+	_, _, _ = w.store.AppendSource("claude:subagent:"+agentID, claudeSubagentStarted(agentID, meta))
 	w.in <- observedLine{provider: "claude_history", line: addClaudeSidechain(line, agentID, meta)}
 }
 
@@ -173,16 +174,19 @@ func (w *worker) run(id string) {
 					w.codexSpawns = w.codexSpawns[1:]
 					w.codexSubs[threadID] = spawn
 					linked = true
-					specs = append([]eventSpec{{
-						sourceID:  "codex:subagent:" + threadID,
-						eventType: "subagent_started",
-						payload:   map[string]any{"id": threadID, "parent_id": spawn.ParentId, "parent_item_id": spawn.ToolID, "agent_type": "codex", "description": spawn.Prompt, "prompt": spawn.Prompt, "status": "running"},
-					}}, specs...)
+					started := &SubagentStarted{ChatSubagentPayload: codexSubagent(threadID, spawn, "running")}
+					started.ParentItemId = spawn.ToolID
+					specs = append([]eventSpec{{sourceID: "codex:subagent:" + threadID, payload: started}}, specs...)
 				}
 				for i := range specs {
-					specs[i].payload = withCodexSidechain(specs[i].payload, threadID, spawn.ToolID)
-					if (specs[i].eventType == "turn_completed" || specs[i].eventType == "turn_failed") && linked {
-						specs = append(specs, eventSpec{sourceID: "codex:subagent:" + threadID + ":completed", eventType: "subagent_completed", payload: map[string]any{"id": threadID, "parent_id": spawn.ParentId, "parent_item_id": spawn.ToolID, "agent_type": "codex", "description": spawn.Prompt, "prompt": spawn.Prompt, "status": "completed"}})
+					if sc, ok := specs[i].payload.(sidechainSetter); ok {
+						sc.SetSidechain(threadID, spawn.ToolID)
+					}
+					kind := specs[i].eventType()
+					if (kind == "turn_completed" || kind == "turn_failed") && linked {
+						done := &SubagentCompleted{ChatSubagentPayload: codexSubagent(threadID, spawn, "completed")}
+						done.ParentItemId = spawn.ToolID
+						specs = append(specs, eventSpec{sourceID: "codex:subagent:" + threadID + ":completed", payload: done})
 					}
 				}
 			}
@@ -193,13 +197,14 @@ func (w *worker) run(id string) {
 			specs = w.settleCodexPartialOnInterrupt(specs)
 		}
 		for _, spec := range specs {
-			if (item.provider == "claude" || item.provider == "claude_history") && spec.eventType == "user_message" && w.reconcileClaudeUserEcho(spec) {
+			kind := spec.eventType()
+			if (item.provider == "claude" || item.provider == "claude_history") && kind == "user_message" && w.reconcileClaudeUserEcho(spec) {
 				continue
 			}
-			if _, _, err := w.store.AppendSource(spec.sourceID, spec.eventType, spec.payload); err != nil {
+			if _, _, err := w.store.AppendSource(spec.sourceID, spec.payload); err != nil {
 				log.Printf("warn: chat events: append %s event for %s: %v", item.provider, id, err)
 			}
-			if spec.eventType == "tool_completed" || spec.eventType == "turn_completed" || spec.eventType == "turn_failed" {
+			if kind == "tool_completed" || kind == "turn_completed" || kind == "turn_failed" {
 				w.reconcileCommits(id, causalItemID(spec.payload))
 			}
 		}
@@ -211,23 +216,26 @@ func (w *worker) run(id string) {
 // The marker is intentionally durable: without it, two identical messages sent
 // in separate turns cannot be paired correctly after a daemon restart.
 func (w *worker) reconcileClaudeUserEcho(spec eventSpec) bool {
-	payload, ok := spec.payload.(map[string]any)
-	if !ok || payload["sidechain"] == true {
+	msg, ok := spec.payload.(*UserMessage)
+	if !ok || msg.Sidechain {
 		return false
 	}
-	key := userMessageContentKey(payload)
+	key := contentKey(msg.Content)
 	if key == "" {
 		return false
 	}
 	pending := make([]uint64, 0, 1)
 	for _, event := range w.store.Events() {
-		var stored map[string]any
-		if json.Unmarshal(event.Payload, &stored) != nil {
+		var payload struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(event.Payload, &payload) != nil {
 			continue
 		}
+		stored := payload.Content
 		switch event.Type {
 		case "user_message":
-			if userMessageContentKey(stored) != key {
+			if contentKey(stored) != key {
 				continue
 			}
 			if strings.HasPrefix(event.SourceId, "claude:") {
@@ -238,7 +246,7 @@ func (w *worker) reconcileClaudeUserEcho(spec eventSpec) bool {
 				pending = append(pending, event.Seq)
 			}
 		case "user_message_echoed":
-			if userMessageContentKey(stored) == key && len(pending) > 0 {
+			if contentKey(stored) == key && len(pending) > 0 {
 				pending = pending[1:]
 			}
 		}
@@ -246,57 +254,51 @@ func (w *worker) reconcileClaudeUserEcho(spec eventSpec) bool {
 	if len(pending) == 0 {
 		return false
 	}
-	_, _, err := w.store.AppendSource(spec.sourceID, "user_message_echoed", map[string]any{
-		"user_seq": pending[0],
-		"content":  payload["content"],
-	})
+	echo := UserMessageEchoed{}
+	echo.UserSeq, echo.Content = pending[0], msg.Content
+	_, _, err := w.store.AppendSource(spec.sourceID, echo)
 	return err == nil
 }
 
-func userMessageContentKey(payload map[string]any) string {
-	content, ok := payload["content"]
-	if !ok {
+// contentKey canonicalises a user message's content so the same message can be
+// recognised across a provider echo. Object key ordering is normalised by
+// round-tripping, because a provider payload is a struct while a replayed one
+// from the store is a map.
+func contentKey(content json.RawMessage) string {
+	if len(content) == 0 {
 		return ""
 	}
-	raw, err := json.Marshal(content)
-	if err != nil {
-		return ""
-	}
-	// Provider payloads may use structs while replayed store payloads use maps.
-	// Round-trip through interface values so object key ordering is canonical.
 	var canonical any
-	if json.Unmarshal(raw, &canonical) != nil {
+	if json.Unmarshal(content, &canonical) != nil {
 		return ""
 	}
-	raw, err = json.Marshal(canonical)
+	out, err := json.Marshal(canonical)
 	if err != nil {
 		return ""
 	}
-	return string(raw)
+	return string(out)
 }
 
 func (w *worker) settleCodexPartialOnInterrupt(specs []eventSpec) []eventSpec {
 	out := make([]eventSpec, 0, len(specs)+len(w.codexAssistantDeltas))
 	for _, spec := range specs {
-		payload, _ := spec.payload.(map[string]any)
-		messageID, _ := payload["message_id"].(string)
-		switch spec.eventType {
-		case "assistant_delta":
-			if payload["sidechain"] != true && messageID != "" {
-				if text, ok := payload["text"].(string); ok {
-					w.codexAssistantDeltas[messageID] += text
-				}
+		switch payload := spec.payload.(type) {
+		case *AssistantDelta:
+			if !payload.Sidechain && payload.MessageId != "" {
+				w.codexAssistantDeltas[payload.MessageId] += payload.Text
 			}
-		case "assistant_message":
-			delete(w.codexAssistantDeltas, messageID)
-		case "turn_interrupted":
+		case *AssistantMessage:
+			delete(w.codexAssistantDeltas, payload.MessageId)
+		case *TurnInterrupted:
 			for id, text := range w.codexAssistantDeltas {
 				if strings.TrimSpace(text) != "" {
-					out = append(out, eventSpec{sourceID: "codex:partial:" + id, eventType: "assistant_message", payload: map[string]any{"message_id": id, "text": text, "partial": true}})
+					settled := &AssistantMessage{}
+					settled.MessageId, settled.Text, settled.Partial = id, text, true
+					out = append(out, eventSpec{sourceID: "codex:partial:" + id, payload: settled})
 				}
 			}
 			clear(w.codexAssistantDeltas)
-		case "turn_completed", "turn_failed":
+		case *TurnCompleted, *TurnFailed:
 			clear(w.codexAssistantDeltas)
 		}
 		out = append(out, spec)
@@ -401,21 +403,22 @@ func (w *worker) reconcileCommits(id, causalItemID string) {
 		if err == nil {
 			for i := len(commits) - 1; i >= 0; i-- {
 				c := commits[i]
-				payload := map[string]any{
-					"head": newHead, "sha": c.SHA, "short_sha": c.ShortSHA,
-					"subject": c.Subject, "author_name": c.AuthorName,
-					"author_email": c.AuthorEmail, "timestamp": c.Timestamp,
-					"causal_item_id": causalItemID,
-				}
-				w.annotateMerge(&c, payload)
-				if _, _, err := w.store.AppendSource("git:commit:"+c.SHA, "commit_created", payload); err != nil {
+				commit := CommitCreated{}
+				commit.Head, commit.Sha, commit.ShortSha = newHead, c.SHA, c.ShortSHA
+				commit.Subject, commit.AuthorName = c.Subject, c.AuthorName
+				commit.AuthorEmail, commit.Timestamp = c.AuthorEmail, c.Timestamp
+				commit.CausalItemId = causalItemID
+				w.annotateMerge(&c, &commit)
+				if _, _, err := w.store.AppendSource("git:commit:"+c.SHA, commit); err != nil {
 					log.Printf("warn: chat events: append commit for %s: %v", id, err)
 				}
 			}
 			return
 		}
 	}
-	_, _ = w.store.Append("head_changed", map[string]any{"old_head": oldHead, "head": newHead})
+	moved := HeadChanged{}
+	moved.OldHead, moved.Head = oldHead, newHead
+	_, _ = w.store.Append(moved)
 }
 
 // mergedCommitsCap bounds how many merged-in commits a merge chip embeds for its
@@ -426,7 +429,7 @@ const mergedCommitsCap = 100
 // annotateMerge enriches a merge commit's payload with the commits it brought in
 // (its second parent's history not already on the first parent), so the chat can
 // render a single collapsed "Merged ... - N commits" chip that expands to the list.
-func (w *worker) annotateMerge(c *git.CommitInfo, payload map[string]any) {
+func (w *worker) annotateMerge(c *git.CommitInfo, commit *CommitCreated) {
 	if !c.IsMerge() || len(c.Parents) < 2 {
 		return
 	}
@@ -434,20 +437,17 @@ func (w *worker) annotateMerge(c *git.CommitInfo, payload map[string]any) {
 	if err != nil || len(merged) == 0 {
 		return
 	}
-	payload["is_merge"] = true
-	payload["merged_count"] = len(merged)
-	limit := len(merged)
-	if limit > mergedCommitsCap {
-		limit = mergedCommitsCap
-	}
-	list := make([]map[string]any, 0, limit)
+	commit.IsMerge = true
+	commit.MergedCount = len(merged)
+	limit := min(len(merged), mergedCommitsCap)
+	list := make([]api.ChatMergedCommit, 0, limit)
 	for _, m := range merged[:limit] {
-		list = append(list, map[string]any{
-			"sha": m.SHA, "short_sha": m.ShortSHA, "subject": m.Subject,
-			"author_name": m.AuthorName, "timestamp": m.Timestamp,
+		list = append(list, api.ChatMergedCommit{
+			Sha: m.SHA, ShortSha: m.ShortSHA, Subject: m.Subject,
+			AuthorName: m.AuthorName, Timestamp: m.Timestamp,
 		})
 	}
-	payload["merged_commits"] = list
+	commit.MergedCommits = list
 }
 
 // Flush waits until every provider line queued before it has been normalized
@@ -472,7 +472,9 @@ func (m *Manager) importClaudeHistory(id string, w *worker) {
 		var durations map[string]int64
 		if json.Unmarshal(data, &durations) == nil {
 			for messageID, durationMS := range durations {
-				_, _, _ = w.store.AppendSource("claude:thinking:"+messageID, "reasoning_duration", map[string]any{"message_id": messageID, "duration_ms": durationMS})
+				measured := ReasoningDuration{}
+				measured.MessageId, measured.DurationMs = messageID, durationMS
+				_, _, _ = w.store.AppendSource("claude:thinking:"+messageID, measured)
 			}
 		}
 	}
@@ -508,14 +510,7 @@ func (m *Manager) importClaudeHistory(id string, w *worker) {
 	subs, _ := claudestream.TailSubagentTranscripts(dir, sessionID, 0)
 	for _, sub := range subs {
 		meta := sub.Meta
-		payload := map[string]any{"id": sub.AgentID, "agent_type": "claude", "status": "running"}
-		if meta != nil {
-			payload["agent_type"] = meta.AgentType
-			payload["description"] = meta.Description
-			payload["parent_id"] = meta.ParentAgentID
-			payload["parent_item_id"] = meta.ToolUseID
-		}
-		_, _, _ = w.store.AppendSource("claude:subagent:"+sub.AgentID, "subagent_started", payload)
+		_, _, _ = w.store.AppendSource("claude:subagent:"+sub.AgentID, claudeSubagentStarted(sub.AgentID, meta))
 		for _, line := range sub.Lines {
 			w.in <- observedLine{provider: "claude_history", line: addClaudeSidechain(line, sub.AgentID, meta)}
 		}
@@ -550,12 +545,12 @@ func addClaudeSidechain(line []byte, agentID string, meta *claudestream.Subagent
 	return out
 }
 
-func (m *Manager) Append(id, eventType string, payload any) (Event, error) {
+func (m *Manager) Append(id string, payload Payload) (Event, error) {
 	s, err := m.store(id)
 	if err != nil {
 		return Event{}, errtrace.Wrap(err)
 	}
-	return errtrace.Wrap2(s.Append(eventType, payload))
+	return errtrace.Wrap2(s.Append(payload))
 }
 
 func (m *Manager) Snapshot(id string) (Projection, error) {
@@ -596,7 +591,23 @@ func (m *Manager) Watch(id string) (Projection, <-chan Event, func(), error) {
 
 // JSONPayload makes callbacks that already own JSON (plans, usage, content)
 // embed it without string-encoding it.
-func JSONPayload(fields map[string]any, key string, raw []byte) map[string]any {
-	fields[key] = json.RawMessage(raw)
-	return fields
+// claudeSubagentStarted is the lifecycle event for a Claude sub-agent, built
+// from its meta sidecar (which may not exist yet, in which case only the id and
+// a running status are known).
+func claudeSubagentStarted(agentID string, meta *claudestream.SubagentMeta) *SubagentStarted {
+	started := &SubagentStarted{}
+	started.Id, started.AgentType, started.Status = agentID, "claude", "running"
+	if meta != nil {
+		started.AgentType, started.Description = meta.AgentType, meta.Description
+		started.ParentId, started.ParentItemId = meta.ParentAgentID, meta.ToolUseID
+	}
+	return started
+}
+
+// codexSubagent is the shared body of a Codex sub-agent's start and completion.
+func codexSubagent(threadID string, spawn codexSpawn, status string) api.ChatSubagentPayload {
+	return api.ChatSubagentPayload{
+		Id: threadID, ParentId: spawn.ParentId, AgentType: "codex",
+		Description: spawn.Prompt, Prompt: spawn.Prompt, Status: status,
+	}
 }

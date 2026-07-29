@@ -6,6 +6,7 @@ import type {
   ChatConversationStartedPayload,
   ChatDeltaPayload,
   ChatEvent,
+  ChatProviderContext,
   ChatHeadChangedPayload,
   ChatInteractionPayload,
   ChatItemDeltaPayload,
@@ -20,6 +21,7 @@ import type {
   ChatToolStartedPayload,
   ChatTurnPayload,
   ChatUsageUpdatedPayload,
+  ChatUserMessageEchoedPayload,
   ChatUserMessagePayload,
 } from '../api'
 
@@ -41,6 +43,12 @@ import type {
 // than mishandled - which is the fallback behaviour we want anyway.
 type Event<T extends string, P> = Omit<ChatEvent, 'type' | 'payload'> & { type: T; payload: P }
 
+// A provider-derived event's payload is its own fields PLUS the shared context
+// (who produced it, where it belongs). The schema keeps the two separate so the
+// daemon can embed them - Go promotes an embedded struct's fields, so the wire
+// stays flat - and here they intersect to the same shape.
+type ProviderEventOf<T extends string, P> = Event<T, P & ChatProviderContext>
+
 // The wire may omit an empty payload, but every payload's fields are optional,
 // so defaulting it to {} here lets the cases below read fields without a guard
 // on every access. This is the one place the daemon's schema guarantee is taken
@@ -51,35 +59,35 @@ export function asNormalizedChatEvent(ev: ChatEvent): NormalizedChatEvent {
 }
 
 export type NormalizedChatEvent =
-  | Event<'conversation_started', ChatConversationStartedPayload>
-  | Event<'user_message', ChatUserMessagePayload>
-  | Event<'user_message_echoed', ChatUserMessagePayload>
-  | Event<'context_message', ChatContextMessagePayload>
-  | Event<'assistant_message', ChatAssistantMessagePayload>
-  | Event<'assistant_delta', ChatDeltaPayload>
-  | Event<'reasoning_completed', ChatReasoningCompletedPayload>
-  | Event<'reasoning_delta', ChatDeltaPayload>
+  | ProviderEventOf<'conversation_started', ChatConversationStartedPayload>
+  | ProviderEventOf<'user_message', ChatUserMessagePayload>
+  | Event<'user_message_echoed', ChatUserMessageEchoedPayload>
+  | ProviderEventOf<'context_message', ChatContextMessagePayload>
+  | ProviderEventOf<'assistant_message', ChatAssistantMessagePayload>
+  | ProviderEventOf<'assistant_delta', ChatDeltaPayload>
+  | ProviderEventOf<'reasoning_completed', ChatReasoningCompletedPayload>
+  | ProviderEventOf<'reasoning_delta', ChatDeltaPayload>
   | Event<'reasoning_duration', ChatReasoningDurationPayload>
-  | Event<'content_stream_started', ChatContentStreamPayload>
-  | Event<'content_stream_completed', ChatContentStreamPayload>
-  | Event<'tool_started', ChatToolStartedPayload>
-  | Event<'tool_completed', ChatToolCompletedPayload>
-  | Event<'tool_delta', ChatItemDeltaPayload>
-  | Event<'plan_updated', ChatPlanUpdatedPayload>
-  | Event<'plan_delta', ChatItemDeltaPayload>
-  | Event<'subagent_started', ChatSubagentPayload>
-  | Event<'subagent_updated', ChatSubagentPayload>
-  | Event<'subagent_completed', ChatSubagentPayload>
-  | Event<'turn_started', ChatTurnPayload>
-  | Event<'turn_completed', ChatTurnPayload>
-  | Event<'turn_failed', ChatTurnPayload>
-  | Event<'turn_interrupted', ChatTurnPayload>
-  | Event<'turn_error', ChatTurnPayload>
+  | ProviderEventOf<'content_stream_started', ChatContentStreamPayload>
+  | ProviderEventOf<'content_stream_completed', ChatContentStreamPayload>
+  | ProviderEventOf<'tool_started', ChatToolStartedPayload>
+  | ProviderEventOf<'tool_completed', ChatToolCompletedPayload>
+  | ProviderEventOf<'tool_delta', ChatItemDeltaPayload>
+  | ProviderEventOf<'plan_updated', ChatPlanUpdatedPayload>
+  | ProviderEventOf<'plan_delta', ChatItemDeltaPayload>
+  | ProviderEventOf<'subagent_started', ChatSubagentPayload>
+  | ProviderEventOf<'subagent_updated', ChatSubagentPayload>
+  | ProviderEventOf<'subagent_completed', ChatSubagentPayload>
+  | ProviderEventOf<'turn_started', ChatTurnPayload>
+  | ProviderEventOf<'turn_completed', ChatTurnPayload>
+  | ProviderEventOf<'turn_failed', ChatTurnPayload>
+  | ProviderEventOf<'turn_interrupted', ChatTurnPayload>
+  | ProviderEventOf<'turn_error', ChatTurnPayload>
   | Event<'usage_updated', ChatUsageUpdatedPayload>
-  | Event<'messages_retracted', ChatMessagesRetractedPayload>
-  | Event<'notice', ChatNoticePayload>
-  | Event<'interaction_requested', ChatInteractionPayload>
-  | Event<'interaction_resolved', ChatInteractionPayload>
+  | ProviderEventOf<'messages_retracted', ChatMessagesRetractedPayload>
+  | ProviderEventOf<'notice', ChatNoticePayload>
+  | ProviderEventOf<'interaction_requested', ChatInteractionPayload>
+  | ProviderEventOf<'interaction_resolved', ChatInteractionPayload>
   | Event<'commit_created', ChatCommitCreatedPayload>
   | Event<'head_changed', ChatHeadChangedPayload>
   | Event<'head_observed', ChatHeadChangedPayload>

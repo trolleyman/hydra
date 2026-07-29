@@ -2,8 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatToolStartedPayload = (ChatProviderContext & {
+/**
+ * A tool call.
+ */
+export type ChatToolStartedPayload = {
     id?: string;
     name?: string;
     /**
@@ -14,6 +16,9 @@ export type ChatToolStartedPayload = (ChatProviderContext & {
      * Present on Codex items; its absence is what marks a Claude block.
      */
     status?: string;
-    output?: string;
-});
+    /**
+     * Whatever the tool produced, as the provider sent it - a string, an object, an error. Provider-owned, like `input`.
+     */
+    output?: any;
+};
 

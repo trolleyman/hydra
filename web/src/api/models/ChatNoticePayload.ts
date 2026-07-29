@@ -2,8 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatNoticePayload = (ChatProviderContext & {
+/**
+ * Harness bookkeeping shown as a compact chip.
+ */
+export type ChatNoticePayload = {
     text?: string;
-});
+};
 

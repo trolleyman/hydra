@@ -2,9 +2,11 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatDeltaPayload = (ChatProviderContext & {
+/**
+ * One token delta. The first opens the live block; the completed message closes and replaces it. Not persisted to the display log.
+ */
+export type ChatDeltaPayload = {
     message_id?: string;
     text?: string;
-});
+};
 

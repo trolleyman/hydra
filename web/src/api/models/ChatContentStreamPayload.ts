@@ -2,8 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatContentStreamPayload = (ChatProviderContext & {
+/**
+ * A provider content-boundary hint; a state signal, not a card.
+ */
+export type ChatContentStreamPayload = {
     kind?: string;
-});
+};
 

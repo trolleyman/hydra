@@ -2,8 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatMessagesRetractedPayload = (ChatProviderContext & {
+/**
+ * A safety retry evicted blocks the provider had already streamed. The client must drop these ids or the flagged text lingers.
+ */
+export type ChatMessagesRetractedPayload = {
     message_ids?: Array<string>;
-});
+};
 

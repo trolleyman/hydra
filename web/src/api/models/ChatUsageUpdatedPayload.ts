@@ -2,9 +2,11 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatUsageUpdatedPayload = (ChatProviderContext & {
+/**
+ * Token accounting. One carrying a message_id opens a message's count; the rest tick it up, which is what the live working indicator counts.
+ */
+export type ChatUsageUpdatedPayload = {
     message_id?: string;
     usage?: Record<string, any>;
-});
+};
 

@@ -2,13 +2,15 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatAssistantMessagePayload = (ChatProviderContext & {
+/**
+ * A settled assistant message; it replaces its streamed preview.
+ */
+export type ChatAssistantMessagePayload = {
     message_id?: string;
     text?: string;
     /**
      * Set when an interrupt settled the deltas received so far.
      */
     partial?: boolean;
-});
+};
 

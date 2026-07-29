@@ -166,7 +166,9 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 			return
 		}
 		if s.ChatEvents != nil {
-			_, _ = s.ChatEvents.Append(sessionID, "model_changed", map[string]any{"model": msg.Model})
+			changed := chat.ModelChanged{}
+			changed.Model = msg.Model
+			_, _ = s.ChatEvents.Append(sessionID, changed)
 		}
 	case "control_response":
 		// The client answers a CLI control_request (AskUserQuestion) with a
@@ -221,7 +223,10 @@ func (s *Server) runChatShellCommand(conn *safeConn, projectRoot, worktree, sess
 	}
 	content := shellCommandUserContent(res)
 	if s.ChatQueues != nil {
-		s.ChatQueues.SubmitShellResult(projectRoot, sessionID, msgID, content, res)
+		s.ChatQueues.SubmitShellResult(projectRoot, sessionID, msgID, content, &api.ChatShellResult{
+			Command: res.Command, Output: res.Output, ExitCode: res.ExitCode,
+			Truncated: res.Truncated, TimedOut: res.TimedOut, Stopped: res.Stopped,
+		})
 		return
 	}
 	// No queue manager (queueing disabled): deliver to the CLI directly. Without

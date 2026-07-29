@@ -164,17 +164,19 @@ func (s *Store) SetImportOffset(source string, offset int64) error {
 // Append durably writes an event, applies it to the current projection, then
 // atomically checkpoints that projection. A crash between the first two writes
 // is repaired by replaying events after Projection.Through on Open.
-func (s *Store) Append(eventType string, payload any) (Event, error) {
-	ev, _, err := s.AppendSource("", eventType, payload)
+func (s *Store) Append(payload Payload) (Event, error) {
+	ev, _, err := s.AppendSource("", payload)
 	return ev, errtrace.Wrap(err)
 }
 
 // AppendSource is Append with a provider-stable deduplication key. It returns
 // appended=false and the original event when replay/backfill presents a source
 // item already recorded by the live stream.
-func (s *Store) AppendSource(sourceID, eventType string, payload any) (ev Event, appended bool, err error) {
+func (s *Store) AppendSource(sourceID string, payload Payload) (ev Event, appended bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// The payload names its own type, so the two cannot disagree (see events.go).
+	eventType := payload.EventType()
 	if eventType == "" {
 		return Event{}, false, errtrace.Wrap(errors.New("chat event type is empty"))
 	}

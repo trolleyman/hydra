@@ -3,10 +3,9 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * One delta against a tool or plan item, keyed by that item's id.
+ * A queued message was recalled or drained, so it leaves the queue.
  */
-export type ChatItemDeltaPayload = {
+export type ChatQueueMessageRemovedPayload = {
     id?: string;
-    text?: string;
 };
 

@@ -699,8 +699,7 @@ export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyRea
   switch (ev.type) {
     case 'conversation_started':
       return [{ type: 'system', subtype: 'init', model: ev.payload.model, slash_commands: ev.payload.slash_commands, apiKeySource: ev.payload.api_key_source }]
-    case 'user_message':
-    case 'user_message_echoed': {
+    case 'user_message': {
       const p = ev.payload
       const base = providerBase(ev, p, p.id)
       // A "!command" the user ran: its user_message payload carries the sandboxed

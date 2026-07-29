@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/chat"
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -164,7 +165,7 @@ type ChatQueueManager struct {
 	interrupted map[string]time.Time
 	// onEvent mirrors queue/input transitions into the normalized durable chat
 	// stream. Optional so focused queue tests and legacy callers stay lightweight.
-	onEvent func(id, eventType string, payload any)
+	onEvent func(id string, payload chat.Payload)
 }
 
 // interruptMarkTTL bounds how long a pending-interrupt mark stays valid. An
@@ -189,18 +190,18 @@ func NewChatQueueManager(reg *session.Registry, store *db.Store) *ChatQueueManag
 	return &ChatQueueManager{reg: reg, store: store, queues: map[string]*ChatQueue{}, interrupted: map[string]time.Time{}}
 }
 
-func (m *ChatQueueManager) SetEventSink(fn func(id, eventType string, payload any)) {
+func (m *ChatQueueManager) SetEventSink(fn func(id string, payload chat.Payload)) {
 	m.mu.Lock()
 	m.onEvent = fn
 	m.mu.Unlock()
 }
 
-func (m *ChatQueueManager) emit(id, eventType string, payload any) {
+func (m *ChatQueueManager) emit(id string, payload chat.Payload) {
 	m.mu.Lock()
 	fn := m.onEvent
 	m.mu.Unlock()
 	if fn != nil {
-		fn(id, eventType, payload)
+		fn(id, payload)
 	}
 }
 
@@ -320,12 +321,12 @@ func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) bool
 func (m *ChatQueueManager) Submit(projectRoot, id string, msg QueuedMessage, queued bool) {
 	if queued {
 		m.queue(projectRoot, id).Enqueue(msg)
-		m.emit(id, "queued_message", map[string]any{"id": msg.ID, "status": "queued", "content": msg.Content})
+		m.emit(id, queuedMessage(msg.ID, "queued", msg.Content))
 		m.kickIfResting(projectRoot, id)
 		return
 	}
 	if m.writeToStdin(id, msg.Content) {
-		m.emit(id, "user_message", map[string]any{"id": msg.ID, "content": msg.Content})
+		m.emit(id, userMessage(msg.ID, msg.Content, nil))
 	}
 }
 
@@ -341,12 +342,12 @@ func (m *ChatQueueManager) Submit(projectRoot, id string, msg QueuedMessage, que
 // user_message payload's `shell` field. The CLI's replay echo of the same
 // content folds into a user_message_echoed (reconcileClaudeUserEcho), so the
 // card is the sole visible copy.
-func (m *ChatQueueManager) SubmitShellResult(projectRoot, id, msgID string, content json.RawMessage, shell any) {
+func (m *ChatQueueManager) SubmitShellResult(projectRoot, id, msgID string, content json.RawMessage, shell *api.ChatShellResult) {
 	q := m.queue(projectRoot, id)
 	q.sendMu.Lock()
 	defer q.sendMu.Unlock()
 	if m.writeToStdin(id, content) {
-		m.emit(id, "user_message", map[string]any{"id": msgID, "content": content, "shell": shell})
+		m.emit(id, userMessage(msgID, content, shell))
 	}
 }
 
@@ -355,7 +356,7 @@ func (m *ChatQueueManager) SubmitShellResult(projectRoot, id, msgID string, cont
 func (m *ChatQueueManager) Dequeue(projectRoot, id, msgID string) bool {
 	removed := m.queue(projectRoot, id).Dequeue(msgID)
 	if removed {
-		m.emit(id, "queue_message_removed", map[string]any{"id": msgID})
+		m.emit(id, queueMessageRemoved(msgID))
 	}
 	return removed
 }
@@ -458,7 +459,7 @@ func (m *ChatQueueManager) drainAll(projectRoot, id string) {
 			return
 		}
 		if m.writeToStdin(id, msg.Content) {
-			m.emit(id, "user_message", map[string]any{"id": msg.ID, "content": msg.Content})
+			m.emit(id, userMessage(msg.ID, msg.Content, nil))
 		}
 	}
 }
@@ -475,4 +476,29 @@ func (m *ChatQueueManager) OnTurnStep(id string) {
 		return
 	}
 	m.drainAll(root, id)
+}
+
+// The queue's own normalized events. A queued message exists only in the queue
+// projection until it drains, at which point it becomes a durable user_message
+// carrying the same client id - which is what lets the browser reconcile its
+// pending bubble instead of rendering a second one.
+func queuedMessage(id, status string, content json.RawMessage) chat.QueuedMessage {
+	queued := chat.QueuedMessage{}
+	queued.Id, queued.Status, queued.Content = id, status, content
+	return queued
+}
+
+func queueMessageRemoved(id string) chat.QueueMessageRemoved {
+	removed := chat.QueueMessageRemoved{}
+	removed.Id = id
+	return removed
+}
+
+// userMessage is the durable turn a drained (or directly sent) message becomes.
+// shell is set only for a composer "!command", whose sandboxed result rides
+// along so the chat renders a shell card rather than a bubble.
+func userMessage(id string, content json.RawMessage, shell *api.ChatShellResult) chat.UserMessage {
+	msg := chat.UserMessage{}
+	msg.Id, msg.Content, msg.Shell = id, content, shell
+	return msg
 }

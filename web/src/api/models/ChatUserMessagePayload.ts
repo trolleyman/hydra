@@ -2,9 +2,11 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
 import type { ChatShellResult } from './ChatShellResult';
-export type ChatUserMessagePayload = (ChatProviderContext & {
+/**
+ * A user turn. Hydra records this at the input boundary.
+ */
+export type ChatUserMessagePayload = {
     /**
      * The client-generated id, so a queued bubble reconciles to it.
      */
@@ -14,5 +16,5 @@ export type ChatUserMessagePayload = (ChatProviderContext & {
      */
     content?: Record<string, any>;
     shell?: ChatShellResult;
-});
+};
 

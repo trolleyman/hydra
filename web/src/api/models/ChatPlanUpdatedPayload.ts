@@ -3,12 +3,14 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ChatPlanEntry } from './ChatPlanEntry';
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatPlanUpdatedPayload = (ChatProviderContext & {
+/**
+ * A plan checkpoint. Also folded into the projection.
+ */
+export type ChatPlanUpdatedPayload = {
     /**
      * Which provider produced it. Claude's Task cards already carry the timeline, so only Codex renders a visible Update Plan card.
      */
     provider?: string;
     plan?: Array<ChatPlanEntry>;
-});
+};
 

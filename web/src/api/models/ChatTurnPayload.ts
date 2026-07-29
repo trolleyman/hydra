@@ -2,8 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ChatProviderContext } from './ChatProviderContext';
-export type ChatTurnPayload = (ChatProviderContext & {
+/**
+ * A turn boundary - the unit queue draining and head status key off.
+ */
+export type ChatTurnPayload = {
     id?: string;
     status?: string;
     result?: string;
@@ -12,5 +14,5 @@ export type ChatTurnPayload = (ChatProviderContext & {
      * The provider's structured failure. The browser unwraps app-server's nested JSON to show its type, status and message.
      */
     error?: Record<string, any>;
-});
+};
 
