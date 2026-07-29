@@ -10,6 +10,7 @@ import {
   Circle,
   CircleStop,
   ClipboardList,
+  Eye,
   FilePen,
   FileText,
   GitCommitHorizontal,
@@ -9978,6 +9979,21 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           <ResizeGrip orientation="horizontal" />
         </div>
         <div className="relative mx-auto max-w-5xl">
+          {/* What this agent cannot do, said where you are about to ask it to.
+              The failure it heads off is specific and silent: you read a finding,
+              type "just fix that", and the reviewer edits a throwaway checkout it
+              cannot commit from - so the work evaporates with no error anywhere.
+              Above the box rather than in the placeholder, which vanishes the
+              moment you start typing. */}
+          {review && (
+            <div className="mb-1.5 flex items-start gap-1.5 px-1 text-[11px] leading-4 text-stone-400 dark:text-stone-500">
+              <Eye className="mt-px h-3 w-3 shrink-0" />
+              <span>
+                Reviewer - a second agent reading this branch in its own throwaway checkout. It cannot edit
+                your worktree, commit, or reply to the head.
+              </span>
+            </div>
+          )}
           {slashMatches.length > 0 && (
             <div className="absolute bottom-full left-0 mb-1.5 z-20 w-64 max-h-64 overflow-y-auto rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
               {slashMatches.map((c, i) => (
@@ -10022,7 +10038,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               onKeyDown={onComposerKeyDown}
               onPaste={handlePaste}
               renderContent={renderComposerBackdrop}
-              placeholder={connected ? 'Write a message...' : 'Connecting...'}
+              placeholder={connected ? (review ? 'Ask about the diff...' : 'Write a message...') : 'Connecting...'}
               disabled={!connected}
               rows={1}
               wrapperClassName="w-full"

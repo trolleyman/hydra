@@ -425,6 +425,10 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	go heads.RunJSONStatusPoller(ctx, store, roots, eventHub, func(projectRoot, headID string) {
 		go server.PrefetchHeadNow(server.BackgroundCtx, projectRoot, headID)
 	})
+	// Keep every open reviewer's checkout on its head's branch tip, so a
+	// long-lived review conversation is about the head's current work rather than
+	// whichever commit it opened on (docs/review-agent.md).
+	go heads.RunReviewSyncWatcher(ctx, reg, store, roots)
 	go runStoragePruner(ctx, artifactReg, testReg, roots)
 	// Proactively pre-generate artifacts for settled heads so they're ready
 	// before a user clicks in, instead of starting the work only on view.

@@ -165,6 +165,17 @@ func parseTermSize(r *http.Request, defRows, defCols uint16) (uint16, uint16) {
 	return parse("rows", defRows), parse("cols", defCols)
 }
 
+// reviewSlotStatus is a head reviewer's own resting status, read from the
+// status.json its hooks write under the SLOT id. Falls back to "waiting", which
+// is what an attached-but-idle agent is - never to the head's status, which
+// belongs to a different agent entirely.
+func reviewSlotStatus(projectRoot, headID string) string {
+	if info := heads.ReadAgentStatus(projectRoot, heads.ReviewSessionID(headID)); info != nil && info.Status != "" {
+		return string(info.Status)
+	}
+	return "waiting"
+}
+
 // HandleTerminalWS handles WebSocket connections for agent terminal access.
 // URL pattern: /ws/projects/{project_id}/agents/{id}/terminal
 func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
@@ -234,8 +245,14 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("terminal ws: upgraded connection for agent %q", agentID)
 
-	// Send initial status
-	sendStatusUpdate(conn, head.SessionStatus)
+	// Send initial status. A review pane is told about the REVIEWER, never about
+	// the head - its chip and tab dot are the reviewer's, and reporting the head's
+	// "running" there says the wrong thing about the wrong agent.
+	if useReview {
+		sendStatusUpdate(conn, reviewSlotStatus(projectRoot, head.ID))
+	} else {
+		sendStatusUpdate(conn, head.SessionStatus)
+	}
 
 	// Configure heartbeat
 	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -356,13 +373,18 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// already finished its turn, which ResumeHead preserves, so read back the status
 	// it actually wrote rather than assuming "waiting" and flashing it on a finished
 	// head.
-	if resumed {
+	switch {
+	case useReview:
+		// Attaching to a reviewer says nothing about whether it is working; read
+		// back what it last wrote rather than declaring it running.
+		sendStatusUpdate(conn, reviewSlotStatus(projectRoot, head.ID))
+	case resumed:
 		resumeStatus := "waiting"
 		if a, err := s.DB.GetAgent(head.ID); err == nil && a != nil && a.AgentStatus != nil && *a.AgentStatus != "" {
 			resumeStatus = *a.AgentStatus
 		}
 		sendStatusUpdate(conn, resumeStatus)
-	} else {
+	default:
 		sendStatusUpdate(conn, "running")
 	}
 

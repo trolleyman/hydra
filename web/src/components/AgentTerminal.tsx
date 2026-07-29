@@ -765,6 +765,12 @@ const REVIEW_TAB: TabConfig = { id: 'review', label: 'Review', kind: 'review', s
 // fixed agent terminal first. The review tab persists like the shells do: the
 // backend session is long-lived (one slot per head, following the branch as it
 // commits), so "I have a reviewer open" survives a reload and simply reattaches.
+// What the visible tab renders. Several things key off it (the panel's costume,
+// which status the chip names), and each of them wants the same answer.
+function activeKindOf(tabs: TabConfig[], activeTabId: string): TabKind | undefined {
+  return tabs.find(t => t.id === activeTabId)?.kind
+}
+
 function tabsFromPrefs(projectId: string | null, agentId: string): TabConfig[] {
   const prefs = loadAgentViewPrefs(projectId, agentId)
   const shells = (prefs.bashTabs ?? []).map(
@@ -816,6 +822,11 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   })
   const [reconnectKeys, setReconnectKeys] = useState<Record<string, number>>({})
   const [status, setStatus] = useState<string>('pending')
+  // The REVIEWER's status, kept apart from the head's on purpose. The review
+  // pane reports its turns here rather than through onStatusUpdate, so the
+  // reviewer thinking never shows up as the head running - on the title bar
+  // chip, on the sidebar card, or in the unread machinery.
+  const [reviewStatus, setReviewStatus] = useState<string>('pending')
   const [shellMenuOpen, setShellMenuOpen] = useState(false)
 
   // Persist the height the user drags the terminal panel to, per agent, so each
@@ -987,10 +998,18 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   // unaffected. Derived rather than an effect so it can't cascade renders.
   const terminalReconnect = (reconnectKeys.terminal ?? 0) + (reconnectSignal ?? 0)
 
-  const isRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
-  const isNeedsInput = status === AgentStatus.NEEDS_INPUT
-  const isWaiting = status === AgentStatus.WAITING
-  const isLoading = status === AgentStatus.PENDING || status === AgentStatus.BUILDING
+  // The chip names whoever the visible tab is talking to. On the Review tab that
+  // is the reviewer, not the head - showing the head's "running" over a reviewer
+  // sitting idle (or the reverse) is worse than showing nothing.
+  const shownStatus = activeKindOf(tabs, activeTabId) === 'review' ? reviewStatus : status
+  const isRunning = shownStatus === AgentStatus.RUNNING || shownStatus === AgentStatus.STARTING
+  const isNeedsInput = shownStatus === AgentStatus.NEEDS_INPUT
+  const isWaiting = shownStatus === AgentStatus.WAITING
+  const isLoading = shownStatus === AgentStatus.PENDING || shownStatus === AgentStatus.BUILDING
+  // A reviewer mid-turn on a tab you are not looking at: a dot on the tab, the
+  // same signal a background shell would want. Suppressed while it IS the active
+  // tab, where the status chip already says so.
+  const reviewBusy = reviewStatus === AgentStatus.RUNNING || reviewStatus === AgentStatus.STARTING
 
   // Whether the review tab is currently showing, which the `+` menu's Review
   // entry reflects (and toggles) in place of a close button on the tab itself.
@@ -1002,7 +1021,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   // tab RENDERS, not off the head's mode: the review slot is a chat pane whatever
   // mode the head runs in, and dressing it as a terminal window was leaving a
   // chat transcript sitting inside dark terminal chrome.
-  const activeKind = tabs.find(t => t.id === activeTabId)?.kind
+  const activeKind = activeKindOf(tabs, activeTabId)
   const chatActive = activeKind === 'review' || (!!chatMode && activeKind === 'agent')
   // Ghost icon-button palette for the title bar, per costume.
   const ghostBtn = chatActive
@@ -1068,7 +1087,15 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                       : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50'
                 }`}
               >
-                {tab.kind === 'agent' && chatMode ? 'Chat' : tab.label}
+                <span className="inline-flex items-center gap-1.5">
+                  {tab.kind === 'agent' && chatMode ? 'Chat' : tab.label}
+                  {/* The reviewer is working on a tab you are not watching. */}
+                  {tab.kind === 'review' && reviewBusy && activeTabId !== tab.id && (
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${chatActive ? 'bg-green-600 dark:bg-green-400' : 'bg-green-400'}`}
+                    />
+                  )}
+                </span>
               </button>
               {/* Only a shell carries a close button. The head's own tab is
                   permanent, and so - visually - is Review: it is one durable
@@ -1189,7 +1216,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                     : chatActive ? 'text-stone-400 dark:text-stone-500' : 'text-gray-500'
           }`}
         >
-          {isRunning || isNeedsInput || isWaiting ? '● ' : '○ '}{status}
+          {isRunning || isNeedsInput || isWaiting ? '● ' : '○ '}{shownStatus}
         </span>
         <Tooltip content="Refresh" side="bottom">
           <button
@@ -1212,15 +1239,17 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
           {tab.kind === 'review' ? (
             // The review slot: a different agent, so it gets its own ChatPane
             // mount (own socket, own transcript) and is always chat-framed even
-            // when the head it is attached to runs as a terminal. Deliberately no
-            // onStatusUpdate / onDiffRefresh - the reviewer's turns must not drive
-            // the HEAD's status chip or its diff refreshes.
+            // when the head it is attached to runs as a terminal. Its status goes
+            // to reviewStatus, NOT to the head's handleStatusUpdate/onStatusUpdate
+            // - the reviewer's turns drive its own chip and tab dot and nothing
+            // else. No onDiffRefresh either: it never edits anything.
             <ChatPane
               agentId={agentId}
               agentType={agentType}
               projectId={projectId}
               active={activeTabId === tab.id}
               reconnectAttempt={reconnectKeys[tab.id] ?? 0}
+              onStatusUpdate={setReviewStatus}
               onSelectCommit={onSelectCommit}
               review
             />
