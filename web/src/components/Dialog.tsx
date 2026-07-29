@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, type ReactNode } from 'react'
 import { AlertCircle, TriangleAlert, ArrowRight, ExternalLink, Info, HelpCircle, GitPullRequestArrow, Trash2, RotateCcw, FolderSync, Sparkles, X, Clock, LoaderCircle, Bot } from 'lucide-react'
 import { useDialogStore } from '../stores/dialogStore'
 import { IconButton } from './IconButton'
-import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton, type DialogTone } from './dialogPrimitives'
+import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton, DialogSecondaryButton, type DialogTone } from './dialogPrimitives'
 import { BranchPill } from './BranchPill'
 import { withBranchPills } from '../lib/branchPills'
 import { UrlText } from './HostName'
@@ -148,7 +148,9 @@ export const Dialog: React.FC = () => {
           description={message}
           details={details}
           confirmLabel={confirmLabel ?? 'Send to agent'}
+          secondaryLabel={secondaryLabel ?? 'Spawn agent'}
           onConfirm={handleConfirm}
+          onSecondary={onSecondary ? handleSecondary : undefined}
           onCancel={handleCancel}
         />
       ) : variant === 'mergeGate' ? (
@@ -278,14 +280,23 @@ function SendPromptPanel({
   description,
   details,
   confirmLabel,
+  secondaryLabel,
   onConfirm,
+  onSecondary,
   onCancel,
 }: {
   title: string
   description: string
   details?: DialogDetails
   confirmLabel: string
+  secondaryLabel: string
   onConfirm: () => void
+  // Optional "Spawn agent" alternative - hand the SAME message to a fresh head
+  // instead of interrupting the one you're looking at. Deliberately not the
+  // primary action: sending to the open agent is the cheap, expected outcome of
+  // clicking the sparkle, and spawning a head is the bigger commitment. Omitted
+  // when the call site has nothing to spawn into, which hides the button.
+  onSecondary?: () => void
   onCancel: () => void
 }) {
   return (
@@ -324,6 +335,11 @@ function SendPromptPanel({
       </div>
       <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-[#232b3a] bg-gray-50 dark:bg-[#0f141d]">
         <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>
+        {onSecondary && (
+          <DialogSecondaryButton tone="indigo" icon={<Bot className="w-4 h-4" />} onClick={onSecondary}>
+            {secondaryLabel}
+          </DialogSecondaryButton>
+        )}
         <DialogConfirmButton tone="indigo" icon={<Sparkles className="w-4 h-4" />} onClick={onConfirm}>
           {confirmLabel}
         </DialogConfirmButton>

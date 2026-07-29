@@ -1774,7 +1774,7 @@ function buildReviewMessage(comments: ReviewMessagePart[]): string {
     const c = comments[0]
     let s = `Comment on ${c.fromLabel} -> ${c.toLabel} diff:\n`
     if (c.contextBlock) s += `\n${c.contextBlock}`
-    s += `\nComment:\n${c.text}`
+    s += `\n_Comment:_\n${c.text}`
     return s
   }
   // Group by comparison, preserving first-seen order.
@@ -1789,7 +1789,7 @@ function buildReviewMessage(comments: ReviewMessagePart[]): string {
     const parts = g.items.map((c) => {
       let s = ''
       if (c.contextBlock) s += `${c.contextBlock}\n`
-      s += `Comment:\n${c.text}`
+      s += `_Comment:_\n${c.text}`
       return s
     })
     return `Comments on ${g.label} diff:\n\n${parts.join('\n\n')}`
