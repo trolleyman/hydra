@@ -71,6 +71,39 @@ export function DialogCancelButton({
   )
 }
 
+// The same tone vocabulary drawn as a tinted outline, for an action that is a
+// real alternative but NOT the primary one (the fix-a-test dialog's "Spawn
+// agent" beside "Send to agent"). Two filled buttons read as two primaries and
+// make the user pick between them; a neutral one reads as a second Cancel. This
+// sits between the two: clearly an action, clearly the quieter of the pair.
+const OUTLINE_TONE: Record<DialogTone, string> = {
+  emerald: 'border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20',
+  red: 'border-red-200 dark:border-red-800/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
+  amber: 'border-amber-200 dark:border-amber-800/60 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20',
+  indigo: 'border-indigo-200 dark:border-indigo-800/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20',
+  blue: 'border-blue-200 dark:border-blue-800/60 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
+}
+
+// The subordinate toned action button (see OUTLINE_TONE), with an optional
+// leading icon. Same box as DialogConfirmButton so the footer row stays even.
+export function DialogSecondaryButton({
+  tone,
+  icon,
+  children,
+  className = '',
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { tone: DialogTone; icon?: ReactNode }) {
+  return (
+    <button
+      {...props}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap px-4 py-2 rounded-lg border bg-white dark:bg-[#1c2330] text-sm font-semibold transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${OUTLINE_TONE[tone]} ${className}`}
+    >
+      {icon}
+      {children}
+    </button>
+  )
+}
+
 // The toned primary action button with an optional leading icon.
 export function DialogConfirmButton({
   tone,

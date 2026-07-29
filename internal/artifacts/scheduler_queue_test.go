@@ -23,13 +23,21 @@ func TestQueuePosition(t *testing.T) {
 
 	// Queue three behind it: two background, then one foreground. The foreground
 	// one jumps both, so it must report position 1 even though it arrived last.
+	//
+	// Each waiter is parked before the next one is started. Ties among equal
+	// priority are broken by arrival order, and goroutines started together park
+	// in whatever order the runtime happens to run them - not the order they were
+	// created in - so starting bg1 and bg2 concurrently would leave the order
+	// between them undefined.
 	var wg sync.WaitGroup
-	for _, k := range []string{"bg1", "bg2"} {
-		wg.Go(func() { s.acquire(k, false); s.release() })
+	queue := func(key string, fg bool, want int) {
+		t.Helper()
+		wg.Go(func() { s.acquire(key, fg); s.release() })
+		waitForWaiters(t, s, want)
 	}
-	waitForWaiters(t, s, 2)
-	wg.Go(func() { s.acquire("fg", true); s.release() })
-	waitForWaiters(t, s, 3)
+	queue("bg1", false, 1)
+	queue("bg2", false, 2)
+	queue("fg", true, 3)
 
 	if got := s.queuePosition("fg"); got != 1 {
 		t.Errorf("foreground reported position %d, want 1 (it jumps the queue)", got)
