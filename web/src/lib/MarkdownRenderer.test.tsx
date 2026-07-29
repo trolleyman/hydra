@@ -29,6 +29,26 @@ describe('Markdown', () => {
     expect(container.querySelectorAll('br')).toHaveLength(1)
   })
 
+  // The chat variant renders at half a dozen body sizes - 13px chat prose, 14px
+  // when the chat font is a serif, 12px sub-agent cards and review comments,
+  // 10px config previews, plus whatever the Chat size control adds. An absolute
+  // heading size is a fixed 16px h1 in all of them; an em is a multiple of the
+  // body it actually sits in, and follows the size control for free. Re-absolute
+  // one of these and the pane grows its prose past its own h3.
+  it('sizes chat headings and tables relative to their prose', () => {
+    const { container } = render(<Markdown text={'# a\n\n## b\n\n### c\n\n| x |\n| - |\n| y |'} />)
+    for (const tag of ['h1', 'h2', 'h3', 'table']) {
+      expect(container.querySelector(tag)!.className).toMatch(/text-\[length:[\d.]+em\]/)
+    }
+  })
+
+  // The document variant is a README at a fixed page size, not prose that moves,
+  // so its headings stay on the type scale.
+  it('leaves the doc variant headings on absolute sizes', () => {
+    const { container } = render(<Markdown text="# a" variant="doc" />)
+    expect(container.querySelector('h1')!.className).toContain('text-2xl')
+  })
+
   describe('images', () => {
     const ctx = { projectId: 'p1', agentId: 'a1', refStr: 'hydra/a1', filePath: '' }
 

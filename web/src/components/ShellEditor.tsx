@@ -119,10 +119,12 @@ export function ShellEditor({
       {/* The gutter rule, drawn on the frame rather than per line so it spans the
           whole box (past the last line) and never scrolls out from under the
           numbers. Sits between the numbers and the code, as the chat's Read card
-          does. */}
+          does. Inset by the layers' own py-2 so it starts level with the first
+          line rather than running into the frame - the repository view's rule,
+          being per line, sits inside that same padding. */}
       <div
         aria-hidden="true"
-        className="absolute top-0 bottom-0 w-px bg-gray-200 dark:bg-gray-700 pointer-events-none"
+        className="absolute top-2 bottom-2 w-px bg-gray-200 dark:bg-gray-700 pointer-events-none"
         style={{ left: 'calc(var(--shell-gutter) - 11px)' }}
       />
       <textarea

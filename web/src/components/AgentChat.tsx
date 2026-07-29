@@ -1,6 +1,5 @@
 import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
-  Archive,
   ArrowDown,
   ArrowUp,
   Bot,
@@ -2798,10 +2797,10 @@ const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   mcp__hydra__git_rebase: GitMark,
   mcp__hydra__git_rebase_continue: GitMark,
   mcp__hydra__git_rebase_abort: GitMark,
-  mcp__hydra__git_merge: GitMerge,
-  mcp__hydra__git_merge_continue: GitMerge,
-  mcp__hydra__git_merge_abort: GitMerge,
-  mcp__hydra__git_stash: Archive,
+  mcp__hydra__git_merge: GitMark,//GitMerge,
+  mcp__hydra__git_merge_continue: GitMark,//GitMerge,
+  mcp__hydra__git_merge_abort: GitMark,//GitMerge,
+  mcp__hydra__git_stash: GitMark,//Archive,
 }
 
 function LowlitPath({ path }: { path: string }) {
@@ -9893,8 +9892,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         group, which remounts it - the map is how, and living here is what makes
         it forgotten when the pane does (see ToolFoldContext). */}
     <ToolFoldContext.Provider value={toolFoldsRef.current}>
+    {/* The pane's 13px base carries the Chat size step (Settings -> Browser ->
+        Fonts), so every run of prose that inherits it - agent text, user
+        bubbles, tool-result markdown - steps together. Sizes stated explicitly
+        further down (the 11px tool-card chrome, the 12px sub-agent cards) do
+        NOT: this control sizes chat prose, not the cards it sits in. */}
     <div
-      className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
+      className="relative flex-1 min-h-0 flex flex-col text-[calc(13px_+_var(--app-font-chat-step,_0px))] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
       onKeyDown={onPaneKeyDown}
       onDragOver={(e) => {
         if (!isFileDrag(e.dataTransfer)) return

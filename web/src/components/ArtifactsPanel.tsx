@@ -13,14 +13,14 @@ import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { useMediaDims } from '../lib/artifactDims'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loadArtifactChrome, saveArtifactChrome, clampChangeThreshold, type ArtifactTagFilter, type ArtifactChrome } from '../lib/artifactPrefs'
-import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact, isPdfArtifact, isFileTileArtifact } from '../lib/artifactFilter'
+import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact, isPdfArtifact, isTextArtifact, isFileTileArtifact } from '../lib/artifactFilter'
 import { fileKind } from '../lib/fileKind'
 import { formatBytes } from '../lib/formatBytes'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
 import { stripAnsi } from '../lib/ansi'
 import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
-import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect } from '../lib/artifactColumns'
+import { type ArtifactSpans, BASE_ARTIFACT_COLUMNS, defaultSpanForAspect, FILE_TILE_PX, FILE_TILE_MIN_PX } from '../lib/artifactColumns'
 import { VideoDiffView, VIDEO_MIN_TILE_PX } from './VideoDiffView'
 import { ImageDiffView, SegmentedToggle, type ImageDiffMode, type ArtifactABControls } from './ArtifactImageDiff'
 import { ABControlsContext, IMAGE_DIFF_MODES } from './artifactDiffContext'
@@ -166,7 +166,8 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
 }
 
 // FileTile renders an artifact with no inline preview - a download-class package
-// (an .apk, a .zip) or a PDF: an icon, the byte size, and a save link per side.
+// (an .apk, a .zip), a PDF, or a text file: an icon, the byte size, and a save
+// link per side.
 // The blob endpoint serves the download-class ones with Content-Disposition:
 // attachment, so their links save rather than render.
 //
@@ -183,7 +184,10 @@ function FileTile({ file, gallery, index }: { file: ArtifactFile; gallery?: Ligh
   ].filter((s): s is { label: string; url: string } => !!s.url)
   const url = file.right_url ?? file.left_url
   const isPdf = isPdfArtifact(file.name)
-  const Icon = isPdf ? FileText : FileArchive
+  const isText = isTextArtifact(file.name)
+  // A document mark for the two the lightbox can actually read out (a PDF, a
+  // text file); the archive mark stays for what only downloads.
+  const Icon = isPdf || isText ? FileText : FileArchive
   const open = url && gallery && index != null
     ? (e: React.SyntheticEvent<HTMLDivElement>) => openLightbox(gallery, index, e.currentTarget)
     : undefined
@@ -202,7 +206,7 @@ function FileTile({ file, gallery, index }: { file: ArtifactFile; gallery?: Ligh
       <Icon className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
       <div className="min-w-0 flex-1">
         <div className="text-[11px] text-gray-400 dark:text-gray-500">
-          {file.size != null ? formatBytes(file.size) : isPdf ? 'PDF' : 'download'}
+          {file.size != null ? formatBytes(file.size) : isPdf ? 'PDF' : isText ? 'text' : 'download'}
         </div>
         <div className="flex items-center gap-1.5 mt-1">
           {sides.map((side) => (
@@ -832,14 +836,17 @@ const FileGrid = memo(function FileGrid({ files, mode, scale = 1, spans, onSpanC
     () => files.map((f) => ({
       key: f.name,
       node: <FileRow file={f} mode={mode} changeThreshold={changeThreshold} gallery={diffGallery} index={galleryIndex.get(f.name)} />,
-      // Card tiles (packages, PDFs) have no media dimensions; a flat wide aspect
-      // keeps their compact tile from being placed as a tall column.
+      // Card tiles (packages, PDFs, text) have no media dimensions; a flat wide
+      // aspect keeps their compact tile from being placed as a tall column, and
+      // FILE_TILE_PX gives them the natural width the same cap uses for media -
+      // so a card sits at card size rather than claiming the whole row.
       aspect: isFileTileArtifact(f.name) ? 3.2 : dims[f.name]?.aspect,
-      pxWidth: dims[f.name]?.pxWidth,
+      pxWidth: isFileTileArtifact(f.name) ? FILE_TILE_PX : dims[f.name]?.pxWidth,
       dpi: dims[f.name]?.dpi,
       // Videos need a minimum tile width for their transport controls (see
-      // VIDEO_MIN_TILE_PX); images have no such chrome.
-      minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : undefined,
+      // VIDEO_MIN_TILE_PX), and a card needs one for its download buttons;
+      // images have no such chrome.
+      minWidthPx: isVideoArtifact(f.name) ? VIDEO_MIN_TILE_PX : isFileTileArtifact(f.name) ? FILE_TILE_MIN_PX : undefined,
       // Every tile - image AND video - resizes by dragging its media (data-tile-drag).
       // Controls that own their own horizontal drag (the slider divider, the onion
       // opacity range, the video transport bar) opt out with data-no-tile-drag /
