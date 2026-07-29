@@ -357,6 +357,68 @@ body {
   .lightbox-fade-in { animation: none; }
 }
 
+/* The lightbox's text viewer (LightboxText): a line-number gutter and optional
+   soft wrapping over a body that is set as ONE html string. Everything per-line
+   is done in CSS because that body is a single innerHTML - a build log runs to
+   thousands of lines, and a React element per line made opening one visibly slow
+   (which is why this isn't the repository view's per-line JSX).
+
+   The number is a real <span>, not a ::before counter, so it can be
+   `position: sticky` and stay put while a long line scrolls the body sideways.
+   `user-select: none` is what keeps the gutter out of a copied selection -
+   verified in Chromium: selecting the whole body yields the same string with the
+   numbers present as without them.
+
+   The line is a block with a hanging indent (padding-left == -text-indent), so
+   the number sits in the gutter and a WRAPPED continuation lines up under the
+   code rather than under the number. --lb-gutter is set per file from its line
+   count, so a 4-digit log doesn't crowd the code and a 20-line snippet doesn't
+   waste a column. */
+.lb-code {
+  /* The one place the panel colour is written down for the gutter: the sticky
+     number needs an opaque backdrop to cover the code sliding under it, and
+     `inherit` below carries this down rather than repeating the literal.
+     Matches PANEL_CLASS's bg-gray-900 in LightboxViewers.tsx. */
+  background-color: #111827;
+}
+
+.lb-code .lb-line {
+  display: block;
+  background-color: inherit;
+  /* An empty line has no inline content and would otherwise collapse to zero
+     height, so blank lines in the file would vanish from the gutter's count.
+     Matches the pane's leading-5. */
+  min-height: 1.25rem;
+  padding-left: var(--lb-gutter, 3.5rem);
+  padding-right: 0.75rem;
+  text-indent: calc(-1 * var(--lb-gutter, 3.5rem));
+  white-space: pre;
+}
+
+.lb-code.lb-wrap .lb-line {
+  white-space: pre-wrap;
+  /* A minified bundle or a base64 blob has no spaces to break at; without this
+     it would scroll sideways forever even with wrapping on. */
+  overflow-wrap: anywhere;
+}
+
+.lb-code .lb-ln {
+  display: inline-block;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  /* Fills the gutter apart from the 1rem gap this leaves before the code. */
+  width: calc(var(--lb-gutter, 3.5rem) - 1rem);
+  margin-right: 1rem;
+  padding: 0 0.5rem;
+  text-align: right;
+  background-color: inherit;
+  border-right: 1px solid rgb(255 255 255 / 0.08);
+  color: #6b7280;
+  user-select: none;
+}
+
 /* Toasts (bottom-right notifications). They slide up + in from the right and fade
    on enter, and reverse on exit (the store keeps a toast around for one exit
    animation before removing it). A thin countdown bar at the bottom drains over

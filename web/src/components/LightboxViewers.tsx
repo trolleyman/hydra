@@ -8,11 +8,13 @@
 // backdrop, sized against the viewport, with the filename/size caption supplied by
 // the lightbox below it rather than repeated inside.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, File as FileIcon, FileArchive, FileText, LoaderCircle, TriangleAlert } from 'lucide-react'
+import { Download, File as FileIcon, FileArchive, FileText, LoaderCircle, TriangleAlert, WrapText } from 'lucide-react'
 import { LIGHTBOX_MEDIA_CLASS } from '../lib/lightboxFlip'
-import { highlightLines } from '../lib/highlightCore'
-import { langFromPath, type FileKind } from '../lib/fileKind'
+import { buildCodeBody } from '../lib/lightboxText'
+import { type FileKind } from '../lib/fileKind'
 import { formatBytes } from '../lib/formatBytes'
+import { Markdown } from '../lib/MarkdownRenderer'
+import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import { Tooltip } from './Tooltip'
 
 // How much of a text file the viewer will pull down and render. Big enough for
@@ -20,10 +22,11 @@ import { Tooltip } from './Tooltip'
 // mislabelled 200MB blob can't wedge the tab: the rest is a download away, and
 // the panel says so rather than pretending it showed everything.
 const MAX_TEXT_BYTES = 512 * 1024
-// Above this, syntax highlighting is skipped and the text renders plain. Prism
-// runs synchronously on the main thread here (unlike the diff viewer, which has a
-// worker), and a megabyte of tokenising is a visible freeze on opening.
-const MAX_HIGHLIGHT_BYTES = 128 * 1024
+
+// Files the viewer can render as a document rather than as source. Deliberately
+// just markdown: it is the one text format where the source is a lesser version
+// of the thing (a README's tables and headings), rather than the thing itself.
+const MARKDOWN_RE = /\.(md|markdown)$/i
 
 // The panel every non-image viewer sits in: dark, rounded, capped against the
 // viewport. LIGHTBOX_MEDIA_CLASS marks it as the item's own box, so the open/close
@@ -117,24 +120,84 @@ export function LightboxPdf({ url }: { url: string }) {
   )
 }
 
+// A toggle in the text viewer's header bar: the same chip as the download links
+// beside it, plus a lit state for "on". Icon-only ones carry their name in the
+// tooltip - a native title on a button is what the tooltip conventions forbid.
+function HeaderToggle({ active, onClick, tip, children }: {
+  active: boolean
+  onClick: () => void
+  tip: string
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip content={tip}>
+      <button
+        type="button"
+        aria-pressed={active}
+        // The lightbox closes on a backdrop click; this keeps a toggle from
+        // reaching it, like the download links do.
+        onClick={(e) => { e.stopPropagation(); onClick() }}
+        className={`flex items-center gap-1.5 h-7 px-2 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${active
+          ? 'border-white/25 bg-white/15 text-white'
+          : 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/90'}`}
+      >
+        {children}
+      </button>
+    </Tooltip>
+  )
+}
+
+// The rendered/source pair for a markdown file. A segmented control rather than
+// two chips: they are one choice with two states, and a lone "Source" chip reads
+// as "this IS the source" as easily as "show me the source".
+function ViewSwitch({ rendered, onChange }: { rendered: boolean; onChange: (rendered: boolean) => void }) {
+  const seg = (on: boolean) => `h-7 px-2.5 text-[11px] font-medium transition-colors cursor-pointer ${on
+    ? 'bg-white/15 text-white'
+    : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/90'}`
+  return (
+    <div className="flex items-center shrink-0 rounded-md border border-white/15 overflow-hidden">
+      <button type="button" aria-pressed={rendered} onClick={(e) => { e.stopPropagation(); onChange(true) }} className={seg(rendered)}>
+        {/* The label carries the trim, never the icon - see .optical-center. The
+            button keeps its own h-7, so trimming can't shrink the row. */}
+        <span className="optical-center">Rendered</span>
+      </button>
+      <span className="self-stretch w-px bg-white/15" />
+      <button type="button" aria-pressed={!rendered} onClick={(e) => { e.stopPropagation(); onChange(false) }} className={seg(!rendered)}>
+        <span className="optical-center">Source</span>
+      </button>
+    </div>
+  )
+}
+
 type TextState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
   | { status: 'ready'; text: string; truncated: boolean }
 
 // LightboxText shows a text file's contents - a log, a diff, a source file - in a
-// scrollable monospace pane, syntax highlighted by the file's extension.
+// scrollable monospace pane with a line-number gutter, syntax highlighted by the
+// file's extension, soft-wrapped by default. Markdown gets one more choice: the
+// rendered document (the default) or its source.
 //
-// The whole body is set as ONE html string rather than a node per line: a build
-// log runs to thousands of lines, and a React element per line made opening a big
-// one visibly slow for no gain (there is nothing per-line to interact with here -
-// no gutter, no selection state, no viewed markers, unlike the diff viewer).
+// The whole body is still set as ONE html string rather than a node per line -
+// see lib/lightboxText, which builds it, for why, and .lb-code in index.css for
+// the gutter and wrapping that string is styled with.
 export function LightboxText({ url, filename, diff }: {
   url: string
   filename: string
   diff?: { left?: string | null; right?: string | null }
 }) {
   const [state, setState] = useState<TextState>({ status: 'loading' })
+  // Both view prefs are global and sticky (localStorage, like the repository
+  // browser's wrap toggle): stepping ←/→ through a directory of logs shouldn't
+  // re-ask the same question per file. Absent = the default, so the key stays
+  // out of storage for anyone who never touched it.
+  const [wrap, setWrap] = useState(() => readLocal(StorageKeys.lightboxWrap) !== 'false')
+  const [rendered, setRendered] = useState(() => readLocal(StorageKeys.lightboxMarkdownRendered) !== 'false')
+  useEffect(() => { writeLocal(StorageKeys.lightboxWrap, wrap ? null : 'false') }, [wrap])
+  useEffect(() => { writeLocal(StorageKeys.lightboxMarkdownRendered, rendered ? null : 'false') }, [rendered])
+  const isMarkdown = MARKDOWN_RE.test(filename)
+  const asDoc = isMarkdown && rendered
   // Reset to loading during render when the url changes, so a stale body never
   // shows against the new file for a frame.
   const [prevUrl, setPrevUrl] = useState(url)
@@ -160,14 +223,10 @@ export function LightboxText({ url, filename, diff }: {
   }, [url])
 
   const text = state.status === 'ready' ? state.text : ''
-  const html = useMemo(() => {
-    if (!text) return ''
-    const lang = langFromPath(filename)
-    // Over the highlight budget (or with no grammar for this extension)
-    // highlightLines still returns HTML-escaped lines, which is exactly the plain
-    // rendering we want - so the same call covers both.
-    return highlightLines(text, text.length > MAX_HIGHLIGHT_BYTES ? 'plaintext' : (lang || 'plaintext')).join('\n')
-  }, [text, filename])
+  const body = useMemo(
+    () => (!text || asDoc ? null : buildCodeBody(text, filename)),
+    [text, filename, asDoc],
+  )
 
   // Scroll the pane back to the top when the file changes - ←/→ into another file
   // should start at its beginning, not wherever the last one was left.
@@ -193,6 +252,17 @@ export function LightboxText({ url, filename, diff }: {
             </span>
           </Tooltip>
         )}
+        {isMarkdown && <ViewSwitch rendered={rendered} onChange={setRendered} />}
+        {/* Nothing to wrap in the rendered document - prose already reflows. */}
+        {!asDoc && (
+          <HeaderToggle
+            active={wrap}
+            onClick={() => setWrap(!wrap)}
+            tip={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
+          >
+            <WrapText className="w-3.5 h-3.5" />
+          </HeaderToggle>
+        )}
         <DownloadLinks url={url} diff={diff} />
       </div>
       <div ref={bodyRef} className="min-h-0 flex-1 overflow-auto">
@@ -205,13 +275,22 @@ export function LightboxText({ url, filename, diff }: {
             <TriangleAlert className="w-6 h-6 text-amber-400" />
             <span className="text-xs">Could not read this file: {state.message}</span>
           </div>
-        ) : text ? (
+        ) : text && asDoc ? (
+          // The shared renderer, in the same document variant a README gets in the
+          // repository browser - so a .md reads the same wherever you open it. No
+          // linkCtx: an artifact or an attachment has no repo path for a relative
+          // link to resolve against, so links stay plain anchors.
+          <Markdown text={text} variant="doc" className="max-w-3xl mx-auto px-6 py-5 text-gray-200" />
+        ) : text && body ? (
           // The token colours come from the global `.dark .token` palette (index.css),
           // which applies because PANEL_CLASS forces this subtree `dark` - so the code
-          // reads the same as the diff viewer's, whatever theme the app is in.
-          <pre className="p-3 font-mono text-xs leading-5 text-gray-200">
-            <code dangerouslySetInnerHTML={{ __html: html }} />
-          </pre>
+          // reads the same as the diff viewer's, whatever theme the app is in. The
+          // gutter and the wrapping are .lb-code's, over one html string (see above).
+          <pre
+            className={`lb-code${wrap ? ' lb-wrap' : ''} py-3 font-mono text-xs leading-5 text-gray-200`}
+            style={{ ['--lb-gutter' as string]: body.gutter }}
+            dangerouslySetInnerHTML={{ __html: body.html }}
+          />
         ) : (
           <div className="flex items-center justify-center h-full text-xs text-white/40">This file is empty.</div>
         )}

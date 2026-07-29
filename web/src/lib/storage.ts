@@ -153,6 +153,18 @@ export const StorageKeys = {
   // views can be configured independently.
   repoDiffFileView: 'hydra-repo-diff-file-view',
 
+  // 'false' when the user has turned OFF soft wrapping in the lightbox's text
+  // viewer (a long line then scrolls the pane sideways, under a sticky
+  // line-number gutter). Absent = on, the default: a lightbox is opened to READ
+  // a file, and a log line running off the right edge is the one thing that
+  // stops. Kept separate from repoWrap - the repository browser is a different
+  // surface with its own habit. See LightboxViewers.
+  lightboxWrap: 'hydra-lightbox-wrap',
+  // 'false' when the user has switched the lightbox's markdown viewer to the
+  // file's source instead of the rendered document. Absent = rendered, the
+  // default. See LightboxViewers.
+  lightboxMarkdownRendered: 'hydra-lightbox-markdown-rendered',
+
   // '1' when a test/screenshot harness wants to drive the toast store from page
   // context (see lib/toastHarness). Dormant unless explicitly set - only the
   // screenshot script seeds it (via addInitScript), never the app itself - so it
