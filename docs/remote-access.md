@@ -67,13 +67,21 @@ installed and logged in, offers to run them for you - first the web UI, then
 runs is:
 
 ```
-tailscale serve --bg http://127.0.0.1:26600
+tailscale serve --bg --https=26600 http://127.0.0.1:26600
 ```
 
-Now `https://<machine>.<tailnet>.ts.net/` reaches Hydra from any device on your
-tailnet, with a Let's Encrypt cert (real secure context), and **only** your
+Now `https://<machine>.<tailnet>.ts.net:26600/` reaches Hydra from any device on
+your tailnet, with a Let's Encrypt cert (real secure context), and **only** your
 tailnet can reach it - no public URL. Hydra itself needs no changes: it stays on
 localhost, so no auth key and no `0.0.0.0` bind.
+
+The UI is served on its own port rather than the default 443 so that the UI and
+the previews form one contiguous range (`26600-26699` by default) - a single
+Tailscale ACL grant or firewall rule covers the whole deployment - and so 443
+stays free for anything else the machine serves. Tailscale binds the mapping on
+the node's tailnet addresses only, so it does not collide with the loopback-bound
+Hydra listening on the same port number. Pass `--https=443` instead if you would
+rather have a bare `https://<machine>.<tailnet>.ts.net/`.
 
 Prerequisites: install Tailscale and `tailscale up` on the host, and enable
 HTTPS certs for your tailnet in the admin console (DNS -> HTTPS).
