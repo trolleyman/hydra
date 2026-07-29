@@ -190,25 +190,48 @@ before starting. Grouped by area.
 
 ## Deployment
 
-- [ ] **Build the frontend minified *with* source maps.** One line in
-  `web/vite.config.ts` (`sourcemap: isDev` -> `sourcemap: true`). `minify` and
-  `sourcemap` are independent Vite options the config ties together, which makes
-  "production" and "debuggable" look mutually exclusive. Measured: minified+maps
-  serves the same 3.9 MB of JS as minified alone (DevTools fetches maps only when
-  open) and costs +12.5 MB of binary, vs the 7.3 MB unminified bundle being
-  served today. See [deployment.md](deployment.md).
-
-- [ ] **Deploy Hydra as a service.** The daily driver today is `mage dev` - a
-  foreground rebuild loop serving an unminified bundle off the working tree.
-  `mage deploy:service` already installs a systemd --user unit, but its
-  `Restart=on-failure` does not account for the restart button's exit 42 against
-  systemd's start rate limit, `Development` is a boolean meaning "mage will
-  rebuild me" rather than a restart-vs-rebuild mode, linger is only printed not
-  offered, and the CLI's binary-stamp auto-upgrade SIGTERMs a service-managed
-  daemon and respawns it detached (detectable via `INVOCATION_ID`). Also
-  `HYDRA_DEV_BUILD=1` leaks into every head's sandbox env, so a deploy from a
-  `mage dev` shell would ship a dev bundle. Plan in
+- [ ] **One build flavour: minified + source maps + precompressed.** `minify` and
+  `sourcemap` are independent Vite options `web/vite.config.ts` ties together
+  (`:106`, `:109`), which makes "production" and "debuggable" look mutually
+  exclusive. Measured: today's unminified+maps bundle is 7.3 MB of JS on the wire
+  and a 53.9 MB binary; minified+maps+gzip is **1.3 MB** on the wire and ~37.9 MB
+  - better than today on every axis, because precompression pays for the maps.
+  The server does no compression at all right now, so raw size is wire size.
+  Precompress at build time and embed only the `.gz` (all browsers accept it),
+  rather than gzipping per request. Once both options are constants, `isDev`,
+  `HYDRA_DEV_BUILD`, its five `os.Setenv` calls and the dual build stamp all
+  delete - which also kills the trap where heads inherit `HYDRA_DEV_BUILD=1` from
+  a `mage dev` daemon and silently build dev bundles. Separately worthwhile: a
+  normal gzip middleware on API responses, where diff payloads are large. See
   [deployment.md](deployment.md).
+
+- [ ] **Make the installed service update itself.** `POST /api/server/update`:
+  build in the background while still serving, stream the log to a toast over a
+  WS, verify the new binary runs, atomically swap it, exit 42, let systemd
+  restart. A failed build never takes the server down. Splits today's
+  fire-and-forget `POST /api/dev/restart` into restart-only vs update, and turns
+  `Development` from a boolean meaning "mage will rebuild me"
+  (`internal/cli/runtime.go:249`) into a mode. Also needed: the unit wants
+  `RestartForceExitStatus=42` + a relaxed `StartLimit*` (exit 42 currently trips
+  systemd's 5-starts-in-10s limit into `failed`), `loginctl enable-linger`
+  offered rather than printed, and `INVOCATION_ID` stamped into the daemon
+  `.info` file so the CLI's binary-stamp auto-upgrade stops SIGTERMing a
+  service-managed daemon and respawning it detached. Lets `Dev`, `DevExpose`,
+  `Prod`, `Preview`, `DevAutoReload` and `devServerLoop` be deleted - eight ways
+  to start Hydra down to three. See [deployment.md](deployment.md).
+
+- [ ] **Restart without killing every running head** (spike first). A restart
+  currently kills all live sandboxes - bwrap's `--die-with-parent`
+  (`internal/sandbox/linux.go:181`) plus `Registry.StopAll()`
+  (`internal/session/registry.go:665`) - and they resume via `--continue`, losing
+  the in-flight turn. The cgroup side is already fine (transient `hydra-*.scope`
+  units outlive their creator); what binds a head to the daemon is
+  `PR_SET_PDEATHSIG` and the PTY master fd living in daemon memory. Likely route:
+  `syscall.Exec` self-replace (same PID, non-`CLOEXEC` fds survive, hand the PTY
+  masters over in argv/env), which needs `--die-with-parent` dropped in favour of
+  scope-based reaping - Linux keys the parent-death signal to the parent *thread*
+  and `exec` kills every thread but the caller. Would make dev and prod restart
+  paths identical. See [deployment.md](deployment.md).
 
 - [ ] **Make a second Hydra instance survivable** (only if wanted - see
   [deployment.md](deployment.md) for why one instance is probably right).
