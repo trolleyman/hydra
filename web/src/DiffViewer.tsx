@@ -39,6 +39,7 @@ import {
   EXPANDER_ROW, EXPANDER_BTN, EXPANDER_BTNS, EXPANDER_COUNT, EXPANDER_CONTEXT, NOTICE_BLOCK, HIDDEN_BLOCK,
   measureBodyHeight, queueMeasure,
 } from './lib/diffMetrics'
+import { useFontSizePx, useFontStack } from './lib/fontPrefs'
 import {
   buildSideBySide, buildSegments, bodyShape, computeGap, trailingContext, isContiguous, isChangeLine,
   hunkContext, regionAfterHunk, LEAD_REGION_ID, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, PROMOTED_MAX_LINES, PROMOTED_MAX_CHANGES,
@@ -1290,13 +1291,20 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // It runs in an idle slice, hence the row estimate as the interim value.
   const [boxRef, boxW] = useMeasuredWidth(0)
   const [measuredBodyH, setMeasuredBodyH] = useState<number | null>(null)
+  // The Code font and its size are inputs to the measurement, not just to the
+  // paint: a different family wraps at a different column and a different size
+  // changes the row height outright, so a placeholder measured under the old one
+  // is wrong until its card happens to mount. Both are in the deps so the
+  // off-screen cards re-measure the moment the setting changes.
+  const codeFont = useFontStack('code')
+  const codeSizePx = useFontSizePx('code')
   useEffect(() => {
     if (near || headless || boxW <= 0) return
     return queueMeasure(() => {
       const shape = bodyShape(file, sideBySide, !!isHidden, currentContext)
       setMeasuredBodyH(shape && measureBodyHeight(boxW, shape))
     })
-  }, [near, headless, boxW, file, sideBySide, isHidden, currentContext])
+  }, [near, headless, boxW, file, sideBySide, isHidden, currentContext, codeFont, codeSizePx])
   const estBodyH = useMemo(
     () => (near ? 0 : measuredBodyH ?? (isHidden || file.binary ? 100 : estimateVisibleRows(file) * EST_ROW_H)),
     [near, measuredBodyH, isHidden, file],

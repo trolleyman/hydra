@@ -1,18 +1,25 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
+  FONT_BASE_PX,
   FONT_BY_ID,
   FONT_OPTIONS,
   FONT_ROLES,
   FONT_ROLE_SPEC,
+  FONT_SIZE_ROLES,
+  MAX_FONT_STEP,
+  MIN_FONT_STEP,
   SYSTEM_MONO,
   SYSTEM_SANS,
   SYSTEM_SERIF,
+  clampFontStep,
   fontFeaturesFor,
   fontOptionsFor,
+  fontSizePx,
   fontStackFor,
+  hasFontSize,
   isValidFontFor,
 } from './fonts'
-import { loadFont } from './fontPrefs'
+import { loadFont, loadFontSize } from './fontPrefs'
 import { StorageKeys } from './storage'
 
 describe('font catalogue', () => {
@@ -142,5 +149,71 @@ describe('loadFont', () => {
     expect(loadFont('ui')).toBe(FONT_ROLE_SPEC.ui.defaultId)
     expect(loadFont('code')).toBe(FONT_ROLE_SPEC.code.defaultId)
     expect(loadFont('terminal')).toBe(FONT_ROLE_SPEC.terminal.defaultId)
+  })
+})
+
+describe('font size', () => {
+  it('only offers a size for the roles that have a lever to pull', () => {
+    expect(FONT_SIZE_ROLES).toEqual(['chat', 'code', 'terminal'])
+    expect(hasFontSize('ui')).toBe(false)
+    for (const role of FONT_SIZE_ROLES) expect(hasFontSize(role)).toBe(true)
+  })
+
+  it('clamps a step to the offered range and rounds it to whole pixels', () => {
+    expect(clampFontStep(MAX_FONT_STEP + 5)).toBe(MAX_FONT_STEP)
+    expect(clampFontStep(MIN_FONT_STEP - 5)).toBe(MIN_FONT_STEP)
+    // Whole pixels: a fractional line box is what makes streaming chat jiggle.
+    expect(clampFontStep(1.4)).toBe(1)
+    expect(clampFontStep(NaN)).toBe(0)
+  })
+
+  // The step is an offset, so the default must land on the size the surface
+  // already rendered at - that is what makes an untouched build byte-identical.
+  it('resolves step 0 to each role built-in size', () => {
+    expect(fontSizePx('code', 0)).toBe(FONT_BASE_PX.code)
+    expect(fontSizePx('terminal', 0)).toBe(FONT_BASE_PX.terminal)
+    expect(fontSizePx('chat', 0, 'system-sans')).toBe(FONT_BASE_PX.chat)
+  })
+
+  // A serif chat font renders a pixel larger than a sans one (.chat-serif), and
+  // the stepper shows the size the prose will be - so it has to carry that.
+  it('adds the serif chat pixel, at every step', () => {
+    expect(fontSizePx('chat', 0, 'merriweather')).toBe(FONT_BASE_PX.chat + 1)
+    expect(fontSizePx('chat', 2, 'merriweather')).toBe(FONT_BASE_PX.chat + 3)
+    expect(fontSizePx('chat', 2, 'inter')).toBe(FONT_BASE_PX.chat + 2)
+    // Only chat: the mono roles have no serif/sans split to honour.
+    expect(fontSizePx('code', 1, 'merriweather')).toBe(FONT_BASE_PX.code + 1)
+  })
+
+  it('steps by whole pixels from the base', () => {
+    expect(fontSizePx('code', MIN_FONT_STEP)).toBe(FONT_BASE_PX.code + MIN_FONT_STEP)
+    expect(fontSizePx('code', MAX_FONT_STEP)).toBe(FONT_BASE_PX.code + MAX_FONT_STEP)
+    expect(fontSizePx('terminal', 99)).toBe(FONT_BASE_PX.terminal + MAX_FONT_STEP)
+  })
+})
+
+describe('loadFontSize', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('defaults every sized role to no offset', () => {
+    for (const role of FONT_SIZE_ROLES) expect(loadFontSize(role)).toBe(0)
+  })
+
+  it('reads a stored step back, including a negative one', () => {
+    localStorage.setItem(StorageKeys.fontSizeCode, '2')
+    localStorage.setItem(StorageKeys.fontSizeChat, '-1')
+    expect(loadFontSize('code')).toBe(2)
+    expect(loadFontSize('chat')).toBe(-1)
+  })
+
+  // A hand-edited key, or one written by a build with a wider range, must not
+  // throw the surface to an unreadable size.
+  it('clamps or ignores a stored step it cannot use', () => {
+    localStorage.setItem(StorageKeys.fontSizeTerminal, '400')
+    expect(loadFontSize('terminal')).toBe(MAX_FONT_STEP)
+    localStorage.setItem(StorageKeys.fontSizeTerminal, 'huge')
+    expect(loadFontSize('terminal')).toBe(0)
+    localStorage.setItem(StorageKeys.fontSizeTerminal, '')
+    expect(loadFontSize('terminal')).toBe(0)
   })
 })

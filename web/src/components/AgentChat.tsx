@@ -9892,8 +9892,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         group, which remounts it - the map is how, and living here is what makes
         it forgotten when the pane does (see ToolFoldContext). */}
     <ToolFoldContext.Provider value={toolFoldsRef.current}>
+    {/* The pane's 13px base carries the Chat size step (Settings -> Browser ->
+        Fonts), so every run of prose that inherits it - agent text, user
+        bubbles, tool-result markdown - steps together. Sizes stated explicitly
+        further down (the 11px tool-card chrome, the 12px sub-agent cards) do
+        NOT: this control sizes chat prose, not the cards it sits in. */}
     <div
-      className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
+      className="relative flex-1 min-h-0 flex flex-col text-[calc(13px_+_var(--app-font-chat-step,_0px))] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
       onKeyDown={onPaneKeyDown}
       onDragOver={(e) => {
         if (!isFileDrag(e.dataTransfer)) return
