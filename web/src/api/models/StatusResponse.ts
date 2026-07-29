@@ -22,8 +22,19 @@ export type StatusResponse = {
      */
     default_project_id?: string;
     /**
-     * Whether the server is running in development mode
+     * Whether the server is being served out of a Hydra source checkout, which is what enables developer affordances such as the Chrome DevTools workspace endpoint.
+     *
      */
     development?: boolean;
+    /**
+     * Whether the server can restart itself in place (re-exec). False on platforms without exec.
+     *
+     */
+    can_restart?: boolean;
+    /**
+     * Whether the server can rebuild itself from source and restart into the result. Requires the daemon's project root to be a Hydra checkout with mage available.
+     *
+     */
+    can_update?: boolean;
 };
 

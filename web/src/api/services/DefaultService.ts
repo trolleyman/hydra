@@ -110,16 +110,35 @@ export class DefaultService {
         });
     }
     /**
-     * Trigger a server rebuild and restart (dev mode only)
-     * @returns any Restart initiated
+     * Restart the server in place, running the binary already installed
+     * Re-execs the current executable, keeping the process ID and carrying the web listener across so the port is never unbound. Running agents are stopped and resume afterwards. Does not rebuild anything - see /api/server/update for that.
+     *
+     * @returns any Restart initiated; the connection will drop shortly
      * @throws ApiError
      */
-    public devRestart(): CancelablePromise<any> {
+    public restartServer(): CancelablePromise<any> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/dev/restart',
+            url: '/api/server/restart',
             errors: {
-                403: `Not running in dev mode`,
+                403: `This server cannot restart itself`,
+            },
+        });
+    }
+    /**
+     * Rebuild the server from source, then restart into the result
+     * Builds in the background while this server keeps serving, verifies the new binary starts, swaps it in atomically, and only then restarts. A failed build changes nothing. Progress streams over /ws/server/update. Only available when the daemon's project root is a Hydra checkout.
+     *
+     * @returns any Update started; follow /ws/server/update for progress
+     * @throws ApiError
+     */
+    public updateServer(): CancelablePromise<any> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/server/update',
+            errors: {
+                403: `This server cannot rebuild itself`,
+                409: `An update is already running`,
             },
         });
     }

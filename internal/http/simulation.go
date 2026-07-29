@@ -148,6 +148,10 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	projectRoot := "/simulated/project"
 	defaultProjectID := "sim-project"
 	development := s.Development
+	// The simulated server offers both controls so the update panel is drivable
+	// here; neither actually replaces this process (see UpdateServer).
+	canRestart := true
+	canUpdate := true
 
 	api.WriteJSON(w, http.StatusOK, api.StatusResponse{
 		Status:           &status,
@@ -156,6 +160,8 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 		ProjectRoot:      &projectRoot,
 		DefaultProjectId: &defaultProjectID,
 		Development:      &development,
+		CanRestart:       &canRestart,
+		CanUpdate:        &canUpdate,
 	})
 }
 
