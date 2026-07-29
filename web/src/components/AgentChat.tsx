@@ -1011,16 +1011,18 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
 // "hydra::git_commit", the same namespace::tool shape the card heading uses.
 //
 // `prose` here means "not monospace" (see summaryMono at the call site), and the
-// split follows whether the text was REWRITTEN for a human. A select: list has
-// been - those labels are not what anyone typed - so it renders as prose. A
-// keyword search is the agent's own words passed through untouched, so it stays
-// verbatim, in mono. The Raw view keeps the query as sent. (Exported for tests.)
+// rule is simply whether the text was REWRITTEN for a human. Tool labels have
+// been - they are not what anyone typed - so they render as prose. A query we
+// pass through untouched is the agent's own words, so it stays verbatim, in
+// mono: that covers both a keyword search and a degenerate `select:` naming
+// nothing, which falls back to showing the query as sent. The Raw view keeps the
+// query as sent either way. (Exported for tests.)
 // eslint-disable-next-line react-refresh/only-export-components
 export function summarizeToolSearchQuery(query: string): { text: string; prose: boolean } {
   const select = /^\s*select:(.*)$/.exec(query)
   if (!select) return { text: query, prose: false }
   const names = select[1].split(',').map((n) => n.trim()).filter(Boolean)
-  if (names.length === 0) return { text: query, prose: true }
+  if (names.length === 0) return { text: query, prose: false }
   return { text: names.map(mcpToolLabel).join(', '), prose: true }
 }
 

@@ -450,7 +450,7 @@ describe('compareCommitChips', () => {
 // with its mcp__/__ plumbing ("select:mcp__hydra__git_commit").
 // `prose` means "not monospace", and tracks whether the text was rewritten for a
 // human: a select: list is rendered as labels nobody typed, so it reads as prose,
-// while a keyword search is the agent's own words and stays verbatim in mono.
+// while any query we pass through untouched stays verbatim in mono.
 describe('summarizeToolSearchQuery', () => {
   it('renders a select: lookup as the bare tool names, MCP ones namespaced', () => {
     expect(summarizeToolSearchQuery('select:mcp__hydra__git_commit')).toEqual({ text: 'hydra::git_commit', prose: true })
@@ -462,8 +462,11 @@ describe('summarizeToolSearchQuery', () => {
     expect(summarizeToolSearchQuery('+slack send')).toEqual({ text: '+slack send', prose: false })
   })
 
-  it('falls back to the raw query when select: names nothing', () => {
-    expect(summarizeToolSearchQuery('select:')).toEqual({ text: 'select:', prose: true })
+  // Nothing was rewritten here, so it reads as the query it is - mono, like any
+  // other query shown as sent.
+  it('falls back to the raw query, in mono, when select: names nothing', () => {
+    expect(summarizeToolSearchQuery('select:')).toEqual({ text: 'select:', prose: false })
+    expect(summarizeToolSearchQuery('select: , ,')).toEqual({ text: 'select: , ,', prose: false })
   })
 })
 
