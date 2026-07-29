@@ -871,6 +871,21 @@ func SlotSessionID(headID, slot string) string { return headID + SlotSep + slot 
 // else. Used to tear a head's auxiliary sessions down on kill/merge.
 func SlotPrefix(headID string) string { return headID + SlotSep }
 
+// SplitSlotID reverses SlotSessionID: it reports the owning head ID and the slot
+// name for a slot session ID, or ok=false when the ID names a head itself.
+//
+// A slot has no db.Agent row, so anything that resolves a session ID through the
+// store (a project root, a worktree) has to come back here for the head that
+// owns it. Splitting on the FIRST separator is exact rather than a heuristic -
+// SlotSep cannot occur in a head ID, so everything before it is the head.
+func SplitSlotID(sessionID string) (headID, slot string, ok bool) {
+	head, slot, found := strings.Cut(sessionID, SlotSep)
+	if !found || head == "" || slot == "" {
+		return "", "", false
+	}
+	return head, slot, true
+}
+
 // ShellSessionID derives the registry session ID for a head's web bash shell
 // from its head ID, sandbox mode and per-tab token. The same inputs always yield
 // the same ID, so a tab's reconnect reattaches and an explicit close can target
@@ -1796,10 +1811,13 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
 		removeCowDir(head.ProjectPath, head.ID)
 		removeClaudeSessionDir(head)
-		// The review slot's checkout and its own transcript dir (keyed by that
-		// checkout's path, so removeClaudeSessionDir above does not reach it).
+		// The review slot's checkout, its own transcript dir (keyed by that
+		// checkout's path, so removeClaudeSessionDir above does not reach it) and
+		// its own normalized chat log / queue, which are filed under the SLOT id
+		// rather than the head's.
 		RemoveReviewCheckout(head.ProjectPath, head.ID)
 		RemoveReviewSessionDir(head.ProjectPath, head.ID)
+		RemoveAgentStatusFiles(head.ProjectPath, ReviewSessionID(head.ID))
 	}
 
 	if store == nil {

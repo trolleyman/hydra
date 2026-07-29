@@ -5,7 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 import { type TerminalEvent, AgentStatus } from '../api'
-import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff, Eye } from 'lucide-react'
+import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff, Eye, Check } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { ResizeGrip } from './ResizeGrip'
 import { uploadFile, extractFiles } from '../api/uploads'
@@ -929,11 +929,19 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   }
 
   // Unlike the shells, this never adds a second tab: there is one review slot per
-  // head, so a repeat click focuses the tab that already exists.
-  function openReviewTab() {
-    setTabs(prev => (prev.some(t => t.kind === 'review') ? prev : [...prev, REVIEW_TAB]))
-    setActiveTabId(REVIEW_TAB.id)
+  // head. The menu entry is a toggle rather than an open - the tab has no close
+  // button of its own (it is a durable slot, not a disposable tab), so this is
+  // where hiding it lives. Hiding only detaches this pane: unlike a shell tab it
+  // sends no close, so the reviewer, its checkout and its conversation all stay
+  // and showing it again reattaches to the same session.
+  function toggleReviewTab() {
     setShellMenuOpen(false)
+    if (tabs.some(t => t.kind === 'review')) {
+      closeTab(REVIEW_TAB.id)
+      return
+    }
+    setTabs(prev => [...prev, REVIEW_TAB])
+    setActiveTabId(REVIEW_TAB.id)
   }
 
   function closeTab(id: string) {
@@ -984,10 +992,18 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   const isWaiting = status === AgentStatus.WAITING
   const isLoading = status === AgentStatus.PENDING || status === AgentStatus.BUILDING
 
-  // While the chat tab is showing, the panel sheds its terminal-window
-  // costume (dark chrome, traffic lights) and follows the app theme like the
-  // chat pane inside it; bash tabs bring the terminal look back.
-  const chatActive = !!chatMode && activeTabId === 'terminal'
+  // Whether the review tab is currently showing, which the `+` menu's Review
+  // entry reflects (and toggles) in place of a close button on the tab itself.
+  const reviewTabOpen = tabs.some(t => t.kind === 'review')
+
+  // While a chat tab is showing, the panel sheds its terminal-window costume
+  // (dark chrome, traffic lights) and follows the app theme like the chat pane
+  // inside it; bash tabs bring the terminal look back. Keyed off what the active
+  // tab RENDERS, not off the head's mode: the review slot is a chat pane whatever
+  // mode the head runs in, and dressing it as a terminal window was leaving a
+  // chat transcript sitting inside dark terminal chrome.
+  const activeKind = tabs.find(t => t.id === activeTabId)?.kind
+  const chatActive = activeKind === 'review' || (!!chatMode && activeKind === 'agent')
   // Ghost icon-button palette for the title bar, per costume.
   const ghostBtn = chatActive
     ? 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 hover:bg-stone-200/60 dark:hover:bg-white/[0.06]'
@@ -1054,10 +1070,12 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
               >
                 {tab.kind === 'agent' && chatMode ? 'Chat' : tab.label}
               </button>
-              {/* Shells and the review slot are both closable; the head's own
-                  tab is not. Closing Review ends its session but keeps the
-                  checkout, so reopening resumes the same conversation. */}
-              {tab.kind !== 'agent' && (
+              {/* Only a shell carries a close button. The head's own tab is
+                  permanent, and so - visually - is Review: it is one durable
+                  slot per head, not a tab you spin up and discard, and an X
+                  beside it reads as ephemeral. Hiding it is done from the same
+                  dropdown entry that opened it. */}
+              {tab.kind === 'shell' && (
                 <Tooltip content="Close tab" side="bottom">
                   <button
                     onClick={() => closeTab(tab.id)}
@@ -1133,7 +1151,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                         flavour of terminal. */}
                     <div className={`my-1 border-t ${chatActive ? 'border-stone-200 dark:border-white/10' : 'border-gray-700'}`} />
                     <button
-                      onClick={openReviewTab}
+                      onClick={toggleReviewTab}
                       className={`flex w-full items-start gap-2 px-3 py-1.5 text-left cursor-pointer ${
                         chatActive
                           ? 'text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.06]'
@@ -1141,10 +1159,15 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                       }`}
                     >
                       <Eye className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${chatActive ? 'text-violet-600 dark:text-violet-400' : 'text-violet-400'}`} />
-                      <span>
+                      <span className="min-w-0 flex-1">
                         <span className="block font-medium">Review</span>
                         <span className={`block ${chatActive ? 'text-stone-400 dark:text-stone-500' : 'text-gray-500'}`}>A second agent that reads the diff. Cannot commit.</span>
                       </span>
+                      {/* The tick is the whole close affordance: it marks the tab
+                          as showing, and clicking the entry again hides it. */}
+                      {reviewTabOpen && (
+                        <Check className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${chatActive ? 'text-stone-500 dark:text-stone-400' : 'text-gray-400'}`} />
+                      )}
                     </button>
                   </div>
                 </>

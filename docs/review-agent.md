@@ -22,11 +22,13 @@ transcript where it cannot be re-read, re-anchored, or survive a compaction.
 Until it exists the reviewer can only *talk* - it cannot leave anything anchored
 to a line.
 
-> **Caveat on "BUILT": the reviewer has never actually run.** Everything is
-> covered by unit tests, typecheck, and a Playwright pass against the simulation
-> server - but the simulation server does not spawn real sandboxes, so
-> `StartReviewSession` has not yet launched a real Claude process in a real
-> checkout. That needs a live head to exercise.
+> **Caveat on "BUILT": the reviewer has barely run.** The first time it was
+> opened on a live head it showed the head's own chat - see
+> [Its own conversation](#its-own-conversation-key-by-the-slot-not-by-the-head)
+> for what was keyed by the head that should not have been. The simulation server
+> does not spawn real sandboxes, so nothing below the socket is exercised by the
+> Playwright pass; treat everything about the reviewer's *own* turns as
+> lightly tested until it has been driven on a real head.
 
 Related: [review-threads.md](review-threads.md) (the forge-thread half that
 exists), [agent-page-tabs.md](agent-page-tabs.md) (the URL sub-view state a
@@ -233,6 +235,42 @@ requirement.
 > import `artifacts` for something that has nothing to do with artifacts. Worth
 > doing before a third consumer arrives, not after.
 
+### Its own conversation: key by the SLOT, not by the head
+
+Its own checkout buys nothing if the *plumbing* still says `head.ID`, and for a
+while it did: the Review tab opened onto the head's own chat, complete with the
+head's plan chip. Two independent places, one root cause - `<head>@review` has no
+`db.Agent` row, so anything that resolves an id through the store falls through
+to "unknown" or, worse, silently keeps using the head's.
+
+- **The socket pumped the wrong log.** `pumpChatOutput` was passed `agentID`, so
+  the durable event log it watched, the history window it paged, the queued
+  messages it replayed and the pending questions it announced were all the
+  head's. `internal/http/terminal.go` passes `sessionID` now; they are the same
+  value for a head's own tab.
+- **The reviewer's own output was being dropped on the floor.**
+  `Registry.SetOnChatLine` fires with the *session* id, and the chat manager's
+  context resolver looked the id up in the DB and gave up when it missed - so
+  every line the reviewer printed was logged as `resolve ...: unknown head` and
+  discarded. `chatContextResolver` (`internal/cli/runtime.go`) now falls back
+  through `heads.SplitSlotID` to the owning head for the project root, but onto
+  the reviewer's **own** checkout, and with **no** prompt or plan seed: those are
+  the head's task and to-do list, and seeding them would open the reviewer's
+  transcript with someone else's job.
+
+`heads.SplitSlotID` is the shared reverse of `SlotSessionID` and the general
+answer to "this id has no row"; `ChatQueueManager.resolveRoot` uses it too, or a
+review turn would end with nothing to write its status against and a queued
+message that never drains.
+
+The same split exists in the browser. `ChatPane` keys its composer draft, its
+attachments, its composer height, its scroll offset and its local plan mirror by
+a `stateId` that carries the `@review` suffix, so the two panes on one agent page
+do not type into each other's draft. What deliberately stays on the head id:
+approvals (the reviewer's egress prompts are routed to the head's card on
+purpose), unread state, and the branch/worktree a markdown image resolves
+against.
+
 ### No git, enforced twice
 
 `git_isolation = readonly` binds the entire git common dir read-only, so raw
@@ -371,9 +409,17 @@ Decisions inside that shape:
 - **Persisted** (`agentViewPrefs.reviewTabOpen`), unlike the pane choice it
   replaced. "I have a reviewer open" is real state: the backend session is
   long-lived, one slot per head, and reattaching is free. A bool rather than a
-  list like `bashTabs`, since there is only ever one.
-- **Closable**, like a shell tab; the head's own tab is not. Closing ends the
-  session but leaves the checkout, so reopening resumes the same conversation.
+  list like `bashTabs`, since there is only ever one. Note `loadAgentViewPrefs`
+  is an explicit field-by-field projection, so a field the writer sets but the
+  loader does not name is written and never read - which is exactly what the
+  first version of this did, making the tab vanish on every agent switch.
+- **Not closable from the tab**, unlike a shell. It first shipped with a close X
+  and that was wrong twice over: it reads as a disposable tab when the thing
+  behind it is one durable slot per head, and the X is the wrong verb anyway -
+  it does not end the session (there is no `/close` for a reviewer), it only
+  detaches this pane. The `+` menu's Review entry is a **toggle** instead,
+  ticked while the tab is showing. Hiding leaves the reviewer, its checkout and
+  its conversation alone, so showing it again reattaches mid-thought.
 
 Still open: a **status dot on the tab** (mid-turn, or stale because the tip
 moved), and telling the user in the *composer* what this agent cannot do.

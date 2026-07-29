@@ -5856,6 +5856,15 @@ const SettledMessages = memo(
 )
 
 export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit, review }: ChatProps) {
+  // The key for everything this pane stores per CONVERSATION rather than per
+  // head: the composer draft and its attachments, the composer height, the
+  // transcript scroll offset, and the local plan mirror. A review pane is a
+  // different agent sharing the head's page, so keying those by agentId alone
+  // had it typing into the head's draft and showing the head's to-do list.
+  // Mirrors the backend's slot id (`<head>@review`, see docs/review-agent.md).
+  // Head-level state - approvals, unread, the diff's branch - deliberately stays
+  // on agentId: those belong to the head whatever tab you are looking at.
+  const stateId = review ? `${agentId}@review` : agentId
   const [items, setItems] = useState<ChatItem[]>([])
   // Wall-clock time per item id (epoch ms) - the message side of the
   // commit-chip interleave. Stamped by the reducers: replayed events carry the
@@ -5895,7 +5904,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // the last known plan even when the replay window no longer includes the
   // TaskCreate events. Live events reconcile on top (see the reducer).
   const [todos, setTodos] = useState<TodoItem[]>(() =>
-    loadPlan(projectId, agentId)
+    loadPlan(projectId, stateId)
       .sort((a, b) => a.order - b.order)
       .map(({ content, status, activeForm, description }) => ({ content, status, activeForm, description })),
   )
@@ -5988,8 +5997,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const initialComposer = useRef<ReturnType<typeof makeSnapshot> | null>(null)
   if (!initialComposer.current) {
     initialComposer.current = makeSnapshot(
-      loadAgentViewPrefs(projectId, agentId).chatDraft ?? '',
-      loadChatAttachments(projectId, agentId),
+      loadAgentViewPrefs(projectId, stateId).chatDraft ?? '',
+      loadChatAttachments(projectId, stateId),
       0,
       0,
     )
@@ -6071,7 +6080,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // grows the box line by line up to MAX_ROWS regardless. Persisted per agent
   // like the terminal height (item 23).
   const [minRows, setMinRows] = useState(() => {
-    const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
+    const saved = loadAgentViewPrefs(projectId, stateId).chatComposerRows
     return saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
   })
   // Explicit composer height (px), driven by the per-line auto-grow effect. The
@@ -6080,7 +6089,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // it from the saved min rows (leading-5 = 20px line, pt-2.5 + pb-1 = 14px pad)
   // so the composer opens at the right height before the effect measures.
   const [composerHeight, setComposerHeight] = useState<number>(() => {
-    const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
+    const saved = loadAgentViewPrefs(projectId, stateId).chatComposerRows
     const rows = saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
     return rows * 20 + 14
   })
@@ -6181,11 +6190,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // the only copy of the plan; seed it into localStorage (only when local is
   // empty) so the reconnect effect's loadPlan restores it. Runs when the value
   // arrives (the agent-list poll can land after mount).
+  //
+  // A review pane takes no seed at all: that field is the HEAD's plan (the slot
+  // has no db.Agent row to carry one), and seeding it here is what put the head's
+  // to-do chip on the reviewer's transcript. Its own plan arrives live.
   const serverPlan = useAgentStore(
-    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.plan,
+    (s) => (review ? undefined : (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.plan),
   )
   useEffect(() => {
-    const seeded = seedLocalPlan(projectId, agentId, serverPlan)
+    const seeded = seedLocalPlan(projectId, stateId, serverPlan)
     if (seeded.length) {
       // Legitimate effect: seedLocalPlan writes to localStorage (a side effect that
       // belongs in an effect), and we adopt its result. Can't move to render.
@@ -6196,7 +6209,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           .map(({ content, status: st, activeForm, description }) => ({ content, status: st, activeForm, description })),
       )
     }
-  }, [serverPlan, projectId, agentId])
+  }, [serverPlan, projectId, stateId])
 
   // The daemon-captured model (AgentResponse.model). Adopt it while the selector
   // is still on the placeholder, so the right model shows on load before any
@@ -6252,7 +6265,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setStream(null)
     // Restore the persisted plan (not []) so a reconnect / re-navigation shows
     // the last known plan before the replay reconstructs it (planStore).
-    setTodos(restoredPlan(projectId, agentId))
+    setTodos(restoredPlan(projectId, stateId))
     setSubagents({})
     setReplayDone(false)
     setLiveFromId(null)
@@ -6300,8 +6313,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // PlanPanel. The reducer itself lives in lib/planReducer (it is pure, and
     // tested there); here it is wired to the persisted plan on both ends - the
     // seed it starts from, and savePlan/setTodos on every change.
-    const plan = createPlanBuilder(loadPlan(projectId, agentId), (entries) => {
-      savePlan(projectId, agentId, entries)
+    const plan = createPlanBuilder(loadPlan(projectId, stateId), (entries) => {
+      savePlan(projectId, stateId, entries)
       setTodos(toTodoItems(entries))
     })
 
@@ -8166,8 +8179,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       setConnected(false)
     }
     // `review` picks the socket (and therefore the whole conversation), so it
-    // belongs here - though in practice the two panes are separate mounts.
-  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry, review])
+    // belongs here - though in practice the two panes are separate mounts, and
+    // stateId is derived from the same two values.
+  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry, review, stateId])
 
   // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
   // labels, the live/done state and the final report. A NESTED sub-agent's
@@ -8473,7 +8487,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // otherwise the auto-scroll effect has already pinned to the bottom.
   useEffect(() => {
     if (!replayDone) return
-    const saved = loadAgentViewPrefs(projectId, agentId).chatScrollTop
+    const saved = loadAgentViewPrefs(projectId, stateId).chatScrollTop
     if (saved == null) return
     const el = scrollRef.current
     if (!el) return
@@ -8485,7 +8499,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       lastScrollRef.current = { top: saved, pinned: false }
     })
     return () => cancelAnimationFrame(raf)
-  }, [replayDone, projectId, agentId])
+  }, [replayDone, projectId, stateId])
 
   // Opening an agent that has unread changes: land on the TOP of its last
   // message rather than pinned to the bottom, so a long reply is read from its
@@ -8577,9 +8591,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     () => () => {
       if (persistScrollTimer.current) clearTimeout(persistScrollTimer.current)
       const last = lastScrollRef.current
-      patchAgentViewPrefs(projectId, agentId, { chatScrollTop: last.pinned ? undefined : last.top })
+      patchAgentViewPrefs(projectId, stateId, { chatScrollTop: last.pinned ? undefined : last.top })
     },
-    [projectId, agentId],
+    [projectId, stateId],
   )
 
   // requestOlderHistory asks the daemon for the batch older than the current
@@ -8678,7 +8692,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (persistScrollTimer.current) clearTimeout(persistScrollTimer.current)
     persistScrollTimer.current = setTimeout(() => {
       const last = lastScrollRef.current
-      patchAgentViewPrefs(projectId, agentId, { chatScrollTop: last.pinned ? undefined : last.top })
+      patchAgentViewPrefs(projectId, stateId, { chatScrollTop: last.pinned ? undefined : last.top })
     }, 250)
   }
 
@@ -8687,9 +8701,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Save the composer text (debounced) so a half-written message survives an
   // agent switch or reload. Sending clears input, which persists as "no draft".
   useEffect(() => {
-    const t = setTimeout(() => patchAgentViewPrefs(projectId, agentId, { chatDraft: input || undefined }), 300)
+    const t = setTimeout(() => patchAgentViewPrefs(projectId, stateId, { chatDraft: input || undefined }), 300)
     return () => clearTimeout(t)
-  }, [input, projectId, agentId])
+  }, [input, projectId, stateId])
 
   // --- Composer: attachments ------------------------------------------------
 
@@ -8699,8 +8713,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Mirror to the per-agent caches so a switch away - or a reload - restores
     // them. Running on every change (rather than only on unmount) is what makes
     // the reload case work: a reload tears the page down without unmounting.
-    saveChatAttachments(projectId, agentId, attachments)
-  }, [attachments, projectId, agentId])
+    saveChatAttachments(projectId, stateId, attachments)
+  }, [attachments, projectId, stateId])
   // Every preview object URL minted this session. We can't revoke on remove (an
   // undo can bring the chip back) or on unmount (the attachments are stashed to
   // the cache and restored on return), so URLs live until a send consumes the
@@ -8711,10 +8725,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // thumbnails. They're freed on send, or when the page fully reloads.
   useEffect(
     () => () => {
-      saveChatAttachments(projectId, agentId, attachmentsRef.current)
-      patchAgentViewPrefs(projectId, agentId, { chatDraft: inputRef.current || undefined })
+      saveChatAttachments(projectId, stateId, attachmentsRef.current)
+      patchAgentViewPrefs(projectId, stateId, { chatDraft: inputRef.current || undefined })
     },
-    [projectId, agentId],
+    [projectId, stateId],
   )
 
   // addFiles queues each dropped/pasted file as an attachment and uploads it.
@@ -8903,7 +8917,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!composerDragRef.current) return
     composerDragRef.current = null
     e.currentTarget.releasePointerCapture(e.pointerId)
-    patchAgentViewPrefs(projectId, agentId, { chatComposerRows: minRows })
+    patchAgentViewPrefs(projectId, stateId, { chatComposerRows: minRows })
   }
 
   // --- Sending ----------------------------------------------------------------

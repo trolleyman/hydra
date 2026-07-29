@@ -42,6 +42,35 @@ func TestSlotSepIsNotAValidHeadID(t *testing.T) {
 	}
 }
 
+// SplitSlotID is what everything that resolves a session ID through the DB falls
+// back to, since a slot has no db.Agent row. It has to round-trip SlotSessionID
+// and, just as importantly, refuse a bare head ID - answering "yes, and the head
+// is <something else>" for a real head would point that head's chat log, queue
+// and private /tmp at another head entirely.
+func TestSplitSlotID(t *testing.T) {
+	cases := []struct {
+		id       string
+		wantHead string
+		wantSlot string
+		wantOK   bool
+	}{
+		{ReviewSessionID("fix-the"), "fix-the", ReviewSlot, true},
+		{ShellSessionID("fix-the", false, "t"), "fix-the", "shell-host-t", true},
+		{"fix-the", "", "", false},
+		{"fix-the-shell-script", "", "", false},
+		{"", "", "", false},
+		{SlotSep + "review", "", "", false},
+		{"fix-the" + SlotSep, "", "", false},
+	}
+	for _, c := range cases {
+		head, slot, ok := SplitSlotID(c.id)
+		if head != c.wantHead || slot != c.wantSlot || ok != c.wantOK {
+			t.Errorf("SplitSlotID(%q) = (%q, %q, %v), want (%q, %q, %v)",
+				c.id, head, slot, ok, c.wantHead, c.wantSlot, c.wantOK)
+		}
+	}
+}
+
 // The SlotPrefix sweep must not catch a different head whose ID merely starts
 // with this head's ID. Two cases, and the second is the one the old `<head>-shell`
 // scheme got wrong: "foo" vs "foobar" was safe because of the "-shell" boundary,

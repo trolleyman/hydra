@@ -467,7 +467,12 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		if chatMode {
-			s.pumpChatOutput(conn, att, projectRoot, agentID, worktree)
+			// sessionID, not agentID: the review slot's conversation, queue and
+			// pending questions are all keyed by `<head>@review`, and passing the
+			// head's id here would replay the HEAD's transcript into the review pane
+			// (and queue the reviewer's messages against the head). They are equal
+			// for the head's own tab.
+			s.pumpChatOutput(conn, att, projectRoot, sessionID, worktree)
 			return
 		}
 		for {
