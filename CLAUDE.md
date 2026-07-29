@@ -294,6 +294,22 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `run_tests` / `generate_artifacts`; also lists what is deliberately NOT built)
 - **Review threads in the diff** (forge PR comments inline, replying, local-only
   notes, the origin badges) -> [docs/review-threads.md](docs/review-threads.md)
+- **Review agent + a real comment system** (the "Review" tab: a session slot
+  modelled on the shell tabs - no DB row, no branch, own detached checkout,
+  read-only git + blocked git tools - plus the *unbuilt* server-side comment
+  store agents would read/append via tools, notified by id rather than injected
+  as text) -> [docs/review-agent.md](docs/review-agent.md) (slot BUILT:
+  `internal/heads/reviewslot.go`, `?review=true` on the terminal WS, `TabKind`
+  in `AgentTerminal.tsx` - but never yet run against a live head. The comment
+  store is the valuable half, stands alone, and is still open. Key constraint:
+  Claude's transcript dir is keyed by WORKTREE PATH, so a second agent in the
+  head's own worktree can poison its `--continue`/`--resume` - which is why the
+  reviewer gets its own tree, and why that tree must not be a recycled pool slot)
+- **Restructuring the agent page** (should it be GitHub/GitLab-shaped? inspector
+  tabs vs the current five-panel stack, activity as chat rows vs an Activity tab,
+  URL sub-view state) -> [docs/agent-page-tabs.md](docs/agent-page-tabs.md)
+  (proposed, unbuilt; argues against tabbing chat away from the diff on a live
+  head, for tabs *inside* the inspector pane)
 - **Sandbox scope cgroup limits** (CPU/IO weight, CPU quota, memory max, tasks
   max via the `[resources]` config table + the Settings "Resource limits" section)
   -> [docs/sandbox-resource-limits.md](docs/sandbox-resource-limits.md) (BUILT;
@@ -318,6 +334,21 @@ area; do not re-derive it by reading source. Skip them otherwise.
   serving previews over TLS) -> [docs/remote-access.md](docs/remote-access.md)
   (BUILT; plain-HTTP + auth-key, ngrok, Tailscale serve/Funnel, reverse-proxy;
   `previewURL` protocol-relative so preview links follow the page scheme)
-
+- **Deploying Hydra, or changing how it is built/restarted** (`mage
+  deploy:service`, the systemd unit, the in-app update, minify vs source maps,
+  response compression) -> [docs/deployment.md](docs/deployment.md) (BUILT: ONE
+  build flavour - minified *with* source maps, precompressed to `.br`+`.gz` at
+  build time by `web/scripts/precompress.ts` (original deleted, so the binary
+  shrinks) and served by `internal/cli.serveAsset`;
+  `internal/http.CompressionMiddleware` now covers only dynamic responses;
+  `HYDRA_DEV_BUILD` gone. `POST
+  /api/server/update` builds while still serving, streams the log over
+  `/ws/server/update`, verifies, swaps atomically and re-execs via
+  `internal/selfupdate` - `syscall.Exec` keeps the PID and carries the web
+  listener across, so no supervisor and no exit-code protocol. `Dev`/`DevExpose`/
+  `Prod`/`Preview`/`DevAutoReload` deleted. NOT built: carrying agent PTYs across
+  the restart, so a restart still stops running heads - a spike showed it needs
+  `Pdeathsig`/`--die-with-parent` dropped first, trading away the
+  crashed-daemon-can't-orphan guarantee)
 The open backlog (ideas/gaps not yet built) lives in
 [docs/roadmap.md](docs/roadmap.md).

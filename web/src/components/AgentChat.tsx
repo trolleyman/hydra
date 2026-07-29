@@ -114,6 +114,11 @@ interface ChatProps {
   // Clicking a commit chip: point the diff viewer at just that commit (and
   // reveal the diff pane). Absent -> chips render non-clickable.
   onSelectCommit?: (sha: string) => void
+  // This pane IS the head's review slot: a separate agent in its own detached
+  // checkout, reviewing the head's diff (docs/review-agent.md). It has its own
+  // socket, its own transcript and its own conversation - so a pane mounted with
+  // this set shares no chat state with the main one.
+  review?: boolean
 }
 
 interface NormalizedChatEvent {
@@ -1004,15 +1009,21 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
 // The `select:a,b` form is an exact list of tool names, and the wire spelling of
 // an MCP one (`mcp__hydra__git_commit`) is transport detail - it reads as
 // "hydra::git_commit", the same namespace::tool shape the card heading uses.
-// Any other query is a keyword search, i.e. words the agent typed, so it stays
-// verbatim and prose. The Raw view keeps the query as sent. (Exported for tests.)
+//
+// `prose` here means "not monospace" (see summaryMono at the call site), and the
+// rule is simply whether the text was REWRITTEN for a human. Tool labels have
+// been - they are not what anyone typed - so they render as prose. A query we
+// pass through untouched is the agent's own words, so it stays verbatim, in
+// mono: that covers both a keyword search and a degenerate `select:` naming
+// nothing, which falls back to showing the query as sent. The Raw view keeps the
+// query as sent either way. (Exported for tests.)
 // eslint-disable-next-line react-refresh/only-export-components
 export function summarizeToolSearchQuery(query: string): { text: string; prose: boolean } {
   const select = /^\s*select:(.*)$/.exec(query)
-  if (!select) return { text: query, prose: true }
+  if (!select) return { text: query, prose: false }
   const names = select[1].split(',').map((n) => n.trim()).filter(Boolean)
   if (names.length === 0) return { text: query, prose: false }
-  return { text: names.map(mcpToolLabel).join(', '), prose: false }
+  return { text: names.map(mcpToolLabel).join(', '), prose: true }
 }
 
 // summarizeToolInput produces the one-line preview shown on a collapsed tool
@@ -4336,7 +4347,7 @@ function ChatViewSelector({
                 {rowBusy(r) && (
                   <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
                 )}
-                {r.key === 'main' && (
+                {isCurrent && (
                   <ChevronRight
                     className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
                   />
@@ -5831,7 +5842,7 @@ const SettledMessages = memo(
     a.subagents === b.subagents,
 )
 
-export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit }: ChatProps) {
+export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit, review }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
   // Wall-clock time per item id (epoch ms) - the message side of the
   // commit-chip interleave. Stamped by the reducers: replayed events carry the
@@ -7740,7 +7751,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     let activeNormalizedAssistantStream = ''
     let activeNormalizedReasoningStream = ''
 
-    const ws = new WebSocket(getWsUrl(agentId, projectId))
+    const ws = new WebSocket(getWsUrl(agentId, projectId, { review }))
     wsRef.current = ws
     let retryTimer: number | null = null
     let openedAt: number | null = null
@@ -8162,7 +8173,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       wsRef.current = null
       setConnected(false)
     }
-  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry])
+    // `review` picks the socket (and therefore the whole conversation), so it
+    // belongs here - though in practice the two panes are separate mounts.
+  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry, review])
 
   // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
   // labels, the live/done state and the final report. A NESTED sub-agent's

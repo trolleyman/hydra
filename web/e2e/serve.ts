@@ -14,7 +14,12 @@ const repoRoot = join(import.meta.dirname, '..', '..') // web/e2e -> repo root
 const port = process.env.E2E_PORT ?? '41825'
 const addr = `127.0.0.1:${port}`
 
-if (!existsSync(join(repoRoot, 'web', 'dist', 'index.html'))) {
+// The build step precompresses and then DELETES each original (see
+// web/scripts/precompress.ts), so a built dist has index.html.br/.gz and no
+// index.html. Check for any of the three, or this guard reports "not built"
+// against a perfectly good build.
+const distIndex = join(repoRoot, 'web', 'dist', 'index.html')
+if (!['', '.br', '.gz'].some((suffix) => existsSync(distIndex + suffix))) {
   console.error('e2e: web/dist not built - run `mage build` (or `npm run build`) first')
   process.exit(1)
 }

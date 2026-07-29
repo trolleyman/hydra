@@ -20,6 +20,7 @@ import (
 	"github.com/trolleyman/hydra/internal/forge"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
+	"github.com/trolleyman/hydra/internal/selfupdate"
 )
 
 // simAgentByID returns a minimal fixture AgentResponse for the given id, used by
@@ -41,6 +42,15 @@ func simAgentByID(id string) api.AgentResponse {
 // SimulationServer implements api.ServerInterface with mock data.
 type SimulationServer struct {
 	Development bool
+
+	// updateMu and friends back the simulated self-update job (see UpdateServer),
+	// so the update panel - phases, streaming build log, the failure path - can
+	// be driven and screenshotted without a real build.
+	updateMu      sync.Mutex
+	updateRunning bool
+	updateRuns    int
+	updateHistory []selfupdate.Event
+	updateSubs    map[chan selfupdate.Event]struct{}
 
 	// previewMu/previewPolls back the mock previews endpoints: a started
 	// instance advances starting -> running by counting status polls, so the
@@ -138,6 +148,10 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	projectRoot := "/simulated/project"
 	defaultProjectID := "sim-project"
 	development := s.Development
+	// The simulated server offers both controls so the update panel is drivable
+	// here; neither actually replaces this process (see UpdateServer).
+	canRestart := true
+	canUpdate := true
 
 	api.WriteJSON(w, http.StatusOK, api.StatusResponse{
 		Status:           &status,
@@ -146,6 +160,8 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 		ProjectRoot:      &projectRoot,
 		DefaultProjectId: &defaultProjectID,
 		Development:      &development,
+		CanRestart:       &canRestart,
+		CanUpdate:        &canUpdate,
 	})
 }
 
@@ -3830,25 +3846,162 @@ func (s *SimulationServer) StopAgentPreview(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DevRestart mirrors the real server's handler (Server.DevRestart). The reload
-// button always renders in simulation mode (GetStatus reports Development: true),
-// but the actual rebuild + restart only fires when the server runs under `mage
-// demo`'s rebuild loop, which arms it by setting HYDRA_DEV_RESTART=1. Exiting with
-// devRestartExitCode signals mage to rebuild the frontend + backend and relaunch.
-// Absent that env (a bare `hydra server --simulation`, e.g. the screenshot
-// generator) it stays a 403 so a stray click can't kill the process.
-func (s *SimulationServer) DevRestart(w http.ResponseWriter, r *http.Request) {
-	if os.Getenv("HYDRA_DEV_RESTART") != "1" {
-		api.WriteError(w, http.StatusForbidden, "Not available in simulation mode")
+// RestartServer is a no-op in simulation: it answers as the real server would
+// and stays running, so the UI's restart flow (toast, health poll, reload) can
+// be driven and screenshotted without a process actually going away.
+func (s *SimulationServer) RestartServer(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// UpdateServer simulates a rebuild. The point of simulation mode is to be able
+// to drive and screenshot UI that is otherwise awkward to reach, and the update
+// panel - phases, a streaming build log, a failure that leaves the server alive -
+// is exactly that. Every third run fails, so the error path is reachable too.
+func (s *SimulationServer) UpdateServer(w http.ResponseWriter, _ *http.Request) {
+	s.updateMu.Lock()
+	if s.updateRunning {
+		s.updateMu.Unlock()
+		api.WriteError(w, http.StatusConflict, "An update is already running")
 		return
 	}
-	// Respond 200 then exit with the restart code after a short delay to allow
-	// the response to flush (matches Server.DevRestart).
-	w.WriteHeader(http.StatusOK)
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		os.Exit(devRestartExitCode)
+	s.updateRunning = true
+	s.updateRuns++
+	fail := s.updateRuns%3 == 0
+	s.updateHistory = nil
+	s.updateMu.Unlock()
+
+	w.WriteHeader(http.StatusAccepted)
+	go s.runSimulatedUpdate(fail)
+}
+
+// simulatedUpdateLog is the build output the fake update replays, close enough
+// in shape and volume to a real `mage build` for the panel to be laid out
+// against.
+var simulatedUpdateLog = []string{
+	"$ mage build",
+	"$ go mod download",
+	"$ pushd web && aube install && popd",
+	"aube 1.29.1 by jdx.dev · ✓ Already up to date (442 packages)",
+	"$ pushd web && aube run build && popd",
+	"> hydra@0.0.0 build-fonts",
+	"fonts: already built (9 faces) - nothing to do",
+	"> hydra@0.0.0 generate-openapi",
+	"> hydra@0.0.0 generate-tanstack-router",
+	"vite v7.1.5 building for production...",
+	"transforming...",
+	"✓ 3184 modules transformed.",
+	"rendering chunks...",
+	"computing gzip size...",
+	"dist/index.html                    1.42 kB",
+	"dist/assets/index-tkXwjxux.js    394.77 kB │ map: 1,284.10 kB",
+	"✓ built in 18.42s",
+	"$ go generate ./...",
+	"$ go build ./...",
+	"$ go build -o /home/you/.local/bin/hydra.new ./",
+}
+
+func (s *SimulationServer) runSimulatedUpdate(fail bool) {
+	emit := func(ev selfupdate.Event) {
+		s.updateMu.Lock()
+		s.updateHistory = append(s.updateHistory, ev)
+		for ch := range s.updateSubs {
+			select {
+			case ch <- ev:
+			default:
+			}
+		}
+		s.updateMu.Unlock()
+	}
+
+	emit(selfupdate.Event{Kind: selfupdate.KindPhase, Phase: selfupdate.PhaseBuilding})
+	for i, line := range simulatedUpdateLog {
+		time.Sleep(180 * time.Millisecond)
+		emit(selfupdate.Event{Kind: selfupdate.KindLog, Line: line})
+		if fail && i == 12 {
+			emit(selfupdate.Event{Kind: selfupdate.KindLog, Line: "internal/heads/heads.go:412:9: undefined: resumeHeed"})
+			emit(selfupdate.Event{Kind: selfupdate.KindDone, Error: "go build ./... failed: exit status 1"})
+			s.finishSimulatedUpdate()
+			return
+		}
+	}
+
+	emit(selfupdate.Event{Kind: selfupdate.KindPhase, Phase: selfupdate.PhaseVerifying})
+	time.Sleep(500 * time.Millisecond)
+	emit(selfupdate.Event{Kind: selfupdate.KindLog, Line: "verified: hydra version 0.1.0"})
+
+	emit(selfupdate.Event{Kind: selfupdate.KindPhase, Phase: selfupdate.PhaseSwapping})
+	time.Sleep(300 * time.Millisecond)
+	emit(selfupdate.Event{Kind: selfupdate.KindLog, Line: "installed /home/you/.local/bin/hydra (previous kept as hydra.prev)"})
+
+	// A real update re-execs here and the socket dies without a done frame. The
+	// simulation has nothing to re-exec into, so it says done and stays up.
+	emit(selfupdate.Event{Kind: selfupdate.KindPhase, Phase: selfupdate.PhaseRestarting})
+	time.Sleep(400 * time.Millisecond)
+	emit(selfupdate.Event{Kind: selfupdate.KindDone})
+	s.finishSimulatedUpdate()
+}
+
+func (s *SimulationServer) finishSimulatedUpdate() {
+	s.updateMu.Lock()
+	s.updateRunning = false
+	s.updateMu.Unlock()
+}
+
+// HandleServerUpdateWS mirrors Server.HandleServerUpdateWS against the simulated
+// job, replaying what has already happened so a late subscriber catches up.
+func (s *SimulationServer) HandleServerUpdateWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	ch := make(chan selfupdate.Event, 256)
+	s.updateMu.Lock()
+	for _, ev := range s.updateHistory {
+		select {
+		case ch <- ev:
+		default:
+		}
+	}
+	if s.updateSubs == nil {
+		s.updateSubs = map[chan selfupdate.Event]struct{}{}
+	}
+	s.updateSubs[ch] = struct{}{}
+	s.updateMu.Unlock()
+
+	defer func() {
+		s.updateMu.Lock()
+		delete(s.updateSubs, ch)
+		s.updateMu.Unlock()
 	}()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-r.Context().Done():
+			return
+		case ev := <-ch:
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteJSON(ev); err != nil {
+				return
+			}
+			if ev.Kind == selfupdate.KindDone {
+				return
+			}
+		}
+	}
 }
 
 func (s *SimulationServer) GetDevToolsConfig(w http.ResponseWriter, r *http.Request) {

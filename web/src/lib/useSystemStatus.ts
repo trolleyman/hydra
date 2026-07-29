@@ -8,8 +8,10 @@ import type { StatusResponse } from '../api'
 export interface SystemStatus {
   // Stable refetch handle - wire into the caller's events stream.
   refetchStatus: () => void
-  // Whether the server is running in dev mode (gates the restart button).
-  development: boolean
+  // Whether the server can re-exec itself (gates the restart control).
+  canRestart: boolean
+  // Whether it can also rebuild itself from source first.
+  canUpdate: boolean
   // Server boot time as a client epoch (ms), or null until the first status lands.
   // A ref so the once-per-second uptime ticker can advance the label without the
   // caller threading extra state.
@@ -25,12 +27,14 @@ export interface SystemStatus {
 export function useSystemStatus(): SystemStatus {
   const spawnedAt = useRef<number | null>(null)
   const [, setTick] = useState(0)
-  const [development, setDevelopment] = useState(false)
+  const [canRestart, setCanRestart] = useState(false)
+  const [canUpdate, setCanUpdate] = useState(false)
 
   const handleStatus = useCallback((status: StatusResponse) => {
     const { setSystemStatus, setProjects, setSelectedProjectId } = useProjectStore.getState()
     setSystemStatus(status)
-    setDevelopment(status.development ?? false)
+    setCanRestart(status.can_restart ?? false)
+    setCanUpdate(status.can_update ?? false)
     if (status.uptime_seconds != null && spawnedAt.current === null) {
       spawnedAt.current = Date.now() - status.uptime_seconds * 1000
       setTick((n) => n + 1) // one render to mount the self-ticking <Uptime> label
@@ -62,5 +66,5 @@ export function useSystemStatus(): SystemStatus {
     { intervalMs: EVENT_FALLBACK_MS, onData: handleStatus, trackLoading: false },
   )
 
-  return { refetchStatus, development, spawnedAt }
+  return { refetchStatus, canRestart, canUpdate, spawnedAt }
 }

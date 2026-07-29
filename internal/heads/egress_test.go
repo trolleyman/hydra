@@ -126,7 +126,7 @@ func TestEgressProxyEnvFor(t *testing.T) {
 // shell's own egress is keyed by the shell id (its proxy/mode/port), independent of
 // the head id, and that StopShellEgress tears it down.
 func TestStartEgressKeyedSeparatesProxyFromApproval(t *testing.T) {
-	shellID, headID := "h1-shell-tab1", "h1"
+	shellID, headID := ShellSessionID("h1", true, "tab1"), "h1"
 	startEgressKeyed("", shellID, headID, sandbox.AgentTypeBash, &sandbox.NetworkPolicy{Mode: sandbox.NetAdvisory, Enabled: true, FilterHosts: true, AllowedHosts: []string{"example.com"}})
 
 	// The proxy/mode live under the shell id, not the head id.

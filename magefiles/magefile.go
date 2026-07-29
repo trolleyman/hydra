@@ -15,7 +15,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"braces.dev/errtrace"
@@ -56,9 +55,6 @@ const (
 func style(codes ...string) string {
 	return strings.Join(codes, "")
 }
-
-// devRestartExitCode must match the constant in internal/http/handlers.go.
-const devRestartExitCode = 42
 
 // devFastAPIPort is the port the Go API server listens on in DevFast mode.
 // Vite dev server runs on 26600 and proxies /api, /health, /ws to this port.
@@ -250,33 +246,6 @@ func runInDirV(dir string, cmd string, args ...string) error {
 	c.Dir = dir
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	err := c.Run()
-	if err != nil {
-		return errtrace.Wrap(fmt.Errorf("failed to run %q in %q: %w", cmd, dir, err))
-	}
-	return nil
-}
-
-// runInDirWithEnvV runs a command in a specific directory with environment variables set and stdout/stderr forwarded
-func runInDirWithEnvV(dir string, env map[string]string, cmd string, args ...string) error {
-	cmdLine := []string{
-		"pushd", displayPath(dir), "&&",
-	}
-	for k, v := range env {
-		cmdLine = append(cmdLine, fmt.Sprintf("%s=%s", k, v))
-	}
-	cmdLine = append(cmdLine, cmd)
-	cmdLine = append(cmdLine, args...)
-	cmdLine = append(cmdLine, "&&", "popd")
-	printCmdLine(cmdLine)
-	c := exec.Command(cmd, args...)
-	c.Dir = dir
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	c.Env = os.Environ()
-	for k, v := range env {
-		c.Env = append(c.Env, fmt.Sprintf("%s=%s", k, v))
-	}
 	err := c.Run()
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("failed to run %q in %q: %w", cmd, dir, err))
@@ -618,8 +587,8 @@ func (Deploy) Setup() error {
 	}
 	fmt.Println("\nA normal `mage run` / `hydra server` keeps the UI bound to localhost.")
 	fmt.Println("Opening it to the network is a separate, explicit step:")
-	fmt.Printf("  %smage prod%s        build + serve on 0.0.0.0 (production)\n", colorBold, colorReset)
-	fmt.Printf("  %smage devExpose%s   serve on 0.0.0.0 with dev auto-rebuild\n", colorBold, colorReset)
+	fmt.Printf("  %smage deploy:service%s   install + serve on 0.0.0.0 as a systemd unit\n", colorBold, colorReset)
+	fmt.Printf("  %sHYDRA_API_ADDR=0.0.0.0:%s hydra server%s   serve on 0.0.0.0 in the foreground\n", colorBold, hydraPort(), colorReset)
 	fmt.Println("Then browse to http://<this-machine-ip>:26600 and enter the key.")
 	return nil
 }
@@ -629,7 +598,7 @@ func (Deploy) Setup() error {
 // the reference deployment. It stores the settings in .hydra/deploy.toml and
 // renders .hydra/ngrok.yml (both uncommitted; they embed secrets), then prints
 // how to run the tunnel. The tunnel fronts the local Hydra port (HYDRA_PORT,
-// default 26600), so run `mage prod` alongside it:
+// default 26600), so run the exposed server alongside it:
 //
 //	mage deploy:ngrok
 func (Deploy) Ngrok() error {
@@ -700,7 +669,7 @@ func (Deploy) Ngrok() error {
 	fmt.Printf("%s  and saved the settings to %s%s\n", colorGreen, displayPath(paths.GetDeployConfigPath(projectRoot)), colorReset)
 	fmt.Printf("\n%sExposing localhost:%s at %shttps://%s%s (Google login required).%s\n", colorBold, port, colorCyan, ng.Domain, colorBold, colorReset)
 	fmt.Println("\n1. Serve Hydra on that port (in one terminal):")
-	fmt.Printf("     %smage prod%s\n", colorBold, colorReset)
+	fmt.Printf("     %smage deploy:service%s\n", colorBold, colorReset)
 	fmt.Println("2. Start the tunnel (in another):")
 	fmt.Printf("     %sngrok start --all --config %s%s\n", colorBold, displayPath(ngrokPath), colorReset)
 	fmt.Println("\n   Or run it as a persistent background service, like the reference host:")
@@ -782,7 +751,7 @@ func (Deploy) Tailscale() error {
 	// without this note the range silently looks "all busy" to it. Hydra now
 	// falls back to loopback in that case (internal/preview.allocListener), which
 	// is what these mappings proxy to anyway; say so rather than let it surprise.
-	fmt.Printf("%sRunning Hydra exposed too%s (mage prod / HYDRA_API_ADDR=0.0.0.0:...)? The preview\n", colorBold, colorReset)
+	fmt.Printf("%sRunning Hydra exposed too%s (deploy:service / HYDRA_API_ADDR=0.0.0.0:...)? The preview\n", colorBold, colorReset)
 	fmt.Printf("mappings claim %d-%d on your tailnet addresses, so Hydra binds its preview\n", plo, phi)
 	fmt.Printf("listeners on 127.0.0.1 instead - reachable through this TLS front, but not\n")
 	fmt.Printf("directly over plain HTTP from the LAN.\n")
@@ -907,7 +876,7 @@ func tailscaleDNSName() string {
 }
 
 // Service installs Hydra as a systemd --user service that serves the web UI on
-// 0.0.0.0 (auth-key gated, like `mage prod`) and restarts on failure, so a
+// 0.0.0.0 (auth-key gated) and restarts on failure, so a
 // project's server comes up on login/boot without a terminal. Linux/systemd only.
 //
 // It (1) builds a full binary with the frontend embedded and installs it to
@@ -920,7 +889,7 @@ func tailscaleDNSName() string {
 //	mage deploy:service
 func (Deploy) Service() error {
 	if runtime.GOOS != "linux" {
-		return errtrace.Wrap(fmt.Errorf("deploy:service is Linux/systemd only for now (this is %s); use `mage prod` in the foreground", runtime.GOOS))
+		return errtrace.Wrap(fmt.Errorf("deploy:service is Linux/systemd only for now (this is %s); run `hydra server` with HYDRA_API_ADDR set instead", runtime.GOOS))
 	}
 	projectRoot, err := paths.GetProjectRootFromCwd()
 	if err != nil {
@@ -996,13 +965,48 @@ func (Deploy) Service() error {
 	fmt.Println("\nEnable it (nothing is running yet):")
 	fmt.Printf("  %ssystemctl --user daemon-reload%s\n", colorBold, colorReset)
 	fmt.Printf("  %ssystemctl --user enable --now hydra%s\n", colorBold, colorReset)
-	fmt.Println("\nTo keep it running after you log out / across reboots without a login:")
-	fmt.Printf("  %sloginctl enable-linger %s%s\n", colorBold, os.Getenv("USER"), colorReset)
+	// Without linger a --user unit dies at logout and does not come back until
+	// the next login, which is the single most surprising thing about a
+	// systemd --user deployment. Offer it rather than leaving it as homework.
+	offerLinger()
+
 	fmt.Println("\nLogs / control:")
 	fmt.Printf("  %sjournalctl --user -u hydra -f%s\n", colorBold, colorReset)
-	fmt.Printf("  %ssystemctl --user restart hydra%s   (also picks up a re-run of this target)\n", colorBold, colorReset)
+	fmt.Printf("  %ssystemctl --user restart hydra%s\n", colorBold, colorReset)
+	fmt.Printf("\n%sAfter this,%s use the web UI's update button to rebuild and restart -\n", colorBold, colorReset)
+	fmt.Println("it builds while the current server keeps serving, and only swaps the")
+	fmt.Println("binary once the build succeeds and the result is proven to start.")
 	fmt.Printf("\n%sNote:%s the service takes over any daemon started ad-hoc by the CLI for this project.\n", colorYellow, colorReset)
 	return nil
+}
+
+// offerLinger reports whether the user account already lingers, and offers to
+// turn it on if not. Best-effort throughout: loginctl may be absent or refuse,
+// and none of that should fail an otherwise successful install.
+func offerLinger() {
+	user := os.Getenv("USER")
+	if user == "" {
+		return
+	}
+	if out, err := sh.Output("loginctl", "show-user", user, "--property=Linger"); err == nil {
+		if strings.TrimSpace(out) == "Linger=yes" {
+			fmt.Printf("\n%s✓ Lingering is already enabled%s (the service survives logout and reboots).\n", colorGreen, colorReset)
+			return
+		}
+	}
+
+	fmt.Println("\nWithout lingering, a --user service stops when you log out and only")
+	fmt.Println("comes back at your next login.")
+	reader := bufio.NewReader(os.Stdin)
+	if !promptYesNo(reader, fmt.Sprintf("Run `loginctl enable-linger %s` now?", user), true) {
+		fmt.Printf("  Skipped. Run it yourself with: %sloginctl enable-linger %s%s\n", colorBold, user, colorReset)
+		return
+	}
+	if err := runV("loginctl", "enable-linger", user); err != nil {
+		fmt.Printf("%swarn: enable-linger failed (%v); run it yourself: loginctl enable-linger %s%s\n", colorYellow, err, user, colorReset)
+		return
+	}
+	fmt.Printf("%s✓ Lingering enabled%s\n", colorGreen, colorReset)
 }
 
 // gitUserEmail returns the configured git user.email for the project (best
@@ -1016,7 +1020,7 @@ func gitUserEmail(projectRoot string) string {
 	return strings.TrimSpace(out)
 }
 
-// hydraPort is the TCP port the dev/exposed mage targets bind, overridable with
+// hydraPort is the TCP port the exposed mage targets bind, overridable with
 // HYDRA_PORT. The default is a distinctive registered-range port (not the
 // heavily-squatted 8080) so hydra never collides with other local tools and is
 // easy to spot in logs; it is deliberately distinct from other services on the
@@ -1028,9 +1032,9 @@ func hydraPort() string {
 	return "26600"
 }
 
-// exposedAPIAddr is the bind address used by the exposing targets (Prod /
-// DevExpose): every interface, so the UI is reachable from other devices on the
-// network. Override the port with HYDRA_PORT (default 26600).
+// exposedAPIAddr is the bind address used by deploy:service: every interface, so
+// the UI is reachable from other devices on the network. Override the port with
+// HYDRA_PORT (default 26600).
 func exposedAPIAddr() string {
 	return "0.0.0.0:" + hydraPort()
 }
@@ -1052,24 +1056,6 @@ func requireAuthKey() error {
 			"no auth key configured - run `mage deploy:setup` first so the exposed port requires a password"))
 	}
 	return nil
-}
-
-// Prod builds the full project and serves the web UI on 0.0.0.0 (every network
-// interface), reachable from other devices such as your phone. Non-localhost
-// clients must present the auth key from `mage deploy:setup`; Prod refuses to
-// start without one. Override the port with HYDRA_PORT (default 26600).
-func Prod() error {
-	if err := requireAuthKey(); err != nil {
-		return errtrace.Wrap(err)
-	}
-	ensureToolsEnv()
-	addGoBuildDeps()
-	addr := exposedAPIAddr()
-	os.Setenv("HYDRA_API_ADDR", addr)
-	fmt.Printf("%sServing on http://%s - reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
-	args := append([]string{"run"}, goBuildTags(false)...)
-	args = append(args, "./", "server")
-	return errtrace.Wrap(runV("go", args...))
 }
 
 // ensureDeployGitignored makes sure .hydra/deploy.toml is ignored by git (it
@@ -1158,12 +1144,11 @@ func webPM() string {
 	return webPMName
 }
 
+// BuildWeb builds the frontend into web/dist, which the binary embeds. There is
+// exactly one build flavour - minified with source maps, see web/vite.config.ts -
+// so there is one stamp and no build-mode environment to get wrong.
 func BuildWeb() error {
 	stamp := ".mage/web-build.stamp"
-	isDev := os.Getenv("HYDRA_DEV_BUILD") == "1"
-	if isDev {
-		stamp = ".mage/web-build-dev.stamp"
-	}
 
 	ignores := map[string]struct{}{
 		"dist":         {},
@@ -1190,14 +1175,7 @@ func BuildWeb() error {
 		return errtrace.Wrap(err)
 	}
 
-	buildArgs := []string{"run", "build"}
-	env := map[string]string{}
-	if isDev {
-		env["NODE_ENV"] = "development"
-		buildArgs = append(buildArgs, "--", "--mode", "development")
-	}
-
-	if err := runInDirWithEnvV("web", env, webPM(), buildArgs...); err != nil {
+	if err := runInDirV("web", webPM(), "run", "build"); err != nil {
 		return errtrace.Wrap(err)
 	}
 
@@ -1296,81 +1274,21 @@ func getHydraOutputFile() string {
 	return hydraOutputFile
 }
 
-// Dev builds once and runs the server with the /api/dev/restart endpoint enabled.
-// Use the UI restart button to trigger a full rebuild and restart.
-// For auto-reload on file changes use DevAutoReload instead.
-func Dev() error {
-	ensureToolsEnv()
-	os.Setenv("HYDRA_DEV_BUILD", "1")
-	return errtrace.Wrap(devServerLoop([]string{"HYDRA_API_ADDR=localhost:" + hydraPort()}))
-}
-
-// DevExpose is Dev, but binds the web UI to 0.0.0.0 (every network interface) so
-// you can iterate on the UI from another device, e.g. your phone, with the same
-// rebuild-on-UI-restart loop. Non-localhost clients must present the auth key
-// from `mage deploy:setup`; DevExpose refuses to start without one. Override the
-// port with HYDRA_PORT (default 26600).
-func DevExpose() error {
-	if err := requireAuthKey(); err != nil {
-		return errtrace.Wrap(err)
-	}
-	ensureToolsEnv()
-	os.Setenv("HYDRA_DEV_BUILD", "1")
-	addr := exposedAPIAddr()
-	fmt.Printf("%sDev server exposed on http://%s - reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
-	return errtrace.Wrap(devServerLoop([]string{"HYDRA_API_ADDR=" + addr}))
-}
-
-// devServerLoop builds the frontend + backend and runs the dev server with the
-// UI restart endpoint enabled, rebuilding and restarting whenever the UI asks
-// for it (exit code devRestartExitCode). extraEnv is appended to the server's
-// environment - DevExpose uses it to set HYDRA_API_ADDR for a 0.0.0.0 bind.
-func devServerLoop(extraEnv []string) error {
-	for {
-		if err := GenerateGo(); err != nil {
-			return errtrace.Wrap(err)
-		}
-		if err := BuildWeb(); err != nil {
-			return errtrace.Wrap(err)
-		}
-
-		hydraOutputFile := getHydraOutputFile()
-		devBuildArgs := append([]string{"build"}, goBuildTags(false)...)
-		devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
-		if err := runV("go", devBuildArgs...); err != nil {
-			return errtrace.Wrap(err)
-		}
-
-		printCmd(hydraOutputFile, "server")
-		serverCmd := exec.Command(hydraOutputFile, "server")
-		serverCmd.Stdout = os.Stdout
-		serverCmd.Stderr = os.Stderr
-		serverCmd.Env = append(os.Environ(), "HYDRA_DEV_RESTART=1")
-		serverCmd.Env = append(serverCmd.Env, extraEnv...)
-
-		if err := serverCmd.Run(); err != nil {
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) && exitErr.ExitCode() == devRestartExitCode {
-				log.Println("Restart requested via UI, rebuilding...")
-				time.Sleep(1 * time.Second) // Give the OS time to release the port
-				continue
-			}
-			return errtrace.Wrap(err)
-		}
-		return nil // clean exit
-	}
-}
-
 // DevFast builds the Go backend and runs it in API-only mode on a background port,
 // while running the Vite dev server on http://localhost:26600 for hot-module-replacement.
 // Vite proxies /api, /health, and /ws to the Go backend automatically.
-// Clicking the UI restart button rebuilds the backend and restarts both servers.
 // The frontend is never embedded into the binary (hydra_no_frontend build tag).
 // BuildWeb is still called to keep the generated TS API client (web/src/api/) in sync;
 // it uses stamp-based caching so it is a no-op when neither web/ nor api/ have changed.
+//
+// There is no rebuild loop here any more. The server restarts itself in place
+// (syscall.Exec, same PID - see internal/selfupdate), so the UI's restart and
+// update buttons work without mage supervising anything; from here Wait simply
+// keeps waiting on the same process. Note an in-app update rebuilds a normal
+// binary, without the hydra_no_frontend tag - harmless, since Vite is still the
+// thing serving the UI on this port.
 func DevFast() error {
 	ensureToolsEnv()
-	os.Setenv("HYDRA_DEV_BUILD", "1")
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -1406,240 +1324,36 @@ func DevFast() error {
 		return errtrace.Wrap(err)
 	}
 
-	for {
-		viteCmd, err := startVite()
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-
-		printCmd(hydraOutputFile, "server")
-		serverCmd := exec.Command(hydraOutputFile, "server")
-		serverCmd.Stdout = os.Stdout
-		serverCmd.Stderr = os.Stderr
-		serverCmd.Env = append(os.Environ(),
-			"HYDRA_DEV_RESTART=1",
-			"HYDRA_API_ADDR=localhost:"+devFastAPIPort,
-		)
-
-		serverErr := serverCmd.Run()
-
-		// Always stop Vite when the backend exits.
-		if viteCmd.Process != nil {
-			viteCmd.Process.Kill()
-			viteCmd.Wait()
-		}
-
-		if serverErr != nil {
-			var exitErr *exec.ExitError
-			if errors.As(serverErr, &exitErr) && exitErr.ExitCode() == devRestartExitCode {
-				log.Println("Restart requested via UI, rebuilding backend...")
-				time.Sleep(1 * time.Second) // Give the OS time to release the port
-				if err := GenerateGo(); err != nil {
-					fmt.Printf("GenerateGo error: %v\n", err)
-					time.Sleep(2 * time.Second)
-				} else if err := BuildWeb(); err != nil {
-					fmt.Printf("BuildWeb error: %v\n", err)
-					time.Sleep(2 * time.Second)
-				} else if err := buildBackend(); err != nil {
-					fmt.Printf("build error: %v\n", err)
-					time.Sleep(2 * time.Second)
-				}
-				continue
-			}
-			return errtrace.Wrap(serverErr)
-		}
-		return nil // clean exit
-	}
-}
-
-// DevAutoReload runs the Go API server (restarting on Go source changes) and the Vite
-// frontend dev server in parallel for fast UI iteration with hot module replacement.
-// Access the frontend at http://localhost:5173; API calls are proxied to the dev backend.
-// The /api/dev/restart UI button is also available alongside auto-reload.
-func DevAutoReload() error {
-	os.Setenv("HYDRA_DEV_BUILD", "1")
-	// Ensure generated Go code is up to date.
-	if err := GenerateGo(); err != nil {
-		return errtrace.Wrap(err)
-	}
-	// Build the frontend once to ensure web/dist/ exists for Go compilation.
-	// Subsequent frontend changes are handled by the Vite dev server with HMR.
-	if err := BuildWeb(); err != nil {
+	viteCmd, err := startVite()
+	if err != nil {
 		return errtrace.Wrap(err)
 	}
 
-	// Start the Vite dev server (frontend with HMR on http://localhost:5173).
-	printCmdBackground(webPM(), "run", "dev")
-	viteCmd := exec.Command(webPM(), "run", "dev")
-	viteCmd.Dir = "web"
-	viteCmd.Stdout = os.Stdout
-	viteCmd.Stderr = os.Stderr
-	if err := viteCmd.Start(); err != nil {
-		return errtrace.Wrap(fmt.Errorf("failed to start Vite dev server: %w", err))
+	printCmd(hydraOutputFile, "server")
+	serverCmd := exec.Command(hydraOutputFile, "server")
+	serverCmd.Stdout = os.Stdout
+	serverCmd.Stderr = os.Stderr
+	serverCmd.Env = append(os.Environ(), "HYDRA_API_ADDR=localhost:"+devFastAPIPort)
+
+	serverErr := serverCmd.Run()
+
+	// Always stop Vite when the backend exits.
+	if viteCmd.Process != nil {
+		_ = viteCmd.Process.Kill()
+		_ = viteCmd.Wait()
 	}
-	defer func() {
-		if viteCmd.Process != nil {
-			viteCmd.Process.Kill()
-			viteCmd.Wait()
-		}
-	}()
-
-	// Watch Go source files and restart the API server on changes.
-	var serverCmd *exec.Cmd
-	var serverMu sync.Mutex
-	defer func() {
-		serverMu.Lock()
-		defer serverMu.Unlock()
-		if serverCmd != nil && serverCmd.Process != nil {
-			serverCmd.Process.Kill()
-			serverCmd.Wait()
-		}
-	}()
-
-	// needRestart is set to 1 when the server exits with the restart code.
-	var needRestart atomic.Int32
-
-	hydraOutputFile := getHydraOutputFile()
-	startServer := func() {
-		serverMu.Lock()
-		defer serverMu.Unlock()
-		printCmd(hydraOutputFile, "server")
-		serverCmd = exec.Command(hydraOutputFile, "server")
-		serverCmd.Stdout = os.Stdout
-		serverCmd.Stderr = os.Stderr
-		serverCmd.Env = append(os.Environ(), "HYDRA_DEV_RESTART=1")
-		if err := serverCmd.Start(); err != nil {
-			fmt.Printf("start error: %v\n", err)
-			return
-		}
-		go func(cmd *exec.Cmd) {
-			err := cmd.Wait()
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) && exitErr.ExitCode() == devRestartExitCode {
-				log.Println("Restart requested via UI, rebuilding...")
-				needRestart.Store(1)
-			}
-		}(serverCmd)
-	}
-
-	var lastBuild time.Time
-	for {
-		latest, err := getGoSourceModTime()
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-
-		if latest.After(lastBuild) || needRestart.CompareAndSwap(1, 0) {
-			lastBuild = time.Now()
-
-			time.Sleep(1 * time.Second) // Give the OS time to release the port
-
-			if err := GenerateGo(); err != nil {
-				fmt.Printf("GenerateGo error: %v\n", err)
-				time.Sleep(2 * time.Second)
-				continue
-			}
-
-			serverMu.Lock()
-			if serverCmd != nil && serverCmd.Process != nil {
-				printCmd("restarting server")
-				serverCmd.Process.Kill()
-				serverCmd.Wait()
-			}
-			serverMu.Unlock()
-
-			devBuildArgs := append([]string{"build"}, goBuildTags(false)...)
-			devBuildArgs = append(devBuildArgs, "-o", hydraOutputFile, "./")
-			printCmdLine(append([]string{"go"}, devBuildArgs...))
-			buildCmd := exec.Command("go", devBuildArgs...)
-			buildCmd.Stdout = os.Stdout
-			buildCmd.Stderr = os.Stderr
-			if err := buildCmd.Run(); err != nil {
-				fmt.Printf("build error: %v\n", err)
-				time.Sleep(2 * time.Second)
-				continue
-			}
-
-			startServer()
-		}
-
-		time.Sleep(1 * time.Second)
-	}
-}
-
-// Preview builds the full project and runs the server, reloading it when any
-// tracked file changes (Go source, frontend, or API spec).
-func Preview() error {
-	var cmd *exec.Cmd
-
-	defer func() {
-		if cmd != nil && cmd.Process != nil {
-			cmd.Process.Kill()
-		}
-	}()
-
-	var lastRun time.Time
-
-	for {
-		latest, err := getProjectModTime()
-		if err != nil {
-			return errtrace.Wrap(err)
-		}
-
-		if latest.After(lastRun) {
-			lastRun = time.Now()
-
-			if err := GenerateGo(); err != nil {
-				fmt.Printf("GenerateGo error: %v\n", err)
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			if err := BuildWeb(); err != nil {
-				fmt.Printf("BuildWeb error: %v\n", err)
-				time.Sleep(2 * time.Second)
-				continue
-			}
-
-			if cmd != nil && cmd.Process != nil {
-				printCmd("restarting server")
-				cmd.Process.Kill()
-				cmd.Wait()
-			}
-
-			previewBuildArgs := append([]string{"build"}, goBuildTags(false)...)
-			previewBuildArgs = append(previewBuildArgs, "-o", ".mage/server", "./")
-			buildCmd := exec.Command("go", previewBuildArgs...)
-			buildCmd.Stdout = os.Stdout
-			buildCmd.Stderr = os.Stderr
-			if err := buildCmd.Run(); err != nil {
-				fmt.Printf("build error: %v\n", err)
-				time.Sleep(2 * time.Second)
-				continue
-			}
-
-			cmd = exec.Command("./.mage/server", "server")
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Start(); err != nil {
-				fmt.Printf("start error: %v\n", err)
-			}
-		}
-
-		time.Sleep(1 * time.Second)
-	}
+	return errtrace.Wrap(serverErr)
 }
 
 // Demo runs the Hydra server in simulation mode with mock data, serving the
 // frontend through the Vite dev server (HMR on http://localhost:5173, which
 // proxies /api + /ws to the sim server on :demoAPIPort - an out-of-the-way
 // port so a real hydra server on 26600 is untouched). Frontend edits hot-reload
-// through Vite without a restart; the UI reload button rebuilds the Go backend
-// and relaunches the sim server (exit code devRestartExitCode), so a change to
-// the mock data in internal/http/simulation.go goes live with one click. This is
+// through Vite without a restart; a change to the mock data in
+// internal/http/simulation.go needs mage restarting. This is
 // the simulation twin of DevFast - a prod build swapped for --simulation.
 func Demo() error {
 	ensureToolsEnv()
-	os.Setenv("HYDRA_DEV_BUILD", "1")
 	// Ensure generated Go code is up to date.
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
@@ -1681,39 +1395,17 @@ func Demo() error {
 		return errtrace.Wrap(fmt.Errorf("build error: %w", err))
 	}
 
-	for {
-		printCmd(hydraOutputFile, "server", "--simulation")
-		serverCmd := exec.Command(hydraOutputFile, "server", "--simulation")
-		serverCmd.Stdout = os.Stdout
-		serverCmd.Stderr = os.Stderr
-		// HYDRA_DEV_RESTART=1 arms the sim server's reload button (SimulationServer.
-		// DevRestart), so a click exits with devRestartExitCode and this loop
-		// rebuilds. Vite proxies /api + /ws to :demoAPIPort, keeping the sim
-		// server off hydra's real 26600.
-		serverCmd.Env = append(os.Environ(),
-			"HYDRA_DEV_RESTART=1",
-			"HYDRA_API_ADDR=localhost:"+demoAPIPort,
-		)
-
-		serverErr := serverCmd.Run()
-		if serverErr != nil {
-			var exitErr *exec.ExitError
-			if errors.As(serverErr, &exitErr) && exitErr.ExitCode() == devRestartExitCode {
-				log.Println("Restart requested via UI, rebuilding backend...")
-				time.Sleep(1 * time.Second) // Give the OS time to release the port
-				if err := GenerateGo(); err != nil {
-					fmt.Printf("GenerateGo error: %v\n", err)
-					time.Sleep(2 * time.Second)
-				} else if err := buildBackend(); err != nil {
-					fmt.Printf("build error: %v\n", err)
-					time.Sleep(2 * time.Second)
-				}
-				continue
-			}
-			return errtrace.Wrap(serverErr)
-		}
-		return nil // clean exit
-	}
+	printCmd(hydraOutputFile, "server", "--simulation")
+	serverCmd := exec.Command(hydraOutputFile, "server", "--simulation")
+	serverCmd.Stdout = os.Stdout
+	serverCmd.Stderr = os.Stderr
+	// Vite proxies /api + /ws to :demoAPIPort, keeping the sim server off hydra's
+	// real 26600. The sim server's restart/update endpoints only pretend to do
+	// anything (see SimulationServer.UpdateServer), so a click drives the UI's
+	// update panel without this process going anywhere - which is the point of
+	// simulation mode.
+	serverCmd.Env = append(os.Environ(), "HYDRA_API_ADDR=localhost:"+demoAPIPort)
+	return errtrace.Wrap(serverCmd.Run())
 }
 
 // removeDirContents removes everything inside dir except the named entries,

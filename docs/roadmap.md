@@ -51,6 +51,14 @@ before starting. Grouped by area.
 
 ## Agent UX
 
+- [ ] **Sweep slot sessions by owner, not by ID prefix.** `Registry.KillMatching`
+  is a `strings.HasPrefix` sweep (`internal/session/registry.go:638`). The
+  `heads.SlotSep` (`@`) scheme now makes `SlotPrefix(headID)` unambiguous, so this
+  is no longer a correctness bug - but recording the owning head ID on the session
+  and sweeping by field equality would retire the whole prefix-matching bug class
+  rather than one instance of it. The registry already carries a per-session
+  worktree label, so there is a natural home for it.
+
 - [ ] **Go language server alongside sandboxed agents** so the agent can query LSP
   information (definitions, references, diagnostics) instead of only reading files.
 
@@ -65,6 +73,40 @@ before starting. Grouped by area.
 - [ ] **Stream command stdout/stderr live** and prefix log lines (e.g.
   `[stdout]` / `[stderr]`), preserving interleaving instead of buffering and
   printing everything at once.
+
+- [ ] **Server-side comments, notified by id.** Today a review comment is
+  `localStorage` only (`web/src/lib/reviewDrafts.ts` - dies on reload, never
+  leaves the browser it was typed in) and "Comment to agent" formats it plus a
+  diff context block into the transcript (`buildReviewMessage`), where it cannot
+  be re-read, re-anchored, or survive a compaction. Proposed in
+  [review-agent.md](review-agent.md): one append-only server-side store with a
+  `draft`/`published` status (drafts sync but are invisible to agents), anchors
+  (`commit, path, line-range, hunk_hash`), threads that exist without a forge
+  parent (`mergeLocalNotes` must stop dropping orphans), `get_review_comments` /
+  `add_review_comment` tools alongside the already-built
+  `reply_to_review_comment` -> `reviewq.OpNote`, and agents notified with
+  `Comments added: #4 (path:line)` instead of injected text - constant-size, and
+  an id stays resolvable after the transcript scrolls away. Ids: per-head
+  sequential `#N` (one token, human-speakable, safe because every write is
+  daemon-mediated), not a bare UUID. Read + append only; published comments are
+  never edited. Numbers cover forge comments too, assigned on first sight via an
+  append-only `(origin, external_id) -> #N` map and never reused - but Hydra owns
+  the *numbering*, not the content: forge comments stay live-fetched, because
+  people comment/edit/delete on the forge directly and a local copy claiming to
+  be authoritative would need endless reconciliation.
+
+  The review slot that was meant to feed this is now BUILT
+  ([review-agent.md](review-agent.md)), so it currently has nowhere to put a
+  finding - it can only talk. That makes this the next piece, not a nice-to-have.
+
+- [ ] **Finish the review slot's open ends** ([review-agent.md](review-agent.md)):
+  exercise it against a live head (it has never launched a real Claude in a real
+  checkout - the simulation server does not spawn sandboxes), a status dot on the
+  Review tab, syncing the checkout forward as the head commits
+  (`EnsureReviewCheckout` takes a ref, but nothing calls it between turns, so a
+  long-lived reviewer keeps looking at the commit it started on), and lens-named
+  extra slots (`<head>@review-security` - the naming leaves room, nothing creates
+  them).
 
 ## Diff viewer
 
@@ -107,6 +149,21 @@ before starting. Grouped by area.
   rendering.
 
 ## Web
+
+- [ ] **Tabs inside the inspector pane, and head-level events as chat rows.** The
+  inspector is five mutually-exclusive things stacked in one scroll (Changes bar,
+  Tests, Previews, Artifacts, Files+diffs), which is what the sticky-header
+  co-ordination machinery (`--sticky-changes-h` / `--sticky-section-h` /
+  `STICKY_CARD_TOP` / the hard-coded `max-h-[calc(100vh-140px)]`) exists to
+  survive - tabs would simplify it away, give each section the full pane height,
+  and create the page's first addressable sub-view state (`?tab=`, later
+  `?file=` / `?thread=`). Separately, head-level events (status transitions, test
+  verdict changes, publishes, merges) are ephemeral today - `AgentTransitionRow`
+  lives inside a toast and is lost if you were not looking - and should become
+  `ChatItem` rows in the transcript alongside the existing `commit` chips, rather
+  than a separate Activity feed. Argued in
+  [agent-page-tabs.md](agent-page-tabs.md), which also explains why chat and diff
+  should *not* be tabbed apart on a live head.
 
 - [ ] **Async markdown renderer so fenced code blocks pick up on-demand syntax
   highlighting.** The syntax-highlighting refactor split Prism (via refractor)
@@ -187,3 +244,50 @@ before starting. Grouped by area.
 ## Chat mode
 
 - [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
+
+## Deployment
+
+- [x] **One build flavour: minified + source maps, gzipped on the way out.**
+  Done. `minify` and `sourcemap` were both derived from `mode === 'development'`,
+  which made "production" and "debuggable" look mutually exclusive. Measured:
+  today's unminified bundle was 7.3 MB of JS on the wire; it is 3.9 MB minified
+  and 121 KB after gzip. `HYDRA_DEV_BUILD`, its five `os.Setenv` calls and the
+  dual build stamp are gone with it - along with the trap where heads inherited
+  `HYDRA_DEV_BUILD=1` and silently built dev bundles. Compression is a runtime
+  middleware (`internal/http/compress.go`) rather than build-time
+  precompression, so API responses benefit too. Build-time precompression would
+  additionally shrink the binary by ~12 MB - still open, if that matters.
+
+- [x] **The installed service updates itself, restarting via `syscall.Exec`.**
+  Done. `POST /api/server/update` builds while still serving, streams the log to
+  a toast, verifies the new binary starts, swaps it atomically and re-execs. A
+  failed build changes nothing. Re-execing keeps the PID, so no supervisor is
+  involved and the web listener is carried across (the port is never unbound).
+  `Dev`, `DevExpose`, `Prod`, `Preview`, `DevAutoReload` and `devServerLoop` are
+  deleted - eight ways to start Hydra down to three. See
+  [deployment.md](deployment.md).
+
+- [ ] **Restart without killing every running head.** Spiked, deliberately not
+  built. A PTY master crosses `syscall.Exec` fine - the same trick the web
+  listener already uses - but *only* with the parent-death signal dropped: with
+  `Pdeathsig` set, as every sandbox has it via `internal/scope.StartFunc`, the
+  exec SIGKILLs the child even though the process never died, because Linux keys
+  `PR_SET_PDEATHSIG` to the parent THREAD and `exec` kills every thread but the
+  caller. (It depends on which thread forked - forking and exec'ing on one thread
+  lets the child survive and gives a false green light.) So the cheap route
+  trades away the guarantee that a *crashed* daemon cannot orphan a sandbox,
+  leaving `SweepOrphanScopes`-at-next-boot as the only backstop; it would also
+  need that sweep taught to skip the units it just adopted. Splitting the PTY
+  owner into a supervisor that never restarts buys the same thing without the
+  trade. Until then a restart stops running heads, they resume with `--continue`,
+  and the UI confirms first. See [deployment.md](deployment.md).
+
+- [ ] **Make a second Hydra instance survivable** (only if wanted - see
+  [deployment.md](deployment.md) for why one instance is probably right).
+  `SweepOrphanScopes` (`internal/sandbox/scope_linux.go:160`) reaps *all*
+  `hydra-*.scope` units at daemon boot, so a second instance kills the first's
+  live agent sandboxes; needs a per-instance scope prefix. Plus an instance name
+  namespacing `~/.config/hydra/projects.json`, `uuid.txt`, the shared
+  `~/.local/share/hydra/logs/hydra.log` and the daemon runtime key, and a
+  templated `hydra@<instance>.service`. Note simulation mode (`mage demo`) is
+  already fully isolated and covers most frontend work.

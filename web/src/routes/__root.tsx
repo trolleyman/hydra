@@ -26,6 +26,8 @@ import { useMediaQuery } from '../lib/layout'
 import { useTopBarSlot } from '../lib/topBarSlot'
 import { AgentSidebarItem } from '../components/AgentComponents'
 import { Uptime } from '../components/LiveTime'
+import { ServerUpdateToast } from '../components/ServerUpdateToast'
+import { connectUpdateStream, useServerUpdateStore } from '../stores/serverUpdateStore'
 import { UncommittedChip } from '../components/UncommittedChip'
 import { SpawnForm } from '../components/SpawnForm'
 import { ProjectDropdown } from '../components/ProjectDropdown'
@@ -417,7 +419,7 @@ function RootLayout() {
   // Paint the selected project's icon into the tab, so one-tab-per-project
   // setups are tellable apart (matches the OS notification icon).
   useProjectFavicon(currentProjectId)
-  const { refetchStatus, development, spawnedAt } = useSystemStatus()
+  const { refetchStatus, canRestart, canUpdate, spawnedAt } = useSystemStatus()
 
   // Auto-clear an agent's unread dot when it's the one currently open AND the
   // page is actually in front of the user. Covers both opening an unread agent
@@ -581,39 +583,135 @@ function RootLayout() {
   const { state: switcherState, setIndex: switcherSetIndex, commit: switcherCommit } =
     useGlobalShortcuts({ projects: switcherProjects, currentProjectId, selectProject })
 
-  async function handleRestart() {
-    setRestarting(true)
-    // Persistent (duration: 0) toast for the length of the rebuild + health poll,
-    // mirroring the "Syncing with remote..." indicator. It stays up until the
-    // page reloads below, which wipes it - so no success toast is needed.
-    const toast = useToastStore.getState()
-    const toastId = toast.show({ message: 'Restarting server...', type: 'info', duration: 0 })
-    try {
-      await api.default.devRestart()
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 403) {
-        toast.dismiss(toastId)
-        useDialogStore.getState().show({
-          title: 'Dev Mode Required',
-          message: 'Server is not running in dev mode.',
-          type: 'warning'
-        })
-        setRestarting(false)
-        return
-      }
+  // restartErrorText pulls the server's own explanation out of an ApiError, so a
+  // 403 reads as "not running from a Hydra checkout" rather than "Forbidden".
+  function restartErrorText(err: unknown): string {
+    if (err instanceof ApiError) {
+      return (err.body as { details?: string } | undefined)?.details ?? err.message
     }
+    return String(err)
+  }
 
-    for (let i = 0; i < 60; i++) {
+  // waitForHealthy polls until the replacement image answers. The new process
+  // inherited the listening socket, so connections queue rather than being
+  // refused - this normally settles on the first attempt.
+  async function waitForHealthy(): Promise<void> {
+    for (let i = 0; i < 120; i++) {
       await new Promise<void>((r) => setTimeout(r, 500))
       try {
         const resp = await fetch('/health')
-        if (resp.ok) {
-          const text = await resp.text()
-          if (text.trim() === 'OK') break
-        }
+        if (resp.ok && (await resp.text()).trim() === 'OK') return
       } catch { /* still restarting */ }
     }
+  }
+
+  // runServerRestart drives both the plain restart and the rebuild-then-restart.
+  //
+  // The interesting part is how a SUCCESSFUL update ends: the server re-execs,
+  // so the log websocket dies mid-stream with no terminal frame. That is not an
+  // error, and the store distinguishes it (outcome 'restarting') from genuinely
+  // losing the server mid-build. A FAILED build, by contrast, leaves the server
+  // running and reports through the toast, so there is nothing to wait for and
+  // nothing to reload.
+  async function runServerRestart(mode: 'restart' | 'update') {
+    setRestarting(true)
+    const updates = useServerUpdateStore.getState()
+    updates.begin({ restartOnly: mode === 'restart' })
+
+    const toast = useToastStore.getState()
+    // Keyed + persistent: the body follows the update store on its own, so this
+    // is shown once and never re-shown as several hundred build lines arrive.
+    // ONE toast for the whole run, keyed so a second press replaces it in place
+    // rather than stacking. Its body reads the update store, so "Building..."
+    // becomes "Update failed" (or the reload) by re-rendering - there is never a
+    // second card, and never a gap where the first has gone and the next has not
+    // arrived. Wide because the body is a terminal (see TOAST_CARD_WIDTH_WIDE).
+    toast.show({
+      key: 'server-update',
+      message: <ServerUpdateToast />,
+      richMessage: true,
+      type: 'info',
+      duration: 0,
+      wide: true,
+    })
+
+    // A plain restart has no build to report, and the server may be gone before
+    // a stream could even connect - so don't open one. Say what is happening and
+    // wait for the socket to answer again.
+    if (mode === 'restart') {
+      try {
+        await api.default.restartServer()
+      } catch (err) {
+        updates.apply({ kind: 'done', error: restartErrorText(err) })
+        setRestarting(false)
+        return
+      }
+      updates.apply({ kind: 'phase', phase: 'restarting' })
+      await waitForHealthy()
+      window.location.reload()
+      return
+    }
+
+    // Start the job BEFORE subscribing. Subscribers are replayed the events so
+    // far, which is what lets a late tab catch up - but it also means connecting
+    // first would hand us the *previous* run's history, terminal frame and all,
+    // and we would call this update finished before it began. Both the server
+    // and the simulation clear that history synchronously as the job starts, so
+    // subscribing afterwards sees this run and only this run.
+    try {
+      await api.default.updateServer()
+    } catch (err) {
+      updates.apply({ kind: 'done', error: restartErrorText(err) })
+      setRestarting(false)
+      return
+    }
+    const closeStream = connectUpdateStream()
+
+    // Wait for the outcome the stream reports rather than a fixed delay: a
+    // rebuild takes as long as it takes, and a failure must not end in a reload.
+    const outcome = await new Promise<string | null>((resolve) => {
+      const settled = (state: { running: boolean; outcome: string | null }) => {
+        if (!state.running && state.outcome != null) {
+          unsubscribe()
+          resolve(state.outcome)
+        }
+      }
+      const unsubscribe = useServerUpdateStore.subscribe(settled)
+      // The job may already have finished between the POST and this subscribe.
+      settled(useServerUpdateStore.getState())
+    })
+    closeStream()
+
+    if (outcome === 'failed') {
+      setRestarting(false)
+      return
+    }
+
+    await waitForHealthy()
     window.location.reload()
+  }
+
+  // handleRestart confirms first when heads are live, because a restart stops
+  // every running agent: they come back via --continue, but an in-flight turn is
+  // lost. Cheap to say, expensive to discover.
+  function handleRestart(mode: 'restart' | 'update') {
+    // Read at click time rather than subscribing - this is a one-shot count.
+    const live = useAgentStore.getState().agents.filter((a) => a.session_status === 'running').length
+    if (live === 0) {
+      void runServerRestart(mode)
+      return
+    }
+    useDialogStore.getState().show({
+      title: mode === 'update' ? 'Update and restart?' : 'Restart the server?',
+      message:
+        `${live} agent${live === 1 ? ' is' : 's are'} running. Restarting stops ` +
+        `${live === 1 ? 'it' : 'them'} and resumes ${live === 1 ? 'it' : 'them'} afterwards, ` +
+        'but whatever turn is in flight right now will be lost.',
+      type: 'confirm',
+      confirmLabel: mode === 'update' ? 'Update and restart' : 'Restart',
+      showCancel: true,
+      onConfirm: () => void runServerRestart(mode),
+    })
   }
 
   // registerProject performs the actual add once the user has trusted the
@@ -1009,12 +1107,24 @@ function RootLayout() {
               Claude usage + Settings (icon) on the right. The theme switcher now
               lives inside Settings, not here. */}
           <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
-            {development && (
-              <Tooltip content={restarting ? 'Restarting...' : 'Rebuild and restart the server'}>
+            {canRestart && (
+              // Primary action is whichever one is actually useful here: a server
+              // that can rebuild itself gets "update", one that can't gets a plain
+              // restart. The secondary is offered as a hold-Alt variant rather
+              // than a second control, to keep the footer a single row.
+              <Tooltip
+                content={
+                  restarting
+                    ? 'Restarting...'
+                    : canUpdate
+                      ? 'Rebuild and restart the server (Alt: restart without rebuilding)'
+                      : 'Restart the server'
+                }
+              >
                 <button
-                  onClick={handleRestart}
+                  onClick={(e) => handleRestart(canUpdate && !e.altKey ? 'update' : 'restart')}
                   disabled={restarting}
-                  aria-label="Restart server"
+                  aria-label={canUpdate ? 'Update and restart server' : 'Restart server'}
                   className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800 disabled:opacity-50 transition-colors cursor-pointer"
                 >
                   <RotateCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />

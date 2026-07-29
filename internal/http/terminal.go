@@ -207,6 +207,10 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	useShell := r.URL.Query().Get("shell") == "true"
+	// The head's review slot (docs/review-agent.md): a separate Claude session in
+	// its own detached checkout, reached over this same endpoint. Always chat
+	// framing, and mutually exclusive with a shell tab.
+	useReview := !useShell && r.URL.Query().Get("review") == "true"
 	projectRoot, err := s.resolveProjectRoot(projectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -239,7 +243,10 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// A chat-mode head speaks the chat framing (see chat_ws.go) on this same
 	// endpoint: text frames both ways, no PTY semantics. Bash shell tabs stay
 	// plain terminals even on a chat-mode head.
-	chatMode := head.ChatMode && !useShell
+	// The review slot is always a chat session regardless of how the head it is
+	// attached to is configured - it is a different agent, launched by
+	// StartReviewSession with StdioPipes.
+	chatMode := (head.ChatMode && !useShell) || useReview
 
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -295,6 +302,18 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sessionID = shellID
+	} else if useReview {
+		// Lazy: the slot is created on first open and revived on a later one, so a
+		// head nobody reviews never costs a checkout or a model session. Idempotent -
+		// StartReviewSession reattaches when the session is already live, which also
+		// makes this the resume-on-attach path after a daemon restart.
+		reviewID, err := heads.StartReviewSession(s.Sessions, projectRoot, *head, initRows, initCols)
+		if err != nil {
+			log.Printf("terminal ws: start review session for %q: %v", agentID, err)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
+			return
+		}
+		sessionID = reviewID
 	}
 
 	// A live session left over in the OTHER mode can't speak this framing: a
@@ -307,7 +326,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// on attach and stop the stale session; the resume below then relaunches the
 	// head in the mode it is actually set to (the conversation carries over,
 	// exactly like the toggle itself).
-	if !useShell && head.Worktree != nil {
+	if !useShell && !useReview && head.Worktree != nil {
 		wantKind := session.KindTerminal
 		if chatMode {
 			wantKind = session.KindChat
@@ -320,7 +339,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resumed := false
-	if !useShell && !s.Sessions.IsLive(head.ID) && head.Worktree != nil {
+	if !useShell && !useReview && !s.Sessions.IsLive(head.ID) && head.Worktree != nil {
 		// The agent's session isn't running (e.g. the daemon was restarted).
 		// Resume it on demand so opening the page brings the agent back via its
 		// own --resume, instead of showing "Agent is not running".
@@ -385,11 +404,21 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	done := make(chan struct{})
 
-	// The head's worktree, needed by the chat framing both to locate the
-	// transcript (backfill / load-older) and to key the message queue.
+	// The worktree of the session this socket is attached to, needed by the chat
+	// framing both to locate the transcript (backfill / load-older) and to key the
+	// message queue.
+	//
+	// For the review slot that is its OWN checkout, not the head's: a Claude
+	// transcript dir is keyed by working directory, so using the head's worktree
+	// here would make the review pane replay the HEAD's conversation and queue its
+	// messages against the head. That separation is the whole reason the reviewer
+	// gets its own tree (docs/review-agent.md).
 	worktree := ""
 	if head.Worktree != nil {
 		worktree = *head.Worktree
+	}
+	if useReview {
+		worktree = paths.GetReviewCheckoutDirFromProjectRoot(projectRoot, head.ID)
 	}
 
 	// WebSocket → session stdin (and resize control messages)
@@ -414,7 +443,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 				// backend PTY boundary so providers without a prompt-submit hook
 				// (notably Codex terminal mode) leave waiting immediately. Shell tabs
 				// and Shift+Enter (ESC+CR) are deliberately excluded.
-				if !useShell && isTerminalPromptSubmit(data) {
+				if !useShell && !useReview && isTerminalPromptSubmit(data) {
 					if err := heads.MarkPromptSubmitted(s.DB, projectRoot, agentID); err != nil {
 						log.Printf("terminal ws: mark prompt submitted for %q: %v", agentID, err)
 					} else {
@@ -452,7 +481,10 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}()
 		defer func() {
 			log.Printf("terminal ws: stdout goroutine exiting for agent %q", agentID)
-			if !useShell {
+			// Only the head's own session drives the head's status. A shell tab or a
+			// review slot exiting must not report the HEAD as stopped - their panes
+			// see the socket close instead.
+			if !useShell && !useReview {
 				sendStatusUpdate(conn, "stopped")
 			}
 			_ = conn.Close() // Closing the WS will unblock the ReadMessage in the other goroutine

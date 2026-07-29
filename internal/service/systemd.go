@@ -28,6 +28,13 @@ type UnitOpts struct {
 // runs `hydra server` for one project, restarts on failure, and is wanted by the
 // default (login/linger) target. It waits for the network so the 0.0.0.0 bind
 // succeeds at boot.
+//
+// Note what is deliberately absent: any exit-code protocol for the UI's restart
+// button. Hydra restarts itself with syscall.Exec (internal/selfupdate), which
+// keeps the process ID, so systemd - tracking MainPID under Type=simple - does
+// not observe a restart at all. That is why Restart=on-failure is left meaning
+// only what it says, and why no StartLimit tuning is needed: user-initiated
+// restarts never reach the rate limiter.
 func RenderSystemdUnit(o UnitOpts) string {
 	keys := make([]string, 0, len(o.Env))
 	for k := range o.Env {

@@ -448,19 +448,25 @@ describe('compareCommitChips', () => {
 
 // A ToolSearch card's header used to show the raw query, i.e. the wire tool name
 // with its mcp__/__ plumbing ("select:mcp__hydra__git_commit").
+// `prose` means "not monospace", and tracks whether the text was rewritten for a
+// human: a select: list is rendered as labels nobody typed, so it reads as prose,
+// while any query we pass through untouched stays verbatim in mono.
 describe('summarizeToolSearchQuery', () => {
   it('renders a select: lookup as the bare tool names, MCP ones namespaced', () => {
-    expect(summarizeToolSearchQuery('select:mcp__hydra__git_commit')).toEqual({ text: 'hydra::git_commit', prose: false })
-    expect(summarizeToolSearchQuery('select:Read, mcp__hydra__git_add')).toEqual({ text: 'Read, hydra::git_add', prose: false })
+    expect(summarizeToolSearchQuery('select:mcp__hydra__git_commit')).toEqual({ text: 'hydra::git_commit', prose: true })
+    expect(summarizeToolSearchQuery('select:Read, mcp__hydra__git_add')).toEqual({ text: 'Read, hydra::git_add', prose: true })
   })
 
-  it('leaves a keyword search alone', () => {
-    expect(summarizeToolSearchQuery('notebook jupyter')).toEqual({ text: 'notebook jupyter', prose: true })
-    expect(summarizeToolSearchQuery('+slack send')).toEqual({ text: '+slack send', prose: true })
+  it('leaves a keyword search alone, verbatim and mono', () => {
+    expect(summarizeToolSearchQuery('notebook jupyter')).toEqual({ text: 'notebook jupyter', prose: false })
+    expect(summarizeToolSearchQuery('+slack send')).toEqual({ text: '+slack send', prose: false })
   })
 
-  it('falls back to the raw query when select: names nothing', () => {
+  // Nothing was rewritten here, so it reads as the query it is - mono, like any
+  // other query shown as sent.
+  it('falls back to the raw query, in mono, when select: names nothing', () => {
     expect(summarizeToolSearchQuery('select:')).toEqual({ text: 'select:', prose: false })
+    expect(summarizeToolSearchQuery('select: , ,')).toEqual({ text: 'select: , ,', prose: false })
   })
 })
 

@@ -52,64 +52,65 @@ const devPort = process.env.DEV_PORT ? parseInt(process.env.DEV_PORT) : undefine
 const apiBase = `http://localhost:${apiPort}`
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
-  const isDev = mode === 'development'
-
-  return {
-    plugins: [
-      // '@tanstack/router-plugin' must be passed before '@vitejs/plugin-react'
-      tanstackRouter({
-        target: 'react',
-        autoCodeSplitting: true,
-      }),
-      react(),
-      tailwindcss(),
-      keepDistGitkeep(),
-    ],
-    resolve: {
-      alias: {
-        // Bundle tldts (the Public Suffix List, see src/lib/publicSuffix.ts)
-        // from its own pre-minified ESM bundle rather than its ES6 sources.
-        // Built from source the chunk comes out 259KB / 111KB gzipped, because
-        // the minifier inlines the trie's 65KB label string into each of its
-        // three use sites - three copies of the whole list. The published
-        // bundle has already been minified without that, and re-minifying it
-        // is a no-op: 125KB / 47KB gzipped, the same code.
-        tldts: 'tldts/dist/index.esm.min.js',
-      },
+export default defineConfig({
+  plugins: [
+    // '@tanstack/router-plugin' must be passed before '@vitejs/plugin-react'
+    tanstackRouter({
+      target: 'react',
+      autoCodeSplitting: true,
+    }),
+    react(),
+    tailwindcss(),
+    keepDistGitkeep(),
+  ],
+  resolve: {
+    alias: {
+      // Bundle tldts (the Public Suffix List, see src/lib/publicSuffix.ts)
+      // from its own pre-minified ESM bundle rather than its ES6 sources.
+      // Built from source the chunk comes out 259KB / 111KB gzipped, because
+      // the minifier inlines the trie's 65KB label string into each of its
+      // three use sites - three copies of the whole list. The published
+      // bundle has already been minified without that, and re-minifying it
+      // is a no-op: 125KB / 47KB gzipped, the same code.
+      tldts: 'tldts/dist/index.esm.min.js',
     },
-    clearScreen: false,
-    // Emit Web Workers as ES modules (they're instantiated with { type: 'module' }).
-    // The default 'iife' worker format can't code-split, so it would inline every
-    // dynamic import - re-bundling all ~150 lazily-loaded highlight.js grammars into
-    // the highlight worker. 'es' lets those load on demand as separate chunks.
-    worker: { format: 'es' },
-    server: {
-      port: devPort,
-      proxy: {
-        '/api': apiBase,
-        '/uploads': apiBase,
-        '/folder-picker': apiBase,
-        '/health': apiBase,
-        '/.well-known': apiBase,
-        // Non-OpenAPI blob + log routes served by both the real and simulation
-        // servers (repository image/text bytes, the artifacts "Show build log"
-        // toggle). Needed for the diff viewer's images to load when browsing
-        // through this dev server (e.g. `mage demo`).
-        '/repository': apiBase,
-        '/artifacts': apiBase,
-        '/ws': { target: `ws://localhost:${apiPort}`, ws: true },
-      },
+  },
+  clearScreen: false,
+  // Emit Web Workers as ES modules (they're instantiated with { type: 'module' }).
+  // The default 'iife' worker format can't code-split, so it would inline every
+  // dynamic import - re-bundling all ~150 lazily-loaded highlight.js grammars into
+  // the highlight worker. 'es' lets those load on demand as separate chunks.
+  worker: { format: 'es' },
+  server: {
+    port: devPort,
+    proxy: {
+      '/api': apiBase,
+      '/uploads': apiBase,
+      '/folder-picker': apiBase,
+      '/health': apiBase,
+      '/.well-known': apiBase,
+      // Non-OpenAPI blob + log routes served by both the real and simulation
+      // servers (repository image/text bytes, the artifacts "Show build log"
+      // toggle). Needed for the diff viewer's images to load when browsing
+      // through this dev server (e.g. `mage demo`).
+      '/repository': apiBase,
+      '/artifacts': apiBase,
+      '/ws': { target: `ws://localhost:${apiPort}`, ws: true },
     },
-    build: {
-      // Disables minification entirely when in development mode to keep code readable
-      minify: isDev ? false : 'esbuild',
+  },
+  build: {
+    // There is exactly ONE build flavour: minified, with source maps. These are
+    // independent options and were previously both derived from a `--mode
+    // development` flag, which made "fast" and "debuggable" look mutually
+    // exclusive. They aren't - DevTools only fetches a .map when it is open, so
+    // maps cost the browser nothing on a normal load. The `hydra server` binary
+    // embeds this directory (web/embed.go) and gzips responses on the way out,
+    // so shipping maps costs binary size only. See docs/deployment.md for the
+    // measurements.
+    minify: 'esbuild',
+    sourcemap: true,
 
-      // Generates source maps to make debugging easier on the external server
-      sourcemap: isDev,
-
-      // Vite outputs to 'dist/' by default, but this explicitly defines the target
-      outDir: 'dist',
-    }
+    // Vite outputs to 'dist/' by default, but this explicitly defines the target
+    outDir: 'dist',
   }
 })
