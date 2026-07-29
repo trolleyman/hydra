@@ -454,6 +454,11 @@ describe('parseMatchLines', () => {
     expect(parseMatchLines(['src/a.go:12:func a()'], ['src'])).toEqual([
       { path: 'src/a.go', num: '12', text: 'func a()', separator: false },
     ])
+    // `rg pat .` - the whole tree, named by the one operand that is not a file
+    // at all.
+    expect(parseMatchLines(['./go.mod:\tgithub.com/google/go-cmp v0.6.0'], ['.'])).toEqual([
+      { path: './go.mod', num: '', text: '\tgithub.com/google/go-cmp v0.6.0', separator: false },
+    ])
   })
 
   it('leaves lines alone when no shape holds for most of them', () => {

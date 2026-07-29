@@ -521,6 +521,34 @@ var simChatEvents = []simNorm{
 	// section with grep's `-A` context lines numbered alongside the matches.
 	simTool("toolu_sim_ctxprobe", "Bash", simRaw(`{"command":"grep -n \"func (u \\*Uploader) Put\" -A 6 internal/artifacts/upload.go\ngrep -n \"func sleepBackoff\" -A 4 internal/artifacts/backoff.go\necho \"=== sim ===\"\ngrep -n \"func simUpload\" -A 3 internal/http/simulation.go","description":"Check whether the uploader can retry"}`)),
 	simToolOut("toolu_sim_ctxprobe", "112:func (u *Uploader) Put(ctx context.Context, key string, r io.Reader) error {\n113-\tvar err error\n114-\t// The reader is replayed per attempt, so it has to be seekable.\n115-\tfor attempt := 0; attempt < maxAttempts; attempt++ {\n116-\t\tif err = u.put(ctx, key, r); err == nil {\n117-\t\t\treturn nil\n118-\t\t}\n9:func sleepBackoff(attempt int) {\n10-\tbase := 100 * time.Millisecond\n11-\td := base << attempt\n12-\tjitter := time.Duration(rand.Int63n(int64(d / 2)))\n13-\ttime.Sleep(d/2 + jitter)\n=== sim ===\n41:func simUpload(key string) simResult {\n42-\treturn simResult{Key: key, Bytes: 4096}\n43-}"),
+	// The ignore family, end to end. A `.gitignore` is a file of PATTERNS, so it
+	// is highlighted as one (web/src/lib/ignoreHighlight.ts): the negation and
+	// the wildcards are marked and the path text is left alone. The
+	// `git check-ignore -v` at the end prints the rule that caught each path -
+	// coloured by web/src/lib/gitOutput.ts, with the pattern itself in those same
+	// ignore colours, so a `*` reads as a wildcard wherever it turns up.
+	simTool("toolu_sim_ignore", "Bash", simRaw(`{"command":"sed -n '12,18p' .gitignore\necho \"=== web/public/fonts/.gitignore ===\"\ncat web/public/fonts/.gitignore\necho \"=== which rule catches them ===\"\ngit check-ignore -v web/public/fonts/iosevka-400-normal.woff2 web/.iosevka-build.json","description":"Read both ignore files, and ask git which rule wins"}`)),
+	simToolOut("toolu_sim_ignore", "# Self-hosted webfonts (Iosevka, the Nerd Fonts symbol fallback).\n# Not committed - `cd web && npm run build-fonts` fetches them.\n/web/public/fonts/iosevka-*.woff2\n/web/public/fonts/nerd-symbols-*.woff2\n/web/public/fonts/google.css\n/web/public/fonts/google/\n/web/.iosevka-build.json\n=== web/public/fonts/.gitignore ===\n# Generated font files - see web/scripts/build-fonts.ts.\niosevka-*.woff2\n!iosevka-400-normal.woff2\ngoogle.css\ngoogle/\n=== which rule catches them ===\nweb/public/fonts/.gitignore:2:iosevka-*.woff2\tweb/public/fonts/iosevka-400-normal.woff2\n.gitignore:18:/web/.iosevka-build.json\tweb/.iosevka-build.json"),
+	// A `du` sorted biggest-first, and a search of a whole DIRECTORY. The sizes
+	// are marked against the paths they measure (web/src/lib/duOutput.ts); the
+	// `| sort` in front of the `| head` is a filter that reorders lines and
+	// leaves them byte for byte. The search names one operand and prints a
+	// `path:` in front of every line, which is what says where each line came
+	// from and which language to colour it as.
+	simTool("toolu_sim_du", "Bash", simRaw(`{"command":"du -sh ~/.cache/* 2>/dev/null | sort -rh | head -5\necho \"=== who reads the cache dir ===\"\nrg \"CacheDir\" internal/ | head -3","description":"Check what sharing ~/.cache actually buys"}`)),
+	simToolOut("toolu_sim_du", "18G\t/home/callum/.cache/go\n2.5G\t/home/callum/.cache/Google\n658M\t/home/callum/.cache/aube\n646M\t/home/callum/.cache/ms-playwright\n484M\t/home/callum/.cache/uv\n=== who reads the cache dir ===\ninternal/paths/paths.go:func CacheDir(root string) string {\ninternal/heads/seed.go:\tcache := paths.CacheDir(root)\ninternal/sandbox/linux.go:\t\tro = append(ro, paths.CacheDir(o.Root))"),
+	// A script whose output can NOT be sectioned - every step is a build command
+	// this cannot describe, and the log carries ANSI colour, where a section
+	// boundary would be a guess. The `echo` headings in it are still the strings
+	// the script says they are, so they are still coloured as such: they are the
+	// reader's only map of a long build log.
+	simTool("toolu_sim_buildlog", "Bash", simRaw(`{"command":"echo \"=== run 1 (should be no-op) ===\"\nmage build 2>&1 | head -4\necho \"=== touch a web file, run 2 ===\"\ntouch web/src/main.tsx\nmage build 2>&1 | head -4","description":"Test whether BuildWeb emits output when web changed"}`)),
+	simToolOut("toolu_sim_buildlog", "=== run 1 (should be no-op) ===\n\x1b[2m$ mage build\x1b[0m\n\x1b[32m✓\x1b[0m go build: up to date\n\x1b[32m✓\x1b[0m web build: up to date\n=== touch a web file, run 2 ===\n\x1b[2m$ mage build\x1b[0m\n\x1b[33mWARN\x1b[0m web/dist is stale - rebuilding\nvite v8.1.5 \x1b[32mbuilding for production...\x1b[0m\n\x1b[32m✓\x1b[0m 412 modules transformed."),
+	// One read, several stretches of one file - how an agent quotes the places it
+	// is about to edit. The card is still a Read (it is nothing but a read), and
+	// each stretch is numbered from its own start.
+	simTool("toolu_sim_sedmulti", "Bash", simRaw(`{"command":"sed -n '1,3p;40,43p' docs/artifacts.md"}`)),
+	simToolOut("toolu_sim_sedmulti", "# Artifacts\n\nArtifacts are files a head produces that are worth keeping: screenshots, a\n## TODO\n- Retry the upload on a 5xx\n- Surface the attempt count in the panel\n- Collect the generator's own log"),
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20). This settles the chained command
 	// opened well above.
