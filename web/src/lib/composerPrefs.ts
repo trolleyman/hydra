@@ -36,7 +36,7 @@ export const usePasteMarkersStore = create<PasteMarkersState>()(
 )
 
 // Whether the composers auto-pair as you type - a typed opener brings its closer
-// with it, a third backtick opens a fenced block, and a mark typed over a
+// with it, Enter on a "```" line opens a fenced block, and a mark typed over a
 // selection wraps it (lib/autoPair.ts has the full rules). Absent (or anything
 // but '0') = on, the default.
 export function loadAutoPair(): boolean {

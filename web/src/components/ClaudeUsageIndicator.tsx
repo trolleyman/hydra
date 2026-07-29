@@ -4,10 +4,13 @@ import { useServerData } from '../lib/useServerData'
 import { Tooltip } from './Tooltip'
 import type { ClaudeUsageResponse } from '../api'
 
-// The server caches the probed snapshot for ~30s; we poll in the background a
-// bit slower than that so each poll generally gets a fresh probe, and clicking
-// forces an immediate re-probe.
-const POLL_MS = 60_000
+// Behind this endpoint is a real Claude CLI launched under a PTY, so the polling
+// here is deliberately slack: the server serves a cached snapshot for ~10 minutes
+// and only re-probes when a poll arrives after that, so a 5-minute poll costs one
+// cheap JSON round-trip and, at worst, one probe per 10 minutes. Quota moves over
+// hours - there is nothing to gain from asking faster. The poll is also paused
+// while the tab is hidden (useServerData), and clicking forces a re-probe.
+const POLL_MS = 5 * 60_000
 
 // fmtCountdown renders a millisecond remaining-time as "2h 14m" / "14m" / "<1m".
 function fmtCountdown(ms: number): string {
@@ -76,10 +79,11 @@ export function ClaudeUsageIndicator() {
   const rawReset = !Number.isNaN(resetsAt)
     ? fmtCountdown(resetsAt - now)
     : (data.session_reset_text ?? null)
-  // Strip a leading "Resets in ..." so only the duration sits under the "reset"
+  // Strip the leading "Resets [in] ..." so only the value sits under the "reset"
   // label (the live countdown path is already bare; this normalizes the text
-  // fallback, e.g. the simulation's "Resets in 2h 15m").
-  const countdown = rawReset ? rawReset.replace(/^resets?\s+in\s+/i, '') : null
+  // fallback, which the CLI writes either as a countdown - "Resets in 2h 15m" -
+  // or as a wall clock time, "Resets 3:10pm (Europe/London)").
+  const countdown = rawReset ? rawReset.replace(/^resets?\s+(in\s+)?/i, '') : null
 
   const tip = (
     <div className="text-xs leading-relaxed">

@@ -28,10 +28,16 @@ describe('parseScriptSteps', () => {
     expect(kinds('echo "$file"\ncat a.go')).toEqual(['unknown', 'view'])
     expect(kinds('echo "$(date)"\ncat a.go')).toEqual(['unknown', 'view'])
     expect(kinds('echo -n ---\ncat a.go')).toEqual(['unknown', 'view'])
-    // Too short to search the output for safely.
-    expect(kinds('echo --\ncat a.go')).toEqual(['unknown', 'view'])
     // Piped somewhere, so what reaches the transcript is not this text.
     expect(kinds('echo ---- | tee log\ncat a.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('keeps an echo too short to anchor on as a step of known length', () => {
+    // Not searchable - '--' turns up inside real file content - but it still
+    // prints exactly one line, which is what its neighbours need to know.
+    expect(steps('echo --\ncat a.go')[0]).toEqual({ kind: 'echo', text: '--' })
+    expect(steps('grep -n a f.go\necho')[1]).toEqual({ kind: 'echo', text: '' })
+    expect(steps('grep -n a f.go\necho ""')[1]).toEqual({ kind: 'echo', text: '' })
   })
 
   it('reads a grep', () => {
@@ -172,6 +178,67 @@ describe('splitScriptOutput', () => {
     // ... but a bounded one still splits.
     const split = splitScriptOutput(steps('head -1 a.go\ncat b.go'), 'a1\nb1')
     expect(split?.map((s) => [s.kind, s.lines])).toEqual([['view', ['a1']], ['view', ['b1']]])
+  })
+
+  it('attributes a search that a blank echo follows', () => {
+    // The spacing `echo` between an agent's greps prints one blank line each.
+    // Bounding it from the END is what leaves the search above it its own lines.
+    const script = [
+      'echo "=== go ==="',
+      'grep -rn foo --include=*.go internal/',
+      'echo',
+      'echo "=== web ==="',
+      'grep -rn foo --include=*.ts web/src/',
+    ].join('\n')
+    const output = [
+      '=== go ===',
+      'internal/a.go:12:func foo()',
+      'internal/b.go:3:// foo',
+      '',
+      '=== web ===',
+      'web/src/a.ts:9:const foo = 1',
+    ].join('\n')
+    expect(splitScriptOutput(steps(script), output)?.map((s) => [s.kind, s.lines])).toEqual([
+      ['marker', ['=== go ===']],
+      ['matches', ['internal/a.go:12:func foo()', 'internal/b.go:3:// foo']],
+      ['marker', ['']],
+      ['marker', ['=== web ===']],
+      ['matches', ['web/src/a.ts:9:const foo = 1']],
+    ])
+  })
+
+  it('attributes two searches with nothing between them', () => {
+    // Where the first grep's matches stop and the second's start does not
+    // matter: both sets of lines are lines of the file they name.
+    const script = [
+      'grep -n "func (m \\*Manager) List" -A 2 internal/heads/queue.go',
+      'grep -n "func (q \\*Queue) List" -A 2 internal/heads/queue.go',
+      'echo "=== sim ==="',
+      'grep -n "func simQueueList" -A 2 internal/http/simulation.go',
+    ].join('\n')
+    const output = ['364:func (m *Manager) List() []Msg {', '365-\treturn m.queue.List()', '140:func (q *Queue) List() []Msg {', '141-\tq.mu.Lock()', '=== sim ===', '88:func simQueueList() []Msg {'].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections?.map((s) => [s.kind, s.lines.length])).toEqual([['matches', 4], ['marker', 1], ['matches', 1]])
+    expect(sections?.[0]).toMatchObject({ match: { paths: ['internal/heads/queue.go'] } })
+  })
+
+  it('will not give one search another one\'s language', () => {
+    // Two files, so the merged pair names both and each line's own `path:`
+    // prefix says which it is. A search whose files could not be enumerated
+    // makes the pair's file list unknown rather than borrowing the other's.
+    const two = steps('grep -n foo a.go\ngrep -n bar b.ts')
+    expect(splitScriptOutput(two, 'a.go:1:foo\nb.ts:2:bar')?.[0]).toMatchObject({
+      match: { paths: ['a.go', 'b.ts'] },
+    })
+    const glob = steps('grep -n foo a.go\ngrep -n bar *.ts')
+    expect(splitScriptOutput(glob, 'a.go:1:foo\nb.ts:2:bar')?.[0]).toMatchObject({ match: { paths: [] } })
+  })
+
+  it('leaves a trailing echo the line it never printed', () => {
+    // The blank line is trimmed off the end of the output, so the echo takes
+    // nothing rather than taking the search's last match.
+    const sections = splitScriptOutput(steps('grep -n foo a.go\necho'), '3:foo\n9:foo')
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([['matches', ['3:foo', '9:foo']]])
   })
 
   it('gives a section back to plain text when it printed more than it could have', () => {
