@@ -32,6 +32,16 @@ const (
 	Waiting    AgentStatus = "waiting"
 )
 
+// Defines values for AgentStatusChangedEventType.
+const (
+	AgentStatusChanged AgentStatusChangedEventType = "agent_status_changed"
+)
+
+// Defines values for AgentTestsChangedEventType.
+const (
+	AgentTestsChanged AgentTestsChangedEventType = "agent_tests_changed"
+)
+
 // Defines values for ApprovalDecisionRequestDecision.
 const (
 	Allow ApprovalDecisionRequestDecision = "allow"
@@ -57,6 +67,42 @@ const (
 	ArtifactSetStatusError      ArtifactSetStatus = "error"
 	ArtifactSetStatusGenerating ArtifactSetStatus = "generating"
 	ArtifactSetStatusReady      ArtifactSetStatus = "ready"
+)
+
+// Defines values for ArtifactSide.
+const (
+	ArtifactSideLeft  ArtifactSide = "left"
+	ArtifactSideRight ArtifactSide = "right"
+)
+
+// Defines values for ArtifactsClientMessageType.
+const (
+	ArtifactsClientMessageTypeRefresh ArtifactsClientMessageType = "refresh"
+)
+
+// Defines values for ArtifactsFileFrameType.
+const (
+	File ArtifactsFileFrameType = "file"
+)
+
+// Defines values for ArtifactsLogFrameType.
+const (
+	ArtifactsLogFrameTypeLog ArtifactsLogFrameType = "log"
+)
+
+// Defines values for ArtifactsProgressFrameType.
+const (
+	ArtifactsProgressFrameTypeProgress ArtifactsProgressFrameType = "progress"
+)
+
+// Defines values for ArtifactsSetFrameType.
+const (
+	Set ArtifactsSetFrameType = "set"
+)
+
+// Defines values for ArtifactsSnapshotFrameType.
+const (
+	ArtifactsSnapshotFrameTypeSnapshot ArtifactsSnapshotFrameType = "snapshot"
 )
 
 // Defines values for AssistantDeltaEventType.
@@ -310,6 +356,14 @@ const (
 	RepositoryArtifactResponseStatusReady      RepositoryArtifactResponseStatus = "ready"
 )
 
+// Defines values for ResourceChangedEventType.
+const (
+	AgentsChanged     ResourceChangedEventType = "agents_changed"
+	ProjectsChanged   ResourceChangedEventType = "projects_changed"
+	PushStatusChanged ResourceChangedEventType = "push_status_changed"
+	ServicesChanged   ResourceChangedEventType = "services_changed"
+)
+
 // Defines values for ReviewThreadNoteOrigin.
 const (
 	Forge     ReviewThreadNoteOrigin = "forge"
@@ -330,7 +384,7 @@ const (
 
 // Defines values for ServerUpdateLogFrameKind.
 const (
-	Log ServerUpdateLogFrameKind = "log"
+	ServerUpdateLogFrameKindLog ServerUpdateLogFrameKind = "log"
 )
 
 // Defines values for ServerUpdatePhase.
@@ -343,7 +397,7 @@ const (
 
 // Defines values for ServerUpdatePhaseFrameKind.
 const (
-	Phase ServerUpdatePhaseFrameKind = "phase"
+	ServerUpdatePhaseFrameKindPhase ServerUpdatePhaseFrameKind = "phase"
 )
 
 // Defines values for ServiceStatusState.
@@ -396,6 +450,36 @@ const (
 	TestStatusPassing TestStatus = "passing"
 	TestStatusRunning TestStatus = "running"
 	TestStatusStale   TestStatus = "stale"
+)
+
+// Defines values for TestsClientMessageType.
+const (
+	TestsClientMessageTypeRefresh TestsClientMessageType = "refresh"
+)
+
+// Defines values for TestsCountsFrameType.
+const (
+	Counts TestsCountsFrameType = "counts"
+)
+
+// Defines values for TestsLogFrameType.
+const (
+	Log TestsLogFrameType = "log"
+)
+
+// Defines values for TestsProgressFrameType.
+const (
+	TestsProgressFrameTypeProgress TestsProgressFrameType = "progress"
+)
+
+// Defines values for TestsRunnerFrameType.
+const (
+	Runner TestsRunnerFrameType = "runner"
+)
+
+// Defines values for TestsSnapshotFrameType.
+const (
+	TestsSnapshotFrameTypeSnapshot TestsSnapshotFrameType = "snapshot"
 )
 
 // Defines values for ToolCompletedEventType.
@@ -586,6 +670,19 @@ type AgentResponse struct {
 // AgentStatus The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
 type AgentStatus string
 
+// AgentStatusChangedEvent One agent's live status bundle changed.
+type AgentStatusChangedEvent struct {
+	Activity               string                      `json:"activity,omitempty"`
+	AgentId                string                      `json:"agent_id"`
+	LastMessage            string                      `json:"last_message,omitempty"`
+	LastMessageIsSuggested bool                        `json:"last_message_is_suggested,omitempty"`
+	Status                 string                      `json:"status,omitempty"`
+	Type                   AgentStatusChangedEventType `json:"type"`
+}
+
+// AgentStatusChangedEventType defines model for AgentStatusChangedEvent.Type.
+type AgentStatusChangedEventType string
+
 // AgentStatusInfo defines model for AgentStatusInfo.
 type AgentStatusInfo struct {
 	// Activity Short human-readable description of the agent's current action, derived from status_log.jsonl (present while running)
@@ -612,6 +709,18 @@ type AgentStatusInfo struct {
 	// Timestamp ISO 8601 timestamp of when the status was set
 	Timestamp string `json:"timestamp"`
 }
+
+// AgentTestsChangedEvent One agent's test counts moved mid-run, so the sidebar chips can tick without refetching the agent list.
+type AgentTestsChangedEvent struct {
+	AgentId string `json:"agent_id"`
+
+	// Tests Compact per-head test verdict for the head's current commit, shown as the sidebar/header chip without opening the tests panel (PLAN #68). Computed from the cached report without triggering a run.
+	Tests *TestSummary               `json:"tests,omitempty"`
+	Type  AgentTestsChangedEventType `json:"type"`
+}
+
+// AgentTestsChangedEventType defines model for AgentTestsChangedEvent.Type.
+type AgentTestsChangedEventType string
 
 // ApprovalDecisionRequest defines model for ApprovalDecisionRequest.
 type ApprovalDecisionRequest struct {
@@ -798,10 +907,82 @@ type ArtifactSet struct {
 // ArtifactSetStatus defines model for ArtifactSet.Status.
 type ArtifactSetStatus string
 
+// ArtifactSide Which side of the comparison a frame belongs to.
+type ArtifactSide string
+
+// ArtifactsClientMessage Client to server. Only `refresh` is supported - regenerate one script, or with a side, just that side, leaving the other cached.
+type ArtifactsClientMessage struct {
+	Script string                     `json:"script"`
+	Side   ArtifactSide               `json:"side,omitempty"`
+	Type   ArtifactsClientMessageType `json:"type"`
+}
+
+// ArtifactsClientMessageType defines model for ArtifactsClientMessage.Type.
+type ArtifactsClientMessageType string
+
+// ArtifactsFileFrame One output file finished and was compared mid-run, so its tile can render before the whole set settles. The client upserts it into the set by name; the authoritative `set` at settle reconciles the list.
+type ArtifactsFileFrame struct {
+	File   ArtifactFile           `json:"file"`
+	Script string                 `json:"script"`
+	Type   ArtifactsFileFrameType `json:"type"`
+}
+
+// ArtifactsFileFrameType defines model for ArtifactsFileFrame.Type.
+type ArtifactsFileFrameType string
+
+// ArtifactsFrame One server-to-client frame on the artifacts socket.
+type ArtifactsFrame struct {
+	union json.RawMessage
+}
+
+// ArtifactsLogFrame One captured log line from a running generation.
+type ArtifactsLogFrame struct {
+	Line   ArtifactLogLine `json:"line"`
+	Script string          `json:"script"`
+
+	// Side Which side of the comparison a frame belongs to.
+	Side ArtifactSide          `json:"side"`
+	Type ArtifactsLogFrameType `json:"type"`
+}
+
+// ArtifactsLogFrameType defines model for ArtifactsLogFrame.Type.
+type ArtifactsLogFrameType string
+
+// ArtifactsProgressFrame The header progress line changed for one side of a script.
+type ArtifactsProgressFrame struct {
+	Progress string `json:"progress"`
+	Script   string `json:"script"`
+
+	// Side Which side of the comparison a frame belongs to.
+	Side ArtifactSide               `json:"side"`
+	Type ArtifactsProgressFrameType `json:"type"`
+}
+
+// ArtifactsProgressFrameType defines model for ArtifactsProgressFrame.Type.
+type ArtifactsProgressFrameType string
+
 // ArtifactsResponse defines model for ArtifactsResponse.
 type ArtifactsResponse struct {
 	Scripts []ArtifactSet `json:"scripts"`
 }
+
+// ArtifactsSetFrame One script's set changed - a generation settled or was refreshed.
+type ArtifactsSetFrame struct {
+	Set  ArtifactSet           `json:"set"`
+	Type ArtifactsSetFrameType `json:"type"`
+}
+
+// ArtifactsSetFrameType defines model for ArtifactsSetFrame.Type.
+type ArtifactsSetFrameType string
+
+// ArtifactsSnapshotFrame Every script's current set, sent once on connect.
+type ArtifactsSnapshotFrame struct {
+	Scripts []ArtifactSet              `json:"scripts"`
+	Type    ArtifactsSnapshotFrameType `json:"type"`
+}
+
+// ArtifactsSnapshotFrameType defines model for ArtifactsSnapshotFrame.Type.
+type ArtifactsSnapshotFrameType string
 
 // AssistantDeltaEvent defines model for AssistantDeltaEvent.
 type AssistantDeltaEvent struct {
@@ -2269,6 +2450,11 @@ type PreviewsResponse struct {
 	Previews []PreviewStatus `json:"previews"`
 }
 
+// ProjectEventFrame One change signal. No `discriminator` here: the four bare refetch nudges share one schema, and a discriminator mapping several type values onto the same member is not expressible - openapi-typescript-codegen collapses the enum to whichever mapping it saw last. A plain oneOf narrows on `type` correctly because every member's is a literal or a closed enum.
+type ProjectEventFrame struct {
+	union json.RawMessage
+}
+
 // ProjectInfo defines model for ProjectInfo.
 type ProjectInfo struct {
 	// AgentCount Total number of this project's active (non-ephemeral, non-archived) agents. Drives the project switcher's per-project agent tally.
@@ -2637,6 +2823,14 @@ type ResolvedPathResponse struct {
 	// RepoRoot Root of the git repository containing the path, when is_git_repo (the project would be added at this path)
 	RepoRoot *string `json:"repo_root,omitempty"`
 }
+
+// ResourceChangedEvent A resource changed; refetch it. Carries no payload.
+type ResourceChangedEvent struct {
+	Type ResourceChangedEventType `json:"type"`
+}
+
+// ResourceChangedEventType defines model for ResourceChangedEvent.Type.
+type ResourceChangedEventType string
 
 // ResourceLimits The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults - weights on 50/50, hard caps off - are applied only when resolving). Weights are soft (bite only under contention); the hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
 type ResourceLimits struct {
@@ -3329,10 +3523,89 @@ type TestSummary struct {
 	Warnings *int `json:"warnings,omitempty"`
 }
 
+// TestsClientMessage Client to server. Only `refresh` is supported - re-run one runner.
+type TestsClientMessage struct {
+	Name string                 `json:"name"`
+	Type TestsClientMessageType `json:"type"`
+}
+
+// TestsClientMessageType defines model for TestsClientMessage.Type.
+type TestsClientMessageType string
+
+// TestsCounts Authoritative running totals - not deltas - plus the newly-appended cases the client merges into its case list.
+type TestsCounts struct {
+	Cases   []TestCase `json:"cases,omitempty"`
+	Failed  int        `json:"failed"`
+	Passed  int        `json:"passed"`
+	Skipped int        `json:"skipped"`
+
+	// Total The denominator; 0 means unknown.
+	Total int `json:"total"`
+
+	// TotalEstimated The total is an estimate carried from a prior run, because this one emitted no ::hydra:test:total:: marker.
+	TotalEstimated bool `json:"total_estimated,omitempty"`
+	Warnings       int  `json:"warnings"`
+}
+
+// TestsCountsFrame Running totals for one runner, mid-run.
+type TestsCountsFrame struct {
+	// Counts Authoritative running totals - not deltas - plus the newly-appended cases the client merges into its case list.
+	Counts TestsCounts          `json:"counts"`
+	Name   string               `json:"name"`
+	Type   TestsCountsFrameType `json:"type"`
+}
+
+// TestsCountsFrameType defines model for TestsCountsFrame.Type.
+type TestsCountsFrameType string
+
+// TestsFrame One server-to-client frame on the tests socket.
+type TestsFrame struct {
+	union json.RawMessage
+}
+
+// TestsLogFrame One captured log line from a running runner.
+type TestsLogFrame struct {
+	Line ArtifactLogLine   `json:"line"`
+	Name string            `json:"name"`
+	Type TestsLogFrameType `json:"type"`
+}
+
+// TestsLogFrameType defines model for TestsLogFrame.Type.
+type TestsLogFrameType string
+
+// TestsProgressFrame The header progress line changed for one runner.
+type TestsProgressFrame struct {
+	Name     string                 `json:"name"`
+	Progress string                 `json:"progress"`
+	Type     TestsProgressFrameType `json:"type"`
+}
+
+// TestsProgressFrameType defines model for TestsProgressFrame.Type.
+type TestsProgressFrameType string
+
 // TestsResponse defines model for TestsResponse.
 type TestsResponse struct {
 	Runners []TestRunResult `json:"runners"`
 }
+
+// TestsRunnerFrame One runner's verdict changed.
+type TestsRunnerFrame struct {
+	// Runner One test runner's parsed result for a single ref (single-sided; no comparison)
+	Runner TestRunResult        `json:"runner"`
+	Type   TestsRunnerFrameType `json:"type"`
+}
+
+// TestsRunnerFrameType defines model for TestsRunnerFrame.Type.
+type TestsRunnerFrameType string
+
+// TestsSnapshotFrame Every runner's current verdict, sent once on connect.
+type TestsSnapshotFrame struct {
+	Runners []TestRunResult        `json:"runners"`
+	Type    TestsSnapshotFrameType `json:"type"`
+}
+
+// TestsSnapshotFrameType defines model for TestsSnapshotFrame.Type.
+type TestsSnapshotFrameType string
 
 // ToolCompletedEvent defines model for ToolCompletedEvent.
 type ToolCompletedEvent struct {
@@ -4096,6 +4369,185 @@ type SetProjectIconJSONRequestBody = SetProjectIconRequest
 
 // CommitRepositoryJSONRequestBody defines body for CommitRepository for application/json ContentType.
 type CommitRepositoryJSONRequestBody = CommitRepositoryRequest
+
+// AsArtifactsSnapshotFrame returns the union data inside the ArtifactsFrame as a ArtifactsSnapshotFrame
+func (t ArtifactsFrame) AsArtifactsSnapshotFrame() (ArtifactsSnapshotFrame, error) {
+	var body ArtifactsSnapshotFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromArtifactsSnapshotFrame overwrites any union data inside the ArtifactsFrame as the provided ArtifactsSnapshotFrame
+func (t *ArtifactsFrame) FromArtifactsSnapshotFrame(v ArtifactsSnapshotFrame) error {
+	v.Type = "snapshot"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeArtifactsSnapshotFrame performs a merge with any union data inside the ArtifactsFrame, using the provided ArtifactsSnapshotFrame
+func (t *ArtifactsFrame) MergeArtifactsSnapshotFrame(v ArtifactsSnapshotFrame) error {
+	v.Type = "snapshot"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsArtifactsSetFrame returns the union data inside the ArtifactsFrame as a ArtifactsSetFrame
+func (t ArtifactsFrame) AsArtifactsSetFrame() (ArtifactsSetFrame, error) {
+	var body ArtifactsSetFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromArtifactsSetFrame overwrites any union data inside the ArtifactsFrame as the provided ArtifactsSetFrame
+func (t *ArtifactsFrame) FromArtifactsSetFrame(v ArtifactsSetFrame) error {
+	v.Type = "set"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeArtifactsSetFrame performs a merge with any union data inside the ArtifactsFrame, using the provided ArtifactsSetFrame
+func (t *ArtifactsFrame) MergeArtifactsSetFrame(v ArtifactsSetFrame) error {
+	v.Type = "set"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsArtifactsLogFrame returns the union data inside the ArtifactsFrame as a ArtifactsLogFrame
+func (t ArtifactsFrame) AsArtifactsLogFrame() (ArtifactsLogFrame, error) {
+	var body ArtifactsLogFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromArtifactsLogFrame overwrites any union data inside the ArtifactsFrame as the provided ArtifactsLogFrame
+func (t *ArtifactsFrame) FromArtifactsLogFrame(v ArtifactsLogFrame) error {
+	v.Type = "log"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeArtifactsLogFrame performs a merge with any union data inside the ArtifactsFrame, using the provided ArtifactsLogFrame
+func (t *ArtifactsFrame) MergeArtifactsLogFrame(v ArtifactsLogFrame) error {
+	v.Type = "log"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsArtifactsProgressFrame returns the union data inside the ArtifactsFrame as a ArtifactsProgressFrame
+func (t ArtifactsFrame) AsArtifactsProgressFrame() (ArtifactsProgressFrame, error) {
+	var body ArtifactsProgressFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromArtifactsProgressFrame overwrites any union data inside the ArtifactsFrame as the provided ArtifactsProgressFrame
+func (t *ArtifactsFrame) FromArtifactsProgressFrame(v ArtifactsProgressFrame) error {
+	v.Type = "progress"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeArtifactsProgressFrame performs a merge with any union data inside the ArtifactsFrame, using the provided ArtifactsProgressFrame
+func (t *ArtifactsFrame) MergeArtifactsProgressFrame(v ArtifactsProgressFrame) error {
+	v.Type = "progress"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsArtifactsFileFrame returns the union data inside the ArtifactsFrame as a ArtifactsFileFrame
+func (t ArtifactsFrame) AsArtifactsFileFrame() (ArtifactsFileFrame, error) {
+	var body ArtifactsFileFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromArtifactsFileFrame overwrites any union data inside the ArtifactsFrame as the provided ArtifactsFileFrame
+func (t *ArtifactsFrame) FromArtifactsFileFrame(v ArtifactsFileFrame) error {
+	v.Type = "file"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeArtifactsFileFrame performs a merge with any union data inside the ArtifactsFrame, using the provided ArtifactsFileFrame
+func (t *ArtifactsFrame) MergeArtifactsFileFrame(v ArtifactsFileFrame) error {
+	v.Type = "file"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ArtifactsFrame) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t ArtifactsFrame) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "file":
+		return t.AsArtifactsFileFrame()
+	case "log":
+		return t.AsArtifactsLogFrame()
+	case "progress":
+		return t.AsArtifactsProgressFrame()
+	case "set":
+		return t.AsArtifactsSetFrame()
+	case "snapshot":
+		return t.AsArtifactsSnapshotFrame()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t ArtifactsFrame) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ArtifactsFrame) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // AsConversationStartedEvent returns the union data inside the ChatEventUnion as a ConversationStartedEvent
 func (t ChatEventUnion) AsConversationStartedEvent() (ConversationStartedEvent, error) {
@@ -5595,6 +6047,94 @@ func (t *ChatFrame) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// AsResourceChangedEvent returns the union data inside the ProjectEventFrame as a ResourceChangedEvent
+func (t ProjectEventFrame) AsResourceChangedEvent() (ResourceChangedEvent, error) {
+	var body ResourceChangedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResourceChangedEvent overwrites any union data inside the ProjectEventFrame as the provided ResourceChangedEvent
+func (t *ProjectEventFrame) FromResourceChangedEvent(v ResourceChangedEvent) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResourceChangedEvent performs a merge with any union data inside the ProjectEventFrame, using the provided ResourceChangedEvent
+func (t *ProjectEventFrame) MergeResourceChangedEvent(v ResourceChangedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAgentTestsChangedEvent returns the union data inside the ProjectEventFrame as a AgentTestsChangedEvent
+func (t ProjectEventFrame) AsAgentTestsChangedEvent() (AgentTestsChangedEvent, error) {
+	var body AgentTestsChangedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAgentTestsChangedEvent overwrites any union data inside the ProjectEventFrame as the provided AgentTestsChangedEvent
+func (t *ProjectEventFrame) FromAgentTestsChangedEvent(v AgentTestsChangedEvent) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAgentTestsChangedEvent performs a merge with any union data inside the ProjectEventFrame, using the provided AgentTestsChangedEvent
+func (t *ProjectEventFrame) MergeAgentTestsChangedEvent(v AgentTestsChangedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAgentStatusChangedEvent returns the union data inside the ProjectEventFrame as a AgentStatusChangedEvent
+func (t ProjectEventFrame) AsAgentStatusChangedEvent() (AgentStatusChangedEvent, error) {
+	var body AgentStatusChangedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAgentStatusChangedEvent overwrites any union data inside the ProjectEventFrame as the provided AgentStatusChangedEvent
+func (t *ProjectEventFrame) FromAgentStatusChangedEvent(v AgentStatusChangedEvent) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAgentStatusChangedEvent performs a merge with any union data inside the ProjectEventFrame, using the provided AgentStatusChangedEvent
+func (t *ProjectEventFrame) MergeAgentStatusChangedEvent(v AgentStatusChangedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ProjectEventFrame) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ProjectEventFrame) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsServerUpdatePhaseFrame returns the union data inside the ServerUpdateFrame as a ServerUpdatePhaseFrame
 func (t ServerUpdateFrame) AsServerUpdatePhaseFrame() (ServerUpdatePhaseFrame, error) {
 	var body ServerUpdatePhaseFrame
@@ -5859,6 +6399,185 @@ func (t TerminalEvent) MarshalJSON() ([]byte, error) {
 }
 
 func (t *TerminalEvent) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsTestsSnapshotFrame returns the union data inside the TestsFrame as a TestsSnapshotFrame
+func (t TestsFrame) AsTestsSnapshotFrame() (TestsSnapshotFrame, error) {
+	var body TestsSnapshotFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTestsSnapshotFrame overwrites any union data inside the TestsFrame as the provided TestsSnapshotFrame
+func (t *TestsFrame) FromTestsSnapshotFrame(v TestsSnapshotFrame) error {
+	v.Type = "snapshot"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTestsSnapshotFrame performs a merge with any union data inside the TestsFrame, using the provided TestsSnapshotFrame
+func (t *TestsFrame) MergeTestsSnapshotFrame(v TestsSnapshotFrame) error {
+	v.Type = "snapshot"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTestsRunnerFrame returns the union data inside the TestsFrame as a TestsRunnerFrame
+func (t TestsFrame) AsTestsRunnerFrame() (TestsRunnerFrame, error) {
+	var body TestsRunnerFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTestsRunnerFrame overwrites any union data inside the TestsFrame as the provided TestsRunnerFrame
+func (t *TestsFrame) FromTestsRunnerFrame(v TestsRunnerFrame) error {
+	v.Type = "runner"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTestsRunnerFrame performs a merge with any union data inside the TestsFrame, using the provided TestsRunnerFrame
+func (t *TestsFrame) MergeTestsRunnerFrame(v TestsRunnerFrame) error {
+	v.Type = "runner"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTestsLogFrame returns the union data inside the TestsFrame as a TestsLogFrame
+func (t TestsFrame) AsTestsLogFrame() (TestsLogFrame, error) {
+	var body TestsLogFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTestsLogFrame overwrites any union data inside the TestsFrame as the provided TestsLogFrame
+func (t *TestsFrame) FromTestsLogFrame(v TestsLogFrame) error {
+	v.Type = "log"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTestsLogFrame performs a merge with any union data inside the TestsFrame, using the provided TestsLogFrame
+func (t *TestsFrame) MergeTestsLogFrame(v TestsLogFrame) error {
+	v.Type = "log"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTestsProgressFrame returns the union data inside the TestsFrame as a TestsProgressFrame
+func (t TestsFrame) AsTestsProgressFrame() (TestsProgressFrame, error) {
+	var body TestsProgressFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTestsProgressFrame overwrites any union data inside the TestsFrame as the provided TestsProgressFrame
+func (t *TestsFrame) FromTestsProgressFrame(v TestsProgressFrame) error {
+	v.Type = "progress"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTestsProgressFrame performs a merge with any union data inside the TestsFrame, using the provided TestsProgressFrame
+func (t *TestsFrame) MergeTestsProgressFrame(v TestsProgressFrame) error {
+	v.Type = "progress"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTestsCountsFrame returns the union data inside the TestsFrame as a TestsCountsFrame
+func (t TestsFrame) AsTestsCountsFrame() (TestsCountsFrame, error) {
+	var body TestsCountsFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTestsCountsFrame overwrites any union data inside the TestsFrame as the provided TestsCountsFrame
+func (t *TestsFrame) FromTestsCountsFrame(v TestsCountsFrame) error {
+	v.Type = "counts"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTestsCountsFrame performs a merge with any union data inside the TestsFrame, using the provided TestsCountsFrame
+func (t *TestsFrame) MergeTestsCountsFrame(v TestsCountsFrame) error {
+	v.Type = "counts"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t TestsFrame) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t TestsFrame) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "counts":
+		return t.AsTestsCountsFrame()
+	case "log":
+		return t.AsTestsLogFrame()
+	case "progress":
+		return t.AsTestsProgressFrame()
+	case "runner":
+		return t.AsTestsRunnerFrame()
+	case "snapshot":
+		return t.AsTestsSnapshotFrame()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t TestsFrame) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *TestsFrame) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

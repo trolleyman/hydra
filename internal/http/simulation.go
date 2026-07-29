@@ -5093,8 +5093,8 @@ func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
-	for _, t := range []string{"agents_changed", "projects_changed", "services_changed"} {
-		if err := conn.WriteJSON(eventMsg{Type: t}); err != nil {
+	for _, t := range []api.ResourceChangedEventType{api.AgentsChanged, api.ProjectsChanged, api.ServicesChanged} {
+		if err := conn.WriteJSON(api.ResourceChangedEvent{Type: t}); err != nil {
 			return
 		}
 	}
@@ -5126,7 +5126,7 @@ func (s *SimulationServer) HandleEventsWS(w http.ResponseWriter, r *http.Request
 				continue
 			}
 			gen, asking = current, live
-			if err := conn.WriteJSON(eventMsg{Type: "agents_changed"}); err != nil {
+			if err := conn.WriteJSON(api.ResourceChangedEvent{Type: api.AgentsChanged}); err != nil {
 				return
 			}
 		}
@@ -5156,7 +5156,7 @@ func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Requ
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
-	snapshot := artifactWSMessage{Type: "snapshot", Scripts: simArtifactSets(id)}
+	snapshot := api.ArtifactsSnapshotFrame{Type: api.ArtifactsSnapshotFrameTypeSnapshot, Scripts: simArtifactSets(id)}
 	data, _ := json.Marshal(snapshot)
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 
@@ -5181,7 +5181,7 @@ func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Requ
 			return
 		case <-time.After(simArtifactStreamInterval):
 		}
-		fdata, _ := json.Marshal(artifactWSMessage{Type: "file", Script: "components", File: &f})
+		fdata, _ := json.Marshal(api.ArtifactsFileFrame{Type: api.File, Script: "components", File: f})
 		if err := conn.WriteMessage(websocket.TextMessage, fdata); err != nil {
 			return
 		}
@@ -5196,12 +5196,12 @@ func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Requ
 			return
 		case <-time.After(150 * time.Millisecond):
 		}
-		side := "left"
+		side := api.ArtifactSideLeft
 		if i%2 == 1 {
-			side = "right"
+			side = api.ArtifactSideRight
 		}
-		line := &api.ArtifactLogLine{Stream: api.Stdout, Text: fmt.Sprintf("[%s] capturing frame %d ... ok", side, i)}
-		ldata, _ := json.Marshal(artifactWSMessage{Type: "log", Script: "components", Side: side, Line: line})
+		line := api.ArtifactLogLine{Stream: api.Stdout, Text: fmt.Sprintf("[%s] capturing frame %d ... ok", side, i)}
+		ldata, _ := json.Marshal(api.ArtifactsLogFrame{Type: api.ArtifactsLogFrameTypeLog, Script: "components", Side: side, Line: line})
 		if err := conn.WriteMessage(websocket.TextMessage, ldata); err != nil {
 			return
 		}
@@ -5264,7 +5264,7 @@ func (s *SimulationServer) HandleTestsWS(w http.ResponseWriter, r *http.Request)
 	conn := &safeConn{Conn: rawConn}
 	defer conn.Close()
 
-	msg := testsWSMessage{Type: "snapshot", Runners: simTestRunners(id)}
+	msg := api.TestsSnapshotFrame{Type: api.TestsSnapshotFrameTypeSnapshot, Runners: simTestRunners(id)}
 	data, _ := json.Marshal(msg)
 	_ = conn.WriteMessage(websocket.TextMessage, data)
 

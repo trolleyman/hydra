@@ -12,20 +12,49 @@ only thing a chat socket carries. Nothing provider-shaped reaches the browser as
 transport: a provider's own payload rides *inside* a normalized event, where the
 Raw panel can show it, but it never determines the wire format or the reducer.
 
-## The wire protocol
+## Every socket is declared in the schema
+
+Hydra serves five WebSockets, and all of them follow one rule: their frames are
+declared in `api/openapi.yaml` and generated for both the daemon
+(`internal/api`) and the browser (`web/src/api/models`), so a frame the server
+writes and one the client narrows on cannot drift.
+
+| Socket | Union | Carries |
+| --- | --- | --- |
+| `/ws/.../terminal` (terminal head) | `TerminalEvent` | PTY output, size, status, diff refresh |
+| `/ws/.../terminal` (chat head) | `ChatFrame` | the conversation - see below |
+| `/ws/.../artifacts` | `ArtifactsFrame` | generation progress, live log, finished tiles |
+| `/ws/.../tests` | `TestsFrame` | runner verdicts, live log, running counts |
+| `/ws/projects/{id}/events` | `ProjectEventFrame` | change signals, so the UI refetches on demand |
+| `/ws/server/update` | `ServerUpdateFrame` | self-update progress (docs/deployment.md) |
+
+Each member declares its own single value for `type`, and the parent is a
+`oneOf`, so the generated TypeScript is a real discriminated union: `switch
+(frame.type)` narrows to that member with no casts, and Go gets a constant per
+frame. `writeFrame` in `internal/http/terminal.go` is the one place a frame
+becomes bytes.
+
+Two traps worth knowing before adding a sixth:
+
+- **Enum names are global.** oapi-codegen gives an enum short constant names
+  only while they are unique across the whole spec, and answers a clash by
+  prefixing every value of BOTH enums - silently renaming a neighbour that has
+  nothing to do with your socket. Pin yours with `x-enum-varnames` when the
+  values are generic (`left`, `building`, `log`).
+- **A discriminator cannot map several values onto one member.**
+  `ProjectEventFrame` has four bare refetch nudges sharing a schema;
+  openapi-typescript-codegen collapses that enum to whichever mapping it saw
+  last. Dropping the `discriminator` and keeping the plain `oneOf` narrows
+  correctly.
+
+## The chat socket
 
 A chat head shares `/ws/.../terminal` with terminal heads, but every frame is
 text.
 
-Both sockets are declared once, in `api/openapi.yaml`, and generated for the
-daemon (`internal/api`) and the browser (`web/src/api/models`). Each frame
-declares its own single value for `type` and the parent is a `oneOf` with a
-discriminator, so `ChatFrame` and `TerminalEvent` are real discriminated unions:
-Go gets a constant per frame, TypeScript gets `type: 'chat_event'` literals that
-narrow in a `switch` with no casts. `internal/chat` type-aliases the generated
-`ChatEvent` and `ChatProjection` rather than declaring its own, so the durable
-log and the wire are the same shape by construction. `writeFrame` in
-`internal/http/terminal.go` is the one place a frame becomes bytes.
+`internal/chat` type-aliases the generated `ChatEvent` and `ChatProjection`
+rather than declaring its own, so the durable log and the wire are the same
+shape by construction.
 
 Each event type has its own payload schema, and a provider-derived one also
 carries `ChatProviderContext` - who produced it and where it belongs. The two

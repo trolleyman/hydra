@@ -6103,6 +6103,313 @@ components:
     # and appends it to a log, which needs a concrete struct - and a generated
     # oneOf is an opaque wrapper it cannot field-access.
 
+    # --- Artifacts WebSocket (/ws/projects/{id}/agents/{id}/artifacts) ---------
+    #
+    # Generation progress for a head's artifact scripts, so the panel reflects a
+    # run as it happens instead of polling.
+
+    ArtifactSide:
+      type: string
+      description: Which side of the comparison a frame belongs to.
+      enum: [left, right]
+      # Pinned: `left`/`right` also appear in GetAgentArtifactsParams, and
+      # oapi-codegen answers a clash by prefixing every value of BOTH enums -
+      # renaming a neighbour that has nothing to do with this socket.
+      x-enum-varnames: [ArtifactSideLeft, ArtifactSideRight]
+
+    ArtifactsFrame:
+      description: One server-to-client frame on the artifacts socket.
+      oneOf:
+        - $ref: '#/components/schemas/ArtifactsSnapshotFrame'
+        - $ref: '#/components/schemas/ArtifactsSetFrame'
+        - $ref: '#/components/schemas/ArtifactsLogFrame'
+        - $ref: '#/components/schemas/ArtifactsProgressFrame'
+        - $ref: '#/components/schemas/ArtifactsFileFrame'
+      discriminator:
+        propertyName: type
+        mapping:
+          snapshot: '#/components/schemas/ArtifactsSnapshotFrame'
+          set: '#/components/schemas/ArtifactsSetFrame'
+          log: '#/components/schemas/ArtifactsLogFrame'
+          progress: '#/components/schemas/ArtifactsProgressFrame'
+          file: '#/components/schemas/ArtifactsFileFrame'
+
+    ArtifactsSnapshotFrame:
+      type: object
+      description: Every script's current set, sent once on connect.
+      required: [type, scripts]
+      properties:
+        type:
+          type: string
+          enum: [snapshot]
+        scripts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactSet'
+
+    ArtifactsSetFrame:
+      type: object
+      description: One script's set changed - a generation settled or was refreshed.
+      required: [type, set]
+      properties:
+        type:
+          type: string
+          enum: [set]
+        set:
+          $ref: '#/components/schemas/ArtifactSet'
+
+    ArtifactsLogFrame:
+      type: object
+      description: One captured log line from a running generation.
+      required: [type, script, side, line]
+      properties:
+        type:
+          type: string
+          enum: [log]
+        script:
+          type: string
+        side:
+          $ref: '#/components/schemas/ArtifactSide'
+        line:
+          $ref: '#/components/schemas/ArtifactLogLine'
+
+    ArtifactsProgressFrame:
+      type: object
+      description: The header progress line changed for one side of a script.
+      required: [type, script, side, progress]
+      properties:
+        type:
+          type: string
+          enum: [progress]
+        script:
+          type: string
+        side:
+          $ref: '#/components/schemas/ArtifactSide'
+        progress:
+          type: string
+
+    ArtifactsFileFrame:
+      type: object
+      description: >-
+        One output file finished and was compared mid-run, so its tile can
+        render before the whole set settles. The client upserts it into the set
+        by name; the authoritative `set` at settle reconciles the list.
+      required: [type, script, file]
+      properties:
+        type:
+          type: string
+          enum: [file]
+        script:
+          type: string
+        file:
+          $ref: '#/components/schemas/ArtifactFile'
+
+    ArtifactsClientMessage:
+      type: object
+      description: >-
+        Client to server. Only `refresh` is supported - regenerate one script,
+        or with a side, just that side, leaving the other cached.
+      required: [type, script]
+      properties:
+        type:
+          type: string
+          enum: [refresh]
+        script:
+          type: string
+        side:
+          allOf:
+            - $ref: '#/components/schemas/ArtifactSide'
+          x-go-type-skip-optional-pointer: true
+
+    # --- Tests WebSocket (/ws/projects/{id}/agents/{id}/tests) -----------------
+
+    TestsFrame:
+      description: One server-to-client frame on the tests socket.
+      oneOf:
+        - $ref: '#/components/schemas/TestsSnapshotFrame'
+        - $ref: '#/components/schemas/TestsRunnerFrame'
+        - $ref: '#/components/schemas/TestsLogFrame'
+        - $ref: '#/components/schemas/TestsProgressFrame'
+        - $ref: '#/components/schemas/TestsCountsFrame'
+      discriminator:
+        propertyName: type
+        mapping:
+          snapshot: '#/components/schemas/TestsSnapshotFrame'
+          runner: '#/components/schemas/TestsRunnerFrame'
+          log: '#/components/schemas/TestsLogFrame'
+          progress: '#/components/schemas/TestsProgressFrame'
+          counts: '#/components/schemas/TestsCountsFrame'
+
+    TestsSnapshotFrame:
+      type: object
+      description: Every runner's current verdict, sent once on connect.
+      required: [type, runners]
+      properties:
+        type:
+          type: string
+          enum: [snapshot]
+        runners:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestRunResult'
+
+    TestsRunnerFrame:
+      type: object
+      description: One runner's verdict changed.
+      required: [type, runner]
+      properties:
+        type:
+          type: string
+          enum: [runner]
+        runner:
+          $ref: '#/components/schemas/TestRunResult'
+
+    TestsLogFrame:
+      type: object
+      description: One captured log line from a running runner.
+      required: [type, name, line]
+      properties:
+        type:
+          type: string
+          enum: [log]
+        name:
+          type: string
+        line:
+          $ref: '#/components/schemas/ArtifactLogLine'
+
+    TestsProgressFrame:
+      type: object
+      description: The header progress line changed for one runner.
+      required: [type, name, progress]
+      properties:
+        type:
+          type: string
+          enum: [progress]
+        name:
+          type: string
+        progress:
+          type: string
+
+    TestsCountsFrame:
+      type: object
+      description: Running totals for one runner, mid-run.
+      required: [type, name, counts]
+      properties:
+        type:
+          type: string
+          enum: [counts]
+        name:
+          type: string
+        counts:
+          $ref: '#/components/schemas/TestsCounts'
+
+    TestsCounts:
+      type: object
+      description: >-
+        Authoritative running totals - not deltas - plus the newly-appended
+        cases the client merges into its case list.
+      required: [passed, failed, skipped, warnings, total]
+      properties:
+        passed:
+          type: integer
+        failed:
+          type: integer
+        skipped:
+          type: integer
+        warnings:
+          type: integer
+        total:
+          type: integer
+          description: The denominator; 0 means unknown.
+        total_estimated:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The total is an estimate carried from a prior run, because this one
+            emitted no ::hydra:test:total:: marker.
+        cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/TestCase'
+          x-go-type-skip-optional-pointer: true
+
+    TestsClientMessage:
+      type: object
+      description: Client to server. Only `refresh` is supported - re-run one runner.
+      required: [type, name]
+      properties:
+        type:
+          type: string
+          enum: [refresh]
+        name:
+          type: string
+
+    # --- Events WebSocket (/ws/projects/{id}/events) ---------------------------
+    #
+    # Change signals for one project, so the UI refetches on demand rather than
+    # polling. Most frames name a resource and carry nothing; the client runs the
+    # corresponding fetch. On connect the server sends one of each, so a client
+    # that missed changes while away refetches everything once.
+
+    ProjectEventFrame:
+      description: >-
+        One change signal. No `discriminator` here: the four bare refetch nudges
+        share one schema, and a discriminator mapping several type values onto
+        the same member is not expressible - openapi-typescript-codegen collapses
+        the enum to whichever mapping it saw last. A plain oneOf narrows on
+        `type` correctly because every member's is a literal or a closed enum.
+      oneOf:
+        - $ref: '#/components/schemas/ResourceChangedEvent'
+        - $ref: '#/components/schemas/AgentTestsChangedEvent'
+        - $ref: '#/components/schemas/AgentStatusChangedEvent'
+
+    ResourceChangedEvent:
+      type: object
+      description: A resource changed; refetch it. Carries no payload.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [agents_changed, projects_changed, services_changed, push_status_changed]
+
+    AgentTestsChangedEvent:
+      type: object
+      description: >-
+        One agent's test counts moved mid-run, so the sidebar chips can tick
+        without refetching the agent list.
+      required: [type, agent_id]
+      properties:
+        type:
+          type: string
+          enum: [agent_tests_changed]
+        agent_id:
+          type: string
+        tests:
+          $ref: '#/components/schemas/TestSummary'
+
+    AgentStatusChangedEvent:
+      type: object
+      description: One agent's live status bundle changed.
+      required: [type, agent_id]
+      properties:
+        type:
+          type: string
+          enum: [agent_status_changed]
+        agent_id:
+          type: string
+        status:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        activity:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        last_message:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        last_message_is_suggested:
+          type: boolean
+          x-go-type-skip-optional-pointer: true
+
     # --- Server-update WebSocket (/ws/server/update) ---------------------------
     #
     # The progress of a self-update, streamed while the server rebuilds itself.
@@ -6173,6 +6480,7 @@ components:
         kind:
           type: string
           enum: [phase]
+          x-enum-varnames: [ServerUpdatePhaseFrameKindPhase]
         phase:
           $ref: '#/components/schemas/ServerUpdatePhase'
 
@@ -6184,6 +6492,7 @@ components:
         kind:
           type: string
           enum: [log]
+          x-enum-varnames: [ServerUpdateLogFrameKindLog]
         line:
           type: string
 
@@ -6197,6 +6506,7 @@ components:
         kind:
           type: string
           enum: [done]
+          x-enum-varnames: [ServerUpdateDoneFrameKindDone]
         error:
           type: string
           x-go-type-skip-optional-pointer: true
