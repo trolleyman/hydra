@@ -70,6 +70,30 @@ describe('parseScriptSteps', () => {
     expect(kinds('grep -n foo a.go | wc -l\ncat b.go')).toEqual(['unknown', 'view'])
   })
 
+  it('reads `git show <rev>:<path>` as the file it prints, not as a report', () => {
+    expect(steps('git show main:web/src/App.tsx')[0]).toMatchObject({
+      kind: 'view',
+      view: { path: 'web/src/App.tsx', start: 1, end: null },
+    })
+    // A `| sed -n 'A,Bp'` over a whole file is that file's lines A to B.
+    expect(steps("git show main:web/src/App.tsx 2>/dev/null | sed -n '449,466p'")[0]).toMatchObject({
+      kind: 'view',
+      view: { path: 'web/src/App.tsx', start: 449, end: 466 },
+    })
+    // ...and a `-n` on a grep over one numbers the file, not just the stream.
+    expect(steps('git show main:web/src/App.tsx | grep -n "export function" -A 8')[0]).toMatchObject({
+      kind: 'matches',
+      match: { paths: ['web/src/App.tsx'], numbered: true },
+    })
+    // Neither means anything against a stream that was NOT the whole file.
+    expect(kinds("sed -n '1,40p' a.go | sed -n '5,9p'\ncat b.go")).toEqual(['unknown', 'view'])
+    expect(kinds('head -50 a.go | grep -n foo\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('grep -rn foo src | grep -n bar\ncat b.go')).toEqual(['unknown', 'view'])
+    // Still a report when it is not naming a blob.
+    expect(kinds('git show HEAD\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git show --stat main:a.go\necho ----')).toEqual(['git', 'marker'])
+  })
+
   it('sees through a trailing cat, which drops nothing at all', () => {
     // Not even a trim, so the slice keeps both of its ends.
     expect(steps('sed -n 40,110p a.go | cat')[0]).toMatchObject({ kind: 'view', view: { start: 40, end: 110 } })

@@ -26,7 +26,7 @@
 // one makes its section (only its section) plain, because a file name and line
 // numbers attached to text from somewhere else would be worse than no
 // highlighting at all.
-import { parseView, type FileView } from './fileViewCommand'
+import { parseSedRange, parseView, type FileView } from './fileViewCommand'
 
 // A grep-shaped step: output that is a set of lines from one or more files,
 // non-contiguous, optionally carrying its own line numbers.
@@ -454,12 +454,34 @@ function isPassthrough(cmd: Command): boolean {
 // highlighting even though every line that survives is still a line of the file
 // the search before it named.
 //
-// It is the same parse as a searching grep, held to two more conditions: it
-// names no file of its own (so what it read was the pipe), and it adds no line
-// numbers (which would count lines of the STREAM, not lines of any file).
-function isLineFilter(cmd: Command): boolean {
+// It is the same parse as a searching grep, held to one more condition: it names
+// no file of its own, so what it read was the pipe. Whether it NUMBERS what it
+// keeps is handed back rather than refused, because those numbers count lines of
+// the STREAM - which is the file's own numbering when, and only when, the stream
+// is a whole file (see classify).
+function isLineFilter(cmd: Command): { numbered: boolean } | null {
   const grep = parseMatches(cmd.words)
-  return grep !== null && grep.fileCount === 0 && !grep.numbered
+  return grep !== null && grep.fileCount === 0 ? { numbered: grep.numbered } : null
+}
+
+// isRangeFilter reads a `| sed -n '449,466p'`: a contiguous slice of what the
+// command before it printed, taken by line number. Like isLineFilter, it must
+// name no file of its own.
+function isRangeFilter(cmd: Command): { start: number; end: number | null } | null {
+  const name = cmd.words[0]
+  if (name.text !== 'sed' || name.quoted) return null
+  const args = cmd.words.slice(1)
+  if (args[0]?.text !== '-n') return null
+  const rest = args[1]?.text === '-e' ? args.slice(2) : args.slice(1)
+  if (rest.length !== 1 || rest[0].dynamic) return null
+  return parseSedRange(rest[0].text)
+}
+
+// wholeFile reports whether a view is the file from its first line with no end -
+// a `cat f`, a `git show rev:f`. That is what makes a filter's own line numbers,
+// or the range it slices out, line up with the file's.
+function wholeFile(view: FileView): boolean {
+  return view.start === 1 && view.end == null && !view.numbered
 }
 
 // classify decides what one pipeline contributes to the output.
@@ -470,14 +492,24 @@ function classify(p: Pipeline): ScriptStep {
   let cmds = p.cmds
   let trimmedFrom: 'head' | 'tail' | null = null
   let filtered = false
+  // A filter that numbered what it kept, or sliced a range out of it. Both only
+  // mean anything against a whole-file producer, and are refused below when the
+  // producer is not one.
+  let numbered = false
+  let sliced: { start: number; end: number | null } | null = null
   while (cmds.length > 1) {
     const last = cmds[cmds.length - 1]
     const trim = isFilter(last)
+    const line = isLineFilter(last)
+    const range = isRangeFilter(last)
     if (trim) trimmedFrom = trim
     // A passthrough drops nothing, so it is not even a trim: `git log | cat`
     // is that log, and `sed -n 1,20p f | cat` is still lines 1 to 20 of f.
     else if (isPassthrough(last)) { /* nothing to record */ }
-    else if (isLineFilter(last)) filtered = true
+    else if (line) { filtered = true; numbered ||= line.numbered }
+    // Only ever one of these, and nothing may follow it: a second range would
+    // be counted against the first one's output rather than the file.
+    else if (range && !sliced && !filtered && !trimmedFrom) sliced = range
     else break
     cmds = cmds.slice(0, -1)
   }
@@ -489,27 +521,46 @@ function classify(p: Pipeline): ScriptStep {
   if (cmd.redirected) return { kind: 'silent' }
   if (!name.quoted && (SILENT.has(name.text) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(name.text))) return { kind: 'silent' }
 
+  const unknown: ScriptStep = { kind: 'unknown', command: p.raw }
+
   const echo = parseEcho(cmd.words)
-  if (echo !== null && !trimmedFrom && !filtered) {
+  if (echo !== null && !trimmedFrom && !filtered && !sliced) {
     return echo.trim().length >= MIN_MARKER_LEN ? { kind: 'marker', text: echo } : { kind: 'echo', text: echo }
   }
 
   const matches = parseMatches(cmd.words)
-  if (matches) return { kind: 'matches', match: { paths: matches.paths, numbered: matches.numbered }, command: p.raw }
+  // A search's output is lines from all over a file, so a filter's own numbers
+  // or line range describe the STREAM and nothing that could be pointed at.
+  if (matches) {
+    return numbered || sliced
+      ? unknown
+      : { kind: 'matches', match: { paths: matches.paths, numbered: matches.numbered }, command: p.raw }
+  }
 
-  if (parseGitReport(cmd.words)) return { kind: 'git', command: p.raw }
-
+  // Asked BEFORE the git report below, because `git show <rev>:<path>` is the
+  // one git command that prints a file rather than a report about one.
   if (!cmd.words.some((w) => w.dynamic)) {
     const view = parseView(cmd.words.map((w) => w.text), p.raw)
     if (view) {
-      // Grepped, so the lines that came through are no longer a contiguous
-      // slice to number from `start` - but they are still that file's lines,
-      // and still want its language. (`cat -n` is the exception: its numbers
-      // ride in the text, and nothing downstream can read them back off.)
+      // A range sliced out of the stream is a range of the FILE - but only when
+      // the stream WAS the whole file, since that is what makes line 449 of the
+      // one line 449 of the other.
+      if (sliced) {
+        return wholeFile(view)
+          ? { kind: 'view', view: { ...view, start: sliced.start, end: sliced.end } }
+          : unknown
+      }
       if (filtered) {
-        return view.numbered
-          ? { kind: 'unknown', command: p.raw }
-          : { kind: 'matches', match: { paths: [view.path], numbered: false }, command: p.raw }
+        // Grepped, so the lines that came through are no longer a contiguous
+        // slice to number from `start` - but they are still that file's lines,
+        // and still want its language.
+        //
+        // A `-n` on that grep numbered the stream, which is the file's own
+        // numbering on a whole-file read and nothing at all otherwise. (`cat -n`
+        // is the other way round: its numbers ride in the text, where nothing
+        // downstream can read them back off.)
+        if (view.numbered || (numbered && !wholeFile(view))) return unknown
+        return { kind: 'matches', match: { paths: [view.path], numbered }, command: p.raw }
       }
       // A `| head` keeps the start of what was printed and drops the end; a
       // `| tail` keeps an end this parser cannot number.
@@ -518,7 +569,12 @@ function classify(p: Pipeline): ScriptStep {
       return { kind: 'view', view }
     }
   }
-  return { kind: 'unknown', command: p.raw }
+
+  // A filter's line numbers would ride in the text as a `12:` prefix that
+  // lib/gitOutput has no shape for.
+  if (parseGitReport(cmd.words)) return numbered ? unknown : { kind: 'git', command: p.raw }
+
+  return unknown
 }
 
 // parseScriptSteps reads a whole Bash command as the sequence of steps it runs.
