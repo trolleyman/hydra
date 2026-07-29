@@ -76,10 +76,14 @@ func runServer(_ *cobra.Command, _ []string) error {
 	}
 	defer cleanup()
 
-	tcpLn, err := net.Listen("tcp", addr)
+	// Prefer a listener handed over by the process we replaced: inheriting it
+	// means a restart never unbinds the port, so requests arriving mid-swap queue
+	// in the accept backlog instead of being refused.
+	tcpLn, err := webListener(addr)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
+	attachSelfUpdate(rt, tcpLn)
 	log.Printf("Server starting on http://%s", addr)
 
 	serveErr := make(chan error, 1)
@@ -114,8 +118,8 @@ const defaultWebAddr = "localhost:26600"
 // and sits directly below the preview_ports range 26601-26699 so Hydra's whole
 // footprint is one contiguous, firewall-friendly block); a normal
 // `hydra server` or the CLI-auto-started daemon never exposes the port. Exposing
-// it is a deliberate, separate action: `mage prod` / `mage devExpose` set
-// HYDRA_API_ADDR=0.0.0.0:<port>, which this honours. Binding any non-loopback
+// it is a deliberate, separate action: `mage deploy:service` (and anything else
+// setting HYDRA_API_ADDR=0.0.0.0:<port>) opts in, which this honours. Binding any non-loopback
 // address with no auth key configured is refused outright, so the port can never
 // be opened to the network without a password.
 func resolveWebAddr(deploy config.DeployConfig) (string, error) {
@@ -188,6 +192,9 @@ func runSimulationServer() error {
 	// against a real project.
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
 	mux.HandleFunc("/tests/projects/{project_id}/log", server.HandleTestLog)
+
+	// Simulated self-update stream, so the update panel is drivable here too.
+	mux.HandleFunc("/ws/server/update", server.HandleServerUpdateWS)
 
 	// Auth status (mirrors the real server's non-OpenAPI route): the sim is
 	// always local/authenticated. Without it every page load logs a 404 in the

@@ -90,15 +90,46 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/dev/restart:
+  /api/server/restart:
     post:
-      summary: Trigger a server rebuild and restart (dev mode only)
-      operationId: devRestart
+      summary: Restart the server in place, running the binary already installed
+      description: >
+        Re-execs the current executable, keeping the process ID and carrying the
+        web listener across so the port is never unbound. Running agents are
+        stopped and resume afterwards. Does not rebuild anything - see
+        /api/server/update for that.
+      operationId: restartServer
       responses:
-        '200':
-          description: Restart initiated
+        '202':
+          description: Restart initiated; the connection will drop shortly
         '403':
-          description: Not running in dev mode
+          description: This server cannot restart itself
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/server/update:
+    post:
+      summary: Rebuild the server from source, then restart into the result
+      description: >
+        Builds in the background while this server keeps serving, verifies the
+        new binary starts, swaps it in atomically, and only then restarts. A
+        failed build changes nothing. Progress streams over
+        /ws/server/update. Only available when the daemon's project root is a
+        Hydra checkout.
+      operationId: updateServer
+      responses:
+        '202':
+          description: Update started; follow /ws/server/update for progress
+        '403':
+          description: This server cannot rebuild itself
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: An update is already running
           content:
             application/json:
               schema:
@@ -2911,7 +2942,21 @@ components:
           description: Project ID of the default (CWD) project
         development:
           type: boolean
-          description: Whether the server is running in development mode
+          description: >
+            Whether the server is being served out of a Hydra source checkout,
+            which is what enables developer affordances such as the Chrome
+            DevTools workspace endpoint.
+        can_restart:
+          type: boolean
+          description: >
+            Whether the server can restart itself in place (re-exec). False on
+            platforms without exec.
+        can_update:
+          type: boolean
+          description: >
+            Whether the server can rebuild itself from source and restart into
+            the result. Requires the daemon's project root to be a Hydra
+            checkout with mage available.
 
     ClaudeUsageResponse:
       type: object

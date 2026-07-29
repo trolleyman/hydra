@@ -79,12 +79,17 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 	if daemonFlags.web {
 		if addr, err := resolveWebAddr(rt.deploy); err != nil {
 			log.Printf("warn: daemon: web UI disabled: %v", err)
-		} else if tcpLn, err := net.Listen("tcp", addr); err != nil {
+		} else if tcpLn, err := webListener(addr); err != nil {
 			log.Printf("warn: daemon: web UI listen %s failed: %v", addr, err)
 		} else {
 			log.Printf("daemon: web UI on http://%s", addr)
+			attachSelfUpdate(rt, tcpLn)
 			go func() { _ = srv.Serve(tcpLn) }()
 		}
+	} else {
+		// No web listener to carry over, but the daemon can still re-exec itself
+		// (a restart asked for over the control socket).
+		attachSelfUpdate(rt, nil)
 	}
 
 	log.Printf("daemon: ready (project %s)", projectRoot)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/projects"
+	"github.com/trolleyman/hydra/internal/selfupdate"
 )
 
 // seedInstanceUUID points the user config dir at a temp location seeded with a
@@ -33,8 +34,10 @@ func seedInstanceUUID(t *testing.T, uuid string) {
 
 func TestGetDevToolsConfig(t *testing.T) {
 	seedInstanceUUID(t, "test-uuid")
+	// A non-empty SourceRoot is what "we are serving out of a Hydra checkout"
+	// means now; it is the gate the DevTools workspace endpoint keys off.
 	s := &Server{
-		Development:    true,
+		SelfUpdate:     &selfupdate.Manager{SourceRoot: "/tmp/test-project"},
 		ProjectRoot:    "/tmp/test-project",
 		DefaultProject: projects.ProjectInfo{},
 	}
@@ -68,9 +71,7 @@ func TestGetDevToolsConfig(t *testing.T) {
 }
 
 func TestGetDevToolsConfigUnauthorized(t *testing.T) {
-	s := &Server{
-		Development: false,
-	}
+	s := &Server{} // no SelfUpdate: not serving from source
 
 	handler := NewHandler(s)
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/appspecific/com.chrome.devtools.json", nil)

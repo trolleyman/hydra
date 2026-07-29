@@ -74,15 +74,25 @@ Build the entire project (backend and frontend bundled in single `hydra` binary)
 mage build
 ```
 
-Run the development server (with restarting):
-```bash
-mage dev
-```
-
-Run the production server:
+Run the server:
 ```bash
 mage run
 ```
+
+Install it as a systemd --user service, so it comes up on login and survives
+your terminal closing:
+```bash
+mage deploy:setup     # once - generates the auth key for non-localhost access
+mage deploy:service
+```
+
+From then on the web UI's update button rebuilds and restarts the server for
+you: it builds while the running server keeps serving, and only swaps the
+binary once the build succeeds and the new one is proven to start. See
+[docs/deployment.md](docs/deployment.md).
+
+For frontend work, `mage devFast` runs Vite with hot-module-replacement in
+front of the Go API, and `mage demo` does the same against mock data.
 
 See `AGENTS.md`/`CLAUDE.md`/`GEMINI.md` for more instructions.
 

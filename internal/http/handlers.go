@@ -31,6 +31,7 @@ import (
 	"github.com/trolleyman/hydra/internal/preview"
 	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/selfupdate"
 	"github.com/trolleyman/hydra/internal/services"
 	"github.com/trolleyman/hydra/internal/session"
 	hydratests "github.com/trolleyman/hydra/internal/tests"
@@ -52,9 +53,6 @@ func gitConfigVal(dir, key string) string {
 	return strings.TrimRight(string(out), "\n")
 }
 
-// devRestartExitCode is the process exit code that signals mage to rebuild and restart.
-const devRestartExitCode = 42
-
 // Server implements StrictServerInterface.
 type Server struct {
 	WorktreesDir    string
@@ -69,9 +67,11 @@ type Server struct {
 	ChatQueues *heads.ChatQueueManager
 	// ChatEvents owns provider-neutral durable history and current-state
 	// projections. nil keeps legacy tests/simulation paths working.
-	ChatEvents  *chat.Manager
-	StartTime   time.Time
-	Development bool // set when running under mage dev / mage DevAutoReload
+	ChatEvents *chat.Manager
+	StartTime  time.Time
+	// SelfUpdate backs the UI's restart and "update and restart" controls. nil
+	// (simulation, tests) hides both.
+	SelfUpdate *selfupdate.Manager
 	// BackgroundCtx is the server-lifetime context (cancelled on shutdown). It's
 	// handed to detached best-effort work started by a request - e.g. async title
 	// refinement - so that work outlives the request but still dies on shutdown.
@@ -220,11 +220,13 @@ func NewHandler(s *Server) http.Handler {
 }
 
 func (s *Server) GetDevToolsConfig(_ context.Context, _ api.GetDevToolsConfigRequestObject) (api.GetDevToolsConfigResponseObject, error) {
-	if !s.Development {
+	// Handing Chrome a workspace root only makes sense when the code being
+	// served is the code on disk in front of you.
+	if !s.servingFromSource() {
 		return api.GetDevToolsConfig403JSONResponse{
 			Code:    403,
 			Error:   api.ErrorResponseErrorUnauthorized,
-			Details: "not in dev mode",
+			Details: "not serving from a Hydra source checkout",
 		}, nil
 	}
 
@@ -857,7 +859,9 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	uptime := float32(time.Since(s.StartTime).Seconds())
 	projectRoot := s.ProjectRoot
 	defaultProjectID := s.DefaultProject.ID
-	development := s.Development
+	development := s.servingFromSource()
+	canRestart := s.SelfUpdate != nil && s.SelfUpdate.CanRestart()
+	canUpdate := s.SelfUpdate != nil && s.SelfUpdate.CanUpdate()
 
 	var sandboxErr *string
 	if lastErr := s.GetSandboxError(); lastErr != "" {
@@ -873,7 +877,17 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		ProjectRoot:      &projectRoot,
 		DefaultProjectId: &defaultProjectID,
 		Development:      &development,
+		CanRestart:       &canRestart,
+		CanUpdate:        &canUpdate,
 	}), nil
+}
+
+// servingFromSource reports whether this daemon's project root is the Hydra
+// checkout it was built from. It gates the developer-only affordances (the
+// Chrome DevTools workspace endpoint), which used to key off a `mage dev`
+// environment variable back when there were two build flavours.
+func (s *Server) servingFromSource() bool {
+	return s.SelfUpdate != nil && s.SelfUpdate.SourceRoot != ""
 }
 
 func (s *Server) GetClaudeUsage(ctx context.Context, request api.GetClaudeUsageRequestObject) (api.GetClaudeUsageResponseObject, error) {
@@ -1542,20 +1556,55 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	return api.SaveConfig200Response{}, nil
 }
 
-func (s *Server) DevRestart(_ context.Context, _ api.DevRestartRequestObject) (api.DevRestartResponseObject, error) {
-	if !s.Development {
-		return api.DevRestart403JSONResponse{
+// RestartServer re-execs the binary that is already installed. It answers first
+// and restarts a moment later, so the caller gets a response rather than a
+// severed connection - the browser then polls /health until the new image
+// answers on the socket it inherited.
+func (s *Server) RestartServer(_ context.Context, _ api.RestartServerRequestObject) (api.RestartServerResponseObject, error) {
+	if s.SelfUpdate == nil || !s.SelfUpdate.CanRestart() {
+		return api.RestartServer403JSONResponse{
 			Code:    403,
 			Error:   api.ErrorResponseErrorUnauthorized,
-			Details: "not in dev mode",
+			Details: "this server cannot restart itself",
 		}, nil
 	}
-	// Respond 200 then exit with the restart code after a short delay to allow the response to flush.
 	go func() {
-		time.Sleep(100 * time.Millisecond)
-		os.Exit(devRestartExitCode)
+		time.Sleep(150 * time.Millisecond)
+		if err := s.SelfUpdate.Restart(); err != nil {
+			// Only reachable if exec failed, which leaves us running the old
+			// image - degraded but alive, so log rather than exit.
+			log.Printf("restart failed, still running the previous binary: %v", err)
+		}
 	}()
-	return api.DevRestart200Response{}, nil
+	return api.RestartServer202Response{}, nil
+}
+
+// UpdateServer rebuilds from source and restarts into the result. It returns as
+// soon as the job is accepted; everything after that is reported on
+// /ws/server/update, including failure - a build that does not compile leaves
+// this server running and untouched.
+func (s *Server) UpdateServer(ctx context.Context, _ api.UpdateServerRequestObject) (api.UpdateServerResponseObject, error) {
+	if s.SelfUpdate == nil || !s.SelfUpdate.CanUpdate() {
+		return api.UpdateServer403JSONResponse{
+			Code:    403,
+			Error:   api.ErrorResponseErrorUnauthorized,
+			Details: "this server cannot rebuild itself: it is not running from a Hydra checkout, or mage is not on PATH",
+		}, nil
+	}
+	// The build outlives this request by design, so it hangs off the server
+	// lifetime rather than the caller's cancelled context.
+	buildCtx := s.BackgroundCtx
+	if buildCtx == nil {
+		buildCtx = ctx
+	}
+	if err := s.SelfUpdate.Start(buildCtx); err != nil {
+		return api.UpdateServer409JSONResponse{
+			Code:    409,
+			Error:   api.ErrorResponseErrorConflict,
+			Details: err.Error(),
+		}, nil
+	}
+	return api.UpdateServer202Response{}, nil
 }
 
 // spawnTermSize sanitises the optional rows/cols a spawn request carries into
