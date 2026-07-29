@@ -382,7 +382,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       })
       .catch(() => {})
 
-    const url = getWsUrl(agentId, projectId, shell, sandboxed, shellId)
+    const url = getWsUrl(agentId, projectId, { shell, sandboxed, shellId })
     const ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
