@@ -307,11 +307,21 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
     })
   }, [projectId, repoRef])
 
-  // Hand the same message to a NEW head instead of this one. Branched from the
-  // agent's own branch, because a fix agent that can't reproduce the failure is
-  // useless - which is also why the option is hidden when the head has no branch
-  // to start from. Only the committed tip travels: uncommitted work in this
-  // worktree is not in the new head's, and the dialog says so.
+  // Hand the same message to a NEW head instead of this one.
+  //
+  // Branched from THIS AGENT'S branch, not the project's default branch (the
+  // spawn composer's own default), and that is the deliberate part: this panel
+  // is single-sided - the verdict it shows is for the head's own ref - so a
+  // failure you click the sparkle on is usually one the head's changes
+  // introduced. A head spawned off main often cannot reproduce it at all, and
+  // its fix would land on main while the failing branch stays failing until it
+  // updates from base. Stacking on a `hydra/<id>` branch is a supported spawn
+  // (it is what the composer's branch selector offers), and the fix merges back
+  // into the branch that has the bug. Which is also why the option is hidden
+  // when the head has no branch to start from.
+  //
+  // Only the committed tip travels: uncommitted work in this worktree is not in
+  // the new head's, and the dialog says so.
   const spawnFixAgent = useCallback(async (prompt: string, branch: string) => {
     const geom = spawnGeometry()
     const res = await runWithToast(
