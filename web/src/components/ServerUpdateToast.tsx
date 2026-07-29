@@ -1,7 +1,9 @@
-import { useContext, useEffect, useRef } from 'react'
+import { useContext, useMemo } from 'react'
 import { AlertTriangle, ChevronDown, ChevronRight, Loader2, RotateCw } from 'lucide-react'
 import { ToastDismissContext } from '../stores/toastStore'
 import { PHASE_LABEL, useServerUpdateStore } from '../stores/serverUpdateStore'
+import { LogView } from './ArtifactLogView'
+import { ArtifactLogLine } from '../api'
 
 // ServerUpdateToast is the body of the persistent toast shown while the server
 // rebuilds and restarts itself. It reads the update store directly rather than
@@ -16,16 +18,20 @@ export function ServerUpdateToast() {
   const { running, phase, lines, error, outcome, restartOnly, expanded, setExpanded } =
     useServerUpdateStore()
   const dismiss = useContext(ToastDismissContext)
-  const logRef = useRef<HTMLDivElement>(null)
 
-  // Follow the tail while it streams, but only when the user is already at the
-  // bottom - scrolling up to read an error should not be yanked back.
-  useEffect(() => {
-    const el = logRef.current
-    if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-    if (atBottom) el.scrollTop = el.scrollHeight
-  }, [lines, expanded])
+  // The build log is real terminal output - `mage` colours its command echoes and
+  // the toolchains colour their diagnostics - so it goes through the same xterm
+  // view the artifact and test build logs use rather than a stack of divs, which
+  // would render the escape sequences as literal garbage. Reusing LogView also
+  // brings scrollback, selection and follow-the-tail for free.
+  //
+  // Stdout and stderr are one interleaved stream on the server (ordering matters
+  // more than which pipe a line came from), so every line is tagged stdout; the
+  // failure itself is reported above the log, not by colouring a line inside it.
+  const logLines = useMemo(
+    () => lines.map((text) => ({ text, stream: ArtifactLogLine.stream.STDOUT })),
+    [lines],
+  )
 
   const failed = outcome === 'failed'
   const title = failed
@@ -82,13 +88,8 @@ export function ServerUpdateToast() {
             </span>
           </button>
           {expanded && (
-            <div
-              ref={logRef}
-              className="mt-1.5 max-h-48 overflow-auto rounded bg-gray-900 dark:bg-black/50 p-2 font-mono text-[10px] leading-4 text-gray-200 whitespace-pre-wrap break-words"
-            >
-              {lines.map((line, i) => (
-                <div key={i}>{line}</div>
-              ))}
+            <div className="mt-1.5">
+              <LogView log={logLines} emptyText="Waiting for output..." failed={failed} />
             </div>
           )}
         </>

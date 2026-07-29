@@ -26,11 +26,16 @@ var gzipWriters = sync.Pool{
 	New: func() any { return gzip.NewWriter(nil) },
 }
 
-// CompressionMiddleware gzips responses for clients that ask for it. Hydra
-// serves its own frontend - 3.9MB of JS plus ~12MB of source maps, embedded in
-// the binary - and previously served every byte of it uncompressed, so raw size
-// was wire size. That is invisible over loopback and very visible over Tailscale
-// from a phone.
+// CompressionMiddleware gzips DYNAMIC responses for clients that ask for it -
+// API JSON, most of all the diff payloads, which are the largest thing the UI
+// fetches and cannot be compressed ahead of time.
+//
+// The frontend does not come through here. Those assets are compressed at build
+// time (web/scripts/precompress.ts) and served straight from the embedded FS by
+// internal/cli.serveAsset, which picks brotli or gzip per request - better ratios
+// than anything worth doing per request, and no CPU at all on the way out. This
+// middleware leaves them alone because it never touches a response that already
+// carries a Content-Encoding.
 //
 // Compression is decided per response, lazily, once enough of the body has
 // accumulated to be worth it (see compressWriter.decide). Requests that must not
