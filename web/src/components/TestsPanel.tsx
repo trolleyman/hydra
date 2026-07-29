@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Check, X, TriangleAlert, LoaderCircle, RefreshCw, FunnelX, ScrollText, ChevronRight, Search, SkipForward, FlaskConical } from 'lucide-react'
+import { Check, X, TriangleAlert, LoaderCircle, RefreshCw, FunnelX, ScrollText, ChevronRight, Search, SkipForward, FlaskConical, Sparkles } from 'lucide-react'
 import { linkOptions } from '@tanstack/react-router'
 import { api } from '../stores/apiClient'
 import { apiErrorBody, formatError } from '../api/format_error'
@@ -22,6 +22,12 @@ import { formatLineHash } from '../lib/lineRange'
 import { buildRepoSplat } from '../lib/repoSplat'
 import { buildFixTestMessage } from '../lib/testCases'
 import { useDialogStore } from '../stores/dialogStore'
+import { useAgentStore } from '../stores/agentStore'
+import { useToastStore } from '../stores/toastStore'
+import { agentTransitionToast } from '../lib/agentToast'
+import { TILE_TONE, TILE_BAR } from '../lib/tileTone'
+import { spawnDefaultFields } from '../lib/spawnDefaults'
+import { spawnGeometry } from '../lib/terminalGeometry'
 import { runWithToast } from '../lib/apiAction'
 import { useLogCoalescer } from '../lib/useLogCoalescer'
 import { closeWebSocket } from '../lib/ws'
@@ -276,6 +282,11 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
     saveTestFilter(projectId, agentId, custom)
   }, [projectId, agentId, groupResult])
 
+  // The head's own branch, for a "Spawn agent" that starts from the code the
+  // test is failing in. A selector, not a whole-store subscribe: this panel
+  // re-renders on every streamed test frame as it is.
+  const branchName = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.branch_name ?? '')
+
   // Every parsed case across all runners: drives the status dropdown's counts
   // and the scope-axis availability the cog needs.
   const allCases = useMemo(() => (runners ?? []).flatMap((r) => r.cases ?? []), [runners])
@@ -296,16 +307,64 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
     })
   }, [projectId, repoRef])
 
+  // Hand the same message to a NEW head instead of this one. Branched from the
+  // agent's own branch, because a fix agent that can't reproduce the failure is
+  // useless - which is also why the option is hidden when the head has no branch
+  // to start from. Only the committed tip travels: uncommitted work in this
+  // worktree is not in the new head's, and the dialog says so.
+  const spawnFixAgent = useCallback(async (prompt: string, branch: string) => {
+    const geom = spawnGeometry()
+    const res = await runWithToast(
+      () => api.default.spawnAgent(projectId, {
+        prompt,
+        // The agent type / model / chat mode the user last spawned with. There is
+        // no composer here to choose them in, and a hardcoded default would spawn
+        // an agent they don't use.
+        ...spawnDefaultFields(),
+        base_branch: branch,
+        ...(geom.cols ? { cols: geom.cols } : {}),
+        rows: geom.rows,
+      }),
+      { errorPrefix: 'Failed to spawn an agent' },
+    )
+    if (!res.ok) return
+    const agent = res.value
+    // Into the store immediately, so the head is in the sidebar before the next
+    // poll - the toast links to it, and a link to an agent the list doesn't know
+    // about yet lands on a page with nothing on it.
+    useAgentStore.getState().addAgent(agent)
+    useToastStore.getState().show({
+      ...agentTransitionToast({
+        agentName: agent.title || agent.id,
+        agentId: agent.id,
+        projectId,
+        // No status pill: the head is a second old and has yet to report one.
+        // The sentence is the whole message, and the name above it is the link.
+        before: 'is on the test failure',
+      }),
+      // The tile says WHAT HAPPENED (see agentToast) - here that's the same
+      // sparkle as the fix affordance this was started from, not the neutral dot
+      // a status-less transition would otherwise get.
+      icon: <Sparkles className="w-[18px] h-[18px]" />,
+      accent: { wrap: TILE_TONE.indigo, bar: TILE_BAR.indigo },
+    })
+  }, [projectId])
+
   // "Ask the agent to fix this test": build the message, show it in full, and
   // only send once the user confirms. Nothing is sent from the row click itself
-  // - starting an agent turn is not something to discover after the fact.
+  // - starting an agent turn is not something to discover after the fact. The
+  // same message can go to a fresh head instead (the secondary action), for a
+  // failure you don't want to interrupt this agent with.
   const fixCase = useCallback((runner: string, c: TestCase) => {
     const prompt = buildFixTestMessage(runner, c)
     useDialogStore.getState().show({
       variant: 'sendPrompt',
       title: 'Ask the agent to fix this test?',
-      message: 'This is sent to the agent as a new chat message, and starts a turn (or queues behind the one running).',
+      message: branchName
+        ? 'This is sent to the agent as a new chat message, and starts a turn (or queues behind the one running). Spawn agent gives it to a new head branched off this one instead - uncommitted work stays here.'
+        : 'This is sent to the agent as a new chat message, and starts a turn (or queues behind the one running).',
       confirmLabel: 'Send to agent',
+      secondaryLabel: 'Spawn agent',
       details: { prompt },
       onConfirm: () => {
         void runWithToast(() => api.default.sendAgentInput(projectId, agentId, { text: prompt }), {
@@ -313,8 +372,11 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
           errorPrefix: 'Failed to send to the agent',
         })
       },
+      // Omitted without a branch, which hides the button rather than offering a
+      // spawn that would start from the wrong code.
+      onSecondary: branchName ? () => { void spawnFixAgent(prompt, branchName) } : undefined,
     })
-  }, [projectId, agentId])
+  }, [projectId, agentId, branchName, spawnFixAgent])
 
   const hasScope = useMemo(() => allCases.some((c) => (c.scope?.length ?? 0) > 0), [allCases])
   useEffect(() => { onScopeAvailable?.(hasScope) }, [hasScope, onScopeAvailable])
