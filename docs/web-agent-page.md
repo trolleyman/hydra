@@ -33,6 +33,23 @@ and `web/src/DiffViewer.tsx`):
   `z-40` in `__root.tsx`. The bar is styled to match the global top bar (same
   bg/border; `py-2.5` lands a single-line bar at h-12) but stays sticky inside
   the scroll container - its ref selectors must remain reachable deep in a diff.
+- **Revealing context** has one model and one fallback. The bulk diff request
+  ships each eligible file's whole content inline (`full_context=true`,
+  `max_full_changes`/`max_full_lines` = `HIDDEN_FILE_THRESHOLD`/`FULL_MAX_LINES`),
+  and `buildSegments` + a per-region `RevealMap` open the gaps client-side: no
+  round-trip, and a click only ever grows the region it belongs to. Nothing here
+  touches the scroll - the expander stays under the pointer and the new lines
+  grow away from it (an earlier "keep the change below the gap pinned" scrolled
+  the pane by the height of every reveal; see the note in `diffScroll.ts`).
+  A file past the bulk caps arrives windowed (`-U3` hunks); the first click on
+  one of its expanders calls `expandFileDiff`, which re-fetches **that one file**
+  with `full_context` at the promotion caps (`PROMOTED_MAX_LINES`/
+  `PROMOTED_MAX_CHANGES`) and promotes it into the model above for good. The
+  click isn't lost: the windowed expanders name their region up front
+  (`LEAD_REGION_ID` / `regionAfterHunk`, keyed the same way `buildSegments` keys
+  regions) and record the reveal before the fetch lands. Only a file too big even
+  for the promotion cap keeps the old `-U<wider>` re-fetch, whose context is a
+  property of the whole file and so widens every hunk in it, not the gap clicked.
 - Lazy file bodies + **measured placeholders**: a file card's body stays an empty
   placeholder until the card first scrolls near the viewport (`near`, a one-way
   IntersectionObserver latch in `FileDiff`). The placeholder's height is not

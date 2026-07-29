@@ -1,6 +1,5 @@
 import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
-  Archive,
   ArrowDown,
   ArrowUp,
   Bot,
@@ -2798,10 +2797,10 @@ const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   mcp__hydra__git_rebase: GitMark,
   mcp__hydra__git_rebase_continue: GitMark,
   mcp__hydra__git_rebase_abort: GitMark,
-  mcp__hydra__git_merge: GitMerge,
-  mcp__hydra__git_merge_continue: GitMerge,
-  mcp__hydra__git_merge_abort: GitMerge,
-  mcp__hydra__git_stash: Archive,
+  mcp__hydra__git_merge: GitMark,//GitMerge,
+  mcp__hydra__git_merge_continue: GitMark,//GitMerge,
+  mcp__hydra__git_merge_abort: GitMark,//GitMerge,
+  mcp__hydra__git_stash: GitMark,//Archive,
 }
 
 function LowlitPath({ path }: { path: string }) {

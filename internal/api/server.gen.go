@@ -1798,7 +1798,7 @@ type GetAgentDiffParams struct {
 	// Context Number of lines of context to show (defaults to 3)
 	Context *int `form:"context,omitempty" json:"context,omitempty"`
 
-	// FullContext Return each file's full content (so the client can expand context without further round-trips), in a single request for all files. Files larger than max_full_lines are returned at the normal context instead. Ignored when a specific path is requested.
+	// FullContext Return each file's full content (so the client can expand context without further round-trips), in a single request for all files. Files larger than max_full_lines are returned at the normal context instead. Combined with path it expands just that file, which is how the client promotes a single big file (left windowed by the bulk caps) once the reader expands it - pass caps above the bulk ones.
 	FullContext *bool `form:"full_context,omitempty" json:"full_context,omitempty"`
 
 	// MaxFullChanges Only auto-expand files with at most this many changed lines. Larger files (which the client also hides by default) keep the normal context so their full content isn't shipped until requested. Only meaningful with full_context.
@@ -1951,7 +1951,7 @@ type GetRepositoryDiffParams struct {
 	// Context Number of lines of context to show (defaults to 3)
 	Context *int `form:"context,omitempty" json:"context,omitempty"`
 
-	// FullContext Return each file's full content (so the client can expand context without further round-trips), in a single request for all files. Files larger than max_full_lines are returned at the normal context instead. Ignored when a specific path is requested.
+	// FullContext Return each file's full content (so the client can expand context without further round-trips), in a single request for all files. Files larger than max_full_lines are returned at the normal context instead. Combined with path it expands just that file, which is how the client promotes a single big file (left windowed by the bulk caps) once the reader expands it - pass caps above the bulk ones.
 	FullContext *bool `form:"full_context,omitempty" json:"full_context,omitempty"`
 
 	// MaxFullChanges Only auto-expand files with at most this many changed lines. Only meaningful with full_context.

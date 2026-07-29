@@ -98,11 +98,26 @@ export const CTX = 3
 // click - so show those lines inline instead.
 export const MIN_COLLAPSE_GAP = 1
 
-// Files whose full content exceeds this many lines keep the lightweight `-U3`
-// view + network expansion rather than rendering the whole file client-side.
-// The server applies the same cap when deciding which files to expand in the
-// full_context response (max_full_lines); this is the matching client guard.
+// How much whole-file content the server may ship PER FILE in the bulk diff
+// (max_full_lines). Files past it arrive at the windowed `-U3` context, so a
+// diff touching a few huge files doesn't drag their entire contents along.
 export const FULL_MAX_LINES = 6000
+
+// The cap for ONE file the reader has explicitly asked to expand: the first
+// click on a windowed file's expander re-fetches just that file with this cap
+// (see expandFileDiff), which is also the guard on rendering a file with the
+// whole-content reveal model. It is far above the bulk cap because the cost
+// profile is different - one file, on request, instead of every file in the
+// diff - and because the alternative is the windowed `-U<wider>` re-fetch,
+// which widens every hunk in the file rather than the gap that was clicked.
+// Only the collapsed view of the content is rendered either way; what this
+// really bounds is the payload and the one whole-file highlight pass.
+export const PROMOTED_MAX_LINES = 20000
+
+// Changed-line cap for that same single-file request. The bulk one
+// (max_full_changes) exists to keep big files out of the shared response; for a
+// file the reader opened on purpose there is nothing left to protect.
+export const PROMOTED_MAX_CHANGES = 1_000_000
 
 export const isChangeLine = (l: DiffLine) => l.type === 'addition' || l.type === 'deletion'
 
@@ -142,7 +157,30 @@ export interface RenderSeg {
   context?: DiffLine // enclosing function/section line of the code just below the gap
 }
 
-export const regionKey = (l: DiffLine) => `${l.old_line_num ?? 'x'}:${l.new_line_num ?? 'x'}`
+// Takes just the line numbers, so a caller can name a region it hasn't got the
+// line for (LEAD_REGION_ID below).
+export const regionKey = (l: Pick<DiffLine, 'old_line_num' | 'new_line_num'>) =>
+  `${l.old_line_num ?? 'x'}:${l.new_line_num ?? 'x'}`
+
+// The two helpers below let a WINDOWED file (one still shown as `-U3` hunks)
+// name a region of the whole-content model it hasn't got yet, so a click on one
+// of its expanders can be recorded now and applied the moment that file is
+// promoted - see windowedExpand in DiffViewer.
+//
+// It works because buildSegments keys a region by its first line, and a hunk
+// already shows the line the run below it starts on: `-U3` puts that line in the
+// hunk as its first trailing context line.
+export const LEAD_REGION_ID = regionKey({ old_line_num: 1, new_line_num: 1 })
+
+export function regionAfterHunk(hunk: DiffHunk): string | null {
+  let lastChange = -1
+  for (let i = 0; i < hunk.lines.length; i++) {
+    if (isChangeLine(hunk.lines[i])) lastChange = i
+  }
+  if (lastChange < 0) return null
+  const next = hunk.lines[lastChange + 1]
+  return next ? regionKey(next) : null
+}
 
 // hunkContext returns the function-context trailer git appends after the second
 // `@@` of a hunk header (`@@ -a,b +c,d @@ <context>`) - the enclosing function or
@@ -261,7 +299,7 @@ export function bodyShape(file: DiffFile, sideBySide: boolean, isHidden: boolean
   if (file.additions === 0 && file.deletions === 0) return { kind: 'notice' }
 
   const all = hunks.flatMap((h) => h.lines)
-  const whole = !!file.expanded && all.length > 0 && all.length <= FULL_MAX_LINES && isContiguous(all)
+  const whole = !!file.expanded && all.length > 0 && all.length <= PROMOTED_MAX_LINES && isContiguous(all)
 
   // Runs of lines that render as rows, and the expander rows interleaved between
   // them - counted exactly the way each render branch emits them.

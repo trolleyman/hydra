@@ -29,6 +29,7 @@ import {
 } from '../DiffViewer'
 import { buildFileTree, compactTree as compactDiffTree, getGroupedFiles } from '../lib/fileTree'
 import { scrollCardToTop } from '../lib/diffScroll'
+import { PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES } from '../lib/diffBody'
 import { type ImageDiffMode } from './ArtifactImageDiff'
 import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
@@ -1191,16 +1192,23 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     })
   }, [])
 
-  // Re-fetch one file at a wider context for the huge-file network-expand path
-  // (FileDiff's fallback), patching the new hunks into the existing diff.
+  // Revealing context in a file the bulk response left windowed (FileDiff's
+  // `-U3` fallback). Same deal as the agent diff's expandFileDiff: ask for that
+  // one file in full and let it switch to the client-side reveal model, so later
+  // expanders are instant and only open the gap they belong to; a file too big
+  // even for that comes back at the wider windowed context in the same response.
   const expandDiffFile = useCallback(async (path: string, context = 3) => {
-    fileContextsRef.current.set(path, context)
-    setFileContexts(new Map(fileContextsRef.current))
     try {
-      const fileDiff = await api.default.getRepositoryDiff(projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, path, context)
+      const fileDiff = await api.default.getRepositoryDiff(projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, path, context,
+        true, PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES)
       const updated = fileDiff.files.find((x) => x.path === path)
+      const promoted = !!updated?.expanded
+      if (!promoted) {
+        fileContextsRef.current.set(path, context)
+        setFileContexts(new Map(fileContextsRef.current))
+      }
       setDiff((prev) => prev
-        ? { ...prev, files: prev.files.map((f) => f.path === path ? { ...f, hunks: updated?.hunks ?? [] } : f) }
+        ? { ...prev, files: prev.files.map((f) => f.path === path ? { ...f, hunks: updated?.hunks ?? [], expanded: promoted } : f) }
         : prev)
     } catch (e) {
       console.error('Failed to fetch repository file diff:', e)
