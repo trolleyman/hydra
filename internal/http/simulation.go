@@ -1275,6 +1275,172 @@ func (s *SimulationServer) ReplyToReviewThread(w http.ResponseWriter, r *http.Re
 	api.WriteJSON(w, http.StatusOK, simThreadsResponse(id))
 }
 
+// Hydra-native review comments (docs/review-agent.md), in memory for the run.
+// Seeded with one draft and one published comment on agent-1 so the diff viewer
+// has both states to render - the pair is the point, since a draft is the one
+// thing no agent may see.
+var (
+	simCommentMu       sync.Mutex
+	simCommentsByHead  map[string][]api.ReviewComment
+	simCommentNextByID = map[string]int{}
+)
+
+func simSeedComments(id string) []api.ReviewComment {
+	if id != "agent-1" {
+		return nil
+	}
+	return []api.ReviewComment{
+		{
+			Number: 1, Status: api.Published, Author: "user",
+			Body:      "This drops the error rather than wrapping it - the caller can't tell a missing head from a broken DB.",
+			Path:      ptr("internal/heads/heads.go"),
+			Line:      ptr(45),
+			Diff:      ptr("main -> a1b2c3d"),
+			CreatedAt: "2026-07-28T10:02:00Z", PublishedAt: ptr("2026-07-28T10:05:00Z"),
+		},
+		{
+			Number: 2, Status: api.Draft, Author: "user",
+			Body:      "Worth a test for the empty case before this goes out.",
+			Path:      ptr("internal/heads/heads.go"),
+			Line:      ptr(5),
+			Diff:      ptr("main -> a1b2c3d"),
+			CreatedAt: "2026-07-28T10:09:00Z",
+		},
+	}
+}
+
+func simComments(id string) []api.ReviewComment {
+	simCommentMu.Lock()
+	defer simCommentMu.Unlock()
+	if simCommentsByHead == nil {
+		simCommentsByHead = map[string][]api.ReviewComment{}
+	}
+	if _, ok := simCommentsByHead[id]; !ok {
+		seeded := simSeedComments(id)
+		simCommentsByHead[id] = seeded
+		simCommentNextByID[id] = len(seeded) + 1
+	}
+	out := append([]api.ReviewComment(nil), simCommentsByHead[id]...)
+	if out == nil {
+		out = []api.ReviewComment{}
+	}
+	return out
+}
+
+func simCommentsResponse(id string, notified *string) api.ReviewCommentsResponse {
+	return api.ReviewCommentsResponse{Comments: simComments(id), Notified: notified}
+}
+
+func (s *SimulationServer) GetReviewComments(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	api.WriteJSON(w, http.StatusOK, simCommentsResponse(id, nil))
+}
+
+func (s *SimulationServer) AddReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var body api.NewReviewCommentBody
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	simComments(id) // seed
+	simCommentMu.Lock()
+	n := simCommentNextByID[id]
+	simCommentNextByID[id] = n + 1
+	c := api.ReviewComment{
+		Number: n, Status: api.Draft, Author: "user", Body: body.Body,
+		Path: body.Path, Line: body.Line, OldSide: body.OldSide,
+		Commit: body.Commit, Diff: body.Diff, Context: body.Context,
+		HunkHash: body.HunkHash, ReplyTo: body.ReplyTo,
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}
+	if body.Publish != nil && *body.Publish {
+		c.Status = api.Published
+		c.PublishedAt = ptr(c.CreatedAt)
+	}
+	simCommentsByHead[id] = append(simCommentsByHead[id], c)
+	simCommentMu.Unlock()
+	var notified *string
+	if c.Status == api.Published {
+		notified = ptr(simNotifyLine([]api.ReviewComment{c}))
+	}
+	api.WriteJSON(w, http.StatusOK, simCommentsResponse(id, notified))
+}
+
+func (s *SimulationServer) UpdateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int) {
+	var body api.UpdateReviewCommentBody
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	simComments(id)
+	simCommentMu.Lock()
+	for i := range simCommentsByHead[id] {
+		if simCommentsByHead[id][i].Number == number && simCommentsByHead[id][i].Status == api.Draft {
+			simCommentsByHead[id][i].Body = body.Body
+		}
+	}
+	simCommentMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, simCommentsResponse(id, nil))
+}
+
+func (s *SimulationServer) DeleteReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int) {
+	simComments(id)
+	simCommentMu.Lock()
+	kept := simCommentsByHead[id][:0]
+	for _, c := range simCommentsByHead[id] {
+		if c.Number == number && c.Status == api.Draft {
+			continue // the number is retired, not reused: simCommentNextByID never goes back
+		}
+		kept = append(kept, c)
+	}
+	simCommentsByHead[id] = kept
+	simCommentMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, simCommentsResponse(id, nil))
+}
+
+func (s *SimulationServer) PublishReviewComments(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var body api.PublishReviewCommentsBody
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	want := map[int]bool{}
+	if body.Numbers != nil {
+		for _, n := range *body.Numbers {
+			want[n] = true
+		}
+	}
+	simComments(id)
+	var published []api.ReviewComment
+	simCommentMu.Lock()
+	for i := range simCommentsByHead[id] {
+		c := &simCommentsByHead[id][i]
+		if c.Status != api.Draft || (len(want) > 0 && !want[c.Number]) {
+			continue
+		}
+		c.Status = api.Published
+		c.PublishedAt = ptr(time.Now().Format(time.RFC3339))
+		published = append(published, *c)
+	}
+	simCommentMu.Unlock()
+	if len(published) == 0 {
+		api.WriteJSON(w, http.StatusBadRequest, api.ErrorResponse{
+			Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: "there is nothing to publish",
+		})
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, simCommentsResponse(id, ptr(simNotifyLine(published))))
+}
+
+// simNotifyLine mirrors reviewstore.NotifyLine: handles and locations only, never
+// bodies - the property the real one exists to guarantee.
+func simNotifyLine(published []api.ReviewComment) string {
+	parts := make([]string, 0, len(published))
+	for _, c := range published {
+		if c.Path != nil && c.Line != nil {
+			parts = append(parts, fmt.Sprintf("#%d (%s:%d)", c.Number, *c.Path, *c.Line))
+		} else {
+			parts = append(parts, fmt.Sprintf("#%d", c.Number))
+		}
+	}
+	noun := "comments"
+	if len(published) == 1 {
+		noun = "comment"
+	}
+	return fmt.Sprintf("Review %s added: %s. Read them with the get_review_comments tool (they are not repeated here).",
+		noun, strings.Join(parts, ", "))
+}
+
 func (s *SimulationServer) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }

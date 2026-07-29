@@ -1,8 +1,8 @@
 # Review agent + a real comment system
 
-Status: **the review slot is BUILT; the comment system is not.** This is a
-design doc, not an options survey - the survey it grew out of is kept as an
-appendix at the bottom.
+Status: **both halves are BUILT.** This is a design doc, not an options survey -
+the survey it grew out of is kept as an appendix at the bottom, and the parts
+still open are called out where they belong.
 
 Two halves that only work together:
 
@@ -11,16 +11,18 @@ Two halves that only work together:
    disposable checkout, no branch, and no ability to write to git.
    `internal/heads/reviewslot.go`, `?review=true` on the terminal WS,
    `TabKind = 'review'` in `AgentTerminal.tsx`.
-2. **A server-side comment system** - **not built.** Comments would stop being
-   ephemeral text piped into an agent's context and become durable, addressable
+2. **A server-side comment system** - **BUILT.** Comments are no longer ephemeral
+   text piped into an agent's context: they are durable, numbered, line-anchored
    objects that agents read and append to through tools.
+   `internal/reviewstore/comments.go`, `internal/http/review_comments.go`,
+   `reviewq.OpComments` / `OpAddComment`, `web/src/lib/reviewComments.ts`.
 
-The second is the more valuable half, and it is still open. It is worth building
-even if the reviewer were thrown away, because it fixes the existing "Comment to
-agent" flow, which today formats a markdown blob and injects it into the
-transcript where it cannot be re-read, re-anchored, or survive a compaction.
-Until it exists the reviewer can only *talk* - it cannot leave anything anchored
-to a line.
+The second was the more valuable half, and building it fixed the existing
+"Comment to agent" flow as a side effect: that used to format a markdown blob and
+inject it into the transcript, where it could not be re-read, re-anchored, or
+survive a compaction, and the unsent batch lived in `localStorage`, so it died on
+a reload and never left the browser it was typed in. What is still open is
+listed at the end of Part 2.
 
 > **Caveat on "BUILT": the reviewer has barely run.** The first time it was
 > opened on a live head it showed the head's own chat - see
@@ -583,13 +585,40 @@ Four, mirroring what already exists rather than inventing a surface:
 
 | tool | shape | notes |
 | --- | --- | --- |
-| `get_review_comments` | no args = all published on this head; with ids = those, full body + anchor + diff context | extends the existing forge-only tool (`internal/mcpserver/server.go`) to Hydra-native comments |
-| `add_review_comment` | `path`, `line`/`line-range`, `body` | new; opens a thread |
-| `reply_to_review_comment` | `thread_id`, `body` | **already built** - `reviewq.OpNote`, writes an agent-authored note |
-| `resolve_review_thread` | `thread_id` | optional, later. A state change, not an edit of content, so it does not break the append-only rule |
+| `get_review_comments` | no args = every published comment; `numbers` = those, with their frozen diff context | **BUILT.** ONE tool over both sources - Hydra's own comments first, the forge's unresolved discussions after. They are the same job to an agent ("what has someone said about my code, and where"), so splitting them by where they happen to be stored would only make the model pick, and pick wrong |
+| `add_review_comment` | `path`, `line`, `reply_to`, `body` | **BUILT** - `reviewq.OpAddComment`. Published on write: an agent has no drafts, because a draft exists so a person can think before speaking |
+| `reply_to_review_comment` | `thread_id`, `body` | **already built** - `reviewq.OpNote`, writes an agent-authored note on a FORGE thread |
+| `resolve_review_thread` | `thread_id` | still open. A state change, not an edit of content, so it would not break the append-only rule |
 
 Scope every tool to the calling head's own comments. `reviewq` is already a
 per-head file channel, so that falls out of the existing design.
+
+Two details the implementation settled:
+
+- **The unfiltered read carries no diff blocks.** "Show me everything" should stay
+  cheap enough to call habitually; a fenced context block per comment would make
+  an unfiltered read on a long review the most expensive tool in the session. Ask
+  for `numbers` and you get the full context for those.
+- **A reviewer signs as `reviewer`, not as `agent`.** The review slot has its own
+  `reviewq` dir (`<head>@review`) but no comment store of its own - the comments
+  are about the head, and a reviewer writing into a private store would be talking
+  to nobody. `commentOwner` maps the slot back to the head and swaps the author,
+  so the head cannot sign as its own reviewer.
+
+### Still open in the comment store
+
+None of it blocking, and each is smaller than what is built:
+
+- **Forge comments are not in the same numbering sequence.** `#N` covers Hydra's
+  own comments only, so "fix #3" works for those and not for a GitHub reviewer's.
+  The design above (an append-only `(origin, external_id) -> #N` map, assigned on
+  first sight) still stands; nothing implements it.
+- **No permalink.** `?comment=4` needs the URL sub-view state in
+  [agent-page-tabs.md](agent-page-tabs.md).
+- **Drafts are per-head, and there is no bulk edit.** Publishing takes a list of
+  numbers, but the UI only ever publishes all of them.
+- **`resolve_review_thread`**, and a resolved/addressed state generally. A
+  comment is currently either a draft or published forever.
 
 ## What is already built vs what is new
 
@@ -602,12 +631,15 @@ per-head file channel, so that falls out of the existing design.
 | Agent -> comment write path | **built** (`reply_to_review_comment` -> `reviewq.OpNote`) |
 | Notification into an agent | **built** (`SendAgentInput`) |
 | Staleness detection | **built** client-side (`hunkHash`, `contextBlock`) |
-| Claude-argv session slot + chat framing + UI entry | new |
-| Comment store: anchors, draft/published, forge-independent threads | new |
-| `add_review_comment` / native `get_review_comments` | new |
-| Notify-by-id replacing `buildReviewMessage` | new (and deletes code) |
-| Third origin badge for agent-authored notes | new (`ReviewThreadCard.tsx:44-83` knows only `forge` / `local_only`) |
+| Claude-argv session slot + chat framing + UI entry | **built** |
+| Comment store: anchors, draft/published, forge-independent threads | **built** (`internal/reviewstore/comments.go`) |
+| `add_review_comment` / native `get_review_comments` | **built** (`reviewq.OpAddComment` / `OpComments`) |
+| Notify-by-id replacing `buildReviewMessage` | **built** (and deleted it) |
+| Agent-authored comments rendered in the gutter | **built** (the quiet numbered card in `QueuedCommentCard`) |
+| Numbering FORGE comments into the same sequence | new (see "Numbering forge comments" above) |
+| Third origin badge for agent-authored notes | new (`ReviewThreadCard.tsx` knows only `forge` / `local_only`) |
 | Permalink / URL sub-view state | new (see [agent-page-tabs.md](agent-page-tabs.md)) |
+| `resolve_review_thread` | new (optional; a state change, not an edit) |
 | Conditional `resolveGitIsolation` fallback | new (small; see the gotcha above) |
 
 ## What state gets reviewed

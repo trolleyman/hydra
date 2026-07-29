@@ -68,7 +68,12 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	// lives in the daemon's managers, and services state ONLY ever exists in daemon
 	// memory, so there is nothing in the sandbox to read. No channel -> hide them
 	// rather than advertise a tool that can only time out.
+	// Hydra's own review comments ride the same daemon channel, and - unlike the
+	// forge tools above - are NOT gated on a review file: they exist for every
+	// head, published or not (docs/review-agent.md).
 	if os.Getenv("HYDRA_REVIEW_REQ_DIR") != "" {
+		deps.HydraComments = hydraCommentsFromMCP
+		deps.AddComment = addReviewCommentFromMCP
 		deps.HeadStatus = headStatusFromMCP
 		deps.TestLogs = testLogsFromMCP
 		deps.RunTests = func(runner string) (string, bool) { return runFromMCP(reviewq.OpRunTests, runner) }
@@ -267,6 +272,36 @@ func replyLocalToReviewThread(threadID, body string) (bool, string) {
 		return false, "Hydra did not confirm the note in time, so it may not have been saved. Ask the user to check the daemon."
 	}
 	return res.OK, res.Message
+}
+
+// hydraCommentsFromMCP backs the Hydra half of get_review_comments. The store is
+// host-side (the sandbox has no view of it), so this is a round trip like every
+// other daemon-answered tool.
+func hydraCommentsFromMCP(numbers []int) (string, bool) {
+	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
+	if dir == "" {
+		return "", false
+	}
+	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpComments, Numbers: numbers})
+	if !ok {
+		return "Hydra did not answer in time, so its review comments could not be read.", false
+	}
+	return res.Message, res.OK
+}
+
+// addReviewCommentFromMCP backs add_review_comment.
+func addReviewCommentFromMCP(path string, line, replyTo int, body string) (string, bool) {
+	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
+	if dir == "" {
+		return "Leaving review comments is not available in this session.", false
+	}
+	res, ok := reviewRoundTrip(dir, reviewq.Request{
+		Op: reviewq.OpAddComment, Path: path, Line: line, ReplyTo: replyTo, Body: body,
+	})
+	if !ok {
+		return "Hydra did not confirm the comment in time, so it may not have been saved. Ask the user to check the daemon.", false
+	}
+	return res.Message, res.OK
 }
 
 // headStatusFromMCP backs get_head_status: it asks the daemon for this head's

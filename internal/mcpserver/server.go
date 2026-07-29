@@ -49,6 +49,15 @@ type Deps struct {
 	// explicit user action, so this is the whole of an agent's write access to a
 	// review conversation. Nil hides the tool.
 	ReplyLocal func(threadID, body string) (ok bool, message string)
+	// HydraComments reads Hydra's OWN review comments on this head - numbered,
+	// line-anchored, and durable, so an agent can re-read "#3" rounds later
+	// instead of relying on a blob that was pasted into its context and has since
+	// scrolled out (docs/review-agent.md). Published only; drafts never reach an
+	// agent. numbers narrows the read; empty means all. Nil hides the tool.
+	HydraComments func(numbers []int) (message string, ok bool)
+	// AddComment leaves a review comment anchored to a file and line, for the user
+	// (and any other agent) to read in the diff viewer. Nil hides the tool.
+	AddComment func(path string, line int, replyTo int, body string) (message string, ok bool)
 	// GitOp performs a git write-operation on the head's OWN branch, inside its
 	// worktree - never another branch or a path outside the worktree. It backs the
 	// git_* tools (commit / reset / revert / add / rebase / cherry-pick): raw git
@@ -347,17 +356,52 @@ func toolDefs(deps Deps) []map[string]any {
 			},
 		})
 	}
+	// One tool for both sources of review feedback. They are the same job to an
+	// agent - "what has someone said about my code, and where" - so splitting them
+	// by where they happen to be stored would only make the model pick, and pick
+	// wrong. Comments left IN Hydra need no forge at all, which is why this is not
+	// nested under GetReview.
+	if deps.GetReview != nil || deps.HydraComments != nil {
+		defs = append(defs, map[string]any{
+			"name": "get_review_comments",
+			"description": "Read the review comments on YOUR work, with file/line context, ready to act on. Covers both: comments left in Hydra by the user or a reviewer agent (numbered - refer to them as \"#3\" from then on), and, if this head is linked to a merge/pull request, that MR's unresolved discussions read live from the forge. " +
+				"Hydra tells you when comments arrive by NUMBER only, so this is how you read what they say - and you can call it again rounds later to check whether something you were asked about still stands.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"numbers": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "integer"},
+						"description": "Read only these Hydra comment numbers, in full, with their diff context. Omit for everything (without the per-comment diff blocks, which keeps a habitual call cheap).",
+					},
+				},
+			},
+			"annotations": map[string]any{"readOnlyHint": true},
+		})
+	}
+	if deps.AddComment != nil {
+		defs = append(defs, map[string]any{
+			"name": "add_review_comment",
+			"description": "Leave a review comment anchored to a line of this head's diff, for the USER to read in Hydra's diff viewer next to the code it is about. " +
+				"It is durable and numbered, so you (or another agent) can refer back to it as \"#4\" later. It is LOCAL to Hydra and is never posted to a forge. " +
+				"Prefer one specific, located comment over a paragraph in chat: chat scrolls away, this stays attached to the line.",
+			"inputSchema": map[string]any{
+				"type":     "object",
+				"required": []string{"body"},
+				"properties": map[string]any{
+					"path":     map[string]any{"type": "string", "description": "Repo-relative file the comment is about."},
+					"line":     map[string]any{"type": "integer", "description": "Line number in the CURRENT version of that file."},
+					"reply_to": map[string]any{"type": "integer", "description": "Reply to an existing comment by its number, rather than opening a new one. Prefer this to restating a point already made."},
+					"body":     map[string]any{"type": "string", "description": "What you want to say, in markdown."},
+				},
+			},
+		})
+	}
 	if deps.GetReview != nil {
 		defs = append(defs,
 			map[string]any{
 				"name":        "get_review_status",
 				"description": "Get the status of YOUR merge/pull request, if this head is linked to one: URL, target branch, draft/open/merged state, CI status, approvals, and the count of unresolved review discussions. Reads the MR from the forge on every call (a second or two), so the answer is live - call it again whenever you need current state. Scoped to this head's own MR only.",
-				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
-				"annotations": map[string]any{"readOnlyHint": true},
-			},
-			map[string]any{
-				"name":        "get_review_comments",
-				"description": "Get YOUR merge/pull request's unresolved review discussions with file/line context, ready to act on. Reads the MR from the forge on every call (a second or two), so it picks up comments left while you were working - call it again after a push. Use this to address reviewer feedback, then commit your changes.",
 				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 				"annotations": map[string]any{"readOnlyHint": true},
 			},
@@ -460,7 +504,27 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 	case "get_review_status":
 		return textResult(reviewStatusText(deps), false)
 	case "get_review_comments":
-		return textResult(reviewCommentsText(deps), false)
+		var args struct {
+			Numbers []int `json:"numbers"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		return textResult(reviewCommentsText(deps, args.Numbers), false)
+	case "add_review_comment":
+		if deps.AddComment == nil {
+			return textResult("add_review_comment is not available in this session.", true)
+		}
+		var args struct {
+			Path    string `json:"path"`
+			Line    int    `json:"line"`
+			ReplyTo int    `json:"reply_to"`
+			Body    string `json:"body"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		if strings.TrimSpace(args.Body) == "" {
+			return textResult("add_review_comment needs a non-empty \"body\".", true)
+		}
+		msg, ok := deps.AddComment(strings.TrimSpace(args.Path), args.Line, args.ReplyTo, args.Body)
+		return textResult(msg, !ok)
 	case "reply_to_review_comment":
 		if deps.ReplyLocal == nil {
 			return textResult("reply_to_review_comment is not available in this session.", true)
@@ -539,7 +603,32 @@ func freshnessNote(rf *ReviewFile) string {
 
 // reviewCommentsText renders this head's unresolved discussions for
 // get_review_comments.
-func reviewCommentsText(deps Deps) string {
+// The Hydra-native comments come first and the forge discussions after, under
+// their own headings: an agent reading top-down should meet the feedback that
+// exists whether or not this head was ever published.
+func reviewCommentsText(deps Deps, numbers []int) string {
+	var hydra string
+	if deps.HydraComments != nil {
+		// The ok flag is deliberately ignored: its only failure is "no comment has
+		// that number", which is worth telling the agent verbatim but must not
+		// swallow the forge half of the answer.
+		hydra, _ = deps.HydraComments(numbers)
+	}
+	forge := forgeCommentsText(deps)
+	switch {
+	case hydra == "":
+		return forge
+	case forge == "" || forge == unlinkedText:
+		// No MR: the Hydra comments ARE the review, so do not pad the answer with an
+		// explanation of a forge this head has nothing to do with.
+		return hydra
+	default:
+		return "Review comments left in Hydra:\n\n" + hydra + "\n\n---\n\n" + forge
+	}
+}
+
+// forgeCommentsText renders the unresolved discussions on this head's MR.
+func forgeCommentsText(deps Deps) string {
 	if deps.GetReview == nil {
 		return unlinkedText
 	}

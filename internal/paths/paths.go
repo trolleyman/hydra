@@ -361,6 +361,15 @@ func GetReviewNotesJson(projectRoot, id string) string {
 	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-notes", id+".json")
 }
 
+// GetReviewCommentsJson returns the per-head store of Hydra's OWN review
+// comments - the ones anchored to a line of the head's diff, which agents read
+// and append to through tools (docs/review-agent.md). Distinct from
+// GetReviewNotesJson, which holds replies to a FORGE thread and cannot exist
+// without one. Lives at .hydra/local/review-comments/<id>.json.
+func GetReviewCommentsJson(projectRoot, id string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-comments", id+".json")
+}
+
 // GetReviewReqRootDir returns the parent dir holding every head's review-refresh
 // channel (.hydra/local/review-req). The daemon's review-request watcher scans it
 // to find heads asking for a forge refresh.

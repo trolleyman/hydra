@@ -298,13 +298,17 @@ area; do not re-derive it by reading source. Skip them otherwise.
   modelled on the shell tabs - no DB row, no branch, own detached checkout,
   read-only git + blocked git tools - plus the *unbuilt* server-side comment
   store agents would read/append via tools, notified by id rather than injected
-  as text) -> [docs/review-agent.md](docs/review-agent.md) (slot BUILT:
-  `internal/heads/reviewslot.go`, `?review=true` on the terminal WS, `TabKind`
-  in `AgentTerminal.tsx` - but never yet run against a live head. The comment
-  store is the valuable half, stands alone, and is still open. Key constraint:
-  Claude's transcript dir is keyed by WORKTREE PATH, so a second agent in the
-  head's own worktree can poison its `--continue`/`--resume` - which is why the
-  reviewer gets its own tree, and why that tree must not be a recycled pool slot)
+  as text) -> [docs/review-agent.md](docs/review-agent.md) (BOTH halves BUILT:
+  `internal/heads/reviewslot.go` + `reviewsync.go`, `?review=true` on the
+  terminal WS, `TabKind` in `AgentTerminal.tsx`; and the comment store -
+  `internal/reviewstore/comments.go`, `internal/http/review_comments.go`,
+  `reviewq.OpComments`/`OpAddComment`, `web/src/lib/reviewComments.ts`. Two
+  constraints worth knowing before touching either: Claude's transcript dir is
+  keyed by WORKTREE PATH, so a second agent in the head's own worktree can poison
+  its `--continue`/`--resume` - which is why the reviewer gets its own tree, and
+  why that tree must not be a recycled pool slot; and everything a review pane
+  touches is keyed by the SLOT id `<head>@review`, not the head, or it replays
+  the head's conversation)
 - **Restructuring the agent page** (should it be GitHub/GitLab-shaped? inspector
   tabs vs the current five-panel stack, activity as chat rows vs an Activity tab,
   URL sub-view state) -> [docs/agent-page-tabs.md](docs/agent-page-tabs.md)
