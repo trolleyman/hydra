@@ -1,7 +1,7 @@
 # Deploying Hydra: a self-updating local service
 
-Status: **proposed, unbuilt** (audit + plan). Pieces that already exist are marked
-BUILT inline.
+Status: **Phases A and B BUILT. Phase C spiked, deliberately not built** (see
+"The hard part" below for why).
 
 The end state: **one installed service that rebuilds itself on demand.** You press
 a button, it compiles in the background while still serving, streams the build log
@@ -50,23 +50,34 @@ Reading it:
 So the end state is strictly better than today on every axis: 5.6x less JS on the
 wire, 16 MB smaller binary, and original-source stack traces.
 
-### Notes on doing the compression
+### What was actually built
 
-- **Precompress at build time, don't gzip per request.** Assets are immutable and
-  content-hashed, so compressing once at build time is free at runtime and lets
-  you use `gzip -9`. Embed *only* the `.gz` for compressible types and decompress
-  on the fly for the rare client that doesn't send `Accept-Encoding: gzip` (every
-  browser does; `curl` doesn't). That is what makes the binary shrink rather than
-  grow.
-- Skip the already-compressed types (`.png`, `.woff2`) - they are most of what is
-  left and gzip does nothing for them.
-- Don't reach for `http.ServeContent` on a precompressed asset; set
-  `Content-Encoding`, the `Content-Type` of the *original* extension, and
-  `Content-Length` of the compressed bytes, and skip range support. Ranges on a
-  content-encoded representation are a footgun and nothing here needs them.
-- **API responses are a separate, also-worthwhile win.** Diff payloads are large
-  and are not static, so they want a normal streaming gzip middleware rather than
-  precompression. Worth doing, but independent of the above.
+A runtime gzip middleware (`internal/http/compress.go`), not build-time
+precompression - chosen so API responses (diffs, which are large and not static)
+get the same benefit as the static assets, from one mechanism. The binary keeps
+the uncompressed `dist`, so it is 49.9 MB rather than the ~37.9 MB the
+precompressed row predicts; the wire saving is the same, measured at 394,765 ->
+120,934 bytes for the main bundle.
+
+Things the middleware has to get right, all of which have tests:
+
+- **Decide late.** Go sniffs `Content-Type` from the first bytes to reach the
+  underlying writer, so compressing before the type is known labels the response
+  `application/x-gzip`. The header is held back until the uncompressed prefix can
+  be sniffed.
+- **Don't compress small bodies.** Under ~1KB gzip framing makes the response
+  bigger, and the UI polls several small JSON endpoints per second per tab.
+- **A flush means streaming.** A handler that flushes has no knowable size, so
+  the size threshold must not apply - this is what the build-log stream needs.
+- **Skip what isn't ours**: websocket upgrades (they hijack the connection),
+  range requests (they name bytes of the identity representation), already
+  encoded or already compressed bodies, 204/304. Drop `Content-Length` and weaken
+  a strong `ETag` when re-encoding.
+- It sits **outside** `LoggingMiddleware`, which captures the body of a failed
+  response for the log and should capture the readable one.
+
+Build-time precompression is still the way to shrink the *binary*; it just wasn't
+worth a second mechanism for a saving that only shows up on disk.
 
 ## Yes, `HYDRA_DEV_BUILD` can go
 
@@ -245,30 +256,59 @@ Note the cgroup side is *already* fine: workloads run in transient systemd scope
 to the daemon is only `PR_SET_PDEATHSIG` and the fact that the PTY master fd
 lives in the daemon's memory - close it and the agent gets `SIGHUP`.
 
-Three routes:
+### The spike result
 
-- **(a) Carry the PTY fds across the `exec`.** Phase B already re-execs in place,
-  and non-`CLOEXEC` fds survive `exec`, so the PTY masters can be handed to the
-  new image by clearing `CLOEXEC` and passing their fd numbers plus metadata in
-  the environment - exactly what Phase B does for the listener, just more of it.
-  This is the classic graceful-restart trick and needs no new mechanism.
-  **Two caveats, the first of which is why this is spike-first:** `exec`
-  terminates every thread but the caller, and Linux keys the parent-death signal
-  to the parent *thread*, not the process - so if the thread that forked bwrap
-  isn't the one calling `exec`, `--die-with-parent` fires anyway. The fix is to
-  drop `--die-with-parent` and lean on the scope-based reaping `SweepOrphanScopes`
-  already does, but that wants proving before it is planned. Second: scrollback
-  rings live in memory and would need passing through a temp file, or accepting
-  their loss.
-- **(b) Split the process** - a small supervisor owning PTYs, plus a web/API
-  server that restarts freely. Cleanest long-term, largest change.
+Run, rather than reasoned about: `internal/selfupdate/ptyhandover_unix_test.go`
+drives a real process with a real PTY child through a real re-exec. Two findings,
+and they settle the design:
+
+- **The handover mechanism works.** A PTY master crosses `exec` exactly like the
+  listener does - clear `FD_CLOEXEC`, pass the number in the environment - and on
+  the far side the child is still running and still echoing through it.
+- **It only works with the parent-death signal gone.** With `Pdeathsig` set, as
+  every Hydra sandbox has it today (`internal/scope.StartFunc`), the child is
+  SIGKILLed by the exec even though the process it belongs to never died. Linux
+  keys `PR_SET_PDEATHSIG` to the parent *thread*, and `exec` terminates every
+  thread but the caller.
+
+That second point is easy to miss because it depends on *which thread* forked.
+An early version of the spike forked and exec'd from the same goroutine and the
+child survived, which would have been a false green light. Forking from a
+separate goroutine - the shape `scope.StartFunc` produces, and the shape the
+daemon really has, since sessions start on request handlers and the exec happens
+on the update goroutine - kills the child every time.
+
+### What Phase C therefore costs
+
+Carrying agent PTYs across a restart is not "also hand over these fds". It
+requires dropping `Pdeathsig` *and* bwrap's `--die-with-parent` for agent
+sessions, and those exist for a reason: they guarantee that a daemon which dies
+ungracefully (crash, SIGKILL, OOM) cannot leave a sandbox running. Give them up
+and the backstop becomes `SweepOrphanScopes` at the next daemon boot - which
+means a crashed daemon leaves agents running, burning tokens, until something
+restarts it.
+
+Three routes, given that:
+
+- **(a) Carry the PTY fds across the `exec`.** Now a small increment on Phase B
+  mechanically - the spike proves the descriptor half - but it carries the
+  lifetime trade above, and it needs `SweepOrphanScopes`
+  (`internal/sandbox/scope_linux.go:160`) taught to skip the units it just
+  adopted, or the restarted daemon reaps the very sandboxes it carried over.
+- **(b) Split the process** - a small supervisor owning the PTYs, plus a web/API
+  server that restarts freely. Keeps the parent-death guarantee (the supervisor
+  is the parent and never restarts), at the cost of the largest change here.
 - **(c) A per-head shim** owning the PTY, so nothing the daemon does matters.
-  Medium-large.
+  Medium-large, and much the same trade as (b) at a finer grain.
 
-**(a) is probably the answer**, and it is now a small increment rather than a
-separate design, because Phase B adopts `exec` for its own reasons. That is the
-main argument for taking `exec` early even though Phase B gains nothing from fd
-inheritance yet.
+**Unbuilt, deliberately.** (a) is cheap now but pays for restarts with a weaker
+crash guarantee, and the integration - real bwrap sandboxes, transient scopes,
+re-adopting `Wait()` on processes we no longer forked - cannot be exercised in an
+agent sandbox, because bwrap will not nest. (b) is the design that gives
+restarts *and* keeps the guarantee, and is the one to spend the effort on if
+restart-without-losing-agents turns out to matter. Until then a restart stops
+running heads and they resume with `--continue`, and the UI says so before you
+press the button.
 
 ## Audit: what else is missing
 
@@ -291,24 +331,30 @@ inheritance yet.
 - **`Deploy.Service` never enables linger**, so the unit dies at logout unless
   the user runs the printed `loginctl enable-linger`.
 
+(All four are addressed in Phase B; kept here because they explain why the
+design is shaped the way it is.)
+
 ## Plan
 
-**Phase A - build flavour (small).** `sourcemap: true`, drop `isDev` /
-`HYDRA_DEV_BUILD` / the dual stamp, add build-time precompression + the static
-asset handler change. Independently valuable, no behaviour risk.
+**Phase A - build flavour. BUILT.** `sourcemap: true` with minification kept,
+`isDev` / `HYDRA_DEV_BUILD` / the dual stamp deleted, and a gzip middleware in
+front of everything.
 
-**Phase B - self-update via `exec` (small/medium).** The update endpoint, the log
-stream, the toast, verify-then-swap, `exec`-restart with the listener fd carried
-over, the `os.Getpid()` guard in `StopDaemon`, `Development` as a mode,
-`INVOCATION_ID` detection, linger. Then delete `Dev`, `DevExpose`, `Prod`,
-`Preview`, `DevAutoReload` and `devServerLoop`. This is where the magefile
-collapses. Restart still kills heads, so it needs a confirmation showing the live
-count.
+**Phase B - self-update via `exec`. BUILT.** The update endpoint, the log stream,
+the toast, verify-then-swap, `exec`-restart with the listener fd carried over,
+the `os.Getpid()` guard in `StopDaemon`, `can_restart`/`can_update` replacing the
+`Development` boolean, `INVOCATION_ID` detection, linger offered by
+`deploy:service`. `Dev`, `DevExpose`, `Prod`, `Preview`, `DevAutoReload` and
+`devServerLoop` are gone - eight ways to start Hydra down to three. A restart
+still stops running heads, so it confirms first, showing the live count.
 
-**Phase C - restart without killing heads (medium, spike first).** Carry the PTY
-master fds across the `exec` that Phase B already does, drop `--die-with-parent`
-in favour of scope-based reaping, and remove `StopAll`. Removes the confirmation
-from Phase B and makes "hot swap" literally true.
+**Phase C - restart without killing heads. SPIKED, NOT BUILT.** The spike
+(above) proves the descriptor handover works and proves it needs the
+parent-death signal dropped first, which trades away the guarantee that a
+crashed daemon cannot orphan a sandbox. Route (b) - splitting the PTY owner out
+of the restarting process - buys the same thing without that trade, and is the
+one to build if this becomes important. Phase B's confirmation dialog stands in
+the meantime.
 
 A and B are worth doing regardless. C is the one to prototype before planning.
 

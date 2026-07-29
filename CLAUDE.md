@@ -319,17 +319,17 @@ area; do not re-derive it by reading source. Skip them otherwise.
   (BUILT; plain-HTTP + auth-key, ngrok, Tailscale serve/Funnel, reverse-proxy;
   `previewURL` protocol-relative so preview links follow the page scheme)
 - **Deploying Hydra, or changing how it is built/restarted** (`mage
-  deploy:service`, the systemd unit, the exit-42 rebuild loop, minify vs source
-  maps, asset compression, whether to run a second instance) ->
-  [docs/deployment.md](docs/deployment.md) (proposed, unbuilt plan for ONE
-  self-updating service: minified + source-mapped + precompressed, an in-app
-  build-verify-swap-restart with a streamed log, and `Dev`/`DevExpose`/`Prod`/
-  `Preview`/`DevAutoReload` + `HYDRA_DEV_BUILD` deleted. Notes the hard part -
-  a restart kills every head via `--die-with-parent` + `Registry.StopAll` - and
-  the `syscall.Exec` fd-handoff route out of it. Also: `SweepOrphanScopes` is
-  global so a second daemon reaps the first's live sandboxes; simulation mode is
-  already fully isolated; the CLI binary-stamp auto-upgrade fights a
-  systemd-managed daemon)
-
+  deploy:service`, the systemd unit, the in-app update, minify vs source maps,
+  response compression) -> [docs/deployment.md](docs/deployment.md) (BUILT: ONE
+  build flavour - minified *with* source maps, gzipped by
+  `internal/http.CompressionMiddleware`; `HYDRA_DEV_BUILD` gone. `POST
+  /api/server/update` builds while still serving, streams the log over
+  `/ws/server/update`, verifies, swaps atomically and re-execs via
+  `internal/selfupdate` - `syscall.Exec` keeps the PID and carries the web
+  listener across, so no supervisor and no exit-code protocol. `Dev`/`DevExpose`/
+  `Prod`/`Preview`/`DevAutoReload` deleted. NOT built: carrying agent PTYs across
+  the restart - the spike in `internal/selfupdate/ptyhandover_unix_test.go` shows
+  it needs `Pdeathsig`/`--die-with-parent` dropped first, trading away the
+  crashed-daemon-can't-orphan guarantee)
 The open backlog (ideas/gaps not yet built) lives in
 [docs/roadmap.md](docs/roadmap.md).

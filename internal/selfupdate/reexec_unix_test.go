@@ -33,8 +33,12 @@ const (
 )
 
 func TestMain(m *testing.M) {
-	if os.Getenv(roleEnv) == "child" {
+	switch os.Getenv(roleEnv) {
+	case "child":
 		runChild()
+		return
+	case "pty":
+		runPTYChild()
 		return
 	}
 	os.Exit(m.Run())
