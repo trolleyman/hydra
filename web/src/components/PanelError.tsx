@@ -1,4 +1,4 @@
-import { AlertTriangle } from 'lucide-react'
+import { TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 // PanelError is the red error box a diff-viewer panel (Previews / Tests /
@@ -15,7 +15,7 @@ export function PanelError({ title, icon, message }: { title: string; icon?: Rea
       </div>
       <div className="rounded-lg border border-red-300 dark:border-red-800/70 bg-red-50 dark:bg-red-900/20 px-3.5 py-3">
         <div className="flex items-center gap-1.5 text-sm font-medium text-red-700 dark:text-red-300">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <TriangleAlert className="w-4 h-4 shrink-0" />
           Couldn't load {title.toLowerCase()}
         </div>
         <div className="mt-1 text-xs font-mono whitespace-pre-wrap break-words text-red-700/90 dark:text-red-300/90 max-h-40 overflow-auto">

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { TriangleAlert, LoaderCircle } from 'lucide-react'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import type { RepositoryUncommittedChanges } from '../api'
 import { Tooltip } from './Tooltip'
@@ -129,7 +129,7 @@ export function UncommittedChip({
           }}
           className="flex items-center gap-0.5 px-1 py-1 rounded-md text-xs font-medium tabular-nums text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors cursor-pointer"
         >
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <TriangleAlert className="w-3.5 h-3.5 shrink-0" />
           {uncommitted.total}
         </button>
       </Tooltip>
@@ -188,7 +188,7 @@ export function UncommittedChip({
                   : 'shrink-0 px-2.5 py-1.5 text-xs font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer'
               }
             >
-              {committing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Commit'}
+              {committing ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : 'Commit'}
             </button>
           </div>
         </div>,

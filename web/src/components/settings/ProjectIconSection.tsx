@@ -11,6 +11,7 @@ import { IMAGE_ICON_RE, isGlyphIcon } from '../../lib/projectIconValue'
 import { Tooltip } from '../Tooltip'
 import { IconPicker } from './IconPicker'
 import { SettingSection } from './shared'
+import { pillText } from '../../lib/branchPills'
 
 // A few one-click presets to make the field discoverable. Mix of emoji and
 // lucide icon names (resolved by ProjectIcon just like a typed value). The
@@ -48,7 +49,7 @@ export function ProjectIconSection({ project }: { project: ProjectInfo }) {
       setDraft(updated.icon ?? '')
       useToastStore.getState().show({ message: 'Project icon updated', type: 'success' })
     } catch (err) {
-      useToastStore.getState().show({ message: `Failed to set icon: ${formatError(err)}`, type: 'error' })
+      useToastStore.getState().show({ message: pillText`Failed to set icon: ${formatError(err)}`, type: 'error' })
     } finally {
       setSaving(false)
     }

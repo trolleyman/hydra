@@ -1,5 +1,5 @@
 import React from 'react'
-import { Check, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
+import { Check, AlertCircle, TriangleAlert, Info, X } from 'lucide-react'
 import { useToastStore, ToastDismissContext, type Toast, type ToastType } from '../stores/toastStore'
 import { useProjectStore } from '../stores/projectStore'
 import { IconButton } from './IconButton'
@@ -7,16 +7,19 @@ import { ApprovalCard } from './ApprovalToast'
 import { CrossProjectBanner } from './CrossProjectBanner'
 import { withBranchPills } from '../lib/branchPills'
 import { highlightCode } from '../lib/markdown'
+import { TILE_TONE, TILE_BAR, TILE_GLYPH, type TileTone } from '../lib/tileTone'
+import { TOAST_CARD_WIDTH } from '../lib/toastLayout'
 
-// Per-type visual identity: the icon and its tinted rounded square, mirroring the
-// approval card's kind icon so the two toast styles read as one family. Success
-// is a bare tick - the tile is already a rounded square, so a tick-in-a-circle
-// inside it read as a badge within a badge.
-const TYPE_VISUAL: Record<ToastType, { Icon: React.ComponentType<{ className?: string }>; wrap: string; bar: string }> = {
-  success: { Icon: Check, wrap: 'bg-green-50 text-green-600 dark:bg-green-500/15 dark:text-green-300', bar: 'bg-green-500' },
-  error: { Icon: AlertCircle, wrap: 'bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300', bar: 'bg-red-500' },
-  warning: { Icon: AlertTriangle, wrap: 'bg-amber-50 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300', bar: 'bg-amber-500' },
-  info: { Icon: Info, wrap: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300', bar: 'bg-blue-500' },
+// Per-type visual identity: the icon and its tinted rounded square. The tint and
+// the countdown bar come from the shared tile table (lib/tileTone), which the
+// approval card and the confirmation dialogs also draw from - so every icon tile
+// in the app is the same object. Success is a bare tick: the tile is already a
+// rounded square, so a tick-in-a-circle inside it read as a badge within a badge.
+const TYPE_VISUAL: Record<ToastType, { Icon: React.ComponentType<{ className?: string }>; tone: TileTone }> = {
+  success: { Icon: Check, tone: 'green' },
+  error: { Icon: AlertCircle, tone: 'red' },
+  warning: { Icon: TriangleAlert, tone: 'amber' },
+  info: { Icon: Info, tone: 'blue' },
 }
 
 // Per-variant button styling for a toast action - matched to the approval card's
@@ -42,9 +45,11 @@ const codeClass = 'max-h-40 overflow-auto text-[11px] font-mono text-gray-600 da
 // tile and the gaps all step down so a two-word title over a one-line value
 // doesn't sit in a card that is mostly whitespace. Everything else keeps the
 // roomier default, where the body is text you actually stop to read.
+// Both scales are a FIXED width, not a min/max range - see lib/toastLayout for
+// why, and why the default shares its width with the approval card.
 const SIZE = {
   default: {
-    card: 'min-w-[17rem] max-w-[22rem] rounded-2xl',
+    card: `${TOAST_CARD_WIDTH} rounded-2xl`,
     pad: 'p-4',
     row: 'gap-3',
     tile: 'w-9 h-9 rounded-xl',
@@ -55,7 +60,7 @@ const SIZE = {
     actions: 'mt-3 pl-12',
   },
   compact: {
-    card: 'max-w-[20rem] rounded-xl',
+    card: 'w-[20rem] max-w-[calc(100vw-2rem)] rounded-xl',
     pad: 'p-2.5',
     row: 'gap-2.5',
     tile: 'w-7 h-7 rounded-lg',
@@ -94,15 +99,20 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
 
   const base = TYPE_VISUAL[toast.type] ?? TYPE_VISUAL.info
   const size = toast.compact ? SIZE.compact : SIZE.default
-  // The tile glyph, tile tint and countdown-bar colour all default to the type
-  // identity; a toast may override the glyph (`icon`, e.g. a Bot for agent rows)
-  // and the tint+bar pair (`accent`, e.g. the emerald "merge queued" card).
+  // The tile glyph, tile fill and countdown-bar colour all default to the type
+  // identity; a toast may override the glyph (`icon`) and the fill+bar pair
+  // (`accent`) - an agent toast does both, from its status (see lib/agentToast).
   const iconNode = toast.icon ?? <base.Icon className={toast.compact ? 'w-4 h-4' : 'w-[18px] h-[18px]'} />
-  const wrap = toast.accent?.wrap ?? base.wrap
-  const bar = toast.accent?.bar ?? base.bar
-  // A plain string message is a single line, vertically centred against the tile;
-  // a rich node (e.g. the two-line agent-transition row) tops out with the tile.
-  const isStringMessage = typeof toast.message === 'string'
+  const wrap = toast.accent?.wrap ?? TILE_TONE[base.tone]
+  const bar = toast.accent?.bar ?? TILE_BAR[base.tone]
+  // A SENTENCE is vertically centred against the tile and wears the toast's prose
+  // paragraph; a LAYOUT (the two-line agent-transition row) tops out with the tile
+  // and styles itself. Keyed on the explicit flag, not on `typeof message`: a
+  // sentence with untrusted text spliced into it arrives as a ReactNode from
+  // pillText (lib/branchPills) and still wants the paragraph and the centring.
+  // Only a string is scanned for backtick pills - a node has already been through
+  // that, on the authored half only.
+  const isProse = !toast.richMessage
   const hasActions = toast.actions && toast.actions.length > 0
   // A tagged code block (e.g. a `json` API error body) is syntax-coloured through
   // the shared highlighter; an unknown/absent language falls back to plain text.
@@ -124,12 +134,25 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
       )}
       <div className={size.pad}>
         <div className={`flex items-start ${size.row}`}>
-          <div className={`shrink-0 flex items-center justify-center ${size.tile} ${wrap}`}>
+          <div className={`shrink-0 flex items-center justify-center ${TILE_GLYPH} ${size.tile} ${wrap}`}>
             {iconNode}
           </div>
-          <div className={`min-w-0 flex-1 ${isStringMessage ? 'self-center' : ''}`}>
-            {isStringMessage
-              ? <p className={`text-gray-700 dark:text-gray-200 ${size.message}`}>{withBranchPills(toast.message as string)}</p>
+          {/* self-center for BOTH shapes, with a free top backstop: a flex item
+              that is taller than the line cannot move, so a body bigger than the
+              tile (a wrapped title) stays exactly where top-alignment put it,
+              while a body smaller than the tile drops to the middle.
+              This only reads right because both shapes are trimmed to their ink
+              (`.optical-center` on the paragraph here, on the title and status
+              runs in AgentTransitionRow). Untrimmed, the box carried ~8.5px of
+              line-box slack below the last baseline and none above it, so
+              centring the BOX still left the ink sitting high. */}
+          <div className="min-w-0 flex-1 self-center">
+            {isProse
+              ? (
+                <p className={`optical-center text-gray-700 dark:text-gray-200 ${size.message}`}>
+                  {typeof toast.message === 'string' ? withBranchPills(toast.message) : toast.message}
+                </p>
+              )
               : toast.message}
             {toast.code && (
               // w-fit: the block hugs its content instead of stretching to the

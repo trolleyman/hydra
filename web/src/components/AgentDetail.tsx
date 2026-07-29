@@ -5,7 +5,7 @@ import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
 import type { AgentResponse, RepositoryBranch } from '../api'
-import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, MRIcon, ProviderIcon } from './ReviewControls'
+import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, ProviderIcon } from './ReviewControls'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
 import { BranchTag } from './BranchTag'
@@ -21,7 +21,7 @@ import type { Attachment } from '../lib/spawnDrafts'
 import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, Lock, AlertTriangle, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -40,6 +40,7 @@ import { useAgentStore } from '../stores/agentStore'
 import { ensureReviewConfig, refreshReviewConfig, useProjectStore } from '../stores/projectStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME, SHORTCUT_DIFF_SIDEBAR } from '../lib/shortcuts'
+import { pillText } from '../lib/branchPills'
 
 // Matches an upload path the spawn form embeds in a prompt: any token containing
 // the uploads dir followed by the on-disk filename (sanitized to [A-Za-z0-9._-]
@@ -1066,7 +1067,7 @@ export function AgentDetail({
           await api.default.killAgent(projectId ?? '', agent.id)
           useToastStore.getState().show({
             type: 'info',
-            ...agentTransitionToast({ agentName: agent.title || agent.id, agentId: agent.id, projectId: projectId ?? '', status: 'killed', before: '' }),
+            ...agentTransitionToast({ agentName: agent.title || agent.id, agentId: agent.id, projectId: projectId ?? '', status: 'killed', before: 'was' }),
           })
           // Optimistically move the agent into the archived history so it appears
           // in the sidebar immediately, rather than vanishing until the next
@@ -1178,7 +1179,7 @@ export function AgentDetail({
       if (body?.error === 'uncommitted_changes') {
         const files = body.conflicting_files ?? []
         const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
-        useDialogStore.getState().show({ title: 'Uncommitted Changes in Target', message: `Can't merge: the merge target (${agent.base_branch}) has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`, type: 'warning' })
+        useDialogStore.getState().show({ title: 'Uncommitted Changes in Target', message: `Can't merge: the merge target \`${agent.base_branch}\` has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`, type: 'warning' })
       } else if (body?.error === 'tests_failing' || body?.error === 'tests_errored') {
         // The soft gate blocked it (the verdict moved since the button rendered).
         // Surface the same Force / Queue choice dialog the button opens proactively
@@ -1241,7 +1242,7 @@ export function AgentDetail({
     const n = agent.tests?.failed ?? 0
     showMergeConfirm({
       force: true,
-      title: `Force merge into ${toBranch}?`,
+      title: `Force merge into \`${toBranch}\`?`,
       confirmLabel: 'Force merge',
       caution: kind === 'failing'
         ? `${n || 'Some'} failing test${n === 1 ? '' : 's'} will land on ${toBranch}.`
@@ -1263,7 +1264,7 @@ export function AgentDetail({
         ...agentTransitionToast({ agentName: name, agentId: agent.id, projectId: projectId ?? '', icon: 'merge-queued', before: `will merge into \`${toBranch}\` when it finishes and tests pass` }),
       })
     } catch (err) {
-      useToastStore.getState().show({ message: `Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })
+      useToastStore.getState().show({ message: pillText`Couldn't arm auto-merge: ${formatError(err)}`, type: 'error' })
     }
   }
   async function cancelMerge() {
@@ -1271,7 +1272,7 @@ export function AgentDetail({
       await api.default.disarmMergeWhenGreen(projectId ?? '', agent.id)
       useToastStore.getState().show({ message: 'Auto-merge cancelled', type: 'info' })
     } catch (err) {
-      useToastStore.getState().show({ message: `Couldn't cancel auto-merge: ${formatError(err)}`, type: 'error' })
+      useToastStore.getState().show({ message: pillText`Couldn't cancel auto-merge: ${formatError(err)}`, type: 'error' })
     }
   }
 
@@ -1352,7 +1353,7 @@ export function AgentDetail({
       showMergeConfirm({
         force: true,
         keepOpen: true,
-        title: `Force merge into ${toBranch} and continue?`,
+        title: `Force merge into \`${toBranch}\` and continue?`,
         confirmLabel: 'Force merge',
         caution,
       })
@@ -1385,11 +1386,11 @@ export function AgentDetail({
     // will refuse on push - the MR path is the intended route.
     const reviewCfg = useProjectStore.getState().reviewConfigs[projectId ?? '']
     const protectedWarning = reviewCfg?.protected_branches?.includes(toBranch)
-      ? `${toBranch} is a protected branch on the forge - pushing a direct local merge will likely be rejected. Consider a merge request instead.`
+      ? `\`${toBranch}\` is a protected branch on the forge - pushing a direct local merge will likely be rejected. Consider a merge request instead.`
       : undefined
     const lead = parent
-      ? `Merges this agent’s work into agent "${parent.id}"'s branch (${toBranch})${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
-      : `Merges this agent’s work into ${toBranch}${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
+      ? `Merges this agent’s work into agent "${parent.id}"'s branch (\`${toBranch}\`)${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
+      : `Merges this agent’s work into \`${toBranch}\`${keepOpen ? ' and keeps the agent running so it can continue from here.' : ' and closes the session.'}`
     // A caller-supplied caution (e.g. failing tests for a force merge) wins over the
     // uncommitted-changes note the background check would otherwise add.
     const caution = opts.caution ?? protectedWarning ?? parentWarning
@@ -1398,7 +1399,7 @@ export function AgentDetail({
     // The diff stats + uncommitted-changes check run in the background and fold
     // into the open dialog when they return.
     useDialogStore.getState().show({
-      title: opts.title ?? (keepOpen ? `Merge into ${toBranch} and continue?` : `Merge into ${toBranch}?`),
+      title: opts.title ?? (keepOpen ? `Merge into \`${toBranch}\` and continue?` : `Merge into \`${toBranch}\`?`),
       message: lead,
       type: caution ? 'warning' : 'confirm',
       variant: 'merge',
@@ -1812,8 +1813,8 @@ export function AgentDetail({
           disabled: busy,
           shortcut: SHORTCUT_MERGE,
           menu: ([
-            { label: 'Merge and continue', description: `Merge into ${toBranch} but keep the agent running.`, icon: <GitPullRequestArrow className="w-4 h-4" />, onClick: () => confirmMergeKeepOpen(), tone: 'emerald', disabled: busy },
-            { label: 'Force merge', description: `Merge this commit to ${toBranch} right now.`, icon: <AlertTriangle className="w-4 h-4" />, onClick: forceMerge, danger: true, tone: 'red', disabled: busy },
+            { label: 'Merge and continue', description: `Merge into \`${toBranch}\` but keep the agent running.`, icon: <GitPullRequestArrow className="w-4 h-4" />, onClick: () => confirmMergeKeepOpen(), tone: 'emerald', disabled: busy },
+            { label: 'Force merge', description: `Merge this commit to \`${toBranch}\` right now.`, icon: <TriangleAlert className="w-4 h-4" />, onClick: forceMerge, danger: true, tone: 'red', disabled: busy },
             { label: 'Queue merge', description: 'Merges on its own once tests pass.', icon: <Clock className="w-4 h-4" />, onClick: () => void armMerge(), tone: 'emerald', disabled: busy },
           ] as AgentTopBarMenuItem[]),
         }
@@ -1915,7 +1916,13 @@ export function AgentDetail({
         }
       : {
           label: 'Create MR',
-          icon: <MRIcon linked={false} className="w-4 h-4" />,
+          // The FORGE mark, not a generic lucide one: this button opens the
+          // "Create merge request" dialog, which leads with the same mark, and
+          // the two wearing different glyphs for one action was the giveaway
+          // that they were designed apart. It also says WHICH forge before you
+          // open anything. Falls back to a generic PR glyph when the project has
+          // no provider configured (see ProviderIcon).
+          icon: <ProviderIcon provider={reviewConfig?.provider} className="w-4 h-4" />,
           onClick: () => void openCreateMR(),
           variant: 'blue',
           disabled: busy || publishing,

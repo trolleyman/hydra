@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { Link, type LinkProps } from '@tanstack/react-router'
-import { AlertTriangle, Box, Braces, Check, ChevronRight, Folder, FolderOpen, SkipForward, Sparkles, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
+import { TriangleAlert, Box, Braces, Check, ChevronRight, Folder, FolderOpen, SkipForward, Sparkles, SquareArrowOutUpRight, SquareFunction, X } from 'lucide-react'
 import type { TestCase } from '../api/models/TestCase'
 import { caseKey, caseLocation, splitPath } from '../lib/testCases'
 import { getFileIcon } from '../lib/fileIcons'
@@ -244,7 +244,7 @@ export function NodeBadges({ counts }: { counts: Record<string, number> }) {
         <span className="inline-flex items-center gap-0.5 text-red-600 dark:text-red-400"><X className="w-2.5 h-2.5" strokeWidth={3} />{counts.failed}</span>
       )}
       {(counts.warning ?? 0) > 0 && (
-        <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400"><AlertTriangle className="w-2.5 h-2.5" />{counts.warning}</span>
+        <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400"><TriangleAlert className="w-2.5 h-2.5" />{counts.warning}</span>
       )}
       {(counts.passed ?? 0) > 0 && (
         <span className="inline-flex items-center gap-0.5 text-green-700 dark:text-green-400"><Check className="w-2.5 h-2.5" strokeWidth={3} />{counts.passed}</span>
@@ -297,7 +297,7 @@ function FixButton({ onFix, title }: { onFix: () => void; title: string }) {
       aria-label={title}
       className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded text-gray-400 hover:text-violet-600 dark:text-gray-500 dark:hover:text-violet-400 transition-opacity cursor-pointer"
     >
-      <Sparkles className="w-3 h-3" />
+      <Sparkles className="w-3 h-3" fill="currentColor" />
     </button>
   )
 }
@@ -327,7 +327,7 @@ function StatusGlyph({ status }: { status: string }) {
     case 'failed':
       return <X className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" strokeWidth={3} />
     case 'warning':
-      return <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+      return <TriangleAlert className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
     case 'skipped':
       return <SkipForward className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
     default:
@@ -352,7 +352,7 @@ function MissingFileMarker() {
       title={MISSING_FILE_TITLE}
       aria-label={MISSING_FILE_TITLE}
     >
-      <AlertTriangle className="w-3 h-3" />
+      <TriangleAlert className="w-3 h-3" />
     </span>
   )
 }

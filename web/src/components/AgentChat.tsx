@@ -1726,6 +1726,13 @@ function modelDisplayLabel(model: string): string {
     if (lower.includes(m.id)) return m.label
   }
   for (const m of CODEX_MODELS) if (lower.includes(m.id)) return m.label
+  // A BARE alias. The CLI accepts `/model opus`, and then reports `opus` - which
+  // matches no entry above, because those deliberately carry full ids so the two
+  // Opus versions stay distinguishable. Without this the chip rendered the raw
+  // lowercase alias ("opus") next to labels that are all title case. The version
+  // is genuinely unknown here, so the label says "Opus" and does not guess one.
+  const bare: Record<string, string> = { opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku', fable: 'Fable' }
+  if (bare[lower]) return bare[lower]
   return model.replace(/^claude-/, '')
 }
 
@@ -5108,7 +5115,7 @@ const SkillCard = memo(function SkillCard({ name, text }: { name: string; text: 
         className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
         aria-expanded={open}
       >
-        <Sparkles className="w-3 h-3 shrink-0" />
+        <Sparkles className="w-3 h-3 shrink-0" fill="currentColor" />
         <span className="truncate">Skill loaded: {name}</span>
         <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -10148,13 +10155,29 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   <Plus className="w-4 h-4" />
                 </button>
               </Tooltip>
+              {/* This group holds three runs of text at three different sizes -
+                  "Enter to queue" at 10px, the context percentage at 11px, the
+                  model name at 12px - plus two icon buttons. Plain items-center
+                  aligns each item's LINE BOX, and a bigger line box reserves more
+                  room above the cap, so three sizes centred put three different
+                  baselines on screen.
+                  The fix is NOT items-baseline. That aligns the text but breaks
+                  the buttons: a button has no text baseline, so it falls back to
+                  its bottom margin edge and hangs off the labels; and the line's
+                  cross-centre (max-ascent over max-descent) sits above the text's
+                  ink, so a `self-center` button then reads high.
+                  Instead every label carries `.optical-center`, which trims its
+                  box to the cap-to-baseline ink. Once each item's box IS its ink,
+                  plain items-center aligns the ink - the baselines land within
+                  ~0.7px (half the cap-height difference between 10px and 12px)
+                  and the buttons centre on the same ink the text does. */}
               <div className="ml-auto flex items-center gap-1.5">
                 {/* Item 6: surface what Enter will do only when it isn't the
                     obvious thing - i.e. the message will queue, draining into
                     the running turn at its next step (terminal-style
                     steering); otherwise show nothing. */}
                 {canSend && isTurnRunning && (
-                  <span className="hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 select-none">
+                  <span className="optical-center hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 select-none">
                     Enter to queue
                   </span>
                 )}
@@ -10168,7 +10191,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     side="top"
                   >
                     <span
-                      className={`hidden sm:inline text-[11px] tabular-nums select-none ${
+                      className={`optical-center hidden sm:inline text-[11px] tabular-nums select-none ${
                         contextPct < 10
                           ? 'text-red-500 dark:text-red-400'
                           : contextPct < 20
@@ -10191,7 +10214,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                           : 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.06] hover:text-stone-700 dark:hover:text-stone-200'
                       }`}
                     >
-                      {modelLabel}
+                      {/* Trimmed like the labels beside it, so the button's
+                          symmetric py-1 makes its box centre the label's ink
+                          centre - which is what the group then aligns on. */}
+                      <span className="optical-center">{modelLabel}</span>
                       <ChevronDown className="w-3 h-3" />
                     </button>
                   </Tooltip>

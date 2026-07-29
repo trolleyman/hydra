@@ -12,6 +12,7 @@ import { useToastStore } from '../stores/toastStore'
 import { reorderProjects, useProjectStore } from '../stores/projectStore'
 import { ProjectAgentCounts, ProjectAttentionDot } from './ProjectAgentCounts'
 import { ServiceHealthWarning } from './ServiceHealthWarning'
+import { pillText } from '../lib/branchPills'
 
 // Project-switch shortcut hint. We bind Ctrl (not Cmd) on every platform,
 // including macOS: macOS reserves Cmd+` for its own "cycle windows within an
@@ -478,7 +479,7 @@ export const ProjectDropdown = memo(function ProjectDropdown({
       await api.default.removeProject(p.id)
       const store = useProjectStore.getState()
       store.setProjects(store.projects.filter((x) => x.id !== p.id))
-      useToastStore.getState().show({ message: `Removed "${p.name}" from Hydra.`, type: 'success' })
+      useToastStore.getState().show({ message: pillText`Removed "${p.name}" from Hydra.`, type: 'success' })
       // Removing the project you're looking at leaves the page pointing at
       // nothing - hand back to the caller's deselect, which navigates away.
       if (selectedId === p.id) onDeselect()

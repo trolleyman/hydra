@@ -204,6 +204,15 @@ export function agentStatusBadge(status: string | undefined): { label: string; c
   return { label: status ?? '', className: TONE_BADGE.faint }
 }
 
+// The raw tone behind agentStatusBadge, for surfaces that paint a status in
+// something other than a pill - the notification tile above the pill on an
+// agent toast (see lib/tileTone + lib/agentToast). Reading it from the same
+// AGENT_STATUS table is what keeps the tile and the pill from naming two
+// different colours for one status.
+export function agentStatusTone(status: string | undefined): Tone {
+  return (status ? AGENT_STATUS[status]?.badge : undefined) ?? 'faint'
+}
+
 // agentStatusHelp is the prose behind a status chip's hover card - what the state
 // means in plain words. Empty for an unknown status, so a caller can fall back to
 // no tooltip at all rather than an empty box.

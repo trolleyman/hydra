@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, type ReactNode } from 'react'
-import { MoreHorizontal, ChevronDown, Sparkles, Loader2 } from 'lucide-react'
+import { MoreHorizontal, ChevronDown, Sparkles, LoaderCircle } from 'lucide-react'
 import { useFinePointer } from '../lib/useFinePointer'
 import { Tooltip } from './Tooltip'
+import { TILE_TONE, TILE_GLYPH } from '../lib/tileTone'
+import { withBranchPills } from '../lib/branchPills'
 
 // Visual treatment for an action button. 'primary' is a filled accent button
 // (the merge call-to-action); 'segment' members are borderless and render inside
@@ -22,7 +24,10 @@ export interface AgentTopBarMenuItem {
   onClick: () => void
   danger?: boolean
   disabled?: boolean
-  // A second, muted line under the label in the (rich) dropdown - what the option does.
+  // A second, muted line under the label in the (rich) dropdown - what the option
+  // does. `backtick` spans become inline branch pills, the same convention the
+  // toasts and dialogs use - a menu row that says "Merge into `main`" sits one
+  // click from a dialog and a toast that both render that branch as a pill.
   description?: string
   // Colour of the option's icon tile in the rich dropdown. Defaults to red when
   // `danger`, else neutral.
@@ -168,16 +173,18 @@ function chevBtnClass(v: AgentTopBarVariant | undefined): string {
   return `${base} bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700`
 }
 
-// A rounded icon tile for a rich dropdown row - mirrors the dialog icon tiles, in
-// the same red / emerald / neutral tones.
+// A rounded icon tile for a rich dropdown row. The SAME object as a toast's tile
+// and a dialog's, so it draws from the same table (lib/tileTone) - these rows sit
+// one click away from the dialog they open, and the two tiles reading differently
+// was the giveaway that they were two hand-rolled tints. Slightly smaller (8 vs 9)
+// because a menu row is denser than a card header; the border is gone with the
+// tint, since a solid fill does not need an edge to separate it from the sheet.
 function MenuTile({ tone, children }: { tone: 'red' | 'emerald' | 'neutral'; children: ReactNode }) {
-  const cls =
-    tone === 'red'
-      ? 'bg-red-100 text-red-600 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800/50'
-      : tone === 'emerald'
-        ? 'bg-emerald-100 text-emerald-600 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800/50'
-        : 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
-  return <span className={`w-8 h-8 shrink-0 rounded-lg border flex items-center justify-center ${cls}`}>{children}</span>
+  return (
+    <span className={`w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ${TILE_GLYPH} ${TILE_TONE[tone]}`}>
+      {children}
+    </span>
+  )
 }
 
 // A split action button: the main button (the action's onClick) butted against a
@@ -249,7 +256,7 @@ function SplitActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mo
               <MenuTile tone={m.tone ?? (m.danger ? 'red' : 'neutral')}>{m.icon}</MenuTile>
               <span className="flex flex-col gap-0.5 min-w-0 pt-0.5">
                 <span className={`text-[13px] font-semibold leading-tight ${m.danger ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-[#eef1f6]'}`}>{m.label}</span>
-                {m.description && <span className="text-[12px] leading-snug text-gray-500 dark:text-[#8b94a6]">{m.description}</span>}
+                {m.description && <span className="text-[12px] leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(m.description)}</span>}
               </span>
             </button>
           ))}
@@ -663,9 +670,13 @@ export function AgentTopBarContent({
                 className="shrink-0 h-7 inline-flex items-center gap-1.5 px-2.5 rounded-md text-[12.5px] font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
               >
                 {rename.generating ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  <Sparkles className="w-3.5 h-3.5" />
+                  // Filled, not outlined. At 14px lucide's Sparkles is three
+                  // hairline outlines and reads as noise next to the solid label
+                  // beside it; filled, the mark reads as a mark. The other
+                  // Sparkles in the UI are still outlined - see the icon audit.
+                  <Sparkles className="w-3.5 h-3.5" fill="currentColor" />
                 )}
                 <span className="whitespace-nowrap optical-center">Generate</span>
               </button>

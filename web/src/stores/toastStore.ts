@@ -84,8 +84,15 @@ export interface ToastAction {
 export interface Toast {
   id: number
   // The toast body. A string renders as the message paragraph (`backtick` spans
-  // become inline mono branch pills); any other node renders verbatim.
+  // become inline mono branch pills); a ReactNode from pillText is the same
+  // sentence with untrusted text spliced in, and renders in that paragraph too.
   message: ToastContent
+  // Set when `message` is a multi-row LAYOUT of its own (the agent-transition
+  // card) rather than a sentence. A sentence gets the prose paragraph and is
+  // centred against the icon tile; a layout gets neither and tops out with it.
+  // A flag rather than a `typeof message === 'string'` test, because a sentence
+  // is no longer always a string - see pillText in lib/branchPills.
+  richMessage?: boolean
   // Tile glyph override (a lucide icon element). Omitted, the tile shows the
   // `type` icon; rich toasts pass e.g. <Bot/> to identify as an agent.
   icon?: ReactNode
@@ -153,6 +160,7 @@ interface ToastState {
   // toast (duration: 0) can later dismiss() it - e.g. a "Merging..." indicator.
   show: (options: {
     message: ToastContent
+    richMessage?: boolean
     code?: string
     codeLang?: string
     compact?: boolean
@@ -217,7 +225,7 @@ function clearTimer(id: number) {
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
-  show: ({ message, code, codeLang, compact, type = 'info', duration = type === 'error' ? ERROR_DURATION_MS : DEFAULT_DURATION_MS, actions, onDismiss, key, icon, accent, approval, projectContext }) => {
+  show: ({ message, richMessage, code, codeLang, compact, type = 'info', duration = type === 'error' ? ERROR_DURATION_MS : DEFAULT_DURATION_MS, actions, onDismiss, key, icon, accent, approval, projectContext }) => {
     // Keyed toast already on screen → replace its contents in place (same id, no
     // re-stack), and re-arm its expiry timer if it auto-dismisses.
     if (key !== undefined) {
@@ -226,7 +234,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
         set((state) => ({
           toasts: state.toasts.map((t) =>
             t.id === existing.id
-              ? { ...t, message, code, codeLang, compact, type, duration, actions, onDismiss, icon, accent, approval, projectContext, createdAt: Date.now() }
+              ? { ...t, message, richMessage, code, codeLang, compact, type, duration, actions, onDismiss, icon, accent, approval, projectContext, createdAt: Date.now() }
               : t,
           ),
         }))
@@ -238,7 +246,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
     set((state) => ({
       toasts: [
         ...state.toasts,
-        { id, message, code, codeLang, compact, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, icon, accent, approval, projectContext },
+        { id, message, richMessage, code, codeLang, compact, type, duration, createdAt: Date.now(), exiting: false, actions, onDismiss, key, icon, accent, approval, projectContext },
       ],
     }))
     if (duration > 0) {

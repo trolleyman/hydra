@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronRight, Loader2, Save } from 'lucide-react'
+import { ChevronRight, LoaderCircle, Save } from 'lucide-react'
 import { readLocal, writeLocal } from '../../lib/storage'
 import { TopBarPortal } from '../TopBarPortal'
 import { Tooltip } from '../Tooltip'
@@ -41,7 +41,7 @@ export function SettingsSaveAction({
                 : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
             }`}
           >
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            {saving ? <LoaderCircle className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             <span className="whitespace-nowrap optical-center">{saving ? 'Saving...' : 'Save'}</span>
           </button>
         </Tooltip>
