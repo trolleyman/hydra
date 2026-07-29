@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildEditRows, parseEditPatch, hasLineNumbers } from './editDiff'
+import { buildEditRows, parseEditPatch, hasLineNumbers, numberRows } from './editDiff'
 
 const shape = (rows: ReturnType<typeof buildEditRows>) => rows.map((r) => `${r.type} ${r.oldNum ?? '-'}/${r.newNum ?? '-'} ${r.content}`)
 
@@ -86,5 +86,38 @@ describe('buildEditRows from the strings alone', () => {
   it('leaves an unrelated deletion/addition pair unmarked', () => {
     const rows = buildEditRows('apple', 'orange')
     expect(rows.every((r) => r.ranges === undefined)).toBe(true)
+  })
+})
+
+// numberRows is what the lightbox's text diff uses: two WHOLE files, so a row's
+// position is its line number on the side it belongs to.
+describe('numberRows', () => {
+  it('numbers each side independently, skipping the side a row is absent from', () => {
+    const rows = numberRows(buildEditRows('a\nb\nc', 'a\nB\nc\nd'))
+    expect(rows.map((r) => [r.type, r.oldNum, r.newNum])).toEqual([
+      ['context', 1, 1],
+      ['del', 2, null],
+      ['add', null, 2],
+      ['context', 3, 3],
+      ['add', null, 4],
+    ])
+    expect(hasLineNumbers(rows)).toBe(true)
+  })
+
+  it('leaves a gap row alone', () => {
+    const rows = numberRows([
+      { type: 'context', content: 'a', oldNum: null, newNum: null },
+      { type: 'gap', content: '', oldNum: null, newNum: null },
+      { type: 'context', content: 'b', oldNum: null, newNum: null },
+    ])
+    expect(rows[1]).toEqual({ type: 'gap', content: '', oldNum: null, newNum: null })
+    // The gap consumes no line, so numbering continues across it.
+    expect([rows[0].newNum, rows[2].newNum]).toEqual([1, 2])
+  })
+
+  it('does not mutate the rows it was given', () => {
+    const rows = buildEditRows('a', 'b')
+    numberRows(rows)
+    expect(rows.every((r) => r.oldNum === null && r.newNum === null)).toBe(true)
   })
 })

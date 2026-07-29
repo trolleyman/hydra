@@ -8,7 +8,7 @@ import { formatError } from '../api/format_error'
 import { IMG_CLASS, checkerStyle } from './artifactDiffShared'
 import { CheckerLayer } from './CheckerLayer'
 import { VIDEO_MIN_TILE_PX } from './VideoDiffView'
-import { isVideoArtifact, isPdfArtifact, isFileTileArtifact } from '../lib/artifactFilter'
+import { isVideoArtifact, isPdfArtifact, isTextArtifact, isFileTileArtifact } from '../lib/artifactFilter'
 import { fileKind } from '../lib/fileKind'
 import { formatBytes } from '../lib/formatBytes'
 import { MasonryGrid } from './ArtifactsPanel'
@@ -48,7 +48,10 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
     openLightbox(gallery, i >= 0 ? i : 0, e.currentTarget)
   }
   const isCard = isFileTileArtifact(file.name)
-  const CardIcon = isPdfArtifact(file.name) ? FileText : FileArchive
+  // A document mark for the two the lightbox can read out (a PDF, a text
+  // file); the archive mark stays for what only downloads.
+  const isDoc = isPdfArtifact(file.name) || isTextArtifact(file.name)
+  const CardIcon = isDoc ? FileText : FileArchive
   return (
     <div className="p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
@@ -69,7 +72,8 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
             <span className="text-[11px] font-medium">No file</span>
           </div>
         ) : isCard ? (
-          // A file with no inline preview - a package (an .apk, a .zip) or a PDF.
+          // A file with no inline preview - a package (an .apk, a .zip), a PDF or
+          // a text file.
           // The card opens the lightbox like every other tile (the PDF renders in
           // the browser's viewer there; a package gets a card with its download
           // link), and the save button on the right downloads it directly.
@@ -88,7 +92,7 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
                 The row's height comes from the w-6 icon, so the trim can't
                 shorten it. */}
             <span className="optical-center min-w-0 flex-1 text-[11px] text-gray-400 dark:text-gray-500">
-              {file.size != null ? formatBytes(file.size) : isPdfArtifact(file.name) ? 'PDF' : 'download'}
+              {file.size != null ? formatBytes(file.size) : isPdfArtifact(file.name) ? 'PDF' : isTextArtifact(file.name) ? 'text' : 'download'}
             </span>
             <Tooltip content="Download">
               <a href={url} download onClick={(e) => e.stopPropagation()} className="shrink-0 p-1 -m-1 rounded hover:text-gray-900 dark:hover:text-gray-100">

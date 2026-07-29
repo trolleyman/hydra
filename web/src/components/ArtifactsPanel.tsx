@@ -13,7 +13,7 @@ import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { useMediaDims } from '../lib/artifactDims'
 import { loadArtifactPrefs, saveArtifactPrefs, loadTagFilter, saveTagFilter, loadArtifactChrome, saveArtifactChrome, clampChangeThreshold, type ArtifactTagFilter, type ArtifactChrome } from '../lib/artifactPrefs'
-import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact, isPdfArtifact, isFileTileArtifact } from '../lib/artifactFilter'
+import { computeVisibleFiles, filterIsActive, effectiveChangeType, isVideoArtifact, isPdfArtifact, isTextArtifact, isFileTileArtifact } from '../lib/artifactFilter'
 import { fileKind } from '../lib/fileKind'
 import { formatBytes } from '../lib/formatBytes'
 import { ArtifactFilterBar, TagBadge } from './ArtifactFilterBar'
@@ -166,7 +166,8 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
 }
 
 // FileTile renders an artifact with no inline preview - a download-class package
-// (an .apk, a .zip) or a PDF: an icon, the byte size, and a save link per side.
+// (an .apk, a .zip), a PDF, or a text file: an icon, the byte size, and a save
+// link per side.
 // The blob endpoint serves the download-class ones with Content-Disposition:
 // attachment, so their links save rather than render.
 //
@@ -183,7 +184,10 @@ function FileTile({ file, gallery, index }: { file: ArtifactFile; gallery?: Ligh
   ].filter((s): s is { label: string; url: string } => !!s.url)
   const url = file.right_url ?? file.left_url
   const isPdf = isPdfArtifact(file.name)
-  const Icon = isPdf ? FileText : FileArchive
+  const isText = isTextArtifact(file.name)
+  // A document mark for the two the lightbox can actually read out (a PDF, a
+  // text file); the archive mark stays for what only downloads.
+  const Icon = isPdf || isText ? FileText : FileArchive
   const open = url && gallery && index != null
     ? (e: React.SyntheticEvent<HTMLDivElement>) => openLightbox(gallery, index, e.currentTarget)
     : undefined
@@ -202,7 +206,7 @@ function FileTile({ file, gallery, index }: { file: ArtifactFile; gallery?: Ligh
       <Icon className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
       <div className="min-w-0 flex-1">
         <div className="text-[11px] text-gray-400 dark:text-gray-500">
-          {file.size != null ? formatBytes(file.size) : isPdf ? 'PDF' : 'download'}
+          {file.size != null ? formatBytes(file.size) : isPdf ? 'PDF' : isText ? 'text' : 'download'}
         </div>
         <div className="flex items-center gap-1.5 mt-1">
           {sides.map((side) => (
