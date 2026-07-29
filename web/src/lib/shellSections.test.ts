@@ -62,7 +62,40 @@ describe('parseScriptSteps', () => {
     expect(steps('cat a.go | tail -5')[0]).toMatchObject({ kind: 'view', view: { start: null, end: null } })
     // Any other pipe transforms the output into something else.
     expect(kinds('grep -n foo a.go | wc -l\ncat b.go')).toEqual(['unknown', 'view'])
-    expect(kinds('cat a.go | grep foo\ncat b.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('sees through a trailing grep that only drops lines', () => {
+    expect(steps('grep -rn foo src | grep -v _test.go | head -20')[0]).toEqual({
+      kind: 'matches',
+      command: 'grep -rn foo src | grep -v _test.go | head -20',
+      match: { paths: ['src'], numbered: true },
+    })
+    // A filtered file view is no longer a contiguous slice, so it keeps the
+    // file's language and loses the line numbers it could no longer count.
+    expect(steps('cat a.go | grep foo')[0]).toMatchObject({
+      kind: 'matches',
+      match: { paths: ['a.go'], numbered: false },
+    })
+    // A filter that would add numbers of its own is numbering the STREAM, and a
+    // `cat -n`'s numbers ride in text nothing downstream can read them off.
+    expect(kinds('grep -n foo a.go | grep -n bar\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('cat -n a.go | grep foo\ncat b.go')).toEqual(['unknown', 'view'])
+    // Still a search of its own, not a filter, when it names a file.
+    expect(kinds('cat a.go | grep foo b.go\ncat b.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('reads a git report', () => {
+    expect(steps('git status --short')[0]).toEqual({ kind: 'git', command: 'git status --short' })
+    expect(kinds('git status\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git -C /repo show --stat HEAD | tail -20\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git log --oneline -10\necho ----')).toEqual(['git', 'marker'])
+    // A patch wants a diff view, not a line-shape colouriser - and a caller's
+    // own format could put anything on any line.
+    expect(kinds('git show HEAD\necho ----')).toEqual(['unknown', 'marker'])
+    expect(kinds('git log -p\necho ----')).toEqual(['unknown', 'marker'])
+    expect(kinds('git show --stat --pretty=format:%s\necho ----')).toEqual(['unknown', 'marker'])
+    expect(kinds('git status --porcelain=v2\necho ----')).toEqual(['unknown', 'marker'])
+    expect(kinds('git commit -m x\necho ----')).toEqual(['unknown', 'marker'])
   })
 
   it('treats what prints nothing as silent', () => {
