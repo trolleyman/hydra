@@ -77,11 +77,13 @@ function imagePasteEvent() {
 // A fresh agent id per render: the composer's draft attachments live in an
 // in-memory cache keyed by agent, which would otherwise leak chips (and the
 // image-number counter) from one test into the next.
+// (`agentId` is overridable for the one test that has to render the SAME head
+// twice - a pane's own state must not survive it going away.)
 let agentSeq = 0
-function renderChat() {
+function renderChat(agentId = `agent-${++agentSeq}`) {
   return render(
     <ChatPane
-      agentId={`agent-${++agentSeq}`}
+      agentId={agentId}
       projectId="proj"
       active
       reconnectAttempt={0}
@@ -307,6 +309,25 @@ describe('an expanded tool card survives its run becoming a step group', () => {
     // after the cards it now owns - proof the run really did fold.
     await screen.findByText('2 steps')
     expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  // The other half of the rule: the memory belongs to the VISIT. What you
+  // unfolded chasing one thing is not what you want waiting for you when you
+  // come back, so the pane owns the map and it dies with the pane.
+  it('forgets the card again once the pane goes away', async () => {
+    const { unmount } = renderChat('agent-refold')
+    await connectedComposer()
+    act(() => sockets[0].emit({ type: 'replay_done' }))
+    call(sockets[0], 'toolu_refold', 'Read')
+    act(() => cardHeader('Read')!.click())
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+
+    unmount()
+    renderChat('agent-refold')
+    await connectedComposer()
+    act(() => sockets[1].emit({ type: 'replay_done' }))
+    call(sockets[1], 'toolu_refold', 'Read')
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'false')
   })
 })
 

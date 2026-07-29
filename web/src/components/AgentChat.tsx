@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
+import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   Archive,
   ArrowDown,
@@ -2811,23 +2811,28 @@ function LowlitPath({ path }: { path: string }) {
   return <>{dir && <span className="text-stone-400/70 dark:text-stone-500/70">{dir}</span>}<span className="text-stone-400 dark:text-stone-500">{name}</span></>
 }
 
-// Which cards the reader has expanded, by tool-use id, outliving the card's
-// React instance.
+// Which cards the reader has expanded, by tool-use id: state that has to
+// outlive the card's React instance, but not the visit.
 //
-// A card's fold state cannot live in useState alone, because the card does not
-// stay mounted: the moment a second tool call lands beside it, planStepRows
+// A card's fold cannot live in useState alone, because the card does not stay
+// mounted: the moment a second tool call lands beside it, planStepRows
 // re-parents the run into a new StepGroup, and React reconciles a row that
 // changes parent as unmount + mount rather than as a move (the key only matches
 // among siblings of the same parent). Local state would take the expanded card
 // the reader was in the middle of reading away from them, mid-turn, for no
 // reason they could see.
 //
-// Only cards the reader has actually TOUCHED get an entry, so this holds one
-// boolean per click and nothing per transcript. It is deliberately not cleared
-// when a pane unmounts: a card you opened is your decision, and unlike a step
-// group (which tidies itself away on the way back in, see StepGroup) an open
-// card inside a folded group costs nothing until you go looking for it again.
-const toolCardOpen = new Map<string, boolean>()
+// The map is owned by the PANE (a ref, handed down through this context) and
+// dies with it, so leaving the page and coming back renders the transcript
+// quiet again - the same tidying a step group does (see StepGroup), for the
+// same reason: what you unfolded chasing one thing is not what you want waiting
+// for you on the next visit. Only cards the reader actually TOUCHED get an
+// entry, so within a visit it holds one boolean per click and nothing per
+// transcript.
+//
+// The default is a fallback for a card rendered outside a pane; every real one
+// is under the provider in ChatPane.
+const ToolFoldContext = createContext<Map<string, boolean>>(new Map())
 
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
 // tool card in the transcript (item 16). Props are stable per settled item.
@@ -2853,13 +2858,14 @@ const ToolCard = memo(function ToolCard({
   recipientRunning?: boolean
   openSub?: (key: string) => void
 }) {
-  const [open, setOpen] = useState(() => toolCardOpen.get(item.toolUseId) ?? false)
+  const folds = useContext(ToolFoldContext)
+  const [open, setOpen] = useState(() => folds.get(item.toolUseId) ?? false)
   // Toggling records the choice so it survives the card's next remount (see
-  // toolCardOpen). The auto-open below deliberately doesn't - an approval opens
-  // the card by itself on every mount for as long as it is parked.
+  // ToolFoldContext). The auto-open below deliberately doesn't - an approval
+  // opens the card by itself on every mount for as long as it is parked.
   const toggleOpen = () => {
     const next = !open
-    toolCardOpen.set(item.toolUseId, next)
+    folds.set(item.toolUseId, next)
     setOpen(next)
   }
   const [showRaw, setShowRaw] = useState(false)
@@ -5981,6 +5987,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // The main view's scroll spot, parked while a sub-agent view is open so
   // coming back lands where the reader left off.
   const mainScrollRef = useRef<{ top: number; pinned: boolean } | null>(null)
+  // The tool cards the reader has unfolded on this visit, owned here so they
+  // are forgotten when the pane goes away (see ToolFoldContext).
+  const toolFoldsRef = useRef<Map<string, boolean>>(new Map())
   // Chat pane width, tracked so the plan panel collapses when there's no room
   // to sit it alongside the transcript.
   const [paneWidth, setPaneWidth] = useState(0)
@@ -8467,6 +8476,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
   useEffect(() => {
     mainScrollRef.current = null
+    // Which tool cards the reader unfolded is per-head too (see
+    // ToolFoldContext). The pane itself outlives a head switch, so the map has
+    // to be emptied here as well as by dying with the pane.
+    toolFoldsRef.current.clear()
   }, [agentId, projectId])
 
   // Stable identity (per chatView) so the subagentLinks memo below doesn't
@@ -9876,6 +9889,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // brand accent instead of Claude's unconditionally.
     <ChatAgentTypeContext.Provider value={agentType ?? 'claude'}>
     <ChatApprovalContext.Provider value={approvalCtx}>
+    {/* A card the reader unfolds has to survive its run folding into a step
+        group, which remounts it - the map is how, and living here is what makes
+        it forgotten when the pane does (see ToolFoldContext). */}
+    <ToolFoldContext.Provider value={toolFoldsRef.current}>
     <div
       className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
       onKeyDown={onPaneKeyDown}
@@ -10292,6 +10309,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         />
       )}
     </div>
+    </ToolFoldContext.Provider>
     </ChatApprovalContext.Provider>
     </ChatAgentTypeContext.Provider>
   )
