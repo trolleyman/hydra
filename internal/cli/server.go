@@ -204,7 +204,7 @@ func runSimulationServer() error {
 		addr = envAddr
 	}
 	log.Printf("Simulation Server starting on http://%s", addr)
-	return errtrace.Wrap(http.ListenAndServe(addr, httppkg.LoggingMiddleware(mux)))
+	return errtrace.Wrap(http.ListenAndServe(addr, httppkg.CompressionMiddleware(httppkg.LoggingMiddleware(mux))))
 }
 
 func trimSlash(s string) string {

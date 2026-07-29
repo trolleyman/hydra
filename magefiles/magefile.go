@@ -257,33 +257,6 @@ func runInDirV(dir string, cmd string, args ...string) error {
 	return nil
 }
 
-// runInDirWithEnvV runs a command in a specific directory with environment variables set and stdout/stderr forwarded
-func runInDirWithEnvV(dir string, env map[string]string, cmd string, args ...string) error {
-	cmdLine := []string{
-		"pushd", displayPath(dir), "&&",
-	}
-	for k, v := range env {
-		cmdLine = append(cmdLine, fmt.Sprintf("%s=%s", k, v))
-	}
-	cmdLine = append(cmdLine, cmd)
-	cmdLine = append(cmdLine, args...)
-	cmdLine = append(cmdLine, "&&", "popd")
-	printCmdLine(cmdLine)
-	c := exec.Command(cmd, args...)
-	c.Dir = dir
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	c.Env = os.Environ()
-	for k, v := range env {
-		c.Env = append(c.Env, fmt.Sprintf("%s=%s", k, v))
-	}
-	err := c.Run()
-	if err != nil {
-		return errtrace.Wrap(fmt.Errorf("failed to run %q in %q: %w", cmd, dir, err))
-	}
-	return nil
-}
-
 // Custom error to break out of filepath.Walk early when a newer file is found.
 var errFoundNewer = errors.New("found newer file")
 
@@ -1158,12 +1131,11 @@ func webPM() string {
 	return webPMName
 }
 
+// BuildWeb builds the frontend into web/dist, which the binary embeds. There is
+// exactly one build flavour - minified with source maps, see web/vite.config.ts -
+// so there is one stamp and no build-mode environment to get wrong.
 func BuildWeb() error {
 	stamp := ".mage/web-build.stamp"
-	isDev := os.Getenv("HYDRA_DEV_BUILD") == "1"
-	if isDev {
-		stamp = ".mage/web-build-dev.stamp"
-	}
 
 	ignores := map[string]struct{}{
 		"dist":         {},
@@ -1190,14 +1162,7 @@ func BuildWeb() error {
 		return errtrace.Wrap(err)
 	}
 
-	buildArgs := []string{"run", "build"}
-	env := map[string]string{}
-	if isDev {
-		env["NODE_ENV"] = "development"
-		buildArgs = append(buildArgs, "--", "--mode", "development")
-	}
-
-	if err := runInDirWithEnvV("web", env, webPM(), buildArgs...); err != nil {
+	if err := runInDirV("web", webPM(), "run", "build"); err != nil {
 		return errtrace.Wrap(err)
 	}
 
@@ -1301,7 +1266,6 @@ func getHydraOutputFile() string {
 // For auto-reload on file changes use DevAutoReload instead.
 func Dev() error {
 	ensureToolsEnv()
-	os.Setenv("HYDRA_DEV_BUILD", "1")
 	return errtrace.Wrap(devServerLoop([]string{"HYDRA_API_ADDR=localhost:" + hydraPort()}))
 }
 
@@ -1315,7 +1279,6 @@ func DevExpose() error {
 		return errtrace.Wrap(err)
 	}
 	ensureToolsEnv()
-	os.Setenv("HYDRA_DEV_BUILD", "1")
 	addr := exposedAPIAddr()
 	fmt.Printf("%sDev server exposed on http://%s - reachable from other devices; auth key required%s\n", colorBold, addr, colorReset)
 	return errtrace.Wrap(devServerLoop([]string{"HYDRA_API_ADDR=" + addr}))
@@ -1370,7 +1333,6 @@ func devServerLoop(extraEnv []string) error {
 // it uses stamp-based caching so it is a no-op when neither web/ nor api/ have changed.
 func DevFast() error {
 	ensureToolsEnv()
-	os.Setenv("HYDRA_DEV_BUILD", "1")
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -1457,7 +1419,6 @@ func DevFast() error {
 // Access the frontend at http://localhost:5173; API calls are proxied to the dev backend.
 // The /api/dev/restart UI button is also available alongside auto-reload.
 func DevAutoReload() error {
-	os.Setenv("HYDRA_DEV_BUILD", "1")
 	// Ensure generated Go code is up to date.
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
@@ -1639,7 +1600,6 @@ func Preview() error {
 // the simulation twin of DevFast - a prod build swapped for --simulation.
 func Demo() error {
 	ensureToolsEnv()
-	os.Setenv("HYDRA_DEV_BUILD", "1")
 	// Ensure generated Go code is up to date.
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)

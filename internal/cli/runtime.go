@@ -440,7 +440,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	mux := buildMux(server, auth)
 	return &daemonRuntime{
 		server:      server,
-		handler:     httppkg.LoggingMiddleware(auth.Middleware(mux)),
+		handler:     httppkg.CompressionMiddleware(httppkg.LoggingMiddleware(auth.Middleware(mux))),
 		store:       store,
 		reg:         reg,
 		services:    svcMgr,
