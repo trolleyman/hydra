@@ -14,7 +14,12 @@ type Seg =
   // A backslash-escaped metacharacter (`\_` etc.): renders as the literal
   // character. Its source is '\' + value.
   | { kind: 'escape'; value: string }
-  | { kind: 'code'; marker: string; value: string }
+  // An inline `code` span. `marker` is the backtick RUN that delimits it (one or
+  // more - see codeSpanAt), `value` the content as it should read, and `pad` the
+  // single space CommonMark strips from each end when the content is padded
+  // (`` ` `` -> a literal backtick). marker + pad + value + pad + marker is the
+  // exact source, which is what the textarea overlay needs.
+  | { kind: 'code'; marker: string; value: string; pad: string }
   // A fenced ```code block```. `raw` is the exact matched source (fences and all)
   // so the textarea overlay stays glyph-aligned; `value` is just the inner code
   // and `lang` the optional info string for read-only rendering.
@@ -47,7 +52,40 @@ type Seg =
 // overlay away from the textarea caret.)
 const FENCE_RE = /^```([^\n]*)\n(?:([\s\S]*?)\n)?```[ \t]*(?=\n|$)/
 
-type InlineKind = 'code' | 'bold' | 'italic' | 'bolditalic' | 'strike'
+type InlineKind = 'bold' | 'italic' | 'bolditalic' | 'strike'
+
+// codeSpanAt matches a code span at the START of `rest`, or null. Code spans get
+// their own matcher rather than a regex in PATTERNS because their delimiter is
+// variable-length, which a regex can't express: a run of N backticks is closed
+// by the next run of EXACTLY N (CommonMark 6.1), so a longer or shorter run in
+// between is just content. That is what lets a span hold backticks at all -
+// `` ` `` is a literal backtick, and "` ``` `" is the triple fence. A single
+// `^`([^`\n]+)`$`-style pattern instead read the first two backticks of
+// "` ``` `" as an empty span, which is how a sentence about ``` came out as two
+// blank chips.
+//
+// If the content both starts and ends with a space and isn't all spaces, one
+// space is stripped from each end (CommonMark's padding rule - it is what makes
+// a span that starts or ends with a backtick writable). The stripped pair is
+// returned as `pad` so the source can be reassembled exactly.
+//
+// Unlike CommonMark the span may not cross a newline: this parser highlights as
+// you type, where an unclosed marker must not swallow the rest of the text.
+function codeSpanAt(rest: string): Extract<Seg, { kind: 'code' }> | null {
+  const open = /^`+/.exec(rest)
+  if (!open) return null
+  const marker = open[0]
+  const scan = /`+|\n/g
+  scan.lastIndex = marker.length
+  for (let m = scan.exec(rest); m; m = scan.exec(rest)) {
+    if (m[0] === '\n') return null
+    if (m[0].length !== marker.length) continue
+    const inner = rest.slice(marker.length, m.index)
+    const pad = inner.startsWith(' ') && inner.endsWith(' ') && inner.trim() !== '' ? ' ' : ''
+    return { kind: 'code', marker, pad, value: pad ? inner.slice(1, -1) : inner }
+  }
+  return null
+}
 
 // Inline patterns, tried in order at each position. The longer markers must
 // precede the shorter ones that prefix them so the longer marker wins: `***`/
@@ -55,7 +93,6 @@ type InlineKind = 'code' | 'bold' | 'italic' | 'bolditalic' | 'strike'
 // anchored to the current scan position and forbids newlines inside the span so
 // an unclosed marker doesn't swallow the rest of the text.
 const PATTERNS: { kind: InlineKind; re: RegExp }[] = [
-  { kind: 'code', re: /^`([^`\n]+)`/ },
   { kind: 'bolditalic', re: /^\*\*\*([^\n]+?)\*\*\*/ },
   { kind: 'bolditalic', re: /^___([^\n]+?)___/ },
   { kind: 'bold', re: /^\*\*([^\n]+?)\*\*/ },
@@ -80,9 +117,10 @@ const HEADING_RE = /^(#{1,6}[ \t]+)([^\n]*)/
 const ESCAPABLE = new Set(['`', '*', '_', '~', '\\'])
 
 // parseInline splits text into styled/plain segments. The concatenation of all
-// segments' source (marker + value + marker, or '\' + value for an escape) is
-// exactly the input, so callers that need character-for-character fidelity
-// (e.g. a textarea overlay) can rely on it.
+// segments' source (marker + value + marker, marker + pad + value + pad + marker
+// for a code span, or '\' + value for an escape) is exactly the input, so
+// callers that need character-for-character fidelity (e.g. a textarea overlay)
+// can rely on it.
 function parseInline(text: string): Seg[] {
   const segs: Seg[] = []
   let buf = ''
@@ -130,6 +168,18 @@ function parseInline(text: string): Seg[] {
         i += hm[0].length
         continue
       }
+    }
+    // Code spans first: their contents are literal, so a marker inside one is
+    // never emphasis (CommonMark gives them the highest inline precedence).
+    const code = text[i] === '`' ? codeSpanAt(rest) : null
+    if (code) {
+      if (buf) {
+        segs.push({ kind: 'text', value: buf })
+        buf = ''
+      }
+      segs.push(code)
+      i += code.marker.length * 2 + code.pad.length * 2 + code.value.length
+      continue
     }
     let hit: { kind: InlineKind; m: RegExpExecArray } | null = null
     for (const p of PATTERNS) {
@@ -264,7 +314,7 @@ function flattenToLine(segs: Seg[]): Seg[] {
     // An empty text seg is pure gap; an empty code chip still renders (it is a
     // deliberate span in the source).
     if (core !== '' || s.kind === 'code' || s.kind === 'codeblock') {
-      push(s.kind === 'codeblock' ? { kind: 'code', marker: '`', value: core } : { ...s, value: core })
+      push(s.kind === 'codeblock' ? { kind: 'code', marker: '`', pad: '', value: core } : { ...s, value: core })
     }
     gap = gap || value.endsWith(' ')
   }
@@ -411,9 +461,9 @@ export function renderMarkdownSource(text: string): ReactNode {
           key={i}
           className="rounded box-decoration-clone bg-gray-100/80 dark:bg-black/30 text-[#a8462d] dark:text-[#eab6a0] shadow-[inset_0_0_0_1px_rgba(120,120,120,0.35)]"
         >
-          {s.marker}
+          {s.marker + s.pad}
           {s.value}
-          {s.marker}
+          {s.pad + s.marker}
         </span>
       )
     }

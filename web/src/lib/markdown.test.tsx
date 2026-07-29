@@ -88,6 +88,39 @@ describe('renderMarkdown', () => {
     expect(code?.className).not.toContain('block')
   })
 
+  // CommonMark 6.1: a run of N backticks is closed by the next run of exactly N,
+  // and a content that is padded with a space at BOTH ends loses one from each.
+  // Getting this wrong is what turned a sentence about ``` into two blank chips.
+  it('closes a code span only on a backtick run of the same length', () => {
+    const { container } = render(<span>{renderMarkdown('Typing ` ``` ` still works')}</span>)
+    const codes = [...container.querySelectorAll('code')].map((c) => c.textContent)
+    expect(codes).toEqual(['```'])
+    expect(container.textContent).toBe('Typing ``` still works')
+  })
+
+  it('renders a lone backtick written as a doubled span', () => {
+    const { container } = render(<span>{renderMarkdown('the `` ` `` mark')}</span>)
+    expect(container.querySelector('code')?.textContent).toBe('`')
+  })
+
+  it('keeps a code span that is only spaces, and inner spaces either side', () => {
+    // "Not all spaces" is the guard on the padding rule; one-sided padding stays.
+    expect(render(<span>{renderMarkdown('a `  ` b')}</span>).container.querySelector('code')?.textContent).toBe('  ')
+    expect(render(<span>{renderMarkdown('a ` b` c')}</span>).container.querySelector('code')?.textContent).toBe(' b')
+  })
+
+  it('treats the contents of a code span as literal, not emphasis', () => {
+    const { container } = render(<span>{renderMarkdown('run `a *b* c` now')}</span>)
+    expect(container.querySelector('em')).toBeNull()
+    expect(container.querySelector('code')?.textContent).toBe('a *b* c')
+  })
+
+  it('leaves an unclosed backtick run as plain text', () => {
+    const { container } = render(<span>{renderMarkdown('a ``` b\nc')}</span>)
+    expect(container.querySelector('code')).toBeNull()
+    expect(container.textContent).toBe('a ``` b\nc')
+  })
+
   it('leaves an escaped tilde literal, opening no strikethrough', () => {
     const { container } = render(<span>{renderMarkdown('cd \\~/foo then \\~/bar')}</span>)
     expect(container.querySelector('del')).toBeNull()
@@ -119,6 +152,15 @@ describe('renderMarkdownSource', () => {
     expect(italic.container.querySelector('.md-src-italic')?.textContent).toBe('*b*')
     expect(italic.container.querySelector('em')).toBeNull()
     expect(italic.container.querySelector('.italic')).toBeNull()
+  })
+
+  it('keeps every source character of a padded, multi-backtick code span', () => {
+    // The composer overlay sits behind the textarea, so a stripped padding space
+    // would drift every glyph after it away from the caret.
+    for (const src of ['Typing ` ``` ` still works', 'the `` ` `` mark', 'a `  ` b']) {
+      const { container } = render(<span>{renderMarkdownSource(src)}</span>)
+      expect(container.textContent).toBe(src)
+    }
   })
 
   it('slants and bold-strokes bold-italic, keeping metrics neutral', () => {
