@@ -111,6 +111,30 @@ describe('scanShellEmbeds', () => {
     expect(embeds('tar -c "dir"')).toEqual([])
   })
 
+  it('finds a search pattern wherever in the arguments it sits', () => {
+    const at = (code: string) => embeds(code).map((e) => code.slice(e.bodyStart, e.bodyEnd))
+    expect(at('grep -rn "a\\|b" src')).toEqual(['a\\|b'])
+    // Not the flag's value, and not a file - the first operand.
+    expect(at('grep -A 8 "x" f.tsx')).toEqual(['x'])
+    expect(at('grep -e "x" -e "y" f')).toEqual(['x'])
+    expect(at('rg -n --include "*.go" "x"')).toEqual(['x'])
+    // One per command in a pipeline.
+    expect(at('grep -rn "a" src | grep -v "b"')).toEqual(['a', 'b'])
+    // Nothing to pick out of a fixed-string search, or of a bare word.
+    expect(at('fgrep "a|b" f')).toEqual([])
+    expect(at('grep -F "a|b" f')).toEqual([])
+    expect(at('grep -rn a\\|b src')).toEqual([])
+  })
+
+  it('reads the dialect off the command and its flags', () => {
+    const flavours = (code: string) => embeds(code).map((e) => e.flavour)
+    expect(flavours('grep "x" f')).toEqual(['bre'])
+    expect(flavours('grep -E "x" f')).toEqual(['ere'])
+    expect(flavours('grep -rniP "x" f')).toEqual(['pcre'])
+    expect(flavours('egrep "x" f')).toEqual(['ere'])
+    expect(flavours('rg "x"')).toEqual(['pcre'])
+  })
+
   it('carries a multi-line inline program to its closing quote', () => {
     const code = 'python3 -c "import json\nprint(json.dumps({}))"\necho after\n'
     const [e] = embeds(code)
@@ -146,6 +170,25 @@ describe('highlightShell', () => {
     const html = highlightShell('cat <<EOF\nhome is $HOME today\nEOF\n')
     expect(tokensAround(html, '$HOME')).toEqual(['token variable'])
     expect(tokensAround(html, 'home is ')).toEqual(['token string'])
+  })
+
+  it('picks the machinery out of a search pattern, leaving the rest a string', () => {
+    const html = highlightShell(`grep -rn '"type": "\\|terminalEvent' internal/http/*.go`)
+    expect(tokensAround(html, '\\|')).toEqual(['token operator'])
+    expect(tokensAround(html, 'terminalEvent')).toEqual(['token string'])
+    // The quotes around it are still the shell's own string.
+    expect(tokensAround(html, "'")).toEqual(['token string', 'token string'])
+  })
+
+  it('leaves a pattern with nothing in it looking exactly as it did', () => {
+    const plain = 'grep -n "export function summarizeToolSearchQuery" -A 8 f.tsx'
+    expect(tokensAround(highlightShell(plain), 'export function')).toEqual(['token string'])
+  })
+
+  it('marks the backslash of an escaped literal without colouring what it escapes', () => {
+    const html = highlightShell('grep -n "func (m \\*Manager) Retract" -A 4 f.go')
+    expect(tokensAround(html, '\\')).toEqual(['token punctuation'])
+    expect(tokensAround(html, '*Manager) Retract')).toEqual(['token string'])
   })
 
   it('highlights an inline python program as python', () => {

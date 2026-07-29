@@ -26,6 +26,10 @@
 import { hasLanguage } from './prism'
 import { highlightToHtml } from './prismHtml'
 import { getLanguage, interpreterLanguage } from './language'
+import {
+  applyFlavourFlag, grepFlavour, isPatternFlag, regexTokens, takesArgument,
+  type RegexFlavour,
+} from './regexHighlight'
 
 // Fence info strings / file languages this module takes over from plain bash.
 // `shell` and `console` are deliberately excluded: those name the
@@ -69,6 +73,11 @@ const DELIM_LANGS: Record<string, string> = {
 // A region of a shell snippet that highlight.js' bash grammar must not see.
 export interface ShellEmbed {
   // 'code'      - an interpreter's inline program: `python3 -c "..."`.
+  // 'regex'     - a search command's pattern: `grep -rn 'a\|b' src`. Embedded in
+  //   the same sense as the above - a language of its own inside a shell word -
+  //   but rendered as a string with its machinery picked out (lib/regexHighlight)
+  //   rather than by a grammar, so a pattern with no metacharacters in it still
+  //   looks exactly like the string it looked like before.
   // 'heredoc'   - a heredoc body.
   // 'delimiter' - the `<<EOF` operator's delimiter word. Not embedded code, but
   //   carved out all the same: highlight.js' own heredoc rule (END_SAME_AS_BEGIN
@@ -76,7 +85,7 @@ export interface ShellEmbed {
   //   with the body no longer in its input, run it to the end of the line -
   //   painting `<<PY > out.py` green. We colour the delimiter ourselves instead,
   //   the same way the grammar colours a quoted one.
-  kind: 'code' | 'heredoc' | 'delimiter'
+  kind: 'code' | 'regex' | 'heredoc' | 'delimiter'
   // The whole region as it must be carved out of the bash stream, including any
   // delimiters (the quotes around a `-c` argument, the `<<-` operator).
   // `start..bodyStart` and `bodyEnd..end` are those delimiters.
@@ -86,6 +95,8 @@ export interface ShellEmbed {
   end: number
   // The embedded language, or null when we only know "this is inert text".
   lang: string | null
+  // For a 'regex' embed: the dialect the command that carries it parses.
+  flavour?: RegexFlavour
   // For a lang-less body: whether the shell would expand `$vars` inside it (an
   // unquoted heredoc delimiter). Quoted delimiters (<<'EOF') expand nothing.
   expand: boolean
@@ -124,6 +135,24 @@ export function scanShellEmbeds(code: string): ShellEmbed[] {
   let lineLang: string | null = null
   // The previous token was a redirection operator, so the next word is a file.
   let redirect = false
+  // The command being scanned is a search (grep, rg, ...): which dialect it
+  // parses its pattern as - null once a `-F` says there is no regex in it - and
+  // where in its arguments the pattern is.
+  let searching = false
+  let dialect: RegexFlavour | null = null
+  let patternNext = false
+  let patternDone = false
+  let skipArg = false
+  const endCommand = () => {
+    cmdLang = null
+    expectCode = null
+    redirect = false
+    searching = false
+    dialect = null
+    patternNext = false
+    patternDone = false
+    skipArg = false
+  }
   let i = 0
 
   while (i < n) {
@@ -153,10 +182,8 @@ export function scanShellEmbeds(code: string): ShellEmbed[] {
         i = body.next
       }
       pending.length = 0
-      cmdLang = null
-      expectCode = null
       lineLang = null
-      redirect = false
+      endCommand()
       continue
     }
 
@@ -195,9 +222,7 @@ export function scanShellEmbeds(code: string): ShellEmbed[] {
 
     if (ch === ';' || ch === '|' || ch === '&' || ch === '(' || ch === ')') {
       i++
-      cmdLang = null
-      expectCode = null
-      redirect = false
+      endCommand()
       continue
     }
 
@@ -216,6 +241,7 @@ export function scanShellEmbeds(code: string): ShellEmbed[] {
       continue
     }
 
+    const at = i
     const word = readWord(code, i)
     i = word.end
     expectCode = null
@@ -229,6 +255,37 @@ export function scanShellEmbeds(code: string): ShellEmbed[] {
       expectCode = cmdLang
       continue
     }
+
+    // Which of a search's words is its pattern. Anything that is not a flag,
+    // and not a flag's value, is the first operand - which IS the pattern
+    // unless a `-e` already named one.
+    if (searching && !patternDone) {
+      const flag = !word.quoted && word.literal.length > 1 && word.literal.startsWith('-')
+      if (skipArg) skipArg = false
+      else if (!patternNext && flag) {
+        const next = applyFlavourFlag(word.literal)
+        if (next !== undefined) dialect = next
+        if (isPatternFlag(word.literal)) patternNext = true
+        else if (takesArgument(word.literal)) skipArg = true
+      } else {
+        patternNext = false
+        patternDone = true
+        // Taken only in quoted form, exactly as an interpreter's inline code is:
+        // that is how a pattern with anything in it is always written, and it is
+        // what gives the region exact bounds.
+        const quote = code[at]
+        const close = quote === "'" || quote === '"' ? closingQuote(code, at) : -1
+        if (dialect && close > at + 1 && close + 1 === word.end) {
+          embeds.push({
+            kind: 'regex',
+            start: at, bodyStart: at + 1, bodyEnd: close, end: word.end,
+            lang: null, expand: false, flavour: dialect,
+          })
+        }
+      }
+      continue
+    }
+
     // A quoted word is data, not a command name, so `echo "python3"` doesn't
     // arm interpreter detection.
     if (!word.quoted) {
@@ -236,6 +293,11 @@ export function scanShellEmbeds(code: string): ShellEmbed[] {
       if (interp) {
         cmdLang = interp
         lineLang ??= interp
+      }
+      const flavour = grepFlavour(word.literal)
+      if (flavour) {
+        searching = true
+        dialect = flavour
       }
     }
   }
@@ -373,6 +435,14 @@ function escapeHtml(s: string): string {
 const TOK_STRING = 'token string'
 const TOK_VARIABLE = 'token variable'
 const TOK_SUBST = 'token interpolation'
+// A regex's own colours, over the string colour its inert text keeps: the
+// structure reads as the operators it is, and a character class as a thing that
+// stands for something the way a variable does. The backslash of an escaped
+// literal is punctuation - deliberately the quietest of the three, since what it
+// marks is a character that does nothing but match itself.
+const TOK_META = 'token operator'
+const TOK_CLASS = 'token variable'
+const TOK_ESCAPE = 'token punctuation'
 
 function span(cls: string, text: string): string {
   return text === '' ? '' : `<span class="${cls}">${escapeHtml(text)}</span>`
@@ -407,7 +477,18 @@ function stringBody(text: string, expand: boolean): string {
   return out + span(TOK_STRING, text.slice(pos))
 }
 
+// regexBody renders a search pattern: still a string, with the parts that match
+// something rather than being something picked out of it (lib/regexHighlight).
+const REGEX_TOKENS = { meta: TOK_META, class: TOK_CLASS, escape: TOK_ESCAPE, literal: TOK_STRING }
+
+function regexBody(text: string, flavour: RegexFlavour): string {
+  let out = ''
+  for (const token of regexTokens(text, flavour)) out += span(REGEX_TOKENS[token.kind], token.text)
+  return out
+}
+
 function embedBody(body: string, e: ShellEmbed): string {
+  if (e.kind === 'regex') return regexBody(body, e.flavour ?? 'bre')
   if (!e.lang) return stringBody(body, e.expand)
   // A shell-in-shell embed (`bash -c '...'`, `<<'SH'`) recurses, so a heredoc
   // nested inside an inline script still gets the same treatment.
