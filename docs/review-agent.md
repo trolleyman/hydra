@@ -74,9 +74,34 @@ whole host filesystem at `/` (`internal/sandbox/linux.go:172`), so the head's
 worktree stays *visible* to the reviewer - just not writable.
 
 **And because it can never commit, it does not need a branch** - a detached
-checkout is enough. That is exactly the `slotPool` primitive that already exists
-for tests and artifacts (`internal/artifacts/slots.go`): bounded, reused via
-incremental `git checkout --force`, crash-safe.
+checkout is enough.
+
+**But not a pooled one.** The obvious move is to reuse `slotPool`
+(`internal/artifacts/slots.go`), which already hands out bounded, recycled,
+detached checkouts to tests and artifacts. That is wrong here, for a reason worth
+stating because it is the same reason the reviewer gets its own tree at all: a
+pool slot is *recycled* - acquired, released, re-checked-out for someone else's
+run - and the reviewer's **conversation is keyed by its checkout path**. A moving
+path means a new transcript, so the reviewer forgets everything on every
+re-acquire. Holding a slot forever instead just starves a 4-slot pool.
+
+So the reviewer wants a **dedicated, persistent directory** -
+`.hydra/local/review/<head-id>/` - created once and checked out forward in place.
+The pool is for ephemeral runs; a conversational reviewer is not one. See
+[Surviving a restart](#surviving-a-restart), which turns out to be the same
+requirement.
+
+> **On the pool itself:** there is no separate `tests.slotPool` - `internal/tests`
+> imports `internal/artifacts` and calls `artifacts.NewSlotPool`
+> (`internal/tests/manager.go:112`), with its own dir and its own cap. The *code*
+> is already shared; only the pool *instances* are separate (so up to 4 checkouts
+> each). The giveaway that it lives in the wrong package is
+> `internal/artifacts/exports.go`, a shim whose entire purpose
+> (`type SlotPool = slotPool`) is to let `internal/tests` reach an unexported
+> type. Extracting it to its own package - `internal/checkout` or
+> `internal/worktreepool` - deletes that shim and stops a reviewer having to
+> import `artifacts` for something that has nothing to do with artifacts. Worth
+> doing before a third consumer arrives, not after.
 
 ### No git, enforced twice
 
@@ -123,6 +148,71 @@ killing the slot, exactly like closing a shell tab.
 Name it so extra slots are possible later without a migration -
 `<head>-review`, leaving room for `<head>-review-security` - mirroring how
 `ShellSessionID` already carries variants.
+
+### What wakes the reviewer
+
+Two candidate triggers, and they should be answered differently. The distinction
+that matters: **syncing the reviewer's checkout is free; waking it is a model
+turn.** Never conflate them.
+
+- **A reply on a thread it participated in - yes, wake it.** This is what makes
+  the reviewer a participant rather than a one-shot report. Without it you answer
+  its finding and it never learns whether it was right. It rides the same
+  notify-by-id path, and it is human-initiated, so the rate is naturally bounded.
+- **New commits on the branch - no, do not wake it.** An agent that commits
+  fifteen times in a task would trigger fifteen review passes: fifteen model
+  turns, a flood of near-duplicate comments, and a feature switched off inside a
+  day. Instead: sync the checkout forward **silently** between turns, mark the
+  existing review stale (the tip moved past what the comments were written
+  against - `hunk_hash` already detects this per comment), and let the next pass
+  be triggered deliberately.
+
+If an automatic pass is wanted, hang it on the **`finished` transition**, not on
+commits - the hook machinery already distinguishes main-agent completion from
+live sub-agents, and merge-when-green already gates on finished-for-10s, so there
+is a precise, once-per-task moment to fire on.
+
+### Surviving a restart
+
+Yes, and most of it falls out of decisions already made:
+
+- **Comments** are server-side by construction. Free.
+- **The reviewer's conversation** needs the lazy resume-on-attach path heads
+  already have (`ResumeHead` when the session is dead but the tree remains):
+  opening the Review view revives it rather than starting fresh.
+
+The neat part is that the own-tree decision makes resume *safe* here. Bare
+`--continue` is unreliable in a head's worktree only because something else may
+write that transcript dir; the reviewer's checkout is used by exactly one
+session, so the mtime heuristic is unambiguous and no session-id bookkeeping is
+needed. A slot has no DB row - that was the point - and this is why it does not
+need one.
+
+**That only holds if the checkout path is stable**, which is the argument against
+a pooled slot above. Same requirement, arrived at from the other direction.
+
+### How many reviewers
+
+Default **one**, but the naming should allow more from the start
+(`<head>-review`, leaving room for `<head>-review-security`) so adding them later
+is not a migration.
+
+On duplication vs a second pair of eyes: the duplication worry is real, but it is
+specific to *identical* reviewers. N general-purpose reviewers on one diff produce
+heavily overlapping findings, and the overlap is not free - you read all of it,
+and every duplicate erodes trust in the channel until you stop reading any of it.
+What does not duplicate is diversity of **lens**: security, performance, "does
+this actually do what the task asked". Those look at different things and produce
+disjoint findings. So multiple reviewers should be distinguished by lens, not by
+count.
+
+**And this is where the comment store earns its keep.** A second reviewer can
+call `get_review_comments` and be briefed to *not restate what is already there -
+reply to an existing thread if it agrees or disagrees*. That converts a second
+reviewer from a duplicate into a second opinion **on existing threads**, which is
+worth more than either review alone and is exactly what N blind parallel
+reviewers cannot do. Sequenced-and-aware beats parallel-and-blind. It is also the
+strongest argument for building the store before building any reviewer.
 
 ## Part 2: the comment system
 
@@ -211,6 +301,49 @@ If that feels likely, do it now: prefix + Crockford base32 (no I/L/O/U, so no
 lookalike corruption), ~10 chars. What to avoid either way is a bare UUID - the
 prefix is what stops a model confusing a comment id with a commit sha.
 
+### Numbering forge comments too - without becoming their source of truth
+
+The numbers should cover **every** comment on the head, forge ones included -
+"fix #3" has to work regardless of who wrote it or where it lives, and a UI with
+two numbering schemes in one gutter is worse than none.
+
+But that does **not** mean Hydra should become the source of truth for forge
+comments, and it is worth being precise about why, because the natural next
+thought ("sync it all into the DB, nothing goes around Hydra") does not survive
+contact with the forge. People comment on GitHub directly. They edit and delete
+there too. Hydra cannot prevent that and should not try - it does not own that
+web UI. A local copy declaring itself authoritative would be a replica pretending
+to be a source, and would need reconciliation for every edit, delete and resolve
+that happened while nobody was looking.
+
+Today's behaviour is already the right one: forge threads are fetched **live** per
+request via `provider.Threads(...)` (~1s) and the server-side copy exists only as
+a fallback when that call fails (`internal/http/review_threads.go`).
+
+**So split ownership: Hydra owns the numbering, the forge owns its content.**
+
+- An append-only local map, `(origin, external_id) -> #N`, assigned on **first
+  sight** of a comment from any origin.
+- One sequence per head across all origins, so the numbers interleave in the order
+  Hydra first saw them.
+- Numbers are never reused. A comment deleted on the forge retires its number
+  rather than freeing it - otherwise "#3" means something different depending on
+  when you read it, which is exactly the failure the ids exist to prevent.
+- Content for forge comments keeps flowing live; content for native comments
+  lives in Hydra. Nothing needs reconciling, because nothing is duplicated.
+
+**Not everything routes through `reviewq`** - that is the *agent to daemon*
+channel specifically, and it exists because an agent has no network and no forge
+credentials. Three write paths converge instead: the web client over HTTP, agents
+over `reviewq`, and the forge poller daemon-side. What matters for numbering is
+not that they share a channel but that they share a **single writer** - and they
+already do, because all three land in the daemon. Assign numbers there.
+
+Note the ordering consequence: a forge comment written while the daemon was down
+gets its number on the next fetch, so numbers reflect *when Hydra first saw* a
+comment, not when it was written. That is fine - they are handles, not a
+chronology - but it should be a deliberate choice rather than a surprise.
+
 ### The tools
 
 Four, mirroring what already exists rather than inventing a surface:
@@ -268,10 +401,14 @@ reports on code that never existed.
    fixes drafts dying on reload.
 2. **The third origin badge + permalinks.** Small, and needed before anything
    agent-authored shows up in the gutter.
-3. **The review slot.** A Claude-argv sibling of `StartShellSession`, a detached
-   checkout, `git_isolation = readonly` with git tools blocked, and a "Review"
-   entry in the chat view dropdown.
-4. **@-mentions**, if wanted - `@<head-id>` / `@self` on a comment, routing
+3. **Extract the slot pool** out of `internal/artifacts` into its own package,
+   deleting the `exports.go` shim. Mechanical, and it is on the path anyway -
+   better before a third consumer than after.
+4. **The review slot.** A Claude-argv sibling of `StartShellSession`, its own
+   persistent checkout under `.hydra/local/review/<head-id>/`,
+   `git_isolation = readonly` with git tools blocked, resume-on-attach, and a
+   "Review" entry in the chat view dropdown.
+5. **@-mentions**, if wanted - `@<head-id>` / `@self` on a comment, routing
    through the same notification path. At this point it is routing plus a
    loop-cap rule, because both ends already exist.
 
@@ -280,6 +417,17 @@ reports on code that never existed.
 - **The reviewer sharing the head's worktree.** Transcript collision, and it
   races the head's edits.
 - **A branch for the reviewer.** It cannot commit; a detached checkout is enough.
+- **A pooled checkout for the reviewer.** Recycled paths mean a new transcript on
+  every re-acquire, i.e. a reviewer that forgets everything.
+- **Waking the reviewer on every commit.** Sync its tree silently; a model turn
+  per commit is a flood of near-duplicate comments and a real bill.
+- **Making Hydra the source of truth for forge comments.** It cannot be - people
+  comment, edit and delete on the forge directly. Own the numbering, not the
+  content.
+- **Reusing a retired comment number.** `#3` must mean one thing forever.
+- **N identical parallel reviewers.** Overlapping findings are not free to read,
+  and they erode trust in the whole channel. Distinguish by lens, and let each
+  read what is already there.
 - **Editing published comments.** Append-only keeps the thread an audit log and
   avoids conflict resolution. Drafts stay editable.
 - **Showing drafts to agents.** Half-written thoughts are not instructions.
