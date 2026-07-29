@@ -60,4 +60,7 @@ core.*
 # See web/scripts/build-fonts.ts.
 /web/public/fonts/iosevka-*.woff2
 /web/public/fonts/nerd-symbols-*.woff2
+# The mirrored Google families (scripts/build-fonts.ts vendorGoogle).
+/web/public/fonts/google.css
+/web/public/fonts/google/
 /web/.iosevka-build.json

@@ -1,8 +1,14 @@
-// Fetches and subsets the self-hosted webfonts into public/fonts.
+// Fetches the self-hosted webfonts into public/fonts. EVERY font this UI renders
+// is vendored here - nothing is fetched from a CDN at runtime.
 //
-// Three families, none of which is on Google Fonts (everything else rides the
-// single Google Fonts stylesheet in index.html, which already serves properly
-// subsetted, unicode-range-split CSS):
+// Two groups, fetched differently because they arrive differently.
+//
+// The Google families (GOOGLE_QUERY) come as Google's own stylesheet, which is
+// already properly subsetted and unicode-range-split, so they are mirrored
+// rather than re-cut: the CSS is fetched once, each .woff2 it points at is
+// downloaded, and the urls are rewritten to /fonts/google/. See vendorGoogle.
+//
+// The other three are not on Google Fonts at all, so we cut our own:
 //
 //   Iosevka, Iosevka Term   offered mono families. No CDN and no maintained npm
 //                           build at a current version, so we cut our own.
@@ -49,6 +55,30 @@ import subsetFont from 'subset-font'
 
 const IOSEVKA_VERSION = '34.8.0'
 const NERD_FONTS_VERSION = '3.4.0'
+
+// The families index.html used to request straight from fonts.googleapis.com.
+// Weights are held to 400-700 (plus italics where the family has them) - that is
+// everything the UI asks for, and the wider ranges in Google's own snippets
+// triple the stylesheet for faces nothing renders.
+const GOOGLE_QUERY =
+  'family=Fira+Code:wght@400..700' +
+  '&family=IBM+Plex+Mono:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700' +
+  '&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700' +
+  '&family=Inter:ital,opsz,wght@0,14..32,400..700;1,14..32,400..700' +
+  '&family=JetBrains+Mono:ital,wght@0,400..700;1,400..700' +
+  '&family=Merriweather:ital,opsz,wght@0,18..144,300..900;1,18..144,300..900' +
+  '&family=Roboto+Flex:slnt,wght@-10..0,100..1000' +
+  '&family=Source+Code+Pro:ital,wght@0,400..700;1,400..700' +
+  '&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..700' +
+  '&display=swap'
+
+// Google serves woff2 only to a UA it recognises as a modern browser; curl's own
+// gets the ttf fallback, which is roughly twice the bytes.
+const BROWSER_UA =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+const GOOGLE_DIR = 'google'
+const GOOGLE_CSS = 'google.css'
 
 const WEB_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = join(WEB_DIR, 'public', 'fonts')
@@ -255,6 +285,45 @@ function readMember(url: string, entry: ZipEntry): Buffer {
   throw new Error(`unsupported compression method ${entry.method} for ${entry.name}`)
 }
 
+// vendorGoogle mirrors Google's stylesheet and everything it points at into
+// public/fonts/google/, returning the sizes of what it wrote.
+//
+// Google's CSS is already the right shape - properly subsetted, split by
+// unicode-range so a browser fetches only the blocks its text actually needs -
+// so this rewrites the urls and changes nothing else. Vendoring it takes the
+// network out of the render entirely, which fixes two things a runtime CDN
+// caused: screenshots flapping between real and fallback metrics depending on
+// whether a face arrived in time, and page loads timing out because a
+// render-blocking stylesheet on a host the sandbox could not reach never
+// settled.
+async function vendorGoogle(): Promise<Record<string, number>> {
+  const url = `https://fonts.googleapis.com/css2?${GOOGLE_QUERY}`
+  console.log(`  Google families: fetching ${url.slice(0, 60)}...`)
+  let css = curl(['-A', BROWSER_UA, url]).toString()
+
+  const urls = [...new Set([...css.matchAll(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/g)].map((m) => m[1]))]
+  if (urls.length === 0) throw new Error('no gstatic urls in the Google stylesheet - did the response shape change?')
+
+  mkdirSync(join(OUT_DIR, GOOGLE_DIR), { recursive: true })
+  const sizes: Record<string, number> = {}
+  for (const remote of urls) {
+    // The basename is Google's own content hash, so it is stable for a given
+    // face and changes when they reissue it.
+    const file = remote.split('/').pop()!
+    const rel = `${GOOGLE_DIR}/${file}`
+    const body = curl(['-A', BROWSER_UA, remote])
+    writeFileSync(join(OUT_DIR, rel), body)
+    sizes[rel] = body.length
+    css = css.split(remote).join(`/fonts/${rel}`)
+  }
+  writeFileSync(join(OUT_DIR, GOOGLE_CSS), css)
+  sizes[GOOGLE_CSS] = Buffer.byteLength(css)
+
+  const total = Object.values(sizes).reduce((a, b) => a + b, 0)
+  console.log(`    ${urls.length} faces  ${(total / 1024 / 1024).toFixed(2)}MB  ${GOOGLE_DIR}/`)
+  return sizes
+}
+
 const cps = codepoints()
 const text = cps.map((cp) => String.fromCodePoint(cp)).join('')
 const nerdText = expand(NERD_RANGES)
@@ -262,6 +331,7 @@ const NERD_OUTPUT = 'nerd-symbols-400-normal.woff2'
 const outputs = [
   ...FAMILIES.flatMap(({ slug }) => FACES.map((f) => `${slug}-${f.weight}-${f.style}.woff2`)),
   NERD_OUTPUT,
+  GOOGLE_CSS,
 ]
 
 // The stamp covers everything that decides the bytes: the releases, which faces
@@ -276,6 +346,7 @@ const signature = createHash('sha256')
       faces: FACES.map((f) => f.file),
       codepoints: cps,
       nerdCodepoints: nerdText.length,
+      google: GOOGLE_QUERY,
     }),
   )
   .digest('hex')
@@ -286,10 +357,16 @@ function upToDate(): boolean {
   try {
     const stamp = JSON.parse(readFileSync(STAMP, 'utf8')) as { signature?: string; sizes?: Record<string, number> }
     if (stamp.signature !== signature) return false
-    return outputs.every((name) => {
-      const path = join(OUT_DIR, name)
-      return existsSync(path) && statSync(path).size === stamp.sizes?.[name]
-    })
+    // Check every file the last build recorded, not just `outputs`: the Google
+    // faces are named by Google's own hashes, so they are only knowable from the
+    // stamp.
+    const recorded = Object.entries(stamp.sizes ?? {})
+    if (recorded.length < outputs.length) return false
+    return outputs.every((name) => stamp.sizes?.[name] !== undefined) &&
+      recorded.every(([name, size]) => {
+        const path = join(OUT_DIR, name)
+        return existsSync(path) && statSync(path).size === size
+      })
   } catch {
     return false
   }
@@ -356,6 +433,8 @@ for (const { pkg, family, slug } of FAMILIES) {
       `${(subset.length / 1024).toFixed(0).padStart(4)}KB  ${NERD_OUTPUT}`,
   )
 }
+
+Object.assign(sizes, await vendorGoogle())
 
 writeFileSync(
   STAMP,

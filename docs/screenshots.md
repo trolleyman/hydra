@@ -90,32 +90,40 @@ starts failing here, fix the spec rather than loosening the selector.
 
 **Chromium needs the egress proxy handed to it explicitly.** Every browser launch
 here spreads `proxyLaunchOptions()` (`web/scripts/lib/browserProxy.ts`) into its
-options, and it must. curl, node and git read `HTTPS_PROXY` from the environment;
-Chromium does not, so inside a sandboxed head it resolves names itself in a
-network namespace with no resolver and every external request dies with
-`ERR_NAME_NOT_RESOLVED`. That silently cost the shots their webfonts - Merriweather
-and Roboto Flex come from `fonts.googleapis.com`, which was on the allow-list and
-reachable all along - so a screenshot generated in a head rendered in fallback
-fonts while the same script on the host rendered correctly. The helper's loopback
-bypass is equally load-bearing: Playwright appends Chromium's `<-loopback>` when a
-proxy is set, undoing its built-in "never proxy loopback" rule, which would
-otherwise send the simulation server's own traffic to the proxy.
+options. curl, node and git read `HTTPS_PROXY` from the environment; Chromium
+does not, so inside a sandboxed head it resolves names itself in a network
+namespace with no resolver and every external request dies with
+`ERR_NAME_NOT_RESOLVED`. The helper's loopback bypass is equally load-bearing:
+Playwright appends Chromium's `<-loopback>` when a proxy is set, undoing its
+built-in "never proxy loopback" rule, which would otherwise send the simulation
+server's own traffic to the proxy.
 
-**A missing webfont is now an error, not a quieter shot.** `settle()` explicitly
-requests each family in `REQUIRED_FONTS` and then *checks* it arrived, because
-`document.fonts.ready` answers neither question on its own: it settles only the
-faces the page has already asked for (a font used by a panel that mounts later -
-an xterm - may not be among them), and it resolves exactly the same way when the
-request FAILED. So a fallback render was indistinguishable from a good one, and
-the difference is visible: Fira Code measures 6.769px per character cell against
-the fallback's 6.601px, so every xterm row in a shot shifts and the terminal
-panels flap between runs. Failing the run is the right trade - a silent fallback
-produces a diff that looks like a real UI change and sends you hunting for one.
+**The shots no longer need the network for fonts, and that is deliberate.** Every
+family is self-hosted (`scripts/build-fonts.ts`), so a capture makes zero
+external requests. It used to fetch nine families from `fonts.googleapis.com` on
+every run, which cost two distinct bugs:
 
-The durable fix would be to self-host those families the way `build-fonts.ts`
-already does for Iosevka and the Nerd Symbols subset, removing the network from
-the capture path entirely. Until then the check is what keeps a flap from being
-mistaken for a change.
+- **Flapping diffs.** A face that arrived late, or not at all, left the page in a
+  fallback with different metrics - Fira Code measures 7.0px per character cell
+  against the fallback's 6.6px - so every xterm row shifted and the terminal
+  panels "changed" between runs with no UI change behind it.
+- **Shots timing out.** A render-blocking stylesheet on a host the sandbox cannot
+  reach does not fail fast; `page.goto` waited out its 30s and the shot failed.
+
+Two earlier attempts treated the symptom: an in-process font cache
+(`lib/fontCache.ts`, since removed) shared the fetch across the ~80 contexts a run
+creates, and aborted a failed fetch so it would fall back rather than hang - which
+made the silent-fallback render *more* likely, not less. Vendoring removes the
+class: there is nothing to race and nothing to time out.
+
+`settle()` still verifies it. It explicitly requests each family in
+`REQUIRED_FONTS` and then *checks* it arrived, because `document.fonts.ready`
+answers neither question on its own - it settles only faces the page has already
+asked for (one used by a panel that mounts later, an xterm, may not be among
+them), and it resolves the same way when a request failed. With the fonts in the
+binary that check should never fire; if it does, something is wrong with the
+build rather than the network, and failing the run beats shipping a shot whose
+text metrics are wrong.
 
 The generator emits a `::hydra:artifact:: <name>.png` marker after writing each
 shot, so its tiles **stream** into the diff viewer as they render rather than
