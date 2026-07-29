@@ -125,6 +125,40 @@ func TestManagerReconcilesClaudeUserEchoDurably(t *testing.T) {
 	}
 }
 
+// A message typed while a turn is running is consumed into that turn, and the
+// CLI records it ONLY as a queued_command attachment - which Hydra relays so the
+// message does not vanish on reattach. But Hydra also persisted it itself at the
+// queue boundary, so relaying the attachment unconditionally showed every
+// mid-turn message twice: the user's own bubble, then a notice repeating it.
+// Taken from a real log, where 19 notices duplicated a user message this way.
+func TestManagerDropsQueuedCommandEchoOfUserMessage(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager(func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" })
+	if _, err := m.Append("head", testUserMessage("client-1", "mid-turn steer")); err != nil {
+		t.Fatal(err)
+	}
+	// The attachment record the CLI writes when it consumes that queued message.
+	m.ObserveProviderLine("head", "claude", []byte(`{"type":"queue_operation","uuid":"q1","attachment":{"prompt":[{"type":"text","text":"mid-turn steer"}]}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+	events, _, _, _ := m.Before("head", "", 10)
+	if len(events) != 1 || events[0].Type != "user_message" {
+		t.Fatalf("want just the user message, got %+v", events)
+	}
+
+	// A notice that is NOT an echo still has to come through - this must not
+	// become a blanket "drop notices" rule.
+	m.ObserveProviderLine("head", "claude", []byte(`{"type":"queue_operation","uuid":"q2","attachment":{"prompt":[{"type":"text","text":"something else"}]}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+	events, _, _, _ = m.Before("head", "", 10)
+	if len(events) != 2 || events[1].Type != "notice" {
+		t.Fatalf("want the unrelated notice kept, got %+v", events)
+	}
+}
+
 func TestManagerLinksCodexChildThreadToSpawn(t *testing.T) {
 	root := t.TempDir()
 	m := NewManager(func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" })

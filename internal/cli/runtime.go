@@ -530,6 +530,7 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	mux.HandleFunc("GET /folder-picker/available", server.HandleFolderPickerAvailable)
 	mux.HandleFunc("POST /folder-picker/open", server.HandleFolderPickerOpen)
 	mux.Handle("/.well-known/", apiHandler)
+	registerPprof(mux)
 	registerFrontend(mux)
 	return mux
 }

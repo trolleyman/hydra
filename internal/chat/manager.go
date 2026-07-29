@@ -201,6 +201,9 @@ func (w *worker) run(id string) {
 			if (item.provider == "claude" || item.provider == "claude_history") && kind == "user_message" && w.reconcileClaudeUserEcho(spec) {
 				continue
 			}
+			if (item.provider == "claude" || item.provider == "claude_history") && kind == "notice" && w.isEchoedQueuedCommand(spec) {
+				continue
+			}
 			if _, _, err := w.store.AppendSource(spec.sourceID, spec.payload); err != nil {
 				log.Printf("warn: chat events: append %s event for %s: %v", item.provider, id, err)
 			}
@@ -209,6 +212,49 @@ func (w *worker) run(id string) {
 			}
 		}
 	}
+}
+
+// isEchoedQueuedCommand reports whether this notice is just a second copy of a
+// message the user already sent.
+//
+// A message typed while a turn is running is consumed INTO that turn, and the
+// CLI records it only as a queued_command attachment - which is why that
+// attachment is relayed at all (see claudestream.queuedCommandMarker): without
+// it, a message queued mid-turn vanished on the next reattach. But Hydra has
+// ALSO persisted that message itself, at the queue boundary, as a real
+// user_message. So relaying the attachment unconditionally renders every
+// mid-turn message twice: once as the user's own bubble and once as a notice
+// echoing it back at them. reconcileClaudeUserEcho does not catch this - it
+// pairs user_message against user_message, and the attachment arrives as a
+// notice.
+//
+// Matching on exact text is sound here in a way it would not be for a user
+// message: a notice that repeats an existing user message verbatim is never
+// something to show, whether or not it is the same send.
+func (w *worker) isEchoedQueuedCommand(spec eventSpec) bool {
+	note, ok := spec.payload.(*Notice)
+	if !ok {
+		return false
+	}
+	text := strings.TrimSpace(note.Text)
+	if text == "" {
+		return false
+	}
+	for _, event := range w.store.Events() {
+		if event.Type != "user_message" {
+			continue
+		}
+		var payload struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(event.Payload, &payload) != nil {
+			continue
+		}
+		if strings.TrimSpace(textFromClaudeContent(payload.Content)) == text {
+			return true
+		}
+	}
+	return false
 }
 
 // reconcileClaudeUserEcho folds Claude's --replay-user-messages echo into the
