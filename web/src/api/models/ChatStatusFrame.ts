@@ -4,9 +4,9 @@
 /* eslint-disable */
 import type { AgentStatus } from './AgentStatus';
 /**
- * The head's computed status changed.
+ * The head's computed status changed. Shares its shape with the terminal socket.
  */
-export type TerminalStatusEvent = {
+export type ChatStatusFrame = {
     type: 'status';
     status: AgentStatus;
 };

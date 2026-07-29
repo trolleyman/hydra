@@ -5113,9 +5113,19 @@ components:
           items:
             $ref: '#/components/schemas/ArtifactSet'
 
+    # --- Terminal WebSocket (/ws/projects/{id}/agents/{id}/terminal) ----------
+    #
+    # A terminal-mode head's socket carries raw PTY bytes as binary frames and
+    # these control events as text frames. Each member declares its own single
+    # value for `type`, so a client can narrow on it directly.
+
     TerminalEvent:
-      type: object
-      required: [type]
+      description: One server-to-client control event on a terminal-mode socket.
+      oneOf:
+        - $ref: '#/components/schemas/TerminalStatusEvent'
+        - $ref: '#/components/schemas/TerminalDataEvent'
+        - $ref: '#/components/schemas/TerminalDiffRefreshEvent'
+        - $ref: '#/components/schemas/TerminalSizeEvent'
       discriminator:
         propertyName: type
         mapping:
@@ -5123,53 +5133,590 @@ components:
           data: '#/components/schemas/TerminalDataEvent'
           diff_refresh: '#/components/schemas/TerminalDiffRefreshEvent'
           size: '#/components/schemas/TerminalSizeEvent'
+
+    TerminalStatusEvent:
+      type: object
+      description: The head's computed status changed.
+      required: [type, status]
       properties:
         type:
           type: string
-          enum: [status, data, diff_refresh, size]
-
-    TerminalDiffRefreshEvent:
-      allOf:
-        - $ref: '#/components/schemas/TerminalEvent'
-        - type: object
-          properties:
-            head_moved:
-              type: boolean
-              description: >-
-                True when this refresh was triggered by a new commit (HEAD
-                moved), as opposed to an uncommitted working-tree change. The
-                diff viewer uses it to also re-snapshot per-commit artifacts
-                (screenshots), which are memoized by commit SHA, while a plain
-                working-tree change only re-fetches the diff text.
-
-    TerminalStatusEvent:
-      allOf:
-        - $ref: '#/components/schemas/TerminalEvent'
-        - type: object
-          properties:
-            status:
-              $ref: '#/components/schemas/AgentStatus'
+          enum: [status]
+        status:
+          $ref: '#/components/schemas/AgentStatus'
 
     TerminalDataEvent:
-      allOf:
-        - $ref: '#/components/schemas/TerminalEvent'
-        - type: object
-          properties:
-            data:
-              type: string
-              description: Base64 encoded binary data or plain string
+      type: object
+      description: A chunk of PTY output, when it is relayed as text rather than binary.
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          enum: [data]
+        data:
+          type: string
+          description: Base64 encoded binary data or plain string
+
+    TerminalDiffRefreshEvent:
+      type: object
+      description: The worktree changed; the diff viewer should re-fetch.
+      required: [type, head_moved]
+      properties:
+        type:
+          type: string
+          enum: [diff_refresh]
+        head_moved:
+          type: boolean
+          description: >-
+            True when this refresh was triggered by a new commit (HEAD
+            moved), as opposed to an uncommitted working-tree change. The
+            diff viewer uses it to also re-snapshot per-commit artifacts
+            (screenshots), which are memoized by commit SHA, while a plain
+            working-tree change only re-fetches the diff text.
 
     TerminalSizeEvent:
-      allOf:
-        - $ref: '#/components/schemas/TerminalEvent'
-        - type: object
+      type: object
+      description: >-
+        The PTY's current window size, sent on attach right before the
+        scrollback replay so the client can size its terminal to match. The
+        replayed bytes carry cursor moves and wrapping computed for this
+        width; rendering them at a different width corrupts the history.
+      required: [type, cols, rows]
+      properties:
+        type:
+          type: string
+          enum: [size]
+        cols:
+          type: integer
+        rows:
+          type: integer
+
+    # --- Chat WebSocket (the same /terminal socket, for a chat-mode head) -----
+    #
+    # A chat-mode head's socket carries no PTY bytes: every frame is text, and
+    # every conversation frame carries Hydra's provider-neutral normalized
+    # events (see internal/chat and docs/chat-mode.md). A provider's own payload
+    # rides inside an event's `payload`, where the Raw panel can show it, but it
+    # never determines the wire format.
+
+    ChatEvent:
+      type: object
+      description: >-
+        One durable normalized event. `seq` is per-head, monotonic, and the sole
+        wire and cursor identity - provider object ids stay inside `payload`.
+      required: [seq, type, timestamp]
+      properties:
+        seq:
+          type: integer
+          format: int64
+          x-go-type: uint64
+          description: Per-head sequence number; also the history cursor.
+        source_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
           description: >-
-            The PTY's current window size, sent on attach right before the
-            scrollback replay so the client can size its terminal to match. The
-            replayed bytes carry cursor moves and wrapping computed for this
-            width; rendering them at a different width corrupts the history.
-          properties:
-            cols:
-              type: integer
-            rows:
-              type: integer
+            Ingestion identity used to deduplicate. Re-reading a transcript
+            window or re-observing a line appends nothing new.
+        type:
+          type: string
+          description: >-
+            The event kind, e.g. conversation_started, user_message,
+            assistant_delta, assistant_message, reasoning_completed,
+            reasoning_duration, tool_started, tool_completed, subagent_started,
+            subagent_completed, plan_updated, commit_created, head_changed,
+            notice, interaction_requested, messages_retracted, turn_started,
+            turn_completed, turn_failed, turn_interrupted.
+        timestamp:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The event's fields, which vary by `type`. Deliberately open: the
+            provider's own recorded entry rides here too, so the Raw panel can
+            show what the provider actually sent.
+
+    ChatTurnState:
+      type: object
+      properties:
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        status:
+          x-go-type-skip-optional-pointer: true
+          type: string
+
+    ChatSubagentState:
+      type: object
+      required: [id]
+      properties:
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        parent_id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The sub-agent that spawned this one; empty for a main-agent spawn.
+        parent_item_id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The tool call that spawned it, so the chat folds it into that card.
+        agent_type:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        description:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        prompt:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        status:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        activity:
+          x-go-type-skip-optional-pointer: true
+          type: string
+
+    ChatStreamState:
+      type: object
+      description: >-
+        The block a response is in the middle of producing, accumulated from
+        every delta no completed message has settled yet. Derived on read, so a
+        client attaching mid-response renders the whole partial block rather
+        than the tail it happens to catch live.
+      required: [kind, text]
+      properties:
+        kind:
+          type: string
+          enum: [text, thinking]
+        message_id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        text:
+          type: string
+
+    ChatQueuedMessage:
+      type: object
+      description: >-
+        A message held daemon-side because a turn was running. It lives only in
+        the queue projection until it drains, at which point it becomes a
+        durable user_message carrying the same id.
+      required: [id, content]
+      properties:
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The client-generated id, used to reconcile the pending bubble.
+        content:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    ChatPendingAsk:
+      type: object
+      description: A question the provider is still blocked on.
+      required: [requestId, toolUseId]
+      properties:
+        requestId:
+          type: string
+        toolUseId:
+          type: string
+
+    ChatProjection:
+      type: object
+      description: >-
+        Bounded current state, folded from the event log and checkpointed with
+        the sequence it was folded through. Complete messages, tool output and
+        sub-agent transcripts stay in the paged log, so this does not grow with
+        the conversation.
+      required: [version, through]
+      properties:
+        version:
+          type: integer
+        through:
+          type: integer
+          format: int64
+          x-go-type: uint64
+          description: The sequence number this projection was folded through.
+        plan:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        subagents:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ChatSubagentState'
+          x-go-type-skip-optional-pointer: true
+        turn:
+          $ref: '#/components/schemas/ChatTurnState'
+        interaction:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        model:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        slash_commands:
+          type: array
+          items:
+            type: string
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The "/" autocomplete list the provider advertised on init. Persisted
+            so it survives a resume - the list is only emitted on the live init
+            line, never in the transcript.
+        usage:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+        queue:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ChatQueuedState'
+          x-go-type-skip-optional-pointer: true
+        head:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The Git HEAD the commit reconciler last observed.
+        imports:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+          x-go-type-skip-optional-pointer: true
+        stream:
+          $ref: '#/components/schemas/ChatStreamState'
+
+    ChatQueuedState:
+      type: object
+      required: [id, status, content]
+      properties:
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        status:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        content:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+
+    ChatFrame:
+      description: >-
+        One server-to-client frame on a chat-mode socket. Each member declares
+        its own single value for `type`, so a client narrows on it directly.
+      oneOf:
+        - $ref: '#/components/schemas/ChatStatusFrame'
+        - $ref: '#/components/schemas/ChatDiffRefreshFrame'
+        - $ref: '#/components/schemas/ChatStateSnapshotFrame'
+        - $ref: '#/components/schemas/ChatHistoryFrame'
+        - $ref: '#/components/schemas/ChatEventFrame'
+        - $ref: '#/components/schemas/ChatSubagentEventsFrame'
+        - $ref: '#/components/schemas/ChatReplayDoneFrame'
+        - $ref: '#/components/schemas/ChatQueueFrame'
+        - $ref: '#/components/schemas/ChatPendingQuestionsFrame'
+        - $ref: '#/components/schemas/ChatQuestionExpiredFrame'
+        - $ref: '#/components/schemas/ChatShellOutputFrame'
+        - $ref: '#/components/schemas/ChatTaskOutputFrame'
+        - $ref: '#/components/schemas/ChatErrorFrame'
+      discriminator:
+        propertyName: type
+        mapping:
+          status: '#/components/schemas/ChatStatusFrame'
+          diff_refresh: '#/components/schemas/ChatDiffRefreshFrame'
+          state_snapshot: '#/components/schemas/ChatStateSnapshotFrame'
+          chat_history: '#/components/schemas/ChatHistoryFrame'
+          chat_event: '#/components/schemas/ChatEventFrame'
+          subagent_events: '#/components/schemas/ChatSubagentEventsFrame'
+          replay_done: '#/components/schemas/ChatReplayDoneFrame'
+          queue: '#/components/schemas/ChatQueueFrame'
+          pending_questions: '#/components/schemas/ChatPendingQuestionsFrame'
+          question_expired: '#/components/schemas/ChatQuestionExpiredFrame'
+          shell_output: '#/components/schemas/ChatShellOutputFrame'
+          task_output: '#/components/schemas/ChatTaskOutputFrame'
+          chat_error: '#/components/schemas/ChatErrorFrame'
+
+    ChatStatusFrame:
+      type: object
+      description: The head's computed status changed. Shares its shape with the terminal socket.
+      required: [type, status]
+      properties:
+        type:
+          type: string
+          enum: [status]
+        status:
+          $ref: '#/components/schemas/AgentStatus'
+
+    ChatDiffRefreshFrame:
+      type: object
+      description: The worktree changed; the diff viewer should re-fetch.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [diff_refresh]
+        head_moved:
+          type: boolean
+
+    ChatStateSnapshotFrame:
+      type: object
+      description: >-
+        The head's current state, sent first on attach. Taken with the history
+        watermark under one lock, so a plan or sub-agent cannot change between
+        snapshotting and subscribing.
+      required: [type, state]
+      properties:
+        type:
+          type: string
+          enum: [state_snapshot]
+        state:
+          $ref: '#/components/schemas/ChatProjection'
+
+    ChatHistoryFrame:
+      type: object
+      description: >-
+        One page of durable history, oldest-first. Answers the initial window
+        and every load_events_before. Paging is display-only: an older page
+        never rewinds the state_snapshot projection.
+      required: [type, events, done]
+      properties:
+        type:
+          type: string
+          enum: [chat_history]
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatEvent'
+        next_cursor:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The cursor to ask for the page before this one.
+        done:
+          type: boolean
+          description: True once the log's beginning has been reached.
+
+    ChatEventFrame:
+      type: object
+      description: One live normalized event.
+      required: [type, event]
+      properties:
+        type:
+          type: string
+          enum: [chat_event]
+        event:
+          $ref: '#/components/schemas/ChatEvent'
+
+    ChatSubagentEventsFrame:
+      type: object
+      description: >-
+        One sub-agent's full step history, answering load_subagent. Not
+        paginated: a sub-agent's steps may sit entirely outside the loaded
+        main-conversation window.
+      required: [type, agentId, events]
+      properties:
+        type:
+          type: string
+          enum: [subagent_events]
+        agentId:
+          type: string
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatEvent'
+
+    ChatReplayDoneFrame:
+      type: object
+      description: The initial window has been delivered; everything after this is live.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [replay_done]
+
+    ChatQueueFrame:
+      type: object
+      description: >-
+        The daemon's authoritative snapshot of still-queued messages, sent after
+        replay_done and on reconnect.
+      required: [type, messages]
+      properties:
+        type:
+          type: string
+          enum: [queue]
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatQueuedMessage'
+
+    ChatPendingQuestionsFrame:
+      type: object
+      description: >-
+        Which question cards can still be answered. A question's request id is
+        durable and replays forever, but the request behind it dies with the
+        turn that raised it, so the client cannot tell a live card from a dead
+        one on its own. An empty list is a definite none; the frame being
+        omitted entirely means the daemon cannot say.
+      required: [type, requests]
+      properties:
+        type:
+          type: string
+          enum: [pending_questions]
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatPendingAsk'
+
+    ChatQuestionExpiredFrame:
+      type: object
+      description: >-
+        An answer was dropped because its request had already been retired. The
+        card flips to expired rather than settling on an "Answered" that never
+        was.
+      required: [type, requestId]
+      properties:
+        type:
+          type: string
+          enum: [question_expired]
+        requestId:
+          type: string
+
+    ChatShellOutputFrame:
+      type: object
+      description: >-
+        A live chunk of a running composer "!command", keyed by the send frame's
+        id. Ephemeral - the durable record is the user_message it settles into.
+      required: [type, id, chunk]
+      properties:
+        type:
+          type: string
+          enum: [shell_output]
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        chunk:
+          type: string
+
+    ChatTaskOutputFrame:
+      type: object
+      description: The tail of a background task's output file, or why it could not be read.
+      required: [type, file]
+      properties:
+        type:
+          type: string
+          enum: [task_output]
+        file:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        content:
+          x-go-type-skip-optional-pointer: true
+          type: string
+        error:
+          x-go-type-skip-optional-pointer: true
+          type: string
+
+    ChatErrorFrame:
+      type: object
+      description: >-
+        This head's normalized event log could not be opened, so the connection
+        will render nothing. There is no fallback to degrade to, and an empty
+        transcript is indistinguishable from a head that never spoke.
+      required: [type, error]
+      properties:
+        type:
+          type: string
+          enum: [chat_error]
+        error:
+          x-go-type-skip-optional-pointer: true
+          type: string
+
+    ChatClientMessage:
+      type: object
+      description: >-
+        One client-to-server frame on a chat-mode socket. Flat rather than a
+        union: `type` selects which of the optional fields carry meaning.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum:
+            - user_message
+            - interrupt
+            - set_model
+            - control_response
+            - shell_command
+            - shell_stop
+            - dequeue
+            - load_events_before
+            - load_subagent
+            - task_output
+        id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: >-
+            The client-generated id of a user_message, or the dequeue/shell_stop
+            target, so a queued message can be reconciled and recalled.
+        queued:
+          x-go-type-skip-optional-pointer: true
+          type: boolean
+          description: >-
+            Set on a user_message sent while a turn runs: the daemon HOLDS it
+            rather than delivering now, and drains it when the turn ends.
+        cursor:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: >-
+            The history cursor of a load_events_before request - the daemon
+            returns the batch older than it.
+        limit:
+          x-go-type-skip-optional-pointer: true
+          type: integer
+        content:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            A user_message's content blocks, forwarded to the provider verbatim.
+        model:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The set_model target (a provider alias like "sonnet").
+        command:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: >-
+            The shell command of a shell_command frame (the text after the
+            composer's leading "!"), run in the head's sandbox.
+        response:
+          type: object
+          additionalProperties: true
+          x-go-type: json.RawMessage
+          x-go-type-skip-optional-pointer: true
+          description: A control_response payload, e.g. AskUserQuestion answers.
+        file:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: >-
+            The output-file path of a task_output request, as the SANDBOXED
+            agent saw it.
+        sub_id:
+          x-go-type-skip-optional-pointer: true
+          type: string
+          description: The sub-agent whose full step history the client wants.

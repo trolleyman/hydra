@@ -2,15 +2,12 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type TerminalEvent = {
-    type: TerminalEvent.type;
-};
-export namespace TerminalEvent {
-    export enum type {
-        STATUS = 'status',
-        DATA = 'data',
-        DIFF_REFRESH = 'diff_refresh',
-        SIZE = 'size',
-    }
-}
+import type { TerminalDataEvent } from './TerminalDataEvent';
+import type { TerminalDiffRefreshEvent } from './TerminalDiffRefreshEvent';
+import type { TerminalSizeEvent } from './TerminalSizeEvent';
+import type { TerminalStatusEvent } from './TerminalStatusEvent';
+/**
+ * One server-to-client control event on a terminal-mode socket.
+ */
+export type TerminalEvent = (TerminalStatusEvent | TerminalDataEvent | TerminalDiffRefreshEvent | TerminalSizeEvent);
 

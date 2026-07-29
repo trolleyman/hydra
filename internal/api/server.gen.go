@@ -8,6 +8,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -56,6 +57,91 @@ const (
 	ArtifactSetStatusError      ArtifactSetStatus = "error"
 	ArtifactSetStatusGenerating ArtifactSetStatus = "generating"
 	ArtifactSetStatusReady      ArtifactSetStatus = "ready"
+)
+
+// Defines values for ChatClientMessageType.
+const (
+	ChatClientMessageTypeControlResponse  ChatClientMessageType = "control_response"
+	ChatClientMessageTypeDequeue          ChatClientMessageType = "dequeue"
+	ChatClientMessageTypeInterrupt        ChatClientMessageType = "interrupt"
+	ChatClientMessageTypeLoadEventsBefore ChatClientMessageType = "load_events_before"
+	ChatClientMessageTypeLoadSubagent     ChatClientMessageType = "load_subagent"
+	ChatClientMessageTypeSetModel         ChatClientMessageType = "set_model"
+	ChatClientMessageTypeShellCommand     ChatClientMessageType = "shell_command"
+	ChatClientMessageTypeShellStop        ChatClientMessageType = "shell_stop"
+	ChatClientMessageTypeTaskOutput       ChatClientMessageType = "task_output"
+	ChatClientMessageTypeUserMessage      ChatClientMessageType = "user_message"
+)
+
+// Defines values for ChatDiffRefreshFrameType.
+const (
+	ChatDiffRefreshFrameTypeDiffRefresh ChatDiffRefreshFrameType = "diff_refresh"
+)
+
+// Defines values for ChatErrorFrameType.
+const (
+	ChatError ChatErrorFrameType = "chat_error"
+)
+
+// Defines values for ChatEventFrameType.
+const (
+	ChatEventFrameTypeChatEvent ChatEventFrameType = "chat_event"
+)
+
+// Defines values for ChatHistoryFrameType.
+const (
+	ChatHistory ChatHistoryFrameType = "chat_history"
+)
+
+// Defines values for ChatPendingQuestionsFrameType.
+const (
+	PendingQuestions ChatPendingQuestionsFrameType = "pending_questions"
+)
+
+// Defines values for ChatQuestionExpiredFrameType.
+const (
+	QuestionExpired ChatQuestionExpiredFrameType = "question_expired"
+)
+
+// Defines values for ChatQueueFrameType.
+const (
+	Queue ChatQueueFrameType = "queue"
+)
+
+// Defines values for ChatReplayDoneFrameType.
+const (
+	ReplayDone ChatReplayDoneFrameType = "replay_done"
+)
+
+// Defines values for ChatShellOutputFrameType.
+const (
+	ShellOutput ChatShellOutputFrameType = "shell_output"
+)
+
+// Defines values for ChatStateSnapshotFrameType.
+const (
+	StateSnapshot ChatStateSnapshotFrameType = "state_snapshot"
+)
+
+// Defines values for ChatStatusFrameType.
+const (
+	ChatStatusFrameTypeStatus ChatStatusFrameType = "status"
+)
+
+// Defines values for ChatStreamStateKind.
+const (
+	Text     ChatStreamStateKind = "text"
+	Thinking ChatStreamStateKind = "thinking"
+)
+
+// Defines values for ChatSubagentEventsFrameType.
+const (
+	SubagentEvents ChatSubagentEventsFrameType = "subagent_events"
+)
+
+// Defines values for ChatTaskOutputFrameType.
+const (
+	ChatTaskOutputFrameTypeTaskOutput ChatTaskOutputFrameType = "task_output"
 )
 
 // Defines values for DiffFileChangeType.
@@ -136,42 +222,22 @@ const (
 
 // Defines values for TerminalDataEventType.
 const (
-	TerminalDataEventTypeData        TerminalDataEventType = "data"
-	TerminalDataEventTypeDiffRefresh TerminalDataEventType = "diff_refresh"
-	TerminalDataEventTypeSize        TerminalDataEventType = "size"
-	TerminalDataEventTypeStatus      TerminalDataEventType = "status"
+	Data TerminalDataEventType = "data"
 )
 
 // Defines values for TerminalDiffRefreshEventType.
 const (
-	TerminalDiffRefreshEventTypeData        TerminalDiffRefreshEventType = "data"
 	TerminalDiffRefreshEventTypeDiffRefresh TerminalDiffRefreshEventType = "diff_refresh"
-	TerminalDiffRefreshEventTypeSize        TerminalDiffRefreshEventType = "size"
-	TerminalDiffRefreshEventTypeStatus      TerminalDiffRefreshEventType = "status"
-)
-
-// Defines values for TerminalEventType.
-const (
-	TerminalEventTypeData        TerminalEventType = "data"
-	TerminalEventTypeDiffRefresh TerminalEventType = "diff_refresh"
-	TerminalEventTypeSize        TerminalEventType = "size"
-	TerminalEventTypeStatus      TerminalEventType = "status"
 )
 
 // Defines values for TerminalSizeEventType.
 const (
-	TerminalSizeEventTypeData        TerminalSizeEventType = "data"
-	TerminalSizeEventTypeDiffRefresh TerminalSizeEventType = "diff_refresh"
-	TerminalSizeEventTypeSize        TerminalSizeEventType = "size"
-	TerminalSizeEventTypeStatus      TerminalSizeEventType = "status"
+	Size TerminalSizeEventType = "size"
 )
 
 // Defines values for TerminalStatusEventType.
 const (
-	Data        TerminalStatusEventType = "data"
-	DiffRefresh TerminalStatusEventType = "diff_refresh"
-	Size        TerminalStatusEventType = "size"
-	Status      TerminalStatusEventType = "status"
+	TerminalStatusEventTypeStatus TerminalStatusEventType = "status"
 )
 
 // Defines values for TestCaseStatus.
@@ -540,6 +606,267 @@ type ArtifactSetStatus string
 // ArtifactsResponse defines model for ArtifactsResponse.
 type ArtifactsResponse struct {
 	Scripts []ArtifactSet `json:"scripts"`
+}
+
+// ChatClientMessage One client-to-server frame on a chat-mode socket. Flat rather than a union: `type` selects which of the optional fields carry meaning.
+type ChatClientMessage struct {
+	// Command The shell command of a shell_command frame (the text after the composer's leading "!"), run in the head's sandbox.
+	Command string `json:"command,omitempty"`
+
+	// Content A user_message's content blocks, forwarded to the provider verbatim.
+	Content json.RawMessage `json:"content,omitempty"`
+
+	// Cursor The history cursor of a load_events_before request - the daemon returns the batch older than it.
+	Cursor string `json:"cursor,omitempty"`
+
+	// File The output-file path of a task_output request, as the SANDBOXED agent saw it.
+	File string `json:"file,omitempty"`
+
+	// Id The client-generated id of a user_message, or the dequeue/shell_stop target, so a queued message can be reconciled and recalled.
+	Id    string `json:"id,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+
+	// Model The set_model target (a provider alias like "sonnet").
+	Model string `json:"model,omitempty"`
+
+	// Queued Set on a user_message sent while a turn runs: the daemon HOLDS it rather than delivering now, and drains it when the turn ends.
+	Queued bool `json:"queued,omitempty"`
+
+	// Response A control_response payload, e.g. AskUserQuestion answers.
+	Response json.RawMessage `json:"response,omitempty"`
+
+	// SubId The sub-agent whose full step history the client wants.
+	SubId string                `json:"sub_id,omitempty"`
+	Type  ChatClientMessageType `json:"type"`
+}
+
+// ChatClientMessageType defines model for ChatClientMessage.Type.
+type ChatClientMessageType string
+
+// ChatDiffRefreshFrame The worktree changed; the diff viewer should re-fetch.
+type ChatDiffRefreshFrame struct {
+	HeadMoved *bool                    `json:"head_moved,omitempty"`
+	Type      ChatDiffRefreshFrameType `json:"type"`
+}
+
+// ChatDiffRefreshFrameType defines model for ChatDiffRefreshFrame.Type.
+type ChatDiffRefreshFrameType string
+
+// ChatErrorFrame This head's normalized event log could not be opened, so the connection will render nothing. There is no fallback to degrade to, and an empty transcript is indistinguishable from a head that never spoke.
+type ChatErrorFrame struct {
+	Error string             `json:"error"`
+	Type  ChatErrorFrameType `json:"type"`
+}
+
+// ChatErrorFrameType defines model for ChatErrorFrame.Type.
+type ChatErrorFrameType string
+
+// ChatEvent One durable normalized event. `seq` is per-head, monotonic, and the sole wire and cursor identity - provider object ids stay inside `payload`.
+type ChatEvent struct {
+	// Payload The event's fields, which vary by `type`. Deliberately open: the provider's own recorded entry rides here too, so the Raw panel can show what the provider actually sent.
+	Payload json.RawMessage `json:"payload,omitempty"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate. Re-reading a transcript window or re-observing a line appends nothing new.
+	SourceId  string    `json:"source_id,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+
+	// Type The event kind, e.g. conversation_started, user_message, assistant_delta, assistant_message, reasoning_completed, reasoning_duration, tool_started, tool_completed, subagent_started, subagent_completed, plan_updated, commit_created, head_changed, notice, interaction_requested, messages_retracted, turn_started, turn_completed, turn_failed, turn_interrupted.
+	Type string `json:"type"`
+}
+
+// ChatEventFrame One live normalized event.
+type ChatEventFrame struct {
+	// Event One durable normalized event. `seq` is per-head, monotonic, and the sole wire and cursor identity - provider object ids stay inside `payload`.
+	Event ChatEvent          `json:"event"`
+	Type  ChatEventFrameType `json:"type"`
+}
+
+// ChatEventFrameType defines model for ChatEventFrame.Type.
+type ChatEventFrameType string
+
+// ChatFrame One server-to-client frame on a chat-mode socket. Each member declares its own single value for `type`, so a client narrows on it directly.
+type ChatFrame struct {
+	union json.RawMessage
+}
+
+// ChatHistoryFrame One page of durable history, oldest-first. Answers the initial window and every load_events_before. Paging is display-only: an older page never rewinds the state_snapshot projection.
+type ChatHistoryFrame struct {
+	// Done True once the log's beginning has been reached.
+	Done   bool        `json:"done"`
+	Events []ChatEvent `json:"events"`
+
+	// NextCursor The cursor to ask for the page before this one.
+	NextCursor string               `json:"next_cursor,omitempty"`
+	Type       ChatHistoryFrameType `json:"type"`
+}
+
+// ChatHistoryFrameType defines model for ChatHistoryFrame.Type.
+type ChatHistoryFrameType string
+
+// ChatPendingAsk A question the provider is still blocked on.
+type ChatPendingAsk struct {
+	RequestId string `json:"requestId"`
+	ToolUseId string `json:"toolUseId"`
+}
+
+// ChatPendingQuestionsFrame Which question cards can still be answered. A question's request id is durable and replays forever, but the request behind it dies with the turn that raised it, so the client cannot tell a live card from a dead one on its own. An empty list is a definite none; the frame being omitted entirely means the daemon cannot say.
+type ChatPendingQuestionsFrame struct {
+	Requests []ChatPendingAsk              `json:"requests"`
+	Type     ChatPendingQuestionsFrameType `json:"type"`
+}
+
+// ChatPendingQuestionsFrameType defines model for ChatPendingQuestionsFrame.Type.
+type ChatPendingQuestionsFrameType string
+
+// ChatProjection Bounded current state, folded from the event log and checkpointed with the sequence it was folded through. Complete messages, tool output and sub-agent transcripts stay in the paged log, so this does not grow with the conversation.
+type ChatProjection struct {
+	// Head The Git HEAD the commit reconciler last observed.
+	Head        string                     `json:"head,omitempty"`
+	Imports     map[string]int64           `json:"imports,omitempty"`
+	Interaction json.RawMessage            `json:"interaction,omitempty"`
+	Model       string                     `json:"model,omitempty"`
+	Plan        json.RawMessage            `json:"plan,omitempty"`
+	Queue       map[string]ChatQueuedState `json:"queue,omitempty"`
+
+	// SlashCommands The "/" autocomplete list the provider advertised on init. Persisted so it survives a resume - the list is only emitted on the live init line, never in the transcript.
+	SlashCommands []string `json:"slash_commands,omitempty"`
+
+	// Stream The block a response is in the middle of producing, accumulated from every delta no completed message has settled yet. Derived on read, so a client attaching mid-response renders the whole partial block rather than the tail it happens to catch live.
+	Stream    *ChatStreamState             `json:"stream,omitempty"`
+	Subagents map[string]ChatSubagentState `json:"subagents,omitempty"`
+
+	// Through The sequence number this projection was folded through.
+	Through uint64          `json:"through"`
+	Turn    *ChatTurnState  `json:"turn,omitempty"`
+	Usage   json.RawMessage `json:"usage,omitempty"`
+	Version int             `json:"version"`
+}
+
+// ChatQuestionExpiredFrame An answer was dropped because its request had already been retired. The card flips to expired rather than settling on an "Answered" that never was.
+type ChatQuestionExpiredFrame struct {
+	RequestId string                       `json:"requestId"`
+	Type      ChatQuestionExpiredFrameType `json:"type"`
+}
+
+// ChatQuestionExpiredFrameType defines model for ChatQuestionExpiredFrame.Type.
+type ChatQuestionExpiredFrameType string
+
+// ChatQueueFrame The daemon's authoritative snapshot of still-queued messages, sent after replay_done and on reconnect.
+type ChatQueueFrame struct {
+	Messages []ChatQueuedMessage `json:"messages"`
+	Type     ChatQueueFrameType  `json:"type"`
+}
+
+// ChatQueueFrameType defines model for ChatQueueFrame.Type.
+type ChatQueueFrameType string
+
+// ChatQueuedMessage A message held daemon-side because a turn was running. It lives only in the queue projection until it drains, at which point it becomes a durable user_message carrying the same id.
+type ChatQueuedMessage struct {
+	Content json.RawMessage `json:"content"`
+
+	// Id The client-generated id, used to reconcile the pending bubble.
+	Id string `json:"id"`
+}
+
+// ChatQueuedState defines model for ChatQueuedState.
+type ChatQueuedState struct {
+	Content json.RawMessage `json:"content"`
+	Id      string          `json:"id"`
+	Status  string          `json:"status"`
+}
+
+// ChatReplayDoneFrame The initial window has been delivered; everything after this is live.
+type ChatReplayDoneFrame struct {
+	Type ChatReplayDoneFrameType `json:"type"`
+}
+
+// ChatReplayDoneFrameType defines model for ChatReplayDoneFrame.Type.
+type ChatReplayDoneFrameType string
+
+// ChatShellOutputFrame A live chunk of a running composer "!command", keyed by the send frame's id. Ephemeral - the durable record is the user_message it settles into.
+type ChatShellOutputFrame struct {
+	Chunk string                   `json:"chunk"`
+	Id    string                   `json:"id"`
+	Type  ChatShellOutputFrameType `json:"type"`
+}
+
+// ChatShellOutputFrameType defines model for ChatShellOutputFrame.Type.
+type ChatShellOutputFrameType string
+
+// ChatStateSnapshotFrame The head's current state, sent first on attach. Taken with the history watermark under one lock, so a plan or sub-agent cannot change between snapshotting and subscribing.
+type ChatStateSnapshotFrame struct {
+	// State Bounded current state, folded from the event log and checkpointed with the sequence it was folded through. Complete messages, tool output and sub-agent transcripts stay in the paged log, so this does not grow with the conversation.
+	State ChatProjection             `json:"state"`
+	Type  ChatStateSnapshotFrameType `json:"type"`
+}
+
+// ChatStateSnapshotFrameType defines model for ChatStateSnapshotFrame.Type.
+type ChatStateSnapshotFrameType string
+
+// ChatStatusFrame The head's computed status changed. Shares its shape with the terminal socket.
+type ChatStatusFrame struct {
+	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
+	Status AgentStatus         `json:"status"`
+	Type   ChatStatusFrameType `json:"type"`
+}
+
+// ChatStatusFrameType defines model for ChatStatusFrame.Type.
+type ChatStatusFrameType string
+
+// ChatStreamState The block a response is in the middle of producing, accumulated from every delta no completed message has settled yet. Derived on read, so a client attaching mid-response renders the whole partial block rather than the tail it happens to catch live.
+type ChatStreamState struct {
+	Kind      ChatStreamStateKind `json:"kind"`
+	MessageId string              `json:"message_id,omitempty"`
+	Text      string              `json:"text"`
+}
+
+// ChatStreamStateKind defines model for ChatStreamState.Kind.
+type ChatStreamStateKind string
+
+// ChatSubagentEventsFrame One sub-agent's full step history, answering load_subagent. Not paginated: a sub-agent's steps may sit entirely outside the loaded main-conversation window.
+type ChatSubagentEventsFrame struct {
+	AgentId string                      `json:"agentId"`
+	Events  []ChatEvent                 `json:"events"`
+	Type    ChatSubagentEventsFrameType `json:"type"`
+}
+
+// ChatSubagentEventsFrameType defines model for ChatSubagentEventsFrame.Type.
+type ChatSubagentEventsFrameType string
+
+// ChatSubagentState defines model for ChatSubagentState.
+type ChatSubagentState struct {
+	Activity    string `json:"activity,omitempty"`
+	AgentType   string `json:"agent_type,omitempty"`
+	Description string `json:"description,omitempty"`
+	Id          string `json:"id"`
+
+	// ParentId The sub-agent that spawned this one; empty for a main-agent spawn.
+	ParentId string `json:"parent_id,omitempty"`
+
+	// ParentItemId The tool call that spawned it, so the chat folds it into that card.
+	ParentItemId string `json:"parent_item_id,omitempty"`
+	Prompt       string `json:"prompt,omitempty"`
+	Status       string `json:"status,omitempty"`
+}
+
+// ChatTaskOutputFrame The tail of a background task's output file, or why it could not be read.
+type ChatTaskOutputFrame struct {
+	Content string                  `json:"content,omitempty"`
+	Error   string                  `json:"error,omitempty"`
+	File    string                  `json:"file"`
+	Type    ChatTaskOutputFrameType `json:"type"`
+}
+
+// ChatTaskOutputFrameType defines model for ChatTaskOutputFrame.Type.
+type ChatTaskOutputFrameType string
+
+// ChatTurnState defines model for ChatTurnState.
+type ChatTurnState struct {
+	Id     string `json:"id,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 // ClaudeUsageResponse defines model for ClaudeUsageResponse.
@@ -1524,48 +1851,45 @@ type StatusResponse struct {
 	Version       *string  `json:"version,omitempty"`
 }
 
-// TerminalDataEvent defines model for TerminalDataEvent.
+// TerminalDataEvent A chunk of PTY output, when it is relayed as text rather than binary.
 type TerminalDataEvent struct {
 	// Data Base64 encoded binary data or plain string
-	Data *string               `json:"data,omitempty"`
+	Data string                `json:"data"`
 	Type TerminalDataEventType `json:"type"`
 }
 
 // TerminalDataEventType defines model for TerminalDataEvent.Type.
 type TerminalDataEventType string
 
-// TerminalDiffRefreshEvent defines model for TerminalDiffRefreshEvent.
+// TerminalDiffRefreshEvent The worktree changed; the diff viewer should re-fetch.
 type TerminalDiffRefreshEvent struct {
 	// HeadMoved True when this refresh was triggered by a new commit (HEAD moved), as opposed to an uncommitted working-tree change. The diff viewer uses it to also re-snapshot per-commit artifacts (screenshots), which are memoized by commit SHA, while a plain working-tree change only re-fetches the diff text.
-	HeadMoved *bool                        `json:"head_moved,omitempty"`
+	HeadMoved bool                         `json:"head_moved"`
 	Type      TerminalDiffRefreshEventType `json:"type"`
 }
 
 // TerminalDiffRefreshEventType defines model for TerminalDiffRefreshEvent.Type.
 type TerminalDiffRefreshEventType string
 
-// TerminalEvent defines model for TerminalEvent.
+// TerminalEvent One server-to-client control event on a terminal-mode socket.
 type TerminalEvent struct {
-	Type TerminalEventType `json:"type"`
+	union json.RawMessage
 }
 
-// TerminalEventType defines model for TerminalEvent.Type.
-type TerminalEventType string
-
-// TerminalSizeEvent defines model for TerminalSizeEvent.
+// TerminalSizeEvent The PTY's current window size, sent on attach right before the scrollback replay so the client can size its terminal to match. The replayed bytes carry cursor moves and wrapping computed for this width; rendering them at a different width corrupts the history.
 type TerminalSizeEvent struct {
-	Cols *int                  `json:"cols,omitempty"`
-	Rows *int                  `json:"rows,omitempty"`
+	Cols int                   `json:"cols"`
+	Rows int                   `json:"rows"`
 	Type TerminalSizeEventType `json:"type"`
 }
 
 // TerminalSizeEventType defines model for TerminalSizeEvent.Type.
 type TerminalSizeEventType string
 
-// TerminalStatusEvent defines model for TerminalStatusEvent.
+// TerminalStatusEvent The head's computed status changed.
 type TerminalStatusEvent struct {
 	// Status The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
-	Status *AgentStatus            `json:"status,omitempty"`
+	Status AgentStatus             `json:"status"`
 	Type   TerminalStatusEventType `json:"type"`
 }
 
@@ -2038,6 +2362,574 @@ type SetProjectIconJSONRequestBody = SetProjectIconRequest
 
 // CommitRepositoryJSONRequestBody defines body for CommitRepository for application/json ContentType.
 type CommitRepositoryJSONRequestBody = CommitRepositoryRequest
+
+// AsChatStatusFrame returns the union data inside the ChatFrame as a ChatStatusFrame
+func (t ChatFrame) AsChatStatusFrame() (ChatStatusFrame, error) {
+	var body ChatStatusFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatStatusFrame overwrites any union data inside the ChatFrame as the provided ChatStatusFrame
+func (t *ChatFrame) FromChatStatusFrame(v ChatStatusFrame) error {
+	v.Type = "status"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatStatusFrame performs a merge with any union data inside the ChatFrame, using the provided ChatStatusFrame
+func (t *ChatFrame) MergeChatStatusFrame(v ChatStatusFrame) error {
+	v.Type = "status"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatDiffRefreshFrame returns the union data inside the ChatFrame as a ChatDiffRefreshFrame
+func (t ChatFrame) AsChatDiffRefreshFrame() (ChatDiffRefreshFrame, error) {
+	var body ChatDiffRefreshFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatDiffRefreshFrame overwrites any union data inside the ChatFrame as the provided ChatDiffRefreshFrame
+func (t *ChatFrame) FromChatDiffRefreshFrame(v ChatDiffRefreshFrame) error {
+	v.Type = "diff_refresh"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatDiffRefreshFrame performs a merge with any union data inside the ChatFrame, using the provided ChatDiffRefreshFrame
+func (t *ChatFrame) MergeChatDiffRefreshFrame(v ChatDiffRefreshFrame) error {
+	v.Type = "diff_refresh"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatStateSnapshotFrame returns the union data inside the ChatFrame as a ChatStateSnapshotFrame
+func (t ChatFrame) AsChatStateSnapshotFrame() (ChatStateSnapshotFrame, error) {
+	var body ChatStateSnapshotFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatStateSnapshotFrame overwrites any union data inside the ChatFrame as the provided ChatStateSnapshotFrame
+func (t *ChatFrame) FromChatStateSnapshotFrame(v ChatStateSnapshotFrame) error {
+	v.Type = "state_snapshot"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatStateSnapshotFrame performs a merge with any union data inside the ChatFrame, using the provided ChatStateSnapshotFrame
+func (t *ChatFrame) MergeChatStateSnapshotFrame(v ChatStateSnapshotFrame) error {
+	v.Type = "state_snapshot"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatHistoryFrame returns the union data inside the ChatFrame as a ChatHistoryFrame
+func (t ChatFrame) AsChatHistoryFrame() (ChatHistoryFrame, error) {
+	var body ChatHistoryFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatHistoryFrame overwrites any union data inside the ChatFrame as the provided ChatHistoryFrame
+func (t *ChatFrame) FromChatHistoryFrame(v ChatHistoryFrame) error {
+	v.Type = "chat_history"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatHistoryFrame performs a merge with any union data inside the ChatFrame, using the provided ChatHistoryFrame
+func (t *ChatFrame) MergeChatHistoryFrame(v ChatHistoryFrame) error {
+	v.Type = "chat_history"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatEventFrame returns the union data inside the ChatFrame as a ChatEventFrame
+func (t ChatFrame) AsChatEventFrame() (ChatEventFrame, error) {
+	var body ChatEventFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatEventFrame overwrites any union data inside the ChatFrame as the provided ChatEventFrame
+func (t *ChatFrame) FromChatEventFrame(v ChatEventFrame) error {
+	v.Type = "chat_event"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatEventFrame performs a merge with any union data inside the ChatFrame, using the provided ChatEventFrame
+func (t *ChatFrame) MergeChatEventFrame(v ChatEventFrame) error {
+	v.Type = "chat_event"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatSubagentEventsFrame returns the union data inside the ChatFrame as a ChatSubagentEventsFrame
+func (t ChatFrame) AsChatSubagentEventsFrame() (ChatSubagentEventsFrame, error) {
+	var body ChatSubagentEventsFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatSubagentEventsFrame overwrites any union data inside the ChatFrame as the provided ChatSubagentEventsFrame
+func (t *ChatFrame) FromChatSubagentEventsFrame(v ChatSubagentEventsFrame) error {
+	v.Type = "subagent_events"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatSubagentEventsFrame performs a merge with any union data inside the ChatFrame, using the provided ChatSubagentEventsFrame
+func (t *ChatFrame) MergeChatSubagentEventsFrame(v ChatSubagentEventsFrame) error {
+	v.Type = "subagent_events"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatReplayDoneFrame returns the union data inside the ChatFrame as a ChatReplayDoneFrame
+func (t ChatFrame) AsChatReplayDoneFrame() (ChatReplayDoneFrame, error) {
+	var body ChatReplayDoneFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatReplayDoneFrame overwrites any union data inside the ChatFrame as the provided ChatReplayDoneFrame
+func (t *ChatFrame) FromChatReplayDoneFrame(v ChatReplayDoneFrame) error {
+	v.Type = "replay_done"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatReplayDoneFrame performs a merge with any union data inside the ChatFrame, using the provided ChatReplayDoneFrame
+func (t *ChatFrame) MergeChatReplayDoneFrame(v ChatReplayDoneFrame) error {
+	v.Type = "replay_done"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatQueueFrame returns the union data inside the ChatFrame as a ChatQueueFrame
+func (t ChatFrame) AsChatQueueFrame() (ChatQueueFrame, error) {
+	var body ChatQueueFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatQueueFrame overwrites any union data inside the ChatFrame as the provided ChatQueueFrame
+func (t *ChatFrame) FromChatQueueFrame(v ChatQueueFrame) error {
+	v.Type = "queue"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatQueueFrame performs a merge with any union data inside the ChatFrame, using the provided ChatQueueFrame
+func (t *ChatFrame) MergeChatQueueFrame(v ChatQueueFrame) error {
+	v.Type = "queue"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatPendingQuestionsFrame returns the union data inside the ChatFrame as a ChatPendingQuestionsFrame
+func (t ChatFrame) AsChatPendingQuestionsFrame() (ChatPendingQuestionsFrame, error) {
+	var body ChatPendingQuestionsFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatPendingQuestionsFrame overwrites any union data inside the ChatFrame as the provided ChatPendingQuestionsFrame
+func (t *ChatFrame) FromChatPendingQuestionsFrame(v ChatPendingQuestionsFrame) error {
+	v.Type = "pending_questions"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatPendingQuestionsFrame performs a merge with any union data inside the ChatFrame, using the provided ChatPendingQuestionsFrame
+func (t *ChatFrame) MergeChatPendingQuestionsFrame(v ChatPendingQuestionsFrame) error {
+	v.Type = "pending_questions"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatQuestionExpiredFrame returns the union data inside the ChatFrame as a ChatQuestionExpiredFrame
+func (t ChatFrame) AsChatQuestionExpiredFrame() (ChatQuestionExpiredFrame, error) {
+	var body ChatQuestionExpiredFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatQuestionExpiredFrame overwrites any union data inside the ChatFrame as the provided ChatQuestionExpiredFrame
+func (t *ChatFrame) FromChatQuestionExpiredFrame(v ChatQuestionExpiredFrame) error {
+	v.Type = "question_expired"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatQuestionExpiredFrame performs a merge with any union data inside the ChatFrame, using the provided ChatQuestionExpiredFrame
+func (t *ChatFrame) MergeChatQuestionExpiredFrame(v ChatQuestionExpiredFrame) error {
+	v.Type = "question_expired"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatShellOutputFrame returns the union data inside the ChatFrame as a ChatShellOutputFrame
+func (t ChatFrame) AsChatShellOutputFrame() (ChatShellOutputFrame, error) {
+	var body ChatShellOutputFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatShellOutputFrame overwrites any union data inside the ChatFrame as the provided ChatShellOutputFrame
+func (t *ChatFrame) FromChatShellOutputFrame(v ChatShellOutputFrame) error {
+	v.Type = "shell_output"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatShellOutputFrame performs a merge with any union data inside the ChatFrame, using the provided ChatShellOutputFrame
+func (t *ChatFrame) MergeChatShellOutputFrame(v ChatShellOutputFrame) error {
+	v.Type = "shell_output"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatTaskOutputFrame returns the union data inside the ChatFrame as a ChatTaskOutputFrame
+func (t ChatFrame) AsChatTaskOutputFrame() (ChatTaskOutputFrame, error) {
+	var body ChatTaskOutputFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatTaskOutputFrame overwrites any union data inside the ChatFrame as the provided ChatTaskOutputFrame
+func (t *ChatFrame) FromChatTaskOutputFrame(v ChatTaskOutputFrame) error {
+	v.Type = "task_output"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatTaskOutputFrame performs a merge with any union data inside the ChatFrame, using the provided ChatTaskOutputFrame
+func (t *ChatFrame) MergeChatTaskOutputFrame(v ChatTaskOutputFrame) error {
+	v.Type = "task_output"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatErrorFrame returns the union data inside the ChatFrame as a ChatErrorFrame
+func (t ChatFrame) AsChatErrorFrame() (ChatErrorFrame, error) {
+	var body ChatErrorFrame
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatErrorFrame overwrites any union data inside the ChatFrame as the provided ChatErrorFrame
+func (t *ChatFrame) FromChatErrorFrame(v ChatErrorFrame) error {
+	v.Type = "chat_error"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatErrorFrame performs a merge with any union data inside the ChatFrame, using the provided ChatErrorFrame
+func (t *ChatFrame) MergeChatErrorFrame(v ChatErrorFrame) error {
+	v.Type = "chat_error"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ChatFrame) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t ChatFrame) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "chat_error":
+		return t.AsChatErrorFrame()
+	case "chat_event":
+		return t.AsChatEventFrame()
+	case "chat_history":
+		return t.AsChatHistoryFrame()
+	case "diff_refresh":
+		return t.AsChatDiffRefreshFrame()
+	case "pending_questions":
+		return t.AsChatPendingQuestionsFrame()
+	case "question_expired":
+		return t.AsChatQuestionExpiredFrame()
+	case "queue":
+		return t.AsChatQueueFrame()
+	case "replay_done":
+		return t.AsChatReplayDoneFrame()
+	case "shell_output":
+		return t.AsChatShellOutputFrame()
+	case "state_snapshot":
+		return t.AsChatStateSnapshotFrame()
+	case "status":
+		return t.AsChatStatusFrame()
+	case "subagent_events":
+		return t.AsChatSubagentEventsFrame()
+	case "task_output":
+		return t.AsChatTaskOutputFrame()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t ChatFrame) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ChatFrame) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsTerminalStatusEvent returns the union data inside the TerminalEvent as a TerminalStatusEvent
+func (t TerminalEvent) AsTerminalStatusEvent() (TerminalStatusEvent, error) {
+	var body TerminalStatusEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTerminalStatusEvent overwrites any union data inside the TerminalEvent as the provided TerminalStatusEvent
+func (t *TerminalEvent) FromTerminalStatusEvent(v TerminalStatusEvent) error {
+	v.Type = "status"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTerminalStatusEvent performs a merge with any union data inside the TerminalEvent, using the provided TerminalStatusEvent
+func (t *TerminalEvent) MergeTerminalStatusEvent(v TerminalStatusEvent) error {
+	v.Type = "status"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTerminalDataEvent returns the union data inside the TerminalEvent as a TerminalDataEvent
+func (t TerminalEvent) AsTerminalDataEvent() (TerminalDataEvent, error) {
+	var body TerminalDataEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTerminalDataEvent overwrites any union data inside the TerminalEvent as the provided TerminalDataEvent
+func (t *TerminalEvent) FromTerminalDataEvent(v TerminalDataEvent) error {
+	v.Type = "data"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTerminalDataEvent performs a merge with any union data inside the TerminalEvent, using the provided TerminalDataEvent
+func (t *TerminalEvent) MergeTerminalDataEvent(v TerminalDataEvent) error {
+	v.Type = "data"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTerminalDiffRefreshEvent returns the union data inside the TerminalEvent as a TerminalDiffRefreshEvent
+func (t TerminalEvent) AsTerminalDiffRefreshEvent() (TerminalDiffRefreshEvent, error) {
+	var body TerminalDiffRefreshEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTerminalDiffRefreshEvent overwrites any union data inside the TerminalEvent as the provided TerminalDiffRefreshEvent
+func (t *TerminalEvent) FromTerminalDiffRefreshEvent(v TerminalDiffRefreshEvent) error {
+	v.Type = "diff_refresh"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTerminalDiffRefreshEvent performs a merge with any union data inside the TerminalEvent, using the provided TerminalDiffRefreshEvent
+func (t *TerminalEvent) MergeTerminalDiffRefreshEvent(v TerminalDiffRefreshEvent) error {
+	v.Type = "diff_refresh"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsTerminalSizeEvent returns the union data inside the TerminalEvent as a TerminalSizeEvent
+func (t TerminalEvent) AsTerminalSizeEvent() (TerminalSizeEvent, error) {
+	var body TerminalSizeEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTerminalSizeEvent overwrites any union data inside the TerminalEvent as the provided TerminalSizeEvent
+func (t *TerminalEvent) FromTerminalSizeEvent(v TerminalSizeEvent) error {
+	v.Type = "size"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTerminalSizeEvent performs a merge with any union data inside the TerminalEvent, using the provided TerminalSizeEvent
+func (t *TerminalEvent) MergeTerminalSizeEvent(v TerminalSizeEvent) error {
+	v.Type = "size"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t TerminalEvent) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"type"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t TerminalEvent) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "data":
+		return t.AsTerminalDataEvent()
+	case "diff_refresh":
+		return t.AsTerminalDiffRefreshEvent()
+	case "size":
+		return t.AsTerminalSizeEvent()
+	case "status":
+		return t.AsTerminalStatusEvent()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t TerminalEvent) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *TerminalEvent) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
