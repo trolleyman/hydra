@@ -369,11 +369,15 @@ body {
    verified in Chromium: selecting the whole body yields the same string with the
    numbers present as without them.
 
-   The line is a block with a hanging indent (padding-left == -text-indent), so
-   the number sits in the gutter and a WRAPPED continuation lines up under the
-   code rather than under the number. --lb-gutter is set per file from its line
-   count, so a 4-digit log doesn't crowd the code and a 20-line snippet doesn't
-   waste a column. */
+   The line is a flex ROW - number, then code - rather than one block with a
+   hanging indent. Both lay the code out identically, and a wrapped continuation
+   lines up under the code either way, but only the row stretches the number's
+   box to the full height of the line it numbers: the gutter's dividing rule is
+   that box's right border, and against a hanging indent it was one text line
+   tall, so a wrapped line left a gap in the rule.
+
+   --lb-gutter is set per file from its line count, so a 4-digit log doesn't
+   crowd the code and a 20-line snippet doesn't waste a column. */
 .lb-code {
   /* The one place the panel colour is written down for the gutter: the sticky
      number needs an opaque backdrop to cover the code sliding under it, and
@@ -383,40 +387,41 @@ body {
 }
 
 .lb-code .lb-line {
-  display: block;
+  display: flex;
   background-color: inherit;
-  /* An empty line has no inline content and would otherwise collapse to zero
-     height, so blank lines in the file would vanish from the gutter's count.
-     Matches the pane's leading-5. */
+  /* Keeps a blank line one row tall, and its number level with the others. */
   min-height: 1.25rem;
-  padding-left: var(--lb-gutter, 3.5rem);
-  padding-right: 0.75rem;
-  text-indent: calc(-1 * var(--lb-gutter, 3.5rem));
-  white-space: pre;
-}
-
-.lb-code.lb-wrap .lb-line {
-  white-space: pre-wrap;
-  /* A minified bundle or a base64 blob has no spaces to break at; without this
-     it would scroll sideways forever even with wrapping on. */
-  overflow-wrap: anywhere;
 }
 
 .lb-code .lb-ln {
-  display: inline-block;
   position: sticky;
   left: 0;
   z-index: 1;
+  flex: none;
   box-sizing: border-box;
-  /* Fills the gutter apart from the 1rem gap this leaves before the code. */
+  /* Leaves the 1rem the code's padding below takes back as the gap. */
   width: calc(var(--lb-gutter, 3.5rem) - 1rem);
-  margin-right: 1rem;
   padding: 0 0.5rem;
   text-align: right;
   background-color: inherit;
   border-right: 1px solid rgb(255 255 255 / 0.08);
   color: #6b7280;
   user-select: none;
+}
+
+.lb-code .lb-tx {
+  /* No min-width: 0 - the row has to be allowed to grow past the pane so an
+     unwrapped long line scrolls it sideways rather than being squeezed. */
+  flex: 1 1 auto;
+  padding: 0 0.75rem 0 1rem;
+  white-space: pre;
+}
+
+.lb-code.lb-wrap .lb-tx {
+  white-space: pre-wrap;
+  /* A minified bundle or a base64 blob has no spaces to break at; without this
+     it would scroll sideways forever even with wrapping on. */
+  overflow-wrap: anywhere;
 }
 
 /* Toasts (bottom-right notifications). They slide up + in from the right and fade

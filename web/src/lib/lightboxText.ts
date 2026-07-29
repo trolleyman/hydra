@@ -34,11 +34,17 @@ export function buildCodeBody(text: string, filename: string): { gutter: string;
     // Joined with nothing: each line is its own block (see .lb-line), so a
     // newline between them would render as a second, empty line.
     //
+    // The code sits in its own .lb-tx cell rather than beside the number: the
+    // line is a flex row, which is what lets the gutter's dividing rule run the
+    // full height of a WRAPPED line instead of stopping after its first row.
+    //
     // The <br> in a BLANK line is what keeps a copy honest. Selecting the body
-    // serializes the boxes, not the source, and an empty block with only a
-    // user-select:none gutter in it contributes nothing - so a blank line came
-    // out of the clipboard missing entirely (verified in Chromium). A trailing
-    // <br> serializes as the newline it stands for and adds no height.
-    html: lines.map((line, i) => `<span class="lb-line"><span class="lb-ln">${i + 1}</span>${line || '<br>'}</span>`).join(''),
+    // serializes the boxes, not the source, and an empty cell next to a
+    // user-select:none gutter contributes nothing - so a blank line came out of
+    // the clipboard missing entirely (verified in Chromium). A <br> serializes
+    // as the newline it stands for and adds no height.
+    html: lines
+      .map((line, i) => `<span class="lb-line"><span class="lb-ln">${i + 1}</span><span class="lb-tx">${line || '<br>'}</span></span>`)
+      .join(''),
   }
 }

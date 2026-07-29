@@ -5,24 +5,22 @@
 import { describe, expect, it } from 'vitest'
 import { buildCodeBody } from './lightboxText'
 
-// The line elements the builder emits, as [number, inner html] pairs.
+// The line elements the builder emits, as [number, code html] pairs.
 function lines(html: string): [string, string][] {
-  return [...html.matchAll(/<span class="lb-line"><span class="lb-ln">(\d+)<\/span>(.*?)<\/span>$/gm)]
+  return [...html.matchAll(/<span class="lb-ln">(\d+)<\/span><span class="lb-tx">(.*?)<\/span><\/span>/g)]
     .map((m) => [m[1], m[2]])
 }
 
-// Splitting on the line wrapper is enough for the assertions below and doesn't
-// care how a line's own markup nests.
+// Splitting on the line wrapper is enough for counting and doesn't care how a
+// line's own markup nests.
 function lineHtml(html: string): string[] {
-  return html.split('<span class="lb-line">').slice(1).map((s) => s.replace(/<\/span>$/, ''))
+  return html.split('<span class="lb-line">').slice(1)
 }
 
 describe('buildCodeBody', () => {
   it('numbers every line from 1', () => {
     const { html } = buildCodeBody('alpha\nbeta\ngamma', 'notes.txt')
-    expect(lineHtml(html)).toHaveLength(3)
-    expect(html).toContain('<span class="lb-ln">1</span>alpha')
-    expect(html).toContain('<span class="lb-ln">3</span>gamma')
+    expect(lines(html)).toEqual([['1', 'alpha'], ['2', 'beta'], ['3', 'gamma']])
   })
 
   it("does not count a file's final newline as another line", () => {
@@ -34,9 +32,8 @@ describe('buildCodeBody', () => {
   it('gives a blank line a <br> so it survives a copied selection', () => {
     // An empty block with only the user-select:none gutter in it serializes to
     // nothing, which dropped the blank line out of the clipboard entirely.
-    const { html } = buildCodeBody('alpha\n\nbeta', 'notes.txt')
-    expect(html).toContain('<span class="lb-ln">2</span><br>')
-    expect(html).not.toContain('<span class="lb-ln">1</span><br>')
+    expect(lines(buildCodeBody('alpha\n\nbeta', 'notes.txt').html))
+      .toEqual([['1', 'alpha'], ['2', '<br>'], ['3', 'beta']])
   })
 
   it('joins the lines with nothing - each is its own block', () => {
@@ -64,10 +61,10 @@ describe('buildCodeBody', () => {
     expect(buildCodeBody('const answer = 42', 'notes.txt').html).not.toContain('token')
   })
 
-  it('reads a line as [number, code] with the number outside the code', () => {
-    // The gutter is its own span so it can be sticky and select-none; the line's
-    // code must not be nested inside it.
-    const [first] = lines(buildCodeBody('alpha', 'notes.txt').html)
-    expect(first).toEqual(['1', 'alpha'])
+  it('gives the number and the code a cell each', () => {
+    // The line is a flex row: the gutter cell is what goes sticky and
+    // select-none, and what stretches its dividing rule down a wrapped line.
+    expect(buildCodeBody('alpha', 'notes.txt').html)
+      .toBe('<span class="lb-line"><span class="lb-ln">1</span><span class="lb-tx">alpha</span></span>')
   })
 })
