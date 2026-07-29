@@ -44,9 +44,11 @@ import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
-import { viewLineNumbers } from '../lib/fileViewCommand'
-import { duOutputSpans } from '../lib/duOutput'
-import { gitOutputSpans } from '../lib/gitOutput'
+import { FILE_BANNER, viewLineNumbers } from '../lib/fileViewCommand'
+import { buildOutputSpans } from '../lib/buildOutput'
+import { diskOutputSpans } from '../lib/diskOutput'
+import { searchSummarySpans } from '../lib/searchSummary'
+import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
 import type { OutputSpan } from '../lib/outputSpan'
 import { parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
@@ -1854,17 +1856,30 @@ function CodePanel({ code, lang }: { code: string; lang: string }) {
 // Null when nothing matched, so the caller keeps its ordinary rendering.
 function separatorHtml(text: string, markers: string[]): string | null {
   const wanted = new Set(markers.flatMap((m) => m.split('\n')).map((l) => l.trimEnd()).filter(Boolean))
-  if (wanted.size === 0) return null
   const plain = stripAnsi(text).split('\n')
+  // What a compiler or a test runner said, for the (very common) card whose
+  // whole output is a build log - see lib/buildOutput. Only over lines the
+  // terminal did NOT colour itself: where it did, its colours are better
+  // informed than any shape read off the text.
+  const built = buildOutputSpans(plain)
+  if (wanted.size === 0 && !built) return null
   // The ANSI is rendered first and then cut at the newlines, so a colour that
   // spans lines survives the split (splitHighlightedLines re-opens it).
+  const raw = text.split('\n')
   const rendered = hasAnsi(text) ? splitHighlightedLines(ansiToHtml(text)) : plain.map(escapeText)
-  if (rendered.length !== plain.length) return null
+  if (rendered.length !== plain.length || raw.length !== plain.length) return null
   let found = false
   const out = plain.map((line, i) => {
-    if (!wanted.has(line.trimEnd())) return rendered[i]
-    found = true
-    return `<span class="token string">${escapeText(line)}</span>`
+    if (wanted.has(line.trimEnd())) {
+      found = true
+      return `<span class="token string">${escapeText(line)}</span>`
+    }
+    const spans = built?.[i]
+    if (spans && !hasAnsi(raw[i]) && spans.some((sp) => sp.cls !== '')) {
+      found = true
+      return spans.map((sp) => (sp.cls ? `<span class="${sp.cls}">${escapeText(sp.text)}</span>` : escapeText(sp.text))).join('')
+    }
+    return rendered[i]
   })
   return found ? out.join('\n') : null
 }
@@ -1884,7 +1899,8 @@ function OutputPanel({ text, lang, markers }: { text: string; lang: string; isEr
   const html = useMemo(
     () => {
       if (lang) return highlightHtml(stripAnsi(text), lang)
-      return (markerKey ? separatorHtml(text, markerKey.split('\n')) : null) ?? (hasAnsi(text) ? ansiToHtml(text) : null)
+      return separatorHtml(text, markerKey ? markerKey.split('\n') : [])
+        ?? (hasAnsi(text) ? ansiToHtml(text) : null)
     },
     [text, lang, markerKey],
   )
@@ -2181,6 +2197,9 @@ interface ScriptOutputRow {
   // The `path:` a multi-file search printed in front of the line, shown lowlit
   // so the file it names does not read as part of the line's code.
   prefix?: string
+  // A prefix the tool wrote in its OWN colours rather than one to lowlight - the
+  // commit, author and date in front of each line of a blame.
+  prefixSpans?: OutputSpan[]
   // The file this line's NUMBER counts in, when the script named one. A
   // sectioned script's gutter is several files' numbering stacked in one column
   // - the numbers restart, and nothing on the row says at which file - so the
@@ -2240,6 +2259,73 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   return rows
 }
 
+// scriptBlameRows renders a `git blame f`: each line of the file behind the
+// commit that last touched it. The prefix is git's - the sha in the colour a sha
+// takes everywhere else, the author and date lowlit behind it - and what follows
+// is a line of that file, so it is numbered by blame's own numbers and
+// highlighted as the file's language.
+//
+// The code is highlighted as ONE run, because that is what it is: a blame prints
+// the file in order, so a multi-line construct colourises correctly.
+function scriptBlameRows(section: Extract<ScriptSection, { kind: 'blame' }>): ScriptOutputRow[] {
+  const parsed = section.lines.map(parseBlameLine)
+  const lang = langFromPath(section.path)
+  // A line blame's shape does not fit (a `fatal:` on stderr) contributes an
+  // empty line to the run, so the highlighting of the lines around it still
+  // lines up with them.
+  const html = highlightLines(parsed.map((b) => b?.code ?? '').join('\n'), lang || 'plaintext')
+  return parsed.map((blame, i) => (blame
+    ? {
+      num: blame.num,
+      html: html[i] ?? '',
+      prefixSpans: blamePrefixSpans(blame),
+      file: section.path,
+      tone: 'code' as const,
+    }
+    : { num: '', html: escapeText(section.lines[i]), tone: 'plain' as const }))
+}
+
+// scriptBannerRows renders a `head -20 a.go b.go`: several files' contents with
+// the `==> name <==` banner head/tail print between them. Each stretch is
+// highlighted as the file its banner names and numbered from the line the
+// command asked for, and the banner itself renders as the separator it is - the
+// same treatment an `echo` heading gets, because it does the same job.
+//
+// The banner is the ONLY thing that says which file a stretch is. So a stretch
+// with no banner in front of it (output that began before the first one, a
+// truncated read) is plain text rather than a guess.
+function scriptBannerRows(section: Extract<ScriptSection, { kind: 'banners' }>): ScriptOutputRow[] {
+  const rows: ScriptOutputRow[] = []
+  let path = ''
+  let run: string[] = []
+  // How many lines of each file the command asked for. `head` prints a BLANK
+  // line between files, which is the separator's and not the file's - so a run
+  // longer than the count has that tail rendered as the spacing it is, rather
+  // than numbered as a line the file does not have.
+  const limit = section.view.start != null && section.view.end != null
+    ? section.view.end - section.view.start + 1
+    : null
+  const flush = () => {
+    if (run.length === 0) return
+    const own = limit != null ? run.slice(0, limit) : run
+    const nums = path ? viewLineNumbers(section.view, own.length) : []
+    const html = highlightLines(own.join('\n'), (path && langFromPath(path)) || 'plaintext')
+    run.forEach((line, i) => rows.push(i < own.length
+      ? { num: nums[i] ?? '', html: html[i] ?? '', file: path || undefined, tone: path ? 'code' : 'plain' }
+      : { num: '', html: escapeText(line), tone: 'plain' }))
+    run = []
+  }
+  for (const line of section.lines) {
+    const banner = FILE_BANNER.exec(line)
+    if (!banner) { run.push(line); continue }
+    flush()
+    path = banner[1]
+    rows.push({ num: '', html: `<span class="token string">${escapeText(line)}</span>`, tone: 'marker' })
+  }
+  flush()
+  return rows
+}
+
 // scriptOutputRows turns the sections of a shell script's output (lib/
 // shellSections) into the rows the panel below renders: file content highlighted
 // by its own extension and numbered by its own line numbers, the script's `echo`
@@ -2256,19 +2342,67 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       for (const spans of gitOutputSpans(section.lines)) rows.push({ num: '', html: '', spans, tone: 'code' })
       continue
     }
-    if (section.kind === 'du') {
-      for (const spans of duOutputSpans(section.lines)) rows.push({ num: '', html: '', spans, tone: 'code' })
+    if (section.kind === 'summary') {
+      for (const spans of searchSummarySpans(section.summary, section.lines)) {
+        rows.push({ num: '', html: '', spans, tone: 'code' })
+      }
       continue
     }
-    if (section.kind !== 'view') {
-      // 'plaintext' is not a grammar, so this is just the escaped lines - which
-      // is what both a separator and unattributable output want.
+    if (section.kind === 'blame') {
+      rows.push(...scriptBlameRows(section))
+      continue
+    }
+    if (section.kind === 'banners') {
+      rows.push(...scriptBannerRows(section))
+      continue
+    }
+    if (section.kind === 'disk') {
+      for (const spans of diskOutputSpans(section.tool, section.lines)) {
+        rows.push({ num: '', html: '', spans, tone: 'code' })
+      }
+      continue
+    }
+    if (section.kind === 'plain') {
+      // Three answers, in the order of who knows most about the line.
+      //
+      // The TERMINAL knows best: where a tool coloured a line itself, that
+      // colour is better informed than any shape read off the text, and it is
+      // the only structure such a stretch has.
+      //
+      // Failing that: is this a compiler, a linter or a test runner talking?
+      // That is answered by the LINE and not by the command, because the command
+      // that printed it (`mage build`, `make`, `npm run lint`) is unknowable -
+      // see lib/buildOutput.
+      //
+      // Failing both, it is the plain terminal text it arrived as.
+      const raw = section.raw
+      const ansi = raw ? splitHighlightedLines(ansiToHtml(raw.join('\n'))) : null
+      // Splitting the rendered ANSI must give one entry per line; a mismatch
+      // would pair a line with another line's colours.
+      const coloured = ansi && ansi.length === section.lines.length ? ansi : null
+      const built = buildOutputSpans(section.lines)
       const escaped = highlightLines(section.lines.join('\n'), 'plaintext')
-      const marker = section.kind === 'marker'
-      escaped.forEach((html) => rows.push({
+      section.lines.forEach((_, i) => {
+        if (coloured && raw && hasAnsi(raw[i])) {
+          rows.push({ num: '', html: coloured[i], tone: 'plain' })
+          return
+        }
+        const spans = built?.[i]
+        if (spans && spans.some((sp) => sp.cls !== '')) {
+          rows.push({ num: '', html: '', spans, tone: 'plain' })
+          return
+        }
+        rows.push({ num: '', html: escaped[i] ?? '', tone: 'plain' })
+      })
+      continue
+    }
+    if (section.kind === 'marker') {
+      // A separator is the string the script printed, so it takes the string
+      // colour whatever the terminal did with it.
+      highlightLines(section.lines.join('\n'), 'plaintext').forEach((line) => rows.push({
         num: '',
-        html: marker ? `<span class="token string">${html}</span>` : html,
-        tone: marker ? 'marker' : 'plain',
+        html: `<span class="token string">${line}</span>`,
+        tone: 'marker',
       }))
       continue
     }
@@ -2327,6 +2461,8 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
               className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
             >
               {row.prefix && <span className="text-stone-400 dark:text-stone-500">{row.prefix}:</span>}
+              {row.prefixSpans?.map((sp, j) => <span key={j} className={sp.cls}>{sp.text}</span>)}
+              {row.prefixSpans && ' '}
               {row.spans
                 ? row.spans.map((s, j) => <span key={j} className={s.cls}>{s.text}</span>)
                 : <span dangerouslySetInnerHTML={{ __html: row.html }} />}
@@ -3016,9 +3152,10 @@ const ToolCard = memo(function ToolCard({
   // was, with its content rendered as source; a card that renamed itself "Read"
   // hid the script that actually ran.
   //
-  // Never over ANSI colour (a `grep --color` line is not the file's own text) or
-  // an error (stderr interleaves with stdout in an order no parse of the script
-  // can predict, so every section boundary would be a guess).
+  // Not over an error: stderr interleaves with stdout in an order no parse of
+  // the script can predict, so every section boundary would be a guess. ANSI
+  // colour is fine - it is stripped for the matching and the highlighting, and
+  // put back for the stretches that render as terminal text (lib/shellSections).
   //
   // A plain const, not useMemo: it derives from `item`, which the reducer mutates
   // in place (see the ToolCard memo note), and a manual dependency on a mutated
@@ -3026,7 +3163,7 @@ const ToolCard = memo(function ToolCard({
   // this for us instead.
   const scriptSteps = isBash ? parseScriptSteps(unwrapBashLoginCommand(bashSource)) : null
   const scriptSections =
-    scriptSteps && renderedResult !== undefined && !item.isError && !hasAnsi(renderedResult)
+    scriptSteps && renderedResult !== undefined && !item.isError
       ? splitScriptOutput(scriptSteps, renderedResult)
       : null
   // What the script's own `echo`s printed, for the output that gets NO sections:

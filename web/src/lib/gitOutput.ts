@@ -88,6 +88,20 @@ const SHORT = /^([ MADRCUT?!])([ MADRCUT?!]) (\S.*)$/
 // The tab is what makes this safe to key on: nothing else git prints puts a
 // `source:line:` in front of one.
 const CHECK_IGNORE = /^([^\t:]*):(\d*):([^\t]*)\t(.*)$/
+// `git branch -vv`: the current branch's marker, its name, the sha at its tip,
+// what it tracks, and the subject of that commit.
+const BRANCH_ROW = /^([* +]\s*)(\S+)(\s+)([0-9a-f]{7,40})(\s+)(\[[^\]]*\]\s+)?(.*)$/
+// A worktree's branch is printed in parentheses instead of being checked out.
+const BRANCH_DETACHED = /^([* +]\s*)(\([^)]*\))(\s+)([0-9a-f]{7,40})(\s+)(.*)$/
+// `git remote -v`: a name, a URL, and which direction it is used in.
+const REMOTE_ROW = /^(\S+)(\s+)(\S+)(\s+\((?:fetch|push)\))$/
+// `git stash list`: `stash@{0}: WIP on main: a7401035 subject`.
+const STASH_ROW = /^(stash@\{\d+\})(: )(.*)$/
+// `git shortlog -sn`: how many commits, then who.
+// `git shortlog -sn`: how many commits, then who. The tab is required - a
+// commit message body that opens with a number is not a shortlog row.
+const SHORTLOG_ROW = /^(\s*)(\d+)(\t)(.*)$/
+
 // The long status's own furniture.
 const BRANCH = /^(On branch |HEAD detached at |HEAD detached from )(.*)$/
 const SECTION = /^(Changes to be committed|Changes not staged for commit|Untracked files|Unmerged paths|Ignored files|Changes staged for commit):$/
@@ -251,6 +265,63 @@ function shapeSpans(line: string, staged: boolean): GitSpan[] | null {
     return [{ text: bare[1], cls: '' }, ...pathSpans(bare[2]).map((s) => ({ ...s, cls: s.cls || side }))]
   }
 
+  // `git branch -vv`. Only for a line that opens with the column git reserves
+  // for the `*`, which is what keeps a commit message two spaces in from being
+  // read as a branch row.
+  if (/^[* +] /.test(line)) {
+    const row = BRANCH_ROW.exec(line)
+    const detached = row ? null : BRANCH_DETACHED.exec(line)
+    const m = row ?? detached
+    if (m) {
+      const current = line.startsWith('*')
+      // The `*` says which branch you are ON, which is the question the command
+      // is usually asked; the name beside it reads as loud as the marker. The
+      // upstream (`[origin/main: ahead 2]`) and the subject are context for the
+      // row, not the row.
+      return [
+        { text: m[1], cls: current ? REF : DIM },
+        { text: m[2], cls: current ? REF : '' },
+        { text: m[3], cls: '' },
+        { text: m[4], cls: SHA },
+        { text: m[5], cls: '' },
+        { text: row ? `${row[6] ?? ''}${row[7]}` : m[6], cls: DIM },
+      ]
+    }
+  }
+
+  const remote = REMOTE_ROW.exec(line)
+  if (remote) {
+    return [
+      { text: remote[1], cls: REF },
+      { text: remote[2], cls: '' },
+      { text: remote[3], cls: '' },
+      { text: remote[4], cls: DIM },
+    ]
+  }
+
+  const stash = STASH_ROW.exec(line)
+  if (stash) {
+    const rest = stash[3]
+    const sha = /^(.*?)([0-9a-f]{7,40})(\s.*)?$/.exec(rest)
+    return [
+      { text: stash[1], cls: REF },
+      { text: stash[2], cls: DIM },
+      ...(sha
+        ? [{ text: sha[1], cls: DIM }, { text: sha[2], cls: SHA }, { text: sha[3] ?? '', cls: '' }]
+        : [{ text: rest, cls: '' }]),
+    ]
+  }
+
+  const shortlog = SHORTLOG_ROW.exec(line)
+  if (shortlog) {
+    return [
+      { text: shortlog[1], cls: '' },
+      { text: shortlog[2], cls: SHA },
+      { text: shortlog[3], cls: '' },
+      { text: shortlog[4], cls: '' },
+    ]
+  }
+
   const short = SHORT.exec(line)
   // Both columns blank is not a status line - it is an indented line of a commit
   // message that happens to be three characters in.
@@ -318,4 +389,41 @@ export function gitOutputSpans(lines: string[]): GitSpan[][] {
     else if (!patch && startsPatch(line)) patch = true
     return lineSpans(line, staged, patch).filter((s) => s.text !== '')
   })
+}
+
+// --- A blame -------------------------------------------------------------------
+
+// One line of `git blame`: which commit last touched it, who and when, its
+// number in the file, and the line itself.
+export interface BlameLine {
+  sha: string
+  // Everything between the sha and the line number - the author and the date,
+  // which are context rather than content.
+  meta: string
+  num: string
+  code: string
+}
+
+// `a7401035 (Callum Tolley 2026-07-29 16:57:41 +0100  12) func main() {`, with a
+// `^` in front of a sha that is a boundary commit and an optional path between
+// the sha and the parenthesis when blame followed the file across a rename.
+const BLAME_LINE = /^(\^?[0-9a-f]{7,40})\s(.*?)\((.*?)\s+(\d+)\)(?: (.*))?$/
+
+// parseBlameLine reads that shape, or null for a line that is not one - which is
+// how a `fatal:` on stderr, or a format this does not know, stays plain text.
+export function parseBlameLine(line: string): BlameLine | null {
+  const m = BLAME_LINE.exec(line)
+  if (!m) return null
+  return { sha: m[1], meta: `${m[2]}(${m[3]}`, num: m[4], code: m[5] ?? '' }
+}
+
+// blamePrefixSpans colours what blame writes IN FRONT of each line: the commit,
+// then who and when. The sha is the one part worth reading - it is what you take
+// to `git show` next - so it keeps the colour a sha has everywhere else here and
+// the rest recedes.
+export function blamePrefixSpans(blame: BlameLine): GitSpan[] {
+  return [
+    { text: blame.sha, cls: SHA },
+    { text: ` ${blame.meta} ${blame.num})`, cls: DIM },
+  ]
 }

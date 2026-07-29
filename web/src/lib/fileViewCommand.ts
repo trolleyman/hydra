@@ -235,7 +235,8 @@ export function parseView(words: string[], raw: string): FileView | null {
       }
     }
     // Several files make head/tail interleave `==> name <==` banners, so the
-    // output is no longer one file's text.
+    // output is no longer ONE file's text - see parseBannerView, which reads
+    // that shape off the output instead.
     if (files.length !== 1) return null
     const count = parseCount(flags)
     if (!count) return null
@@ -251,4 +252,47 @@ export function parseView(words: string[], raw: string): FileView | null {
   }
 
   return null
+}
+
+// The banner `head`/`tail` print in front of each file when they were given
+// more than one. It is the only thing that says where a stretch came from, and
+// it says it better than the command does: the operands may be a glob, or a
+// hundred files long.
+export const FILE_BANNER = /^==> (.*) <==$/
+
+// A read of SEVERAL files, whose output is those files' contents with a banner
+// between them. The paths are deliberately not returned - the banners carry
+// them, including for the `head -30 web/src/*.ts` an operand list could not
+// enumerate - so this answers only how each stretch is numbered.
+export interface BannerView {
+  // 1-based line each stretch starts at, or null when the command cannot say
+  // (a plain `tail`).
+  start: number | null
+  // 1-based last line of each stretch, or null when open-ended.
+  end: number | null
+}
+
+// parseBannerView reads a `head`/`tail` over more than one file. Null when the
+// command is not one, or names only one file (that is a plain view, above).
+//
+// `fileCount` is how many operands the caller could see; a glob or a variable
+// makes it unknowable, and since a banner is printed whenever MORE than one file
+// is read, an unknowable count is taken as "possibly several" - the output's own
+// banners then settle it, and an output with none is one file's text and stays
+// a plain view.
+export function parseBannerView(words: string[], fileCount: number | null): BannerView | null {
+  const tool = words[0]
+  if (tool !== 'head' && tool !== 'tail') return null
+  if (fileCount !== null && fileCount < 2) return null
+  const args = words.slice(1)
+  const flags: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    if (isOperand(args[i])) continue
+    flags.push(args[i])
+    if ((args[i] === '-n' || args[i] === '--lines') && i + 1 < args.length) flags.push(args[++i])
+  }
+  const count = parseCount(flags)
+  if (!count) return null
+  if (tool === 'head') return { start: 1, end: count.count }
+  return count.fromStart ? { start: count.count, end: null } : { start: null, end: null }
 }

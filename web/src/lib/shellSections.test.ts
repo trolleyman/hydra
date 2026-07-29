@@ -55,9 +55,25 @@ describe('parseScriptSteps', () => {
   })
 
   it('refuses a grep whose lines are not lines of a file', () => {
-    expect(kinds('grep -c foo a.go\ncat b.go')).toEqual(['unknown', 'view'])
-    expect(kinds('grep -l foo a.go\ncat b.go')).toEqual(['unknown', 'view'])
+    // Only the matched substring, and the machine-readable shapes.
     expect(kinds('grep -no foo a.go\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('rg --json foo src\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('grep -Z -l foo a.go\ncat b.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('reads a search that summarises rather than quoting', () => {
+    // A count per file, and a list of the files that matched.
+    expect(steps('grep -rc foo internal')[0]).toEqual({
+      kind: 'summary', summary: 'counts', command: 'grep -rc foo internal',
+    })
+    expect(steps('rg -l foo internal | sort')[0]).toMatchObject({ kind: 'summary', summary: 'files' })
+    expect(steps('grep --files-without-match foo *.go')[0]).toMatchObject({ kind: 'summary', summary: 'files' })
+    // `-c` ignores a `-n` beside it - there are no line numbers in a count.
+    expect(steps('grep -cn foo a.go')[0]).toMatchObject({ kind: 'summary', summary: 'counts' })
+    // A count of the lines a search printed is a count of the STREAM, and a
+    // filter that numbers a list of paths puts a number in front of a number.
+    expect(kinds('rg foo src | grep -c bar\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('rg -l foo src | grep -n internal\ncat b.go')).toEqual(['unknown', 'view'])
   })
 
   it('sees through a trailing head or tail', () => {
@@ -163,16 +179,54 @@ describe('parseScriptSteps', () => {
     expect(kinds('rg foo src | grep -n bar\ncat b.go')).toEqual(['unknown', 'view'])
   })
 
+  it('reads a head over several files by the banners it prints', () => {
+    expect(steps('head -20 a.go b.go')[0]).toEqual({ kind: 'banners', view: { start: 1, end: 20 } })
+    // A glob names files this cannot enumerate - but the banners can, so the
+    // step is still one it can describe.
+    expect(kinds('head -30 web/src/*.ts\necho ----')).toEqual(['banners', 'marker'])
+    expect(steps('tail -n +5 a.go b.go')[0]).toEqual({ kind: 'banners', view: { start: 5, end: null } })
+    // A plain `tail` counts back from an end nothing here knows.
+    expect(steps('tail -3 a.go b.go')[0]).toEqual({ kind: 'banners', view: { start: null, end: null } })
+    // One file prints no banner at all, so it stays the plain view it is.
+    expect(steps('head -20 a.go')[0]).toMatchObject({ kind: 'view' })
+    // A filter could cut a stretch away from the banner that names it.
+    expect(kinds('head -20 a.go b.go | grep foo\ncat c.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('splits a banner read at its banners', () => {
+    const output = [
+      '==> a.go <==',
+      'package a',
+      '',
+      '==> b.go <==',
+      'package b',
+    ].join('\n')
+    const sections = splitScriptOutput(steps('head -2 a.go b.go'), output)
+    expect(sections?.map((s) => [s.kind, s.lines.length])).toEqual([['banners', 5]])
+  })
+
   it('reads a du, however its operands are spelled', () => {
     expect(steps('du -sh ~/.cache/* | sort -rh | head -8')[0]).toEqual({
-      kind: 'du', command: 'du -sh ~/.cache/* | sort -rh | head -8',
+      kind: 'disk', tool: 'du', command: 'du -sh ~/.cache/* | sort -rh | head -8',
     })
     // A glob, a variable, a bare directory: what du prints does not depend on
     // knowing which paths it was given.
-    expect(kinds('du -sh "$DIR"\necho ----')).toEqual(['du', 'marker'])
-    expect(kinds('du -h --max-depth=2 web | sort -h\necho ----')).toEqual(['du', 'marker'])
+    expect(kinds('du -sh "$DIR"\necho ----')).toEqual(['disk', 'marker'])
+    expect(kinds('du -h --max-depth=2 web | sort -h\necho ----')).toEqual(['disk', 'marker'])
     // A `| grep -v` drops lines; each one that survives is still a measurement.
-    expect(kinds('du -sh * | grep -v node_modules | head\necho ----')).toEqual(['du', 'marker'])
+    expect(kinds('du -sh * | grep -v node_modules | head\necho ----')).toEqual(['disk', 'marker'])
+  })
+
+  it('reads df, ls -l and stat as the tables they are', () => {
+    expect(steps('df -h | tail -3')[0]).toMatchObject({ kind: 'disk', tool: 'df' })
+    expect(steps('ls -lh internal/http')[0]).toMatchObject({ kind: 'disk', tool: 'ls' })
+    expect(steps('ls -la')[0]).toMatchObject({ kind: 'disk', tool: 'ls' })
+    expect(steps('stat web/dist')[0]).toMatchObject({ kind: 'disk', tool: 'stat' })
+    // A bare `ls` prints names and nothing to measure.
+    expect(kinds('ls web/src\ncat b.go')).toEqual(['unknown', 'view'])
+    // A format of the caller's own choosing can put anything on any line.
+    expect(kinds('stat -c %s web/dist\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('df -i\ncat b.go')).toEqual(['unknown', 'view'])
   })
 
   it('refuses a du whose lines are not a size and a path', () => {
@@ -192,6 +246,30 @@ describe('parseScriptSteps', () => {
     expect(kinds('du -sh * | sort -u\ncat b.go')).toEqual(['unknown', 'view'])
     // A search's lines each carry their own file and number.
     expect(kinds('grep -rn foo src | sort\necho ----')).toEqual(['matches', 'marker'])
+  })
+
+  it('reads a blame as the file it annotates', () => {
+    expect(steps('git blame internal/chat/manager.go')[0]).toEqual({
+      kind: 'blame', path: 'internal/chat/manager.go', command: 'git blame internal/chat/manager.go',
+    })
+    expect(steps('git blame -L 40,80 -w web/src/App.tsx')[0]).toMatchObject({
+      kind: 'blame', path: 'web/src/App.tsx',
+    })
+    // The machine-readable formats are a different shape entirely.
+    expect(kinds('git blame --porcelain a.go\ncat b.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('reads the read-only spellings of branch, remote and stash', () => {
+    expect(kinds('git branch -vv\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git remote -v\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git stash list\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git shortlog -sn\necho ----')).toEqual(['git', 'marker'])
+    // ...and only those. The same words also delete a branch, stash the
+    // worktree and add a remote, which are not reports about anything.
+    expect(kinds('git branch -D old\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('git stash\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('git stash pop\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('git remote add origin git@github.com:x/y.git\ncat b.go')).toEqual(['unknown', 'view'])
   })
 
   it('reads a check-ignore as the report it is', () => {
@@ -235,7 +313,7 @@ describe('parseScriptSteps', () => {
     // An unterminated body runs to the end, as the shell would have taken it.
     expect(kinds("cat a.go\npython3 - <<'PY'\nprint('x')")).toEqual(['view', 'unknown'])
     // A here-string's word is data too, not a file this read.
-    expect(kinds('grep -c foo <<< "$text"\ncat a.go')).toEqual(['unknown', 'view'])
+    expect(kinds('grep -c foo <<< "$text"\ncat a.go')).toEqual(['summary', 'view'])
     // An arithmetic shift is not a heredoc.
     expect(kinds('echo $(( 1 << 2 ))\ncat a.go')).toEqual(['unknown', 'view'])
   })
@@ -423,6 +501,39 @@ describe('splitScriptOutput', () => {
   })
 })
 
+describe('splitScriptOutput over ANSI', () => {
+  const ESC = String.fromCharCode(0x1b)
+  const red = (t: string) => `${ESC}[31m${t}${ESC}[0m`
+
+  it('matches, attributes and highlights the lines without their colour', () => {
+    // A `grep --color` writes escapes around the match; the marker the script
+    // printed can be coloured too (a `mage`-style heading).
+    const script = 'echo "=== hits ==="\ngrep -n "foo" a.go\necho "=== log ==="\nmage build'
+    const output = [
+      red('=== hits ==='),
+      `12:func ${red('foo')}() {`,
+      '=== log ===',
+      `${red('WARN')} stale`,
+    ].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([
+      ['marker', ['=== hits ===']],
+      ['matches', ['12:func foo() {']],
+      ['marker', ['=== log ===']],
+      ['plain', ['WARN stale']],
+    ])
+    // The stretch that renders as terminal text keeps what the terminal wrote;
+    // the ones rendered as code do not carry it at all.
+    expect(sections?.[3].raw).toEqual([`${ESC}[31mWARN${ESC}[0m stale`])
+    expect(sections?.[1].lines).toEqual(['12:func foo() {'])
+  })
+
+  it('carries no raw copy when the output had no colour in it', () => {
+    const sections = splitScriptOutput(steps('grep -n a f.go\necho ----\ncat b.go'), '3:a\n----\nbee')
+    expect(sections?.every((s) => s.raw === undefined)).toBe(true)
+  })
+})
+
 describe('parseMatchLines', () => {
   it('reads grep line numbers off a single file', () => {
     expect(parseMatchLines(['12:const a = 1', '40-  // context', '--', 'noise'], ['a.ts'])).toEqual([
@@ -430,6 +541,26 @@ describe('parseMatchLines', () => {
       { path: '', num: '40', text: '  // context', separator: false },
       { path: '', num: '', text: '--', separator: true },
       { path: '', num: '', text: 'noise', separator: false },
+    ])
+  })
+
+  it('reads a context line, which carries dashes where a match carries colons', () => {
+    // `rg -n pat -A 2 dir/*.go`: one match, then its context. Thirty context
+    // lines to one match is the usual ratio, so the majority rule needs these.
+    expect(parseMatchLines([
+      'internal/claudestream/claudestream.go:163:func IsHiddenChatMessage(line []byte) bool {',
+      'internal/claudestream/claudestream.go-164-\tline = bytes.TrimSpace(line)',
+      'internal/claudestream/claudestream.go-165-\tif len(line) == 0 {',
+    ], [])).toEqual([
+      { path: 'internal/claudestream/claudestream.go', num: '163', text: 'func IsHiddenChatMessage(line []byte) bool {', separator: false },
+      { path: 'internal/claudestream/claudestream.go', num: '164', text: '\tline = bytes.TrimSpace(line)', separator: false },
+      { path: 'internal/claudestream/claudestream.go', num: '165', text: '\tif len(line) == 0 {', separator: false },
+    ])
+  })
+
+  it('splits at the separator in front of the number, not at a dash in the name', () => {
+    expect(parseMatchLines(['web/src/my-file.go-164-\tx := a - 1'], [])).toEqual([
+      { path: 'web/src/my-file.go', num: '164', text: '\tx := a - 1', separator: false },
     ])
   })
 

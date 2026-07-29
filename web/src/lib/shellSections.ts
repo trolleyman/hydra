@@ -25,7 +25,13 @@
 // one makes its section (only its section) plain, because a file name and line
 // numbers attached to text from somewhere else would be worse than no
 // highlighting at all.
-import { parseSedRange, parseView, viewLimit, type FileView } from './fileViewCommand'
+import { hasAnsi, stripAnsi } from './ansi'
+import type { DiskTool } from './diskOutput'
+import type { SearchSummary } from './searchSummary'
+import {
+  parseBannerView, parseSedRange, parseView, viewLimit,
+  type BannerView, type FileView,
+} from './fileViewCommand'
 
 // A grep-shaped step: output that is a set of lines from one or more files,
 // non-contiguous, optionally carrying its own line numbers.
@@ -54,20 +60,44 @@ export type ScriptStep =
   // git reporting on the repository rather than printing a file: a status, a
   // commit header, a diffstat, a patch (see lib/gitOutput).
   | { kind: 'git'; command: string }
-  // A `du`: how big each of these is, one path per line (see lib/duOutput).
-  | { kind: 'du'; command: string }
+  // A listing of what is on disk - how big, how full, whose, when (see
+  // lib/diskOutput).
+  | { kind: 'disk'; tool: DiskTool; command: string }
+  // A `git blame`: the named file's lines, each behind the commit that last
+  // touched it (see gitOutput.parseBlameLine).
+  | { kind: 'blame'; path: string; command: string }
+  // What a search said ABOUT the files rather than what it found in them - a
+  // `-c` count per file, or a `-l` list of the ones that matched (see
+  // lib/searchSummary).
+  | { kind: 'summary'; summary: SearchSummary; command: string }
+  // Several files' contents, with the `==> name <==` banner head/tail print
+  // between them saying which is which.
+  | { kind: 'banners'; view: BannerView }
   // Prints nothing, so it takes no output (`cd`, an assignment, a redirect).
   | { kind: 'silent' }
   // Prints something this module cannot describe.
   | { kind: 'unknown'; command: string }
 
+// Every section carries `lines` with any ANSI colour stripped out - that is what
+// gets matched, attributed and highlighted, since an escape sequence in the
+// middle of a line of Go is not part of the Go. `raw` is the same lines as they
+// arrived, present only when the output actually carried colour, so a stretch
+// that renders as terminal text can render as the terminal wrote it.
+interface SectionLines {
+  lines: string[]
+  raw?: string[]
+}
+
 export type ScriptSection =
-  | { kind: 'marker'; lines: string[] }
-  | { kind: 'view'; view: FileView; lines: string[] }
-  | { kind: 'matches'; match: MatchesView; command: string; lines: string[] }
-  | { kind: 'git'; command: string; lines: string[] }
-  | { kind: 'du'; command: string; lines: string[] }
-  | { kind: 'plain'; lines: string[] }
+  | ({ kind: 'marker' } & SectionLines)
+  | ({ kind: 'view'; view: FileView } & SectionLines)
+  | ({ kind: 'matches'; match: MatchesView; command: string } & SectionLines)
+  | ({ kind: 'git'; command: string } & SectionLines)
+  | ({ kind: 'disk'; tool: DiskTool; command: string } & SectionLines)
+  | ({ kind: 'blame'; path: string; command: string } & SectionLines)
+  | ({ kind: 'summary'; summary: SearchSummary; command: string } & SectionLines)
+  | ({ kind: 'banners'; view: BannerView } & SectionLines)
+  | ({ kind: 'plain' } & SectionLines)
 
 // Steps beyond this are not a script anyone is reading the output of, and the
 // marker search below is O(steps x lines).
@@ -427,6 +457,14 @@ const GREP_ARG_FLAGS = new Set([
   '-t', '--type', '-T', '--type-not', '--max-columns', '--sort', '--iglob',
 ])
 
+// grep flags that make the output a SUMMARY of the search rather than lines of a
+// file: how many matched, or which files did. Each line is still about one file,
+// so it is a shape of its own (see lib/searchSummary) rather than a refusal.
+const GREP_COUNT_FLAGS = new Set(['-c', '--count'])
+const GREP_FILES_FLAGS = new Set([
+  '-l', '--files-with-matches', '-L', '--files-without-match', '--files',
+])
+
 // grep flags that make a printed line something other than a line of a file:
 // counts, bare filenames, only the matched substring, nothing at all.
 const GREP_SHAPE_FLAGS = new Set([
@@ -436,6 +474,9 @@ const GREP_SHAPE_FLAGS = new Set([
 ])
 // The same, as single letters inside a cluster (`-rn`, `-icl`).
 const GREP_SHAPE_LETTERS = new Set(['c', 'l', 'L', 'o', 'q', 'Z', 'z'])
+// Of those, the two that summarise rather than reshape.
+const GREP_COUNT_LETTERS = new Set(['c'])
+const GREP_FILES_LETTERS = new Set(['l', 'L'])
 // Cluster letters whose argument follows the cluster (`-m5` is not modelled).
 const GREP_ARG_LETTERS = new Set(['e', 'f', 'm', 'A', 'B', 'C', 'd', 'g', 't', 'T'])
 
@@ -459,6 +500,9 @@ interface ParsedGrep extends MatchesView {
   // own - and is not the same as `paths` being empty, which also happens when a
   // named file's word is a glob or a variable.
   fileCount: number
+  // The search printed a SUMMARY rather than lines: how many matched per file,
+  // or which files did. Its `paths`/`numbered` then describe nothing.
+  summary?: SearchSummary
 }
 
 // parseMatches reads a grep-family search: which files it could have printed
@@ -470,6 +514,7 @@ function parseMatches(words: Word[]): ParsedGrep | null {
   let numbered = false
   // `-e`/`-f` name the pattern explicitly, so every operand is then a file.
   let patternGiven = false
+  let summary: SearchSummary | undefined
   for (let i = 0; i < args.length; i++) {
     const w = args[i]
     // `quotedStart`, not `quoted`: `--include="*.ts"` is a flag carrying a
@@ -477,6 +522,8 @@ function parseMatches(words: Word[]): ParsedGrep | null {
     // path into the section's file list.
     if (w.quotedStart || !w.text.startsWith('-') || w.text === '-') { operands.push(w); continue }
     const [flag, inlineValue] = splitAt(w.text, '=')
+    if (GREP_COUNT_FLAGS.has(flag)) { summary = 'counts'; continue }
+    if (GREP_FILES_FLAGS.has(flag)) { summary = 'files'; continue }
     if (GREP_SHAPE_FLAGS.has(flag)) return null
     if (flag === '-n' || flag === '--line-number') { numbered = true; continue }
     if (flag === '-e' || flag === '--regexp' || flag === '-f' || flag === '--file') patternGiven = true
@@ -490,7 +537,12 @@ function parseMatches(words: Word[]): ParsedGrep | null {
     // next word.
     if (!/^-[A-Za-z]+$/.test(flag)) return null
     const letters = flag.slice(1).split('')
-    if (letters.some((c) => GREP_SHAPE_LETTERS.has(c))) return null
+    if (letters.some((c) => GREP_COUNT_LETTERS.has(c))) summary = 'counts'
+    else if (letters.some((c) => GREP_FILES_LETTERS.has(c))) summary = 'files'
+    // A cluster asking for BOTH a count and a file list, or for one of the
+    // shapes above alongside it, prints something this cannot describe.
+    if (letters.some((c) => GREP_SHAPE_LETTERS.has(c) && !GREP_COUNT_LETTERS.has(c) && !GREP_FILES_LETTERS.has(c))) return null
+    if (summary && letters.filter((c) => GREP_COUNT_LETTERS.has(c) || GREP_FILES_LETTERS.has(c)).length > 1) return null
     if (letters.includes('n')) numbered = true
     if (letters.some((c) => c === 'e' || c === 'f')) patternGiven = true
     const last = letters[letters.length - 1]
@@ -502,6 +554,7 @@ function parseMatches(words: Word[]): ParsedGrep | null {
     paths: files.some((f) => f.dynamic) ? [] : files.map((f) => f.text),
     numbered,
     fileCount: files.length,
+    summary,
   }
 }
 
@@ -515,7 +568,23 @@ function splitAt(word: string, sep: string): [string, string | null] {
 // the shapes lib/gitOutput knows how to colour. Each of them prints one of those
 // whatever it is asked for, so the refused flags below are the only thing that
 // can turn one into something else.
-const GIT_REPORTS = new Set(['status', 'show', 'log', 'diff', 'check-ignore'])
+const GIT_REPORTS = new Set([
+  'status', 'show', 'log', 'diff', 'check-ignore', 'branch', 'remote', 'stash', 'shortlog',
+])
+
+// Three of those subcommands are only a REPORT in some of their spellings: the
+// same word also deletes a branch, pops a stash and adds a remote. Each is held
+// to the read-only spelling, because a card that colours `git stash` (which
+// STASHES) as a listing is describing something that did not happen.
+const GIT_READONLY: Record<string, (args: Word[]) => boolean> = {
+  branch: (args) => !args.some((w) => /^(-d|-D|-m|-M|-c|-C|--delete|--move|--copy|--edit-description|--set-upstream(-to)?(=.*)?|--unset-upstream|-u)$/.test(w.text)),
+  // `git stash` on its own is `git stash push`.
+  stash: (args) => args.length > 0 && /^(list|show)$/.test(args[0].text),
+  // `git remote add|rename|remove|set-url` all take a name after them, so the
+  // read-only spellings are recognised by their FIRST word rather than by
+  // ruling the others out.
+  remote: (args) => args.length > 0 && /^(-v|--verbose|show|get-url)$/.test(args[0].text),
+}
 
 // Flags that make a git command print nothing and answer with its exit status
 // alone - `git check-ignore -q "$f" && echo ...`, `git diff --quiet`. Their
@@ -552,29 +621,84 @@ function parseGitReport(words: Word[]): 'report' | 'quiet' | null {
   if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return null
   const args = words.slice(i + 1).filter((w) => !w.quoted)
   if (args.some((w) => GIT_QUIET.test(w.text))) return 'quiet'
-  return args.some((w) => GIT_REFUSED.test(w.text)) ? null : 'report'
+  if (args.some((w) => GIT_REFUSED.test(w.text))) return null
+  const readonly = GIT_READONLY[sub.text]
+  return !readonly || readonly(args) ? 'report' : null
 }
 
-// Flags that make `du` print something other than "a size, then the path it
-// measured": a NUL-separated stream, a timestamp column between the two, a list
-// of names read from a file (which prints the same shape, but `--files0-from=-`
-// makes the command a filter on the one before it rather than a measurement of
-// its own).
+// Flags that make one of the disk tools print something other than its ordinary
+// table: a NUL-separated stream, an extra column, a list of names read from a
+// file (which prints the same shape, but `--files0-from=-` makes the command a
+// filter on the one before it rather than a measurement of its own), or - for
+// `ls` - no long format at all, which is a bare list of names with nothing in it
+// to colour.
+//
 // The `-0` is written as a cluster as often as on its own (`du -sh0`), so it is
 // matched as a LETTER of one rather than as a word.
-const DU_REFUSED = /^(--null|--time(=.*)?|--files0-from(=.*)?)$|^-[A-Za-z0-9]*0/
+const DISK_REFUSED: Record<DiskTool, RegExp> = {
+  du: /^(--null|--time(=.*)?|--files0-from(=.*)?)$|^-[A-Za-z0-9]*0/,
+  df: /^(--output(=.*)?|-i|--inodes|--portability|-P)$/,
+  ls: /^(--format=(?!long)|-m|-x|-C|-1|--zero|-Z|--context)$/,
+  stat: /^(-c|--format(=.*)?|--printf(=.*)?|-t|--terse)$/,
+}
 
-// isDu reports whether a command is a `du` printing its ordinary two-column
-// listing (see lib/duOutput).
+// `ls` only prints a table when asked for one; anything else is a list of names
+// with no measurement in it.
+const LS_LONG = /^--format=long$|^--full-time$|^-[A-Za-z]*l/
+
+// diskTool reports which disk listing a command prints, or null when it prints
+// none.
 //
 // The operands are not read, and may be anything - a glob, a variable, a `~`
-// path. What du prints does not depend on knowing WHICH directories it was
-// given, only that each line is a size and a name, which is the opposite of a
-// file view (where the path is the whole point, because it says what language
-// the lines are).
-function isDu(words: Word[]): boolean {
-  if (words[0].text !== 'du' || words[0].quoted) return false
-  return !words.slice(1).some((w) => !w.quoted && DU_REFUSED.test(w.text))
+// path. What these print does not depend on knowing WHICH directories they were
+// given, only that each line is a measurement and a name, which is the opposite
+// of a file view (where the path is the whole point, because it says what
+// language the lines are).
+function diskTool(words: Word[]): DiskTool | null {
+  const name = words[0]
+  if (name.quoted) return null
+  const tool = (['du', 'df', 'ls', 'stat'] as DiskTool[]).find((t) => t === name.text)
+  if (!tool) return null
+  const args = words.slice(1).filter((w) => !w.quoted)
+  if (args.some((w) => DISK_REFUSED[tool].test(w.text))) return null
+  if (tool === 'ls' && !args.some((w) => LS_LONG.test(w.text))) return null
+  return tool
+}
+
+// Flags that make `git blame` print something other than its ordinary
+// annotated lines: the machine-readable formats, and the incremental stream.
+const BLAME_REFUSED = /^(-p|--porcelain|--line-porcelain|--incremental|-z|--null)$/
+
+// parseGitBlame reads a `git blame <file>` and returns the path it annotates, or
+// null when the command is not one. A blame takes exactly one file - the flags
+// around it (`-L`, `-w`, `-C`, `--date=`) change what it says about each line,
+// never that each line IS a line of that file.
+function parseGitBlame(words: Word[]): string | null {
+  if (words[0].text !== 'git' || words[0].quoted) return null
+  let i = 1
+  while (i < words.length && !words[i].quoted && words[i].text.startsWith('-')) {
+    if (words[i].text === '-C' || words[i].text === '-c') i++
+    i++
+  }
+  if (words[i]?.text !== 'blame') return null
+  const args = words.slice(i + 1)
+  if (args.some((w) => !w.quoted && BLAME_REFUSED.test(w.text))) return null
+  const operands: Word[] = []
+  for (let j = 0; j < args.length; j++) {
+    const w = args[j]
+    if (!w.quotedStart && w.text.startsWith('-')) {
+      // `-L` takes the range after it; the rest of blame's flags carry their
+      // value inline or take none.
+      if (w.text === '-L' || w.text === '--reverse' || w.text === '--contents') j++
+      continue
+    }
+    operands.push(w)
+  }
+  // A revision before the path, and a path this parser cannot name, are both
+  // shapes it declines: the path is the whole point (it says what language the
+  // lines are).
+  const file = operands[operands.length - 1]
+  return operands.length >= 1 && !file.dynamic ? file.text : null
 }
 
 // isFilter reports whether a command only trims what the command before it in
@@ -612,7 +736,9 @@ function isPassthrough(cmd: Command): boolean {
 // is a whole file (see classify).
 function isLineFilter(cmd: Command): { numbered: boolean } | null {
   const grep = parseMatches(cmd.words)
-  return grep !== null && grep.fileCount === 0 ? { numbered: grep.numbered } : null
+  // A `| grep -c` counts what it was given rather than dropping lines from it,
+  // and `| grep -l` names a file rather than keeping any of them.
+  return grep !== null && grep.fileCount === 0 && !grep.summary ? { numbered: grep.numbered } : null
 }
 
 // `sort` flags that make it print something other than the lines it was given:
@@ -711,17 +837,23 @@ function classify(p: Pipeline): ScriptStep {
   // of it is different: `rg -n pat f | sed -n 1,40p` only drops lines, and every
   // line that survives is still that file's, still carrying the number the
   // search printed in front of it.
+  if (matches?.summary) {
+    // Sorting or trimming a list of paths leaves each line saying exactly what
+    // it said before; numbering it would put a count in front of a count.
+    return numbered ? unknown : { kind: 'summary', summary: matches.summary, command: p.raw }
+  }
   if (matches) {
     return numbered
       ? unknown
       : { kind: 'matches', match: { paths: matches.paths, numbered: matches.numbered }, command: p.raw }
   }
 
-  // Every `du` line stands on its own - a size and the thing that size is - so
-  // it survives being sorted, trimmed and grepped. Only a filter's own line
-  // numbers make it something else: they would ride in the text as a `12:`
-  // prefix that lib/duOutput has no shape for.
-  if (isDu(cmd.words)) return numbered ? unknown : { kind: 'du', command: p.raw }
+  // Every line of a disk listing stands on its own - a measurement and the thing
+  // it measures - so it survives being sorted, trimmed and grepped. Only a
+  // filter's own line numbers make it something else: they would ride in the
+  // text as a `12:` prefix that lib/diskOutput has no shape for.
+  const disk = diskTool(cmd.words)
+  if (disk) return numbered ? unknown : { kind: 'disk', tool: disk, command: p.raw }
 
   // Everything below reads a FILE, or a report whose lines are read in the
   // order they were written; a sort makes neither of them what it says.
@@ -764,6 +896,26 @@ function classify(p: Pipeline): ScriptStep {
     }
   }
 
+  // A blame prints the file itself, one line at a time, behind a prefix saying
+  // which commit last touched each - so it wants that file's language and its
+  // own line numbers, not lib/gitOutput's report colours.
+  if (!filtered && !sliced && !numbered) {
+    const path = parseGitBlame(cmd.words)
+    if (path !== null) return trimmedFrom ? unknown : { kind: 'blame', path, command: p.raw }
+  }
+
+  // Several files, whose banners say which stretch is which. Unlike a view this
+  // tolerates a glob or a variable in the operands - what it needs is in the
+  // OUTPUT - but not a filter, which could cut a stretch away from its banner.
+  if (!trimmedFrom && !filtered && !sliced && !numbered) {
+    const operands = cmd.words.slice(1).filter((w) => !w.text.startsWith('-') || w.quotedStart)
+    const banner = parseBannerView(
+      cmd.words.map((w) => w.text),
+      cmd.words.some((w) => w.dynamic) ? null : operands.length,
+    )
+    if (banner) return { kind: 'banners', view: banner }
+  }
+
   // A filter's line numbers would ride in the text as a `12:` prefix that
   // lib/gitOutput has no shape for.
   const git = parseGitReport(cmd.words)
@@ -780,7 +932,7 @@ export function parseScriptSteps(script: string): ScriptStep[] | null {
   const pipelines = lexPipelines(script)
   if (!pipelines || pipelines.length === 0 || pipelines.length > MAX_STEPS) return null
   const steps = pipelines.map(classify)
-  const describes = new Set(['marker', 'view', 'matches', 'git', 'du'])
+  const describes = new Set(['marker', 'view', 'matches', 'git', 'disk', 'banners', 'blame', 'summary'])
   return steps.some((s) => describes.has(s.kind)) ? steps : null
 }
 
@@ -931,43 +1083,65 @@ function distribute(producers: ScriptStep[], slice: string[]): string[][] | null
 export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSection[] | null {
   const body = output.replace(/\r\n?/g, '\n').replace(/\n$/, '')
   if (!body.trim()) return null
-  const lines = body.split('\n')
+  // Colour a tool wrote for a terminal is not part of what it said: an escape
+  // in the middle of a `grep --color` match would be highlighted as if it were
+  // Go, and a coloured heading would not match the `echo` that printed it. So
+  // everything below reads the STRIPPED lines, and the originals ride along for
+  // the stretches that render as terminal text rather than as code.
+  const coloured = hasAnsi(body)
+  const raw = body.split('\n')
+  const lines = coloured ? raw.map(stripAnsi) : raw
   if (lines.length > MAX_LINES) return null
   const sections: ScriptSection[] = []
   let pending: ScriptStep[] = []
   let pos = 0
+  // The lines as they arrived, for the slice `lines.slice(from, to)` covers.
+  const rawSlice = (from: number, to: number) => (coloured ? raw.slice(from, to) : undefined)
 
   const flush = (end: number) => {
     const slice = lines.slice(pos, end)
+    const start = pos
     pos = end
     if (slice.length === 0) { pending = []; return }
     const producers = mergeSearches(pending)
     const parts = distribute(producers, slice)
     if (!parts) {
-      sections.push({ kind: 'plain', lines: slice })
+      sections.push({ kind: 'plain', lines: slice, raw: rawSlice(start, end) })
       pending = []
       return
     }
+    // The parts partition the slice in order, so walking them keeps each one's
+    // offset into the output - which is what pairs it with its raw lines.
+    let at = start
     parts.forEach((part, i) => {
+      const from = at
+      at += part.length
       if (part.length === 0) return
+      const rawPart = rawSlice(from, at)
       const step = producers[i]
       const limit = stepLimit(step)
       // More lines than the range could have produced (an error, a banner, a
       // marker that did not fire) means this is not what the parse thinks it is.
       if (step.kind === 'view' && (limit == null || part.length <= limit)) {
-        sections.push({ kind: 'view', view: step.view, lines: part })
+        sections.push({ kind: 'view', view: step.view, lines: part, raw: rawPart })
       } else if (step.kind === 'echo' && part.length <= (limit ?? 0)) {
         // The script says what these lines are, so they render as the string it
         // printed - the same as the separators long enough to anchor on.
-        sections.push({ kind: 'marker', lines: part })
+        sections.push({ kind: 'marker', lines: part, raw: rawPart })
       } else if (step.kind === 'matches') {
-        sections.push({ kind: 'matches', match: step.match, command: step.command, lines: part })
+        sections.push({ kind: 'matches', match: step.match, command: step.command, lines: part, raw: rawPart })
       } else if (step.kind === 'git') {
-        sections.push({ kind: 'git', command: step.command, lines: part })
-      } else if (step.kind === 'du') {
-        sections.push({ kind: 'du', command: step.command, lines: part })
+        sections.push({ kind: 'git', command: step.command, lines: part, raw: rawPart })
+      } else if (step.kind === 'summary') {
+        sections.push({ kind: 'summary', summary: step.summary, command: step.command, lines: part, raw: rawPart })
+      } else if (step.kind === 'blame') {
+        sections.push({ kind: 'blame', path: step.path, command: step.command, lines: part, raw: rawPart })
+      } else if (step.kind === 'disk') {
+        sections.push({ kind: 'disk', tool: step.tool, command: step.command, lines: part, raw: rawPart })
+      } else if (step.kind === 'banners') {
+        sections.push({ kind: 'banners', view: step.view, lines: part, raw: rawPart })
       } else {
-        sections.push({ kind: 'plain', lines: part })
+        sections.push({ kind: 'plain', lines: part, raw: rawPart })
       }
     })
     pending = []
@@ -990,7 +1164,11 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
     }
     if (at < 0) continue // this one never printed
     flush(at)
-    sections.push({ kind: 'marker', lines: lines.slice(at, at + expected.length) })
+    sections.push({
+      kind: 'marker',
+      lines: lines.slice(at, at + expected.length),
+      raw: rawSlice(at, at + expected.length),
+    })
     pos = at + expected.length
   }
   flush(lines.length)
@@ -1015,9 +1193,15 @@ export interface MatchLine {
 
 // grep writes `NNN:` before a matched line and `NNN-` before a context line
 // (-A/-B/-C), and puts `path:` in front of both when it searched more than one
-// file.
+// file - with the SAME separator it used after the number, so a context line
+// reads `path-164-text` and not `path:164-text`.
+//
+// Hence the backreference, and the lazy path: `my-file.go-164-  x := 1` has to
+// split at the separator that comes before the number, not at a dash inside the
+// filename or inside the code. A `-A 30` prints thirty context lines per match,
+// so reading only the `path:` form left the majority rule below with nothing.
 const NUMBERED = /^(\d+)[:-](.*)$/
-const PATH_NUMBERED = /^([^:\s][^:]*):(\d+)[:-](.*)$/
+const PATH_NUMBERED = /^([^:\s][^:]*?)([:-])(\d+)\2(.*)$/
 const PATH_ONLY = /^([\w./~@+-]*[/.][\w./~@+-]*):(.*)$/
 
 // namesOneFile reports whether the search's operands pin every line it printed
@@ -1061,7 +1245,8 @@ export function parseMatchLines(lines: string[], paths: string[]): MatchLine[] {
     const m = shape.exec(line)
     if (!m) return bare(line)
     if (shape === NUMBERED) return { path: '', num: m[1], text: m[2], separator: false }
-    if (shape === PATH_NUMBERED) return { path: m[1], num: m[2], text: m[3], separator: false }
+    // PATH_NUMBERED's second group is the separator it matched, not content.
+    if (shape === PATH_NUMBERED) return { path: m[1], num: m[3], text: m[4], separator: false }
     return { path: m[1], num: '', text: m[2], separator: false }
   })
 }

@@ -548,6 +548,28 @@ var simChatEvents = []simNorm{
 	// is about to edit. Each stretch is numbered from its own start.
 	simTool("toolu_sim_sedmulti", "Bash", simRaw(`{"command":"sed -n '1,3p;40,43p' docs/artifacts.md"}`)),
 	simToolOut("toolu_sim_sedmulti", "# Artifacts\n\nArtifacts are files a head produces that are worth keeping: screenshots, a\n## TODO\n- Retry the upload on a 5xx\n- Surface the attempt count in the panel\n- Collect the generator's own log"),
+	// A test run and a build, which is the output an agent stares at hardest.
+	// Neither is attributable to a command - the same diagnostics come out of
+	// `go build`, `mage`, `make` or a test runner - so they are read by the LINE
+	// (web/src/lib/buildOutput.ts): the location says where, the verdict says
+	// whether it passed, and the prose between them stays prose.
+	simTool("toolu_sim_tests", "Bash", simRaw(`{"command":"go test ./internal/artifacts/ ./internal/chat/ 2>&1 | head -12\necho \"=== and the frontend ===\"\ncd web && aube run lint 2>&1 | tail -4","description":"Run the tests and the frontend typecheck"}`)),
+	simToolOut("toolu_sim_tests", "=== RUN   TestPutRetry\n    upload_test.go:41: expected 5 attempts, got 1\n--- FAIL: TestPutRetry (0.02s)\nFAIL\ngithub.com/trolleyman/hydra/internal/artifacts\t0.512s\nok  \tgithub.com/trolleyman/hydra/internal/chat\t0.606s\n?   \tgithub.com/trolleyman/hydra/internal/tui\t[no test files]\n=== and the frontend ===\nweb/src/lib/upload.ts:42:11: error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.\nweb/src/lib/upload.ts:58:3: warning: 'attempt' is assigned a value but never used\nFound 2 errors in 1 file."),
+	// A `head`/`tail` over SEVERAL files. The `==> name <==` banners say which
+	// stretch is which - better than the command does, since its operands are a
+	// glob - so each stretch is highlighted as the file its banner names and
+	// numbered from the line the command asked for.
+	simTool("toolu_sim_banners", "Bash", simRaw(`{"command":"head -4 internal/artifacts/*.go","description":"Skim the top of each artifacts file"}`)),
+	simToolOut("toolu_sim_banners", "==> internal/artifacts/backoff.go <==\npackage artifacts\n\nimport (\n\t\"math/rand\"\n\n==> internal/artifacts/upload.go <==\npackage artifacts\n\nimport (\n\t\"context\""),
+	// A blame, and the two disk listings. A blame prints the FILE, so it keeps
+	// its own line numbers and its language behind git's prefix; `df` and `ls -l`
+	// are tables whose measurement column is the point (web/src/lib/diskOutput.ts).
+	simTool("toolu_sim_blame", "Bash", simRaw(`{"command":"git blame -L 9,12 internal/artifacts/backoff.go\necho \"=== room left on the disk ===\"\ndf -h /\necho \"=== and what is in there ===\"\nls -l internal/artifacts/","description":"Check who wrote the backoff, and what is left on disk"}`)),
+	simToolOut("toolu_sim_blame", "5d671ab0 (Callum Tolley 2026-07-29 12:00:47 +0100  9) func sleepBackoff(attempt int) {\n5d671ab0 (Callum Tolley 2026-07-29 12:00:47 +0100 10) \tbase := 100 * time.Millisecond\na7401035 (Callum Tolley 2026-07-29 16:57:41 +0100 11) \td := base << attempt\na7401035 (Callum Tolley 2026-07-29 16:57:41 +0100 12) \tjitter := time.Duration(rand.Int63n(int64(d / 2)))\n=== room left on the disk ===\nFilesystem      Size  Used Avail Use% Mounted on\n/dev/nvme0n1p2  1.8T  1.2T  522G  70% /\n=== and what is in there ===\ntotal 24\n-rw-rw-r-- 1 callum callum  4096 Jul 29 16:57 backoff.go\n-rw-rw-r-- 1 callum callum 12288 Jul 29 16:57 upload.go"),
+	// What a search says ABOUT the files rather than what it found in them: a
+	// count per file, then the files that matched (web/src/lib/searchSummary.ts).
+	simTool("toolu_sim_summary", "Bash", simRaw(`{"command":"grep -rc \"sleepBackoff\" internal/artifacts\necho \"=== which files mention it at all ===\"\nrg -l \"sleepBackoff\" internal | sort","description":"Count the callers, then list the files"}`)),
+	simToolOut("toolu_sim_summary", "internal/artifacts/backoff.go:1\ninternal/artifacts/upload.go:3\ninternal/artifacts/store.go:0\n=== which files mention it at all ===\ninternal/artifacts/backoff.go\ninternal/artifacts/upload.go\ninternal/http/simulation.go"),
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20). This settles the chained command
 	// opened well above.
