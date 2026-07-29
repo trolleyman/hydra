@@ -140,24 +140,19 @@ type Server struct {
 // clients are polling.
 const remoteFetchInterval = 20 * time.Second
 
-// claudeUsageTTL is how long a probed usage snapshot is served before re-probing.
-const claudeUsageTTL = 30 * time.Second
-
-// claudeUsageEnabled gates the /api/usage/claude probe. Disabled for now: the
-// probe drives `claude /usage` under a PTY (up to ~20s) and a never-settling TUI
-// could spike CPU / make the daemon feel stuck. When disabled the endpoint still
-// responds, but reports "unavailable" without probing, so the UI indicator just
-// hides. Flip back to true to re-enable.
-const claudeUsageEnabled = false
-
 // claudeUsageCache returns the lazily-created usage cache. The probe runs the
 // host `claude` CLI in the default project root (a directory the user's real
 // Claude is most likely to already trust); the probe also auto-accepts the
 // trust prompt, so an untrusted dir still works without mutating ~/.claude.json.
+//
+// It is deliberately lazy in both directions: nothing probes until a client asks
+// for usage, and usage.DefaultPolicy then refreshes at most every 10 minutes,
+// backs off exponentially on failure and parks the probe entirely once it is
+// clearly not going to work (see the Cache doc comment).
 func (s *Server) claudeUsageCache() *usage.Cache {
 	s.claudeUsageOnce.Do(func() {
 		root := s.ProjectRoot
-		s.claudeUsage = usage.NewCache(claudeUsageTTL, func(ctx context.Context) (usage.Snapshot, error) {
+		s.claudeUsage = usage.NewCache(usage.DefaultPolicy(), func(ctx context.Context) (usage.Snapshot, error) {
 			return errtrace.Wrap2(usage.Probe(ctx, "claude", root, usage.HostEnv()))
 		})
 	})
@@ -877,16 +872,6 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 }
 
 func (s *Server) GetClaudeUsage(ctx context.Context, request api.GetClaudeUsageRequestObject) (api.GetClaudeUsageResponseObject, error) {
-	if !claudeUsageEnabled {
-		// Probe disabled: respond without spawning `claude /usage`. Reported as
-		// unavailable so the frontend indicator quietly hides.
-		msg := "Claude usage probe is disabled"
-		return api.GetClaudeUsage200JSONResponse(api.ClaudeUsageResponse{
-			Available: false,
-			Error:     &msg,
-		}), nil
-	}
-
 	force := request.Params.Refresh != nil && *request.Params.Refresh
 	snap, err := s.claudeUsageCache().Get(ctx, force)
 	if err != nil {
