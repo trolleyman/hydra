@@ -46,7 +46,34 @@ if [ -z "$hours" ] && [ -z "$max_size" ]; then
 	hours=12
 fi
 
-cache=$(go env GOCACHE)
+# Resolve GOCACHE without requiring `go` on PATH. The point of this script is to
+# run unattended from a cron job or systemd timer, and those get a minimal
+# environment - a mise/asdf-managed toolchain is on PATH only for an interactive
+# shell, so `go env GOCACHE` is exactly the thing that breaks there. Fall back to
+# the same sources the go command itself consults, in its order of precedence.
+resolve_cache() {
+	if [ -n "${GOCACHE:-}" ]; then
+		echo "$GOCACHE"
+		return
+	fi
+	if command -v go >/dev/null 2>&1; then
+		go env GOCACHE
+		return
+	fi
+	# `go env -w` persists to os.UserConfigDir()/go/env (GOENV overrides).
+	local goenv="${GOENV:-${XDG_CONFIG_HOME:-$HOME/.config}/go/env}"
+	if [ -r "$goenv" ]; then
+		local v
+		v=$(sed -n 's/^GOCACHE=//p' "$goenv" | tail -1)
+		if [ -n "$v" ]; then
+			echo "${v/#\~/$HOME}"
+			return
+		fi
+	fi
+	echo "${XDG_CACHE_HOME:-$HOME/.cache}/go-build"
+}
+
+cache=$(resolve_cache)
 if [ -z "$cache" ] || [ ! -d "$cache" ]; then
 	echo "GOCACHE ($cache) is not a directory" >&2
 	exit 1
