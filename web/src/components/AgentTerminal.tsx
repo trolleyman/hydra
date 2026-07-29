@@ -5,7 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 import { type TerminalEvent, AgentStatus } from '../api'
-import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff } from 'lucide-react'
+import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff, Eye } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { ResizeGrip } from './ResizeGrip'
 import { uploadFile, extractFiles } from '../api/uploads'
@@ -382,7 +382,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
       })
       .catch(() => {})
 
-    const url = getWsUrl(agentId, projectId, shell, sandboxed, shellId)
+    const url = getWsUrl(agentId, projectId, { shell, sandboxed, shellId })
     const ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
@@ -737,21 +737,40 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   )
 }
 
+// What a tab shows. `agent` is the head itself (an xterm, or the chat pane when
+// the head is in chat mode); `shell` is a bash tab; `review` is the head's review
+// slot - a DIFFERENT agent in its own detached checkout, always a chat pane
+// whatever mode the head is in (docs/review-agent.md).
+//
+// Derived from the tab rather than from `tab.id === 'terminal' && chatMode`,
+// which could only ever describe two of the three.
+type TabKind = 'agent' | 'shell' | 'review'
+
 interface TabConfig {
   id: string
   label: string
-  shell: boolean
+  kind: TabKind
   sandboxed: boolean
 }
 
-// The always-present agent tab. Bash tabs are appended after it.
-const TERMINAL_TAB: TabConfig = { id: 'terminal', label: 'Terminal', shell: false, sandboxed: true }
+// The always-present agent tab. Bash and review tabs are appended after it.
+const TERMINAL_TAB: TabConfig = { id: 'terminal', label: 'Terminal', kind: 'agent', sandboxed: true }
 
-// Rebuild the tab list for an agent from its persisted bash tabs, always keeping
-// the fixed agent terminal first.
+// The head's review slot. One per head - the backend keys the session
+// `<head>@review` - so this is a fixed id rather than a per-tab token, and
+// opening Review twice focuses the existing tab.
+const REVIEW_TAB: TabConfig = { id: 'review', label: 'Review', kind: 'review', sandboxed: true }
+
+// Rebuild the tab list for an agent from its persisted tabs, always keeping the
+// fixed agent terminal first. The review tab persists like the shells do: the
+// backend session is long-lived (one slot per head, following the branch as it
+// commits), so "I have a reviewer open" survives a reload and simply reattaches.
 function tabsFromPrefs(projectId: string | null, agentId: string): TabConfig[] {
-  const saved = loadAgentViewPrefs(projectId, agentId).bashTabs ?? []
-  return [TERMINAL_TAB, ...saved.map((t) => ({ id: t.id, label: t.label, shell: true, sandboxed: t.sandboxed }))]
+  const prefs = loadAgentViewPrefs(projectId, agentId)
+  const shells = (prefs.bashTabs ?? []).map(
+    (t): TabConfig => ({ id: t.id, label: t.label, kind: 'shell', sandboxed: t.sandboxed }),
+  )
+  return [TERMINAL_TAB, ...shells, ...(prefs.reviewTabOpen ? [REVIEW_TAB] : [])]
 }
 
 interface Props {
@@ -832,10 +851,13 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   // hand-reset of height/tabs on an agent-id change is needed: this instance only
   // ever serves one agent.
 
-  // Persist the bash tabs (and active tab) for this agent whenever they change.
+  // Persist the bash tabs, whether the review tab is open, and the active tab.
   useEffect(() => {
     patchAgentViewPrefs(projectId, agentId, {
-      bashTabs: tabs.filter((t) => t.shell).map((t) => ({ id: t.id, label: t.label, sandboxed: t.sandboxed })),
+      bashTabs: tabs
+        .filter((t) => t.kind === 'shell')
+        .map((t) => ({ id: t.id, label: t.label, sandboxed: t.sandboxed })),
+      reviewTabOpen: tabs.some((t) => t.kind === 'review'),
       activeTabId,
     })
   }, [tabs, activeTabId, projectId, agentId])
@@ -897,12 +919,20 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   }
 
   function addBashTab(sandboxed: boolean) {
-    const bashCount = tabs.filter(t => t.shell).length
+    const bashCount = tabs.filter(t => t.kind === 'shell').length
     const id = `bash-${Date.now()}`
     const base = sandboxed ? 'Bash' : 'Bash (host)'
     const label = bashCount === 0 ? base : `${base} ${bashCount + 1}`
-    setTabs(prev => [...prev, { id, label, shell: true, sandboxed }])
+    setTabs(prev => [...prev, { id, label, kind: 'shell', sandboxed }])
     setActiveTabId(id)
+    setShellMenuOpen(false)
+  }
+
+  // Unlike the shells, this never adds a second tab: there is one review slot per
+  // head, so a repeat click focuses the tab that already exists.
+  function openReviewTab() {
+    setTabs(prev => (prev.some(t => t.kind === 'review') ? prev : [...prev, REVIEW_TAB]))
+    setActiveTabId(REVIEW_TAB.id)
     setShellMenuOpen(false)
   }
 
@@ -911,7 +941,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
     // than letting it idle out the grace period (which exists for reloads /
     // transient disconnects, where the pane unmounts without a real close).
     const tab = tabs.find(t => t.id === id)
-    if (tab?.shell) {
+    if (tab?.kind === 'shell') {
       const pid = projectId ? encodeURIComponent(projectId) : '_'
       const params = new URLSearchParams({ shell_id: id })
       if (tab.sandboxed === false) params.set('sandboxed', 'false')
@@ -1022,9 +1052,12 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                       : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50'
                 }`}
               >
-                {tab.id === 'terminal' && chatMode ? 'Chat' : tab.label}
+                {tab.kind === 'agent' && chatMode ? 'Chat' : tab.label}
               </button>
-              {tab.shell && (
+              {/* Shells and the review slot are both closable; the head's own
+                  tab is not. Closing Review ends its session but keeps the
+                  checkout, so reopening resumes the same conversation. */}
+              {tab.kind !== 'agent' && (
                 <Tooltip content="Close tab" side="bottom">
                   <button
                     onClick={() => closeTab(tab.id)}
@@ -1095,6 +1128,24 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                         <span className={`block ${chatActive ? 'text-stone-400 dark:text-stone-500' : 'text-gray-500'}`}>Full host access, no sandbox.</span>
                       </span>
                     </button>
+                    {/* The review slot is not a shell - it is a second agent -
+                        so it sits below a divider rather than reading as a third
+                        flavour of terminal. */}
+                    <div className={`my-1 border-t ${chatActive ? 'border-stone-200 dark:border-white/10' : 'border-gray-700'}`} />
+                    <button
+                      onClick={openReviewTab}
+                      className={`flex w-full items-start gap-2 px-3 py-1.5 text-left cursor-pointer ${
+                        chatActive
+                          ? 'text-stone-700 dark:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.06]'
+                          : 'text-gray-200 hover:bg-gray-700'
+                      }`}
+                    >
+                      <Eye className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${chatActive ? 'text-violet-600 dark:text-violet-400' : 'text-violet-400'}`} />
+                      <span>
+                        <span className="block font-medium">Review</span>
+                        <span className={`block ${chatActive ? 'text-stone-400 dark:text-stone-500' : 'text-gray-500'}`}>A second agent that reads the diff. Cannot commit.</span>
+                      </span>
+                    </button>
                   </div>
                 </>
               )}
@@ -1135,7 +1186,22 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
           className="flex-1 min-h-0 overflow-hidden"
           style={{ display: activeTabId === tab.id ? 'flex' : 'none', flexDirection: 'column' }}
         >
-          {tab.id === 'terminal' && chatMode ? (
+          {tab.kind === 'review' ? (
+            // The review slot: a different agent, so it gets its own ChatPane
+            // mount (own socket, own transcript) and is always chat-framed even
+            // when the head it is attached to runs as a terminal. Deliberately no
+            // onStatusUpdate / onDiffRefresh - the reviewer's turns must not drive
+            // the HEAD's status chip or its diff refreshes.
+            <ChatPane
+              agentId={agentId}
+              agentType={agentType}
+              projectId={projectId}
+              active={activeTabId === tab.id}
+              reconnectAttempt={reconnectKeys[tab.id] ?? 0}
+              onSelectCommit={onSelectCommit}
+              review
+            />
+          ) : tab.kind === 'agent' && chatMode ? (
             <ChatPane
               agentId={agentId}
               agentType={agentType}
@@ -1150,13 +1216,13 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
             <TerminalPane
               agentId={agentId}
               projectId={projectId}
-              shell={tab.shell}
+              shell={tab.kind === 'shell'}
               sandboxed={tab.sandboxed}
               shellId={tab.id}
               active={activeTabId === tab.id}
-              reconnectAttempt={tab.id === 'terminal' ? terminalReconnect : (reconnectKeys[tab.id] ?? 0)}
-              onStatusUpdate={tab.id === 'terminal' ? handleStatusUpdate : undefined}
-              onDiffRefresh={tab.id === 'terminal' ? onDiffRefresh : undefined}
+              reconnectAttempt={tab.kind === 'agent' ? terminalReconnect : (reconnectKeys[tab.id] ?? 0)}
+              onStatusUpdate={tab.kind === 'agent' ? handleStatusUpdate : undefined}
+              onDiffRefresh={tab.kind === 'agent' ? onDiffRefresh : undefined}
               onMetrics={reportMetrics}
             />
           )}
