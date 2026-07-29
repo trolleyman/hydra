@@ -15,6 +15,7 @@ import { hasLanguage } from '../lib/prism'
 import { ensureLanguage } from '../lib/prismLazy'
 import { highlightLines } from '../lib/highlightCore'
 import { inRange, type LineRange } from '../lib/lineRange'
+import { CODE_TEXT } from '../lib/diffMetrics'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
 import type { EditRow } from '../lib/editDiff'
 
@@ -71,8 +72,12 @@ export function CodePane({ content, lang, wrap, className, highlightRange, onSel
 
   const gutterWidth = `${Math.max(2, String(lines.length).length)}ch`
 
+  // CODE_TEXT, not text-xs: this is a Code surface, so it follows the Code size
+  // control (the gutter is already `ch`-based and follows by itself).
+  // leading-snug stays a ratio - nothing here streams, so the whole-pixel rule
+  // the diff rows follow doesn't apply.
   return (
-    <div className={`text-xs font-mono leading-snug ${wrap ? 'w-full' : 'w-max min-w-full'} ${className ?? ''}`}>
+    <div className={`${CODE_TEXT} font-mono leading-snug ${wrap ? 'w-full' : 'w-max min-w-full'} ${className ?? ''}`}>
       {lines.map((html, i) => {
         // The 1-based line number doubles as the scroll/highlight anchor: the
         // page scrolls the row carrying data-line into view when the URL hash
@@ -158,7 +163,7 @@ export function DiffPane({ rows, lang, wrap, className }: {
   const numStyle = { width: `calc(${width}ch + 1rem)` }
 
   return (
-    <div className={`text-xs font-mono leading-snug ${wrap ? 'w-full' : 'w-max min-w-full'} ${className ?? ''}`}>
+    <div className={`${CODE_TEXT} font-mono leading-snug ${wrap ? 'w-full' : 'w-max min-w-full'} ${className ?? ''}`}>
       {rows.map((row, i) => {
         if (row.type === 'gap') {
           return (
