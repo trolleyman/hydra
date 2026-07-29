@@ -2525,14 +2525,20 @@ func (s *Server) getDiffCachedPaths(projectRoot, diffRoot, baseRef, headRef stri
 // Mirrors the web client's FULL_FILE_CONTEXT.
 const fullFileContext = 1_000_000
 
-// getFullContextDiff returns the whole diff with every eligible file expanded to
-// its full content in a single response, so the client need not fire one request
+// getFullContextDiff returns the diff with every eligible file expanded to its
+// full content in a single response, so the client need not fire one request
 // per file. It runs the normal-context diff (for change counts and the
 // large-file fallback) plus one scoped full-context diff over only the files
 // small enough to expand, then merges. Files whose change count or expanded line
 // count exceeds maxFullLines keep their normal-context hunks.
-func (s *Server) getFullContextDiff(projectRoot, diffRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, normalContext, maxFullChanges, maxFullLines int, includeUncommitted bool) ([]git.DiffFile, error) {
-	base, err := s.getDiffCachedPaths(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, nil, normalContext, includeUncommitted)
+//
+// onlyPaths limits the whole thing to those paths (nil = the whole diff). That
+// is how a single file gets promoted to the full-content model on demand: the
+// client asks for one path with caps far above the bulk ones, and from then on
+// reveals context client-side instead of re-running `git diff -U<wider>` - which
+// widened every hunk in the file, not just the one the reader clicked.
+func (s *Server) getFullContextDiff(projectRoot, diffRoot, baseRef, headRef string, ignoreWhitespace, useTripleDot bool, normalContext, maxFullChanges, maxFullLines int, includeUncommitted bool, onlyPaths []string) ([]git.DiffFile, error) {
+	base, err := s.getDiffCachedPaths(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, onlyPaths, normalContext, includeUncommitted)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2816,11 +2822,18 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	}
 
 	// full_context expands every eligible file in one response (no per-file
-	// follow-up requests). It only applies to the whole-diff view; a specific
-	// path request keeps the single-file path.
+	// follow-up requests). With a path it expands just that file, which is how
+	// the client promotes a single big file to the full-content reveal model
+	// after the bulk caps left it windowed. Either way a file over the caps comes
+	// back at contextLines, so a declined promotion still answers the widened
+	// windowed request in the same round-trip.
 	var diffFiles []git.DiffFile
-	if fullContext && path == "" {
-		diffFiles, err = s.getFullContextDiff(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, contextLines, maxFullChanges, maxFullLines, includeUncommitted)
+	if fullContext {
+		var onlyPaths []string
+		if path != "" {
+			onlyPaths = []string{path}
+		}
+		diffFiles, err = s.getFullContextDiff(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, contextLines, maxFullChanges, maxFullLines, includeUncommitted, onlyPaths)
 	} else {
 		diffFiles, err = s.getDiffCached(projectRoot, diffRoot, baseRef, headRef, ignoreWhitespace, useTripleDot, path, contextLines, includeUncommitted)
 	}

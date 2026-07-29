@@ -183,9 +183,15 @@ func (s *Server) GetRepositoryDiff(_ context.Context, request api.GetRepositoryD
 	// diffRoot is the project root and includeUncommitted is false throughout.
 	// useTripleDot is false: a plain base..head diff is the most predictable
 	// answer to "what differs between these two branches".
+	// As on the agent diff, full_context with a path expands just that file - the
+	// repository compare view promotes a single windowed file the same way.
 	var diffFiles []git.DiffFile
-	if fullContext && filePath == "" {
-		diffFiles, err = s.getFullContextDiff(projectRoot, projectRoot, baseRef, headRef, ignoreWhitespace, false, contextLines, maxFullChanges, maxFullLines, false)
+	if fullContext {
+		var onlyPaths []string
+		if filePath != "" {
+			onlyPaths = []string{filePath}
+		}
+		diffFiles, err = s.getFullContextDiff(projectRoot, projectRoot, baseRef, headRef, ignoreWhitespace, false, contextLines, maxFullChanges, maxFullLines, false, onlyPaths)
 	} else {
 		diffFiles, err = s.getDiffCached(projectRoot, projectRoot, baseRef, headRef, ignoreWhitespace, false, filePath, contextLines, false)
 	}

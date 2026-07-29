@@ -16,10 +16,13 @@
          picks one. display=swap shows the fallback until a face arrives, so text
          is never invisible and the app degrades gracefully offline.
 
-         Two of these are load-bearing beyond the selector:
-         - Merriweather is the default chat font. A pinned webfont keeps bold and
-           regular metrics identical on every OS instead of relying on whatever
-           serif the system substitutes.
+         Four of these are load-bearing beyond the selector:
+         - Inter (interface), Merriweather (chat) and Fira Code (code AND
+           terminal) are the four roles' defaults, so this stylesheet is what an
+           untouched browser actually renders in. Pinned webfonts keep the
+           metrics identical on every OS instead of relying on whatever the
+           system substitutes; offline, display=swap leaves each role on the
+           system stack behind it in src/lib/fonts.ts rather than blank.
          - Roboto Flex is the prompt/chat input box (HighlightedTextarea), which
            needs the `slnt` (slant) axis: the highlight backdrop slants *italic*
            runs while keeping the upright glyph advance widths, where a real
