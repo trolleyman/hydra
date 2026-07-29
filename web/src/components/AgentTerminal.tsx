@@ -18,7 +18,7 @@ import { useShortcutsStore } from '../stores/shortcutsStore'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { saveLastGeometry } from '../lib/terminalGeometry'
 import { loadChatDefaultHeight, DEFAULT_CHAT_HEIGHT } from '../lib/chatPrefs'
-import { useFontStack } from '../lib/fontPrefs'
+import { useFontSizePx, useFontStack } from '../lib/fontPrefs'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { ChatPane } from './AgentChat'
@@ -67,6 +67,11 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   // WebSocket down and replay the scrollback. The effect below applies it to a
   // live terminal instead.
   const terminalFontRef = useRef(terminalFont)
+  // The chosen terminal size, in px. Same story as the family: an xterm option
+  // rather than a class, and held in a ref so changing it doesn't re-run the
+  // connect effect.
+  const terminalSize = useFontSizePx('terminal')
+  const terminalSizeRef = useRef(terminalSize)
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -261,7 +266,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
 
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 13,
+      fontSize: terminalSizeRef.current,
       fontFamily: terminalFontRef.current,
       theme: {
         background: '#111827',
@@ -689,26 +694,33 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     // cause spurious reconnects. onStatusUpdate/onDiffRefresh are read via refs above.
   }, [agentId, projectId, reconnectAttempt, shell, sandboxed, shellId])
 
-  // Apply a font change to the live terminal. A different family means a
-  // different cell width, so the grid has to be re-measured and the new
-  // cols/rows pushed to the PTY - the agent sees this as a window resize, which
-  // is the honest thing for it to see. The ref check makes the mount run a
-  // no-op: the connect effect above already opened the terminal with this font.
+  // Apply a font change - family or size - to the live terminal. Either one
+  // means a different cell, so the grid has to be re-measured and the new
+  // cols/rows pushed to the PTY; the agent sees this as a window resize, which
+  // is the honest thing for it to see. One effect for both because they land on
+  // the same terminal through the same re-measure, and doing them separately
+  // would fit twice (and send the PTY an intermediate geometry) when a browser
+  // rehydrates both prefs at once. The ref checks make the mount run a no-op:
+  // the connect effect above already opened the terminal with these values.
   useEffect(() => {
-    if (terminalFontRef.current === terminalFont) return
+    const sameFont = terminalFontRef.current === terminalFont
+    const sameSize = terminalSizeRef.current === terminalSize
+    if (sameFont && sameSize) return
     terminalFontRef.current = terminalFont
+    terminalSizeRef.current = terminalSize
     const term = termRef.current
     if (!term) return
     term.options.fontFamily = terminalFont
+    term.options.fontSize = terminalSize
     document.fonts
-      .load(`${term.options.fontSize}px ${terminalFont}`)
+      .load(`${terminalSize}px ${terminalFont}`)
       .catch(() => {})
       .finally(() => {
         if (termRef.current !== term) return
         term.clearTextureAtlas()
         fitAndSend.current(true)
       })
-  }, [terminalFont])
+  }, [terminalFont, terminalSize])
 
   return (
     <div className="relative flex-1 min-h-0 overflow-hidden flex flex-col">

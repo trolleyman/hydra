@@ -11,6 +11,7 @@ import { UPLOAD_PATH_RE } from './uploadAttachments'
 import { useLightbox } from '../stores/lightboxStore'
 import { markdownGalleryAt } from './markdownGallery'
 import { densityFromPath, logicalSize, useNaturalSize } from './imageDensity'
+import { rememberMediaSize } from './mediaSize'
 import { IMAGE_REFLOW_MS, markSelfReflow } from './selfReflow'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 
@@ -219,7 +220,15 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
       // The pixels landing is the second half of the same reflow as the size
       // landing above - and the one that actually takes the space, when the
       // decode beat the layout to it.
-      onLoad={() => markSelfReflow(IMAGE_REFLOW_MS)}
+      onLoad={(e) => {
+        markSelfReflow(IMAGE_REFLOW_MS)
+        // The bytes are the last word on how big this picture is. Usually it
+        // just confirms what we laid it out at; it matters when an agent has
+        // rewritten the file since it was measured (the blob endpoint sends
+        // no-cache for the same reason), and it means the lightbox opens on the
+        // real size rather than a stale one.
+        rememberMediaSize(url, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)
+      }}
       onError={() => setFailedSrc(src ?? null)}
       // Opens the whole markdown block's images, at this one - so ←/→ step
       // between the pictures of THIS message and stop at its edges (see
@@ -246,13 +255,30 @@ interface Style {
 const STYLES: Record<Variant, Style> = {
   // Compact styling for chat / prompt / config previews (mirrors the retired
   // renderMarkdownBlocks look: tight vertical rhythm, no heading borders).
+  //
+  // The headings and the table are sized in em - a multiple of the prose they
+  // sit in - rather than the absolute rem they used to be. A heading has to move
+  // with its own body, and this variant renders at half a dozen different body
+  // sizes: 13px chat prose, 14px when the chat font is a serif, 12px sub-agent
+  // cards and review comments, 10px config previews, and any of those shifted by
+  // the Chat size control. Absolute headings meant a fixed 16px h1 in all of
+  // them - 1.23x the body in one place and 1.6x in another - and it is why these
+  // needed the size step spelled out in a calc(): em follows it for free.
+  //
+  // The ratios are today's chat numbers over today's 13px chat base (16/13,
+  // 15.2/13, 14/13), so a sans chat pane and the 13px dialog preview render
+  // exactly as before. Everywhere else the heading is now proportional to its
+  // body instead of fixed, which is the point - most visibly in serif chat (the
+  // default), where an h1 was only 1.14x its 14px prose and is now 1.23x like
+  // the sans pane's. Inline code and code blocks were already em and needed
+  // nothing.
   chat: {
-    h1: 'text-base font-bold mt-3 mb-1 first:mt-0',
-    h2: 'text-[0.95rem] font-bold mt-3 mb-1 first:mt-0',
-    h3: 'text-sm font-semibold mt-2 mb-0.5 first:mt-0',
-    h4: 'text-sm font-semibold mt-2 mb-0.5 first:mt-0',
-    h5: 'text-sm font-semibold mt-2 mb-0.5 first:mt-0',
-    h6: 'text-sm font-semibold mt-2 mb-0.5 first:mt-0',
+    h1: 'text-[length:1.2308em] font-bold mt-3 mb-1 first:mt-0',
+    h2: 'text-[length:1.1692em] font-bold mt-3 mb-1 first:mt-0',
+    h3: 'text-[length:1.0769em] font-semibold mt-2 mb-0.5 first:mt-0',
+    h4: 'text-[length:1.0769em] font-semibold mt-2 mb-0.5 first:mt-0',
+    h5: 'text-[length:1.0769em] font-semibold mt-2 mb-0.5 first:mt-0',
+    h6: 'text-[length:1.0769em] font-semibold mt-2 mb-0.5 first:mt-0',
     p: 'my-1 first:mt-0 last:mb-0 break-words',
     ul: 'list-disc pl-5 my-1 space-y-0.5',
     ol: 'list-decimal pl-5 my-1 space-y-0.5',
@@ -267,7 +293,7 @@ const STYLES: Record<Variant, Style> = {
     // of stretching to fill the chat column; `max-w-full` still caps it and
     // `overflow-x-auto` scrolls a genuinely wide table.
     tableWrap: 'my-2 w-fit max-w-full overflow-x-auto rounded-lg border border-stone-200 dark:border-white/10',
-    table: 'border-collapse text-sm',
+    table: 'border-collapse text-[length:1.0769em]',
     th: 'px-3 py-1.5 text-left font-semibold text-stone-700 dark:text-stone-200 bg-stone-100/70 dark:bg-white/[0.04] border-b border-stone-200 dark:border-white/10 whitespace-nowrap',
     td: 'px-3 py-1.5 border-b border-stone-200/60 dark:border-white/[0.06] align-top',
     tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-stone-500/[0.04] dark:[&>tr:nth-child(even)]:bg-white/[0.025]',

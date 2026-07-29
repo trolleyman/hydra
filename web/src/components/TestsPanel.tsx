@@ -10,6 +10,7 @@ import { TestCaseStatus } from '../api/models/TestCaseStatus'
 import type { ArtifactLogLine } from '../api'
 import { TONE_BADGE, verdictTone } from './badgeTones'
 import { CollapsibleCard, MELT_BTN } from './CollapsibleCard'
+import { CollapseSlide } from './CollapseSlide'
 import { useMeasuredHeight } from '../lib/useMeasuredHeight'
 import { LogView } from './ArtifactLogView'
 import { InfoTooltip } from './InfoTooltip'
@@ -423,7 +424,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
         <InfoTooltip title="Tests" width={520}>
           <p>Per-runner pass/fail verdicts for the selected commit - the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip. Single-sided: there's no before/after comparison.</p>
           <p>Each runner is a project-defined <code className="text-blue-300">[tests.&lt;name&gt;]</code> command in <code className="text-blue-300">.hydra/config.toml</code>. Hydra runs it against the ref, parses the report it writes to <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code> (JUnit XML or Hydra-JSON; otherwise a plain pass/fail from the exit code), and caches the verdict per commit. The verdict <strong>soft-gates the merge button</strong> - a failing run needs a force-merge.</p>
-          <p>Expand a card for its cases as a location tree - <strong>passing and skipped cases are hidden by default</strong> (grouping by result hides nothing; its sections fold them away instead); the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. Node tallies always count everything beneath, filtered or not. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
+          <p>Expand a card for its cases as a location tree - <strong>passed and skipped cases are hidden by default</strong> (grouping by result hides nothing; its sections fold them away instead); the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. Node tallies always count everything beneath, filtered or not. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>
         </InfoTooltip>
         {/* leading-4, not the inherited 1.5: 11px * 1.5 = 16.5px, a half pixel,
             which knocks whatever it is the tallest thing in (this bar once it
@@ -436,7 +437,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
           </span>
         )}
         {/* Filter cluster, right-floated - the tests analog of ArtifactFilterBar:
-            search + reset + the status scope dropdown (passing hidden by default). */}
+            search + reset + the status scope dropdown (passed hidden by default). */}
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 dark:text-gray-500" />
@@ -745,7 +746,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
         <div className="-mx-3 flex flex-col">
           {groupResult
             ? <ResultSections cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={fixCase} />
-            : <CaseTree cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={fixCase} collapsed={treeCollapsed} onToggle={onToggleNode} />}
+            : <CaseTree cases={cases} visible={visible} useScope={useScope} onOpenInRepo={onOpenInRepo} onFixCase={fixCase} toggled={treeCollapsed} onToggle={onToggleNode} />}
         </div>
       )}
 
@@ -764,24 +765,42 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
 // (worst first), styled as a ROOT TREE NODE - chevron + status icon + label
 // with the everything-counted badge on the right, its CaseTree indented one
 // level beneath it under a guide line - so the view reads as one tree whose
-// first level is the result. Failing/warning sections open by default; skipped
-// and passing start collapsed (folded away rather than filtered out), since
+// first level is the result. Failed/warning sections open by default; skipped
+// and passed start collapsed (folded away rather than filtered out), since
 // neither is actionable and a green run can be huge - and a folded section
 // mounts no rows at all (see ResultSection), so leaving it shut costs nothing
 // until it is opened.
+//
+// The labels are the case statuses themselves (failed / skipped / passed, plus
+// "warnings" as a plural noun since "warned" isn't a word anyone says about a
+// test). The set used to mix tenses - "failing"/"passing" beside "skipped" -
+// which also read as though the run were still going; these are settled results.
+//
+// `defaultOpen` doubles as the tree's `defaultExpanded` inside the section: a
+// section worth opening on sight is worth unfolding, and one you had to open
+// yourself opens a level at a time instead of dumping its whole subtree.
 const RESULT_SECTIONS: { status: TestCaseStatus; label: string; defaultOpen: boolean }[] = [
-  { status: TestCaseStatus.TestCaseFailed, label: 'failing', defaultOpen: true },
+  { status: TestCaseStatus.TestCaseFailed, label: 'failed', defaultOpen: true },
   { status: TestCaseStatus.TestCaseWarning, label: 'warnings', defaultOpen: true },
   { status: TestCaseStatus.TestCaseSkipped, label: 'skipped', defaultOpen: false },
-  { status: TestCaseStatus.TestCasePassed, label: 'passing', defaultOpen: false },
+  { status: TestCaseStatus.TestCasePassed, label: 'passed', defaultOpen: false },
 ]
-
-// How long a section's grid-row slide runs (matches the duration-200 below);
-// kept in JS so the unmount-after-collapse timer lines up with the CSS glide.
-const SECTION_COLLAPSE_MS = 200
 
 function ResultSections({ cases, visible, useScope, onOpenInRepo, onFixCase }: { cases: TestCase[]; visible: TestCase[]; useScope: boolean; onOpenInRepo?: OpenInRepo; onFixCase?: FixCase }) {
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({})
+  // Which nodes the user has flipped inside each section's tree, held HERE
+  // rather than inside the tree: a section drops its CaseTree when it closes
+  // (that's what keeps a shut wall of green free), so state kept down there
+  // would be thrown away every time you folded a section and reopened it.
+  const [toggled, setToggled] = useState<Record<string, Set<string>>>({})
+  const toggleNode = useCallback((status: string, key: string) => {
+    setToggled((prev) => {
+      const next = new Set(prev[status] ?? [])
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return { ...prev, [status]: next }
+    })
+  }, [])
   return (
     <>
       {RESULT_SECTIONS.map(({ status, label, defaultOpen }) => {
@@ -798,6 +817,9 @@ function ResultSections({ cases, visible, useScope, onOpenInRepo, onFixCase }: {
             vis={vis}
             open={open}
             onToggle={() => setOpenOverride((o) => ({ ...o, [status]: !open }))}
+            defaultExpanded={defaultOpen}
+            toggled={toggled[status] ?? EMPTY_KEYS}
+            onToggleNode={toggleNode}
             useScope={useScope}
             onOpenInRepo={onOpenInRepo}
             onFixCase={onFixCase}
@@ -808,36 +830,32 @@ function ResultSections({ cases, visible, useScope, onOpenInRepo, onFixCase }: {
   )
 }
 
-// ResultSection is one status section. Its CaseTree body mounts on open and
-// unmounts a beat after collapse (SECTION_COLLAPSE_MS, matching the grid slide),
-// so a folded section - a wall of passing cases, say - builds no rows until it
-// is opened. Same mount-on-open/unmount-after-glide idiom CollapsibleCard and
-// the diff viewer's file bodies use for their heavy children. `showBody` renders
-// the instant `open` flips true (not an effect-frame later) so the [0fr]->[1fr]
-// slide has real content to grow into; `mounted` only keeps the body alive
-// through the closing glide before it is dropped.
-function ResultSection({ status, label, all, vis, open, onToggle, useScope, onOpenInRepo, onFixCase }: {
+// A shared empty set for sections nobody has expanded into yet, so an untouched
+// section hands its tree the same identity every render (the tree memoises on it).
+const EMPTY_KEYS: Set<string> = new Set()
+
+// ResultSection is one status section. Its CaseTree body mounts on open and is
+// dropped a beat after collapse (CollapseSlide), so a folded section - a wall of
+// passed cases, say - builds no rows until it is opened. Same
+// mount-on-open/unmount-after-glide idiom CollapsibleCard and the diff viewer's
+// file bodies use for their heavy children.
+function ResultSection({ status, label, all, vis, open, onToggle, defaultExpanded, toggled, onToggleNode, useScope, onOpenInRepo, onFixCase }: {
   status: TestCaseStatus
   label: string
   all: TestCase[]
   vis: TestCase[]
   open: boolean
   onToggle: () => void
+  // Whether the tree inside opens fully or a level at a time (see RESULT_SECTIONS).
+  defaultExpanded: boolean
+  // The tree's per-node overrides, owned by ResultSections so they outlive the
+  // body's unmount.
+  toggled: Set<string>
+  onToggleNode: (status: string, key: string) => void
   useScope: boolean
   onOpenInRepo?: OpenInRepo
   onFixCase?: FixCase
 }) {
-  const [mounted, setMounted] = useState(open)
-  useEffect(() => {
-    if (open) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMounted(true)
-      return
-    }
-    const t = setTimeout(() => setMounted(false), SECTION_COLLAPSE_MS)
-    return () => clearTimeout(t)
-  }, [open])
-  const showBody = open || mounted
   const icon = status === 'failed' ? <X className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" strokeWidth={3} />
     : status === 'warning' ? <TriangleAlert className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
       : status === 'skipped' ? <SkipForward className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
@@ -855,14 +873,23 @@ function ResultSection({ status, label, all, vis, open, onToggle, useScope, onOp
         {/* Badge counts the status's FULL tally, like every tree node. */}
         <NodeBadges counts={{ [status]: all.length }} />
       </button>
-      {/* Animated open/close, matching the tree's grid-row slide. A
-          default-open section renders at grid-rows-[1fr] from its first paint,
-          so it appears open with no glide; only a user toggle animates. */}
-      <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-        <div className="overflow-hidden min-h-0">
-          {showBody && <CaseTree cases={all} visible={vis} useScope={useScope} depth={1} rootConnect onOpenInRepo={onOpenInRepo} onFixCase={onFixCase} />}
-        </div>
-      </div>
+      {/* Animated open/close, matching the tree's own slide. A default-open
+          section renders open from its first paint with no glide; only a user
+          toggle animates. */}
+      <CollapseSlide open={open}>
+        <CaseTree
+          cases={all}
+          visible={vis}
+          useScope={useScope}
+          depth={1}
+          rootConnect
+          defaultExpanded={defaultExpanded}
+          toggled={toggled}
+          onToggle={(key) => onToggleNode(status, key)}
+          onOpenInRepo={onOpenInRepo}
+          onFixCase={onFixCase}
+        />
+      </CollapseSlide>
     </div>
   )
 }

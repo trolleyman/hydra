@@ -67,14 +67,15 @@ import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { WorkSpark } from './WorkSpark'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
-import { type Attachment, nextAttachmentId, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { type Attachment, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
+import { nextAttachmentId } from '../lib/draftAttachments'
 import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
 // langFromPath (the extension -> Prism language map a Read tool's output is
 // highlighted by, item 3) now lives in lib/fileKind, beside the file-type
 // classifier, so the lightbox's text viewer highlights by the same table.
 import { langFromPath } from '../lib/fileKind'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
-import { chatDraftKey, loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
+import { loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
 import { parseUploadAttachments, isImageResizeNotice } from '../lib/uploadAttachments'
@@ -6024,8 +6025,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const [autoRetry, setAutoRetry] = useState(0)
   const retryStreakRef = useRef(0)
   // The composer draft (text + attachments) is restored per agent so it survives
-  // switching agents/reloads (item 30): text from agentViewPrefs, attachments
-  // from the in-memory chatDrafts cache.
+  // switching agents and reloads (item 30): the text from agentViewPrefs, the
+  // attachments from chatDrafts - live chips (object URLs and all) on a switch,
+  // rebuilt from their uploaded paths after a reload.
   //
   // Undo/redo spans BOTH the typed text and the attachment chips: an image/file
   // paste (and its "[filename]" marker) calls preventDefault, so the browser's
@@ -6036,7 +6038,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   if (!initialComposer.current) {
     initialComposer.current = makeSnapshot(
       loadAgentViewPrefs(projectId, agentId).chatDraft ?? '',
-      loadChatAttachments(chatDraftKey(projectId, agentId)),
+      loadChatAttachments(projectId, agentId),
       0,
       0,
     )
@@ -8873,8 +8875,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const attachmentsRef = useRef<Attachment[]>(attachments)
   useEffect(() => {
     attachmentsRef.current = attachments
-    // Mirror to the per-agent cache so a switch away restores them.
-    saveChatAttachments(chatDraftKey(projectId, agentId), attachments)
+    // Mirror to the per-agent caches so a switch away - or a reload - restores
+    // them. Running on every change (rather than only on unmount) is what makes
+    // the reload case work: a reload tears the page down without unmounting.
+    saveChatAttachments(projectId, agentId, attachments)
   }, [attachments, projectId, agentId])
   // Every preview object URL minted this session. We can't revoke on remove (an
   // undo can bring the chip back) or on unmount (the attachments are stashed to
@@ -8886,7 +8890,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // thumbnails. They're freed on send, or when the page fully reloads.
   useEffect(
     () => () => {
-      saveChatAttachments(chatDraftKey(projectId, agentId), attachmentsRef.current)
+      saveChatAttachments(projectId, agentId, attachmentsRef.current)
       patchAgentViewPrefs(projectId, agentId, { chatDraft: inputRef.current || undefined })
     },
     [projectId, agentId],
@@ -9892,8 +9896,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         group, which remounts it - the map is how, and living here is what makes
         it forgotten when the pane does (see ToolFoldContext). */}
     <ToolFoldContext.Provider value={toolFoldsRef.current}>
+    {/* The pane's 13px base carries the Chat size step (Settings -> Browser ->
+        Fonts), so every run of prose that inherits it - agent text, user
+        bubbles, tool-result markdown - steps together. Sizes stated explicitly
+        further down (the 11px tool-card chrome, the 12px sub-agent cards) do
+        NOT: this control sizes chat prose, not the cards it sits in. */}
     <div
-      className="relative flex-1 min-h-0 flex flex-col text-[13px] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
+      className="relative flex-1 min-h-0 flex flex-col text-[calc(13px_+_var(--app-font-chat-step,_0px))] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
       onKeyDown={onPaneKeyDown}
       onDragOver={(e) => {
         if (!isFileDrag(e.dataTransfer)) return

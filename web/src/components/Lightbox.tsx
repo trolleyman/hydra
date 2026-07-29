@@ -14,6 +14,8 @@ import {
   canFlip, findLightboxOrigin, mediaRectOf, playFlip, rectOf,
   whenMediaLaidOut, FLIP_NAV_MS, FLIP_OPEN_MS, LIGHTBOX_MEDIA_CLASS, type Rect,
 } from '../lib/lightboxFlip'
+import { discoverMediaSize, rememberMediaSize } from '../lib/mediaSize'
+import { logicalSize } from '../lib/imageDensity'
 
 export interface LightboxItem {
   url: string
@@ -39,9 +41,14 @@ export interface LightboxItem {
    *  caption next to the dimensions (e.g. "780 × 1688 @2×"). Omit/1 → not shown. */
   dpi?: number
   /** Natural pixel size, when known ahead of load (artifact entries carry it in
-   *  their metadata). Seeds the caption's "W × H" and the diff comparator's aspect
-   *  ratio immediately on navigation, so neither collapses and re-measures per
-   *  image (which made the caption jump around). Omit → measured on load. */
+   *  their metadata). This is what lets the picture's BOX be reserved before the
+   *  file has loaded - it is set on the <img> as width/height, so the browser lays
+   *  the media out at its final size on the first frame instead of at nothing and
+   *  then popping open around it. It also seeds the caption's "W × H" and the diff
+   *  comparator's aspect ratio, so neither collapses and re-measures per image.
+   *  Omit and the lightbox falls back to lib/mediaSize (a size remembered from an
+   *  earlier load, or read off a copy still decoded in the page) and, failing that,
+   *  to measuring on load as it always did. */
   width?: number
   height?: number
   /** How this artifact changed vs its counterpart (added/removed/modified), when
@@ -210,20 +217,45 @@ export function Lightbox({
   }, [index, count, onIndexChange])
   const prev = useCallback(() => step(-1), [step])
   const next = useCallback(() => step(1), [step])
-  // Natural pixel dimensions of the current image: seeded from the entry's own
-  // metadata when it carries one (artifact entries do), refined by the measured
-  // size once the image loads. Seeding means the caption's "W × H" doesn't blink
-  // out and back on every navigation - which recentred the whole caption row and
-  // made the filename jump around.
+  // Natural pixel dimensions of the entry at `i`: from its own metadata when it
+  // carries one (artifact entries do), else from a size the app already knows for
+  // that url - one it decoded earlier, or a copy still on the page behind the
+  // overlay (see lib/mediaSize; this is what covers markdown images and prompt
+  // attachments, which have no metadata to carry).
+  //
+  // Knowing it up front is what makes ←/→ still: the size becomes the <img>'s
+  // width/height, so the picture occupies its final box on the very first frame
+  // rather than laying out at nothing and popping open once the file decodes -
+  // which shoved the caption, re-measured the zoom frame, and left the arriving
+  // flight with no box to land on. It also keeps the caption's "W × H" from
+  // blinking out and back on every step, which recentred the whole caption row.
   const seedDims = useCallback((i: number) => {
-    const img = items[i]
-    return img?.width && img?.height ? { w: img.width, h: img.height } : null
+    const it = items[i]
+    if (!it) return null
+    if (it.width && it.height) return { w: it.width, h: it.height }
+    return discoverMediaSize(it.url)
   }, [items])
   const [dims, setDims] = useState<{ w: number; h: number } | null>(() => seedDims(index))
   // Re-seed the moment the shown image changes (adjust-during-render rather than
   // in an effect, so a stale size never survives to the next paint).
   const [dimsIndex, setDimsIndex] = useState(index)
   if (dimsIndex !== index) { setDimsIndex(index); setDims(seedDims(index)) }
+  // The box an entry is LAID OUT in, as opposed to the pixels it is made of: a 2x
+  // capture is drawn at half its pixel count so one source pixel lands on one
+  // device pixel, which is the whole reason for shipping the extra pixels (see
+  // lib/imageDensity). The chat and the artifacts grid have always sized pictures
+  // this way; the lightbox is now the same, rather than being the one surface that
+  // showed a @2x shot at double size. The caption still reports the PIXELS
+  // ("780 × 1688 @2×") - that is what the number means there.
+  //
+  // Mostly invisible: a screenshot big enough to hit the max-w/max-h caps lands on
+  // the same box either way. It shows on the small ones, which now open at the
+  // size they were captured to be seen at.
+  const layoutSize = useCallback(
+    (d: { w: number; h: number } | null, item: LightboxItem | undefined) =>
+      (d ? logicalSize(d, item?.dpi ?? 1) : null),
+    [],
+  )
 
   // Comparison mode + before/after view + highlight for diff entries, held HERE (not in
   // LightboxDiff, which remounts per index) so they PERSIST as you navigate ←/→ between
@@ -392,6 +424,9 @@ export function Lightbox({
   if (!current) return null
 
   const currentKind = kindOf(current)
+  // The box the shown picture is laid out in - its pixels, taken down by its
+  // capture density. See layoutSize.
+  const pictureSize = layoutSize(dims, current)
   // A before/after comparator, and the mode controls that drive it, only exist for
   // the two kinds the artifact pipeline actually compares. A text file or an .apk
   // may still carry a `diff` (its two sides) - the viewer turns that into a pair of
@@ -421,6 +456,10 @@ export function Lightbox({
     const peek = items[i]
     const peekKind = kindOf(peek)
     const onClick = dir === 'prev' ? prev : next
+    // The sliver's own box, reserved the same way the main picture's is: a peek
+    // that lays out at nothing until it decodes doesn't just pop, it leaves the
+    // flight with no endpoint to measure - and ←/→ falls back to the plain slide.
+    const peekSize = layoutSize(seedDims(i), peek)
     // Translate the whole button (not just the media) so its click area travels
     // off-screen with it - only the visible sliver stays clickable, rather than a
     // full-width hit zone covering the gutter.
@@ -446,6 +485,13 @@ export function Lightbox({
             ref={(el) => { peekRef(dir).current = el }}
             src={peek.url}
             alt=""
+            width={peekSize?.w}
+            height={peekSize?.h}
+            // Whatever this sliver decodes to is the size the picture will need when
+            // you step onto it, so hand it to lib/mediaSize: by the time ←/→ is
+            // pressed the neighbour's box is already known even for an entry that
+            // carries no metadata.
+            onLoad={(e) => rememberMediaSize(peek.url, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
             style={{ background: CHECKER }}
             className={`${common} object-contain`}
           />
@@ -458,6 +504,9 @@ export function Lightbox({
             muted
             playsInline
             preload="metadata"
+            width={peekSize?.w}
+            height={peekSize?.h}
+            onLoadedMetadata={(e) => rememberMediaSize(peek.url, e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
             style={{ background: CHECKER }}
             className={`${common} object-contain`}
           />
@@ -572,11 +621,11 @@ export function Lightbox({
               view={abView}
               onViewChange={setAbView}
               highlight={highlight}
-              aspect={current.width && current.height ? current.width / current.height : undefined}
+              aspect={dims ? dims.w / dims.h : undefined}
               onDims={setDims}
             />
           ) : currentKind === 'video' ? (
-            <LightboxVideo url={current.url} aspect={current.width && current.height ? current.width / current.height : undefined} />
+            <LightboxVideo url={current.url} aspect={dims ? dims.w / dims.h : undefined} onDims={setDims} />
           ) : currentKind === 'pdf' ? (
             <LightboxPdf url={current.url} />
           ) : currentKind === 'text' ? (
@@ -610,7 +659,20 @@ export function Lightbox({
                 <img
                   src={current.url}
                   alt={current.filename}
-                  onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                  // The known size, as the picture's own box - at its LOGICAL size
+                  // (see layoutSize), which is also what makes a @2x capture land
+                  // one source pixel per device pixel here. The browser sizes a
+                  // replaced element from these before a single byte has arrived
+                  // (max-w/max-h still clamp it, preserving the ratio), so the
+                  // picture lands laid out rather than growing into place - and the
+                  // measured size takes over below if the two ever disagree.
+                  width={pictureSize?.w}
+                  height={pictureSize?.h}
+                  onLoad={(e) => {
+                    const { naturalWidth: w, naturalHeight: h } = e.currentTarget
+                    setDims({ w, h })
+                    rememberMediaSize(current.url, w, h)
+                  }}
                   // Middle-click opens the raw image file in a new browser tab.
                   onAuxClick={makeAuxOpen(() => current.url)}
                   draggable={false}

@@ -96,6 +96,8 @@ depends on the format:
 | `.png`, `.jpg`, `.gif`            | Decoded and compared **pixel-by-pixel**, so cosmetic re-encodes (different compression level, added EXIF/metadata, timestamp chunks) are ignored. |
 | `.webm` (video)                   | Compared **frame-by-frame** via ffmpeg when it is installed; otherwise by byte hash (see below). |
 | `.webp`, `.avif`, `.svg`, `.bmp`, `.pdf` | Compared by **byte hash** — any byte difference reads as modified. |
+| Text (`.txt`, `.log`, `.md`, `.json`, `.csv`, `.yaml`, `.sql`, …) | Compared by **byte hash**, and shown as a **line diff** when you open one: the tile is a document card, and clicking it opens the before/after in the lightbox's text viewer with a Diff / Before / After switch (markdown also renders). See `textExts` in `internal/artifacts`. |
+| `.apk`, `.zip`, `.tar`, `.gz`, `.whl`, … | Compared by **byte hash**; served as a download (no preview). |
 
 ## Video (`.webm`)
 

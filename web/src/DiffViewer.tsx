@@ -30,6 +30,7 @@ import { buildRepoSplat } from './lib/repoSplat'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { buildWordRangeMaps, renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS, type WordRange } from './lib/wordDiff'
 import { Tooltip } from './components/Tooltip'
+import { CollapseSlide } from './components/CollapseSlide'
 import { ResizeGrip } from './components/ResizeGrip'
 import { pinCardToTop, scrollCardToTop, scrollToDiffLine } from './lib/diffScroll'
 import { useMeasuredHeight, useMeasuredWidth } from './lib/useMeasuredHeight'
@@ -39,6 +40,7 @@ import {
   EXPANDER_ROW, EXPANDER_BTN, EXPANDER_BTNS, EXPANDER_COUNT, EXPANDER_CONTEXT, NOTICE_BLOCK, HIDDEN_BLOCK,
   measureBodyHeight, queueMeasure,
 } from './lib/diffMetrics'
+import { useFontSizePx, useFontStack } from './lib/fontPrefs'
 import {
   buildSideBySide, buildSegments, bodyShape, computeGap, trailingContext, isContiguous, isChangeLine,
   hunkContext, regionAfterHunk, LEAD_REGION_ID, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, PROMOTED_MAX_LINES, PROMOTED_MAX_CHANGES,
@@ -119,15 +121,19 @@ function fileDiffText(file: DiffFile): string {
 // RepoOpenButton deep-links the file to the repository browser at the agent's
 // branch - the diff-header sibling of the tests panel's "open in repository"
 // affordance (CaseTree's RepoLinkButton). It renders a real <Link> (an <a href>)
-// so middle-click / Ctrl-click open it in a new tab natively; stopPropagation
-// keeps a left-click from also toggling the header's collapse. Styled to match
-// the adjacent CopyButton rather than the test row's hover-reveal look, since
-// the header's actions are always visible.
+// with target="_blank", so it opens a NEW tab and the diff you were reading -
+// scroll position, expanded files, review drafts and all - stays put behind it;
+// that's the whole point of the affordance (you're cross-referencing, not
+// leaving). stopPropagation keeps a left-click from also toggling the header's
+// collapse. Styled to match the adjacent CopyButton rather than the test row's
+// hover-reveal look, since the header's actions are always visible.
 function RepoOpenButton({ target }: { target: LinkProps }) {
   return (
-    <Tooltip content="Open in repository">
+    <Tooltip content="Open in repository (new tab)">
       <Link
         {...target}
+        target="_blank"
+        rel="noopener noreferrer"
         onClick={(e) => e.stopPropagation()}
         className="inline-flex p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 shrink-0 cursor-pointer transition-colors"
       >
@@ -1290,13 +1296,20 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // It runs in an idle slice, hence the row estimate as the interim value.
   const [boxRef, boxW] = useMeasuredWidth(0)
   const [measuredBodyH, setMeasuredBodyH] = useState<number | null>(null)
+  // The Code font and its size are inputs to the measurement, not just to the
+  // paint: a different family wraps at a different column and a different size
+  // changes the row height outright, so a placeholder measured under the old one
+  // is wrong until its card happens to mount. Both are in the deps so the
+  // off-screen cards re-measure the moment the setting changes.
+  const codeFont = useFontStack('code')
+  const codeSizePx = useFontSizePx('code')
   useEffect(() => {
     if (near || headless || boxW <= 0) return
     return queueMeasure(() => {
       const shape = bodyShape(file, sideBySide, !!isHidden, currentContext)
       setMeasuredBodyH(shape && measureBodyHeight(boxW, shape))
     })
-  }, [near, headless, boxW, file, sideBySide, isHidden, currentContext])
+  }, [near, headless, boxW, file, sideBySide, isHidden, currentContext, codeFont, codeSizePx])
   const estBodyH = useMemo(
     () => (near ? 0 : measuredBodyH ?? (isHidden || file.binary ? 100 : estimateVisibleRows(file) * EST_ROW_H)),
     [near, measuredBodyH, isHidden, file],
@@ -2709,21 +2722,17 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
           <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate optical-center">{node.name}</span>
           <ChevronDown className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
         </button>
-        {/* Children stay mounted and their height animates via the grid-rows
-            0fr<->1fr trick (the inner wrapper is overflow-hidden), so expand /
-            collapse glides open and shut without measuring heights. */}
-        <div
-          className="grid transition-[grid-template-rows] duration-200 ease-out"
-          style={{ gridTemplateRows: isOpen ? '1fr' : '0fr' }}
-        >
-          <div className="overflow-hidden min-h-0">
-            {node.children.map((child) => (
-              <TreeNodeView key={child.path} node={child} depth={depth + 1}
-                collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
-                onFileClick={onFileClick} activeFilePath={activeFilePath} />
-            ))}
-          </div>
-        </div>
+        {/* The shared glide. keepMounted: a diff's file tree is a few dozen rows
+            whose per-file state (the active highlight) is worth keeping alive
+            while a folder is shut - unlike the whole-repo tree in
+            RepositoryView, which drops its closed subtrees. */}
+        <CollapseSlide open={isOpen} keepMounted>
+          {node.children.map((child) => (
+            <TreeNodeView key={child.path} node={child} depth={depth + 1}
+              collapsedFolders={collapsedFolders} toggleFolder={toggleFolder}
+              onFileClick={onFileClick} activeFilePath={activeFilePath} />
+          ))}
+        </CollapseSlide>
       </div>
     )
   }
