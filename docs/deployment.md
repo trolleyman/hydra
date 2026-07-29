@@ -26,12 +26,15 @@ take it down at all.
 derives from a single flag (`:106`, `:109`), which makes "production" and
 "debuggable" look mutually exclusive. They aren't. Measured on this tree:
 
-| flavour | JS on the wire | maps | binary |
-|---|---|---|---|
-| unminified + maps (**what you run today**) | 7.3 MB | 13.0 MB | 53.9 MB |
-| minified, no maps | 3.9 MB | - | 37.4 MB |
-| minified + maps | 3.9 MB | 12.4 MB | 49.9 MB |
-| **minified + maps + precompressed** | **1.3 MB** | 12.4 MB | **~37.9 MB** |
+Main-bundle bytes on the wire, and the resulting binary:
+
+| flavour | JS on the wire | binary |
+|---|---|---|
+| unminified + maps (the old `mage dev` build) | 7.3 MB total | 53.9 MB |
+| minified, no maps | 399 KB | 37.4 MB |
+| minified + maps, no compression | 399 KB | 49.9 MB |
+| minified + maps, runtime gzip | 122 KB | 49.9 MB |
+| **minified + maps, precompressed (BUILT)** | **105 KB brotli / 122 KB gzip** | **41.9 MB** |
 
 Reading it:
 
@@ -52,14 +55,36 @@ wire, 16 MB smaller binary, and original-source stack traces.
 
 ### What was actually built
 
-A runtime gzip middleware (`internal/http/compress.go`), not build-time
-precompression - chosen so API responses (diffs, which are large and not static)
-get the same benefit as the static assets, from one mechanism. The binary keeps
-the uncompressed `dist`, so it is 49.9 MB rather than the ~37.9 MB the
-precompressed row predicts; the wire saving is the same, measured at 394,765 ->
-120,934 bytes for the main bundle.
+**Both**, each where it fits.
 
-Things the middleware has to get right, all of which have tests:
+Static assets are compressed at build time (`web/scripts/precompress.ts`) into
+`.br` and `.gz`, and the original is *deleted* - `dist` is embedded in the
+binary, so keeping a copy nobody fetches would be paid for forever. That is what
+takes the binary from 49.9 MB to 41.9 MB. Cost: 4.0s for 973 files, which fans
+out across cores because `node:zlib`'s async calls run on libuv's thread pool.
+Brotli needs no new dependency at either end - node ships the encoder, and Go
+never decodes brotli, it just serves the bytes.
+
+`internal/cli.serveAsset` picks the best encoding the client accepts. Details
+that would otherwise bite, all with tests:
+
+- **Content-Type comes from the logical name**, not the file's. `index-abc.js.br`
+  means nothing to a browser, and `.map` is absent from the mime tables - left to
+  sniffing it comes back as gzip, which silently defeats shipping maps at all.
+- **Content-Length is the encoded length**, and Range is not supported: a range
+  over a content-encoded body describes a representation the client never asked
+  for.
+- **A client accepting no encoding still gets readable bytes** - the gzip copy is
+  decoded on the way out. That is why the identity fallback reads `.gz` and not
+  `.br`: the standard library can do gzip.
+
+Dynamic responses still go through a runtime gzip middleware
+(`internal/http/compress.go`) - diff payloads are the largest thing the UI
+fetches and cannot be compressed ahead of time. It leaves the static assets
+alone automatically, never touching a response that already carries a
+Content-Encoding.
+
+Things that middleware has to get right, also all tested:
 
 - **Decide late.** Go sniffs `Content-Type` from the first bytes to reach the
   underlying writer, so compressing before the type is known labels the response
@@ -76,8 +101,8 @@ Things the middleware has to get right, all of which have tests:
 - It sits **outside** `LoggingMiddleware`, which captures the body of a failed
   response for the log and should capture the readable one.
 
-Build-time precompression is still the way to shrink the *binary*; it just wasn't
-worth a second mechanism for a saving that only shows up on disk.
+Dropping brotli would save roughly 4 MB more binary at the cost of 17% more wire
+- the other end of the same trade, if that ever becomes the one worth making.
 
 ## Yes, `HYDRA_DEV_BUILD` can go
 
@@ -231,10 +256,18 @@ Two details worth getting right:
 
 ### The toast
 
-Good idea, and there is precedent - the tests panel and the artifacts "Show build
-log" already stream logs into the UI, and `handleRestart` already puts up a
-persistent (`duration: 0`) toast. An expandable toast showing the tail of the
-build log, with the phase as the title, is a small extension of things that exist.
+An expandable toast, phase as the title, with the build log inside it - built on
+the persistent (`duration: 0`) toast `handleRestart` already used.
+
+The log goes through `LogView`, the same xterm view the artifact and test build
+logs use. That is a correctness requirement rather than a consistency one: real
+`mage build` output is full of ANSI, so a stack of divs would render the escape
+sequences as literal garbage. xterm also brings scrollback, selection and
+follow-the-tail.
+
+The toast is NOT widened for it. `web/src/lib/toastLayout.ts` pins the whole
+notification column to one width deliberately - stepping one card out of line
+undoes the reason that exists.
 
 ## The hard part: "hot swap" without killing your agents
 
