@@ -294,13 +294,14 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `run_tests` / `generate_artifacts`; also lists what is deliberately NOT built)
 - **Review threads in the diff** (forge PR comments inline, replying, local-only
   notes, the origin badges) -> [docs/review-threads.md](docs/review-threads.md)
-- **Automating review with a second model** (Hydra-native comment threads,
-  @-mentioning an agent on a line, and how a reviewer gets run: sub-agent vs
-  `[tests.review]` runner vs a reviewer head vs one-shot `claude -p`) ->
-  [docs/review-agent.md](docs/review-agent.md) (proposed, unbuilt; the thread is
-  the feature, the runner is one tenant. Key constraint: Claude's transcript dir
-  is keyed by WORKTREE PATH, so a second agent in the head's own worktree can
-  poison its `--continue`/`--resume`)
+- **Review agent + a real comment system** (a "Review" session slot modelled on
+  the shell tabs - no DB row, no branch, own detached checkout, read-only git -
+  plus server-side comments agents read/append via tools, notified by id rather
+  than injected as text) -> [docs/review-agent.md](docs/review-agent.md)
+  (proposed, unbuilt; the comment store is the valuable half and stands alone.
+  Key constraint: Claude's transcript dir is keyed by WORKTREE PATH, so a second
+  agent in the head's own worktree can poison its `--continue`/`--resume` - which
+  is why the reviewer gets its own tree)
 - **Restructuring the agent page** (should it be GitHub/GitLab-shaped? inspector
   tabs vs the current five-panel stack, activity as chat rows vs an Activity tab,
   URL sub-view state) -> [docs/agent-page-tabs.md](docs/agent-page-tabs.md)

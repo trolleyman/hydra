@@ -66,31 +66,35 @@ before starting. Grouped by area.
   `[stdout]` / `[stderr]`), preserving interleaving instead of buffering and
   printing everything at once.
 
-- [ ] **Hydra-native review threads + @-mentioning an agent on a line.** Today
-  there are two half comment systems: local review comments (`localStorage`, no
-  thread, no reply, no persistence) and forge threads (real threads, but require a
-  published PR). Neither can hold a conversation between you and an agent about a
-  line of code. Proposed in [review-agent.md](review-agent.md): server-side
-  threads anchored to `(commit, path, line-range)` that exist without a forge
-  (`reviewstore.LocalNote` is most of the model; `mergeLocalNotes` must stop
-  dropping orphans), a third origin badge for agent-authored notes, and
-  `@<head-id>` / `@self` / `@review` mentions as the trigger. Both delivery ends
-  already exist - `SendAgentInput` inbound, `reviewq.OpNote` outbound. Needs:
-  staleness policy (`hunkHash` exists), wake-on-mention, a mention-loop cap, and
-  a `?thread=<id>` permalink (which needs the URL sub-view state from
-  [agent-page-tabs.md](agent-page-tabs.md)).
+- [ ] **Server-side comments, notified by id.** Today a review comment is
+  `localStorage` only (`web/src/lib/reviewDrafts.ts` - dies on reload, never
+  leaves the browser it was typed in) and "Comment to agent" formats it plus a
+  diff context block into the transcript (`buildReviewMessage`), where it cannot
+  be re-read, re-anchored, or survive a compaction. Proposed in
+  [review-agent.md](review-agent.md): one append-only server-side store with a
+  `draft`/`published` status (drafts sync but are invisible to agents), anchors
+  (`commit, path, line-range, hunk_hash`), threads that exist without a forge
+  parent (`mergeLocalNotes` must stop dropping orphans), `get_review_comments` /
+  `add_review_comment` tools alongside the already-built
+  `reply_to_review_comment` -> `reviewq.OpNote`, and agents notified with
+  `Comments added: #4 (path:line)` instead of injected text - constant-size, and
+  an id stays resolvable after the transcript scrolls away. Ids: per-head
+  sequential `#N` (one token, human-speakable, safe because every write is
+  daemon-mediated), not a bare UUID. Read + append only; published comments are
+  never edited.
 
-- [ ] **A review agent over a head's diff** - the tenant of the above. Options
-  surveyed in [review-agent.md](review-agent.md): a sub-agent (free, weakest), a
-  second chat thread on the same worktree (rejected - it shares the head's
-  transcript dir and can poison `--continue`), a `[tests.review]` runner emitting
-  `warn` markers (buildable today with no Hydra code, needs a per-runner
-  `prefetch = false` flag so it isn't a model call per commit), an `Ephemeral`
-  reviewer head stacked on `hydra/<id>` (80% built - needs a `ReviewOf` link + a
-  button), a first-class `[review.<name>]` runner, and a one-shot `claude -p`
-  (good only for narrow, tool-less checks). Recommended order: the test runner to
-  find out whether the findings are any good, then threads, then mentions, then a
-  reviewer head behind `@review`.
+- [ ] **A "Review" session slot.** A reviewer agent modelled on the bash shell
+  tabs rather than a spawned head - `<head>-review`, no DB row, no branch, and
+  invisible to `ListHeads` by construction (it is DB-first). Its own disposable
+  detached checkout (it can't commit, so it needs no branch; `artifacts.slotPool`
+  already provides these), `git_isolation = readonly` plus blocked git MCP tools
+  so it cannot write to the repo at all, and a "Review" entry in the chat view
+  dropdown. Explicitly NOT the head's own worktree: that collides on the
+  transcript dir and races the head's edits. New code is a Claude-argv sibling of
+  `StartShellSession` (which hardcodes `/bin/bash` + an empty `gate.Policy{}`).
+  Gotcha: `resolveGitIsolation` falls back to `off` when the agent type lacks git
+  tools, so that fallback must become conditional or the reviewer silently loses
+  its isolation. Design + alternatives in [review-agent.md](review-agent.md).
 
 ## Diff viewer
 
