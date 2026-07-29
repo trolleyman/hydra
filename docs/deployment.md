@@ -232,7 +232,8 @@ What remains, because each does a genuinely different job:
 ## Not built: carrying agent PTYs across a restart
 
 Making a restart *not* stop running heads means handing their PTY masters to the
-new image, the way the listener already is. A spike settled two things:
+new image, the way the listener already is. Two things are known about that,
+from measurement rather than reasoning:
 
 - **The mechanism works.** A PTY master crosses `exec` fine, and on the far side
   the child is still running and still responding through it.
@@ -242,17 +243,13 @@ new image, the way the listener already is. A spike settled two things:
   `PR_SET_PDEATHSIG` to the parent *thread*, and `exec` terminates every thread
   but the caller.
 
-That second finding depends on **which thread forked**, which is the trap for
-anyone re-running it. An early version of the spike forked and exec'd from the
-same goroutine and the child survived - a false green light. Forking from a
-separate goroutine, pinned across the fork and unpinned after (the shape
-`scope.StartFunc` produces, and the shape the daemon really has, since sessions
-start on request handlers while the exec runs on the update goroutine), kills the
-child every time. Reproduce that setup or you measure the wrong thing.
-
-The spike itself was deleted with the finding written down here: it exercised
-Linux and Go semantics rather than any Hydra code, and its negative assertion
-would have to be deleted the day someone made it work.
+The second point depends on **which thread forked**, which is the trap when
+checking it. Fork and exec from the same goroutine and the child survives - a
+false green light. Fork from a separate goroutine, pinned across the fork and
+unpinned after (the shape `scope.StartFunc` produces, and the shape the daemon
+really has, since sessions start on request handlers while the exec runs on the
+update goroutine), and the child dies every time. Reproduce that setup or you
+measure the wrong thing.
 
 So the cheap route requires dropping `Pdeathsig` *and* bwrap's
 `--die-with-parent` for agent sessions, and those exist for a reason: they
