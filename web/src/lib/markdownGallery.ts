@@ -35,6 +35,13 @@ function itemFor(img: HTMLImageElement): LightboxItem {
     // Per image, off its OWN authored path: a message can mix a @2x capture with
     // a 1x one, and each should report its own density in the caption.
     dpi: densityFromPath(img.dataset.mdSrc),
+    // The size is free here - this image is decoded on the page in front of us,
+    // and naturalWidth is the file's own size whatever box it is drawn in. Handing
+    // it over lets the lightbox reserve the picture's box before it loads, so
+    // stepping through a message's images with ←/→ doesn't pop each one open.
+    ...(img.naturalWidth && img.naturalHeight
+      ? { width: img.naturalWidth, height: img.naturalHeight }
+      : null),
   }
 }
 

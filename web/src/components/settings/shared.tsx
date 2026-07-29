@@ -3,6 +3,7 @@ import { ChevronRight, LoaderCircle, Save } from 'lucide-react'
 import { readLocal, writeLocal } from '../../lib/storage'
 import { TopBarPortal } from '../TopBarPortal'
 import { Tooltip } from '../Tooltip'
+import { CollapseSlide } from '../CollapseSlide'
 
 export type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'codex' | 'defaults'
 
@@ -106,20 +107,17 @@ export function SettingSection({
         {action}
       </div>
       {collapsible ? (
-        /* Animated open/close, matching the tests panel / file tree slide: a
-           grid tweened between 0fr and 1fr, since height:auto can't transition.
-           The body stays mounted so there is a height to tween (`inert` keeps
-           the closed copy out of tab order / a11y). A section renders at its
-           resolved row size on first paint - the stored state is read in the
-           useState initializer - so only a user toggle animates. Only the
-           collapsible path is wrapped: the clipping the slide needs would cut
-           off anything a plain section overflows. */
-        <div className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${collapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}>
-          <div className="overflow-hidden min-h-0" inert={collapsed}>
-            {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>}
-            <div className="mt-2">{children}</div>
-          </div>
-        </div>
+        /* The shared glide (see CollapseSlide). keepMounted: a settings section
+           holds live form state - a half-typed field must not be thrown away by
+           folding the section over it. A section renders at its resolved row
+           size on first paint (the stored state is read in the useState
+           initializer), so only a user toggle animates. Only the collapsible
+           path is wrapped: the clipping the slide needs would cut off anything a
+           plain section overflows. */
+        <CollapseSlide open={!collapsed} keepMounted>
+          {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>}
+          <div className="mt-2">{children}</div>
+        </CollapseSlide>
       ) : (
         <>
           {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>}
