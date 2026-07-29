@@ -24,17 +24,35 @@
 
 // ── Row classes (shared with DiffViewer's renderers) ──────────────────────────
 
+// Size and leading come from the Code size control (Settings -> Browser ->
+// Fonts): CODE_TEXT is `text-xs` and CODE_LEADING is `leading-5` plus
+// --app-font-code-step, a signed whole-px length that is 0px by default - so an
+// untouched build renders the 12px/20px row it always did. Whole-px leading, so
+// a stepped row stays on the device-pixel grid.
+//
+// The gutter and marker widths are stated in em rather than px for the same
+// reason: at the element's own (stepped) size, 3.334em IS the 40px `w-10` used
+// to be, and it keeps holding the same number of digits as the size grows
+// instead of letting a right-aligned line number spill over the rule.
+//
+// measureBodyHeight's replica is built from these same constants, so the
+// placeholder height a lazy card reserves steps with them and can't drift.
+// Exported because the repository view's source pane is a Code surface too, and
+// its size has to be the same expression rather than a second copy of it.
+export const CODE_TEXT = 'text-[length:calc(0.75rem_+_var(--app-font-code-step,_0px))]'
+export const CODE_LEADING = 'leading-[calc(1.25rem_+_var(--app-font-code-step,_0px))]'
+
 export const UNIFIED_ROW = 'flex items-stretch'
 export const UNIFIED_GUTTER = 'relative flex shrink-0 select-none'
-export const UNIFIED_LINE_NUM_CLASS = 'select-none text-right pr-2 text-gray-400 dark:text-gray-600 text-xs font-mono w-10 shrink-0 border-r border-gray-200 dark:border-gray-700 leading-5'
-export const UNIFIED_MARKER = 'select-none font-mono text-xs leading-5 w-4 text-center shrink-0'
-export const UNIFIED_CODE_CLASS = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden'
+export const UNIFIED_LINE_NUM_CLASS = `select-none text-right pr-2 text-gray-400 dark:text-gray-600 ${CODE_TEXT} font-mono w-[3.334em] shrink-0 border-r border-gray-200 dark:border-gray-700 ${CODE_LEADING}`
+export const UNIFIED_MARKER = `select-none font-mono ${CODE_TEXT} ${CODE_LEADING} w-[1.334em] text-center shrink-0`
+export const UNIFIED_CODE_CLASS = `pl-1 font-mono ${CODE_TEXT} ${CODE_LEADING} flex-1 whitespace-pre-wrap break-words overflow-hidden`
 
 export const SBS_ROW = 'flex items-stretch divide-x divide-gray-200 dark:divide-gray-700'
 export const SBS_HALF = 'flex items-start flex-1 min-w-0 group relative'
-export const SBS_LINE_NUM = 'select-none text-right text-gray-400 dark:text-gray-600 text-xs font-mono w-8 shrink-0 pr-1 leading-5'
-export const SBS_MARKER = 'select-none font-mono text-xs w-3 shrink-0 text-center leading-5'
-export const SBS_CODE = 'pl-1 font-mono text-xs leading-5 flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0'
+export const SBS_LINE_NUM = `select-none text-right text-gray-400 dark:text-gray-600 ${CODE_TEXT} font-mono w-[2.667em] shrink-0 pr-1 ${CODE_LEADING}`
+export const SBS_MARKER = `select-none font-mono ${CODE_TEXT} w-[1em] shrink-0 text-center ${CODE_LEADING}`
+export const SBS_CODE = `pl-1 font-mono ${CODE_TEXT} ${CODE_LEADING} flex-1 whitespace-pre-wrap break-words overflow-hidden min-w-0`
 
 export const EXPANDER_ROW = 'flex items-center bg-blue-50 dark:bg-blue-950/30 border-y border-blue-100 dark:border-blue-900/50 px-2 py-0.5'
 export const EXPANDER_BTN = 'p-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 cursor-pointer'
@@ -47,11 +65,11 @@ export const EXPANDER_BTNS = 'flex items-center gap-0.5 shrink-0 mr-1 w-[34px]'
 // it, so the counts wandered from one expander to the next down a file. w-44
 // holds a five-digit count; `shrink` lets a narrow pane squeeze it (truncating,
 // never wrapping) so the row stays exactly one line tall at any width.
-export const EXPANDER_COUNT = 'w-44 shrink truncate text-center text-xs text-blue-400 dark:text-blue-500 font-mono py-0.5 rounded cursor-pointer hover:bg-blue-100/50 dark:hover:bg-blue-900/30'
+export const EXPANDER_COUNT = `w-44 shrink truncate text-center ${CODE_TEXT} text-blue-400 dark:text-blue-500 font-mono py-0.5 rounded cursor-pointer hover:bg-blue-100/50 dark:hover:bg-blue-900/30`
 // The context label carries the file's own token markup, so its colours come
 // from the highlight theme; the gray is only what untokenised text falls back
 // to, and the opacity keeps the whole thing behind the code it labels.
-export const EXPANDER_CONTEXT = 'flex-1 min-w-0 truncate pl-3 text-xs font-mono leading-5 text-gray-500 dark:text-gray-400 opacity-70'
+export const EXPANDER_CONTEXT = `flex-1 min-w-0 truncate pl-3 ${CODE_TEXT} font-mono ${CODE_LEADING} text-gray-500 dark:text-gray-400 opacity-70`
 
 // The two fixed-height bodies a card can render instead of rows.
 export const NOTICE_BLOCK = 'px-4 py-3 text-xs text-gray-400 dark:text-gray-500 italic'

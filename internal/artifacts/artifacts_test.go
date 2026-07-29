@@ -334,7 +334,8 @@ func TestBlobPath(t *testing.T) {
 	if _, _, err := m.BlobPath("shots", "nothex!", "home.png"); err == nil {
 		t.Error("expected bad-key rejection")
 	}
-	if _, _, err := m.BlobPath("shots", "commit/abc123", "home.txt"); err == nil {
+	// .exe is in none of the three classes (media, download, text).
+	if _, _, err := m.BlobPath("shots", "commit/abc123", "home.exe"); err == nil {
 		t.Error("expected unsupported-type rejection")
 	}
 
@@ -367,7 +368,8 @@ func TestDownloadArtifacts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "app-debug.apk"), []byte("not really an apk"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("ignored"), 0o644); err != nil {
+	// .bin is in none of the three collectible classes, so it stays ignored.
+	if err := os.WriteFile(filepath.Join(dir, "payload.bin"), []byte("ignored"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	files, _, err := scanOutputs(dir)
@@ -395,6 +397,58 @@ func TestDownloadArtifacts(t *testing.T) {
 		[]FileMeta{{Name: "app-debug.apk", Hash: "bb", Size: 20}},
 	)
 	if len(deltas) != 1 || deltas[0].Change != ChangeModified || deltas[0].Size != 20 {
+		t.Fatalf("deltas = %+v", deltas)
+	}
+}
+
+// TestTextArtifacts covers the text class (a report, a build log, a generated
+// schema): collected by scanOutputs with a byte size but no pixel probe,
+// admitted by BlobPath with a text content type (inline, NOT a download), and
+// byte-hash compared. The web UI previews these in the lightbox's text viewer,
+// which renders a modified pair as a diff.
+func TestTextArtifacts(t *testing.T) {
+	if !IsTextName("build.log") || !IsTextName("REPORT.MD") || IsTextName("home.png") || IsTextName("app.apk") {
+		t.Fatal("IsTextName misclassifies")
+	}
+	// Text is previewed, not downloaded - the two classes must not overlap.
+	if IsDownloadName("build.log") {
+		t.Fatal("a text artifact must not be download-class")
+	}
+
+	dir := t.TempDir()
+	const body = "12:04:01 building\n12:04:19 ok\n"
+	if err := os.WriteFile(filepath.Join(dir, "build.log"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, _, err := scanOutputs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Name != "build.log" {
+		t.Fatalf("scanOutputs = %+v, want the log", files)
+	}
+	if files[0].Size != int64(len(body)) || files[0].Width != 0 || files[0].Height != 0 {
+		t.Fatalf("log meta = %+v, want size with no pixel size", files[0])
+	}
+
+	m := NewManager(t.TempDir())
+	if _, ct, err := m.BlobPath("build", "commit/abc123", "build.log"); err != nil {
+		t.Fatalf("BlobPath rejected text: %v", err)
+	} else if ct != "text/plain" {
+		t.Errorf("content type = %q", ct)
+	}
+	if _, ct, err := m.BlobPath("build", "commit/abc123", "notes.md"); err != nil {
+		t.Fatalf("BlobPath rejected markdown: %v", err)
+	} else if ct != "text/markdown" {
+		t.Errorf("markdown content type = %q", ct)
+	}
+
+	// No pixel ratio to refine with, so a changed log is plainly "modified".
+	deltas := Compare(
+		[]FileMeta{{Name: "build.log", Hash: "aa", Size: 10}},
+		[]FileMeta{{Name: "build.log", Hash: "bb", Size: 20}},
+	)
+	if len(deltas) != 1 || deltas[0].Change != ChangeModified || deltas[0].ChangeRatio != 0 {
 		t.Fatalf("deltas = %+v", deltas)
 	}
 }

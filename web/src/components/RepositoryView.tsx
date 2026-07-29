@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import { useNavigate, useLocation, useSearch, Link, linkOptions, type LinkProps } from '@tanstack/react-router'
-import { hasLanguage } from '../lib/prism'
-import { highlightLines } from '../lib/highlightCore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { formatBytes } from '../lib/formatBytes'
-import { ensureLanguage } from '../lib/prismLazy'
 import { getLanguage } from '../lib/language'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
@@ -25,6 +22,7 @@ import { CopyStateIcon } from './CopyStateIcon'
 import { CollapseSlide } from './CollapseSlide'
 import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
+import { CodePane } from './CodePane'
 import { Tooltip } from './Tooltip'
 import {
   FileDiff, FileRow, ChangeTypeIcon, TreeNodeView, type FileView,
@@ -38,7 +36,7 @@ import { IMAGE_DIFF_MODES } from './artifactDiffContext'
 import { repoBlobUrl } from '../lib/imageDiff'
 import { buildRepoSplat, parseRepoSplat, splatNeedsBranchList } from '../lib/repoSplat'
 import {
-  parseLineRange, formatLineHash, inRange, type LineRange,
+  parseLineRange, formatLineHash, type LineRange,
   parseDiffLineRange, formatDiffLineHash,
 } from '../lib/lineRange'
 import type { RepositorySearch } from '../routes/project.$projectId/repository.$'
@@ -541,67 +539,7 @@ function TreeRow({
 
 // ── File content pane ───────────────────────────────────────────────────────────
 
-function CodeView({ content, lang, wrap, highlightRange, onSelectLine }: { content: string; lang: string; wrap: boolean; highlightRange?: LineRange | null; onSelectLine?: (line: number, extend: boolean) => void }) {
-  // Fetch a not-yet-bundled grammar on demand (the diff viewer does the same via
-  // its worker), then re-highlight: hasGrammar flips false→true once it lands.
-  const [, bumpLoaded] = useState(0)
-  useEffect(() => {
-    if (hasLanguage(lang)) return
-    let cancelled = false
-    ensureLanguage(lang).then((ok) => { if (ok && !cancelled) bumpLoaded((n) => n + 1) })
-    return () => { cancelled = true }
-  }, [lang])
-
-  const hasGrammar = hasLanguage(lang)
-  // One HTML string per line - rendering each logical line as its own element is
-  // what keeps the line numbers aligned when wrapping is on. highlightLines also
-  // falls back to escaped plain text for an unhighlightable file, and carries the
-  // resync guard, so a grammar that derails mid-file still colours the rest.
-  const lines = useMemo(() => {
-    const split = highlightLines(content, lang)
-    // Drop the trailing empty line produced by a final newline, so the gutter
-    // count matches the file's real line count.
-    if (split.length > 1 && split[split.length - 1] === '' && content.endsWith('\n')) split.pop()
-    return split
-    // hasGrammar: re-run once a lazily-loaded grammar lands.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content, lang, hasGrammar])
-
-  const gutterWidth = `${Math.max(2, String(lines.length).length)}ch`
-
-  return (
-    <div className={`text-xs font-mono leading-snug pt-2 ${wrap ? 'w-full' : 'w-max min-w-full'}`}>
-      {lines.map((html, i) => {
-        // The 1-based line number doubles as the scroll/highlight anchor: the
-        // page scrolls the row carrying data-line into view (see contentRef
-        // effect) when the URL hash selects it, and we tint the selected
-        // range GitHub-style. Clicking the gutter number selects the line
-        // (shift+click extends the range) via onSelectLine.
-        const ln = i + 1
-        const isHi = inRange(ln, highlightRange)
-        return (
-          <div key={i} data-line={ln} className={`flex ${isHi ? 'bg-amber-100/70 dark:bg-amber-400/10' : 'hover:bg-gray-50 dark:hover:bg-gray-800/40'}`}>
-            <span
-              onMouseDown={onSelectLine ? (e) => { if (e.shiftKey) e.preventDefault() } : undefined}
-              onClick={onSelectLine ? (e) => onSelectLine(ln, e.shiftKey) : undefined}
-              title={onSelectLine ? `Select line ${ln}` : undefined}
-              style={{ width: `calc(${gutterWidth} + 1.5rem)` }}
-              className={`sticky left-0 z-10 shrink-0 select-none text-right pr-3 pl-2 border-r ${onSelectLine ? 'cursor-pointer hover:text-blue-500 dark:hover:text-blue-400' : ''} ${isHi
-                ? 'text-amber-700 dark:text-amber-300 bg-amber-100/70 dark:bg-amber-400/10 border-amber-200 dark:border-amber-500/20'
-                : 'text-gray-400 dark:text-gray-600 bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800'}`}
-            >
-              {ln}
-            </span>
-            <code
-              className={`bg-transparent flex-1 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}
-              dangerouslySetInnerHTML={{ __html: html || ' ' }}
-            />
-          </div>
-        )
-      })}
-    </div>
-  )
-}
+// The file pane is shared with the lightbox's text viewer - see CodePane.
 
 // MarkdownView renders a markdown file (README) through the shared <Markdown>
 // component in its document variant. linkCtx lets relative repo links resolve
@@ -678,7 +616,7 @@ function FileContent({
     <>
       {/* The content head lets getLanguage fall back to a `#!` shebang for
           extension-less scripts; one line is all it reads. */}
-      <CodeView content={file.content} lang={getLanguage(contentPath, file.content.slice(0, 200))} wrap={wrap} highlightRange={highlightRange} onSelectLine={onSelectLine} />
+      <CodePane content={file.content} lang={getLanguage(contentPath, file.content.slice(0, 200))} wrap={wrap} className="pt-2" highlightRange={highlightRange} onSelectLine={onSelectLine} />
       {file.truncated && (
         <div className="px-4 py-2 text-xs text-amber-600 dark:text-amber-400 border-t border-gray-200 dark:border-gray-700">
           File truncated - showing the first part only.

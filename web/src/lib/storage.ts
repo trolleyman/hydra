@@ -62,6 +62,13 @@ export const StorageKeys = {
   fontChat: 'hydra-font-chat',
   fontCode: 'hydra-font-code',
   fontTerminal: 'hydra-font-terminal',
+  // The size STEP for the three roles that have one - a signed whole number of
+  // pixels from that surface's built-in size ('-1', '2'), not an absolute size.
+  // Absent/'0' = the built-in size. The Interface role has no size key; see the
+  // note in lib/fonts.ts for why. See lib/fontPrefs.
+  fontSizeChat: 'hydra-font-size-chat',
+  fontSizeCode: 'hydra-font-size-code',
+  fontSizeTerminal: 'hydra-font-size-terminal',
   // '0' when the user turned OFF the paste markers: pasting an attachment
   // (image / large text) into a composer also inserts its "[filename]" at the
   // caret. Absent/'1' = on (the default). See lib/composerPrefs.ts.
@@ -152,6 +159,18 @@ export const StorageKeys = {
   // viewer's own file-view setting, but kept under a separate key so the two
   // views can be configured independently.
   repoDiffFileView: 'hydra-repo-diff-file-view',
+
+  // 'false' when the user has turned OFF soft wrapping in the lightbox's text
+  // viewer (a long line then scrolls the pane sideways, under a sticky
+  // line-number gutter). Absent = on, the default: a lightbox is opened to READ
+  // a file, and a log line running off the right edge is the one thing that
+  // stops. Kept separate from repoWrap - the repository browser is a different
+  // surface with its own habit. See LightboxViewers.
+  lightboxWrap: 'hydra-lightbox-wrap',
+  // 'false' when the user has switched the lightbox's markdown viewer to the
+  // file's source instead of the rendered document. Absent = rendered, the
+  // default. See LightboxViewers.
+  lightboxMarkdownRendered: 'hydra-lightbox-markdown-rendered',
 
   // '1' when a test/screenshot harness wants to drive the toast store from page
   // context (see lib/toastHarness). Dormant unless explicitly set - only the
