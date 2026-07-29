@@ -672,10 +672,10 @@ function entryString(entry: unknown, key: string): string {
   return typeof value === 'string' ? value : ''
 }
 
-// Bridge the provider-neutral backend timeline into the mature presentation
-// reducer while Claude's legacy wire format is being retired. Provider details
-// stop at this boundary; paging and live delivery use the same conversion.
-// (Exported for tests.)
+// Convert one provider-neutral backend event into the presentation shapes the
+// card renderers below understand. Provider details stop at this boundary, and
+// paging and live delivery share the conversion, so a scrolled-back page
+// renders exactly like the live session did. (Exported for tests.)
 // eslint-disable-next-line react-refresh/only-export-components
 export function normalizedToProviderEvents(ev: NormalizedChatEvent, showEmptyReasoning = false): ProviderEvent[] {
   const p = ev.payload ?? {}

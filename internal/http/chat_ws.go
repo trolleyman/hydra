@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"braces.dev/errtrace"
@@ -150,10 +149,6 @@ func hasPendingAsk(pending []claudestream.PendingAsk, requestID string) bool {
 	}
 	return false
 }
-
-// chatInterruptSeq numbers control_request interrupts so each request_id is
-// unique across the daemon's lifetime.
-var chatInterruptSeq atomic.Uint64
 
 // handleChatClientMessage services one text frame from a chat client.
 // projectRoot locates the head's on-disk message queue; worktree is the cwd a

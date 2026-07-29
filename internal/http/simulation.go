@@ -3881,7 +3881,7 @@ func handleSimCodexChatWS(conn *safeConn) {
 		{"tool_started", map[string]any{"id": "sim-codex-bash", "name": "Bash", "status": "in_progress", "input": map[string]any{"command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": ".", "_raw": map[string]any{"id": "sim-codex-bash", "item_type": "command_execution", "command": "/usr/bin/bash -lc 'command -v bun || true'", "cwd": ".", "status": "in_progress"}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-bash", "name": "Bash", "output": "", "status": "completed"}},
 		{"tool_started", map[string]any{"id": "sim-codex-edit", "name": "Edit", "status": "in_progress", "input": map[string]any{"changes": []any{
-			map[string]any{"path": "docs/codex-chat.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-# Codex chat\n+# Codex chat support\n"},
+			map[string]any{"path": "docs/chat-mode.md", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-# Chat mode\n+# Chat mode internals\n"},
 			map[string]any{"path": "internal/chat/store.go", "kind": map[string]any{"type": "update"}, "diff": "@@ -1 +1 @@\n-package chat\n+package chat\n"},
 		}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-edit", "name": "Edit", "output": "Files updated", "status": "completed"}},

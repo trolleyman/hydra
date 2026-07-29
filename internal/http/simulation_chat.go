@@ -13,9 +13,9 @@ import (
 
 // The simulated Claude chat conversation, written directly in Hydra's
 // normalized event shapes (internal/chat) - the only thing a chat socket
-// speaks. Each entry below mirrors what internal/chat/claude.go would have
-// produced from the provider line that used to be canned here, so the
-// simulation exercises the same client reducer the daemon feeds.
+// speaks. Each entry is what internal/chat/claude.go produces from the
+// corresponding provider line, so the simulation drives the same client
+// reducer the daemon feeds.
 //
 // Two families of provider line deliberately have no entry here, because
 // normalization drops them upstream and the client must never see them:
