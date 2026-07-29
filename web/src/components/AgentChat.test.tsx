@@ -241,6 +241,75 @@ describe('a streamed reply settles into the same DOM node', () => {
   })
 })
 
+// A tool card you expanded must stay expanded when the NEXT tool call lands.
+// The second call is what earns the run a "N steps" group (planStepRows), and
+// the group is a new parent - React reconciles a row that changes parent as
+// unmount + mount, not as a move - so a fold state living only in the card's
+// useState was thrown away and the card you were reading closed itself
+// mid-turn.
+describe('an expanded tool card survives its run becoming a step group', () => {
+  beforeAll(() => {
+    vi.stubGlobal('WebSocket', RecordingWebSocket)
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    sockets.length = 0
+    localStorage.clear()
+  })
+
+  // A settled tool call: the card, then its answer.
+  const call = (ws: RecordingWebSocket, id: string, name: string) =>
+    act(() => {
+      ws.emit({
+        type: 'claude_event',
+        event: { type: 'assistant', message: { id: `msg_${id}`, content: [{ type: 'tool_use', id, name, input: { file_path: '/w/a.txt' } }] } },
+      })
+      ws.emit({
+        type: 'claude_event',
+        event: { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } },
+      })
+    })
+
+  // Only a ToolCard header carries an explicit role="button" AND aria-expanded;
+  // the group's own header is a real <button>, so it can't be confused for one.
+  const cardHeader = (name: string) =>
+    [...document.querySelectorAll('[role="button"][aria-expanded]')].find((el) =>
+      el.textContent?.includes(name),
+    ) as HTMLElement | undefined
+
+  it('keeps the card open when a second call folds the run into a group', async () => {
+    renderChat()
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => ws.emit({ type: 'replay_done' }))
+
+    call(ws, 'toolu_grp_1', 'Read')
+    const read = cardHeader('Read')
+    expect(read).toBeDefined()
+    expect(read).toHaveAttribute('aria-expanded', 'false')
+
+    act(() => read!.click())
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+
+    // The second call: the run now earns a group, and the Read card moves inside
+    // it. It must come back open, not folded.
+    call(ws, 'toolu_grp_2', 'Grep')
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+    // The card the reader never touched is unaffected - the fix restores a
+    // choice, it doesn't open everything.
+    expect(cardHeader('Grep')).toHaveAttribute('aria-expanded', 'false')
+    // The group's own header grows in a frame later (GrowIn), so it settles
+    // after the cards it now owns - proof the run really did fold.
+    await screen.findByText('2 steps')
+    expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'true')
+  })
+})
+
 // History pages arrive NEWEST first, so a tool call whose tool_use and
 // tool_result straddle a page boundary is reduced result-first: the batch
 // carrying the answer is reduced pages before the batch that builds the card.

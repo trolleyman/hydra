@@ -52,6 +52,7 @@ import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
+import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
 import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
@@ -1744,23 +1745,6 @@ function useDelayedUnmount(open: boolean, ms = 250): boolean {
   return open || mounted
 }
 
-// A step folding away shrinks the transcript by its own height, which clamps
-// scrollTop down - and a scrollTop that drops on its own is exactly what a user
-// scrolling up looks like. onScroll already forgives a shrink it can SEE
-// (scrollHeight went down between two scroll events), but a fold overlaps with
-// the next step arriving, so the two height changes can coalesce into one event
-// where the height is unchanged and only scrollTop moved: read as a scroll-up,
-// which unpinned the view and stopped the chat following a live turn from the
-// first fold onwards. So a fold declares itself for the length of its animation
-// and onScroll trusts that over the geometry.
-let selfReflowUntil = 0
-function markSelfReflow(ms = 400) {
-  selfReflowUntil = Math.max(selfReflowUntil, Date.now() + ms)
-}
-function inSelfReflow(): boolean {
-  return Date.now() < selfReflowUntil
-}
-
 // Expandable animates its child open/closed by transitioning a MEASURED
 // max-height (0 <-> content height). We moved off the grid-rows 0fr/1fr trick
 // because, with a nested scroll container inside (a CodePanel's max-h-64 <pre>),
@@ -2820,6 +2804,24 @@ function LowlitPath({ path }: { path: string }) {
   return <>{dir && <span className="text-stone-400/70 dark:text-stone-500/70">{dir}</span>}<span className="text-stone-400 dark:text-stone-500">{name}</span></>
 }
 
+// Which cards the reader has expanded, by tool-use id, outliving the card's
+// React instance.
+//
+// A card's fold state cannot live in useState alone, because the card does not
+// stay mounted: the moment a second tool call lands beside it, planStepRows
+// re-parents the run into a new StepGroup, and React reconciles a row that
+// changes parent as unmount + mount rather than as a move (the key only matches
+// among siblings of the same parent). Local state would take the expanded card
+// the reader was in the middle of reading away from them, mid-turn, for no
+// reason they could see.
+//
+// Only cards the reader has actually TOUCHED get an entry, so this holds one
+// boolean per click and nothing per transcript. It is deliberately not cleared
+// when a pane unmounts: a card you opened is your decision, and unlike a step
+// group (which tidies itself away on the way back in, see StepGroup) an open
+// card inside a folded group costs nothing until you go looking for it again.
+const toolCardOpen = new Map<string, boolean>()
+
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
 // tool card in the transcript (item 16). Props are stable per settled item.
 // recipient* / openSub describe a SendMessage's target agent. They are passed
@@ -2844,7 +2846,15 @@ const ToolCard = memo(function ToolCard({
   recipientRunning?: boolean
   openSub?: (key: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(() => toolCardOpen.get(item.toolUseId) ?? false)
+  // Toggling records the choice so it survives the card's next remount (see
+  // toolCardOpen). The auto-open below deliberately doesn't - an approval opens
+  // the card by itself on every mount for as long as it is parked.
+  const toggleOpen = () => {
+    const next = !open
+    toolCardOpen.set(item.toolUseId, next)
+    setOpen(next)
+  }
   const [showRaw, setShowRaw] = useState(false)
   const [imgLightbox, setImgLightbox] = useState<number | null>(null)
   // The thumbnail clicked, so the lightbox flies the picture out of it.
@@ -3131,8 +3141,9 @@ const ToolCard = memo(function ToolCard({
       <div
         role="button"
         tabIndex={0}
-        onClick={() => setOpen((o) => !o)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o) } }}
+        aria-expanded={open}
+        onClick={toggleOpen}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleOpen() } }}
         className="flex w-full items-baseline gap-1.5 px-2.5 py-1.5 text-stone-600 dark:text-stone-300 cursor-pointer select-none hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
       >
         <div className="flex flex-1 min-w-0 items-baseline gap-1.5 text-left">
