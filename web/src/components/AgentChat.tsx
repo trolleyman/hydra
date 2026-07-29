@@ -54,12 +54,13 @@ import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
-import { usePasteMarkersStore } from '../lib/composerPrefs'
+import { useAutoPairStore, usePasteMarkersStore } from '../lib/composerPrefs'
+import { fenceEnterEdit } from '../lib/autoPair'
 import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
-import { enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
+import { applyEdit, enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
 import { Lightbox } from './Lightbox'
@@ -2147,7 +2148,13 @@ interface ScriptOutputRow {
 // honestly be given, and it keeps a multi-file search from colouring one file's
 // lines by another's language.
 function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): ScriptOutputRow[] {
-  const only = section.match.paths.length === 1 ? section.match.paths[0] : ''
+  // What the search named, as a language: one file gives its own, and several
+  // give theirs only when they agree (two searches of two .go files print no
+  // `path:` prefix to tell their lines apart, but both are still Go). A
+  // directory or an unknown extension yields '', which is the same "ask the
+  // line's own prefix" fallback as naming no file at all.
+  const named = new Set(section.match.paths.map(langFromPath))
+  const only = named.size === 1 ? [...named][0] : ''
   const rows: ScriptOutputRow[] = []
   let run: MatchLine[] = []
   let runLang = ''
@@ -2163,7 +2170,7 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
       rows.push({ num: '', html: '', tone: 'plain' })
       continue
     }
-    const lang = langFromPath(line.path || only)
+    const lang = line.path ? langFromPath(line.path) : only
     if (lang !== runLang) flush()
     runLang = lang
     run.push(line)
@@ -6103,6 +6110,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Whether pasting an attachment also inserts its "[filename]" marker into the
   // composer (a Browser setting, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
+  // Whether the composer auto-pairs (a Browser setting, default on). The shared
+  // textarea applies the rules itself; this composer needs the flag because it
+  // owns Enter (which sends), so the fence-body step is its call to make.
+  const autoPair = useAutoPairStore((s) => s.enabled)
   // The head's worktree, for trimming absolute paths in tool cards (item 19).
   // Falls back to the archived list for a finished head.
   const worktreePath = useAgentStore(
@@ -9160,6 +9171,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
     if (e.key === 'Enter') {
       if (e.nativeEvent.isComposing) return
+      // Caret parked on a fence auto-pairing just opened (after "```", where the
+      // language goes): every flavour of Enter steps down into the body line
+      // that already exists. Sending here would fire off a half-written block,
+      // and inserting a newline would leave a blank line behind.
+      if (autoPair && !e.metaKey) {
+        const ta = e.currentTarget
+        const edit = fenceEnterEdit(ta.value, ta.selectionStart ?? 0, ta.selectionEnd ?? 0)
+        if (edit) {
+          e.preventDefault()
+          applyEdit(ta, edit)
+          requestAnimationFrame(() => ensureCaretVisible(ta))
+          return
+        }
+      }
       // Shift+Enter is the browser's native newline; Ctrl+Enter and Alt+Enter
       // insert one too (item 7) - they'd otherwise do nothing.
       if (e.altKey || (e.ctrlKey && !e.metaKey)) {

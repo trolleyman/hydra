@@ -74,8 +74,8 @@ export const StorageKeys = {
   // caret. Absent/'1' = on (the default). See lib/composerPrefs.ts.
   pasteMarkers: 'hydra-paste-markers',
   // '0' when the user turned OFF auto-pairing in the composers: typing an opener
-  // (` ( [ { " ') inserts its closer, a third backtick opens a fenced block, and
-  // a mark typed over a selection wraps it. Absent/'1' = on (the default). See
+  // (` ( [ { " ') inserts its closer, Enter on a "```" line opens a fenced
+  // block, and a mark typed over a selection wraps it. Absent/'1' = on (the default). See
   // lib/composerPrefs.ts + lib/autoPair.ts.
   autoPair: 'hydra-auto-pair',
   // 'off' when the user has turned OFF smooth (paced) streaming of chat-mode agent

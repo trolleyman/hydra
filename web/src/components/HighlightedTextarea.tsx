@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { renderMarkdownSource } from '../lib/markdown'
 import { applyEdit, enterEdit, ensureCaretVisible, moveCaret, visualLineTarget } from '../lib/textareaEdit'
-import { autoPairEdit, backspacePairEdit } from '../lib/autoPair'
+import { autoPairEdit, backspacePairEdit, fenceEnterEdit } from '../lib/autoPair'
 import { useAutoPairStore } from '../lib/composerPrefs'
 
 type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'className'> & {
@@ -81,10 +81,11 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
 
     // Auto-pairing (lib/autoPair), when the preference is on: a typed opener
     // brings its closer along, a typed closer steps over the one already there,
-    // Backspace between an empty pair clears both, and a mark typed over a
-    // selection wraps it. Returns whether it handled the key. Skipped for
-    // shortcuts (Cmd, or Ctrl without Alt - AltGr sets both) and mid-composition,
-    // where the "key" is not a character the user is typing into the text.
+    // Backspace between an empty pair clears both, a mark typed over a selection
+    // wraps it, and Enter on a just-opened fence steps into its body instead of
+    // adding a line that is already there. Returns whether it handled the key.
+    // Skipped for shortcuts (Cmd, or Ctrl without Alt - AltGr sets both) and
+    // mid-composition, where the "key" is not a character the user is typing.
     function pairingKeys(e: React.KeyboardEvent<HTMLTextAreaElement>): boolean {
       if (!autoPair || e.nativeEvent.isComposing || e.metaKey || (e.ctrlKey && !e.altKey)) return false
       const ta = e.currentTarget
@@ -93,7 +94,9 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
       const edit =
         e.key === 'Backspace'
           ? backspacePairEdit(ta.value, start, end)
-          : autoPairEdit(e.key, ta.value, start, end)
+          : e.key === 'Enter'
+            ? fenceEnterEdit(ta.value, start, end)
+            : autoPairEdit(e.key, ta.value, start, end)
       if (!edit) return false
       e.preventDefault()
       applyEdit(ta, edit)
