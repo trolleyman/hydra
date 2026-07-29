@@ -52,9 +52,7 @@ const devPort = process.env.DEV_PORT ? parseInt(process.env.DEV_PORT) : undefine
 const apiBase = `http://localhost:${apiPort}`
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
-  const isDev = mode === 'development'
-
+export default defineConfig(() => {
   return {
     plugins: [
       // '@tanstack/router-plugin' must be passed before '@vitejs/plugin-react'
@@ -102,11 +100,16 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
-      // Disables minification entirely when in development mode to keep code readable
-      minify: isDev ? false : 'esbuild',
-
-      // Generates source maps to make debugging easier on the external server
-      sourcemap: isDev,
+      // There is exactly ONE build flavour: minified, with source maps. These are
+      // independent options and were previously both derived from a `--mode
+      // development` flag, which made "fast" and "debuggable" look mutually
+      // exclusive. They aren't - DevTools only fetches a .map when it is open, so
+      // maps cost the browser nothing on a normal load. The `hydra server` binary
+      // embeds this directory (web/embed.go) and gzips responses on the way out,
+      // so shipping maps costs binary size only. See docs/deployment.md for the
+      // measurements.
+      minify: 'esbuild',
+      sourcemap: true,
 
       // Vite outputs to 'dist/' by default, but this explicitly defines the target
       outDir: 'dist',
