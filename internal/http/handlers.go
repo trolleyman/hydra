@@ -313,12 +313,14 @@ func (s *Server) ListProjects(_ context.Context, _ api.ListProjectsRequestObject
 			}
 		}
 		builtin := p.Builtin
+		hidden := p.Hidden
 		resp[i] = api.ProjectInfo{
 			Id:              p.ID,
 			Path:            p.Path,
 			DisplayPath:     displayPathPtr(p.Path),
 			Name:            p.Name,
 			Builtin:         &builtin,
+			Hidden:          &hidden,
 			UnreadCount:     &count,
 			NeedsInputCount: &needs,
 			AgentCount:      &total,
@@ -392,6 +394,36 @@ func (s *Server) ReorderProjects(_ context.Context, request api.ReorderProjectsR
 	// Other connected clients refetch the list and pick up the new order.
 	s.Events.ProjectsChanged()
 	return api.ReorderProjects204Response{}, nil
+}
+
+// SetProjectHidden hides a project from the project lists, or shows it again.
+// Hiding is not removing: nothing on disk changes, the project's agents keep
+// running, and its pages stay reachable - it only drops out of the dropdown and
+// the Ctrl+` switcher (see projects.ProjectInfo.Hidden). The flag is stored in
+// the local project list, so it is per-machine like the list order.
+func (s *Server) SetProjectHidden(_ context.Context, request api.SetProjectHiddenRequestObject) (api.SetProjectHiddenResponseObject, error) {
+	if request.Body == nil {
+		return api.SetProjectHidden400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "hidden is required",
+		}, nil
+	}
+	found, err := s.ProjectsManager.SetHidden(request.ProjectId, request.Body.Hidden)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if !found {
+		return api.SetProjectHidden404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "project not found",
+		}, nil
+	}
+	// Nudge every connected client so the project drops out of (or returns to)
+	// their lists without a manual reload.
+	s.Events.ProjectsChanged()
+	return api.SetProjectHidden204Response{}, nil
 }
 
 // SetProjectIcon sets (or clears) a project's custom icon in its

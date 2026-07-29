@@ -1283,6 +1283,9 @@ type ProjectInfo struct {
 	// FinishedCount Number of this project's active agents currently in the `finished` status (done but not yet archived).
 	FinishedCount *int `json:"finished_count,omitempty"`
 
+	// Hidden True when the user has hidden this project. A hidden project is left out of the project dropdown and the Ctrl+` switcher unless it is the project currently selected, and is always listed while the dropdown is in "Edit list" mode (which is where it is hidden/shown again). Per-machine, like the list order - it is stored in the local project list, not in the project's committed config.
+	Hidden *bool `json:"hidden,omitempty"`
+
 	// Icon Optional custom project icon that replaces the default folder glyph. Interpreted by its content by the web UI: an emoji is rendered as-is; a lucide-react icon name (e.g. "Rocket") renders that icon; a value ending in an image extension (.png/.svg/.ico/.jpg/...) is an image - an http(s) or data: URI is used directly, any other value is a path served from the project by the backend. Empty = the default folder icon.
 	Icon *string `json:"icon,omitempty"`
 
@@ -1784,6 +1787,12 @@ type ServiceStatusState string
 // ServiceStatusResponse defines model for ServiceStatusResponse.
 type ServiceStatusResponse struct {
 	Services []ServiceStatus `json:"services"`
+}
+
+// SetProjectHiddenRequest defines model for SetProjectHiddenRequest.
+type SetProjectHiddenRequest struct {
+	// Hidden True hides the project from the project lists, false shows it again. See ProjectInfo.hidden for where a hidden project still appears.
+	Hidden bool `json:"hidden"`
 }
 
 // SetProjectIconRequest defines model for SetProjectIconRequest.
@@ -2356,6 +2365,9 @@ type ReplyToReviewThreadJSONRequestBody = ReviewReplyRequest
 
 // SaveConfigJSONRequestBody defines body for SaveConfig for application/json ContentType.
 type SaveConfigJSONRequestBody = ConfigResponse
+
+// SetProjectHiddenJSONRequestBody defines body for SetProjectHidden for application/json ContentType.
+type SetProjectHiddenJSONRequestBody = SetProjectHiddenRequest
 
 // SetProjectIconJSONRequestBody defines body for SetProjectIcon for application/json ContentType.
 type SetProjectIconJSONRequestBody = SetProjectIconRequest
@@ -3074,6 +3086,9 @@ type ServerInterface interface {
 	// Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
 	// (GET /api/projects/{project_id}/config-toml)
 	GetProjectConfigToml(w http.ResponseWriter, r *http.Request, projectId string)
+	// Hide a project from the project lists (or show it again)
+	// (PUT /api/projects/{project_id}/hidden)
+	SetProjectHidden(w http.ResponseWriter, r *http.Request, projectId string)
 	// Set (or clear) a project's custom icon
 	// (PUT /api/projects/{project_id}/icon)
 	SetProjectIcon(w http.ResponseWriter, r *http.Request, projectId string)
@@ -4927,6 +4942,31 @@ func (siw *ServerInterfaceWrapper) GetProjectConfigToml(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// SetProjectHidden operation middleware
+func (siw *ServerInterfaceWrapper) SetProjectHidden(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetProjectHidden(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SetProjectIcon operation middleware
 func (siw *ServerInterfaceWrapper) SetProjectIcon(w http.ResponseWriter, r *http.Request) {
 
@@ -5775,6 +5815,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config-toml", wrapper.GetProjectConfigToml)
+	m.HandleFunc("PUT "+options.BaseURL+"/api/projects/{project_id}/hidden", wrapper.SetProjectHidden)
 	m.HandleFunc("PUT "+options.BaseURL+"/api/projects/{project_id}/icon", wrapper.SetProjectIcon)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts", wrapper.GetRepositoryArtifacts)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts/{name}", wrapper.GetRepositoryArtifact)
@@ -7623,6 +7664,50 @@ func (response GetProjectConfigToml500JSONResponse) VisitGetProjectConfigTomlRes
 	return json.NewEncoder(w).Encode(response)
 }
 
+type SetProjectHiddenRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Body      *SetProjectHiddenJSONRequestBody
+}
+
+type SetProjectHiddenResponseObject interface {
+	VisitSetProjectHiddenResponse(w http.ResponseWriter) error
+}
+
+type SetProjectHidden204Response struct {
+}
+
+func (response SetProjectHidden204Response) VisitSetProjectHiddenResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type SetProjectHidden400JSONResponse ErrorResponse
+
+func (response SetProjectHidden400JSONResponse) VisitSetProjectHiddenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetProjectHidden404JSONResponse ErrorResponse
+
+func (response SetProjectHidden404JSONResponse) VisitSetProjectHiddenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetProjectHidden500JSONResponse ErrorResponse
+
+func (response SetProjectHidden500JSONResponse) VisitSetProjectHiddenResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type SetProjectIconRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Body      *SetProjectIconJSONRequestBody
@@ -8447,6 +8532,9 @@ type StrictServerInterface interface {
 	// Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
 	// (GET /api/projects/{project_id}/config-toml)
 	GetProjectConfigToml(ctx context.Context, request GetProjectConfigTomlRequestObject) (GetProjectConfigTomlResponseObject, error)
+	// Hide a project from the project lists (or show it again)
+	// (PUT /api/projects/{project_id}/hidden)
+	SetProjectHidden(ctx context.Context, request SetProjectHiddenRequestObject) (SetProjectHiddenResponseObject, error)
 	// Set (or clear) a project's custom icon
 	// (PUT /api/projects/{project_id}/icon)
 	SetProjectIcon(ctx context.Context, request SetProjectIconRequestObject) (SetProjectIconResponseObject, error)
@@ -9871,6 +9959,39 @@ func (sh *strictHandler) GetProjectConfigToml(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetProjectConfigTomlResponseObject); ok {
 		if err := validResponse.VisitGetProjectConfigTomlResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetProjectHidden operation middleware
+func (sh *strictHandler) SetProjectHidden(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request SetProjectHiddenRequestObject
+
+	request.ProjectId = projectId
+
+	var body SetProjectHiddenJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetProjectHidden(ctx, request.(SetProjectHiddenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetProjectHidden")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetProjectHiddenResponseObject); ok {
+		if err := validResponse.VisitSetProjectHiddenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

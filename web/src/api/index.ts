@@ -97,6 +97,7 @@ export type { SandboxConfig } from './models/SandboxConfig';
 export type { ServiceScript } from './models/ServiceScript';
 export { ServiceStatus } from './models/ServiceStatus';
 export type { ServiceStatusResponse } from './models/ServiceStatusResponse';
+export type { SetProjectHiddenRequest } from './models/SetProjectHiddenRequest';
 export type { SetProjectIconRequest } from './models/SetProjectIconRequest';
 export type { SpawnAgentRequest } from './models/SpawnAgentRequest';
 export type { StatusResponse } from './models/StatusResponse';

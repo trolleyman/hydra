@@ -58,12 +58,37 @@ type SimulationServer struct {
 	approvalKind string
 	approvalGen  int
 
+	// hiddenMu/hiddenProjects back SetProjectHidden: simulation serves a fixed
+	// project list, so a hide is kept here for the life of the process instead of
+	// being persisted. That is enough to drive the whole flow (hide in edit mode
+	// -> the row leaves the list -> show it again) against the real endpoint.
+	// Nothing is hidden at boot, so every other page and screenshot is unchanged.
+	hiddenMu       sync.Mutex
+	hiddenProjects map[string]bool
+
 	// askRunning is true while agent-ask's answered turn is streaming. The chat's
 	// live "working" indicator keys off the AGENT RECORD's status (the store's
 	// list), not the WS status frame, so a fixture pinned to needs_input can
 	// never show it - even mid-stream. Flipping this makes ListAgents/GetAgent
 	// report `running` for exactly as long as the turn is in flight.
 	askRunning atomic.Bool
+}
+
+// setSimHidden records a project as hidden (or shown again) for this process.
+func (s *SimulationServer) setSimHidden(id string, hidden bool) {
+	s.hiddenMu.Lock()
+	defer s.hiddenMu.Unlock()
+	if s.hiddenProjects == nil {
+		s.hiddenProjects = map[string]bool{}
+	}
+	s.hiddenProjects[id] = hidden
+}
+
+// simHidden reports whether a project has been hidden this session.
+func (s *SimulationServer) simHidden(id string) bool {
+	s.hiddenMu.Lock()
+	defer s.hiddenMu.Unlock()
+	return s.hiddenProjects[id]
 }
 
 // setSimApproval parks (or with "" clears) the picked approval kind.
@@ -207,6 +232,12 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 			FinishedCount:   &chatFinished,
 		},
 	}
+	// Reflect any hide made this session (see hiddenProjects). Each entry needs
+	// its own bool - the response holds pointers.
+	for i := range resp {
+		hidden := s.simHidden(resp[i].Id)
+		resp[i].Hidden = &hidden
+	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
@@ -215,6 +246,19 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 // 204 still lets the dropdown's drag-to-reorder be exercised end to end (the
 // client keeps its own optimistic order until the server disagrees).
 func (s *SimulationServer) ReorderProjects(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetProjectHidden records the hide in memory (see hiddenProjects) and answers
+// 204, so the dropdown's edit-list visibility toggle works end to end against
+// the simulation server.
+func (s *SimulationServer) SetProjectHidden(w http.ResponseWriter, r *http.Request, projectId string) {
+	var body api.SetProjectHiddenRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "hidden is required")
+		return
+	}
+	s.setSimHidden(projectId, body.Hidden)
 	w.WriteHeader(http.StatusNoContent)
 }
 
