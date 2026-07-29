@@ -17,16 +17,6 @@ import (
 // client patches the one row in place instead of refetching the agent list:
 // agent_tests_changed carries tests; agent_status_changed carries the live status
 // bundle (status + activity + last_message).
-type eventMsg struct {
-	Type    string           `json:"type"`
-	AgentID string           `json:"agent_id,omitempty"`
-	Tests   *api.TestSummary `json:"tests,omitempty"`
-	// agent_status_changed payload fields.
-	Status                 string `json:"status,omitempty"`
-	Activity               string `json:"activity,omitempty"`
-	LastMessage            string `json:"last_message,omitempty"`
-	LastMessageIsSuggested bool   `json:"last_message_is_suggested,omitempty"`
-}
 
 // agentTestsPayload is the events.Event.Payload of an agent_tests_changed
 // event, published by NotifyTestsProgress and framed here.
@@ -78,18 +68,21 @@ func (s *Server) HandleEventsWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// One frame per change signal. Most name a resource and carry nothing; the
+	// two that carry a payload get their own generated shape.
 	writeEvent := func(ev events.Event) error {
-		msg := eventMsg{Type: string(ev.Type)}
+		var msg any = api.ResourceChangedEvent{Type: api.ResourceChangedEventType(ev.Type)}
 		switch p := ev.Payload.(type) {
 		case agentTestsPayload:
-			msg.AgentID = p.AgentID
-			msg.Tests = p.Tests
+			msg = api.AgentTestsChangedEvent{
+				Type: api.AgentTestsChanged, AgentId: p.AgentID, Tests: p.Tests,
+			}
 		case heads.AgentStatusPayload:
-			msg.AgentID = p.AgentID
-			msg.Status = p.Status
-			msg.Activity = p.Activity
-			msg.LastMessage = p.LastMessage
-			msg.LastMessageIsSuggested = p.LastMessageIsSuggested
+			msg = api.AgentStatusChangedEvent{
+				Type: api.AgentStatusChanged, AgentId: p.AgentID, Status: p.Status,
+				Activity: p.Activity, LastMessage: p.LastMessage,
+				LastMessageIsSuggested: p.LastMessageIsSuggested,
+			}
 		}
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		return errtrace.Wrap(conn.WriteJSON(msg))

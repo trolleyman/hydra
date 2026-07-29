@@ -2,11 +2,14 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { TerminalEvent } from './TerminalEvent';
-export type TerminalDataEvent = (TerminalEvent & {
+/**
+ * A chunk of PTY output, when it is relayed as text rather than binary.
+ */
+export type TerminalDataEvent = {
+    type: 'data';
     /**
      * Base64 encoded binary data or plain string
      */
-    data?: string;
-});
+    data: string;
+};
 

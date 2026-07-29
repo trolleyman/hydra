@@ -18,7 +18,7 @@ func TestStoreAppendProjectAndPage(t *testing.T) {
 	}
 	s.now = func() time.Time { return time.Unix(123, 0) }
 	appendEvent := func(kind string, payload any) Event {
-		ev, err := s.Append(kind, payload)
+		ev, err := s.Append(rawPayload{kind, payload})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -31,7 +31,7 @@ func TestStoreAppendProjectAndPage(t *testing.T) {
 	appendEvent("commit_created", map[string]any{"head": "abc", "sha": "abc"})
 
 	p := s.Snapshot()
-	if p.Through != 5 || p.Head != "abc" || p.Subagents["sub"].Status != "running" || p.Queue["m2"].ID != "m2" {
+	if p.Through != 5 || p.Head != "abc" || p.Subagents["sub"].Status != "running" || p.Queue["m2"].Id != "m2" {
 		t.Fatalf("unexpected projection: %+v", p)
 	}
 	var plan []map[string]any
@@ -63,7 +63,7 @@ func TestSubagentEventsReturnsOnlyThatSubsSteps(t *testing.T) {
 	}
 	s.now = func() time.Time { return time.Unix(123, 0) }
 	mustAppend := func(kind string, payload any) {
-		if _, err := s.Append(kind, payload); err != nil {
+		if _, err := s.Append(rawPayload{kind, payload}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -104,7 +104,7 @@ func TestPendingStreamAndHistorySkipDeltas(t *testing.T) {
 	}
 	s.now = func() time.Time { return time.Unix(123, 0) }
 	mustAppend := func(kind string, payload any) {
-		if _, err := s.Append(kind, payload); err != nil {
+		if _, err := s.Append(rawPayload{kind, payload}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -136,7 +136,7 @@ func TestPendingStreamAndHistorySkipDeltas(t *testing.T) {
 	}
 
 	// Once the block settles, nothing is pending.
-	if _, err := s.Append("assistant_message", map[string]any{"text": "Hello there"}); err != nil {
+	if _, err := s.Append(rawPayload{"assistant_message", map[string]any{"text": "Hello there"}}); err != nil {
 		t.Fatal(err)
 	}
 	snap, _, cancel = s.Watch()
@@ -163,7 +163,7 @@ func TestStoreRecoversFromCheckpointLagAndPartialTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Append("model_changed", map[string]string{"model": "first"}); err != nil {
+	if _, err := s.Append(rawPayload{"model_changed", map[string]string{"model": "first"}}); err != nil {
 		t.Fatal(err)
 	}
 	checkpoint := paths.GetChatStateJSONFromProjectRoot(root, "head")
@@ -171,7 +171,7 @@ func TestStoreRecoversFromCheckpointLagAndPartialTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Append("model_changed", map[string]string{"model": "second"}); err != nil {
+	if _, err := s.Append(rawPayload{"model_changed", map[string]string{"model": "second"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(checkpoint, stale, 0o644); err != nil {
@@ -194,7 +194,7 @@ func TestStoreRecoversFromCheckpointLagAndPartialTail(t *testing.T) {
 	if got := reopened.Snapshot(); got.Through != 2 || got.Model != "second" {
 		t.Fatalf("recovered projection = %+v", got)
 	}
-	if _, err := reopened.Append("model_changed", map[string]string{"model": "third"}); err != nil {
+	if _, err := reopened.Append(rawPayload{"model_changed", map[string]string{"model": "third"}}); err != nil {
 		t.Fatal(err)
 	}
 	page, _, _, err := reopened.Before("", 10)
@@ -240,11 +240,11 @@ func TestAppendSourceDeduplicatesProviderReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, appended, err := s.AppendSource("claude:u1:block:0", "assistant_message", map[string]string{"text": "hi"})
+	first, appended, err := s.AppendSource("claude:u1:block:0", rawPayload{"assistant_message", map[string]string{"text": "hi"}})
 	if err != nil || !appended {
 		t.Fatalf("first append: appended=%v err=%v", appended, err)
 	}
-	again, appended, err := s.AppendSource("claude:u1:block:0", "assistant_message", map[string]string{"text": "duplicate"})
+	again, appended, err := s.AppendSource("claude:u1:block:0", rawPayload{"assistant_message", map[string]string{"text": "duplicate"}})
 	if err != nil || appended || again.Seq != first.Seq {
 		t.Fatalf("duplicate append: event=%+v appended=%v err=%v", again, appended, err)
 	}
@@ -252,7 +252,7 @@ func TestAppendSourceDeduplicatesProviderReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, appended, err = reopened.AppendSource("claude:u1:block:0", "assistant_message", map[string]string{"text": "after restart"})
+	_, appended, err = reopened.AppendSource("claude:u1:block:0", rawPayload{"assistant_message", map[string]string{"text": "after restart"}})
 	if err != nil || appended {
 		t.Fatalf("restart duplicate: appended=%v err=%v", appended, err)
 	}

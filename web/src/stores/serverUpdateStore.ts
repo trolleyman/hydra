@@ -1,15 +1,12 @@
 import { create } from 'zustand'
 import { closeWebSocket } from '../lib/ws'
+import { ServerUpdatePhase, type ServerUpdateFrame } from '../api'
 
-// One frame from /ws/server/update. Mirrors selfupdate.Event on the server.
-export interface ServerUpdateEvent {
-  kind: 'phase' | 'log' | 'done'
-  phase?: string
-  line?: string
-  error?: string
-}
-
-export type UpdatePhase = 'building' | 'verifying' | 'swapping' | 'restarting'
+// The frames and phases come from api/openapi.yaml, generated for both the
+// daemon and here, so a phase the server reaches and one this store labels
+// cannot drift. ServerUpdateFrame is a discriminated union: narrowing on `kind`
+// narrows to the field that kind carries.
+export type UpdatePhase = ServerUpdatePhase
 
 // How the run ended, once it has. 'restarting' is the *expected* end of a
 // successful update: the server re-execs, so the socket dies mid-stream and no
@@ -40,7 +37,7 @@ interface ServerUpdateState {
   expanded: boolean
 
   begin: (opts: { restartOnly: boolean }) => void
-  apply: (ev: ServerUpdateEvent) => void
+  apply: (ev: ServerUpdateFrame) => void
   socketClosed: () => void
   setExpanded: (expanded: boolean) => void
   reset: () => void
@@ -59,11 +56,11 @@ export const useServerUpdateStore = create<ServerUpdateState>((set, get) => ({
     set({ running: true, phase: null, lines: [], error: null, outcome: null, restartOnly }),
 
   apply: (ev) => {
-    if (ev.kind === 'phase' && ev.phase) {
-      set({ phase: ev.phase as UpdatePhase })
+    if (ev.kind === 'phase') {
+      set({ phase: ev.phase })
       return
     }
-    if (ev.kind === 'log' && ev.line != null) {
+    if (ev.kind === 'log') {
       const lines = [...get().lines, ev.line]
       set({ lines: lines.length > MAX_LINES ? lines.slice(-MAX_LINES) : lines })
       return
@@ -86,7 +83,7 @@ export const useServerUpdateStore = create<ServerUpdateState>((set, get) => ({
   socketClosed: () => {
     const { running, phase } = get()
     if (!running) return
-    if (phase === 'restarting' || phase === 'swapping') {
+    if (phase === ServerUpdatePhase.ServerUpdatePhaseRestarting || phase === ServerUpdatePhase.ServerUpdatePhaseSwapping) {
       set({ running: false, outcome: 'restarting' })
     } else {
       set({
@@ -112,7 +109,7 @@ export function connectUpdateStream(): () => void {
 
   ws.onmessage = (e) => {
     try {
-      useServerUpdateStore.getState().apply(JSON.parse(e.data as string) as ServerUpdateEvent)
+      useServerUpdateStore.getState().apply(JSON.parse(e.data as string) as ServerUpdateFrame)
     } catch {
       // A frame we can't parse is not worth tearing the stream down for.
     }

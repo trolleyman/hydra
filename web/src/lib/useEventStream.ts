@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import type { TestSummary } from '../api/models/TestSummary'
+import type { ProjectEventFrame, TestSummary } from '../api'
 import { closeWebSocket } from './ws'
 
 // AgentStatusPatch is the inline payload of an agent_status_changed event: one
@@ -11,17 +11,10 @@ export interface AgentStatusPatch {
   last_message_is_suggested: boolean
 }
 
-// EventFrame is the raw JSON frame the events WebSocket delivers. Only `type` is
-// always present; the rest are payload fields for the inline-patch events.
-interface EventFrame {
-  type: string
-  agent_id?: string
-  tests?: TestSummary
-  status?: string
-  activity?: string
-  last_message?: string
-  last_message_is_suggested?: boolean
-}
+// The frames are declared in api/openapi.yaml and generated for both the daemon
+// and here, so a signal the server sends and one this dispatch narrows on
+// cannot drift. Most name a resource and carry nothing; the two that carry a
+// payload narrow to it.
 
 export interface EventStreamHandlers {
   onAgentsChanged?: () => void
@@ -67,14 +60,14 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let stopped = false // unmounted or projectId changed
 
-    const dispatch = (msg: EventFrame) => {
+    const dispatch = (msg: ProjectEventFrame) => {
       const h = handlersRef.current
       if (msg.type === 'agents_changed') h.onAgentsChanged?.()
       else if (msg.type === 'projects_changed') h.onProjectsChanged?.()
       else if (msg.type === 'services_changed') h.onServicesChanged?.()
       else if (msg.type === 'push_status_changed') h.onPushStatusChanged?.()
-      else if (msg.type === 'agent_tests_changed' && msg.agent_id && msg.tests) h.onAgentTestsChanged?.(msg.agent_id, msg.tests)
-      else if (msg.type === 'agent_status_changed' && msg.agent_id) h.onAgentStatusChanged?.(msg.agent_id, {
+      else if (msg.type === 'agent_tests_changed' && msg.tests) h.onAgentTestsChanged?.(msg.agent_id, msg.tests)
+      else if (msg.type === 'agent_status_changed') h.onAgentStatusChanged?.(msg.agent_id, {
         status: msg.status ?? '',
         activity: msg.activity ?? '',
         last_message: msg.last_message ?? '',
@@ -108,8 +101,8 @@ export function useEventStream(projectId: string | null, handlers: EventStreamHa
       }
       sock.onmessage = (ev) => {
         try {
-          const msg = JSON.parse(ev.data as string) as Partial<EventFrame>
-          if (msg && typeof msg.type === 'string') dispatch(msg as EventFrame)
+          const msg = JSON.parse(ev.data as string) as ProjectEventFrame
+          if (msg && typeof msg.type === 'string') dispatch(msg)
         } catch {
           // ignore malformed frames
         }

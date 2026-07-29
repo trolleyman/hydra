@@ -25,34 +25,6 @@ import (
 //   - "progress": the live progress header changed for a runner.
 //   - "counts":   a streamed (type=stdout) run's running totals plus the cases
 //     appended since the last counts message (coalesced server-side).
-type testsWSMessage struct {
-	Type     string               `json:"type"`
-	Runners  []api.TestRunResult  `json:"runners,omitempty"`
-	Runner   *api.TestRunResult   `json:"runner,omitempty"`
-	Name     string               `json:"name,omitempty"`
-	Line     *api.ArtifactLogLine `json:"line,omitempty"`
-	Progress *string              `json:"progress,omitempty"`
-	Counts   *testsWSCounts       `json:"counts,omitempty"`
-}
-
-// testsWSCounts is the "counts" payload: authoritative running totals (not
-// deltas) and the newly-appended cases the client merges into its case list.
-type testsWSCounts struct {
-	Passed         int            `json:"passed"`
-	Failed         int            `json:"failed"`
-	Skipped        int            `json:"skipped"`
-	Warnings       int            `json:"warnings"`
-	Total          int            `json:"total"`                     // denominator, 0 = unknown
-	TotalEstimated bool           `json:"total_estimated,omitempty"` // Total is an estimate from a prior run (no ::hydra:test:total::)
-	Cases          []api.TestCase `json:"cases,omitempty"`
-}
-
-// testsClientMessage is a client→server message. Only "refresh" (re-run one
-// runner, like the HTTP refresh param) is supported.
-type testsClientMessage struct {
-	Type string `json:"type"`
-	Name string `json:"name"`
-}
 
 // HandleTestsWS streams test-runner verdict updates over a WebSocket so the diff
 // viewer's tests panel reflects progress, the live log and the settled verdict
@@ -102,7 +74,7 @@ func (s *Server) HandleTestsWS(w http.ResponseWriter, r *http.Request) {
 // progress, settles) until the connection closes. A client refresh message
 // re-runs one runner.
 func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, projectID string, head *heads.Head, headRef *string, includeUncommitted bool) {
-	writeMsg := func(m testsWSMessage) error {
+	writeMsg := func(m any) error {
 		data, err := json.Marshal(m)
 		if err != nil {
 			return errtrace.Wrap(err)
@@ -113,7 +85,7 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 	if s.Tests == nil || head.Branch == nil {
 		// Nothing to run (feature off / no branch). Send an empty snapshot and keep
 		// the socket open until the client closes it.
-		_ = writeMsg(testsWSMessage{Type: "snapshot", Runners: []api.TestRunResult{}})
+		_ = writeMsg(api.TestsSnapshotFrame{Type: api.TestsSnapshotFrameTypeSnapshot, Runners: []api.TestRunResult{}})
 		drainUntilClose(conn)
 		return
 	}
@@ -127,7 +99,7 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 	}
 	if len(runners) == 0 {
 		// No runners for this version - empty snapshot, socket stays open.
-		_ = writeMsg(testsWSMessage{Type: "snapshot", Runners: []api.TestRunResult{}})
+		_ = writeMsg(api.TestsSnapshotFrame{Type: api.TestsSnapshotFrameTypeSnapshot, Runners: []api.TestRunResult{}})
 		drainUntilClose(conn)
 		return
 	}
@@ -148,7 +120,7 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 
 	// Initial snapshot. buildTestRunners triggers any needed runs, after which the
 	// subscription delivers their progress/log/settle.
-	if err := writeMsg(testsWSMessage{Type: "snapshot", Runners: s.buildTestRunners(projectID, mgr, runners, v)}); err != nil {
+	if err := writeMsg(api.TestsSnapshotFrame{Type: api.TestsSnapshotFrameTypeSnapshot, Runners: s.buildTestRunners(projectID, mgr, runners, v)}); err != nil {
 		return
 	}
 
@@ -171,7 +143,7 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 			if msgType != websocket.TextMessage {
 				continue
 			}
-			var msg testsClientMessage
+			var msg api.TestsClientMessage
 			if err := json.Unmarshal(data, &msg); err != nil || msg.Type != "refresh" || msg.Name == "" {
 				continue
 			}
@@ -182,7 +154,7 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 			for _, rspec := range runners {
 				if rspec.Name == msg.Name {
 					rep, _ := mgr.Get(rspec, v)
-					_ = writeMsg(testsWSMessage{Type: "runner", Runner: ptr(buildTestRunResult(projectID, mgr, rep))})
+					_ = writeMsg(api.TestsRunnerFrame{Type: api.Runner, Runner: buildTestRunResult(projectID, mgr, rep)})
 					break
 				}
 			}
@@ -211,31 +183,31 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 			switch ev.Kind {
 			case "log":
 				line := api.ArtifactLogLine{Text: ev.Line.Text, Stream: api.ArtifactLogLineStream(ev.Line.Stream)}
-				if err := writeMsg(testsWSMessage{Type: "log", Name: rspec.Name, Line: &line}); err != nil {
+				if err := writeMsg(api.TestsLogFrame{Type: api.Log, Name: rspec.Name, Line: line}); err != nil {
 					return
 				}
 			case "progress":
 				p := ev.Progress
-				if err := writeMsg(testsWSMessage{Type: "progress", Name: rspec.Name, Progress: &p}); err != nil {
+				if err := writeMsg(api.TestsProgressFrame{Type: api.TestsProgressFrameTypeProgress, Name: rspec.Name, Progress: p}); err != nil {
 					return
 				}
 			case "counts":
 				if ev.Counts == nil {
 					continue
 				}
-				counts := &testsWSCounts{
+				counts := &api.TestsCounts{
 					Passed: ev.Counts.Passed, Failed: ev.Counts.Failed,
 					Skipped: ev.Counts.Skipped, Warnings: ev.Counts.Warnings,
 					Total:          ev.Counts.Total,
 					TotalEstimated: ev.Counts.TotalEstimated,
 					Cases:          toAPITestCases(ev.Counts.Cases),
 				}
-				if err := writeMsg(testsWSMessage{Type: "counts", Name: rspec.Name, Counts: counts}); err != nil {
+				if err := writeMsg(api.TestsCountsFrame{Type: api.Counts, Name: rspec.Name, Counts: *counts}); err != nil {
 					return
 				}
 			case "settled":
 				rep, _ := mgr.Get(rspec, v)
-				if err := writeMsg(testsWSMessage{Type: "runner", Runner: ptr(buildTestRunResult(projectID, mgr, rep))}); err != nil {
+				if err := writeMsg(api.TestsRunnerFrame{Type: api.Runner, Runner: buildTestRunResult(projectID, mgr, rep)}); err != nil {
 					return
 				}
 			}

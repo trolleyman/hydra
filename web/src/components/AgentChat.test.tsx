@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, normalizedToProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
+import { ChatPane, compareCommitChips, toProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
@@ -200,7 +200,7 @@ describe('a streamed reply settles into the same DOM node', () => {
   })
 
   const TEXT = 'The loader merges the per-environment file over the base.'
-  // One normalized chat event, flushed so the assertions see the render it
+  // One chat event, flushed so the assertions see the render it
   // caused. Seq is the client's dedup key, so every frame needs its own.
   let seq = 0
   const emit = (ws: RecordingWebSocket, type: string, payload: unknown) =>
@@ -570,8 +570,8 @@ describe('toolRawJson', () => {
   const codexPair = (payloadIn: Record<string, unknown>, payloadOut: Record<string, unknown>) =>
     reduceHistoryEvents(
       [
-        ...normalizedToProviderEvents({ seq: 1, type: 'tool_started', timestamp: '', payload: payloadIn }),
-        ...normalizedToProviderEvents({ seq: 2, type: 'tool_completed', timestamp: '', payload: payloadOut }),
+        ...toProviderEvents({ seq: 1, type: 'tool_started', timestamp: '', payload: payloadIn }),
+        ...toProviderEvents({ seq: 2, type: 'tool_completed', timestamp: '', payload: payloadOut }),
       ],
       alloc(),
     ).find((it) => it.kind === 'tool')!
@@ -601,7 +601,7 @@ describe('toolRawJson', () => {
   // The backend relays the entry the CLI recorded (minus its content, which the
   // payload carries) - so Raw shows what was written around the block, `cwd` and
   // all, without anyone having listed which fields to lift out.
-  it('shows the recorded entry around a normalized block', () => {
+  it('shows the recorded entry around a rebuilt block', () => {
     const item = codexPair(
       { id: 't2', name: 'Bash', input: { command: 'bun test' }, entry: { type: 'assistant', uuid: 'u1', cwd: '/repo/wt/web', message: { id: 'm1' } } },
       { id: 't2', content: 'ok', entry: { type: 'user', uuid: 'u2', cwd: '/repo/wt/web' } },

@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
-import { TerminalEvent, type TerminalStatusEvent, type TerminalDataEvent, type TerminalDiffRefreshEvent, type TerminalSizeEvent, AgentStatus } from '../api'
+import { type TerminalEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff, Eye } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { ResizeGrip } from './ResizeGrip'
@@ -419,36 +419,29 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         if (replaySizingRef.current) finishReplaySizing()
       } else if (typeof e.data === 'string') {
         try {
+          // TerminalEvent is a discriminated union (api/openapi.yaml), so each
+          // case below narrows to that member - no casts.
           const msg = JSON.parse(e.data) as TerminalEvent
           switch (msg.type) {
-            case TerminalEvent.type.STATUS: {
-              const statusEvent = msg as TerminalStatusEvent
-              if (statusEvent.status) {
-                const newStatus = statusEvent.status.toLowerCase()
-                onStatusUpdateRef.current?.(newStatus)
-              }
+            case 'status': {
+              onStatusUpdateRef.current?.(msg.status.toLowerCase())
               return
             }
-            case TerminalEvent.type.DIFF_REFRESH: {
-              const refreshEvent = msg as TerminalDiffRefreshEvent
-              onDiffRefreshRef.current?.(refreshEvent.head_moved ?? false)
+            case 'diff_refresh': {
+              onDiffRefreshRef.current?.(msg.head_moved)
               return
             }
-            case TerminalEvent.type.DATA: {
-              const dataEvent = msg as TerminalDataEvent
-              if (dataEvent.data) {
-                term.write(dataEvent.data)
-              }
+            case 'data': {
+              if (msg.data) term.write(msg.data)
               return
             }
-            case TerminalEvent.type.SIZE: {
+            case 'size': {
               // The backend reports the PTY's current width right before replaying
               // its scrollback. Size the xterm to match so the replay's cursor
               // moves land correctly, and suppress fits until the replay is in.
-              const sizeEvent = msg as TerminalSizeEvent
-              if (sizeEvent.cols && sizeEvent.rows) {
+              if (msg.cols && msg.rows) {
                 replaySizingRef.current = true
-                term.resize(sizeEvent.cols, sizeEvent.rows)
+                term.resize(msg.cols, msg.rows)
                 // Fallback: if no replay chunk follows (empty scrollback), don't
                 // stay pinned to the PTY size - refit to our layout shortly.
                 if (replayFallbackRef.current) clearTimeout(replayFallbackRef.current)

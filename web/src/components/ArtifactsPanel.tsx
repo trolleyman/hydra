@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import { apiErrorBody, formatError } from '../api/format_error'
 import { PanelError } from './PanelError'
-import type { ArtifactSet, ArtifactFile, ArtifactLogLine } from '../api'
-import { ArtifactFile as ArtifactFileNS } from '../api'
+import type { ArtifactSet, ArtifactFile, ArtifactLogLine, ArtifactsFrame } from '../api'
+import { ArtifactFile as ArtifactFileNS, ArtifactSide } from '../api'
 import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot, Download, FileArchive, FileText } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { Tooltip } from './Tooltip'
@@ -1113,8 +1113,8 @@ const ArtifactSetCard = memo(function ArtifactSetCard({ set, mode, scale, spans,
                   {/* The main button already regenerates both sides; the menu is
                       just the per-side shortcuts. */}
                   {([
-                    { side: 'left' as ArtifactSide, label: 'Regenerate before' },
-                    { side: 'right' as ArtifactSide, label: 'Regenerate after' },
+                    { side: ArtifactSide.ArtifactSideLeft, label: 'Regenerate before' },
+                    { side: ArtifactSide.ArtifactSideRight, label: 'Regenerate after' },
                   ]).map(({ side, label }) => (
                     <button
                       key={label}
@@ -1227,20 +1227,10 @@ function useStableArray<T>(arr: T[]): T[] {
   return same ? prev : arr
 }
 
-type ArtifactSide = 'left' | 'right'
-
-// Server→client message on the artifacts WebSocket. Mirrors internal/http/artifacts_ws.go.
-// log/progress carry a `side` so the two builds (before/after) stay in separate
-// panes instead of interleaving into one stream.
-type ArtifactWSMessage =
-  | { type: 'snapshot'; scripts: ArtifactSet[] }
-  | { type: 'set'; set: ArtifactSet }
-  | { type: 'log'; script: string; side: ArtifactSide; line: ArtifactLogLine }
-  | { type: 'progress'; script: string; side: ArtifactSide; progress: string }
-  // A single output file finished + was compared mid-run (a ::hydra:artifact::
-  // marker fired), so its tile can render before the whole set settles. Upserted
-  // into the set by name; the authoritative "set" at settle reconciles the list.
-  | { type: 'file'; script: string; file: ArtifactFile }
+// The socket's frames are declared in api/openapi.yaml and generated for both
+// the daemon and here, so a frame the server sends and one this panel narrows
+// on cannot drift. log/progress carry a `side` so the two builds (before/after)
+// stay in separate panes instead of interleaving into one stream.
 
 // upsertArtifactFile merges one streamed file into a set's file list: it replaces
 // an existing entry of the same name (a re-emit is idempotent) or inserts it in
@@ -1408,7 +1398,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
   })
 
   // Apply a server→client WS message to local state.
-  const applyMessage = useCallback((msg: ArtifactWSMessage) => {
+  const applyMessage = useCallback((msg: ArtifactsFrame) => {
     // setError(null) bails out (no re-render) when already null, so this stays
     // cheap even on a burst of log frames.
     setError(null)
@@ -1475,7 +1465,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
     ws.onopen = () => { if (!cancelled) setMode('ws') }
     ws.onmessage = (e) => {
       if (cancelled) return
-      try { applyMessage(JSON.parse(e.data) as ArtifactWSMessage) } catch { /* ignore malformed frames */ }
+      try { applyMessage(JSON.parse(e.data) as ArtifactsFrame) } catch { /* ignore malformed frames */ }
     }
     ws.onclose = () => {
       wsRef.current = null
