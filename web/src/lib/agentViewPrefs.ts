@@ -13,6 +13,7 @@
 // agent at once. Entries untouched for AGENT_VIEW_TTL_MS are pruned on boot.
 
 import { agentViewPrefsKey, AGENT_VIEW_PREFS_PREFIX, createShardedStore } from './storage'
+import type { StoredAttachment } from './draftAttachments'
 
 // A persisted bash shell tab. `id` doubles as the backend shell_id, so on
 // restore the pane reconnects to the same session if it's still alive.
@@ -45,8 +46,11 @@ export type AgentViewPrefs = {
   // Chat composer minimum height, in whole rows (the drag bar's setting).
   chatComposerRows?: number
   // Unsent chat composer text, so a draft survives switching agents and reloads
-  // (item 30). Attachments travel alongside in an in-memory cache (chatDrafts).
+  // (item 30), and the settled uploads attached to it - stored as their paths,
+  // which is the part of an attachment that outlives the page (see chatDrafts /
+  // draftAttachments). Both halves of one draft, so they expire together.
   chatDraft?: string
+  chatAttachments?: StoredAttachment[]
   // Split layout: whether the working pane's prompt disclosure is collapsed.
   promptCollapsed?: boolean
   // Per-file "viewed" review state: path → the head blob sha the file had when it
@@ -79,6 +83,7 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     chatScrollTop: stored.chatScrollTop,
     chatComposerRows: stored.chatComposerRows,
     chatDraft: stored.chatDraft,
+    chatAttachments: stored.chatAttachments,
     promptCollapsed: stored.promptCollapsed,
     viewedFiles: stored.viewedFiles,
   }
