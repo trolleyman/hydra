@@ -22,6 +22,34 @@ A client initializes the connection, starts or resumes a thread, starts turns,
 and consumes notifications such as `turn/started`, `item/started`,
 `item/agentMessage/delta`, `item/completed`, and `turn/completed`.
 
+## Status: the provider-neutral transport is BUILT, and it is the only one
+
+The migration this document plans is done, and the legacy half is gone. A chat
+socket now speaks **only** normalized events (`internal/chat`): `state_snapshot`,
+`chat_history`, `chat_event`, plus `load_events_before` / `load_subagent` in the
+other direction. The `claude_event` frame and everything that fed it - the raw
+stdout relay, the `~/.claude/projects/...` transcript backfill, `subagent_meta`,
+`notification_backfill`, `history_before` and the `plan` frame - were deleted
+from `chat_ws.go` and `AgentChat.tsx`, and the simulation's canned conversations
+were rewritten as normalized events (`internal/http/simulation_chat.go`).
+
+Two things made that safe rather than a leap:
+
+- chat mode is only permitted for the providers `internal/chat` normalizes
+  (`sandbox.AgentArgv` rejects the rest), so no head could reach the legacy path;
+- the daemon ingests a head's stdout centrally (`Registry.SetOnChatLine` ->
+  `Manager.ObserveProviderLine`) whether or not a browser is attached, and
+  `Manager.Flush` imports the Claude transcript, its sub-agent sidecars and the
+  thinking-duration sidecar, so an old head still backfills without the relay.
+
+The chat socket therefore has no fallback left: if `Flush`/`Watch` fails it logs
+at ERROR and sends a `chat_error` frame the pane renders as a banner, rather than
+showing an empty transcript indistinguishable from a head that never spoke.
+
+The sections below are the original design, kept for the reasoning behind the
+event vocabulary and the driver lifecycle. Read them as history, not as a
+description of what to build next.
+
 ## Why the Claude path cannot just be enabled for Codex
 
 `chat_mode` currently means "Claude stream-json" throughout the stack, despite
@@ -35,7 +63,7 @@ the database field and session kind having generic names:
   It detects Claude `result`, assistant, plan, model, thinking, and API-error
   records; none are Codex notification shapes.
 - `chat_ws.go` backfills `~/.claude/projects/...` transcripts and wraps every
-  line as `claude_event`.
+  line as `claude_event`. (Both are gone - see Status above.)
 - `AgentChat.tsx` reduces Anthropic message/content blocks and Claude-specific
   control requests, usage, sub-agent, compaction, and task-notification shapes.
 - switching modes assumes Claude's transcript lookup and `--resume <session>`.
@@ -71,7 +99,8 @@ component a second raw protocol. A small initial vocabulary is enough:
 Keep a `raw` field (or log the original notification) while the mapping settles,
 but do not make provider JSON part of the browser API. Claude can initially keep
 its existing `claude_event` path; migration to normalized events can happen
-after Codex works, avoiding a risky big-bang rewrite.
+after Codex works, avoiding a risky big-bang rewrite. (That staging is spent:
+Codex works, and Claude's `claude_event` path has since been removed.)
 
 ### Codex driver lifecycle
 
@@ -431,7 +460,8 @@ and process exit mid-turn.
 - Generalize queue turn-boundary callbacks from Claude `result` to normalized
   `turn_completed`/`turn_failed`.
 - Name new outbound frames `chat_event`; continue accepting `claude_event`
-  during the frontend migration.
+  during the frontend migration. (The migration is over - `claude_event` is
+  gone.)
 - Make history paging display-only: older pages must not update current plan or
   sub-agent state in the frontend.
 - Replace provider-UUID history paging with an opaque normalized-event cursor;
@@ -447,7 +477,10 @@ and process exit mid-turn.
 ### 4. UI and API enablement
 
 - Add a normalized-event reducer alongside the current Claude reducer, then
-  share the existing message/tool/plan card renderers.
+  share the existing message/tool/plan card renderers. (Shipped as
+  `normalizedToProviderEvents`, which converts each normalized event into the
+  presentation shapes the existing reducer already renders. That reducer stays;
+  only the transport into it changed.)
 - Hide provider-only controls: Claude's slash commands and `set_model` control
   request do not directly map to Codex. Model selection can be a per-turn
   app-server override once its UX is defined.
@@ -461,8 +494,10 @@ and process exit mid-turn.
 - Backend tests for fresh spawn, initial prompt, resume by exact thread id,
   queued follow-up, interrupt, daemon reconnect, and terminal/chat switching.
 - Reducer tests for every normalized event and unknown-event fallback.
-- Simulation fixtures include `/agent/agent-chat` for Claude's legacy provider
-  frames and `/agent/agent-chat-codex` for the normalized Codex contract. The
+- Simulation fixtures include `/agent/agent-chat` and `/agent/agent-chat-codex`,
+  both now on the normalized contract (see `internal/http/simulation_chat.go`;
+  the Claude fixtures were hand-rewritten rather than piped through the real
+  normalizer, so each one still names the regression it guards). The
   Codex fixture covers shell-wrapper display, multi-file edits, a real child
   report, status-only spawn completion, and close-agent controls so replay and
   live rendering can be checked against the same deterministic input.

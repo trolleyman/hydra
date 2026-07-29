@@ -93,12 +93,12 @@ import type { ToolResultLink } from '../lib/toolResultLink'
 import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
 
-// ChatPane renders a chat-mode head: it speaks the chat framing
-// on the same terminal WebSocket - {"type":"claude_event"} frames carrying
-// verbatim Claude stream-json events out, {"type":"user_message"|"interrupt"|
-// "set_model"} frames in - and reduces the event stream into a message list.
-// On (re)connect the backend replays the whole conversation from the session's
-// scrollback ring (--replay-user-messages includes user turns), so the reducer
+// ChatPane renders a chat-mode head: it speaks the chat framing on the same
+// terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
+// frames carrying Hydra's provider-neutral normalized events out (see
+// internal/chat), {"type":"user_message"|"interrupt"|"set_model"} frames in -
+// and reduces that stream into a message list. On (re)connect the backend sends
+// the current state plus the newest window of durable history, so the reducer
 // always starts from scratch. Unlike the terminal panel it FOLLOWS the app
 // theme, with Claude-app-inspired light (cream) and dark (warm gray) surfaces.
 
@@ -6575,10 +6575,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }
       return sub
     }
-    // A subagent_meta frame links a sub-agent to its Task tool_use (so the Task
-    // card upgrades into the SubagentCard in place) and labels it. A frame
-    // without a tool_use id (a sub whose sidecar lacked one) has no card to fold
-    // into, so it gets a standalone 'subagent' item instead.
+    // A sub-agent's lifecycle event links it to its Task tool_use (so the Task
+    // card upgrades into the SubagentCard in place) and labels it. One without a
+    // tool_use id (a sub whose sidecar lacked one) has no card to fold into, so
+    // it gets a standalone 'subagent' item instead.
     // toolUseId -> real sub key, learned from meta frames, so a live line that
     // carries only parent_tool_use_id lands in the linked sub (not a placeholder).
     const toolUseToSub = new Map<string, string>()
@@ -6768,9 +6768,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           }
         }
       }
-      // A PRE-WINDOW notification relayed for bookkeeping only
-      // (notification_backfill): apply the completion, render nothing - the
-      // chip belongs to a part of the conversation that isn't loaded.
+      // A PRE-WINDOW notification, applied for bookkeeping only: settle the
+      // completion, render nothing - the chip belongs to a part of the
+      // conversation that isn't loaded.
       if (quiet) return
       // The canonical subagent_completed event already rendered this task's
       // completion chip (and the settle above ran); the resume echo of the same
