@@ -91,24 +91,47 @@ describe('autoPairEdit: stepping over a closer', () => {
 })
 
 describe('autoPairEdit: fences', () => {
-  // ` -> `|`, ` -> steps over -> ``|, ` -> the fence. The caret stays on the
-  // opening fence so the language can be typed straight after it.
-  it('opens a fenced block on the third backtick, caret on the fence', () => {
-    expect(type('`', '``|')).toBe('```|\n\n```')
-    expect(type('`', 'text\n``|')).toBe('text\n```|\n\n```')
-  })
-
-  it('keeps the line indent on the fence it writes', () => {
-    expect(type('`', '  ``|')).toBe('  ```|\n  \n  ```')
-  })
-
-  it('only fences at the end of a line', () => {
-    expect(type('`', '``| trailing')).toBeNull()
+  // ` -> `|`, ` -> steps over -> ``|, ` -> a third backtick and nothing else:
+  // the block is Enter's job (fenceEnterEdit), so "```" stays writable as text.
+  it('does not open a block on the third backtick', () => {
+    expect(type('`', '``|')).toBeNull()
+    expect(type('`', 'text\n``|')).toBeNull()
+    expect(type('`', '  ``|')).toBeNull()
   })
 })
 
-describe('fenceEnterEdit', () => {
-  it('steps into the body of a just-opened fence', () => {
+describe('fenceEnterEdit: opening a block', () => {
+  it('writes the body line and the closing fence, caret in the body', () => {
+    expect(enter('```|')).toBe('```\n|\n```')
+    expect(enter('```python|')).toBe('```python\n|\n```')
+    expect(enter('text\n```|')).toBe('text\n```\n|\n```')
+  })
+
+  it('keeps the fence line indent on the block it writes', () => {
+    expect(enter('  ```sh|')).toBe('  ```sh\n  |\n  ```')
+  })
+
+  it('opens the block above whatever follows it', () => {
+    expect(enter('```|\nmore prose')).toBe('```\n|\n```\nmore prose')
+  })
+
+  it('leaves a fence that closes an open block alone', () => {
+    expect(enter('```sh\ncode\n```|')).toBeNull()
+  })
+
+  it('leaves a fence whose block is already closed alone', () => {
+    expect(enter('```|\ncode\n```')).toBeNull()
+  })
+
+  it('is not fooled by a line that only mentions a fence', () => {
+    expect(enter('``` see below|')).toBeNull()
+    expect(enter('use ```|')).toBeNull()
+    expect(enter('````|')).toBeNull()
+  })
+})
+
+describe('fenceEnterEdit: stepping into an open block', () => {
+  it('steps into an empty body instead of adding a line', () => {
     expect(enter('```|\n\n```')).toBe('```\n|\n```')
     expect(enter('```python|\n\n```')).toBe('```python\n|\n```')
     expect(enter('text\n```|\n\n```')).toBe('text\n```\n|\n```')
@@ -120,9 +143,6 @@ describe('fenceEnterEdit', () => {
 
   it('leaves any other Enter to the caller', () => {
     expect(enter('```|python\n\n```')).toBeNull() // not at the end of the line
-    expect(enter('```sh|\ncode\n```')).toBeNull() // body already written in
-    expect(enter('```sh|\n\ntext')).toBeNull() // no closing fence
-    expect(enter('```sh|')).toBeNull() // nothing below at all
     expect(enter('plain text|\n\n```')).toBeNull() // not a fence line
     expect(enter('```|a\nb|\n```')).toBeNull() // a selection
   })

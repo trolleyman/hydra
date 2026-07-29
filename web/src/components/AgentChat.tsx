@@ -2161,7 +2161,13 @@ interface ScriptOutputRow {
 // honestly be given, and it keeps a multi-file search from colouring one file's
 // lines by another's language.
 function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): ScriptOutputRow[] {
-  const only = section.match.paths.length === 1 ? section.match.paths[0] : ''
+  // What the search named, as a language: one file gives its own, and several
+  // give theirs only when they agree (two searches of two .go files print no
+  // `path:` prefix to tell their lines apart, but both are still Go). A
+  // directory or an unknown extension yields '', which is the same "ask the
+  // line's own prefix" fallback as naming no file at all.
+  const named = new Set(section.match.paths.map(langFromPath))
+  const only = named.size === 1 ? [...named][0] : ''
   const rows: ScriptOutputRow[] = []
   let run: MatchLine[] = []
   let runLang = ''
@@ -2177,7 +2183,7 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
       rows.push({ num: '', html: '', tone: 'plain' })
       continue
     }
-    const lang = langFromPath(line.path || only)
+    const lang = line.path ? langFromPath(line.path) : only
     if (lang !== runLang) flush()
     runLang = lang
     run.push(line)
