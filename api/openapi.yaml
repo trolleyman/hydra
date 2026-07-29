@@ -1261,6 +1261,95 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/review/comments/{number}/resolve:
+    post:
+      summary: Resolve (or reopen) a review comment by its number
+      operationId: resolveReviewComment
+      description: >
+        Marks a comment dealt with. Works on either origin, because the numbering is
+        one sequence: a Hydra comment gets a resolved flag, and a forge comment
+        resolves the THREAD it belongs to. Resolving a forge thread is LOCAL to Hydra
+        and is never sent to the forge - GitHub's resolveReviewThread needs a thread
+        node id Hydra does not fetch, and a resolve that silently worked on GitLab and
+        silently did not on GitHub would be worse than one that is honestly local
+        everywhere. A state change, not an edit, so it is allowed on a published
+        comment.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: number
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveReviewCommentBody'
+      responses:
+        '200':
+          description: Resolved (returns the full comment list).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewCommentsResponse'
+        '400':
+          description: Bad Request (no comment or thread has that number)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/review/comments/read:
+    post:
+      summary: Mark review comments as read
+      operationId: markReviewCommentsRead
+      description: >
+        Records that the user has seen these numbers. Read state is a fact about this
+        Hydra install rather than about the comment, so it lives here and never reaches
+        a forge. Nothing becomes read by the passage of time - only this call sets it.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkReadBody'
+      responses:
+        '200':
+          description: Marked (returns the full comment list).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewCommentsResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{id}/review/comments/publish:
     post:
       summary: Publish this head's draft comments and notify its agent
@@ -3694,6 +3783,10 @@ components:
           description: NEW-side line the thread anchors to (0 when the forge reports none).
         resolved:
           type: boolean
+          description: Resolved, by the forge's own flag OR Hydra's local mark (see resolved_locally).
+        resolved_locally:
+          type: boolean
+          description: Resolved in Hydra only - the forge still shows it open, because Hydra never writes a resolve to a PR.
         outdated:
           type: boolean
           description: The anchor line no longer exists in the MR's diff.
@@ -3711,6 +3804,11 @@ components:
       properties:
         id:
           type: string
+        number:
+          type: integer
+          description: The note's handle in the head's ONE numbering sequence, shared with Hydra's own comments so "fix #3" is unambiguous. Assigned on first sight and never reused.
+        read:
+          type: boolean
         author:
           type: string
         body:
@@ -3782,6 +3880,30 @@ components:
           type: string
         published_at:
           type: string
+        resolved:
+          type: boolean
+          description: Dealt with. A state change, not an edit - the body is untouched and still readable.
+        resolved_at:
+          type: string
+        read:
+          type: boolean
+          description: The user has seen it. Set only by an explicit mark-read; nothing becomes read by the passage of time.
+
+    ResolveReviewCommentBody:
+      type: object
+      required: [resolved]
+      properties:
+        resolved:
+          type: boolean
+
+    MarkReadBody:
+      type: object
+      properties:
+        numbers:
+          type: array
+          items:
+            type: integer
+          description: Numbers to mark read. Omitted or empty marks every comment on the head.
 
     NewReviewCommentBody:
       type: object

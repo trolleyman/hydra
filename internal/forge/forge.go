@@ -87,7 +87,11 @@ type Status struct {
 // Discussion is one unresolved review thread with file/line context, ready for an
 // agent to act on (get_review_comments / the "respond to review" prompt).
 type Discussion struct {
+	// ID is the THREAD handle - what a reply attaches to. NoteID identifies the
+	// individual comment inside it, which is what Hydra numbers, so "#7" can name
+	// one person's remark rather than the whole conversation.
 	ID     string
+	NoteID string
 	Author string
 	Body   string
 	Path   string
@@ -140,7 +144,7 @@ func UnresolvedDiscussions(threads []Thread) []Discussion {
 		}
 		for _, n := range t.Notes {
 			out = append(out, Discussion{
-				ID: t.ID, Author: n.Author, Body: n.Body,
+				ID: t.ID, NoteID: n.ID, Author: n.Author, Body: n.Body,
 				Path: t.Path, Line: t.Line, URL: firstNonEmptyStr(n.URL, t.URL),
 			})
 		}

@@ -167,3 +167,117 @@ func TestRenderForAgentCarriesAnchorsAndContext(t *testing.T) {
 		t.Errorf("empty rendering is unhelpful: %q", got)
 	}
 }
+
+// One sequence across every origin is the whole point of the numbering: a UI with
+// two schemes in one gutter is worse than none, and "fix #3" has to be
+// unambiguous whether #3 was left in Hydra or on the PR.
+func TestForgeNotesShareTheNumberingSequence(t *testing.T) {
+	root := t.TempDir()
+	first, err := AppendComment(root, "h", Comment{Body: "mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forge := NumberForForgeNote(root, "h", "note-701", "thread-701")
+	second, err := AppendComment(root, "h", Comment{Body: "mine again"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Number != 1 || forge != 2 || second.Number != 3 {
+		t.Fatalf("numbers %d, %d, %d - want one interleaved sequence 1, 2, 3", first.Number, forge, second.Number)
+	}
+	// Idempotent: the diff viewer numbers forge notes on EVERY render, so a repeat
+	// must not burn a number.
+	if again := NumberForForgeNote(root, "h", "note-701", "thread-701"); again != forge {
+		t.Fatalf("re-numbering the same note gave %d, want %d", again, forge)
+	}
+	if third, _ := AppendComment(root, "h", Comment{Body: "third"}); third.Number != 4 {
+		t.Fatalf("next number %d, want 4 - a repeat lookup consumed one", third.Number)
+	}
+
+	// And a number resolves back to the note (and its thread), which is what lets
+	// an agent reply to "#2" without a second forge lookup.
+	noteID, ref, ok := ForgeRef(root, "h", forge)
+	if !ok || noteID != "note-701" || ref.Thread != "thread-701" {
+		t.Fatalf("ForgeRef(%d) = (%q, %+v, %v), want note-701/thread-701", forge, noteID, ref, ok)
+	}
+	if _, _, ok := ForgeRef(root, "h", first.Number); ok {
+		t.Error("a native comment's number resolved as a forge ref")
+	}
+}
+
+// Resolving is a state change, not an edit, so it is allowed on a published
+// comment - and it is what OpenComments filters on.
+func TestResolveHidesAcommentFromTheOpenRead(t *testing.T) {
+	root := t.TempDir()
+	c, _ := AppendComment(root, "h", Comment{Body: "please fix", Path: "a.go", Line: 3})
+	if _, err := PublishDrafts(root, "h", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(OpenComments(root, "h")) != 1 {
+		t.Fatal("a published comment should start open")
+	}
+	got, err := SetResolved(root, "h", c.Number, true)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if !got.Resolved || got.ResolvedAt == "" {
+		t.Errorf("resolve did not stamp the comment: %+v", got)
+	}
+	if len(OpenComments(root, "h")) != 0 {
+		t.Error("a resolved comment is still in the open read")
+	}
+	if len(PublishedComments(root, "h")) != 1 {
+		t.Error("resolving deleted the comment; it must stay readable")
+	}
+	if got.Body != "please fix" {
+		t.Error("resolving changed the body - it is a state change, not an edit")
+	}
+	if _, err := SetResolved(root, "h", c.Number, false); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if len(OpenComments(root, "h")) != 1 {
+		t.Error("reopening did not put the comment back")
+	}
+}
+
+// A forge thread's resolve mark is Hydra-local, and must not be mistaken for the
+// forge's own.
+func TestThreadResolutionIsLocalAndReversible(t *testing.T) {
+	root := t.TempDir()
+	if ThreadResolved(root, "h", "t1") {
+		t.Fatal("an unknown thread reads as resolved")
+	}
+	if err := SetThreadResolved(root, "h", "t1", true, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if !ThreadResolved(root, "h", "t1") {
+		t.Error("thread did not stay resolved")
+	}
+	if err := SetThreadResolved(root, "h", "t1", false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if ThreadResolved(root, "h", "t1") {
+		t.Error("thread did not reopen")
+	}
+}
+
+// Read state is per-number and only ever set explicitly - nothing becomes read by
+// the passage of time.
+func TestReadStateIsExplicitAndPerNumber(t *testing.T) {
+	root := t.TempDir()
+	if IsRead(root, "h", 3) {
+		t.Fatal("a comment nobody has seen reads as read")
+	}
+	if err := MarkRead(root, "h", []int{3, 5}); err != nil {
+		t.Fatal(err)
+	}
+	if !IsRead(root, "h", 3) || !IsRead(root, "h", 5) || IsRead(root, "h", 4) {
+		t.Errorf("read set is wrong: %v", ReadSet(root, "h"))
+	}
+	if err := MarkRead(root, "h", []int{3}); err != nil {
+		t.Fatalf("marking read twice must be idempotent: %v", err)
+	}
+	if got := ReadSet(root, "h"); len(got) != 2 {
+		t.Errorf("read set has %d entries, want 2", len(got))
+	}
+}

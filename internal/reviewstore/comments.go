@@ -89,6 +89,13 @@ type Comment struct {
 
 	CreatedAt   string `json:"created_at"`
 	PublishedAt string `json:"published_at,omitempty"`
+
+	// Resolved is a state change, not an edit of content, so it does not break the
+	// append-only rule: the body stays exactly as written and a reader can still
+	// see what was said. It is what turns a long review from a wall into a
+	// worklist - and what the next/previous navigation steps through.
+	Resolved   bool   `json:"resolved,omitempty"`
+	ResolvedAt string `json:"resolved_at,omitempty"`
 }
 
 // IsDraft reports whether a comment is still invisible to agents.
@@ -138,6 +145,21 @@ func PublishedComments(projectRoot, id string) []Comment {
 	return out
 }
 
+// OpenComments is PublishedComments minus what has been resolved - the default
+// agent-facing read, because "what is still being asked of me" is almost always
+// the question, and a review that has been worked through should get cheaper to
+// re-read, not more expensive.
+func OpenComments(projectRoot, id string) []Comment {
+	all := PublishedComments(projectRoot, id)
+	out := make([]Comment, 0, len(all))
+	for _, c := range all {
+		if !c.Resolved {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // FindComment returns the comment numbered n, if it exists.
 func FindComment(projectRoot, id string, n int) (Comment, bool) {
 	for _, c := range LoadComments(projectRoot, id) {
@@ -155,17 +177,16 @@ func FindComment(projectRoot, id string, n int) (Comment, bool) {
 // so deleting a draft cannot hand its number to a different comment later.
 func AppendComment(projectRoot, id string, c Comment) (Comment, error) {
 	all := LoadComments(projectRoot, id)
-	next := 1
+	// The sequence is shared with the forge notes (see sidecar.go), so a head has
+	// ONE numbering across every origin and "fix #3" is unambiguous. Raise the
+	// counter past anything already in the list first, so a sidecar that was lost
+	// or a store copied in from elsewhere cannot reissue a number in use.
 	for _, existing := range all {
-		if existing.Number >= next {
-			next = existing.Number + 1
-		}
+		noteHighWater(projectRoot, id, existing.Number)
 	}
-	// A number is retired the moment it is handed out, so a deleted draft's number
-	// must not come back. The high-water mark records that independently of what
-	// the list still contains.
-	if hw := loadHighWater(projectRoot, id); hw >= next {
-		next = hw + 1
+	next, err := allocNumber(projectRoot, id)
+	if err != nil {
+		return Comment{}, errtrace.Wrap(err)
 	}
 	now := time.Now().Format(time.RFC3339)
 	c.Number = next
@@ -180,9 +201,6 @@ func AppendComment(projectRoot, id string, c Comment) (Comment, error) {
 	c.CreatedAt = now
 	c.Body = strings.TrimSpace(c.Body)
 	if err := saveComments(projectRoot, id, append(all, c)); err != nil {
-		return Comment{}, errtrace.Wrap(err)
-	}
-	if err := saveHighWater(projectRoot, id, next); err != nil {
 		return Comment{}, errtrace.Wrap(err)
 	}
 	return c, nil
@@ -230,6 +248,29 @@ func DeleteDraft(projectRoot, id string, n int) error {
 	return errtrace.Wrap(ErrNoComment)
 }
 
+// SetResolved marks a comment resolved (or reopens it). Allowed on a PUBLISHED
+// comment - and only meaningful there - because it is a state change rather than
+// an edit of content: the body stays exactly as written, and a reader can still
+// see both what was said and that it has been dealt with.
+func SetResolved(projectRoot, id string, n int, resolved bool) (Comment, error) {
+	all := LoadComments(projectRoot, id)
+	for i, c := range all {
+		if c.Number != n {
+			continue
+		}
+		all[i].Resolved = resolved
+		all[i].ResolvedAt = ""
+		if resolved {
+			all[i].ResolvedAt = time.Now().Format(time.RFC3339)
+		}
+		if err := saveComments(projectRoot, id, all); err != nil {
+			return Comment{}, errtrace.Wrap(err)
+		}
+		return all[i], nil
+	}
+	return Comment{}, errtrace.Wrap(ErrNoComment)
+}
+
 // PublishDrafts flips the named drafts (or every draft, when numbers is empty) to
 // published, and returns them in number order. Already-published comments named
 // explicitly are skipped rather than erroring - publishing twice is the same
@@ -271,37 +312,6 @@ func saveComments(projectRoot, id string, all []Comment) error {
 	return errtrace.Wrap(writeJSON(paths.GetReviewCommentsJson(projectRoot, id), data))
 }
 
-// The high-water mark of numbers handed out for a head, kept beside the store so
-// a deleted draft's number stays retired. A tiny file rather than a field on the
-// list because the list is the thing that loses the evidence.
-type highWater struct {
-	Last int `json:"last"`
-}
-
-func highWaterPath(projectRoot, id string) string {
-	return paths.GetReviewCommentsJson(projectRoot, id+".seq")
-}
-
-func loadHighWater(projectRoot, id string) int {
-	data, err := os.ReadFile(highWaterPath(projectRoot, id))
-	if err != nil {
-		return 0
-	}
-	var hw highWater
-	if err := json.Unmarshal(data, &hw); err != nil {
-		return 0
-	}
-	return hw.Last
-}
-
-func saveHighWater(projectRoot, id string, n int) error {
-	data, err := json.Marshal(highWater{Last: n})
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-	return errtrace.Wrap(writeJSON(highWaterPath(projectRoot, id), data))
-}
-
 // RenderForAgent formats comments the way an agent reads them from a tool: the
 // handle, where it points, who wrote it, the body, and the frozen diff context.
 // Deliberately the same shape whether one comment or twenty came back, so a model
@@ -321,6 +331,9 @@ func RenderForAgent(comments []Comment, withContext bool) string {
 		}
 		if c.ReplyTo > 0 {
 			fmt.Fprintf(&b, " (reply to #%d)", c.ReplyTo)
+		}
+		if c.Resolved {
+			b.WriteString(" [resolved]")
 		}
 		fmt.Fprintf(&b, " - %s", c.Author)
 		if c.Diff != "" {
