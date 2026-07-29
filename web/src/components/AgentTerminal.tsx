@@ -956,6 +956,22 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   // unaffected. Derived rather than an effect so it can't cascade renders.
   const terminalReconnect = (reconnectKeys.terminal ?? 0) + (reconnectSignal ?? 0)
 
+  // Which agent the chat side of the pane is showing: the head itself, or its
+  // review slot (docs/review-agent.md). Not persisted - the review agent is the
+  // exception rather than where you live, so a reload should land you back on
+  // the head's own conversation.
+  const [chatPane, setChatPane] = useState<'main' | 'review'>('main')
+  // The review pane mounts only once it has been asked for, and stays mounted
+  // afterwards. Creating it spins up a detached checkout and a model session on
+  // the backend, so a head nobody reviews must never pay for one. Latched in the
+  // handler rather than derived during render - mounting is a side effect, and
+  // it must not be undone by switching back to the main conversation.
+  const [reviewOpened, setReviewOpened] = useState(false)
+  const selectChatPane = useCallback((pane: 'main' | 'review') => {
+    if (pane === 'review') setReviewOpened(true)
+    setChatPane(pane)
+  }, [])
+
   const isRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   const isNeedsInput = status === AgentStatus.NEEDS_INPUT
   const isWaiting = status === AgentStatus.WAITING
@@ -1143,16 +1159,50 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
           style={{ display: activeTabId === tab.id ? 'flex' : 'none', flexDirection: 'column' }}
         >
           {tab.id === 'terminal' && chatMode ? (
-            <ChatPane
-              agentId={agentId}
-              agentType={agentType}
-              projectId={projectId}
-              active={activeTabId === tab.id}
-              reconnectAttempt={terminalReconnect}
-              onStatusUpdate={handleStatusUpdate}
-              onDiffRefresh={onDiffRefresh}
-              onSelectCommit={onSelectCommit}
-            />
+            // Two mounts, one visible: the review slot is a different agent with
+            // its own socket and transcript, so switching must not reuse the
+            // main pane's state. Both stay mounted once opened, so flipping back
+            // and forth does not re-backfill either conversation - but the review
+            // one is never created until it is first asked for (it costs a
+            // checkout and a model session on the backend).
+            <>
+              <div
+                className="flex-1 min-h-0 flex-col"
+                style={{ display: chatPane === 'main' ? 'flex' : 'none' }}
+              >
+                <ChatPane
+                  agentId={agentId}
+                  agentType={agentType}
+                  projectId={projectId}
+                  active={activeTabId === tab.id && chatPane === 'main'}
+                  reconnectAttempt={terminalReconnect}
+                  onStatusUpdate={handleStatusUpdate}
+                  onDiffRefresh={onDiffRefresh}
+                  onSelectCommit={onSelectCommit}
+                  onSelectPane={selectChatPane}
+                />
+              </div>
+              {reviewOpened && (
+                <div
+                  className="flex-1 min-h-0 flex-col"
+                  style={{ display: chatPane === 'review' ? 'flex' : 'none' }}
+                >
+                  {/* Deliberately no onStatusUpdate / onDiffRefresh: the
+                      reviewer's turns must not drive the HEAD's status chip or
+                      its diff refreshes. It is a different agent. */}
+                  <ChatPane
+                    agentId={agentId}
+                    agentType={agentType}
+                    projectId={projectId}
+                    active={activeTabId === tab.id && chatPane === 'review'}
+                    reconnectAttempt={terminalReconnect}
+                    onSelectCommit={onSelectCommit}
+                    onSelectPane={selectChatPane}
+                    review
+                  />
+                </div>
+              )}
+            </>
           ) : (
             <TerminalPane
               agentId={agentId}

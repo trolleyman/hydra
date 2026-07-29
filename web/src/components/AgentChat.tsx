@@ -22,6 +22,7 @@ import {
   ListPlus,
   LoaderCircle,
   MessageSquare,
+  Eye,
   Plus,
   Search,
   Send,
@@ -114,6 +115,14 @@ interface ChatProps {
   // Clicking a commit chip: point the diff viewer at just that commit (and
   // reveal the diff pane). Absent -> chips render non-clickable.
   onSelectCommit?: (sha: string) => void
+  // This pane IS the head's review slot: a separate agent in its own detached
+  // checkout, reviewing the head's diff (docs/review-agent.md). It has its own
+  // socket, its own transcript and its own conversation - so a pane mounted with
+  // this set shares no chat state with the main one.
+  review?: boolean
+  // Switch which agent this side of the split shows. Absent -> the selector's
+  // Review row is hidden (nothing could act on it).
+  onSelectPane?: (pane: 'main' | 'review') => void
 }
 
 interface NormalizedChatEvent {
@@ -4122,6 +4131,7 @@ function ChatViewSelector({
   onSelect,
   fadeIn,
   paired,
+  showReview,
 }: {
   chatView: string
   subagents: Record<string, SubagentView>
@@ -4133,6 +4143,10 @@ function ChatViewSelector({
   // card's chip - as wide as its current row's label - grow under the plan's
   // corner. See PlanPanel's `paired`.
   paired: boolean
+  // Offer the head's review slot as a destination. Unlike every other row, it is
+  // a DIFFERENT agent with its own socket and transcript, not a view over this
+  // conversation - hence the divider before it.
+  showReview?: boolean
 }) {
   const [open, setOpen] = useState(false)
   // Frozen at mount: fade in only when the selector APPEARS live (the first
@@ -4161,6 +4175,9 @@ function ChatViewSelector({
     desc: string
     depth: number
     sub?: SubagentView
+    // Draw a separator above this row: everything below it is a different agent
+    // rather than a view over this conversation.
+    separated?: boolean
   }
   const rows: SelectorRow[] = [{ key: 'main', label: 'Main conversation', desc: '', depth: 0 }]
   {
@@ -4178,6 +4195,19 @@ function ChatViewSelector({
       for (const c of kids[sub.agentId] ?? []) walk(c, depth + 1)
     }
     for (const r of roots) walk(r, 0)
+  }
+  // The review slot goes last and below a divider. Sub-agents are CHILDREN of
+  // this conversation and vanish with it; the reviewer is a sibling of the whole
+  // head, with its own transcript that outlives any single turn. A flat list
+  // would read as if picking it were the same kind of act.
+  if (showReview) {
+    rows.push({
+      key: 'review',
+      label: 'Review',
+      desc: 'Second agent, reads the diff',
+      depth: 0,
+      separated: true,
+    })
   }
   const currentRow = rows.find((r) => r.key === localView) ?? rows[0]
   const pick = (key: string) => {
@@ -4243,7 +4273,9 @@ function ChatViewSelector({
   }, [open])
 
   const rowIcon = (r: SelectorRow) =>
-    r.sub ? (
+    r.key === 'review' ? (
+      <Eye className="w-3.5 h-3.5 shrink-0 text-amber-500/90 dark:text-amber-400/90" />
+    ) : r.sub ? (
       <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
     ) : (
       <MessageSquare className="w-3.5 h-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
@@ -4304,9 +4336,12 @@ function ChatViewSelector({
               // glides into its indented slot on open; the other rows keep a
               // static indent so nothing else shifts sideways during the morph.
               style={{ paddingLeft: !open && isCurrent ? 12 : 12 + r.depth * 14 }}
+              // A border rather than a sibling <hr>: the morph measures row
+              // offsets imperatively, and an extra element between rows would
+              // desynchronise the collapse target from the row it points at.
               className={`flex w-full items-center gap-1.5 pr-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-white/[0.07] ${
                 isCurrent ? 'transition-all duration-200' : 'transition-colors'
-              } ${open && isCurrent ? 'bg-stone-100/80 dark:bg-white/[0.06] text-stone-800 dark:text-stone-100' : ''}`}
+              } ${r.separated ? 'border-t border-stone-200 dark:border-white/10' : ''} ${open && isCurrent ? 'bg-stone-100/80 dark:bg-white/[0.06] text-stone-800 dark:text-stone-100' : ''}`}
             >
               {rowIcon(r)}
               <span className="max-w-48 shrink-0 truncate font-medium">{r.label}</span>
@@ -4315,7 +4350,7 @@ function ChatViewSelector({
                 {rowBusy(r) && (
                   <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />
                 )}
-                {r.key === 'main' && (
+                {isCurrent && (
                   <ChevronRight
                     className={`w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
                   />
@@ -5810,7 +5845,7 @@ const SettledMessages = memo(
     a.subagents === b.subagents,
 )
 
-export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit }: ChatProps) {
+export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit, review, onSelectPane }: ChatProps) {
   const [items, setItems] = useState<ChatItem[]>([])
   // Wall-clock time per item id (epoch ms) - the message side of the
   // commit-chip interleave. Stamped by the reducers: replayed events carry the
@@ -7707,7 +7742,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     let activeNormalizedAssistantStream = ''
     let activeNormalizedReasoningStream = ''
 
-    const ws = new WebSocket(getWsUrl(agentId, projectId))
+    const ws = new WebSocket(getWsUrl(agentId, projectId, { review }))
     wsRef.current = ws
     let retryTimer: number | null = null
     let openedAt: number | null = null
@@ -8129,7 +8164,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       wsRef.current = null
       setConnected(false)
     }
-  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry])
+    // `review` picks the socket (and therefore the whole conversation), so it
+    // belongs here - though in practice the two panes are separate mounts.
+  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry, review])
 
   // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
   // labels, the live/done state and the final report. A NESTED sub-agent's
@@ -9725,15 +9762,25 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             relocates the other (no pushing/jumping): with both on screen they
             split the row in half (`paired`) so neither can reach the other's
             corner - and so neither can cover the other's clicks. */}
-        {hasSubagents && (
+        {/* Shown whenever there is somewhere else to go: a sub-agent tree, or
+            the head's review slot. On the review pane it is the way back. */}
+        {(hasSubagents || !!onSelectPane) && (
           <ChatViewSelector
-            chatView={viewSub ? chatView : 'main'}
+            chatView={review ? 'review' : viewSub ? chatView : 'main'}
             subagents={subagents}
             taskToolByUse={taskToolByUse}
             awaitingChildren={subsAwaitingChildren}
-            onSelect={(key) => (key === 'main' ? setChatView('main') : openSubView(key))}
+            onSelect={(key) => {
+              if (key === 'review' || (review && key === 'main')) {
+                onSelectPane?.(key === 'review' ? 'review' : 'main')
+                return
+              }
+              if (key === 'main') setChatView('main')
+              else openSubView(key)
+            }}
             fadeIn={liveUiRef.current}
             paired={planVisible}
+            showReview={!!onSelectPane}
           />
         )}
         {/* Current plan (item 17): the agent's latest TodoWrite. Main view
