@@ -51,6 +51,31 @@ before starting. Grouped by area.
 
 ## Agent UX
 
+- [ ] **BUG: session ids collide across heads, and can disable a live head's
+  gate.** Slot session ids are string-concatenated onto a head id
+  (`ShellSessionID` = `<head>-shell[-host][-<token>]`, `internal/heads/heads.go:849`)
+  and head ids may contain hyphens - `slugifyHeadID` yields `[a-z0-9-]` from a
+  prompt's first eight words, and `ValidateHeadID` accepts `[a-zA-Z0-9._-]`
+  (`internal/heads/id.go:29,82`). Two ordinarily-named heads collide: "Fix the"
+  -> `fix-the` and "Fix the shell script" -> `fix-the-shell-script`. Three
+  consequences, worst last: (1) `Registry.Start` returns `ErrExists`, so a head
+  named `foo-shell` cannot start while head `foo` has a shell tab open; (2)
+  teardown is `reg.KillMatching(head.ID + "-shell")` and `KillMatching` is a
+  **prefix** sweep (`strings.HasPrefix`, `internal/session/registry.go:638`), so
+  killing head `fix-the` kills the *main agent session* of head
+  `fix-the-shell-script` - no exact collision needed; (3) `StartShellSession`
+  seeds with an empty `gate.Policy{}` (`heads.go:1034`), writing
+  `cacheDir/<id>-gate-policy.json` (`internal/heads/seed.go:467`) - the same path
+  a head of that name uses - and the gate hook reloads the policy fresh on every
+  tool call (`internal/cli/gate.go:73-91`), so opening a shell tab can silently
+  switch a live head's gate off. The approvals dir collides identically. **Fix:**
+  a separator outside the head-id charset - `@` (`foo@shell`, `foo@review`); `.`
+  and `_` do NOT qualify, explicit head ids may contain both. Migration is
+  near-free (slot ids are in-memory only; their on-disk traces are regenerated
+  cache files), and it makes the prefix sweep sound as a side effect. Belt and
+  braces afterwards: record the owning head id on the session and sweep by field
+  equality instead of by prefix. Detail in [review-agent.md](review-agent.md).
+
 - [ ] **Go language server alongside sandboxed agents** so the agent can query LSP
   information (definitions, references, diagnostics) instead of only reading files.
 

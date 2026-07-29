@@ -42,7 +42,8 @@ head. That is a much lighter thing than it first appears:
   kill/merge (`heads.go:1562,1737`).
 
 So a review slot needs **no DB row, no branch, no sidebar card, no merge path**.
-It is `<head>-review`, a sibling of `<head>-shell`.
+It is a sibling of `<head>-shell` (though the id scheme itself needs fixing
+first - see below).
 
 The one thing that genuinely differs from a shell is the argv and the seeding:
 `StartShellSession` hardcodes `/bin/bash` and passes an empty `gate.Policy{}`
@@ -50,6 +51,84 @@ The one thing that genuinely differs from a shell is the argv and the seeding:
 `sandbox.AgentArgv(sandbox.AgentTypeClaude, ...)`, chat-mode framing, and a
 **real** gate policy. That is the new code, and it is the same shape as the
 existing function.
+
+### The slot id: `<head>-review`, not `<head>/<N>`
+
+Two reasons not to key the slot by an ordinal under a slash.
+
+**A `/` breaks things, because these ids become filenames.** `seedGatePolicy`
+writes `cacheDir/<id>-gate-policy.json` (`internal/heads/seed.go:467`) and
+provisions `paths.GetApprovalsDirFromProjectRoot(projectRoot, id)`. An id of
+`agent-1/2` names a directory that does not exist. The established convention is
+a hyphen, for exactly this reason - `ShellSessionID` produces
+`<head>-shell[-host][-<token>]` (`heads.go:849`).
+
+**And a bare ordinal hides the only thing that makes a second reviewer
+worthwhile.** `agent-1-review-2` says nothing; `agent-1-review-security` says
+everything. Ordinals are also unstable - kill the second slot, make another, and
+whether it is `2` or `3` depends on bookkeeping nobody wants to maintain. A lens
+name is self-describing and idempotent.
+
+So: **`<head>-review`** for the default, with no suffix at all, leaving
+`<head>-review-<lens>` free for later. A single-slot v1 then needs no naming
+scheme, and adding lenses later is not a migration.
+
+### The session-id namespace is broken today, and `-review` would inherit it
+
+Session ids are built by **string concatenation onto a head id**, and head ids
+can contain hyphens. That collides, and it is not theoretical.
+
+`ValidateHeadID` accepts `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` for an explicit id
+(`internal/heads/id.go:29`), and `slugifyHeadID` produces `[a-z0-9-]` from a
+prompt's first eight words (`id.go:82-94`). So two ordinarily-named heads are
+enough: a head from "Fix the" (`fix-the`) and a head from "Fix the shell script"
+(`fix-the-shell-script`).
+
+Three things break, in increasing order of severity:
+
+1. **Spawn/resume failure.** `Registry.Start` returns `ErrExists`
+   (`internal/session/registry.go:20`) - a head named `foo-shell` cannot start
+   while head `foo` has a live shell tab holding that id.
+2. **Cross-head kill.** Teardown is `reg.KillMatching(head.ID + "-shell")`
+   (`heads.go:1562,1737`), and `KillMatching` is a **prefix** sweep
+   (`strings.HasPrefix`, `registry.go:638-651`). Killing or merging head
+   `fix-the` sweeps the prefix `fix-the-shell`, which matches
+   `fix-the-shell-script` - **the main agent session of an unrelated head**. The
+   prefix match is what makes this likely: no exact name collision is needed.
+3. **Gate policy clobber, and this one is security-relevant.**
+   `StartShellSession` calls `seedHead` with the shell's id and an *empty*
+   `gate.Policy{}` (`heads.go:1034`), which writes
+   `cacheDir/foo-shell-gate-policy.json`. That is the same path head `foo-shell`'s
+   real policy occupies. The gate hook reloads the policy **fresh on every tool
+   call** (`internal/cli/gate.go:73-91`), so a live head's gate can silently go
+   from enforcing to disabled because someone opened a shell tab on a
+   similarly-named head. The approvals directory collides the same way.
+
+**The fix: a separator that cannot appear in a head id.** Not a reserved-suffix
+blacklist (`*-shell`, `*-review`, ...) - that grows with every new slot kind,
+does nothing for heads that already exist, and leaves the prefix sweep ambiguous.
+Instead pick a character outside `[a-zA-Z0-9._-]` and filename-safe on all three
+platforms: **`@`** reads well and qualifies (`.` and `_` do **not** - explicit
+head ids may contain both).
+
+```
+foo@shell   foo@shell-host   foo@review   foo@review-security
+```
+
+Collisions then become impossible by construction, and the prefix sweep becomes
+sound as a side effect: `KillMatching("foo@")` can only ever match head `foo`'s
+own slots.
+
+**The migration is close to free**, which is why this is worth doing now rather
+than after a third slot kind exists: slot ids live only in `session.Registry`
+(in-memory - shell sessions have no DB row), and their on-disk traces are
+regenerated cache files. A daemon restart is the migration.
+
+Worth doing as belt and braces afterwards: record the **owning head id** on the
+session and sweep by field equality instead of by string prefix. The registry
+already carries a per-session worktree label, so there is a natural home for it,
+and it retires the whole prefix-matching bug class rather than just this
+instance.
 
 ### Correction: its own tree, not the head's
 
@@ -190,6 +269,42 @@ need one.
 
 **That only holds if the checkout path is stable**, which is the argument against
 a pooled slot above. Same requirement, arrived at from the other direction.
+
+### The dropdown entry
+
+`ChatViewSelector` (`web/src/components/AgentChat.tsx:4120`) is the right home -
+it is already the "which conversation am I looking at" control. But adding Review
+to it is a **category change** worth making deliberately: every entry today is a
+*view over one head's transcript* (the main conversation plus its sub-agent
+sidechains). A review slot is a different process, a different session and a
+different transcript.
+
+Once the selector is a session switcher, the bash shell tabs arguably belong in
+it too - and they currently live in an entirely separate control, the `+`
+split-button in `AgentTerminal.tsx`. Two switchers for "what is in this pane" is
+the outcome to avoid. Ship the narrow version (Review joins, shells stay put),
+but know that is the direction.
+
+Even in the narrow version: **put a divider between Review and the sub-agents.**
+Sub-agents are *children of* the main conversation; Review is a *sibling of* it.
+A flat list erases that, and the hierarchy is the only cue for why one of them
+disappears when a turn ends and the other does not.
+
+Three things matter more than the dropdown itself:
+
+- **Make the entry lazy.** A reviewer that does not exist yet renders as an
+  action, and opening it is what creates it. Pre-spawning a checkout and a model
+  session per head - most never opened - is real cost for nothing.
+- **Status has to show on the *closed* trigger.** Mid-turn, unread comments,
+  stale because the tip moved: if that is only visible once the dropdown is open,
+  nobody will open it. Same argument as tabs needing status affordances in
+  [agent-page-tabs.md](agent-page-tabs.md).
+- **The pane must be unmistakably a different agent.** This is the one likely to
+  bite: switching to Review and forgetting you are not talking to your head is
+  easy, and the failure is silent - you tell it to "just fix that" and it cannot,
+  because it has no git and a throwaway tree. A changed dropdown label is not
+  enough; the pane wants persistent identity (a tinted header or a badge), and
+  the composer should say what this agent cannot do.
 
 ### How many reviewers
 
@@ -401,14 +516,19 @@ reports on code that never existed.
    fixes drafts dying on reload.
 2. **The third origin badge + permalinks.** Small, and needed before anything
    agent-authored shows up in the gutter.
-3. **Extract the slot pool** out of `internal/artifacts` into its own package,
+3. **Fix the session-id namespace** (`@` separator, and ideally an owner field
+   instead of the prefix sweep). This is a **standalone bug fix that should not
+   wait for the review agent** - it can silently disable a live head's gate
+   today. Doing it first also means `-review` never ships into a broken
+   namespace.
+4. **Extract the slot pool** out of `internal/artifacts` into its own package,
    deleting the `exports.go` shim. Mechanical, and it is on the path anyway -
    better before a third consumer than after.
-4. **The review slot.** A Claude-argv sibling of `StartShellSession`, its own
+5. **The review slot.** A Claude-argv sibling of `StartShellSession`, its own
    persistent checkout under `.hydra/local/review/<head-id>/`,
    `git_isolation = readonly` with git tools blocked, resume-on-attach, and a
    "Review" entry in the chat view dropdown.
-5. **@-mentions**, if wanted - `@<head-id>` / `@self` on a comment, routing
+6. **@-mentions**, if wanted - `@<head-id>` / `@self` on a comment, routing
    through the same notification path. At this point it is routing plus a
    loop-cap rule, because both ends already exist.
 
@@ -425,6 +545,11 @@ reports on code that never existed.
   comment, edit and delete on the forge directly. Own the numbering, not the
   content.
 - **Reusing a retired comment number.** `#3` must mean one thing forever.
+- **A `/` in a session id, or an ordinal slot suffix.** Ids become filenames, and
+  an ordinal hides the lens that makes a second reviewer worth having.
+- **Fixing the id collision with a reserved-suffix blacklist.** It grows with
+  every slot kind, does nothing for existing heads, and leaves the prefix sweep
+  ambiguous. Make the separator unrepresentable in a head id instead.
 - **N identical parallel reviewers.** Overlapping findings are not free to read,
   and they erode trust in the whole channel. Distinguish by lens, and let each
   read what is already there.
