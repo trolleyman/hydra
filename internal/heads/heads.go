@@ -842,12 +842,41 @@ func EffectiveGitIsolation(h Head) sandbox.GitIsolationMode {
 	return resolveGitIsolation(cfg, string(h.AgentType), h.GitIsolation)
 }
 
+// SlotSep separates a head ID from its session-slot name in a registry session
+// ID (`<head>@<slot>`). It is load-bearing that this character CANNOT occur in a
+// head ID: ValidateHeadID accepts `[a-zA-Z0-9._-]` for an explicit ID (see
+// internal/heads/id.go), so '-', '.' and '_' would all be claimable by a head
+// and are NOT safe here - '@' is rejected by that pattern, so no head ID can
+// ever spell another head's slot ID.
+//
+// That is not hypothetical. Slot IDs used to be built as `<head>-shell`, and
+// two ordinarily-named heads collided: "Fix the" -> `fix-the` and "Fix the
+// shell script" -> `fix-the-shell-script`. Because SlotPrefix is swept with a
+// *prefix* match, killing the first head tore down the second head's main agent
+// session; the shell's empty gate.Policy{} also clobbered the second head's
+// `<id>-gate-policy.json`, which the gate hook reloads per tool call - silently
+// disabling the gate on a live head.
+//
+// '@' is mapped to '_' by sandbox.sanitizeUnit when a session ID becomes a
+// systemd scope unit name, which is why sandbox.ScopeUnit disambiguates with a
+// hash of the unsanitized ID rather than relying on the sanitized name alone.
+const SlotSep = "@"
+
+// SlotSessionID builds the registry session ID for one of a head's auxiliary
+// session slots (a bash shell tab, a review agent, ...). See SlotSep.
+func SlotSessionID(headID, slot string) string { return headID + SlotSep + slot }
+
+// SlotPrefix is the Registry.KillMatching prefix matching every slot session
+// belonging to headID - and, because SlotSep cannot occur in a head ID, nothing
+// else. Used to tear a head's auxiliary sessions down on kill/merge.
+func SlotPrefix(headID string) string { return headID + SlotSep }
+
 // ShellSessionID derives the registry session ID for a head's web bash shell
 // from its head ID, sandbox mode and per-tab token. The same inputs always yield
 // the same ID, so a tab's reconnect reattaches and an explicit close can target
-// it. Mirrors the `<head>-shell[-host][-<token>]` shape KillMatching tears down.
+// it. Mirrors the `<head>@shell[-host][-<token>]` shape SlotPrefix tears down.
 func ShellSessionID(headID string, sandboxed bool, token string) string {
-	id := headID + "-shell"
+	id := SlotSessionID(headID, "shell")
 	if !sandboxed {
 		id += "-host"
 	}
@@ -1557,9 +1586,9 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 		reg.Remove(head.ID)
 		// Tear down the head's filtering egress proxy, if any.
 		stopEgressProxy(head.ID)
-		// Tear down any web bash shells for this head - they share its worktree,
-		// which is about to be removed, so they must not outlive it.
-		reg.KillMatching(head.ID + "-shell")
+		// Tear down any slot sessions for this head (bash shells, ...) - they share
+		// its worktree, which is about to be removed, so they must not outlive it.
+		reg.KillMatching(SlotPrefix(head.ID))
 	}
 	if killErr == nil {
 		// Sandboxed teardown hook: the agent's session is dead but the worktree is
@@ -1734,7 +1763,7 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 		}
 		reg.Remove(head.ID)
 		stopEgressProxy(head.ID)
-		reg.KillMatching(head.ID + "-shell")
+		reg.KillMatching(SlotPrefix(head.ID))
 	}
 
 	if head.Worktree != nil && head.ProjectPath != "" {

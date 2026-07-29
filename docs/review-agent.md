@@ -31,19 +31,18 @@ The reviewer should be modelled on the **bash shell tabs**, not on a spawned
 head. That is a much lighter thing than it first appears:
 
 - `StartShellSession` (`internal/heads/heads.go:937`) starts a sandboxed session
-  under an id derived from the head (`<head>-shell[-host]`, `ShellSessionID` at
-  `heads.go:849`), seeds it with its own policy, and registers it in
-  `session.Registry`. It **never touches `internal/db`**.
+  under an id derived from the head (`<head>@shell[-host]`, `ShellSessionID`),
+  seeds it with its own policy, and registers it in `session.Registry`. It
+  **never touches `internal/db`**.
 - `ListHeads` builds its result from `store.ListAgents` and only overlays live
   status from the registry (`heads.go:105-150`). So a registry-only session is
   invisible to the head list **by construction** - there is no exclusion filter
   to write.
-- Teardown is already a prefix sweep: `reg.KillMatching(head.ID + "-shell")` on
-  kill/merge (`heads.go:1562,1737`).
+- Teardown is already a prefix sweep: `reg.KillMatching(SlotPrefix(head.ID))` on
+  kill/merge, which catches every slot the head owns.
 
 So a review slot needs **no DB row, no branch, no sidebar card, no merge path**.
-It is a sibling of `<head>-shell` (though the id scheme itself needs fixing
-first - see below).
+It is a sibling of `<head>@shell`.
 
 The one thing that genuinely differs from a shell is the argv and the seeding:
 `StartShellSession` hardcodes `/bin/bash` and passes an empty `gate.Policy{}`
@@ -52,7 +51,7 @@ The one thing that genuinely differs from a shell is the argv and the seeding:
 **real** gate policy. That is the new code, and it is the same shape as the
 existing function.
 
-### The slot id: `<head>-review`, not `<head>/<N>`
+### The slot id: `<head>@review`, not `<head>/<N>`
 
 Two reasons not to key the slot by an ordinal under a slash.
 
@@ -60,23 +59,29 @@ Two reasons not to key the slot by an ordinal under a slash.
 writes `cacheDir/<id>-gate-policy.json` (`internal/heads/seed.go:467`) and
 provisions `paths.GetApprovalsDirFromProjectRoot(projectRoot, id)`. An id of
 `agent-1/2` names a directory that does not exist. The established convention is
-a hyphen, for exactly this reason - `ShellSessionID` produces
-`<head>-shell[-host][-<token>]` (`heads.go:849`).
+`<head>@<slot>` for exactly this reason - `ShellSessionID` produces
+`<head>@shell[-host][-<token>]`, via `SlotSessionID`.
 
 **And a bare ordinal hides the only thing that makes a second reviewer
-worthwhile.** `agent-1-review-2` says nothing; `agent-1-review-security` says
+worthwhile.** `agent-1@review-2` says nothing; `agent-1@review-security` says
 everything. Ordinals are also unstable - kill the second slot, make another, and
 whether it is `2` or `3` depends on bookkeeping nobody wants to maintain. A lens
 name is self-describing and idempotent.
 
-So: **`<head>-review`** for the default, with no suffix at all, leaving
-`<head>-review-<lens>` free for later. A single-slot v1 then needs no naming
-scheme, and adding lenses later is not a migration.
+So: **`<head>@review`** (`SlotSessionID(headID, "review")`) for the default, with
+no suffix at all, leaving `<head>@review-<lens>` free for later. A single-slot v1
+then needs no naming scheme, and adding lenses later is not a migration.
 
-### The session-id namespace is broken today, and `-review` would inherit it
+### The session-id namespace (BUILT - was broken, `-review` would have inherited it)
 
-Session ids are built by **string concatenation onto a head id**, and head ids
-can contain hyphens. That collides, and it is not theoretical.
+**Status: fixed.** `heads.SlotSep` / `SlotSessionID` / `SlotPrefix`
+(`internal/heads/heads.go`) now build slot ids as `<head>@<slot>`, and
+`sandbox.ScopeUnit` disambiguates unit names with a hash. Kept here in full
+because the reasoning is what the review slot's id scheme rests on.
+
+Session ids used to be built by **string concatenation onto a head id** with a
+hyphen, and head ids can contain hyphens. That collided, and it was not
+theoretical.
 
 `ValidateHeadID` accepts `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` for an explicit id
 (`internal/heads/id.go:29`), and `slugifyHeadID` produces `[a-z0-9-]` from a
@@ -89,9 +94,9 @@ Three things break, in increasing order of severity:
 1. **Spawn/resume failure.** `Registry.Start` returns `ErrExists`
    (`internal/session/registry.go:20`) - a head named `foo-shell` cannot start
    while head `foo` has a live shell tab holding that id.
-2. **Cross-head kill.** Teardown is `reg.KillMatching(head.ID + "-shell")`
-   (`heads.go:1562,1737`), and `KillMatching` is a **prefix** sweep
-   (`strings.HasPrefix`, `registry.go:638-651`). Killing or merging head
+2. **Cross-head kill.** Teardown was `reg.KillMatching(head.ID + "-shell")`, and
+   `KillMatching` is a **prefix** sweep
+   (`strings.HasPrefix`, `internal/session/registry.go:638`). Killing or merging head
    `fix-the` sweeps the prefix `fix-the-shell`, which matches
    `fix-the-shell-script` - **the main agent session of an unrelated head**. The
    prefix match is what makes this likely: no exact name collision is needed.
@@ -115,20 +120,55 @@ head ids may contain both).
 foo@shell   foo@shell-host   foo@review   foo@review-security
 ```
 
-Collisions then become impossible by construction, and the prefix sweep becomes
-sound as a side effect: `KillMatching("foo@")` can only ever match head `foo`'s
-own slots.
+Collisions are now impossible by construction, and the prefix sweep is sound as a
+side effect: `KillMatching(SlotPrefix("foo"))` can only ever match head `foo`'s
+own slots. `TestSlotSepIsNotAValidHeadID` asserts the separator stays outside
+`ValidateHeadID`'s character class, so a later loosening of head-id validation
+fails a test rather than silently reopening this.
 
-**The migration is close to free**, which is why this is worth doing now rather
-than after a third slot kind exists: slot ids live only in `session.Registry`
-(in-memory - shell sessions have no DB row), and their on-disk traces are
-regenerated cache files. A daemon restart is the migration.
+**Why `@` specifically survives every surface a session id reaches.** The
+constraint is narrow - the character must be rejected by `ValidateHeadID` *and*
+harmless everywhere an id is used - so it is worth recording what each candidate
+does, because most of the obvious ones fail:
 
-Worth doing as belt and braces afterwards: record the **owning head id** on the
+| surface | requirement | `@` |
+| --- | --- | --- |
+| Windows filenames (`<id>-gate-policy.json`, the approvals dir) | not one of `< > : " / \ \| ? *`, not a control char, no trailing dot/space | legal on NTFS/FAT32/exFAT; device names (`CON`, `NUL`, `COM1`) are unaffected by it |
+| POSIX filenames | not `/`, not NUL | legal |
+| URLs | - | never reaches one: the client sends only a *tab token* as `shell_id` and the backend derives the session id (`internal/http/terminal.go:290`). Legal in a path segment and a query string regardless (RFC 3986 `pchar`) |
+| shell | no expansion if interpolated | not special in sh/bash/zsh |
+| git refnames | only if a slot ever became a branch (none do) | legal - the refname rules only forbid a bare `@` and the sequence `@{`, neither of which a slot id can spell |
+| systemd unit names | see below | **is** special (`foo@bar.service` is template syntax) - which is why `sanitizeUnit` maps it to `_`, and why the hash below matters |
+
+The near misses are instructive: **`:`** is illegal on Windows (drive
+separator); **`%`** is systemd specifier expansion *and* URL percent-encoding;
+**`#`** is a URL fragment; **`!`** is history expansion in interactive
+bash/zsh; **`~`** is tilde expansion and is illegal in a git refname; **`+`**
+decodes as a space in form-encoded query strings. And `.`, `_`, `-` are all
+accepted by `ValidateHeadID`, so they fail the first requirement outright.
+
+**And one layer down: the systemd unit name.** `sandbox.sanitizeUnit` maps every
+character systemd disallows to `_`, so `foo@shell` and a head explicitly named
+`foo_shell` both sanitized to `foo_shell` - the same collision, one layer lower,
+and not fixed by the separator alone. It bites harder than it looks: `WrapScope`
+calls `StopScope(unit)` first to clear a stale unit from a prior life, so one
+workload starting would tear down the other's **live** cgroup. `ScopeUnit` now
+appends `ScopeHash(id)` of the *unsanitized* id, which keeps the readable name
+and makes the mapping injective. (Several callers - tests, artifacts, services -
+already appended a hash by hand for exactly this reason; this moves it into the
+one place that cannot be forgotten.)
+
+**The migration was close to free**, which is why it was worth doing before a
+third slot kind existed: slot ids live only in `session.Registry` (in-memory -
+shell sessions have no DB row) and their on-disk traces are regenerated cache
+files, so a daemon restart is the migration. Note the frontend needed no change
+at all: it passes a `shell_id` *tab token* as a query param and the backend
+derives the session id, so no client ever spelled one.
+
+Still worth doing as belt and braces: record the **owning head id** on the
 session and sweep by field equality instead of by string prefix. The registry
 already carries a per-session worktree label, so there is a natural home for it,
-and it retires the whole prefix-matching bug class rather than just this
-instance.
+and it retires the whole prefix-matching bug class rather than one instance.
 
 ### Correction: its own tree, not the head's
 
@@ -516,14 +556,12 @@ reports on code that never existed.
    fixes drafts dying on reload.
 2. **The third origin badge + permalinks.** Small, and needed before anything
    agent-authored shows up in the gutter.
-3. **Fix the session-id namespace** (`@` separator, and ideally an owner field
-   instead of the prefix sweep). This is a **standalone bug fix that should not
-   wait for the review agent** - it can silently disable a live head's gate
-   today. Doing it first also means `-review` never ships into a broken
-   namespace.
-4. **Extract the slot pool** out of `internal/artifacts` into its own package,
-   deleting the `exports.go` shim. Mechanical, and it is on the path anyway -
-   better before a third consumer than after.
+3. ~~**Fix the session-id namespace**~~ - **DONE.** `heads.SlotSep` (`@`),
+   `SlotSessionID`, `SlotPrefix`, plus the `ScopeUnit` hash. Was a standalone bug
+   fix that did not need the review agent; doing it first meant `@review` never
+   shipped into a broken namespace.
+4. ~~**Extract the slot pool**~~ - **DONE.** `internal/checkout` (`Pool`, `Slot`)
+   and `internal/sched`; `internal/artifacts/exports.go` is gone.
 5. **The review slot.** A Claude-argv sibling of `StartShellSession`, its own
    persistent checkout under `.hydra/local/review/<head-id>/`,
    `git_isolation = readonly` with git tools blocked, resume-on-attach, and a

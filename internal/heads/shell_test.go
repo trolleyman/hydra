@@ -1,6 +1,7 @@
 package heads
 
 import (
+	"strings"
 	"sync"
 	"testing"
 )
@@ -13,11 +14,11 @@ func TestShellSessionID(t *testing.T) {
 		token     string
 		want      string
 	}{
-		{"sandboxed with token", "abc", true, "bash-123", "abc-shell-bash-123"},
-		{"host with token", "abc", false, "bash-123", "abc-shell-host-bash-123"},
-		{"no token", "abc", true, "", "abc-shell"},
-		{"token sanitized", "abc", true, "../../etc/passwd", "abc-shell-etcpasswd"},
-		{"token slashes dropped", "abc", false, "a/b\\c", "abc-shell-host-abc"},
+		{"sandboxed with token", "abc", true, "bash-123", "abc@shell-bash-123"},
+		{"host with token", "abc", false, "bash-123", "abc@shell-host-bash-123"},
+		{"no token", "abc", true, "", "abc@shell"},
+		{"token sanitized", "abc", true, "../../etc/passwd", "abc@shell-etcpasswd"},
+		{"token slashes dropped", "abc", false, "a/b\\c", "abc@shell-host-abc"},
 	}
 	for _, c := range cases {
 		if got := ShellSessionID(c.head, c.sandboxed, c.token); got != c.want {
@@ -26,17 +27,46 @@ func TestShellSessionID(t *testing.T) {
 	}
 }
 
-// The KillMatching("<head>-shell") sweep must not catch a different head whose ID
-// merely starts with this head's ID (e.g. "foo" vs "foobar"): the "-shell"
-// boundary keeps the prefix unambiguous.
-func TestShellSessionIDPrefixBoundary(t *testing.T) {
-	foo := ShellSessionID("foo", true, "t")
-	foobar := ShellSessionID("foobar", true, "t")
-	if prefix := "foo" + "-shell"; len(foobar) >= len(prefix) && foobar[:len(prefix)] == prefix {
-		t.Errorf("foobar shell %q wrongly matches prefix %q", foobar, prefix)
+// A slot ID must never be spellable as a head ID, or one head's SlotPrefix sweep
+// tears down another head's sessions. SlotSep is the guarantee: ValidateHeadID
+// rejects it, so no head can be named `<other-head>@shell`.
+func TestSlotSepIsNotAValidHeadID(t *testing.T) {
+	if err := ValidateHeadID(SlotSessionID("foo", "shell")); err == nil {
+		t.Fatalf("ValidateHeadID(%q) = nil, want an error: a head must never be nameable as another head's slot",
+			SlotSessionID("foo", "shell"))
 	}
-	if prefix := "foo" + "-shell"; foo[:len(prefix)] != prefix {
-		t.Errorf("foo shell %q should match prefix %q", foo, prefix)
+	// The separator itself must be outside the explicit-ID character class, not
+	// merely absent from generated slugs.
+	if err := ValidateHeadID("a" + SlotSep + "b"); err == nil {
+		t.Errorf("ValidateHeadID accepts SlotSep %q; pick a character it rejects", SlotSep)
+	}
+}
+
+// The SlotPrefix sweep must not catch a different head whose ID merely starts
+// with this head's ID. Two cases, and the second is the one the old `<head>-shell`
+// scheme got wrong: "foo" vs "foobar" was safe because of the "-shell" boundary,
+// but "fix-the" vs "fix-the-shell-script" was NOT - killing the former swept the
+// latter's main agent session, whose session ID is just its head ID.
+func TestSlotPrefixDoesNotCatchOtherHeads(t *testing.T) {
+	cases := []struct{ killing, other string }{
+		{"foo", "foobar"},
+		{"fix-the", "fix-the-shell-script"},
+		{"fix-the", "fix-the-shell"},
+	}
+	for _, c := range cases {
+		prefix := SlotPrefix(c.killing)
+		// The other head's own agent session is keyed by its bare head ID.
+		if strings.HasPrefix(c.other, prefix) {
+			t.Errorf("killing %q sweeps prefix %q, which matches head %q's agent session", c.killing, prefix, c.other)
+		}
+		// ...and so are its slots.
+		if other := ShellSessionID(c.other, true, "t"); strings.HasPrefix(other, prefix) {
+			t.Errorf("killing %q sweeps prefix %q, which matches %q's shell %q", c.killing, prefix, c.other, other)
+		}
+		// The sweep must still catch the head's own slots.
+		if own := ShellSessionID(c.killing, true, "t"); !strings.HasPrefix(own, prefix) {
+			t.Errorf("killing %q: own shell %q not matched by prefix %q", c.killing, own, prefix)
+		}
 	}
 }
 
