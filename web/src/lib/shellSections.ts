@@ -26,7 +26,7 @@
 // one makes its section (only its section) plain, because a file name and line
 // numbers attached to text from somewhere else would be worse than no
 // highlighting at all.
-import { parseView, type FileView } from './fileViewCommand'
+import { parseSedRange, parseView, type FileView } from './fileViewCommand'
 
 // A grep-shaped step: output that is a set of lines from one or more files,
 // non-contiguous, optionally carrying its own line numbers.
@@ -53,7 +53,7 @@ export type ScriptStep =
   // Lines matched out of one or more files.
   | { kind: 'matches'; match: MatchesView; command: string }
   // git reporting on the repository rather than printing a file: a status, a
-  // diffstat, a commit header (see lib/gitOutput).
+  // commit header, a diffstat, a patch (see lib/gitOutput).
   | { kind: 'git'; command: string }
   // Prints nothing, so it takes no output (`cd`, an assignment, a redirect).
   | { kind: 'silent' }
@@ -91,6 +91,10 @@ interface Word {
   dynamic: boolean
   // Some part of it was quoted, so it is data rather than a command name.
   quoted: boolean
+  // It BEGINS quoted, which is the stricter question to ask of something that
+  // looks like a flag: `"-v"` is a pattern that happens to start with a dash,
+  // but `--include="*.ts"` is a flag whose VALUE is quoted.
+  quotedStart: boolean
 }
 
 interface Command {
@@ -198,13 +202,86 @@ function readWordAt(code: string, at: number): (Word & { end: number }) | null {
     text += ch
     i++
   }
-  return { end: i, text, dynamic, quoted }
+  return { end: i, text, dynamic, quoted, quotedStart: /['"\\]/.test(code[at] ?? '') }
+}
+
+// A bare heredoc delimiter has to look like an identifier, which is what keeps
+// an arithmetic left shift - `$(( 1 << 2 ))` - from being read as one.
+const HEREDOC_DELIM = /^[A-Za-z_][A-Za-z0-9_.-]*$/
+
+// readHeredoc parses a `<<`/`<<-` operator at `at` and finds where its body
+// ends, so the lexer can step over a region that is DATA. Null when what follows
+// is not a plausible heredoc.
+//
+// The body is skipped rather than modelled: it is stdin for the command the
+// operator belongs to, so nothing in it is a command and nothing in it reaches
+// the transcript. The one thing that matters is not lexing it as shell, which
+// would turn a file's worth of text into commands.
+function readHeredoc(script: string, at: number): { opEnd: number; delim: string; strip: boolean } | null {
+  let i = at + 2
+  const strip = script[i] === '-'
+  if (strip) i++
+  while (script[i] === ' ' || script[i] === '\t') i++
+  let delim = ''
+  const quote = script[i]
+  if (quote === "'" || quote === '"') {
+    const close = script.indexOf(quote, i + 1)
+    if (close === -1) return null
+    delim = script.slice(i + 1, close)
+    i = close + 1
+  } else {
+    while (i < script.length && !WORD_END.test(script[i])) { delim += script[i]; i++ }
+    if (!HEREDOC_DELIM.test(delim)) return null
+  }
+  return delim === '' ? null : { opEnd: i, delim, strip }
+}
+
+// skipHeredocBodies steps over the bodies queued on the line that just ended,
+// returning where shell resumes. An unterminated body (a truncated script) runs
+// to the end, which is what the shell would have done with it.
+function skipHeredocBodies(script: string, from: number, pending: { delim: string; strip: boolean }[]): number {
+  let pos = from
+  for (const h of pending) {
+    while (pos < script.length) {
+      const nl = script.indexOf('\n', pos)
+      const end = nl === -1 ? script.length : nl
+      const raw = script.slice(pos, end)
+      const body = h.strip ? raw.replace(/^\t+/, '') : raw
+      pos = nl === -1 ? script.length : nl + 1
+      if (body.replace(/\r$/, '') === h.delim) break
+    }
+  }
+  return pos
+}
+
+// skipGroup steps over a `( ... )` (or `{ ...; }`) from its opening bracket,
+// respecting quotes, and returns the index just past its close - or -1 when it
+// never closes. The group is then one opaque command: it prints something this
+// module cannot describe, which is what `unknown` is for, and refusing the whole
+// script over it cost every OTHER step in the script its attribution.
+function skipGroup(script: string, at: number): number {
+  const open = script[at]
+  const close = open === '(' ? ')' : '}'
+  let depth = 0
+  for (let i = at; i < script.length; i++) {
+    const ch = script[i]
+    if (ch === "'" || ch === '"') {
+      const end = ch === '"' ? closingDouble(script, i) : script.indexOf("'", i + 1)
+      if (end === -1) return -1
+      i = end
+      continue
+    }
+    if (ch === '\\') { i++; continue }
+    if (ch === open) depth++
+    else if (ch === close && --depth === 0) return i + 1
+  }
+  return -1
 }
 
 // lexPipelines cuts a script into the pipelines the shell runs one after
 // another - the pieces separated by `;`, `&&`, `||` and newlines - each split
 // into its `|`-separated commands. Null for a script whose shape this cannot
-// model at all (a subshell, a heredoc, a backgrounded command).
+// model at all (a backgrounded command, an unterminated quote).
 function lexPipelines(script: string): Pipeline[] | null {
   const pipelines: Pipeline[] = []
   let cmds: Command[] = []
@@ -215,6 +292,8 @@ function lexPipelines(script: string): Pipeline[] | null {
   let lastEnd = -1
   let i = 0
   const n = script.length
+  // Heredocs opened on the line being lexed, whose bodies start after it.
+  let heredocs: { delim: string; strip: boolean }[] = []
 
   const endCmd = (at: number) => {
     if (words.length > 0) cmds.push({ words, raw: script.slice(cmdStart, at).trim(), redirected })
@@ -231,7 +310,19 @@ function lexPipelines(script: string): Pipeline[] | null {
 
   while (i < n) {
     const ch = script[i]
-    if (ch === '\n' || ch === ';') { endPipeline(i, i + 1); i++; continue }
+    if (ch === '\n' || ch === ';') {
+      endPipeline(i, i + 1)
+      i++
+      // The bodies of any heredocs this line opened sit here, between the line
+      // and the next command.
+      if (heredocs.length > 0) {
+        i = skipHeredocBodies(script, i, heredocs)
+        heredocs = []
+        pipeStart = i
+        cmdStart = i
+      }
+      continue
+    }
     if (ch === '&') {
       if (script[i + 1] === '&') { endPipeline(i, i + 2); i += 2; continue }
       // A backgrounded command's output arrives whenever it arrives, so no
@@ -245,9 +336,18 @@ function lexPipelines(script: string): Pipeline[] | null {
       i++
       continue
     }
-    // A subshell reorders nothing but nests, and its `(` would be read as a word
-    // boundary rather than a group.
-    if (ch === '(' || ch === ')') return null
+    // A group runs commands this module is not going to describe, but it is ONE
+    // producer's worth of output, so it is stepped over as a single opaque word
+    // rather than costing the whole script its parse.
+    if (ch === '(' || (ch === '{' && WORD_END.test(script[i + 1] ?? ' '))) {
+      const end = skipGroup(script, i)
+      if (end === -1) return null
+      words.push({ text: script.slice(i, end), dynamic: true, quoted: false, quotedStart: false })
+      i = end
+      lastEnd = i
+      continue
+    }
+    if (ch === ')' || ch === '}') return null
     if (ch === ' ' || ch === '\t' || ch === '\r') { i++; continue }
     // A `#` opens a comment only at the start of a word, which is where we are.
     if (ch === '#') {
@@ -256,9 +356,25 @@ function lexPipelines(script: string): Pipeline[] | null {
       continue
     }
     if (ch === '<' || ch === '>') {
-      // A heredoc body is data, and lexing it as shell would turn a file's worth
-      // of text into commands.
-      if (script.startsWith('<<', i)) return null
+      // A here-string's word is data on stdin: consumed and dropped, like a
+      // redirect target.
+      if (script.startsWith('<<<', i)) {
+        i += 3
+        while (script[i] === ' ' || script[i] === '\t') i++
+        const target = readWordAt(script, i)
+        if (!target) return null
+        i = target.end > i ? target.end : i + 1
+        continue
+      }
+      // A heredoc's BODY is data too, but it does not start until after this
+      // line, so the operator is noted here and the body stepped over there.
+      if (script.startsWith('<<', i)) {
+        const doc = readHeredoc(script, i)
+        if (!doc) return null
+        heredocs.push({ delim: doc.delim, strip: doc.strip })
+        i = doc.opEnd
+        continue
+      }
       // `2>` redirects a stream: the digit belongs to the operator, not to the
       // command's arguments. Only when it is written flush against it.
       let fd = ''
@@ -354,7 +470,10 @@ function parseMatches(words: Word[]): ParsedGrep | null {
   let patternGiven = false
   for (let i = 0; i < args.length; i++) {
     const w = args[i]
-    if (w.quoted || !w.text.startsWith('-') || w.text === '-') { operands.push(w); continue }
+    // `quotedStart`, not `quoted`: `--include="*.ts"` is a flag carrying a
+    // quoted value, and counting it as a file operand put a path that is not a
+    // path into the section's file list.
+    if (w.quotedStart || !w.text.startsWith('-') || w.text === '-') { operands.push(w); continue }
     const [flag, inlineValue] = splitAt(w.text, '=')
     if (GREP_SHAPE_FLAGS.has(flag)) return null
     if (flag === '-n' || flag === '--line-number') { numbered = true; continue }
@@ -389,24 +508,29 @@ function splitAt(word: string, sep: string): [string, string | null] {
   return at === -1 ? [word, null] : [word.slice(0, at), word.slice(at + 1)]
 }
 
-// git subcommands whose output is a report on the repository - the shapes
-// lib/gitOutput knows how to colour.
+// git subcommands whose output is a report on the repository - a status, a
+// commit header, a diffstat, a patch - which are the shapes lib/gitOutput knows
+// how to colour. Each of them prints one of those whatever it is asked for, so
+// the refused flags below are the only thing that can turn one into something
+// else.
 const GIT_REPORTS = new Set(['status', 'show', 'log', 'diff'])
 
-// Flags that make git print something other than those shapes: a patch, a
-// machine-readable format, a custom pretty format, a commit graph.
-const GIT_REFUSED = /^(-p|-u|--patch|-U\d*|--unified(=.*)?|--numstat|--name-only|--name-status|--raw|--graph|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
-
-// Flags that replace `show`/`log`/`diff`'s patch with a summary of it.
-const GIT_SUMMARY = /^(--stat(=.*)?|--shortstat|--compact-summary|--summary|--oneline|-s|--no-patch)$/
+// Flags that make git print something OTHER than those shapes: a machine
+// readable listing, a format chosen by the caller that could put anything on any
+// line, a diff marked up inside the line rather than by it.
+//
+// `--graph` and `-p` are not among them: the first only puts the topology in the
+// left margin and then prints the same lines, and the second prints a patch,
+// which lib/gitOutput now reads.
+const GIT_REFUSED = /^(--numstat|--name-only|--name-status|--raw|--pretty(=.*)?|--format(=.*)?|-z|--null|--porcelain=.*|--word-diff(=.*)?)$/
 
 // parseGitReport reports whether a command is a git call whose output is one of
-// the reports lib/gitOutput colours: a status, a diffstat, a commit header.
+// the reports lib/gitOutput colours: a status, a commit header, a diffstat, a
+// patch.
 //
-// Narrow on purpose. Everything outside this set either prints a patch - which
-// wants a diff view, not a line-shape colouriser - or a format chosen by the
-// caller, and a `--pretty` this module has not read can put anything on any
-// line.
+// Narrow on purpose. Everything outside this set prints a listing or a format
+// chosen by the caller, and a `--pretty` this module has not read can put
+// anything on any line.
 function parseGitReport(words: Word[]): boolean {
   if (words[0].text !== 'git' || words[0].quoted) return false
   // git's own options come before the subcommand; `-C` and `-c` take the word
@@ -418,11 +542,7 @@ function parseGitReport(words: Word[]): boolean {
   }
   const sub = words[i]
   if (!sub || sub.quoted || !GIT_REPORTS.has(sub.text)) return false
-  const args = words.slice(i + 1)
-  if (args.some((w) => !w.quoted && GIT_REFUSED.test(w.text))) return false
-  // `status` only ever prints a status, long or short.
-  if (sub.text === 'status') return true
-  return args.some((w) => !w.quoted && GIT_SUMMARY.test(w.text))
+  return !words.slice(i + 1).some((w) => !w.quoted && GIT_REFUSED.test(w.text))
 }
 
 // isFilter reports whether a command only trims what the command before it in
@@ -433,6 +553,19 @@ function isFilter(cmd: Command): 'head' | 'tail' | null {
   return cmd.words.slice(1).every((w) => w.text.startsWith('-') && !w.quoted) ? name : null
 }
 
+// isPassthrough reports whether a command hands on what it was given byte for
+// byte: `| cat`, which agents append to a git call to stop it paging.
+//
+// Only a bare `cat` reading stdin. Every flag it takes rewrites the lines it
+// prints (`-n` numbers them, `-s` squeezes blanks, `-A` spells out the
+// invisible ones), and a `cat` naming a file of its own is printing that file
+// rather than passing the pipe along.
+function isPassthrough(cmd: Command): boolean {
+  const name = cmd.words[0]
+  if (name.text !== 'cat' || name.quoted) return false
+  return cmd.words.slice(1).every((w) => !w.quoted && w.text === '-')
+}
+
 // isLineFilter reports whether a command only DROPS lines from what the command
 // before it printed, leaving the ones it keeps byte for byte - `| grep -v test/`,
 // `| grep import`. Agents write these constantly (`grep -rn X src | grep -v
@@ -440,12 +573,34 @@ function isFilter(cmd: Command): 'head' | 'tail' | null {
 // highlighting even though every line that survives is still a line of the file
 // the search before it named.
 //
-// It is the same parse as a searching grep, held to two more conditions: it
-// names no file of its own (so what it read was the pipe), and it adds no line
-// numbers (which would count lines of the STREAM, not lines of any file).
-function isLineFilter(cmd: Command): boolean {
+// It is the same parse as a searching grep, held to one more condition: it names
+// no file of its own, so what it read was the pipe. Whether it NUMBERS what it
+// keeps is handed back rather than refused, because those numbers count lines of
+// the STREAM - which is the file's own numbering when, and only when, the stream
+// is a whole file (see classify).
+function isLineFilter(cmd: Command): { numbered: boolean } | null {
   const grep = parseMatches(cmd.words)
-  return grep !== null && grep.fileCount === 0 && !grep.numbered
+  return grep !== null && grep.fileCount === 0 ? { numbered: grep.numbered } : null
+}
+
+// isRangeFilter reads a `| sed -n '449,466p'`: a contiguous slice of what the
+// command before it printed, taken by line number. Like isLineFilter, it must
+// name no file of its own.
+function isRangeFilter(cmd: Command): { start: number; end: number | null } | null {
+  const name = cmd.words[0]
+  if (name.text !== 'sed' || name.quoted) return null
+  const args = cmd.words.slice(1)
+  if (args[0]?.text !== '-n') return null
+  const rest = args[1]?.text === '-e' ? args.slice(2) : args.slice(1)
+  if (rest.length !== 1 || rest[0].dynamic) return null
+  return parseSedRange(rest[0].text)
+}
+
+// wholeFile reports whether a view is the file from its first line with no end -
+// a `cat f`, a `git show rev:f`. That is what makes a filter's own line numbers,
+// or the range it slices out, line up with the file's.
+function wholeFile(view: FileView): boolean {
+  return view.start === 1 && view.end == null && !view.numbered
 }
 
 // classify decides what one pipeline contributes to the output.
@@ -456,11 +611,24 @@ function classify(p: Pipeline): ScriptStep {
   let cmds = p.cmds
   let trimmedFrom: 'head' | 'tail' | null = null
   let filtered = false
+  // A filter that numbered what it kept, or sliced a range out of it. Both only
+  // mean anything against a whole-file producer, and are refused below when the
+  // producer is not one.
+  let numbered = false
+  let sliced: { start: number; end: number | null } | null = null
   while (cmds.length > 1) {
     const last = cmds[cmds.length - 1]
     const trim = isFilter(last)
+    const line = isLineFilter(last)
+    const range = isRangeFilter(last)
     if (trim) trimmedFrom = trim
-    else if (isLineFilter(last)) filtered = true
+    // A passthrough drops nothing, so it is not even a trim: `git log | cat`
+    // is that log, and `sed -n 1,20p f | cat` is still lines 1 to 20 of f.
+    else if (isPassthrough(last)) { /* nothing to record */ }
+    else if (line) { filtered = true; numbered ||= line.numbered }
+    // Only ever one of these, and nothing may follow it: a second range would
+    // be counted against the first one's output rather than the file.
+    else if (range && !sliced && !filtered && !trimmedFrom) sliced = range
     else break
     cmds = cmds.slice(0, -1)
   }
@@ -472,27 +640,46 @@ function classify(p: Pipeline): ScriptStep {
   if (cmd.redirected) return { kind: 'silent' }
   if (!name.quoted && (SILENT.has(name.text) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(name.text))) return { kind: 'silent' }
 
+  const unknown: ScriptStep = { kind: 'unknown', command: p.raw }
+
   const echo = parseEcho(cmd.words)
-  if (echo !== null && !trimmedFrom && !filtered) {
+  if (echo !== null && !trimmedFrom && !filtered && !sliced) {
     return echo.trim().length >= MIN_MARKER_LEN ? { kind: 'marker', text: echo } : { kind: 'echo', text: echo }
   }
 
   const matches = parseMatches(cmd.words)
-  if (matches) return { kind: 'matches', match: { paths: matches.paths, numbered: matches.numbered }, command: p.raw }
+  // A search's output is lines from all over a file, so a filter's own numbers
+  // or line range describe the STREAM and nothing that could be pointed at.
+  if (matches) {
+    return numbered || sliced
+      ? unknown
+      : { kind: 'matches', match: { paths: matches.paths, numbered: matches.numbered }, command: p.raw }
+  }
 
-  if (parseGitReport(cmd.words)) return { kind: 'git', command: p.raw }
-
+  // Asked BEFORE the git report below, because `git show <rev>:<path>` is the
+  // one git command that prints a file rather than a report about one.
   if (!cmd.words.some((w) => w.dynamic)) {
     const view = parseView(cmd.words.map((w) => w.text), p.raw)
     if (view) {
-      // Grepped, so the lines that came through are no longer a contiguous
-      // slice to number from `start` - but they are still that file's lines,
-      // and still want its language. (`cat -n` is the exception: its numbers
-      // ride in the text, and nothing downstream can read them back off.)
+      // A range sliced out of the stream is a range of the FILE - but only when
+      // the stream WAS the whole file, since that is what makes line 449 of the
+      // one line 449 of the other.
+      if (sliced) {
+        return wholeFile(view)
+          ? { kind: 'view', view: { ...view, start: sliced.start, end: sliced.end } }
+          : unknown
+      }
       if (filtered) {
-        return view.numbered
-          ? { kind: 'unknown', command: p.raw }
-          : { kind: 'matches', match: { paths: [view.path], numbered: false }, command: p.raw }
+        // Grepped, so the lines that came through are no longer a contiguous
+        // slice to number from `start` - but they are still that file's lines,
+        // and still want its language.
+        //
+        // A `-n` on that grep numbered the stream, which is the file's own
+        // numbering on a whole-file read and nothing at all otherwise. (`cat -n`
+        // is the other way round: its numbers ride in the text, where nothing
+        // downstream can read them back off.)
+        if (view.numbered || (numbered && !wholeFile(view))) return unknown
+        return { kind: 'matches', match: { paths: [view.path], numbered }, command: p.raw }
       }
       // A `| head` keeps the start of what was printed and drops the end; a
       // `| tail` keeps an end this parser cannot number.
@@ -501,7 +688,12 @@ function classify(p: Pipeline): ScriptStep {
       return { kind: 'view', view }
     }
   }
-  return { kind: 'unknown', command: p.raw }
+
+  // A filter's line numbers would ride in the text as a `12:` prefix that
+  // lib/gitOutput has no shape for.
+  if (parseGitReport(cmd.words)) return numbered ? unknown : { kind: 'git', command: p.raw }
+
+  return unknown
 }
 
 // parseScriptSteps reads a whole Bash command as the sequence of steps it runs.
@@ -567,6 +759,32 @@ function mergeSearches(steps: ScriptStep[]): ScriptStep[] {
   return out
 }
 
+// searchExtent is how many lines at one END of a stretch carry the prefixes a
+// search writes on its own output - `path:12:`, `12:`, `path:` - and so cannot
+// have come from whatever ran on the other side of it.
+//
+// This is the one boundary in this module that comes from the OUTPUT's shape
+// rather than from the script, and it is here because the script cannot say
+// where it is: an `ls dir` followed by a `grep -rn x dir/*.ts` bounds neither
+// producer, so both used to lose their attribution to one plain block even
+// though every line of the search announces itself and no line of the `ls`
+// does.
+//
+// Null when the search prints no prefix at all (one named file, no `-n`), which
+// is exactly when there is nothing to tell the two apart by.
+function searchExtent(step: ScriptStep, slice: string[], lo: number, hi: number, from: 'start' | 'end'): number | null {
+  if (step.kind !== 'matches') return null
+  const shapes: RegExp[] = []
+  if (step.match.numbered) shapes.push(PATH_NUMBERED, NUMBERED)
+  if (step.match.paths.length !== 1) shapes.push(PATH_ONLY)
+  if (shapes.length === 0) return null
+  // A `--` between context groups is the search's own, and carries no prefix.
+  const owns = (line: string) => line.trim() === '--' || shapes.some((re) => re.test(line))
+  let n = 0
+  while (hi - lo - n > 0 && owns(slice[from === 'start' ? lo + n : hi - n - 1])) n++
+  return n > 0 ? n : null
+}
+
 // distribute hands a stretch of output to the producers that ran inside it.
 // Null when the boundaries between them are not knowable.
 //
@@ -577,6 +795,9 @@ function mergeSearches(steps: ScriptStep[]): ScriptStep[] {
 // puts a spacing `echo` after each search as often as before it, and taking the
 // leading end only meant that blank line cost the search above it its whole
 // attribution.
+//
+// A search at either end is bounded too, by its own prefixes rather than by a
+// count - see searchExtent.
 function distribute(producers: ScriptStep[], slice: string[]): string[][] | null {
   if (producers.length === 0) return null
   if (producers.length === 1) return [slice]
@@ -594,7 +815,7 @@ function distribute(producers: ScriptStep[], slice: string[]): string[][] | null
 
   let head = 0
   for (; head < producers.length; head++) {
-    const limit = stepLimit(producers[head])
+    const limit = stepLimit(producers[head]) ?? searchExtent(producers[head], slice, lo, hi, 'start')
     if (limit == null) break
     const n = Math.min(limit, hi - lo)
     if (!fits(producers[head], lo)) continue
@@ -603,7 +824,7 @@ function distribute(producers: ScriptStep[], slice: string[]): string[][] | null
   }
   let tail = producers.length - 1
   for (; tail > head; tail--) {
-    const limit = stepLimit(producers[tail])
+    const limit = stepLimit(producers[tail]) ?? searchExtent(producers[tail], slice, lo, hi, 'end')
     if (limit == null) break
     const n = Math.min(limit, hi - lo)
     if (!fits(producers[tail], hi - n)) continue

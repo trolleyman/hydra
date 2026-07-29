@@ -70,6 +70,40 @@ describe('parseScriptSteps', () => {
     expect(kinds('grep -n foo a.go | wc -l\ncat b.go')).toEqual(['unknown', 'view'])
   })
 
+  it('reads `git show <rev>:<path>` as the file it prints, not as a report', () => {
+    expect(steps('git show main:web/src/App.tsx')[0]).toMatchObject({
+      kind: 'view',
+      view: { path: 'web/src/App.tsx', start: 1, end: null },
+    })
+    // A `| sed -n 'A,Bp'` over a whole file is that file's lines A to B.
+    expect(steps("git show main:web/src/App.tsx 2>/dev/null | sed -n '449,466p'")[0]).toMatchObject({
+      kind: 'view',
+      view: { path: 'web/src/App.tsx', start: 449, end: 466 },
+    })
+    // ...and a `-n` on a grep over one numbers the file, not just the stream.
+    expect(steps('git show main:web/src/App.tsx | grep -n "export function" -A 8')[0]).toMatchObject({
+      kind: 'matches',
+      match: { paths: ['web/src/App.tsx'], numbered: true },
+    })
+    // Neither means anything against a stream that was NOT the whole file.
+    expect(kinds("sed -n '1,40p' a.go | sed -n '5,9p'\ncat b.go")).toEqual(['unknown', 'view'])
+    expect(kinds('head -50 a.go | grep -n foo\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('grep -rn foo src | grep -n bar\ncat b.go')).toEqual(['unknown', 'view'])
+    // Still a report when it is not naming a blob.
+    expect(kinds('git show HEAD\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git show --stat main:a.go\necho ----')).toEqual(['git', 'marker'])
+  })
+
+  it('sees through a trailing cat, which drops nothing at all', () => {
+    // Not even a trim, so the slice keeps both of its ends.
+    expect(steps('sed -n 40,110p a.go | cat')[0]).toMatchObject({ kind: 'view', view: { start: 40, end: 110 } })
+    expect(steps('echo ---- | cat')[0]).toEqual({ kind: 'marker', text: '----' })
+    // A `cat` that rewrites the lines, or that prints a file of its own, is not
+    // passing the pipe along.
+    expect(kinds('sed -n 40,110p a.go | cat -n\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('sed -n 40,110p a.go | cat b.go\ncat b.go')).toEqual(['unknown', 'view'])
+  })
+
   it('sees through a trailing grep that only drops lines', () => {
     expect(steps('grep -rn foo src | grep -v _test.go | head -20')[0]).toEqual({
       kind: 'matches',
@@ -95,11 +129,24 @@ describe('parseScriptSteps', () => {
     expect(kinds('git status\necho ----')).toEqual(['git', 'marker'])
     expect(kinds('git -C /repo show --stat HEAD | tail -20\necho ----')).toEqual(['git', 'marker'])
     expect(kinds('git log --oneline -10\necho ----')).toEqual(['git', 'marker'])
-    // A patch wants a diff view, not a line-shape colouriser - and a caller's
-    // own format could put anything on any line.
-    expect(kinds('git show HEAD\necho ----')).toEqual(['unknown', 'marker'])
-    expect(kinds('git log -p\necho ----')).toEqual(['unknown', 'marker'])
+    // `log` prints commit headers and messages whatever it is asked for; a
+    // patch takes an explicit `-p`. `--graph` only adds a margin.
+    expect(kinds('git log\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git log -1\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git --no-pager log --graph --oneline --all\necho ----')).toEqual(['git', 'marker'])
+    // The `| cat` that stops git paging changes nothing about what it printed.
+    expect(steps('git log --oneline -1 | cat')[0]).toEqual({ kind: 'git', command: 'git log --oneline -1 | cat' })
+    expect(kinds('git log | cat | head -20\necho ----')).toEqual(['git', 'marker'])
+    // A patch is a shape too.
+    expect(kinds('git show HEAD\necho ----')).toEqual(['git', 'marker'])
+    expect(kinds('git log -p\necho ----')).toEqual(['git', 'marker'])
+    expect(steps('cd .. && git diff internal/chat/manager.go | head -20')).toMatchObject([
+      { kind: 'silent' },
+      { kind: 'git', command: 'git diff internal/chat/manager.go | head -20' },
+    ])
+    // A listing, or a caller's own format, could put anything on any line.
     expect(kinds('git show --stat --pretty=format:%s\necho ----')).toEqual(['unknown', 'marker'])
+    expect(kinds('git diff --name-only\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git status --porcelain=v2\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git commit -m x\necho ----')).toEqual(['unknown', 'marker'])
   })
@@ -115,10 +162,41 @@ describe('parseScriptSteps', () => {
   it('declines a script with nothing to describe', () => {
     expect(parseScriptSteps('go test ./...')).toBeNull()
     expect(parseScriptSteps('cd web && bun run lint')).toBeNull()
-    // Shapes it will not model at all.
+    // A heredoc body is DATA: the `cat a.go` inside this one is a line of the
+    // file being written, not a step that read one.
     expect(parseScriptSteps("cat <<'EOF' > f\ncat a.go\nEOF")).toBeNull()
+    // A group is one opaque producer, so this describes nothing either.
     expect(parseScriptSteps('(cat a.go)')).toBeNull()
+    // Shapes it will not model at all.
     expect(parseScriptSteps('cat a.go &')).toBeNull()
+    expect(parseScriptSteps("cat 'a.go")).toBeNull()
+  })
+
+  it('steps over a heredoc rather than refusing the whole script', () => {
+    // The body is stdin for the command above it - nothing in it ran, and
+    // nothing in it reached the transcript.
+    expect(kinds("python3 - <<'PY'\nprint('x')\nPY\ngrep -n foo a.go")).toEqual(['unknown', 'matches'])
+    expect(kinds('cat <<-EOF\n\tbody\n\tEOF\ncat a.go')).toEqual(['unknown', 'view'])
+    // An unterminated body runs to the end, as the shell would have taken it.
+    expect(kinds("cat a.go\npython3 - <<'PY'\nprint('x')")).toEqual(['view', 'unknown'])
+    // A here-string's word is data too, not a file this read.
+    expect(kinds('grep -c foo <<< "$text"\ncat a.go')).toEqual(['unknown', 'view'])
+    // An arithmetic shift is not a heredoc.
+    expect(kinds('echo $(( 1 << 2 ))\ncat a.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('steps over a group as one opaque producer', () => {
+    // The `echo` separators around it still anchor, which is the whole point:
+    // one unmodellable step used to cost every other step in the script its
+    // attribution.
+    expect(kinds('echo ----\n(gzip -dc x.gz | grep -o y | head -5)\necho ====\ncat a.go')).toEqual([
+      'marker', 'unknown', 'marker', 'view',
+    ])
+    expect(kinds('{ cat a.go; echo x; }\ncat b.go')).toEqual(['unknown', 'view'])
+    // A brace EXPANSION is a word, not a group.
+    expect(kinds('cat src/{a,b}.go\ncat b.go')).toEqual(['unknown', 'view'])
+    // A group that never closes is not one.
+    expect(parseScriptSteps('(cat a.go\ncat b.go')).toBeNull()
   })
 })
 
@@ -169,6 +247,34 @@ describe('splitScriptOutput', () => {
     // The file's own text contains the marker; the section must not stop there.
     const sections = splitScriptOutput(steps('sed -n 1,3p a.go\necho ---\nsed -n 1,1p b.go'), 'a1\n---\na3\n---\nb1')
     expect(sections?.map((s) => s.lines)).toEqual([['a1', '---', 'a3'], ['---'], ['b1']])
+  })
+
+  it('splits a search off an unmodellable neighbour by its own prefixes', () => {
+    // Neither an `ls` nor the search after it is bounded by anything the script
+    // says - but every line the search printed announces where it came from,
+    // and no line of the `ls` does.
+    const split = splitScriptOutput(
+      steps('ls web/scripts/lib/\ngrep -rn gstatic web/scripts/lib/*.ts'),
+      'browserProxy.ts\nfontCache.ts\nweb/scripts/lib/fontCache.ts:19:const FONT_HOSTS = /x/',
+    )
+    expect(split?.map((s) => [s.kind, s.lines])).toEqual([
+      ['plain', ['browserProxy.ts', 'fontCache.ts']],
+      ['matches', ['web/scripts/lib/fontCache.ts:19:const FONT_HOSTS = /x/']],
+    ])
+    // The same the other way round, and with the bare `12:` a single-file
+    // search numbers its output with.
+    const before = splitScriptOutput(
+      steps('grep -n foo a.go\nls dir/'),
+      '12:foo()\n30:foo()\na.txt\nb.txt',
+    )
+    expect(before?.map((s) => [s.kind, s.lines])).toEqual([
+      ['matches', ['12:foo()', '30:foo()']],
+      ['plain', ['a.txt', 'b.txt']],
+    ])
+    // A search that prints NO prefix (one named file, no `-n`) says nothing
+    // about where its lines end, so there is nothing to split on and the card
+    // keeps its plain output panel.
+    expect(splitScriptOutput(steps('ls dir/\ngrep foo a.go'), 'a.txt\nfoo()')).toBeNull()
   })
 
   it('falls back to plain text where it cannot tell the producers apart', () => {

@@ -54,6 +54,47 @@ describe('gitOutputSpans', () => {
     ])
   })
 
+  it('lowlights the address on an author line', () => {
+    expect(spans('Author: Callum Tolley <cgtrolley@gmail.com>')).toEqual([
+      [['Author:', 'dim'], [' ', ''], ['Callum Tolley', ''], [' <cgtrolley@gmail.com>', 'dim']],
+    ])
+  })
+
+  it('picks the sha out of a --oneline log', () => {
+    expect(spans('832c46c8 Merge branch \'main\'')).toEqual([
+      [['832c46c8', 'sha'], [' ', ''], ["Merge branch 'main'", '']],
+    ])
+  })
+
+  it('colours the refs a decorated --oneline log carries, and only those', () => {
+    expect(spans('832c46c8 (HEAD -> main, origin/main) Fix it', '4ff1e2a1 (tag: v1.2) Ship it')).toEqual([
+      [['832c46c8', 'sha'], [' ', ''], ['(HEAD -> main, origin/main) ', 'ref'], ['Fix it', '']],
+      [['4ff1e2a1', 'sha'], [' ', ''], ['(tag: v1.2) ', 'ref'], ['Ship it', '']],
+    ])
+    // A subject that merely opens with a parenthesis is a subject.
+    expect(spans('4ff1e2a1 (chore) bump deps')).toEqual([
+      [['4ff1e2a1', 'sha'], [' ', ''], ['(chore) bump deps', '']],
+    ])
+  })
+
+  it('dims a --graph margin and reads the line behind it', () => {
+    expect(spans('* 832c46c8 Fix it', '|\\  ', '| * 4ff1e2a1 Ship it', '|/  ')).toEqual([
+      [['* ', 'dim'], ['832c46c8', 'sha'], [' ', ''], ['Fix it', '']],
+      [['|\\  ', 'dim']],
+      [['| * ', 'dim'], ['4ff1e2a1', 'sha'], [' ', ''], ['Ship it', '']],
+      [['|/  ', 'dim']],
+    ])
+    // The same margin over a full log's commit header.
+    expect(spans('*   commit a7401035', '|\\  Merge: 5d671ab0 a7401035')).toEqual([
+      [['*   ', 'dim'], ['commit ', 'dim'], ['a7401035', 'sha']],
+      [['|\\  ', 'dim'], ['Merge:', 'dim'], [' ', ''], ['5d671ab0 a7401035', 'sha']],
+    ])
+  })
+
+  it('leaves a bulleted commit message alone rather than reading it as a graph', () => {
+    expect(spans('    * dropped the retry loop')).toEqual([[['    * dropped the retry loop', '']]])
+  })
+
   it('takes staged or not from the heading above the entry', () => {
     const out = spans(
       'On branch main',
@@ -70,6 +111,56 @@ describe('gitOutputSpans', () => {
     expect(out[3]).toEqual([['\t', ''], ['modified:', 'add'], ['   ', ''], ['a.go', 'add']])
     expect(out[5]).toEqual([['\t', ''], ['modified:', 'del'], ['   ', ''], ['b.go', 'del']])
     expect(out[7]).toEqual([['\t', ''], ['scratch/', 'del']])
+  })
+
+  it('colours a patch by direction, with its header receding', () => {
+    expect(spans(
+      'diff --git a/internal/chat/manager.go b/internal/chat/manager.go',
+      'index 560e9b39..28c6f309 100644',
+      '--- a/internal/chat/manager.go',
+      '+++ b/internal/chat/manager.go',
+      '@@ -556,7 +556,9 @@ func (m *Manager) RetractOrphanedTurn(id string) error {',
+      ' \tif len(orphans) == 0 {',
+      '-\tif _, err := s.Append("messages_retracted", m); err != nil {',
+      '+\tretracted := MessagesRetracted{}',
+      '\\ No newline at end of file',
+    )).toEqual([
+      [['diff --git ', 'dim'], ['a/internal/chat/manager.go b/internal/chat/manager.go', '']],
+      [['index ', 'dim'], ['560e9b39..28c6f309', 'sha'], [' 100644', 'dim']],
+      [['--- ', 'dim'], ['a/internal/chat/manager.go', '']],
+      [['+++ ', 'dim'], ['b/internal/chat/manager.go', '']],
+      [['@@ -556,7 +556,9 @@', 'ref'], [' func (m *Manager) RetractOrphanedTurn(id string) error {', 'dim']],
+      [[' \tif len(orphans) == 0 {', '']],
+      [['-\tif _, err := s.Append("messages_retracted", m); err != nil {', 'del']],
+      [['+\tretracted := MessagesRetracted{}', 'add']],
+      [['\\ No newline at end of file', 'dim']],
+    ])
+  })
+
+  it('reads a patch of a new file', () => {
+    expect(spans('new file mode 100644', '--- /dev/null', '+++ b/a.go')).toEqual([
+      [['new file mode 100644', 'dim']],
+      // Not a path anyone is looking for.
+      [['--- ', 'dim'], ['/dev/null', 'dim']],
+      [['+++ ', 'dim'], ['b/a.go', '']],
+    ])
+  })
+
+  it('runs the patch state through a log -p, and drops it at the next commit', () => {
+    const out = spans(
+      'commit a7401035',
+      '    - dropped the retry loop',
+      'diff --git a/a.go b/a.go',
+      '-\told',
+      'commit 5d671ab0',
+      '    - and the backoff with it',
+    )
+    // A dash in a commit message is not a deletion...
+    expect(out[1]).toEqual([['    - dropped the retry loop', '']])
+    expect(out[3]).toEqual([['-\told', 'del']])
+    // ...on either side of the patch.
+    expect(out[4]).toEqual([['commit ', 'dim'], ['5d671ab0', 'sha']])
+    expect(out[5]).toEqual([['    - and the backoff with it', '']])
   })
 
   it('leaves a line it has no shape for alone', () => {

@@ -28,6 +28,24 @@ describe('parseFileViewScript', () => {
     expect(views('tail -n 20 a.go').map((v) => [v.start, v.end])).toEqual([[null, null]])
   })
 
+  it('reads a git blob as a read of the path in it', () => {
+    // The revision goes: the command above the content already says which one,
+    // and what the renderer wants from a path is its language, which does not
+    // change with the revision.
+    expect(views('git show main:web/src/App.tsx').map((v) => [v.path, v.start, v.end])).toEqual([
+      ['web/src/App.tsx', 1, null],
+    ])
+    expect(views('git show HEAD~2:a.go').map((v) => [v.path])).toEqual([['a.go']])
+    expect(views('git show :a.go').map((v) => [v.path])).toEqual([['a.go']])
+    expect(views('git -C /repo show main:a.go').map((v) => [v.path])).toEqual([['a.go']])
+    // Everything else git prints is a report about the repository, not a file.
+    expect(parseFileViewScript('git show HEAD')).toBeNull()
+    expect(parseFileViewScript('git show --stat main:a.go')).toBeNull()
+    expect(parseFileViewScript('git show main:a.go b.go')).toBeNull()
+    expect(parseFileViewScript('git show main:')).toBeNull()
+    expect(parseFileViewScript('git log --oneline')).toBeNull()
+  })
+
   it('keeps the path as written', () => {
     expect(views('cat ~/.claude/settings.json')[0].path).toBe('~/.claude/settings.json')
     expect(views("sed -n 1,5p 'my file.go'")[0].path).toBe('my file.go')

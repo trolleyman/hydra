@@ -1,0 +1,16 @@
+# The generated webfonts. Not committed - `npm run build-fonts` (which
+# `npm run build` runs first) fetches them from their upstream releases and, for
+# the families that need it, subsets them into place. See ../../scripts/build-fonts.ts.
+#
+# Everything NOT listed here is checked in and must stay: the two upstream
+# licences, and noto-sans-math-arrows.woff2 (a hand-picked face, not generated).
+
+# Cut from the Iosevka releases.
+iosevka-*.woff2
+
+# The Nerd Fonts symbol fallback, appended to every mono stack.
+nerd-symbols-*.woff2
+
+# Google's own stylesheet and faces, mirrored so nothing is fetched at runtime.
+google.css
+google/

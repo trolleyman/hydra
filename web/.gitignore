@@ -27,3 +27,9 @@ playwright-report
 *.njsproj
 *.sln
 *.sw?
+
+# Build receipt for the self-hosted webfonts - records what public/fonts/ was
+# built from, so a matching build is skipped. Deliberately NOT in public/, which
+# vite copies wholesale into dist/ and web/embed.go bakes into the binary; a
+# build receipt does not belong in a shipped artifact. See scripts/build-fonts.ts.
+/.iosevka-build.json

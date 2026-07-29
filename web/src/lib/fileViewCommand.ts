@@ -134,7 +134,10 @@ function lexSteps(script: string): RawStep[] | null {
 
 // parseSedRange reads the one accepted sed script: a print of a contiguous line
 // range with no other command attached. `40p`, `40,110p`, `40,$p`.
-function parseSedRange(expr: string): { start: number; end: number | null } | null {
+//
+// Exported for lib/shellSections, where the same script with no file operand is
+// a filter that narrows what the command before it printed.
+export function parseSedRange(expr: string): { start: number; end: number | null } | null {
   const m = /^(\d+)(?:,(\d+|\$))?p$/.exec(expr)
   if (!m) return null
   const start = Number(m[1])
@@ -171,6 +174,33 @@ function isOperand(word: string): boolean {
   return word !== '' && !word.startsWith('-')
 }
 
+// parseGitBlob reads `git show <rev>:<path>`, which is the odd one out among git
+// commands: it prints a FILE - the blob at that revision, byte for byte - and
+// not a report about the repository. So it is a read of `<path>`, and wants that
+// file's language and line numbers rather than lib/gitOutput's colours.
+//
+// The revision itself is dropped. It says which VERSION was printed, which the
+// command line above the content already shows, and the one thing the renderer
+// needs from a path - what language it is - is the same at every revision.
+function parseGitBlob(words: string[]): string | null {
+  // git's own options come before the subcommand; `-C` and `-c` take the word
+  // after them, and none of them change what `show` prints.
+  let i = 1
+  while (i < words.length && words[i].startsWith('-')) {
+    if (words[i] === '-C' || words[i] === '-c') i++
+    i++
+  }
+  if (words[i] !== 'show') return null
+  const args = words.slice(i + 1)
+  // Exactly one operand, and no flags: a `--stat` or a second revision would
+  // make this something other than one file's contents.
+  if (args.length !== 1 || !isOperand(args[0])) return null
+  const at = args[0].indexOf(':')
+  const path = at < 0 ? '' : args[0].slice(at + 1)
+  // `git show :file` (the index) is a blob too; `git show rev:` is not a file.
+  return path === '' || path.startsWith('-') ? null : path
+}
+
 // parseView turns one step into the file view it performs, or null when the
 // step is not a plain read of a single named file.
 //
@@ -200,6 +230,11 @@ export function parseView(words: string[], raw: string): FileView | null {
     // the bytes printed.
     if (files.length !== 1 || flags.some((f) => f !== '-n' && f !== '--number')) return null
     return { ...base, path: files[0], start: 1, end: null, numbered: flags.length > 0 }
+  }
+
+  if (tool === 'git') {
+    const path = parseGitBlob(words)
+    return path === null ? null : { ...base, path, start: 1, end: null }
   }
 
   if (tool === 'head' || tool === 'tail') {
