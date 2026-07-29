@@ -9,7 +9,7 @@ mode for any other agent type.
 Both providers converge on one contract. The daemon normalizes every provider
 line into Hydra's own sequenced event log (`internal/chat`), and that log is the
 only thing a chat socket carries. Nothing provider-shaped reaches the browser as
-transport: a provider's own payload rides *inside* a normalized event, where the
+transport: a provider's own payload rides *inside* a Hydra event, where the
 Raw panel can show it, but it never determines the wire format or the reducer.
 
 ## Every socket is declared in the schema
@@ -79,7 +79,7 @@ narrows on a generated union rather than a hand-written mapping.
 `ChatEvent` describes the same wire bytes with `payload` left open, and that is
 what the frames carry - the event store reads `seq`/`type` off every event and
 appends it to a log, which needs a concrete struct, and a generated `oneOf` is
-an opaque wrapper it cannot field-access. `asNormalizedChatEvent` is the single
+an opaque wrapper it cannot field-access. `asChatEvent` is the single
 point where one becomes the other.
 
 Because the daemon builds its own typed events rather than consuming the union,
@@ -95,7 +95,7 @@ Server to client:
 | --- | --- |
 | `state_snapshot` | the projection (current state) and its `through` watermark |
 | `chat_history` | one page of durable events, oldest-first, with `next_cursor` and `done` |
-| `chat_event` | one live normalized event |
+| `chat_event` | one live event |
 | `subagent_events` | one sub-agent's full step history |
 | `replay_done` | the initial window has been delivered |
 | `queue` | the head's still-queued messages |
@@ -174,12 +174,12 @@ CLIs put neither on the main stream:
 - the main transcript's `<task-notification>` records - a background sub-agent's
   completion, the only live signal that settles its card.
 
-Both go to the manager, not the socket, and come back out as ordinary
-normalized events.
+Both go to the manager, not the socket, and come back out as ordinary chat
+events.
 
 ## The Claude driver
 
-`internal/chat/claude.go` maps stream-json to normalized events: `system:init`
+`internal/chat/claude.go` maps stream-json to chat events: `system:init`
 to `conversation_started`, assistant content blocks to `assistant_message` /
 `reasoning_completed` / `tool_started`, `tool_result` blocks to
 `tool_completed`, `result` to `turn_completed`/`turn_failed`, `control_request`
@@ -317,12 +317,12 @@ Codex runs with bypassed approvals because the process is already inside Hydra's
 sandbox, and app-server turns are configured equivalently. Server-request
 handling is still defensive: Hydra replies automatically only to the classes it
 already auto-allows and surfaces genuinely interactive elicitation as a
-normalized request card. App-server is never left blocked merely because no
+request card. App-server is never left blocked merely because no
 browser is attached.
 
 ## Git commits as sequenced events
 
-Commit chips are durable normalized events, not a second data set merged into
+Commit chips are durable events in the log, not a second data set merged into
 the transcript by timestamp - provider output, filesystem polling, HTTP fetches
 and author timestamps are independent clocks, so timestamps cannot guarantee a
 commit renders after the tool card that created it.
@@ -374,9 +374,9 @@ uncertain delivery state instead of silently sending a possibly duplicated turn.
 
 ## Presentation
 
-`AgentChat.tsx` consumes normalized events and converts each into the
+`AgentChat.tsx` consumes the event log and converts each event into the
 presentation shapes its card renderers already understand
-(`normalizedToProviderEvents`). Normal cards show semantic fields; the
+(`toProviderEvents`). Normal cards show semantic fields; the
 provider's own payload stays available under Raw, and blocks Hydra reconstructed
 rather than received are marked synthetic so Raw does not present them as
 protocol payloads the provider never sent.
@@ -432,7 +432,7 @@ emulation is out of scope.
 
 `/agent/agent-chat` and `/agent/agent-chat-codex` serve canned conversations
 over the same contract (`internal/http/simulation_chat.go`). The fixtures are
-written directly as normalized events, and each one names the rendering
+written directly as chat events, and each one names the rendering
 behaviour it guards, so the simulation is a fair test of the reducer rather than
 a happy path. The simulated socket also answers `load_events_before` and
 `load_subagent`, so pagination is exercised the way a real client uses it.
