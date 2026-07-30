@@ -64,7 +64,7 @@ import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
-import { useAutoPairStore, usePasteMarkersStore } from '../lib/composerPrefs'
+import { useAutoPairStore, usePasteMarkersStore, useSpellcheckStore } from '../lib/composerPrefs'
 import { fenceEnterEdit } from '../lib/autoPair'
 import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
@@ -4868,6 +4868,12 @@ export function QuestionCard({
   // is simply gone.
   const [submitted, setSubmitted] = useState(false)
   const [sent, setSent] = useState(false)
+  // The free-text boxes below are plain textareas rather than
+  // HighlightedTextareas, so they follow the same spellcheck preference by hand
+  // (see lib/composerPrefs) - an answer typed here is the same kind of text as
+  // one typed in the composer, and the two reading differently was the point of
+  // the setting.
+  const spellcheck = useSpellcheckStore((s) => s.enabled)
   // `submitted` stops counting the moment the card is known expired: that is
   // the daemon reporting it never delivered the answer (question_expired), so
   // the optimistic "Answered" was a lie and the card unlocks for the message
@@ -5076,6 +5082,7 @@ export function QuestionCard({
           </span>
           <textarea
             rows={1}
+            spellCheck={spellcheck}
             autoFocus={value === '' && !answered}
             value={value}
             onClick={(e) => e.stopPropagation()}
@@ -5220,6 +5227,7 @@ export function QuestionCard({
                     </span>
                     <textarea
                       rows={1}
+                      spellCheck={spellcheck}
                       value={showOther[qi]}
                       onChange={(e) => {
                         const v = e.target.value

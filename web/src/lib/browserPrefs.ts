@@ -13,7 +13,7 @@
 import { useThemeStore } from './theme'
 import { fontStores, fontSizeStores } from './fontPrefs'
 import { FONT_ROLES, FONT_ROLE_SPEC } from './fonts'
-import { usePasteMarkersStore, useAutoPairStore } from './composerPrefs'
+import { usePasteMarkersStore, useAutoPairStore, useSpellcheckStore } from './composerPrefs'
 import {
   useChatStreamStore,
   useChatStepsStore,
@@ -36,6 +36,7 @@ const PREF_STORES = [
   ...Object.values(fontSizeStores),
   usePasteMarkersStore,
   useAutoPairStore,
+  useSpellcheckStore,
   useChatStreamStore,
   useChatStepsStore,
   useChatCodeLinesStore,
@@ -70,6 +71,7 @@ export function browserPrefs(): Pref[] {
   const theme = useThemeStore.getState()
   const paste = usePasteMarkersStore.getState()
   const pair = useAutoPairStore.getState()
+  const spell = useSpellcheckStore.getState()
   const stream = useChatStreamStore.getState()
   const steps = useChatStepsStore.getState()
   const lines = useChatCodeLinesStore.getState()
@@ -100,6 +102,7 @@ export function browserPrefs(): Pref[] {
     }),
     simple('paste markers', () => paste.enabled, paste.setEnabled, true),
     simple('auto-close pairs', () => pair.enabled, pair.setEnabled, true),
+    simple('spellcheck', () => spell.enabled, spell.setEnabled, false),
     simple('smooth streaming', () => stream.smooth, stream.setSmooth, true),
     simple('step folding', () => steps.grouped, steps.setGrouped, true),
     simple('code line numbers', () => lines.lineNumbers, lines.setLineNumbers, true),
