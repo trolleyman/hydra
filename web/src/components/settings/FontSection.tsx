@@ -12,6 +12,7 @@ import {
 } from '../../lib/fonts'
 import { Tooltip } from '../Tooltip'
 import { SettingSection } from './shared'
+import { ResetPrefsButton } from './ResetPrefsButton'
 
 // Fonts - client-only, global preferences (localStorage, like Theme) for the
 // four typefaces the app uses: the interface, chat-mode agent prose, code/diffs,
@@ -139,6 +140,9 @@ export function FontSection() {
   return (
     <SettingSection
       title="Fonts"
+      // Eight knobs in one section - four families and four sizes - is enough to
+      // want to undo on its own, without also resetting your theme.
+      action={<ResetPrefsButton group="fonts" what="fonts" size="sm" />}
       description="Typefaces for the interface, chat prose, code blocks and diffs, and the terminal panes. Each also takes a size, which moves that surface's text a pixel at a time - the whole shell for Interface, chat prose and its headings for Chat, the diff and repository views for Code, the grid for Terminal. Interface moves type only, so rows and spacing stay put; for bigger everything, use your browser's zoom. Saved in this browser only. Changing the terminal font or size re-measures its grid, so a running agent sees a resize."
     >
       <div className="flex flex-col gap-3">

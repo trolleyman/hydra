@@ -58,6 +58,25 @@ describe('browser prefs reset', () => {
     expect(browserPrefs()).toHaveLength(19)
   })
 
+  // The Fonts section's own reset is a filter over the same list, so it must
+  // move the eight font prefs and nothing else.
+  it('scopes a reset to one group', () => {
+    useThemeStore.getState().setMode('dark')
+    fontStores.chat.getState().setFont('source-serif')
+    fontSizeStores.ui.getState().setStep(2)
+    expect(changedBrowserPrefs()).toHaveLength(3)
+    expect(changedBrowserPrefs('fonts')).toHaveLength(2)
+
+    resetBrowserPrefs('fonts')
+
+    expect(changedBrowserPrefs('fonts')).toHaveLength(0)
+    expect(fontStores.chat.getState().font).toBe('merriweather')
+    expect(fontSizeStores.ui.getState().step).toBe(0)
+    // Not a font, so untouched.
+    expect(useThemeStore.getState().mode).toBe('dark')
+    expect(changedBrowserPrefs()).toHaveLength(1)
+  })
+
   describe('describeChanged', () => {
     const p = (label: string) => ({ label, isDefault: () => false, reset: () => {} })
 

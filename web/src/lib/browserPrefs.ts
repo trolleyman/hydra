@@ -46,17 +46,24 @@ const PREF_STORES = [
   useNotifyStore,
 ]
 
+// Which control a pref belongs to. The Fonts section has its own reset - eight
+// knobs in one section is enough to want to undo on its own, without touching
+// your theme - so its prefs are tagged, and every scope is a filter over the one
+// list rather than a second list that could disagree with it.
+export type PrefGroup = 'fonts'
+
 interface Pref {
   // What it is, for the confirm dialog's summary. Lower case: it is read in a
   // sentence ("Reset the chat font, the interface size and 2 others?").
   label: string
+  group?: PrefGroup
   isDefault: () => boolean
   reset: () => void
 }
 
 // A boolean/scalar pref: one getter, one setter, one default value.
-function simple<T>(label: string, get: () => T, set: (v: T) => void, fallback: T): Pref {
-  return { label, isDefault: () => get() === fallback, reset: () => set(fallback) }
+function simple<T>(label: string, get: () => T, set: (v: T) => void, fallback: T, group?: PrefGroup): Pref {
+  return { label, group, isDefault: () => get() === fallback, reset: () => set(fallback) }
 }
 
 export function browserPrefs(): Pref[] {
@@ -79,11 +86,17 @@ export function browserPrefs(): Pref[] {
     ...FONT_ROLES.map((role): Pref => {
       const store = fontStores[role].getState()
       const fallback = FONT_ROLE_SPEC[role].defaultId
-      return simple(`the ${FONT_ROLE_SPEC[role].label.toLowerCase()} font`, () => store.font, store.setFont, fallback)
+      return simple(
+        `the ${FONT_ROLE_SPEC[role].label.toLowerCase()} font`,
+        () => store.font,
+        store.setFont,
+        fallback,
+        'fonts',
+      )
     }),
     ...FONT_ROLES.map((role): Pref => {
       const store = fontSizeStores[role].getState()
-      return simple(`the ${FONT_ROLE_SPEC[role].label.toLowerCase()} size`, () => store.step, store.setStep, 0)
+      return simple(`the ${FONT_ROLE_SPEC[role].label.toLowerCase()} size`, () => store.step, store.setStep, 0, 'fonts')
     }),
     simple('paste markers', () => paste.enabled, paste.setEnabled, true),
     simple('auto-close pairs', () => pair.enabled, pair.setEnabled, true),
@@ -100,13 +113,14 @@ export function browserPrefs(): Pref[] {
   ]
 }
 
-// The prefs currently sitting on something other than their default.
-export function changedBrowserPrefs(): Pref[] {
-  return browserPrefs().filter((p) => !p.isDefault())
+// The prefs currently sitting on something other than their default. Pass a
+// group to ask about one section instead of the whole tab.
+export function changedBrowserPrefs(group?: PrefGroup): Pref[] {
+  return browserPrefs().filter((p) => (group ? p.group === group : true) && !p.isDefault())
 }
 
-export function resetBrowserPrefs(): void {
-  for (const p of changedBrowserPrefs()) p.reset()
+export function resetBrowserPrefs(group?: PrefGroup): void {
+  for (const p of changedBrowserPrefs(group)) p.reset()
 }
 
 function subscribeBrowserPrefs(onChange: () => void): () => void {
@@ -117,10 +131,10 @@ function subscribeBrowserPrefs(onChange: () => void): () => void {
 // A COUNT, not the list: useSyncExternalStore compares snapshots by identity and
 // would loop for ever on a fresh array. Callers that want the list call
 // changedBrowserPrefs() when they need it, which is on click.
-export function useChangedBrowserPrefCount(): number {
+export function useChangedBrowserPrefCount(group?: PrefGroup): number {
   return useSyncExternalStore(
     subscribeBrowserPrefs,
-    () => changedBrowserPrefs().length,
+    () => changedBrowserPrefs(group).length,
     () => 0,
   )
 }
