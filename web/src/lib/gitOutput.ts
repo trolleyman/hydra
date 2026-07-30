@@ -23,13 +23,20 @@ import type { OutputSpan } from './outputSpan'
 export type GitSpan = OutputSpan
 
 // The staged/unstaged split is the whole point of a status, so it gets the
-// green/red pair the diff viewer uses. Everything git prints as scaffolding -
-// labels, hints, the `|` in a diffstat - is dimmed so the paths read first.
+// green/red pair the diff viewer uses - for the entries where those two words
+// really do mean added and deleted (see OFF_SIDE). Everything git prints as
+// scaffolding - labels, hints, the `|` in a diffstat - is dimmed so the paths
+// read first.
 const DIM = 'text-stone-400 dark:text-stone-500'
 const ADD = 'text-green-600 dark:text-green-400'
 const DEL = 'text-red-600 dark:text-red-400'
 const SHA = 'text-amber-600 dark:text-amber-400'
 const REF = 'text-sky-700 dark:text-sky-400'
+// "Changed, and still there" - see OFF_SIDE. Its own step off the green/red
+// axis rather than a reuse of SHA, because a script that runs a `git status`
+// and a `git log --oneline` puts both in one section, and a sha and a status
+// column both sit at the head of their line.
+const MOD = 'text-yellow-600 dark:text-yellow-400'
 
 // A diffstat row: ` web/src/x.tsx | 32 ++++++----`, ` img.png | Bin 0 -> 12 bytes`.
 const STAT = /^( *)(\S.*?)( +\| +)(Bin .*?|\d+)( *)([+-]*)$/
@@ -109,14 +116,33 @@ const TRAILER = /^(Your branch |nothing to commit|nothing added to commit|no cha
 // An entry under one of those headings: `\tmodified:   web/src/x.tsx`. The
 // label runs to the colon, and can be two words (`both modified`, `added by us`).
 const ENTRY = /^(\t)([a-z][a-z ]*:)( *)(.*)$/
+// The long status's spelling of the codes in OFF_SIDE: the same file, still
+// there and different, so it takes the same amber rather than the colour of the
+// section it is under. Anchored to the label exactly - `both modified:` is an
+// unmerged path, which is a conflict and reads as one.
+const ENTRY_MOD = /^(modified|typechange):$/
 // An untracked or unmerged path, which is printed with no label at all.
 const BARE_ENTRY = /^(\t)(\S.*)$/
 
-// The `?` and `!` columns say "git is not tracking this", which is neither an
-// addition nor a deletion - the red git paints them is louder than they are.
+// Status codes whose meaning is neither of the two directions the column they
+// sit in stands for, so they are not coloured by it.
+//
+// `?` and `!` say "git is not tracking this at all", which is quieter than
+// either - they dim. `M` and `T` say the file is still there and different,
+// which is neither an addition nor a deletion, and the red git paints an
+// unstaged one reads as the louder of the two: a modified file is not a lost
+// file. They take the same amber this module gives a sha - something to look
+// at rather than something gone.
+//
+// The staged/unstaged split survives it. In a `--short` status that split is
+// drawn by WHICH column the letter is in (`M ` against ` M`), which is still
+// there to read; only the letters where "staged" genuinely means added and
+// "unstaged" genuinely means deleted still say it twice.
+const OFF_SIDE: Record<string, string> = { '?': DIM, '!': DIM, M: MOD, T: MOD }
+
 function columnClass(code: string, side: string): string {
   if (code === ' ') return ''
-  return code === '?' || code === '!' ? DIM : side
+  return OFF_SIDE[code] ?? side
 }
 
 // checkIgnoreSpans colours one line of a `git check-ignore -v`: where the rule
@@ -249,7 +275,7 @@ function shapeSpans(line: string, staged: boolean): GitSpan[] | null {
 
   const entry = ENTRY.exec(line)
   if (entry) {
-    const side = staged ? ADD : DEL
+    const side = ENTRY_MOD.test(entry[2]) ? MOD : staged ? ADD : DEL
     return [
       { text: entry[1], cls: '' },
       { text: entry[2], cls: side },
