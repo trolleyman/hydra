@@ -27,7 +27,7 @@ export const CrossProjectBanner: React.FC<{
   projectId?: string
   icon?: string | null
 }> = ({ project, tone, projectId, icon }) => (
-  <div className={`flex items-center gap-2 px-4 py-1.5 border-b font-mono text-[11px] ${TONES[tone]}`}>
+  <div className={`flex items-center gap-2 px-4 py-1.5 border-b font-mono text-2xs ${TONES[tone]}`}>
     {projectId ? (
       <ProjectIcon icon={icon} projectId={projectId} size={12} className="shrink-0" />
     ) : (

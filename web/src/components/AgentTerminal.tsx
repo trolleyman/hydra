@@ -722,7 +722,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         className="flex-1 min-h-0 overflow-hidden"
       />
       {notice && (
-        <div className="absolute top-2 left-2 px-2 py-1 bg-blue-900/90 text-gray-100 text-[10px] rounded border border-blue-700 shadow-lg pointer-events-none z-10 max-w-[80%] truncate">
+        <div className="absolute top-2 left-2 px-2 py-1 bg-blue-900/90 text-gray-100 text-3xs rounded border border-blue-700 shadow-lg pointer-events-none z-10 max-w-[80%] truncate">
           {notice}
         </div>
       )}
@@ -1014,7 +1014,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
           show (it would read "0x0") - suppress it there. */}
       {!chatActive && (
         <div
-          className={`absolute top-14 right-4 px-2 py-1 bg-gray-900/90 text-gray-200 text-[11px] font-mono rounded border border-gray-600 shadow-lg pointer-events-none z-20 transition-opacity duration-500 ${isResizing ? 'opacity-100' : 'opacity-0'}`}
+          className={`absolute top-14 right-4 px-2 py-1 bg-gray-900/90 text-gray-200 text-2xs font-mono rounded border border-gray-600 shadow-lg pointer-events-none z-20 transition-opacity duration-500 ${isResizing ? 'opacity-100' : 'opacity-0'}`}
         >
           {dims.cols}×{dims.rows}
         </div>
@@ -1154,7 +1154,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
 
         {/* Status + refresh */}
         <span
-          className={`ml-auto text-[10px] px-1.5 py-0.5 rounded font-medium ${
+          className={`ml-auto text-3xs px-1.5 py-0.5 rounded font-medium ${
             isRunning
               ? chatActive ? 'text-green-600 dark:text-green-400' : 'text-green-400'
               : isNeedsInput

@@ -48,7 +48,7 @@ function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
     // flex-1 min-w-0 so the two cells split their row evenly and the width-driven
     // images (w-full) each fill their half.
     <div className="flex-1 min-w-0">
-      <div className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
+      <div className="text-3xs font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
         // A plain click opens the image in the fullscreen lightbox; a middle click
         // opens its raw image file in a new browser tab. The image fills the cell
@@ -76,7 +76,7 @@ function ImageCell({ url, label, name, aspect, gallery, index, disableOpen }: {
         // select-none so rapid clicking near it never highlights the label text.
         <div className="select-none flex flex-col items-center justify-center gap-1 w-full h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
           <ImageOff className="w-5 h-5" />
-          <span className="text-[11px] font-medium">No image</span>
+          <span className="text-2xs font-medium">No image</span>
         </div>
       )}
     </div>
@@ -95,7 +95,7 @@ function LayerNode({ url, style }: { url?: string | null; style?: React.CSSPrope
   return (
     <div style={style} className={`${OVERLAY_CLASS} select-none flex flex-col items-center justify-center gap-1 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500`}>
       <ImageOff className="w-5 h-5" />
-      <span className="text-[11px] font-medium">No image</span>
+      <span className="text-2xs font-medium">No image</span>
     </div>
   )
 }
@@ -116,7 +116,7 @@ export function SegmentedToggle<T extends string>({ value, onChange, options }: 
           type="button"
           onClick={() => onChange(o.value)}
           aria-pressed={value === o.value}
-          className={`px-2 py-0.5 rounded text-[10px] font-medium tracking-wide transition-colors cursor-pointer ${
+          className={`px-2 py-0.5 rounded text-3xs font-medium tracking-wide transition-colors cursor-pointer ${
             value === o.value
               ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
               : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
@@ -175,7 +175,7 @@ function ABSwitch({ left, right, name, aspect, gallery, index, disableOpen }: {
             className="ml-auto"
           >
             <label
-              className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+              className={`flex items-center gap-1 text-3xs font-medium tracking-wide select-none ${
                 canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
               }`}
             >
@@ -338,13 +338,13 @@ function OnionCompare({ left, right, name, aspect, gallery, index, disableOpen }
       {/* data-no-tile-drag: this opacity slider owns its own horizontal drag, so the
           masonry tile's drag-to-resize must not hijack it (see startBodyResize). */}
       <div data-no-tile-drag className="flex items-center gap-2 mt-1">
-        <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">Before</span>
+        <span className="text-3xs font-semibold tracking-wide text-gray-400 dark:text-gray-500">Before</span>
         <input
           type="range" min={0} max={100} value={opacity}
           onChange={(e) => setOpacity(Number(e.target.value))}
           className="flex-1 accent-blue-500 cursor-pointer"
         />
-        <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">After</span>
+        <span className="text-3xs font-semibold tracking-wide text-gray-400 dark:text-gray-500">After</span>
       </div>
     </div>
   )

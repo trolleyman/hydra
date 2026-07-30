@@ -46,7 +46,7 @@ export function TrackBranchButton({ projectId, agentId }: { projectId: string; a
       onOpen={ensure}
     >
       <SettingsGroupLabel className="mb-1.5">Check out locally</SettingsGroupLabel>
-      <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2 leading-snug">
+      <p className="text-2xs text-gray-500 dark:text-gray-400 mb-2 leading-snug">
         Follow this agent's branch from your own checkout. Run it once, then <code className="font-mono">git pull</code> to update as the agent commits.
       </p>
       {/* items-start, not items-center: the command box wraps to as many lines as
@@ -60,7 +60,7 @@ export function TrackBranchButton({ projectId, agentId }: { projectId: string; a
             already breaks a head id at its hyphens, which reads far better than
             a break mid-word, and this only steps in for a token with nowhere to
             break rather than overflowing the box. */}
-        <code className="flex-1 min-w-0 break-words font-mono text-[11px] bg-gray-100 dark:bg-gray-900 rounded px-2 py-1 text-gray-700 dark:text-gray-200">{cmd}</code>
+        <code className="flex-1 min-w-0 break-words font-mono text-2xs bg-gray-100 dark:bg-gray-900 rounded px-2 py-1 text-gray-700 dark:text-gray-200">{cmd}</code>
         <button
           type="button"
           onClick={copy}

@@ -52,7 +52,7 @@ function OriginBadge({ note, provider }: { note: ReviewThreadNote; provider?: st
   if (note.origin === 'local_only') {
     return (
       <Tooltip content="Kept in Hydra - it was never posted to the pull request, so only you can see it.">
-        <span className="inline-flex items-center gap-1 h-5 px-1 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/60 rounded cursor-help">
+        <span className="inline-flex items-center gap-1 h-5 px-1 text-3xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/60 rounded cursor-help">
           <EyeOff className="w-3 h-3" />
           private
         </span>
@@ -137,7 +137,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
     }
   }
 
-  const btn = 'px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer disabled:opacity-50'
+  const btn = 'px-2 py-1 text-3xs font-medium rounded transition-colors cursor-pointer disabled:opacity-50'
 
   return (
     <div className="border-y border-violet-200 dark:border-violet-900/60 bg-violet-50/40 dark:bg-violet-950/20 px-4 py-2">
@@ -147,11 +147,11 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
           {thread.notes.map((n, i) => (
             <div key={n.id} className={i > 0 ? 'mt-2 pt-2 border-t border-violet-200/60 dark:border-violet-900/40' : ''}>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-medium text-gray-700 dark:text-gray-200 truncate">
+                <span className="text-2xs font-medium text-gray-700 dark:text-gray-200 truncate">
                   {n.author || 'someone'}
                 </span>
                 {noteAgo(n.created_at) && (
-                  <span className="text-[10px] text-gray-400">{noteAgo(n.created_at)}</span>
+                  <span className="text-3xs text-gray-400">{noteAgo(n.created_at)}</span>
                 )}
                 {/* Fixed-height row so the badge and the menu trigger share a
                     centre line whichever of them renders. */}
@@ -184,7 +184,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                               <Sparkles className="w-3.5 h-3.5 mt-px shrink-0 text-violet-500" fill="currentColor" />
                               <span>
                                 <span className="block text-xs text-gray-700 dark:text-gray-200">Resolve with agent</span>
-                                <span className="block text-[10px] text-gray-400 leading-snug">Send this thread to the head and ask it to address the comment.</span>
+                                <span className="block text-3xs text-gray-400 leading-snug">Send this thread to the head and ask it to address the comment.</span>
                               </span>
                             </button>
                             {thread.url && (
@@ -213,24 +213,24 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
 
           <div className="mt-2 flex items-center gap-2">
             {thread.resolved && (
-              <span className="flex items-center gap-1 text-[10px] text-green-700 dark:text-green-300">
+              <span className="flex items-center gap-1 text-3xs text-green-700 dark:text-green-300">
                 <Check className="w-3 h-3" /> resolved
               </span>
             )}
             {thread.outdated && (
-              <span className="text-[10px] text-amber-700 dark:text-amber-300">outdated</span>
+              <span className="text-3xs text-amber-700 dark:text-amber-300">outdated</span>
             )}
             {!replying && (
               <button
                 type="button"
                 onClick={() => setReplying(true)}
-                className="text-[10px] text-violet-700 dark:text-violet-300 hover:underline cursor-pointer"
+                className="text-3xs text-violet-700 dark:text-violet-300 hover:underline cursor-pointer"
               >
                 Reply
               </button>
             )}
             {busy === 'agent' && (
-              <span className="flex items-center gap-1 text-[10px] text-gray-500">
+              <span className="flex items-center gap-1 text-3xs text-gray-500">
                 <LoaderCircle className="w-3 h-3 animate-spin" /> sending to the agent...
               </span>
             )}
@@ -282,7 +282,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
               </div>
             </div>
           )}
-          {error && <p className="mt-1 text-[10px] text-red-500 break-words">{error}</p>}
+          {error && <p className="mt-1 text-3xs text-red-500 break-words">{error}</p>}
         </div>
       </div>
     </div>

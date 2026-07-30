@@ -390,7 +390,7 @@ function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentRespons
       >
         <span className="inline-flex items-center gap-2 cursor-help">
           <Clock className="w-4 h-4 shrink-0" />
-          <span className="text-[13px] font-semibold whitespace-nowrap">Merge queued</span>
+          <span className="text-sm font-semibold whitespace-nowrap">Merge queued</span>
         </span>
       </Tooltip>
       <Tooltip content="Cancel the queued merge" side="bottom">
@@ -398,7 +398,7 @@ function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentRespons
           type="button"
           onClick={onCancel}
           disabled={disabled}
-          className="h-6 px-2.5 rounded-md text-[12px] font-semibold bg-white dark:bg-[#141a26] text-gray-600 dark:text-gray-200 border border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className="h-6 px-2.5 rounded-md text-xs font-semibold bg-white dark:bg-[#141a26] text-gray-600 dark:text-gray-200 border border-emerald-200/80 dark:border-emerald-800/60 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Cancel
         </button>

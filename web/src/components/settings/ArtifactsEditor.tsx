@@ -209,7 +209,7 @@ export function ArtifactsEditor({
                     />
                   </div>
                   {unsafe && (
-                    <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5">
+                    <div className="flex items-start gap-1.5 text-2xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5">
                       <TriangleAlert className="w-3.5 h-3.5 mt-px shrink-0" />
                       <span>Runs unsandboxed on the host with full access to your credentials. Only use for audited, self-contained commands.</span>
                     </div>

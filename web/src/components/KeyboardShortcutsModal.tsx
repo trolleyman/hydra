@@ -7,7 +7,7 @@ import { IconButton } from './IconButton'
 // A single key rendered as a lowlit keycap.
 function Key({ children }: { children: string }) {
   return (
-    <kbd className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+    <kbd className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-2xs font-medium text-gray-500 dark:text-gray-400">
       {children}
     </kbd>
   )
@@ -57,7 +57,7 @@ export function KeyboardShortcutsModal() {
         <div className="px-6 py-4 max-h-[70vh] overflow-y-auto">
           {SHORTCUT_GROUPS.map((group) => (
             <div key={group.title} className="mb-5 last:mb-0">
-              <div className="text-[11px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-2">
+              <div className="text-2xs font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-2">
                 {group.title}
               </div>
               <div className="space-y-1.5">

@@ -519,7 +519,7 @@ export function Lightbox({
             className={`${common} w-[22vw] flex flex-col items-center justify-center gap-2 py-10 px-6 bg-gray-900 border border-white/10`}
           >
             <KindIcon kind={peekKind} className="w-8 h-8 text-white/40" />
-            <span className="max-w-full truncate text-[11px] font-mono text-white/50">{peek.filename}</span>
+            <span className="max-w-full truncate text-2xs font-mono text-white/50">{peek.filename}</span>
           </div>
         )}
       </button>

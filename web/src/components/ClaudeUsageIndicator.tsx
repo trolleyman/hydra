@@ -36,9 +36,9 @@ function usedColor(used: number | null | undefined): string {
 // so the three stats line up as a compact mini-table in the sidebar footer.
 function UsageStat({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
   return (
-    <span className="flex flex-col items-start leading-tight">
-      <span className="text-[10px] text-gray-400 dark:text-gray-500">{label}</span>
-      <span className={`tabular-nums ${valueClass ?? 'text-gray-600 dark:text-gray-300'}`}>{value}</span>
+    <span className="flex min-w-0 flex-col items-start leading-tight">
+      <span className="text-3xs text-gray-400 dark:text-gray-500">{label}</span>
+      <span className={`max-w-full truncate tabular-nums ${valueClass ?? 'text-gray-600 dark:text-gray-300'}`}>{value}</span>
     </span>
   )
 }
@@ -116,7 +116,7 @@ export function ClaudeUsageIndicator() {
         onClick={() => fetchUsage(true)}
         disabled={loading}
         aria-label="Claude usage"
-        className="flex items-start gap-2 text-xs px-1 py-0.5 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-60"
+        className="flex min-w-0 items-start gap-1.5 text-xs px-1 py-0.5 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-60"
       >
         {countdown && <UsageStat label="reset" value={countdown} />}
         {session != null && <UsageStat label="4h" value={`${Math.round(session)}%`} valueClass={usedColor(session)} />}

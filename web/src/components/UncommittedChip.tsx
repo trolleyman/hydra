@@ -177,7 +177,7 @@ export function UncommittedChip({
             textClassName="px-2 py-1.5 text-xs leading-relaxed placeholder-gray-400 dark:placeholder-gray-500"
           />
           <div className="flex items-center justify-end gap-2">
-            <span className="text-[10px] text-gray-400 dark:text-gray-500 select-none">Ctrl+Enter to commit</span>
+            <span className="text-3xs text-gray-400 dark:text-gray-500 select-none">Ctrl+Enter to commit</span>
             <button
               type="button"
               onClick={() => void submit()}

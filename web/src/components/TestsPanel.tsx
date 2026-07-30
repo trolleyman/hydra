@@ -418,7 +418,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
             wraps) onto a fractional height - and a box on a fractional height
             paints 1px taller or shorter depending on its subpixel offset. */}
         {runningCount > 0 && (
-          <span className="flex items-center gap-1.5 text-[11px] leading-4 font-normal text-gray-400 dark:text-gray-500">
+          <span className="flex items-center gap-1.5 text-2xs leading-4 font-normal text-gray-400 dark:text-gray-500">
             <LoaderCircle className="w-3 h-3 animate-spin" />
             Running {runners.length - runningCount}/{runners.length}
           </span>
@@ -434,7 +434,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
               onChange={(e) => setSearch(e.target.value)}
               placeholder="search"
               aria-label="Search test cases by path or name"
-              className="h-7 w-36 pl-7 pr-6 rounded-md border text-[11px] bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              className="h-7 w-36 pl-7 pr-6 rounded-md border text-2xs bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
             />
             {search && (
               // The absolute placement is relative to the search box, so it moves
@@ -454,7 +454,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
             <Tooltip content="Reset filters">
               <button
                 onClick={() => updateFilter(defaultTestFilter(!!groupResult))}
-                className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+                className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-2xs font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
               >
                 <FunnelX className="w-3 h-3" />
                 <span className="lowercase">reset</span>
@@ -740,7 +740,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
       {/* What the status filter / search hid, so a quiet card never reads as
           "no tests" - the counts remain in the header regardless. */}
       {hiddenCount > 0 && (
-        <div className="-mx-3 px-4 py-1.5 text-[11px] text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800">
+        <div className="-mx-3 px-4 py-1.5 text-2xs text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800">
           {hiddenCount} case{hiddenCount === 1 ? '' : 's'} hidden by filters
         </div>
       )}

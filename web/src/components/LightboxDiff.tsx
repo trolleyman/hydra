@@ -171,7 +171,7 @@ export function LightboxDiffControls({ mode, onModeChange, view, onViewChange, h
           {/* Neutral wording: this same row drives a still pair and a .webm pair. */}
           <Tooltip content={canDiff ? 'Highlight changed pixels in magenta (H)' : 'Needs both a before and after version'}>
             <label
-              className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+              className={`flex items-center gap-1 text-3xs font-medium tracking-wide select-none ${
                 canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
               }`}
             >

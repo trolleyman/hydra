@@ -158,7 +158,7 @@ export function PRPicker({
               >
                 <div className="flex items-center gap-1.5 min-w-0">
                   <ProviderIcon className="w-3 h-3 shrink-0 text-gray-400" />
-                  <span className="text-[11px] text-gray-400 shrink-0">#{r.id}</span>
+                  <span className="text-2xs text-gray-400 shrink-0">#{r.id}</span>
                   <span className="text-xs font-medium text-gray-800 dark:text-gray-100 truncate">{r.title}</span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -168,10 +168,10 @@ export function PRPicker({
                       read-only
                     </Badge>
                   )}
-                  <span className="text-[11px] text-gray-400 font-mono truncate">
+                  <span className="text-2xs text-gray-400 font-mono truncate">
                     {r.target_branch} ← {r.head_ref}
                   </span>
-                  {r.author && <span className="text-[11px] text-gray-400">by {r.author}</span>}
+                  {r.author && <span className="text-2xs text-gray-400">by {r.author}</span>}
                 </div>
               </button>
             ))}

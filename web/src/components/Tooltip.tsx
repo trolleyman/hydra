@@ -386,7 +386,7 @@ export function Tooltip({
           >
             <div
               role="tooltip"
-              className={`relative flex flex-col p-3 ${surface} border text-gray-800 dark:text-gray-100 text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100`}
+              className={`relative flex flex-col p-3 ${surface} border text-gray-800 dark:text-gray-100 text-2xs rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100`}
               // Cap to the viewport (minus the 16px clamp pad each side) so the
               // fixed `width` can't spill off-screen on narrow/phone viewports where
               // it exceeds the screen. computePos clamps by the box's REAL
@@ -413,7 +413,7 @@ export function Tooltip({
           <div
             ref={boxRef}
             role="tooltip"
-            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 border ${inDark ? 'dark' : ''} ${surface} text-gray-700 dark:text-gray-200 text-[11px] text-center rounded shadow-lg break-words ${
+            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 border ${inDark ? 'dark' : ''} ${surface} text-gray-700 dark:text-gray-200 text-2xs text-center rounded shadow-lg break-words ${
               pos.placement === 'top' ? '-translate-y-full' : ''
             }`}
             // width: max-content sizes the box to its text: a fixed-position box

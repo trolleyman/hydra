@@ -240,7 +240,7 @@ function ChildConnector({ parentDepth, hasChevron, isLast }: { parentDepth: numb
 // the status filter and search hide rows, never the tallies.
 export function NodeBadges({ counts }: { counts: Record<string, number> }) {
   return (
-    <span className="ml-auto flex items-center gap-1.5 shrink-0 text-[10px] font-medium tabular-nums">
+    <span className="ml-auto flex items-center gap-1.5 shrink-0 text-3xs font-medium tabular-nums">
       {(counts.failed ?? 0) > 0 && (
         <span className="inline-flex items-center gap-0.5 text-red-600 dark:text-red-400"><X className="w-2.5 h-2.5" strokeWidth={3} />{counts.failed}</span>
       )}
@@ -399,7 +399,7 @@ function RowSegments({ segs, isDir, expanded, fileLine, pathMissing }: { segs: S
     const suffix = missing
       ? <MissingFileMarker />
       : fileLine != null && fileLine > 0
-        ? <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{fileLine}</span>
+        ? <span className="font-mono text-3xs text-gray-400 dark:text-gray-500 shrink-0">:{fileLine}</span>
         : undefined
     pieces.push({ icon, text: pathSegs.map((s) => s.label).join('/'), textClass: 'text-gray-700 dark:text-gray-300', suffix })
   }
@@ -475,7 +475,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo, onFix
         </span>
         {showLocation && loc ? (
           <span className="inline-flex items-center gap-1 min-w-0 shrink-1">
-            <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 truncate">{loc}</span>
+            <span className="font-mono text-3xs text-gray-400 dark:text-gray-500 truncate">{loc}</span>
             {/* Scope-mode rows have no path piece to carry the marker, so it hangs
                 off the file:line secondary here. */}
             {c.path_missing ? <MissingFileMarker /> : null}
@@ -484,14 +484,14 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo, onFix
           // No file piece on this row (plain leaf under a file node), so show the
           // line here - a dim ":42", also the row's open-in-repo #L target. When a
           // file piece IS present the line already rides on it (see hasPathSeg).
-          <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">:{c.line}</span>
+          <span className="font-mono text-3xs text-gray-400 dark:text-gray-500 shrink-0">:{c.line}</span>
         ) : null}
         <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} what={loc ? 'test path' : 'test name'} />
         {onOpenInRepo && c.path && !c.path_missing ? (
           <RepoLinkButton target={onOpenInRepo(c.path as string, c.line)} title={`Open ${loc || c.path} in repository (new tab)`} />
         ) : null}
         {c.duration_ms != null && c.duration_ms > 0 ? (
-          <span className="ml-auto font-mono text-[10px] text-gray-400 shrink-0">{c.duration_ms}ms</span>
+          <span className="ml-auto font-mono text-3xs text-gray-400 shrink-0">{c.duration_ms}ms</span>
         ) : null}
       </div>
       {showMessage ? (
@@ -502,7 +502,7 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo, onFix
         // they reveal on the ROW's hover (the outer `group`), like every other
         // affordance on the row.
         <div className="relative ml-5">
-          <AnsiText text={c.message ?? ''} className={`text-[11px] font-mono whitespace-pre-wrap border rounded pl-2.5 pr-14 py-1.5 ${msgTone}`} />
+          <AnsiText text={c.message ?? ''} className={`text-2xs font-mono whitespace-pre-wrap border rounded pl-2.5 pr-14 py-1.5 ${msgTone}`} />
           <div className="absolute top-1 right-1 flex items-center gap-0.5">
             <CopyButton
               text={c.message ?? ''}

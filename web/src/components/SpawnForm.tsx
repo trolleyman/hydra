@@ -161,7 +161,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
             <AgentTypeIcon name={active.id} className={iconCls} />
           </span>
-          {label && <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 max-w-[4rem] truncate">{label}</span>}
+          {label && <span className="text-3xs font-medium text-gray-600 dark:text-gray-300 max-w-[4rem] truncate">{label}</span>}
         </button>
       </Tooltip>
       {open && coords && (
@@ -172,7 +172,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           {AGENT_TYPES.map((a, i) => (
             <div key={a.id}>
               {i > 0 && <div className="my-1 border-t border-gray-100 dark:border-gray-700" />}
-              <div className="flex items-center gap-2 px-3 py-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+              <div className="flex items-center gap-2 px-3 py-1 text-2xs font-semibold text-gray-500 dark:text-gray-400">
                 <AgentTypeIcon name={a.id} className={`w-3.5 h-3.5 shrink-0 ${a.color}`} />
                 <span>{a.label}</span>
               </div>
@@ -1035,7 +1035,7 @@ export const SpawnForm = memo(function SpawnForm({
               <button
                 type="submit"
                 disabled={!canSubmit || loading || disabled}
-                className="relative overflow-hidden text-[10px] font-semibold px-2.5 py-1 rounded-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 animate-gradient shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-opacity hover:opacity-90 shrink-0"
+                className="relative overflow-hidden text-3xs font-semibold px-2.5 py-1 rounded-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 animate-gradient shadow-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-opacity hover:opacity-90 shrink-0"
               >
                 {loading ? '...' : adopt ? 'Adopt PR' : 'Spawn'}
               </button>
@@ -1044,7 +1044,7 @@ export const SpawnForm = memo(function SpawnForm({
           </div>
         </div>
         {error && (
-          <p className="mt-1.5 text-[10px] text-red-500 leading-snug">{error}</p>
+          <p className="mt-1.5 text-3xs text-red-500 leading-snug">{error}</p>
         )}
       </form>
       {lightbox}

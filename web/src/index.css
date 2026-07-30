@@ -160,6 +160,55 @@
     'Noto Color Emoji');
   --font-mono--font-feature-settings: var(--app-font-code-features, normal);
   --font-serif: 'Hydra Arrows', 'Merriweather', Georgia, Cambria, 'Times New Roman', Times, serif;
+
+  /* --- The interface type scale ------------------------------------------
+     Every size the shell renders at, as one named ladder:
+
+       text-4xs  10  text-3xs  11  text-2xs  12  text-xs   13
+       text-sm   15  text-base 17  text-lg   19  text-xl   21 ...
+
+     Two things changed here at once, and they are separable in review:
+
+     1. Each rung is ONE PIXEL UP from what it was. The shell was built on a
+        10/11/12/14 ladder, which is a step below what it should be - 274 of
+        the 306 hardcoded sizes in the app were 10px or 11px, small enough to
+        be work to read on a laptop and genuinely hard on a phone, where the
+        app renders at exactly the same sizes (there is no responsive type
+        scale, and adding one would only paper over a scale that is too small
+        on both).
+     2. Every rung carries + var(--app-font-ui-step), so the Interface size
+        control in Settings -> Browser -> Fonts moves the whole ladder at once,
+        the way the Chat/Code/Terminal steps already move theirs. A signed px
+        LENGTH, not a ratio, so each rung stays a whole pixel.
+
+     The tiny rungs (4xs/3xs/2xs) are @utility rules further down rather than
+     entries here, because a --text-* entry pairs a line-height with the size
+     and the arbitrary px classes they replace set font-size alone.
+     Introducing a line-height where there wasn't one would reflow every row
+     that carries them, which is most of the sidebar.
+
+     Chat, code and terminal text is deliberately NOT on this ladder - each has
+     its own size control and its own reasons (see the .chat-* rules below, and
+     the note on FONT_BASE_PX in lib/fonts.ts). */
+  --text-xs: calc(13px + var(--app-font-ui-step, 0px));
+  --text-sm: calc(15px + var(--app-font-ui-step, 0px));
+  --text-base: calc(17px + var(--app-font-ui-step, 0px));
+  --text-lg: calc(19px + var(--app-font-ui-step, 0px));
+  --text-xl: calc(21px + var(--app-font-ui-step, 0px));
+  --text-2xl: calc(25px + var(--app-font-ui-step, 0px));
+  --text-3xl: calc(31px + var(--app-font-ui-step, 0px));
+}
+
+/* The three rungs below text-xs. font-size only, no line-height - see the note
+   in @theme above. */
+@utility text-2xs {
+  font-size: calc(12px + var(--app-font-ui-step, 0px));
+}
+@utility text-3xs {
+  font-size: calc(11px + var(--app-font-ui-step, 0px));
+}
+@utility text-4xs {
+  font-size: calc(10px + var(--app-font-ui-step, 0px));
 }
 
 /* The prompt/chat input font (HighlightedTextarea). Pinned to Roboto Flex (loaded
