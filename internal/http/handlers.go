@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1097,8 +1098,25 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	// The raw [resources] table for this layer (nil = unset → the editor shows the
 	// fields empty and inherits the layer below / the built-in defaults).
 	resp.Resources = toAPIResourceLimits(cfg.Resources)
+	resp.ResourceCapacity = resourceCapacity()
 
 	return api.GetConfig200JSONResponse(resp), nil
+}
+
+func resourceCapacity() api.ResourceCapacity {
+	logicalCPUs := runtime.NumCPU()
+	return api.ResourceCapacity{
+		LogicalCpus:          logicalCPUs,
+		WorkloadCpuQuota:     sandbox.DefaultWorkloadCPUQuota(logicalCPUs),
+		WorkloadIoReadMax:    sandbox.DefaultWorkloadIOReadBandwidthMax,
+		WorkloadIoWriteMax:   sandbox.DefaultWorkloadIOWriteBandwidthMax,
+		MachineCpuQuota:      sandbox.DefaultMachineCPUQuota(logicalCPUs),
+		MachineIoReadMax:     sandbox.DefaultMachineIOReadBandwidthMax,
+		MachineIoWriteMax:    sandbox.DefaultMachineIOWriteBandwidthMax,
+		BackgroundCpuQuota:   sandbox.DefaultBackgroundCPUQuota(logicalCPUs),
+		BackgroundIoReadMax:  sandbox.DefaultBackgroundIOReadBandwidthMax,
+		BackgroundIoWriteMax: sandbox.DefaultBackgroundIOWriteBandwidthMax,
+	}
 }
 
 // toAPIArtifactScript converts an internal ArtifactScript to the API representation.

@@ -978,7 +978,7 @@ func (m *Manager) generate(parent context.Context, spec config.TestScript, v Ver
 	// Best-effort: a no-op where scopes are unavailable; StopScope reaps the whole
 	// cgroup on every return path.
 	scopeUnit := sandbox.ScopeUnit("test", spec.Name+"-"+sandbox.ScopeHash(dir))
-	scope.Apply(m.projectRoot, scopeUnit, launch)
+	scope.Apply(m.projectRoot, scopeUnit, launch, sandbox.ScopeBackground)
 	defer sandbox.StopScope(scopeUnit)
 
 	// A streaming run that never declares ::hydra:test:total:: still gets a

@@ -4228,11 +4228,11 @@ components:
         local), as edited in the Settings scope tabs. Applied to every scoped
         workload of the project (agent, preview, service, artifact) via its
         transient systemd scope. Every field is nullable; a null field is unset at
-        this layer and inherits the layer below (built-in defaults - weights on
-        50/50, hard caps off - are applied only when resolving). Weights are soft
-        (bite only under contention); the hard caps apply even on an idle box and
-        may be silently skipped where their cgroup controller is not delegated to
-        the user systemd manager.
+        this layer and inherits the layer below. Built-in defaults apply CPU and
+        IO ceilings as well as 50/50 weights; explicit zero disables a hard cap.
+        Weights are soft (bite only under contention); hard caps apply even on an
+        idle box and may be silently skipped where their cgroup controller is not
+        delegated to the user systemd manager.
       properties:
         cpu_weight:
           type: integer
@@ -4250,7 +4250,7 @@ components:
           type: integer
           nullable: true
           minimum: 0
-          description: Hard CPU cap in percent of one core (systemd CPUQuota; 200 = 2 cores). null/0 = no cap.
+          description: Hard CPU cap in percent of one core (systemd CPUQuota; 200 = 2 cores). null uses the machine-scaled safe default; 0 = no cap.
         memory_max:
           type: integer
           nullable: true
@@ -4267,7 +4267,8 @@ components:
           minimum: 0
           description: >-
             Hard read ceiling in MB/s for the device backing the project root
-            (systemd IOReadBandwidthMax, i.e. cgroup io.max). null/0 = no cap.
+            (systemd IOReadBandwidthMax, i.e. cgroup io.max). null uses the
+            80 MB/s safe default; 0 = no cap.
         io_write_bandwidth_max:
           type: integer
           nullable: true
@@ -4276,7 +4277,37 @@ components:
             Hard write ceiling in MB/s (systemd IOWriteBandwidthMax, i.e. cgroup
             io.max). Unlike io_weight this needs no particular IO scheduler, so it
             is the cap that reliably bites - weights are inert unless the host uses
-            bfq or blk-iocost. null/0 = no cap.
+            bfq or blk-iocost. null uses the 40 MB/s safe default; 0 = no cap.
+
+    ResourceCapacity:
+      type: object
+      required:
+        - logical_cpus
+        - workload_cpu_quota
+        - workload_io_read_max
+        - workload_io_write_max
+        - machine_cpu_quota
+        - machine_io_read_max
+        - machine_io_write_max
+        - background_cpu_quota
+        - background_io_read_max
+        - background_io_write_max
+      description: >-
+        Read-only built-in safety ceilings resolved for the server machine.
+        CPU quotas use systemd's percent-of-one-core units (400 = four logical
+        CPUs). Workloads retain explicit [resources] overrides, while machine
+        and background values are aggregate parent-slice ceilings.
+      properties:
+        logical_cpus: { type: integer }
+        workload_cpu_quota: { type: integer }
+        workload_io_read_max: { type: integer }
+        workload_io_write_max: { type: integer }
+        machine_cpu_quota: { type: integer }
+        machine_io_read_max: { type: integer }
+        machine_io_write_max: { type: integer }
+        background_cpu_quota: { type: integer }
+        background_io_read_max: { type: integer }
+        background_io_write_max: { type: integer }
 
     ReviewState:
       type: object
@@ -5407,7 +5438,7 @@ components:
 
     ConfigResponse:
       type: object
-      required: [defaults, agents]
+      required: [defaults, agents, resource_capacity]
       properties:
         defaults:
           $ref: '#/components/schemas/AgentConfig'
@@ -5515,6 +5546,8 @@ components:
           # the layer sets none). Edited in the Settings Resource limits section;
           # the scope tab decides which file a save writes to.
           $ref: '#/components/schemas/ResourceLimits'
+        resource_capacity:
+          $ref: '#/components/schemas/ResourceCapacity'
 
     ServiceStatus:
       type: object

@@ -626,7 +626,7 @@ func (m *Manager) buildCmd(ctx context.Context, root string, sv *supervised) (*e
 	// process subtree gets its own cgroup with the project's resolved resource
 	// limits and a single kill handle, and can't outlive the daemon. Reaped in the
 	// ctx.Done path below.
-	scope.Apply(root, serviceScopeUnit(root, sv), spec)
+	scope.Apply(root, serviceScopeUnit(root, sv), spec, sandbox.ScopeInteractive)
 
 	cmd := scope.Command(ctx, spec)
 	cmd.Stdout = sv.sink

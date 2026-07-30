@@ -1745,7 +1745,10 @@ type ConfigResponse struct {
 	// Previews Per-project live-server scripts, each proxied on demand as a clickable preview of the head's app ([previews.<name>] in config.toml). A config still spelling one as an [artifacts.<name>] with type = "server" is upgraded on read, so it appears here and not under artifacts.
 	Previews *[]PreviewScript `json:"previews"`
 
-	// Resources The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults - weights on 50/50, hard caps off - are applied only when resolving). Weights are soft (bite only under contention); the hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
+	// ResourceCapacity Read-only built-in safety ceilings resolved for the server machine. CPU quotas use systemd's percent-of-one-core units (400 = four logical CPUs). Workloads retain explicit [resources] overrides, while machine and background values are aggregate parent-slice ceilings.
+	ResourceCapacity ResourceCapacity `json:"resource_capacity"`
+
+	// Resources The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below. Built-in defaults apply CPU and IO ceilings as well as 50/50 weights; explicit zero disables a hard cap. Weights are soft (bite only under contention); hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
 	Resources *ResourceLimits `json:"resources,omitempty"`
 
 	// Review The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.
@@ -2931,6 +2934,20 @@ type ResolvedPathResponse struct {
 	RepoRoot *string `json:"repo_root,omitempty"`
 }
 
+// ResourceCapacity Read-only built-in safety ceilings resolved for the server machine. CPU quotas use systemd's percent-of-one-core units (400 = four logical CPUs). Workloads retain explicit [resources] overrides, while machine and background values are aggregate parent-slice ceilings.
+type ResourceCapacity struct {
+	BackgroundCpuQuota   int `json:"background_cpu_quota"`
+	BackgroundIoReadMax  int `json:"background_io_read_max"`
+	BackgroundIoWriteMax int `json:"background_io_write_max"`
+	LogicalCpus          int `json:"logical_cpus"`
+	MachineCpuQuota      int `json:"machine_cpu_quota"`
+	MachineIoReadMax     int `json:"machine_io_read_max"`
+	MachineIoWriteMax    int `json:"machine_io_write_max"`
+	WorkloadCpuQuota     int `json:"workload_cpu_quota"`
+	WorkloadIoReadMax    int `json:"workload_io_read_max"`
+	WorkloadIoWriteMax   int `json:"workload_io_write_max"`
+}
+
 // ResourceChangedEvent A resource changed; refetch it. Carries no payload.
 type ResourceChangedEvent struct {
 	Type ResourceChangedEventType `json:"type"`
@@ -2939,21 +2956,21 @@ type ResourceChangedEvent struct {
 // ResourceChangedEventType defines model for ResourceChangedEvent.Type.
 type ResourceChangedEventType string
 
-// ResourceLimits The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults - weights on 50/50, hard caps off - are applied only when resolving). Weights are soft (bite only under contention); the hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
+// ResourceLimits The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below. Built-in defaults apply CPU and IO ceilings as well as 50/50 weights; explicit zero disables a hard cap. Weights are soft (bite only under contention); hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
 type ResourceLimits struct {
-	// CpuQuota Hard CPU cap in percent of one core (systemd CPUQuota; 200 = 2 cores). null/0 = no cap.
+	// CpuQuota Hard CPU cap in percent of one core (systemd CPUQuota; 200 = 2 cores). null uses the machine-scaled safe default; 0 = no cap.
 	CpuQuota *int `json:"cpu_quota"`
 
 	// CpuWeight Relative CPU share under contention (systemd CPUWeight, 1-10000). null uses the default (50).
 	CpuWeight *int `json:"cpu_weight"`
 
-	// IoReadBandwidthMax Hard read ceiling in MB/s for the device backing the project root (systemd IOReadBandwidthMax, i.e. cgroup io.max). null/0 = no cap.
+	// IoReadBandwidthMax Hard read ceiling in MB/s for the device backing the project root (systemd IOReadBandwidthMax, i.e. cgroup io.max). null uses the 80 MB/s safe default; 0 = no cap.
 	IoReadBandwidthMax *int `json:"io_read_bandwidth_max"`
 
 	// IoWeight Relative block-IO share under contention (systemd IOWeight, 1-10000). null uses the default (50).
 	IoWeight *int `json:"io_weight"`
 
-	// IoWriteBandwidthMax Hard write ceiling in MB/s (systemd IOWriteBandwidthMax, i.e. cgroup io.max). Unlike io_weight this needs no particular IO scheduler, so it is the cap that reliably bites - weights are inert unless the host uses bfq or blk-iocost. null/0 = no cap.
+	// IoWriteBandwidthMax Hard write ceiling in MB/s (systemd IOWriteBandwidthMax, i.e. cgroup io.max). Unlike io_weight this needs no particular IO scheduler, so it is the cap that reliably bites - weights are inert unless the host uses bfq or blk-iocost. null uses the 40 MB/s safe default; 0 = no cap.
 	IoWriteBandwidthMax *int `json:"io_write_bandwidth_max"`
 
 	// MemoryMax Hard memory ceiling in MB (systemd MemoryMax); the cgroup is OOM-killed past it. null/0 = no cap.

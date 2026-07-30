@@ -24,6 +24,57 @@ var (
 	ScopeIOWeight  = 50
 )
 
+const (
+	// Conservative per-scope ceilings. Parent slices add aggregate ceilings, so
+	// several individually compliant workloads cannot multiply past the machine
+	// budget.
+	DefaultWorkloadIOReadBandwidthMax  = 80
+	DefaultWorkloadIOWriteBandwidthMax = 40
+
+	DefaultMachineIOReadBandwidthMax     = 160
+	DefaultMachineIOWriteBandwidthMax    = 80
+	DefaultBackgroundIOReadBandwidthMax  = 80
+	DefaultBackgroundIOWriteBandwidthMax = 40
+)
+
+// ScopeClass selects the aggregate slice a workload belongs to. Every scope is
+// placed under hydra.slice; background scopes are placed in its tighter
+// hydra-background.slice child.
+type ScopeClass uint8
+
+const (
+	ScopeInteractive ScopeClass = iota
+	ScopeBackground
+)
+
+// DefaultWorkloadCPUQuota allows about half of a small machine, capped at four
+// logical CPUs so one workload cannot saturate a large workstation.
+func DefaultWorkloadCPUQuota(logicalCPUs int) int {
+	return clampCPUQuota(logicalCPUs*50, 100, 400)
+}
+
+// DefaultMachineCPUQuota is the aggregate Hydra ceiling: half the host's
+// logical CPUs, capped at sixteen logical CPUs.
+func DefaultMachineCPUQuota(logicalCPUs int) int {
+	return clampCPUQuota(logicalCPUs*50, 100, 1600)
+}
+
+// DefaultBackgroundCPUQuota is shared by every test and artifact: one quarter
+// of the host, capped at four logical CPUs.
+func DefaultBackgroundCPUQuota(logicalCPUs int) int {
+	return clampCPUQuota(logicalCPUs*25, 100, 400)
+}
+
+func clampCPUQuota(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
 // ScopeLimits are the resolved cgroup resource limits for one workload scope,
 // threaded per call site (one daemon serves many projects, so limits cannot be a
 // process-global). Config resolves a project's [resources] table into this; the

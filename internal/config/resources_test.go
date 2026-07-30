@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -60,13 +61,19 @@ func TestConfigMergeResources(t *testing.T) {
 	}
 }
 
-// TestResolveResourceLimits checks defaults are filled for unset weights while
-// hard caps stay unset (0), and explicit values win.
+// TestResolveResourceLimits checks safe built-in caps are filled while explicit
+// values (including zero to opt out) win.
 func TestResolveResourceLimits(t *testing.T) {
-	// nil Resources: default weights, no caps. The io path is threaded through
-	// regardless - it names the device, not a limit.
+	// nil Resources: machine-scaled CPU plus conservative IO ceilings.
 	got := Config{}.ResolveResourceLimits("/srv/proj")
-	want := sandbox.ScopeLimits{CPUWeight: sandbox.ScopeCPUWeight, IOWeight: sandbox.ScopeIOWeight, IOPath: "/srv/proj"}
+	want := sandbox.ScopeLimits{
+		CPUWeight:           sandbox.ScopeCPUWeight,
+		IOWeight:            sandbox.ScopeIOWeight,
+		CPUQuota:            sandbox.DefaultWorkloadCPUQuota(runtime.NumCPU()),
+		IOPath:              "/srv/proj",
+		IOReadBandwidthMax:  sandbox.DefaultWorkloadIOReadBandwidthMax,
+		IOWriteBandwidthMax: sandbox.DefaultWorkloadIOWriteBandwidthMax,
+	}
 	if got != want {
 		t.Errorf("nil resources: got %+v, want %+v", got, want)
 	}
@@ -93,6 +100,16 @@ func TestResolveResourceLimits(t *testing.T) {
 	}
 	if got != want {
 		t.Errorf("explicit resources: got %+v, want %+v", got, want)
+	}
+
+	// An explicit zero remains the opt-out spelling at any config layer.
+	got = Config{Resources: &ResourceLimits{
+		CPUQuota:            iptr(0),
+		IOReadBandwidthMax:  iptr(0),
+		IOWriteBandwidthMax: iptr(0),
+	}}.ResolveResourceLimits("/srv/proj")
+	if got.CPUQuota != 0 || got.IOReadBandwidthMax != 0 || got.IOWriteBandwidthMax != 0 {
+		t.Errorf("explicit zero should disable defaults, got %+v", got)
 	}
 }
 

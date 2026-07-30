@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { ResourceLimits } from '../../api/models/ResourceLimits'
+import type { ResourceCapacity } from '../../api/models/ResourceCapacity'
 import { StorageKeys } from '../../lib/storage'
 import { SettingSection } from './shared'
 import { InfoTooltip } from '../InfoTooltip'
@@ -24,10 +25,12 @@ const SCOPE_FILE: Record<'project' | 'local' | 'user', string> = {
 // never touch it.
 export function ResourceLimitsSection({
   resources,
+  capacity,
   onChange,
   scope,
 }: {
   resources: ResourceLimits | null | undefined
+  capacity: ResourceCapacity
   onChange: (r: ResourceLimits | null) => void
   scope: 'project' | 'local' | 'user'
 }) {
@@ -50,7 +53,7 @@ export function ResourceLimitsSection({
   return (
     <SettingSection
       title="Resource limits"
-      description={`cgroup limits applied to every scoped workload of this project (agent, preview, service, artifact). Fields left empty inherit the layer below, then the built-in defaults. Saving writes to ${SCOPE_FILE[scope]}.`}
+      description={`Per-workload cgroup limits applied to every head, preview, service, test, and artifact. Fields left empty inherit the layer below, then the safe built-in defaults. Saving writes to ${SCOPE_FILE[scope]}.`}
       collapsible
       defaultCollapsed
       storageKey={StorageKeys.settingsResourcesCollapsed}
@@ -85,13 +88,13 @@ export function ResourceLimitsSection({
           <Field
             label="CPU quota"
             value={r.cpu_quota}
-            placeholder="no cap"
+            placeholder={`default (${formatCores(capacity.workload_cpu_quota)})`}
             suffix="% of one core"
             onChange={(v) => set('cpu_quota', v)}
             tip={
               <>
                 <p>Hard CPU cap in percent of one core (systemd CPUQuota; 200 = 2 cores). Unlike the weight, this applies even when the box is idle.</p>
-                <p className="mt-1.5">Leave empty for no cap. Hard caps are opt-in - a quota that is too low can starve a legitimate build. May be ignored if the cpu controller is not delegated to the user systemd manager.</p>
+                <p className="mt-1.5">Leave empty for the machine-scaled default ({formatCores(capacity.workload_cpu_quota)}). Enter 0 to opt out. May be ignored if the cpu controller is not delegated to the user systemd manager.</p>
               </>
             }
           />
@@ -111,27 +114,27 @@ export function ResourceLimitsSection({
           <Field
             label="IO read max"
             value={r.io_read_bandwidth_max}
-            placeholder="no cap"
+            placeholder={`default (${capacity.workload_io_read_max})`}
             suffix="MB/s"
             onChange={(v) => set('io_read_bandwidth_max', v)}
             tip={
               <>
                 <p>Hard read ceiling for the device holding this project (systemd IOReadBandwidthMax, i.e. cgroup io.max).</p>
-                <p className="mt-1.5">Leave empty for no cap.</p>
+                <p className="mt-1.5">Leave empty for the built-in {capacity.workload_io_read_max} MB/s ceiling. Enter 0 to opt out.</p>
               </>
             }
           />
           <Field
             label="IO write max"
             value={r.io_write_bandwidth_max}
-            placeholder="no cap"
+            placeholder={`default (${capacity.workload_io_write_max})`}
             suffix="MB/s"
             onChange={(v) => set('io_write_bandwidth_max', v)}
             tip={
               <>
                 <p>Hard write ceiling for the device holding this project (systemd IOWriteBandwidthMax, i.e. cgroup io.max).</p>
                 <p className="mt-1.5">This is the one to reach for when a single busy head makes the whole machine unresponsive. Unlike IO weight it needs no particular IO scheduler, so it always takes effect - weights do nothing unless the host uses bfq or blk-iocost, which a typical NVMe does not.</p>
-                <p className="mt-1.5">Leave empty for no cap.</p>
+                <p className="mt-1.5">Leave empty for the built-in {capacity.workload_io_write_max} MB/s ceiling. Enter 0 to opt out.</p>
               </>
             }
           />
@@ -151,6 +154,78 @@ export function ResourceLimitsSection({
       </div>
     </SettingSection>
   )
+}
+
+export function MachineCapacitySection({ capacity }: { capacity: ResourceCapacity }) {
+  return (
+    <SettingSection
+      title="Machine capacity"
+      description={`Aggregate safety ceilings derived from this server's ${capacity.logical_cpus} logical CPUs. They apply across every Hydra project; tests and artifacts share the tighter background allowance.`}
+      collapsible
+      defaultCollapsed={false}
+    >
+      <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-5 bg-gray-50 dark:bg-gray-900/50 px-3.5 py-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+          <span>Capacity group</span>
+          <span>CPU max</span>
+          <span>Read / write</span>
+        </div>
+        <CapacityRow
+          label="All Hydra workloads"
+          cpu={capacity.machine_cpu_quota}
+          read={capacity.machine_io_read_max}
+          write={capacity.machine_io_write_max}
+        />
+        <CapacityRow
+          label="Tests and artifacts"
+          detail="Shared subset of the total above"
+          cpu={capacity.background_cpu_quota}
+          read={capacity.background_io_read_max}
+          write={capacity.background_io_write_max}
+        />
+        <CapacityRow
+          label="One workload"
+          detail="Default before an explicit Resource limits override"
+          cpu={capacity.workload_cpu_quota}
+          read={capacity.workload_io_read_max}
+          write={capacity.workload_io_write_max}
+        />
+      </div>
+      <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+        CPU capacity scales with the host and is bounded on very small or large machines. IO ceilings use cgroup io.max, so they remain effective when IO weight is inert on NVMe storage.
+      </p>
+    </SettingSection>
+  )
+}
+
+function CapacityRow({
+  label,
+  detail,
+  cpu,
+  read,
+  write,
+}: {
+  label: string
+  detail?: string
+  cpu: number
+  read: number
+  write: number
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-5 border-t border-gray-100 dark:border-gray-800 px-3.5 py-3 text-sm">
+      <span className="min-w-0">
+        <span className="block text-gray-700 dark:text-gray-200">{label}</span>
+        {detail && <span className="block text-xs text-gray-400 dark:text-gray-500">{detail}</span>}
+      </span>
+      <span className="font-mono text-gray-600 dark:text-gray-300">{formatCores(cpu)}</span>
+      <span className="font-mono text-gray-600 dark:text-gray-300">{read} / {write} MB/s</span>
+    </div>
+  )
+}
+
+function formatCores(quota: number) {
+  const cores = quota / 100
+  return `${Number.isInteger(cores) ? cores : cores.toFixed(1)} ${cores === 1 ? 'core' : 'cores'}`
 }
 
 // Field is one numeric limit input: label + info tooltip + a number field that

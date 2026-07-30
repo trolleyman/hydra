@@ -8,7 +8,7 @@ import { Tooltip } from '../Tooltip'
 import { AGENT_ACCENT } from '../../lib/agentTypeMeta'
 import { SettingSection, type SettingsSection } from './shared'
 import { ReviewSection } from './ReviewSection'
-import { ResourceLimitsSection } from './ResourceLimitsSection'
+import { MachineCapacitySection, ResourceLimitsSection } from './ResourceLimitsSection'
 import { ConfigForm } from './ConfigForm'
 import { ArtifactsEditor } from './ArtifactsEditor'
 import { PreviewsEditor } from './PreviewsEditor'
@@ -133,8 +133,10 @@ export function SettingsContent({
       {/* Resource limits apply to every scoped workload of a project and layer
           like other config, so they are offered at all scopes (a user-scope
           value is the default for every project). */}
+      {scope === 'user' && <MachineCapacitySection capacity={config.resource_capacity} />}
       <ResourceLimitsSection
         resources={config.resources}
+        capacity={config.resource_capacity}
         onChange={(resources) => setConfig({ ...config, resources: resources ?? undefined })}
         scope={scope}
       />

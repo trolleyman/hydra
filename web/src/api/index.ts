@@ -153,6 +153,7 @@ export type { RepositoryUncommittedChanges } from './models/RepositoryUncommitte
 export type { RepositoryUncommittedFile } from './models/RepositoryUncommittedFile';
 export type { ResolvedPathResponse } from './models/ResolvedPathResponse';
 export type { ResolveReviewCommentBody } from './models/ResolveReviewCommentBody';
+export type { ResourceCapacity } from './models/ResourceCapacity';
 export { ResourceChangedEvent } from './models/ResourceChangedEvent';
 export type { ResourceLimits } from './models/ResourceLimits';
 export { ReviewComment } from './models/ReviewComment';

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,8 +96,66 @@ func ScopesAvailable() bool {
 		if ioOK && !ioWeightEffective() {
 			log.Printf("sandbox: cgroup io.weight does nothing on this host (no device using the bfq scheduler, and blk-iocost is unconfigured), so IOWeight is accepted but inert - a heavy workload can still stall the machine. Set [resources] io_write_bandwidth_max (and io_read_bandwidth_max) for a ceiling that bites regardless, or enable bfq/iocost on the host.")
 		}
+		configureHydraSlices()
 	})
 	return scopeOK
+}
+
+const (
+	hydraSlice           = "hydra.slice"
+	hydraBackgroundSlice = "hydra-background.slice"
+)
+
+// configureHydraSlices creates the user-wide aggregate hierarchy before the
+// first workload starts. hydra-background.slice is a child of hydra.slice by
+// systemd's dash-name hierarchy, so its quota is constrained by both limits.
+//
+// The IO caps use "/" to identify the root filesystem's backing device. A
+// workload on another device still gets its per-scope project-path cap; the
+// aggregate IO ceiling currently protects the overwhelmingly common case where
+// Hydra's projects and caches live below the home directory on the root device.
+func configureHydraSlices() {
+	if systemctlPath == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(ctx, systemctlPath, "--user", "start",
+		hydraSlice, hydraBackgroundSlice).Run(); err != nil {
+		log.Printf("sandbox: create aggregate Hydra slices: %v; workloads keep per-scope limits", err)
+		return
+	}
+	set := func(unit string, props ...string) {
+		if len(props) == 0 {
+			return
+		}
+		args := []string{"--user", "set-property", "--runtime", unit}
+		args = append(args, props...)
+		if err := exec.CommandContext(ctx, systemctlPath, args...).Run(); err != nil {
+			log.Printf("sandbox: configure aggregate slice %s: %v; workloads keep per-scope limits", unit, err)
+		}
+	}
+	var allProps []string
+	if cpuOK {
+		allProps = append(allProps, "CPUQuota="+strconv.Itoa(DefaultMachineCPUQuota(runtime.NumCPU()))+"%")
+	}
+	if ioMaxOK {
+		allProps = append(allProps,
+			"IOReadBandwidthMax=/ "+strconv.Itoa(DefaultMachineIOReadBandwidthMax)+"M",
+			"IOWriteBandwidthMax=/ "+strconv.Itoa(DefaultMachineIOWriteBandwidthMax)+"M")
+	}
+	set(hydraSlice, allProps...)
+
+	var backgroundProps []string
+	if cpuOK {
+		backgroundProps = append(backgroundProps, "CPUQuota="+strconv.Itoa(DefaultBackgroundCPUQuota(runtime.NumCPU()))+"%")
+	}
+	if ioMaxOK {
+		backgroundProps = append(backgroundProps,
+			"IOReadBandwidthMax=/ "+strconv.Itoa(DefaultBackgroundIOReadBandwidthMax)+"M",
+			"IOWriteBandwidthMax=/ "+strconv.Itoa(DefaultBackgroundIOWriteBandwidthMax)+"M")
+	}
+	set(hydraBackgroundSlice, backgroundProps...)
 }
 
 // probeScope runs a throwaway scope around /bin/true and reports whether it was
@@ -168,13 +227,18 @@ func allProps(limits ScopeLimits) []string {
 // and a single kill handle. Returns true if the spec was wrapped; false (spec
 // untouched) when scopes are unavailable. Any stale unit of the same name is
 // cleared first so systemd-run can't fail with "unit already exists".
-func WrapScope(unit string, spec *Spec, limits ScopeLimits) bool {
+func WrapScope(unit string, spec *Spec, limits ScopeLimits, class ScopeClass) bool {
 	if !ScopesAvailable() {
 		return false
 	}
 	StopScope(unit) // clear a stale same-named unit left by a prior life
 
 	wrapped := []string{systemdRunPath, "--user", "--scope", "--quiet", "--collect", "--unit=" + unit}
+	if class == ScopeBackground {
+		wrapped = append(wrapped, "--slice="+hydraBackgroundSlice)
+	} else {
+		wrapped = append(wrapped, "--slice="+hydraSlice)
+	}
 	wrapped = append(wrapped, allProps(limits)...)
 	wrapped = append(wrapped, "--", spec.Path)
 	wrapped = append(wrapped, spec.Args[1:]...)

@@ -3,8 +3,29 @@
 Status: **built**. This was the design + build order for making the per-workload
 systemd-scope cgroup limits configurable per project and editable from the web
 Settings UI; it is now implemented (see the build order below for the map of what
-landed where). The scope-wrapping machinery it builds on was already shipped (see
-"What exists today"). The two "Also worth doing" items remain optional and unbuilt.
+landed where). Aggregate machine protection has since been added above those
+per-workload scopes.
+
+## Current safety hierarchy
+
+Every scoped Hydra process belongs to `hydra.slice`. Tests, artifact generation,
+and self-update builds additionally belong to its child
+`hydra-background.slice`. Limits therefore compose:
+
+| Level | CPU default | Read / write default | Purpose |
+|---|---:|---:|---|
+| All Hydra work | half the logical CPUs, max 16 cores | 160 / 80 MB/s | Leaves capacity for GNOME and other host applications. |
+| Background subset | quarter of the logical CPUs, max 4 cores | 80 / 40 MB/s | Prevents overlapping tests, browsers, and builds from monopolizing the host. |
+| One workload | half the logical CPUs, max 4 cores | 80 / 40 MB/s | Contains either one head or one background job. |
+
+CPU defaults have a one-core floor. This keeps small machines usable rather than
+assuming a 32-core development host. The aggregate IO limits target the device
+backing `/`, while each workload targets the device backing its project root.
+
+The Settings "Machine capacity" section shows these resolved defaults. The
+editable "Resource limits" section controls the one-workload limits: an empty
+CPU or IO field uses the safe default, while an explicit `0` opts out. Memory
+and task limits remain opt-in.
 
 ## Motivation
 
@@ -106,11 +127,11 @@ unset, not the source of truth.
 |---|---|---|---|---|
 | `cpu_weight` | `CPUWeight=<n>` | int 1-10000 | 50 | Soft; only bites under contention. Below the daemon's 100 so it yields. |
 | `io_weight` | `IOWeight=<n>` | int 1-10000 | 50 | Soft, like cpu_weight. **Inert unless the host runs bfq or blk-iocost** - see below. |
-| `cpu_quota` | `CPUQuota=<n>%` | int percent (200 = 2 cores) | unset (no cap) | Hard cap even when the box is idle. |
+| `cpu_quota` | `CPUQuota=<n>%` | int percent (200 = 2 cores) | half the logical CPUs, clamped to 1-4 cores | Hard cap even when the box is idle; 0 opts out. |
 | `memory_max` | `MemoryMax=<n>M` | int MB | unset (no cap) | Hard ceiling; cgroup is OOM-killed past it. |
 | `tasks_max` | `TasksMax=<n>` | int | unset (no cap) | Caps processes/threads; guards fork-bomb / PID exhaustion. |
-| `io_read_bandwidth_max` | `IOReadBandwidthMax=<path> <n>M` | int MB/s | unset (no cap) | Per-device hard cap (cgroup `io.max`); path = the project root. |
-| `io_write_bandwidth_max` | `IOWriteBandwidthMax=<path> <n>M` | int MB/s | unset (no cap) | As above. The cap that reliably bites when a head stalls the machine. |
+| `io_read_bandwidth_max` | `IOReadBandwidthMax=<path> <n>M` | int MB/s | 80 MB/s | Per-device hard cap (cgroup `io.max`); path = the project root; 0 opts out. |
+| `io_write_bandwidth_max` | `IOWriteBandwidthMax=<path> <n>M` | int MB/s | 40 MB/s | As above. The cap that reliably bites when a head stalls the machine; 0 opts out. |
 
 ### The io_weight trap
 
@@ -142,9 +163,10 @@ inert. Two ways out:
 `scripts/io-stall.sh` measures whether any of this is actually the problem before
 you tune it.
 
-Recommended defaults: **weights on (50/50), hard caps off (unset)**. Hard caps can
-break legitimate workloads (an OOM-kill mid-render, a quota that starves a build),
-so they should be opt-in. `0`/unset/empty on a field = "don't emit that property".
+Current defaults: **weights on (50/50), safe CPU and IO ceilings on**. Memory and
+task ceilings stay opt-in because crossing either can terminate valid work.
+For CPU and IO, unset/empty means "use the safe default" and `0` means "do not
+emit that property".
 
 ### Controller-delegation gotcha (important)
 
@@ -186,11 +208,11 @@ Add a top-level TOML table `[resources]` -> `Config.Resources *ResourceLimits`:
 [resources]
 cpu_weight = 50
 io_weight  = 50
-cpu_quota  = 200   # percent; 2 cores. omit = no cap
+cpu_quota  = 400   # percent; example override. omit = machine-scaled default
 memory_max = 2048  # MB. omit = no cap
 tasks_max  = 512   # omit = no cap
-io_read_bandwidth_max  = 200  # MB/s. omit = no cap
-io_write_bandwidth_max = 100  # MB/s. omit = no cap
+io_read_bandwidth_max  = 80  # MB/s. omit = 80 MB/s
+io_write_bandwidth_max = 40  # MB/s. omit = 40 MB/s
 ```
 
 - New struct `ResourceLimits` with `*int` fields (nil = inherit/unset), so a layer
@@ -239,8 +261,8 @@ Keep `internal/sandbox` free of any `internal/config` import - config resolves
   `TestsEditor.tsx` / `ConfigForm.tsx`) - `type="number"`, empty string ->
   `undefined` (falls through to default, shown via a `placeholder` like
   `"default (50)"`), clamp with `Math.max`. Add an `InfoTooltip` per field
-  explaining weight-vs-quota-vs-max semantics and the "hard caps are opt-in / may
-  be ignored if the controller isn't delegated" caveat.
+  explaining weight-vs-quota-vs-max semantics, safe defaults, explicit-zero
+  opt-out, and the controller-delegation caveat.
 - Show an "effective: X" hint where a value is inherited/unset, matching how
   `ReviewSection` surfaces the resolved config (via the project store's
   resolved-config cache) if we want parity - optional for a first cut.
@@ -274,14 +296,14 @@ Keep `internal/sandbox` free of any `internal/config` import - config resolves
 - Add the unwrap-and-retry fallback (as the agent path has) to the
   preview/service/artifact call sites, so a scope/property failure never kills a
   workload even if the per-property probe missed an edge case.
-- Consider surfacing the resolved effective limits somewhere read-only (e.g. the
-  agent page) so it's visible what a workload is actually capped at.
+- The Settings user tab now surfaces the resolved built-in workload and
+  aggregate limits read-only. A per-agent live-cgroup view could still be useful.
 
 ## Testing notes
 
 - Unit-test `ResourceLimits.Merge` (per-field last-wins across layers) and
-  `ResolveResourceLimits` (defaults filled, caps left unset) - pure functions, no
-  sandbox needed.
+  `ResolveResourceLimits` (safe CPU/IO defaults filled, explicit zeros retained)
+  - pure functions, no sandbox needed.
 - Unit-test `allProps(limits)` (correct `--property` strings, omitted when unset).
 - The systemd behaviour (properties actually applied, controller-delegation
   fallback) needs host verification - it can't be exercised from CI or a nested
