@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot, FileArchive, FileText, File as FileIcon, Film, MessageSquarePlus } from 'lucide-react'
 import { ImagePins, type ImagePin, type PendingPin } from './ImagePins'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import { renderCommentSource } from '../lib/mentionHighlight'
 import { useImageCommentStore } from '../stores/imageCommentStore'
 import {
   anchorPositionLabel, anchorVersionLabel, artifactRefFromUrl, buildImageAnchor, sameArtifactPicture,
@@ -370,7 +371,11 @@ export function Lightbox({
       await submitPin(anchor, body, publish)
       setPending(null)
       setPinBody('')
-      setArming(false)
+      // Deliberately STAYS armed. Disarming drops back to the comparator, which
+      // has no pin layer - so the comment you just left vanished the instant you
+      // saved it, which reads as having lost it. Staying put also matches how
+      // reviewing actually goes: several remarks on one screenshot, not one.
+      // Escape or the toolbar toggle is the way out.
     } catch (e) {
       setPinError(e instanceof Error ? e.message : 'The comment could not be saved.')
     } finally {
@@ -557,6 +562,20 @@ export function Lightbox({
   // capture density. See layoutSize.
   const pictureSize = layoutSize(dims, current)
   const showsPins = canPin && (arming || pinsHere.length > 0)
+  // The composer needs room, and the figure caps at 90vh: without giving the
+  // picture a lower ceiling while arming, the two together overflow it and - since
+  // the media wrapper is `min-h-0` and so free to shrink below its content - the
+  // picture keeps PAINTING at its old height, straight over the panel. Shrinking
+  // the picture is the honest fix; letting it overlap hid the Before/After switch
+  // entirely.
+  //
+  // `w-auto` rides along, and is not optional: the picture carries width/height
+  // ATTRIBUTES (that is what reserves its box before it loads), so a max-height
+  // that actually binds shrinks the height while the width stays put - and
+  // `object-contain` then letterboxes the picture inside its own box, painting
+  // checkerboard down both sides. Letting the width follow the height keeps the
+  // ratio, and the attributes still supply it.
+  const mediaMaxH = arming ? 'max-h-[62vh] w-auto' : 'max-h-[85vh]'
   // Where the pin being composed sits, in the picture's own pixels when they are
   // known - the same form the agent is given, so what you are told you marked and
   // what it is told are the same sentence.
@@ -704,11 +723,20 @@ export function Lightbox({
               onClick={() => { setArming((v) => !v); setPending(null) }}
               aria-label="Comment on this picture"
               aria-pressed={arming}
-              className={`p-2 rounded-full transition-colors cursor-pointer ${
+              className={`relative p-2 rounded-full transition-colors cursor-pointer ${
                 arming ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-white/10 text-white/80 hover:bg-white/20 hover:text-white'
               }`}
             >
               <MessageSquarePlus className="w-5 h-5" />
+              {/* How many comments are already on this side. Without it a picture
+                  that HAS remarks looks exactly like one that has none, because
+                  the pins are only drawn while commenting - and there is no badge
+                  on the tile yet either. */}
+              {pinsHere.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 flex items-center justify-center rounded-full bg-white text-gray-900 text-4xs font-semibold tabular-nums">
+                  {pinsHere.length}
+                </span>
+              )}
             </button>
           </Tooltip>
         )}
@@ -806,7 +834,7 @@ export function Lightbox({
               // than the full-width wrapper it is centred in.
               className={`${LIGHTBOX_MEDIA_CLASS} rounded-lg shadow-2xl ${shadowFade}`}
               maxWidth={hasSiblings ? '80vw' : '90vw'}
-              maxHeight="85vh"
+              maxHeight={arming ? '62vh' : '85vh'}
               onVerticalSlide={followFrameSlide}
             >
               {/* The wrapper hugs the image (shrink-to-fit inside ZoomPan's content
@@ -837,7 +865,7 @@ export function Lightbox({
                   draggable={false}
                   // relative so the picture paints ABOVE the checkerboard layer behind
                   // it (a positioned element beats a static one in the same stack).
-                  className={`relative max-h-[85vh] ${figureWidth} object-contain block`}
+                  className={`relative ${mediaMaxH} ${figureWidth} object-contain block`}
                 />
                 {showsPins && (
                   <ImagePins
@@ -870,9 +898,18 @@ export function Lightbox({
         )}
         {/* The pin composer, in the same slot the diff controls occupy - one row of
             chrome under the picture, never both, since arming replaces the
-            comparator with the single side being pinned. */}
+            comparator with the single side being pinned.
+
+            ONE dark panel carries all of it, rather than letting the hint and the
+            side switch sit on whatever happens to be behind them: they were
+            white-on-white the moment a light screenshot's own background ended up
+            under them. The backdrop is dark, but the PICTURE need not be, and this
+            row lands right at its edge. */}
         {arming && (
-          <div className={`w-full max-w-xl ${chromeFade}`} onClick={(e) => e.stopPropagation()}>
+          <div
+            className={`w-full max-w-xl rounded-lg border border-white/15 bg-gray-900/90 p-3 ${chromeFade}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Which side is being pinned. Only meaningful for a comparison; a
                 single-sided picture has no side to choose and shows none. */}
             {current.diff && current.diff.left && current.diff.right && (
@@ -896,7 +933,7 @@ export function Lightbox({
                 Click a point on the picture, or drag a box around what you mean.
               </p>
             ) : (
-              <div className="rounded-lg border border-white/15 bg-gray-900/90 p-3">
+              <>
                 <div className="flex items-center gap-2 mb-2 text-3xs text-white/50 font-mono">
                   <span>{pendingLabel}</span>
                   {pinnedRef && <span className="text-white/30">·</span>}
@@ -913,11 +950,17 @@ export function Lightbox({
                     }
                   }}
                   placeholder="What is wrong with this spot?"
-                  rows={3}
-                  textClassName="px-2.5 py-2 text-xs leading-5"
-                  wrapperClassName="w-full rounded border border-white/15 bg-black/30 focus-within:border-blue-400/70"
+                  // The textarea is absolutely positioned inside the wrapper, so it
+                  // cannot size the box - the height belongs on the wrapper, as it
+                  // does on the diff viewer's comment box.
+                  wrapperClassName="w-full h-20 rounded border border-white/15 bg-black/30 focus-within:ring-1 focus-within:ring-blue-400"
+                  textClassName="p-2 text-xs leading-5"
                   textColorClassName="text-gray-100"
                   caretClassName="caret-gray-100"
+                  // Mentions decide who the comment wakes - `@review` sends it to
+                  // the reviewer instead of the head - so they are painted while it
+                  // is typed, exactly as in the line-comment box.
+                  renderContent={renderCommentSource}
                 />
                 {pinError && <p className="mt-2 text-2xs text-red-400">{pinError}</p>}
                 <div className="flex items-center justify-end gap-2 mt-2">
@@ -945,7 +988,7 @@ export function Lightbox({
                     <span className="optical-center">Add to review</span>
                   </button>
                 </div>
-              </div>
+              </>
             )}
           </div>
         )}
