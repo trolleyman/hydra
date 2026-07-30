@@ -2455,7 +2455,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
       >
         <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
         {label}
-        {hasUncommitted && selected.type !== 'uncommitted' && (
+        {hasUncommitted && selected.type === 'commit' && (
           <TriangleAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
         )}
         <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" />
