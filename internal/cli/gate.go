@@ -65,8 +65,23 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 	// gate.GitReadonlyAdvice) - the command runs, the OS refuses the .git write,
 	// and we explain that afterwards instead of pre-emptively killing the whole
 	// Bash call over one git clause.
+	agentID := stringField(input, "agent_id") // set on sub-agent hooks only
 	if event := stringField(input, "hook_event_name"); event == "PostToolUse" || event == "PostToolUseFailure" {
-		emitPostAdvice(stdout, toolName, toolInput, input["tool_response"], stringField(input, "cwd"))
+		// The two events name the same thing differently: a successful call carries
+		// `tool_response`, a failing one carries the whole output as a bare `error`
+		// string and no tool_response at all. Reading only the former is why the
+		// read-only .git explanation never fired on a git write that FAILED - which
+		// is every git write it was written for.
+		response := input["tool_response"]
+		if response == nil {
+			response = input["error"]
+		}
+		// An interrupted call was not refused by anything - the user stopped it - so
+		// there is nothing to explain, and its partial output can look like anything.
+		if interrupt, _ := input["is_interrupt"].(bool); interrupt {
+			return nil
+		}
+		emitPostAdvice(stdout, toolName, toolInput, response, stringField(input, "cwd"), event == "PostToolUseFailure", agentID)
 		return nil
 	}
 
@@ -88,10 +103,14 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 
+	// A hook emits at most ONE decision object, so the advice below is confined to
+	// the paths where nothing else is being said: a deny already carries its own
+	// reason, and stacking a second object on it would be a malformed response.
 	result := gate.Decide(policy, toolName, toolInput)
 	switch result.Decision {
 	case gate.Allow:
-		return nil // silence = proceed
+		emitPreAdvice(stdout, toolName, stringField(input, "cwd"), agentID)
+		return nil
 	case gate.Deny:
 		emitDeny(stdout, result.Reason)
 		return nil
@@ -99,10 +118,45 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 		decision := resolveAsk(toolName, result)
 		if decision == gate.Deny {
 			emitDeny(stdout, result.Reason+" (denied)")
+			return nil
 		}
+		emitPreAdvice(stdout, toolName, stringField(input, "cwd"), agentID)
 		return nil
 	}
 	return nil
+}
+
+// emitPreAdvice is the one hook event that reliably reaches the model, so it
+// carries two things:
+//
+//   - Whatever a previous PostToolUseFailure could not deliver, flushed from the
+//     queue (see gate.QueueAdvice). Any tool's PreToolUse will do - the note is
+//     about a call that already happened, and the sooner it lands the better - so
+//     unlike the cwd note this is not confined to Bash.
+//   - Where the persistent Bash shell already is. This is the half that survives a
+//     FAILING call, so the shell's position is stated even for a run of commands
+//     that all exit non-zero - which is when an agent is most likely to be lost.
+//
+// The queue is only taken here, on the paths that actually emit: a deny swallows
+// its output for a reason of its own, and taking there would drop the note for
+// good. Silent at the worktree root with an empty queue, which is the normal case.
+func emitPreAdvice(w io.Writer, toolName, cwd, agentID string) {
+	parts := gate.TakeAdvice(os.Getenv(gate.EnvApprovalDir), agentID, time.Now())
+	if toolName == "Bash" {
+		if a := gate.ShellCwdAdviceBefore(cwd, os.Getenv(gate.EnvWorktree)); a != "" {
+			parts = append(parts, a)
+		}
+	}
+	if len(parts) == 0 {
+		return
+	}
+	advice := strings.Join(parts, " ")
+	appendJSONLine(w, map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":     "PreToolUse",
+			"additionalContext": advice,
+		},
+	})
 }
 
 // emitPostAdvice attaches after-the-fact guidance to a tool call that already
@@ -110,15 +164,34 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 // the read-only .git explanation (which needs the command and its output) and the
 // shell's resulting cwd (which the Bash result itself never reports). Silence is
 // the normal case - a hook that printed on every tool call would be noise.
-func emitPostAdvice(w io.Writer, toolName string, toolInput map[string]any, response any, cwd string) {
+//
+// Measured on CLI 2.1.220: Claude delivers additionalContext from PostToolUse but
+// silently DROPS it from PostToolUseFailure - the hook runs and emits, and the
+// model never sees it. A failing call is exactly where advice about a command's
+// output gets produced, so on that event nothing is printed; the note is queued
+// for the next PreToolUse to deliver instead (gate.QueueAdvice).
+//
+// The cwd half is not queued: emitPreAdvice restates the shell's position on the
+// next call anyway, freshly measured, so queueing it would say the same thing
+// twice and risk saying it about a directory the shell has since left.
+func emitPostAdvice(w io.Writer, toolName string, toolInput map[string]any, response any, cwd string, dropped bool, agentID string) {
 	if toolName != "Bash" {
 		return
 	}
-	var parts []string
-	if a := gate.GitReadonlyAdvice(stringField(toolInput, "command"), toolResponseText(response)); a != "" {
-		parts = append(parts, a)
+	gitAdvice := gate.GitReadonlyAdvice(stringField(toolInput, "command"), toolResponseText(response))
+	if dropped {
+		if gitAdvice != "" {
+			if err := gate.QueueAdvice(os.Getenv(gate.EnvApprovalDir), agentID, "About your previous Bash call: "+gitAdvice, time.Now()); err != nil {
+				fmt.Fprintf(os.Stderr, "hydra gate: queue advice: %v\n", err)
+			}
+		}
+		return
 	}
-	if a := gate.ShellCwdAdvice(cwd, os.Getenv(gate.EnvWorktree)); a != "" {
+	var parts []string
+	if gitAdvice != "" {
+		parts = append(parts, gitAdvice)
+	}
+	if a := gate.ShellCwdAdviceAfter(cwd, os.Getenv(gate.EnvWorktree)); a != "" {
 		parts = append(parts, a)
 	}
 	if len(parts) == 0 {
@@ -133,10 +206,11 @@ func emitPostAdvice(w io.Writer, toolName string, toolInput map[string]any, resp
 	})
 }
 
-// toolResponseText flattens a hook payload's tool_response into searchable text.
+// toolResponseText flattens a hook payload's tool result into searchable text.
 // Claude sends a Bash result either as a bare string or as an object carrying
 // stdout/stderr, and the read-only error arrives on stderr, so both shapes have
-// to be covered or the advice never fires.
+// to be covered or the advice never fires. A failed call's `error` field is the
+// bare-string shape ("Exit code 128\nfatal: ...").
 func toolResponseText(response any) string {
 	switch v := response.(type) {
 	case string:
