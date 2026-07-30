@@ -8,7 +8,7 @@ import { ensureLanguage } from './lib/prismLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
-import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewThread } from './api'
+import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewImageAnchor, ReviewThread } from './api'
 import { ReviewThreadCard, type ReviewThreadActions } from './components/ReviewThreadCard'
 import { ProviderIcon } from './components/ReviewControls'
 import { providerLabel } from './lib/forgeDisplay'
@@ -64,7 +64,8 @@ import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
-import { addReviewComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, draftsOf, type PendingReviewComment } from './lib/reviewComments'
+import { addReviewComment, addImageComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, draftsOf, type PendingReviewComment } from './lib/reviewComments'
+import { useImageCommentStore } from './stores/imageCommentStore'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
 import { renderCommentSource } from './lib/mentionHighlight'
 import { Markdown } from './lib/MarkdownRenderer'
@@ -3737,6 +3738,31 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       .then(setReviewComments)
       .catch((e) => console.error('Failed to queue comment:', e))
   }, [agent.id, agent.base_branch, projectId])
+
+  // Pins on artifact pictures (docs/review-agent.md). The lightbox is a global
+  // overlay with no idea which head opened it, so the page that DOES hold the
+  // comments registers the way to read and write one; nothing registered means no
+  // pin UI at all, which is right for a chat image or a spawn attachment.
+  //
+  // Registered from here rather than from ArtifactsPanel because this is where the
+  // comments already live: a second copy in the panel would be a second thing to
+  // keep in sync, and the two would disagree the moment one of them refetched.
+  const registerImageComments = useImageCommentStore((s) => s.register)
+  const clearImageComments = useImageCommentStore((s) => s.clear)
+  const submitImageComment = useCallback(async (image: ReviewImageAnchor, text: string, publish: boolean) => {
+    // Resolved at write time, exactly as a line comment's is, so "latest commit"
+    // cannot drift between placing the pin and publishing it.
+    const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
+    const cs = await addImageComment(projectId, agent.id, {
+      image, text, diffLabel: `${fromLabel} -> ${toLabel}`, publish,
+    })
+    setReviewComments(cs)
+    if (publish) showSentToast('Comment sent to agent')
+  }, [projectId, agent.id, agent.base_branch, showSentToast])
+  useEffect(() => {
+    registerImageComments({ comments: reviewComments, submit: submitImageComment })
+    return () => clearImageComments()
+  }, [reviewComments, submitImageComment, registerImageComments, clearImageComments])
 
   const removeQueuedComment = useCallback((id: string) => {
     removeReviewComment(projectId, agent.id, Number(id))

@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ReviewImageAnchor } from './ReviewImageAnchor';
 export type NewReviewCommentBody = {
     body: string;
     path?: string;
@@ -12,6 +13,7 @@ export type NewReviewCommentBody = {
     context?: string;
     hunk_hash?: string;
     reply_to?: number;
+    image?: ReviewImageAnchor;
     /**
      * Publish immediately instead of storing a draft (the "Comment to agent" one-shot path).
      */

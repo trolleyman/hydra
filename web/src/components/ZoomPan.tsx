@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Maximize } from 'lucide-react'
+import { ZoomScaleContext } from '../lib/zoomScale'
 
 // How far past fit you can magnify (8× the fit size). Enough to read individual
 // pixels of a downscaled screenshot without letting the image run away entirely.
@@ -479,7 +480,9 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
             transition: transitionCss && `transform ${transitionCss}`,
           }}
         >
-          {children}
+          {/* A primitive value, so the provider only re-renders its consumers when
+              the magnification actually changes - no memo needed. */}
+          <ZoomScaleContext.Provider value={view.scale}>{children}</ZoomScaleContext.Provider>
         </div>
 
       </div>
