@@ -1140,10 +1140,13 @@ type ChatCommitCreatedPayload struct {
 	IsMerge       bool               `json:"is_merge,omitempty"`
 	MergedCommits []ChatMergedCommit `json:"merged_commits,omitempty"`
 	MergedCount   int                `json:"merged_count,omitempty"`
-	Sha           string             `json:"sha,omitempty"`
-	ShortSha      string             `json:"short_sha,omitempty"`
-	Subject       string             `json:"subject,omitempty"`
-	Timestamp     string             `json:"timestamp,omitempty"`
+
+	// MergedRef The ref this merge brought in, when the reconciler knows it rather than having to read it out of the commit subject. Set when the head absorbed its base by FAST-FORWARD (update-from-base with nothing of its own to merge): the branch then sits on the base's own tip, whose subject names whatever that commit merged - another head - so the chip must be labelled from the ref that was pulled in, not from it.
+	MergedRef string `json:"merged_ref,omitempty"`
+	Sha       string `json:"sha,omitempty"`
+	ShortSha  string `json:"short_sha,omitempty"`
+	Subject   string `json:"subject,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // ChatContentStreamPayload A provider content-boundary hint; a state signal, not a card.

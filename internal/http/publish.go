@@ -367,6 +367,11 @@ func (s *Server) PullFromMr(ctx context.Context, request api.PullFromMrRequestOb
 			return api.PullFromMr409JSONResponse(api.MergeConflictError{Error: api.MergeConflictErrorErrorMergeConflict, Code: 409, Details: errMsg}), nil
 		}
 	}
+	// Same as update-from-base: these commits belong to no tool call, so the chat
+	// reconciler has to be told to look (see chat.Manager.ReconcileCommits).
+	if head.ChatMode && s.ChatEvents != nil {
+		s.ChatEvents.ReconcileCommits(head.ID, track)
+	}
 	s.notifyAgentsChanged(projectRoot, false)
 	updated, _ := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, head.ID)
 	if updated == nil {

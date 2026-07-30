@@ -20,6 +20,10 @@ export type ChatCommitCreatedPayload = {
     causal_item_id?: string;
     is_merge?: boolean;
     merged_count?: number;
+    /**
+     * The ref this merge brought in, when the reconciler knows it rather than having to read it out of the commit subject. Set when the head absorbed its base by FAST-FORWARD (update-from-base with nothing of its own to merge): the branch then sits on the base's own tip, whose subject names whatever that commit merged - another head - so the chip must be labelled from the ref that was pulled in, not from it.
+     */
+    merged_ref?: string;
     merged_commits?: Array<ChatMergedCommit>;
 };
 

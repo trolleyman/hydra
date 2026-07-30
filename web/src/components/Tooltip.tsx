@@ -4,9 +4,13 @@ import { ShortcutHint } from './Kbd'
 
 type Placement = 'top' | 'bottom'
 
-// Max width of the compact hint, in px. The box wraps at this width (see
-// max-w below) so computePos can clamp it on-screen using a known worst case.
+// Default max width of the compact hint, in px. The box wraps at this width (see
+// max-w below) so computePos can clamp it on-screen using a known worst case. A
+// hint whose content wraps badly at this width can raise it with `width`.
 const HINT_MAX_WIDTH = 320
+
+// Default width of the explainer card, in px.
+const CARD_WIDTH = 384
 
 // How far the rotated-square arrow pokes out past the box edge: half the
 // diagonal of an ARROW_SIZE square, i.e. size / 2 * sqrt(2).
@@ -60,8 +64,19 @@ export interface TooltipProps {
   variant?: 'hint' | 'card'
   /** Card only: bold heading rendered above the content. */
   title?: string
-  /** Card only: fixed width in px (drives both the box and the clamp math). */
+  /**
+   * Card: fixed width in px. Hint: raises its max width - the box still sizes to
+   * its content, this is only the point at which it wraps. Drives the clamp math
+   * either way.
+   */
   width?: number
+  /**
+   * Card only: whether clicking the trigger latches the card open (default true).
+   * Pass false when the trigger's click does something of its own - the click
+   * then dismisses the card instead of leaving it stranded over whatever the
+   * click navigated to.
+   */
+  pin?: boolean
   /** Extra gap (px) between the trigger and the box, on top of the base 8px -
    *  e.g. to clear a neighbouring control the box would otherwise sit against. */
   offset?: number
@@ -102,12 +117,15 @@ export function Tooltip({
   className,
   variant = 'hint',
   title,
-  width = 384,
+  width,
+  pin = true,
   offset = 0,
   shortcut,
   footnote,
 }: TooltipProps) {
   const card = variant === 'card'
+  // One prop, two meanings: the card's fixed width, or the hint's wrap point.
+  const boxWidth = card ? (width ?? CARD_WIDTH) : (width ?? HINT_MAX_WIDTH)
   const showDelay = delay ?? (card ? 0 : 600)
 
   const [visible, setVisible] = useState(false)
@@ -138,13 +156,12 @@ export function Tooltip({
     if (!el) return null
     const rect = el.getBoundingClientRect()
     // Clamp by the box's REAL width when we have it. The hint sizes to its
-    // text, so clamping by the 320px cap shoves a short tip (e.g. "Settings")
+    // text, so clamping by its max width shoves a short tip (e.g. "Settings")
     // ~160px sideways near a screen edge - box adrift, arrow stretched to reach.
     // On the first paint the box isn't in the DOM yet, so fall back to the cap;
     // the useLayoutEffect below re-runs this with the measured width before paint.
-    const maxWidth = card ? width : HINT_MAX_WIDTH
     const clampPad = card ? 16 : 8
-    const halfWidth = (boxRef.current?.offsetWidth ?? maxWidth) / 2
+    const halfWidth = (boxRef.current?.offsetWidth ?? boxWidth) / 2
 
     // Clamp horizontally so the box never spills off-screen, then shift the arrow
     // back by the same offset so it still points at the trigger.
@@ -186,7 +203,7 @@ export function Tooltip({
       arrowX: `calc(50% + ${arrowOffset}px)`,
       maxHeight,
     }
-  }, [card, side, width, offset])
+  }, [card, side, boxWidth, offset])
 
   const clearTimers = useCallback(() => {
     if (showTimer.current !== null) {
@@ -277,13 +294,20 @@ export function Tooltip({
 
   const handleClick = useCallback(() => {
     if (!card) return
+    // The trigger's own click is the action (pin={false}): get out of its way.
+    // Pinning here would leave the card sitting over whatever that click just
+    // scrolled to or opened, with the pointer already elsewhere.
+    if (!pin) {
+      hide()
+      return
+    }
     // Tap-to-open on touch (where there is no hover), click-to-pin on desktop.
     if (visible && pinned) hide()
     else {
       setPinned(true)
       if (!visible) show()
     }
-  }, [card, visible, pinned, hide, show])
+  }, [card, pin, visible, pinned, hide, show])
 
   // show()'s computePos runs before the box is in the DOM, so it can't measure
   // the real height to pick a side. Re-run once now that it's rendered (synchronous
@@ -416,7 +440,7 @@ export function Tooltip({
               // it exceeds the screen. computePos clamps by the box's REAL
               // offsetWidth, so the capped width also fixes the horizontal position.
               style={{
-                width,
+                width: boxWidth,
                 maxWidth: 'calc(100vw - 2rem)',
                 maxHeight: pos.maxHeight || undefined,
               }}
@@ -452,9 +476,10 @@ export function Tooltip({
             // otherwise shrink-to-fits against the space to the RIGHT of `left`
             // (the -translate-x-1/2 recenters only after layout), so a trigger
             // near the right viewport edge would wrap even a short tip.
-            // 320px cap normally, but never wider than the viewport (minus the 8px
-            // clamp pad each side) so it can't overflow on a phone.
-            style={{ top: pos.top, left: pos.left, width: 'max-content', maxWidth: 'min(320px, calc(100vw - 1rem))' }}
+            // Capped at boxWidth (320px unless the caller raised it), but never
+            // wider than the viewport (minus the 8px clamp pad each side) so it
+            // can't overflow on a phone.
+            style={{ top: pos.top, left: pos.left, width: 'max-content', maxWidth: `min(${boxWidth}px, calc(100vw - 1rem))` }}
           >
             {content}
             {shortcut && (
