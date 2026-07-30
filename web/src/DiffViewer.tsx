@@ -2500,13 +2500,53 @@ const UNCOMMITTED_TOOLTIP_FILES = 10
 // browser breaks mid-filename ("UncommittedChangesPane" / "l.tsx"); a <wbr> after
 // each separator gives it directory boundaries to prefer instead, and the
 // break-words on the row still catches a single segment that is too long on its
-// own. Split on "/" and " -> " so a rename breaks between its two paths.
+// own. WrappablePathName handles the other separator, " -> " in a rename.
 function wrappablePath(path: string) {
-  const parts = path.split(/(\/| -> )/)
+  const parts = path.split('/')
   return parts.map((p, i) => (
     // Static list: the parts of one path never reorder, so the index is a stable key.
-    <Fragment key={i}>{p}{/\/| -> /.test(p) && i < parts.length - 1 ? <wbr /> : null}</Fragment>
+    <Fragment key={i}>{p}{i < parts.length - 1 ? <>/<wbr /></> : null}</Fragment>
   ))
+}
+
+// PathName's lowlit-directory treatment, but wrap-safe for the narrow tooltip
+// box. Two differences from PathName:
+//
+//   - the lowlight is opacity rather than a second grey (HostName's reasoning):
+//     these rows are already dimmed relative to their heading, so a fixed colour
+//     would have to be re-picked per row shade to stay *below* it, while opacity
+//     composes with whatever the row inherits;
+//   - a dirty entry may be a rename ("old -> new"), so the split runs per side.
+//     A single last-slash split would call "a/b.ts -> c/" the directory and dim
+//     the old filename along with it.
+function WrappablePathName({ path }: { path: string }) {
+  const sides = path.split(' -> ')
+  return (
+    <>
+      {sides.map((side, i) => {
+        const idx = side.lastIndexOf('/')
+        const dir = idx === -1 ? '' : side.slice(0, idx + 1)
+        const base = idx === -1 ? side : side.slice(idx + 1)
+        // Static list: the sides of one entry never reorder, so the index is a
+        // stable key.
+        return (
+          <Fragment key={i}>
+            {i > 0 && <>{' -> '}<wbr /></>}
+            {dir && <span className="opacity-60">{wrappablePath(dir)}</span>}
+            {base}
+          </Fragment>
+        )
+      })}
+    </>
+  )
+}
+
+// The icon names the file the entry ends up as - the new path of a rename, and
+// the last segment either way - matching what the diff card header does with
+// file.path.
+function uncommittedIconName(entry: string) {
+  const target = entry.split(' -> ').pop() ?? entry
+  return target.split('/').pop() ?? target
 }
 
 function UncommittedButton({ diff, onJumpToUncommitted }: {
@@ -2541,18 +2581,34 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
         {groups.map((g) => (
           <div key={g.heading} className="mt-1 first:mt-0">
             <p className="text-gray-600 dark:text-gray-300">{g.heading}</p>
-            {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => (
-              // Dash and path as two flex cells rather than a "- " prefix in the
-              // text: that hangs the indent, so a wrapped path lines up under the
-              // start of the path above it instead of under its dash.
-              <div key={f} className="flex gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
-                <span aria-hidden className="shrink-0">-</span>
-                <span className="min-w-0 break-words">{wrappablePath(f)}</span>
-              </div>
-            ))}
+            {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => {
+              // The per-filetype icon from the diff's file list stands in for the
+              // "- " bullet these rows used to carry: it marks the row just as
+              // well and additionally says what kind of file it is.
+              const { Icon, className } = getFileIcon(uncommittedIconName(f))
+              return (
+                // Icon and path as two flex cells rather than a prefix in the
+                // text: that hangs the indent, so a wrapped path lines up under
+                // the start of the path above it instead of under its icon.
+                // items-start keeps the icon on the FIRST line of a path that
+                // wraps; the span around it supplies the line box that
+                // vertical-align needs (a flex item has none of its own), and
+                // sizing the mark in em / offsetting it in cap centres it on the
+                // text's cap box at whatever size the tooltip renders at.
+                <div key={f} className="flex items-start gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
+                  <span className="shrink-0">
+                    <Icon className={`inline-block h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)] ${className}`} />
+                  </span>
+                  <span className="min-w-0 break-words"><WrappablePathName path={f} /></span>
+                </div>
+              )
+            })}
             {g.count > Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES) && (
-              <div className="flex gap-1.5 pl-1 text-gray-400 dark:text-gray-500">
-                <span aria-hidden className="shrink-0">-</span>
+              // Empty first cell rather than a dash, so the count lines up with
+              // the filenames above it and nothing looks like a file that lost
+              // its icon.
+              <div className="flex items-start gap-1.5 pl-1 text-gray-400 dark:text-gray-500">
+                <span aria-hidden className="shrink-0 w-[1em]" />
                 <span>+{g.count - Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES)} more</span>
               </div>
             )}
