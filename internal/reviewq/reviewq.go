@@ -44,9 +44,11 @@ type Op string
 const (
 	// OpRefresh re-reads the MR from the forge and rewrites the head's review file.
 	OpRefresh Op = "refresh"
-	// OpNote records a LOCAL-ONLY reply on a review thread. It is never sent to the
-	// forge: an agent has no forge credentials, and Hydra only ever writes to a PR
-	// as an explicit user action (docs/review-threads.md).
+	// OpNote records a LOCAL-ONLY reply to a review comment, addressed by its
+	// NUMBER - the one sequence that covers Hydra's own comments and the forge's
+	// alike, so an agent answers "#7" without caring where #7 lives. It is never
+	// sent to the forge: an agent has no forge credentials, and Hydra only ever
+	// writes to a PR as an explicit user action (docs/review-threads.md).
 	OpNote Op = "note"
 	// OpComments reads Hydra's OWN review comments on this head - the numbered,
 	// line-anchored ones the user (or a reviewer agent) left in the diff viewer,

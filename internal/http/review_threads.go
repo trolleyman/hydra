@@ -148,7 +148,7 @@ func (s *Server) reviewThreadsResponse(ctx context.Context, projectRoot string, 
 			resp.FetchedAt = ptr(fetchedAt)
 		}
 	}
-	resp.Threads = mergeLocalNotes(threads, reviewstore.LoadNotes(projectRoot, head.ID))
+	resp.Threads = s.mergeLocalNotes(projectRoot, head.ID, threads, reviewstore.LoadNotes(projectRoot, head.ID))
 	return resp
 }
 
@@ -156,28 +156,43 @@ func (s *Server) reviewThreadsResponse(ctx context.Context, projectRoot string, 
 // notes appended in time order. Notes whose thread has vanished from the forge
 // are dropped rather than orphaned into a thread of their own - they are replies
 // to something that no longer exists.
-func mergeLocalNotes(threads []forge.Thread, notes []reviewstore.LocalNote) []api.ReviewThread {
+func (s *Server) mergeLocalNotes(projectRoot, headID string, threads []forge.Thread, notes []reviewstore.LocalNote) []api.ReviewThread {
+	read := reviewstore.ReadSet(projectRoot, headID)
 	byThread := map[string][]reviewstore.LocalNote{}
 	for _, n := range notes {
 		byThread[n.ThreadID] = append(byThread[n.ThreadID], n)
 	}
 	out := make([]api.ReviewThread, 0, len(threads))
 	for _, t := range threads {
+		// Hydra's local mark counts as resolved, and is flagged as local so the UI
+		// can say the forge still shows it open (reviewstore.ThreadState).
+		locally := reviewstore.ThreadResolved(projectRoot, headID, t.ID)
 		at := api.ReviewThread{
 			Id: t.ID, Path: t.Path, Line: t.Line,
-			Resolved: ptr(t.Resolved), Outdated: ptr(t.Outdated),
-			Notes: make([]api.ReviewThreadNote, 0, len(t.Notes)),
+			Resolved: ptr(t.Resolved || locally), ResolvedLocally: ptr(locally),
+			Outdated: ptr(t.Outdated),
+			Notes:    make([]api.ReviewThreadNote, 0, len(t.Notes)),
 		}
 		if t.URL != "" {
 			at.Url = ptr(t.URL)
 		}
 		for _, n := range t.Notes {
+			// Numbered from the head's ONE sequence, on first sight. Idempotent, so
+			// numbering on every render costs nothing after the first.
+			num := reviewstore.NumberForForgeNote(projectRoot, headID, n.ID, t.ID)
 			an := api.ReviewThreadNote{Id: n.ID, Body: n.Body, Origin: api.Forge}
+			if num > 0 {
+				an.Number = &num
+				an.Read = ptr(read[num])
+			}
 			if n.Author != "" {
 				an.Author = ptr(n.Author)
 			}
 			if n.URL != "" {
 				an.Url = ptr(n.URL)
+			}
+			if n.AvatarURL != "" {
+				an.AvatarUrl = ptr(n.AvatarURL)
 			}
 			if n.CreatedAt != "" {
 				an.CreatedAt = ptr(n.CreatedAt)
@@ -187,7 +202,13 @@ func mergeLocalNotes(threads []forge.Thread, notes []reviewstore.LocalNote) []ap
 		local := byThread[t.ID]
 		sort.Slice(local, func(i, j int) bool { return local[i].CreatedAt < local[j].CreatedAt })
 		for _, n := range local {
+			num := reviewstore.NumberForForgeNote(projectRoot, headID, n.ID, t.ID)
 			an := api.ReviewThreadNote{Id: n.ID, Body: n.Body, Origin: api.LocalOnly}
+			if num > 0 {
+				an.Number = &num
+				// A note the AGENT wrote is news; one you wrote is not.
+				an.Read = ptr(read[num] || n.Author != reviewstore.AuthorAgent)
+			}
 			if n.Author != "" {
 				an.Author = ptr(n.Author)
 			}

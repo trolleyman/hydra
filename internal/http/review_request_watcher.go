@@ -143,24 +143,58 @@ func (s *Server) refreshReviewOnDemand(ctx context.Context, id string) reviewq.R
 	return reviewq.Result{OK: true, Refreshed: true}
 }
 
-// recordLocalNote stores an agent's LOCAL-ONLY reply on a review thread. It is
-// never forwarded to the forge: the agent has no forge credentials, and a write
-// to someone's PR is always an explicit user action. The user sees the note in
-// the diff viewer marked private, and can repeat it to the forge themselves.
+// recordLocalNote stores an agent's LOCAL-ONLY reply to a review comment,
+// addressed by number.
+//
+// The number is what makes one tool cover both origins: it resolves either to one
+// of Hydra's own comments (the reply becomes another comment, threaded under it)
+// or to a forge note (the reply becomes a local note on that note's thread). It is
+// never forwarded to the forge either way - the agent has no forge credentials,
+// and a write to someone's PR is always an explicit user action. The user sees the
+// reply in the diff viewer marked private and can repeat it to the forge
+// themselves.
+//
+// Scoped to the calling head by construction: the request arrived on that head's
+// own reviewq dir, and the number is resolved against that head's own store, so an
+// agent cannot address a comment on someone else's diff even by guessing.
 func (s *Server) recordLocalNote(projectRoot, id string, r reviewq.Request) reviewq.Result {
 	if strings.TrimSpace(r.Body) == "" {
-		return reviewq.Result{Message: "The note was empty, so nothing was recorded."}
+		return reviewq.Result{Message: "The reply was empty, so nothing was recorded."}
 	}
-	if strings.TrimSpace(r.ThreadID) == "" {
-		return reviewq.Result{Message: "No thread id was given, so the note had nothing to attach to."}
+	owner, author := commentOwner(id)
+	target := r.ReplyTo
+	if target <= 0 {
+		return reviewq.Result{Message: "No comment number was given, so the reply had nothing to attach to. Take the number from get_review_comments."}
 	}
-	if _, err := reviewstore.AppendNote(projectRoot, id, reviewstore.LocalNote{
-		ThreadID: r.ThreadID, Author: reviewstore.AuthorAgent, Body: r.Body,
+
+	// One of Hydra's own comments: reply in kind, threaded under it.
+	if parent, ok := reviewstore.FindComment(projectRoot, owner, target); ok && !parent.IsDraft() {
+		c, err := reviewstore.AppendComment(projectRoot, owner, reviewstore.Comment{
+			Status: reviewstore.StatusPublished, Author: author, Body: r.Body,
+			ReplyTo: parent.Number, Path: parent.Path, Line: parent.Line, OldSide: parent.OldSide,
+		})
+		if err != nil {
+			return reviewq.Result{Message: "The reply could not be saved: " + err.Error()}
+		}
+		s.notifyAgentsChanged(projectRoot, false)
+		return reviewq.Result{OK: true, Message: fmt.Sprintf(
+			"Saved as %s, threaded under #%d. The user can see it in Hydra's diff viewer.", c.Label(), parent.Number)}
+	}
+
+	// Otherwise a forge note: the reply attaches to its THREAD, local-only.
+	_, ref, ok := reviewstore.ForgeRef(projectRoot, owner, target)
+	if !ok || ref.Thread == "" {
+		return reviewq.Result{Message: fmt.Sprintf(
+			"No comment on this head has the number %d. Call get_review_comments to see what is there.", target)}
+	}
+	if _, err := reviewstore.AppendNote(projectRoot, owner, reviewstore.LocalNote{
+		ThreadID: ref.Thread, Author: author, Body: r.Body,
 	}); err != nil {
-		return reviewq.Result{Message: "The note could not be saved: " + err.Error()}
+		return reviewq.Result{Message: "The reply could not be saved: " + err.Error()}
 	}
 	s.notifyAgentsChanged(projectRoot, false)
-	return reviewq.Result{OK: true}
+	return reviewq.Result{OK: true, Message: fmt.Sprintf(
+		"Saved as a local note on the thread holding #%d. The user can see it in Hydra next to that thread; it was NOT posted to the forge.", target)}
 }
 
 // commentOwner maps the session id a review request arrived under to the HEAD

@@ -22,6 +22,7 @@ export function InspectorPane({
   externalCommitSelect,
   changesLeading,
   leadingInline,
+  focusComment,
 }: {
   agent: AgentResponse
   projectId: string | null
@@ -36,6 +37,8 @@ export function InspectorPane({
   // instead of as a vertically-centered left-edge sibling - used by the narrow
   // screen-stack so the base->head selector row below gets the full width.
   leadingInline?: boolean
+  // A review comment number from `?comment=N`, forwarded to the diff.
+  focusComment?: number
 }) {
   return (
     // pt-4 mirrors the classic scroll container so DiffViewer's `-top-4` sticky
@@ -59,6 +62,7 @@ export function InspectorPane({
         inspector
         changesLeading={changesLeading}
         leadingInline={leadingInline}
+        focusComment={focusComment}
       />
     </div>
   )

@@ -58,11 +58,6 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	// is seeded for every head; the file reports linked=false until published).
 	if os.Getenv("HYDRA_REVIEW_PATH") != "" {
 		deps.GetReview = loadReviewFile
-		// The local-reply tool needs the daemon channel (the note is stored
-		// host-side); without it the tool stays hidden rather than failing on use.
-		if os.Getenv("HYDRA_REVIEW_REQ_DIR") != "" {
-			deps.ReplyLocal = replyLocalToReviewThread
-		}
 	}
 	// The self-status tools ride the same daemon channel: tests/artifacts state
 	// lives in the daemon's managers, and services state ONLY ever exists in daemon
@@ -74,6 +69,9 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	if os.Getenv("HYDRA_REVIEW_REQ_DIR") != "" {
 		deps.HydraComments = hydraCommentsFromMCP
 		deps.AddComment = addReviewCommentFromMCP
+		// Replying is no longer gated on a forge link: a number can name one of
+		// Hydra's own comments, which exist with or without an MR.
+		deps.ReplyLocal = replyLocalToReviewThread
 		deps.HeadStatus = headStatusFromMCP
 		deps.TestLogs = testLogsFromMCP
 		deps.RunTests = func(runner string) (string, bool) { return runFromMCP(reviewq.OpRunTests, runner) }
@@ -262,12 +260,12 @@ func requestReviewRefresh() string {
 // replyLocalToReviewThread backs the reply_to_review_comment tool: it hands the
 // note to the daemon, which stores it against the thread for the user to read in
 // the diff viewer. Nothing is sent to the forge.
-func replyLocalToReviewThread(threadID, body string) (bool, string) {
+func replyLocalToReviewThread(number int, body string) (bool, string) {
 	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
 	if dir == "" {
 		return false, "Replying is not available in this session."
 	}
-	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpNote, ThreadID: threadID, Body: body})
+	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpNote, ReplyTo: number, Body: body})
 	if !ok {
 		return false, "Hydra did not confirm the note in time, so it may not have been saved. Ask the user to check the daemon."
 	}

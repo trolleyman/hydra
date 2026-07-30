@@ -16,6 +16,7 @@ import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
 import type { DiffResponse } from '../models/DiffResponse';
 import type { GeneratedTitleResponse } from '../models/GeneratedTitleResponse';
 import type { ListReviewsResponse } from '../models/ListReviewsResponse';
+import type { MarkReadBody } from '../models/MarkReadBody';
 import type { NewReviewCommentBody } from '../models/NewReviewCommentBody';
 import type { NewReviewCommentRequest } from '../models/NewReviewCommentRequest';
 import type { PreviewsResponse } from '../models/PreviewsResponse';
@@ -30,6 +31,7 @@ import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryPushStatus } from '../models/RepositoryPushStatus';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { ResolvedPathResponse } from '../models/ResolvedPathResponse';
+import type { ResolveReviewCommentBody } from '../models/ResolveReviewCommentBody';
 import type { ReviewCommentsResponse } from '../models/ReviewCommentsResponse';
 import type { ReviewConfigResponse } from '../models/ReviewConfigResponse';
 import type { ReviewReplyRequest } from '../models/ReviewReplyRequest';
@@ -881,6 +883,68 @@ export class DefaultService {
             },
             errors: {
                 400: `Bad Request (no such comment, or it is published)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Resolve (or reopen) a review comment by its number
+     * Marks a comment dealt with. Works on either origin, because the numbering is one sequence: a Hydra comment gets a resolved flag, and a forge comment resolves the THREAD it belongs to. Resolving a forge thread is LOCAL to Hydra and is never sent to the forge - GitHub's resolveReviewThread needs a thread node id Hydra does not fetch, and a resolve that silently worked on GitLab and silently did not on GitHub would be worse than one that is honestly local everywhere. A state change, not an edit, so it is allowed on a published comment.
+     *
+     * @param projectId
+     * @param id
+     * @param number
+     * @param requestBody
+     * @returns ReviewCommentsResponse Resolved (returns the full comment list).
+     * @throws ApiError
+     */
+    public resolveReviewComment(
+        projectId: string,
+        id: string,
+        number: number,
+        requestBody: ResolveReviewCommentBody,
+    ): CancelablePromise<ReviewCommentsResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/review/comments/{number}/resolve',
+            path: {
+                'project_id': projectId,
+                'id': id,
+                'number': number,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (no comment or thread has that number)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Mark review comments as read
+     * Records that the user has seen these numbers. Read state is a fact about this Hydra install rather than about the comment, so it lives here and never reaches a forge. Nothing becomes read by the passage of time - only this call sets it.
+     *
+     * @param projectId
+     * @param id
+     * @param requestBody
+     * @returns ReviewCommentsResponse Marked (returns the full comment list).
+     * @throws ApiError
+     */
+    public markReviewCommentsRead(
+        projectId: string,
+        id: string,
+        requestBody: MarkReadBody,
+    ): CancelablePromise<ReviewCommentsResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/review/comments/read',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
                 404: `Not Found`,
             },
         });

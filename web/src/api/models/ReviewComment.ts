@@ -48,6 +48,15 @@ export type ReviewComment = {
     hunk_hash?: string;
     created_at: string;
     published_at?: string;
+    /**
+     * Dealt with. A state change, not an edit - the body is untouched and still readable.
+     */
+    resolved?: boolean;
+    resolved_at?: string;
+    /**
+     * The user has seen it. Set only by an explicit mark-read; nothing becomes read by the passage of time.
+     */
+    read?: boolean;
 };
 export namespace ReviewComment {
     /**

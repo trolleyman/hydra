@@ -1166,6 +1166,18 @@ var (
 // 45), so the diff viewer renders them inline, and cover the three shapes worth
 // looking at: a plain forge thread, a thread with an agent's local-only reply,
 // and a resolved one.
+// simAvatar stands in for a forge-hosted profile picture. A data: URL rather than
+// a real one so the simulation needs no network and hotlinks nobody - what is
+// being demonstrated is that the AVATAR PATH works, not whose face is on it.
+func simAvatar(name, colour string) string {
+	svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48">`+
+		`<rect width="48" height="48" fill="%s"/>`+
+		`<circle cx="24" cy="18" r="8" fill="#ffffff" opacity="0.9"/>`+
+		`<path d="M8 48c0-9 7-16 16-16s16 7 16 16z" fill="#ffffff" opacity="0.9"/>`+
+		`<title>%s</title></svg>`, colour, name)
+	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(svg))
+}
+
 func simSeedThreads(id string) []api.ReviewThread {
 	if id != "agent-1" {
 		return nil
@@ -1176,7 +1188,7 @@ func simSeedThreads(id string) []api.ReviewThread {
 			Resolved: ptr(false), Outdated: ptr(false),
 			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701"),
 			Notes: []api.ReviewThreadNote{
-				{Id: "701", Author: ptr("priya"), Body: "Is `errors` still used after the refactor? If not this import can go.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:12:00Z"), Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701")},
+				{Id: "701", Number: ptr(3), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "Is `errors` still used after the refactor? If not this import can go.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:12:00Z"), Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701")},
 			},
 		},
 		{
@@ -1184,16 +1196,18 @@ func simSeedThreads(id string) []api.ReviewThread {
 			Resolved: ptr(false), Outdated: ptr(false),
 			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_702"),
 			Notes: []api.ReviewThreadNote{
-				{Id: "702", Author: ptr("sam"), Body: "Threading a `*db.Store` through here couples spawn to the DB - can we pass the narrower interface instead?", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:20:00Z")},
-				{Id: "703", Author: ptr("priya"), Body: "Agreed, and it would make this testable without a temp DB.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:26:00Z")},
-				{Id: "local-1", Author: ptr("agent"), Body: "Narrowed it to a `HeadStore` interface in 4f21ac9 - spawn now takes just `CreateAgent`/`GetAgent`.", Origin: api.LocalOnly, CreatedAt: ptr("2026-07-28T09:41:00Z")},
+				{Id: "702", Number: ptr(4), Read: ptr(true), Author: ptr("sam"), AvatarUrl: ptr(simAvatar("sam", "#0891b2")), Body: "Threading a `*db.Store` through here couples spawn to the DB - can we pass the narrower interface instead?", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:20:00Z")},
+				{Id: "703", Number: ptr(5), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "Agreed, and it would make this testable without a temp DB.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:26:00Z")},
+				// Unread: an agent's reply is news, and this is what the unread dot and
+				// the next-unread jump are for.
+				{Id: "local-1", Number: ptr(6), Read: ptr(false), Author: ptr("agent"), Body: "Narrowed it to a `HeadStore` interface in 4f21ac9 - spawn now takes just `CreateAgent`/`GetAgent`.", Origin: api.LocalOnly, CreatedAt: ptr("2026-07-28T09:41:00Z")},
 			},
 		},
 		{
 			Id: "704", Path: "web/src/components/AgentDetail.tsx", Line: 46,
 			Resolved: ptr(true), Outdated: ptr(false),
 			Notes: []api.ReviewThreadNote{
-				{Id: "704", Author: ptr("sam"), Body: "Nit: this could use the shared formatter.", Origin: api.Forge, CreatedAt: ptr("2026-07-27T16:02:00Z")},
+				{Id: "704", Number: ptr(7), Read: ptr(true), Author: ptr("sam"), AvatarUrl: ptr(simAvatar("sam", "#0891b2")), Body: "Nit: this could use the shared formatter.", Origin: api.Forge, CreatedAt: ptr("2026-07-27T16:02:00Z")},
 			},
 		},
 	}
@@ -1280,8 +1294,11 @@ func (s *SimulationServer) ReplyToReviewThread(w http.ResponseWriter, r *http.Re
 // has both states to render - the pair is the point, since a draft is the one
 // thing no agent may see.
 var (
-	simCommentMu       sync.Mutex
-	simCommentsByHead  map[string][]api.ReviewComment
+	simCommentMu      sync.Mutex
+	simCommentsByHead map[string][]api.ReviewComment
+	// The fixtures already use 1-7 across both origins (comments 1-2, forge notes
+	// 3-7), so a new comment starts at 8 - one sequence, exactly as the real store
+	// does it.
 	simCommentNextByID = map[string]int{}
 )
 
@@ -1296,7 +1313,7 @@ func simSeedComments(id string) []api.ReviewComment {
 			Path:      ptr("internal/heads/heads.go"),
 			Line:      ptr(45),
 			Diff:      ptr("main -> a1b2c3d"),
-			CreatedAt: "2026-07-28T10:02:00Z", PublishedAt: ptr("2026-07-28T10:05:00Z"),
+			CreatedAt: "2026-07-28T10:02:00Z", PublishedAt: ptr("2026-07-28T10:05:00Z"), Read: ptr(true),
 		},
 		{
 			Number: 2, Status: api.Draft, Author: "user",
@@ -1304,7 +1321,7 @@ func simSeedComments(id string) []api.ReviewComment {
 			Path:      ptr("internal/heads/heads.go"),
 			Line:      ptr(5),
 			Diff:      ptr("main -> a1b2c3d"),
-			CreatedAt: "2026-07-28T10:09:00Z",
+			CreatedAt: "2026-07-28T10:09:00Z", Read: ptr(true),
 		},
 	}
 }
@@ -1318,7 +1335,11 @@ func simComments(id string) []api.ReviewComment {
 	if _, ok := simCommentsByHead[id]; !ok {
 		seeded := simSeedComments(id)
 		simCommentsByHead[id] = seeded
-		simCommentNextByID[id] = len(seeded) + 1
+		if len(seeded) > 0 {
+			simCommentNextByID[id] = 8
+		} else {
+			simCommentNextByID[id] = 1
+		}
 	}
 	out := append([]api.ReviewComment(nil), simCommentsByHead[id]...)
 	if out == nil {
@@ -1388,6 +1409,65 @@ func (s *SimulationServer) DeleteReviewComment(w http.ResponseWriter, r *http.Re
 	}
 	simCommentsByHead[id] = kept
 	simCommentMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, simCommentsResponse(id, nil))
+}
+
+func (s *SimulationServer) ResolveReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int) {
+	var body api.ResolveReviewCommentBody
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	simComments(id)
+	simCommentMu.Lock()
+	for i := range simCommentsByHead[id] {
+		if simCommentsByHead[id][i].Number == number {
+			simCommentsByHead[id][i].Resolved = ptr(body.Resolved)
+		}
+	}
+	simCommentMu.Unlock()
+	// A number that is not one of Hydra's own names a forge thread; the fixtures
+	// number those from simThreadsResponse, so resolve it there.
+	simThreads(id)
+	simThreadMu.Lock()
+	for i := range simThreadsByHead[id] {
+		for _, n := range simThreadsByHead[id][i].Notes {
+			if n.Number != nil && *n.Number == number {
+				simThreadsByHead[id][i].Resolved = ptr(body.Resolved)
+				simThreadsByHead[id][i].ResolvedLocally = ptr(body.Resolved)
+			}
+		}
+	}
+	simThreadMu.Unlock()
+	api.WriteJSON(w, http.StatusOK, simCommentsResponse(id, nil))
+}
+
+func (s *SimulationServer) MarkReviewCommentsRead(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var body api.MarkReadBody
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	want := map[int]bool{}
+	if body.Numbers != nil {
+		for _, n := range *body.Numbers {
+			want[n] = true
+		}
+	}
+	read := body.Unread == nil || !*body.Unread
+	simComments(id)
+	simCommentMu.Lock()
+	for i := range simCommentsByHead[id] {
+		if len(want) == 0 || want[simCommentsByHead[id][i].Number] {
+			simCommentsByHead[id][i].Read = ptr(read)
+		}
+	}
+	simCommentMu.Unlock()
+	simThreads(id)
+	simThreadMu.Lock()
+	for i := range simThreadsByHead[id] {
+		for j := range simThreadsByHead[id][i].Notes {
+			n := &simThreadsByHead[id][i].Notes[j]
+			if n.Number != nil && (len(want) == 0 || want[*n.Number]) {
+				n.Read = ptr(read)
+			}
+		}
+	}
+	simThreadMu.Unlock()
 	api.WriteJSON(w, http.StatusOK, simCommentsResponse(id, nil))
 }
 
