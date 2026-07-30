@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -67,21 +68,64 @@ func TestLoggingMiddlewareLogsMutationsAndErrors(t *testing.T) {
 
 // Quieting the routine traffic must not lose the old property that a request
 // stuck in its handler is visible in the log BEFORE it finishes.
+//
+// The in-flight warning is emitted from a time.AfterFunc timer goroutine, so it
+// is asynchronous: a busy test binary can schedule that goroutine after the
+// handler has already returned. Capturing a single snapshot the instant serve()
+// returns (as captureLog does) therefore races the warning and can miss it - the
+// line then lands on the restored default logger instead of the buffer. Capture
+// into a synchronized buffer and wait for the warning rather than snapshotting.
 func TestLoggingMiddlewareWarnsWhileAGetIsStuck(t *testing.T) {
 	old := slowRequestWarn
 	slowRequestWarn = 20 * time.Millisecond
 	defer func() { slowRequestWarn = old }()
 
+	buf := &syncBuffer{}
+	oldOut, oldFlags := log.Writer(), log.Flags()
+	log.SetOutput(buf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(oldOut)
+		log.SetFlags(oldFlags)
+	}()
+
 	h := LoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(80 * time.Millisecond)
 	}))
-	out := captureLog(t, func() { serve(h, http.MethodGet, "/api/slow", nil) })
-	if !strings.Contains(out, "== GET /api/slow still running") {
-		t.Errorf("slow GET logged %q, want an in-flight warning", out)
+	serve(h, http.MethodGet, "/api/slow", nil)
+
+	// The completion line is written synchronously by serve; the warning is not,
+	// so give the timer goroutine a generous window to land it.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		out := buf.String()
+		if strings.Contains(out, "== GET /api/slow still running") && strings.Contains(out, "-> GET /api/slow 200") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("slow GET logged %q, want an in-flight warning and a completion line", out)
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
-	if !strings.Contains(out, "-> GET /api/slow 200") {
-		t.Errorf("slow GET logged %q, want a completion line too", out)
-	}
+}
+
+// syncBuffer is a bytes.Buffer safe for the logger to write to from its timer
+// goroutine while the test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
 }
 
 // A websocket is meant to sit open for minutes, so neither the stuck warning nor
