@@ -268,7 +268,7 @@ func TestHeadStatusTools(t *testing.T) {
 func TestRunToolsHiddenWithoutDeps(t *testing.T) {
 	resps := runLines(t, Deps{}, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	for _, tl := range resps[0]["result"].(map[string]any)["tools"].([]any) {
-		if n := tl.(map[string]any)["name"].(string); n == "retry_tests" || n == "generate_artifacts" {
+		if n := tl.(map[string]any)["name"].(string); n == "retry_tests" || n == "retry_artifacts" {
 			t.Errorf("%s advertised with no backing dep", n)
 		}
 	}
@@ -276,10 +276,13 @@ func TestRunToolsHiddenWithoutDeps(t *testing.T) {
 
 func TestRunTools(t *testing.T) {
 	var seen []string
-	var gotArtifact string
+	var artifactCalls []string
 	deps := Deps{
-		RunTests:     func(r string) (string, bool) { seen = append(seen, r); return "Started 1 test runner(s): unit.", true },
-		RunArtifacts: func(n string) (string, bool) { gotArtifact = n; return "Started 1 artifact(s): shots.", true },
+		RunTests: func(r string) (string, bool) { seen = append(seen, r); return "Started 1 test runner(s): unit.", true },
+		RunArtifacts: func(n string) (string, bool) {
+			artifactCalls = append(artifactCalls, n)
+			return "Started 1 artifact(s): shots.", true
+		},
 	}
 	resps := runLines(t, deps,
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"retry_tests","arguments":{"runner":"  unit  "}}}`,
@@ -287,7 +290,9 @@ func TestRunTools(t *testing.T) {
 		// Sent under the PRE-RENAME name, which stays dispatchable so a config or
 		// a doc quoting it does not break.
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_tests","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"generate_artifacts","arguments":{"name":"shots"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"retry_artifacts","arguments":{"name":"shots"}}}`,
+		// Pre-rename name, still dispatchable.
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"generate_artifacts","arguments":{"name":"old"}}}`,
 	)
 	// The name is trimmed before it reaches the host, and an omitted argument
 	// arrives as "" - the "run all of them" form, not an error.
@@ -300,7 +305,8 @@ func TestRunTools(t *testing.T) {
 	if text := firstText(t, resps[1]); !strings.Contains(text, "Started") {
 		t.Errorf("retry_tests relayed %q", text)
 	}
-	if gotArtifact != "shots" {
-		t.Errorf("generate_artifacts passed name=%q, want \"shots\"", gotArtifact)
+	// Both the new name and the pre-rename one reach the artifact dep.
+	if len(artifactCalls) != 2 || artifactCalls[0] != "shots" || artifactCalls[1] != "old" {
+		t.Errorf("retry_artifacts saw %q, want [\"shots\", \"old\"]", artifactCalls)
 	}
 }

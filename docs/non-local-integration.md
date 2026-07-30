@@ -235,10 +235,11 @@ linked or not (`internal/http/head_status.go` renders them):
   state, and the project's supervised services.
 - `get_test_logs` - the tail of one runner's captured output (default 200 lines,
   cap 2000), named by runner.
-- `retry_tests` / `generate_artifacts` - discard the cached verdict/output for
-  the branch tip and start a fresh run. (`retry_tests` was called `run_tests`;
-  the dispatcher still accepts the old name, and the wire op on the `reviewq`
-  channel is still `run_tests` - see the naming note below.)
+- `retry_tests` / `retry_artifacts` - discard the cached verdict/output for
+  the branch tip and start a fresh run. (They were `run_tests` /
+  `generate_artifacts`; the dispatcher still accepts both old names, and the wire
+  ops on the `reviewq` channel are still `run_tests` / `run_artifacts` - see the
+  naming note below.)
 
 They exist because an agent could run its own test command but could not see
 **the thing that actually gates its merge**: the daemon's cached per-runner
@@ -280,8 +281,12 @@ Design notes worth keeping:
   over - a run already in flight is reused rather than restarted (both managers'
   `Invalidate` no-op while generating), and one that settled inside
   `runCooldown` is reported rather than repeated, which is what stops a
-  finish-then-immediately-rerun loop. `generate_artifacts` is the same shape;
-  its payoff is a UI head regenerating its screenshots and then reading them.
+  finish-then-immediately-rerun loop. `retry_artifacts` is the same shape in
+  every respect, including the name: artifacts are generated per commit by the
+  same kind of background sweep (`RunArtifactPrefetcher`, plus `PrefetchHeadNow`
+  the moment a head goes to rest), so waiting is the answer there too - the queue
+  is just slower, because a screenshot run costs more than a test run. Its payoff
+  is a UI head whose set FAILED regenerating it and then reading the images.
 - **Split, but the summary must stand alone.** The common call stays cheap and
   only a real failure pays for a log - yet a status that just said "FAILING" and
   pointed at another tool would make the split a tax, not a saving. So the

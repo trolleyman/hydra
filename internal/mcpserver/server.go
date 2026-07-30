@@ -364,9 +364,13 @@ func toolDefs(deps Deps) []map[string]any {
 	}
 	if deps.RunArtifacts != nil {
 		defs = append(defs, map[string]any{
-			"name": "generate_artifacts",
-			"description": "Regenerate YOUR artifacts (screenshots and other generated outputs) from your branch's latest commit, discarding the cached ones. " +
-				"Useful after a UI change: regenerate, then read the image files get_head_status lists to see what your change actually looks like. " +
+			// retry_artifacts for the same reason as retry_tests: Hydra generates a
+			// head's artifacts itself for each commit, so "generate my artifacts" is
+			// a thing an agent asks for only because the tool is named after it. The
+			// queue can be slow, and slow is what waiting is for.
+			"name": "retry_artifacts",
+			"description": "Re-generate artifacts (screenshots and other generated outputs) that ALREADY GENERATED, discarding the cached ones. You almost never need this: Hydra generates your artifacts itself for each commit, so after committing just wait - the queue can take a while behind other work - and call get_head_status, which lists the image files for you to read. " +
+				"What it is for is a set that FAILED, or cached output you have reason to believe is wrong, rather than one that simply has not been reached yet. " +
 				"Returns as soon as generation STARTS: call get_head_status a little later for the files, and do NOT call this again while it runs. " +
 				"COMMIT FIRST - it builds from the latest commit, not your working tree.",
 			"inputSchema": map[string]any{
@@ -541,13 +545,13 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		}
 		msg, ok := deps.TestLogs(strings.TrimSpace(args.Runner), args.Tail)
 		return textResult(msg, !ok)
-	// "run_tests" is the pre-rename name, still accepted: a tool name is quoted
-	// in places Hydra does not control - a user's mcp_tools_allowed/blocked
-	// entry, a project's own docs - and it costs one word here to keep those
-	// working. Only "retry_tests" is advertised.
-	case "retry_tests", "run_tests", "generate_artifacts":
+	// "run_tests" / "generate_artifacts" are the pre-rename names, still accepted:
+	// a tool name is quoted in places Hydra does not control - a user's
+	// mcp_tools_allowed/blocked entry, a project's own docs - and it costs one
+	// word here to keep those working. Only the retry_* names are advertised.
+	case "retry_tests", "run_tests", "retry_artifacts", "generate_artifacts":
 		fn, argKey := deps.RunTests, "runner"
-		if p.Name == "generate_artifacts" {
+		if p.Name == "retry_artifacts" || p.Name == "generate_artifacts" {
 			fn, argKey = deps.RunArtifacts, "name"
 		}
 		if fn == nil {

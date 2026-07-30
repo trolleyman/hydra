@@ -1111,7 +1111,7 @@ function summarizeToolInput(input: unknown, name = ''): { text: string; prose: b
   if (name === 'mcp__hydra__retry_tests' || name === 'mcp__hydra__run_tests') {
     return { text: typeof obj.runner === 'string' && obj.runner ? obj.runner : 'All runners', prose: true }
   }
-  if (name === 'mcp__hydra__generate_artifacts') {
+  if (name === 'mcp__hydra__retry_artifacts' || name === 'mcp__hydra__generate_artifacts') {
     return { text: typeof obj.name === 'string' && obj.name ? obj.name : 'All artifact sets', prose: true }
   }
   if (name === 'mcp__hydra__request_mcp_server') {
@@ -1297,7 +1297,8 @@ const HYDRA_TOOL_LABELS: Record<string, string> = {
   get_test_logs: 'Test logs',
   retry_tests: 'Retry tests',
   run_tests: 'Retry tests',
-  generate_artifacts: 'Generate artifacts',
+  retry_artifacts: 'Retry artifacts',
+  generate_artifacts: 'Retry artifacts',
   get_review_comments: 'Review comments',
   add_review_comment: 'Add review comment',
   get_review_status: 'Review status',
@@ -1311,6 +1312,7 @@ const HYDRA_SUMMARY_ONLY_TOOLS = new Set([
   'mcp__hydra__get_test_logs',
   'mcp__hydra__retry_tests',
   'mcp__hydra__run_tests',
+  'mcp__hydra__retry_artifacts',
   'mcp__hydra__generate_artifacts',
   'mcp__hydra__request_mcp_server',
   'mcp__hydra__reply_to_review_comment',
@@ -3468,6 +3470,7 @@ const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   // transcript is durable, so a conversation from before the rename still
   // carries run_tests calls that must not fall back to the raw tool name.
   mcp__hydra__run_tests: Zap,
+  mcp__hydra__retry_artifacts: Sparkles,
   mcp__hydra__generate_artifacts: Sparkles,
   mcp__hydra__get_review_comments: MessageSquare,
   mcp__hydra__add_review_comment: MessageSquare,
