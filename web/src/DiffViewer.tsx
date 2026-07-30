@@ -16,7 +16,7 @@ import { ReviewThreadContext, useReviewThreadActions } from './lib/reviewThreadC
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Folder, FolderOpen, X, GitMergeConflict, Bot, File, FileDiff as FileDiffIcon, Files as FilesIcon,
+  Folder, FolderOpen, X, GitMergeConflict, Bot, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   CircleCheck, Link2, ArrowUp, ArrowDown,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
@@ -2566,7 +2566,11 @@ function MergeConflictButton({ diff, agent, projectId }: {
     `git merge ${baseBranch}`,
     '',
     '# Edit conflicting files, then stage and commit',
-    'git add <resolved-files>',
+    // `git add -A` rather than a `<resolved-files>` placeholder: after a merge
+    // you resolve every conflicted file before committing anyway, so naming
+    // them adds nothing but a token to hand-edit - and the whole point of this
+    // block is that you can paste it and have it run.
+    'git add -A',
     'git commit',
   ].join('\n')
 
@@ -2627,14 +2631,21 @@ function MergeConflictButton({ diff, agent, projectId }: {
                   <div>
                     <DialogSectionLabel>Conflicting files</DialogSectionLabel>
                     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 divide-y divide-gray-100 dark:divide-gray-700/50 max-h-40 overflow-y-auto">
-                      {conflictFiles.map((f) => (
-                        <div key={f} className="flex items-center gap-2.5 px-3.5 py-2.5">
-                          <File className="w-4 h-4 shrink-0 text-red-500 dark:text-red-400" />
-                          {/* Same path treatment as the diff's file list: the
-                              directories lowlit, the filename in normal text. */}
-                          <span className="text-sm truncate min-w-0" title={f}><PathName path={f} /></span>
-                        </div>
-                      ))}
+                      {/* A row reads exactly like a row of the diff's file list:
+                          the shared per-filetype icon (getFileIcon) rather than
+                          a generic red page - the panel around it already says
+                          "conflict", so colouring the icon red only hid which
+                          KIND of file each one is - and PathName's lowlit
+                          directories with the filename in normal text. */}
+                      {conflictFiles.map((f) => {
+                        const { Icon, className } = getFileIcon(f.split('/').pop() ?? f)
+                        return (
+                          <div key={f} className="flex items-center gap-2.5 px-3.5 py-2.5">
+                            <Icon className={`w-4 h-4 shrink-0 ${className}`} />
+                            <span className="text-sm truncate min-w-0" title={f}><PathName path={f} /></span>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
