@@ -173,7 +173,10 @@ export const BranchSelector = memo(function BranchSelector({
             // GitCompare became GitCompareArrows. Same idea as data-main-scroll.
             data-branch-selector=""
             onClick={() => setOpen((o) => !o)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer ${triggerSize} ${open
+            // h-7 rather than py-1: this trigger sits in a row with the
+            // options popovers and the terminal/chat toggle, which are h-7, and
+            // arriving at 27px from padding read as a misalignment.
+            className={`flex h-7 items-center gap-1.5 px-2.5 rounded-md border text-xs font-medium transition-colors cursor-pointer ${triggerSize} ${open
               ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
               : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
               }`}

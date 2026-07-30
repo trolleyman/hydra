@@ -738,9 +738,12 @@ const AgentMetaRow = memo(function AgentMetaRow({
           content="How this head is driven: a terminal or a chat view. Switching restarts the agent process; the conversation is preserved."
           className="shrink-0"
         >
-          <span className="inline-flex items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono">
+          {/* h-7 on the pill and h-full on each half, so the segmented control is
+              exactly as tall as the branch trigger and the popovers beside it
+              rather than arriving at 27px from its buttons' padding. */}
+          <span className="inline-flex h-7 items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono">
             {savingChatMode ? (
-              <span className="flex items-center gap-1.5 px-2.5 py-1 text-gray-500 dark:text-gray-400">
+              <span className="flex h-full items-center gap-1.5 px-2.5 text-gray-500 dark:text-gray-400">
                 <LoaderCircle className="w-3 h-3 animate-spin" />
                 switching
               </span>
@@ -748,7 +751,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
               <>
                 <button
                   onClick={() => confirmChatMode(false)}
-                  className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+                  className={`flex h-full items-center gap-1 px-2 transition-colors ${
                     agent.chat_mode
                       ? 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
                       : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
@@ -759,7 +762,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
                 </button>
                 <button
                   onClick={() => confirmChatMode(true)}
-                  className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-gray-300 dark:border-gray-600 ${
+                  className={`flex h-full items-center gap-1 px-2 transition-colors border-l border-gray-300 dark:border-gray-600 ${
                     agent.chat_mode
                       ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
                       : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
