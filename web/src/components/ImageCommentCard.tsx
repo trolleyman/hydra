@@ -1,23 +1,30 @@
 import { MessageSquare } from 'lucide-react'
 import type { ReviewImageAnchor } from '../api'
-import { anchorPositionLabel, anchorVersionLabel } from '../lib/artifactAnchor'
+import { anchorPositionLabel, anchorVersionLabel, artifactBlobUrl } from '../lib/artifactAnchor'
+import { cropOutputSize, cropRect } from '../lib/imageCrop'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { useLightboxStore } from '../stores/lightboxStore'
 
 // A remark about a spot in a picture, rendered as one readable thing.
 //
-// This is what the frozen crop exists for. A comment that carries only
-// coordinates can be shown as text - "#8 home.png @ 62%,28%" - but that is a
-// reference to a picture rather than a picture, and the reader has to go and
-// look before the remark means anything. With the close-up beside it, the whole
-// point is legible in a chat row: here is the spot, here is what is wrong with
-// it.
+// A comment that carries only coordinates can be shown as text - "#8 home.png @
+// 62%,28%" - but that is a reference to a picture rather than a picture, and the
+// reader has to go and look before the remark means anything. With the spot
+// shown beside it, the whole point is legible in a row: here is where, here is
+// what is wrong with it.
 //
-// The same card serves every surface that has to show one (the chat, a review
-// list, a reply two rounds later), which is the other half of why the crop is
-// stored rather than re-derived: none of those surfaces has the artifact.
+// The close-up is a window onto the LIVE artifact, framed with CSS. That works
+// because the cache entry a comment anchors to is pinned against pruning
+// server-side (artifacts.Pin), so the original outlives the comment - which is
+// both less machinery than storing a derived copy and more useful, since
+// clicking through opens the whole picture rather than a thumbnail of it.
 
-export function ImageCommentCard({ comment, className, onOpen }: {
+// The thumbnail's box. A wide region and a tall one both fit inside it, so a row
+// of cards keeps one rhythm rather than each setting its own height.
+const THUMB_W = 128
+const THUMB_H = 96
+
+export function ImageCommentCard({ comment, projectId, className, onOpen }: {
   comment: {
     number: number
     text: string
@@ -26,6 +33,8 @@ export function ImageCommentCard({ comment, className, onOpen }: {
     resolved?: boolean
     image?: ReviewImageAnchor
   }
+  /** Needed to address the artifact blob the close-up is drawn from. */
+  projectId: string | null
   className?: string
   /** Called instead of the default lightbox open, when a caller wants the click
    *  to navigate somewhere of its own (a permalink to the comment, say). */
@@ -34,38 +43,57 @@ export function ImageCommentCard({ comment, className, onOpen }: {
   const openLightbox = useLightboxStore((s) => s.open)
   const a = comment.image
   if (!a) return null
-  const cropUrl = a.crop_url
+  const url = artifactBlobUrl(projectId, a)
+  // The close-up is a WINDOW onto the live file, not a stored copy: the artifact
+  // entry a comment points at is pinned against pruning, so the original is still
+  // there. Framed with background-position rather than a canvas, so nothing is
+  // decoded or copied to show it - and the same arithmetic (lib/imageCrop) that
+  // decided what a crop would have contained decides what this shows.
+  const frame = url && a.natural_w && a.natural_h
+    ? (() => {
+        const rect = cropRect({ x: a.x, y: a.y, w: a.w, h: a.h }, a.natural_w, a.natural_h)
+        // Capped to the thumbnail box HERE rather than clamped again in CSS: the
+        // background is scaled for whatever size this returns, so a second clamp
+        // would just show the region's top-left corner.
+        const out = cropOutputSize(rect.w, rect.h, THUMB_W, THUMB_H)
+        const scale = out.w / rect.w
+        return {
+          width: out.w,
+          height: out.h,
+          backgroundImage: `url("${url}")`,
+          backgroundSize: `${a.natural_w * scale}px ${a.natural_h * scale}px`,
+          backgroundPosition: `-${rect.x * scale}px -${rect.y * scale}px`,
+          backgroundRepeat: 'no-repeat',
+        } satisfies React.CSSProperties
+      })()
+    : null
   const open = (e: React.MouseEvent) => {
     e.stopPropagation()
     if (onOpen) { onOpen(); return }
-    // The crop is a thumbnail of a moment that may no longer exist; opening it
-    // shows what was pinned, not what the artifact looks like now. That is the
-    // honest thing to show from a card that is itself a record.
-    if (cropUrl) {
-      openLightbox([{ url: cropUrl, filename: `${a.file} @ ${anchorPositionLabel(a)}`, size: 0 }], 0, e.currentTarget)
+    // Opens the WHOLE picture, not the close-up - which is the other half of
+    // keeping the original: there is more to look at than the crop showed.
+    if (url) {
+      openLightbox([{ url, filename: a.file, size: 0, width: a.natural_w, height: a.natural_h }], 0, e.currentTarget)
     }
   }
   return (
     <div className={`flex gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 ${className ?? ''}`}>
-      {cropUrl ? (
+      {frame ? (
         <button
           type="button"
           onClick={open}
           className="shrink-0 cursor-zoom-in"
-          aria-label={`Open the close-up for comment #${comment.number}`}
+          aria-label={`Open ${a.file}, the picture comment #${comment.number} is on`}
         >
-          <img
-            src={cropUrl}
-            alt=""
-            // Capped rather than sized: a crop of a wide region and one of a tall
-            // region should both read as the same kind of thumbnail.
-            className="block max-w-32 max-h-24 rounded border border-gray-200 dark:border-gray-700 object-contain bg-white dark:bg-gray-950"
+          <div
+            className="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950"
+            style={frame}
           />
         </button>
       ) : (
-        // A comment written before crops existed, or one whose crop could not be
-        // drawn. The remark is still worth showing - it just costs a trip to the
-        // picture to place, which is what the anchor line below is for.
+        // No natural size recorded, or nothing to address the blob with. The
+        // remark is still worth showing - it just costs a trip to the picture to
+        // place, which is what the anchor line below is for.
         <div className="shrink-0 w-16 h-16 rounded border border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center">
           <MessageSquare className="w-5 h-5 text-gray-400 dark:text-gray-600" />
         </div>

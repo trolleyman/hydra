@@ -1,23 +1,21 @@
-// The close-up of what a pin points at, frozen when the pin is placed.
+// Which part of a picture a pin's close-up shows.
 //
-// This is the image analogue of the fenced ```diff block a line comment already
-// stores. A comment that keeps only coordinates is readable exactly as long as
-// the picture behind it survives unchanged - and an artifact is regenerated on
-// every commit, so that is not long. A crop makes the remark self-describing
-// forever: it can be shown in a chat row, in a list, or next to the reply two
-// rounds later, without loading a whole screenshot to display a dot in it.
+// A pin's whole value is being able to go back and look at what it points at, so
+// a card has to show that spot rather than the whole screenshot the pin is one
+// dot in. The picture itself is still the source - the artifact cache entry a
+// comment anchors to is PINNED against pruning (artifacts.Pin), so it stays
+// retrievable - and this is only the arithmetic that frames it.
 //
-// It is taken in the BROWSER rather than on the server, and that is the decision
-// that makes it work at all. The server would have to decode every format an
-// artifact can be - including SVG, which Go cannot render, and a frame of a
-// .webm, which needs ffmpeg. The browser has already decoded and painted the
-// thing; drawing it to a canvas is free and format-blind. The blobs are
-// same-origin, so the canvas is never tainted.
+// Nothing is stored. An earlier version froze a PNG of the region at pin time,
+// which meant a write path, a blob route, PNG validation and a decompression-bomb
+// check, all to keep a derived copy of something the cache was about to delete.
+// Keeping the ORIGINAL instead is both less code and more useful: the full
+// picture is still there to open, not just a thumbnail of it.
 
-/** How wide the stored crop is, at most. Big enough to read a control in a
- *  screenshot, small enough that a comment costs a few KB rather than a few MB. */
+/** How wide a close-up is drawn, at most - big enough to read a control in a
+ *  screenshot, small enough to sit in a list row. */
 const MAX_W = 400
-/** And how tall, so a crop of a very vertical region stays a thumbnail. */
+/** And how tall, so a very vertical region stays a thumbnail. */
 const MAX_H = 300
 /** For a POINT pin, how much of the picture to take around it. A point says
  *  "here", not "this region", so the crop has to supply its own context - too
@@ -29,14 +27,6 @@ const MIN_POINT_PX = 160
 /** Padding around a BOX pin, as a fraction of the box, so the region is shown in
  *  its surroundings rather than cut out of them. */
 const BOX_PAD = 0.35
-
-export interface CropSource {
-  /** The painted element. A <video> must be at the frame being pinned. */
-  el: CanvasImageSource & { readonly width?: number; readonly height?: number }
-  /** The media's natural pixel size - what the crop rectangle is computed in. */
-  naturalW: number
-  naturalH: number
-}
 
 export interface CropPin {
   x: number
@@ -74,39 +64,16 @@ export function cropRect(pin: CropPin, naturalW: number, naturalH: number): { x:
   return { x, y, w, h }
 }
 
-/** How big the stored crop should be for a source rectangle - scaled down to fit
- *  the caps, never up (blowing a 40px region up to 400 only stores blur). */
-export function cropOutputSize(w: number, h: number): { w: number; h: number } {
-  const scale = Math.min(1, MAX_W / w, MAX_H / h)
-  return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)) }
-}
-
-/**
- * Draws the crop and returns it as a PNG data URL, or null when it cannot be
- * taken (no 2D context, a zero-sized source, a tainted canvas).
+/** How big to draw a source rectangle - scaled down to fit the caps, never up
+ *  (blowing a 40px region up to 400 only magnifies its blur).
  *
- * Null is a normal outcome, not a failure to report: the comment is still worth
- * storing without its picture, and the anchor still says where to look. Losing
- * the remark because the thumbnail could not be drawn would be much worse.
- */
-export function captureCrop(source: CropSource, pin: CropPin): string | null {
-  const { el, naturalW, naturalH } = source
-  if (!(naturalW > 0) || !(naturalH > 0)) return null
-  const r = cropRect(pin, naturalW, naturalH)
-  const out = cropOutputSize(r.w, r.h)
-  try {
-    const canvas = document.createElement('canvas')
-    canvas.width = out.w
-    canvas.height = out.h
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return null
-    ctx.drawImage(el, r.x, r.y, r.w, r.h, 0, 0, out.w, out.h)
-    return canvas.toDataURL('image/png')
-  } catch {
-    // Chiefly a SecurityError from a cross-origin source. Same-origin is the
-    // norm here, so this is a guard rather than an expected path.
-    return null
-  }
+ *  The caps are parameters because the caller has to size the WINDOW and the
+ *  background together: a box sized here and then clamped again in CSS shows the
+ *  top-left corner of the region rather than the region, since the background is
+ *  scaled for the size this returned. One cap, applied once. */
+export function cropOutputSize(w: number, h: number, maxW = MAX_W, maxH = MAX_H): { w: number; h: number } {
+  const scale = Math.min(1, maxW / w, maxH / h)
+  return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)) }
 }
 
 function clamp(v: number, lo: number, hi: number): number {

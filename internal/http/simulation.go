@@ -1403,15 +1403,6 @@ func (s *SimulationServer) AddReviewComment(w http.ResponseWriter, r *http.Reque
 		c.Status = api.Published
 		c.PublishedAt = ptr(c.CreatedAt)
 	}
-	// The daemon writes the crop to disk and hands back a URL; the simulation has
-	// no disk, so it echoes the posted data URL back in crop_url's place. Both are
-	// just "a URL an <img> can load", which is all the card needs.
-	if c.Image != nil && c.Image.Crop != nil {
-		img := *c.Image
-		img.CropUrl = img.Crop
-		img.Crop = nil
-		c.Image = &img
-	}
 	simCommentsByHead[id] = append(simCommentsByHead[id], c)
 	simCommentMu.Unlock()
 	var notified *string
@@ -2910,6 +2901,16 @@ func simTextURL(mime, body string) string {
 // reads the identity), so this keeps the property that made data URLs attractive
 // here: no on-disk blob serving, and no cache to seed.
 func simArtifactBlob(script, key, file, dataURL string) string {
+	// Also remembered by its (script, key, file) triple, because that is how a
+	// REAL daemon addresses a blob - and anything that reconstructs a URL from an
+	// artifact's identity rather than reusing the one it was handed will ask that
+	// way. A review comment's card is the case in point: it holds an anchor, not a
+	// URL, so without this it asks for a picture the simulation would not
+	// recognise. The map only grows as the fixtures are built, once, at startup.
+	simBlobMu.Lock()
+	simBlobs[simBlobKey{script, key, file}] = dataURL
+	simBlobMu.Unlock()
+
 	q := url.Values{}
 	q.Set("script", script)
 	q.Set("key", key)
@@ -2918,12 +2919,28 @@ func simArtifactBlob(script, key, file, dataURL string) string {
 	return "/artifacts/projects/sim-project/blob?" + q.Encode()
 }
 
+type simBlobKey struct{ script, key, file string }
+
+var (
+	simBlobMu sync.Mutex
+	simBlobs  = map[simBlobKey]string{}
+)
+
 // HandleArtifactBlob serves a simulated artifact's bytes, mirroring the real
 // server's non-OpenAPI route. The content is carried in the request itself (see
 // simArtifactBlob), so there is nothing to look up: this decodes the data URL it
 // was handed back into bytes and a content type.
 func (s *SimulationServer) HandleArtifactBlob(w http.ResponseWriter, r *http.Request) {
-	d := r.URL.Query().Get("d")
+	q := r.URL.Query()
+	d := q.Get("d")
+	if d == "" {
+		// Addressed by identity rather than by the URL we handed out - which is
+		// how the real blob route works, and how anything holding an artifact
+		// anchor will ask.
+		simBlobMu.Lock()
+		d = simBlobs[simBlobKey{q.Get("script"), q.Get("key"), q.Get("file")}]
+		simBlobMu.Unlock()
+	}
 	mime, body, ok := decodeDataURL(d)
 	if !ok {
 		http.NotFound(w, r)

@@ -4777,6 +4777,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           )}
           <ReviewDraftPopover
             comments={queuedComments}
+            projectId={projectId}
             staleIds={staleReviewIds}
             submitting={submittingReview}
             onSubmit={submitReview}

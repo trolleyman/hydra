@@ -1,6 +1,7 @@
 package http
 
 import (
+	"braces.dev/errtrace"
 	"bytes"
 	"log"
 	"net/http"
@@ -119,7 +120,7 @@ type syncBuffer struct {
 func (s *syncBuffer) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.buf.Write(p)
+	return errtrace.Wrap2(s.buf.Write(p))
 }
 
 func (s *syncBuffer) String() string {

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { ReviewImageAnchor } from '../api'
 import {
-  anchorPositionLabel, anchorVersionLabel, artifactRefFromUrl, buildImageAnchor, formatTimecode,
-  sameArtifactPicture, sideOfUrl,
+  anchorPositionLabel, anchorVersionLabel, artifactBlobUrl, artifactRefFromUrl, buildImageAnchor,
+  formatTimecode, sameArtifactPicture, sideOfUrl,
 } from './artifactAnchor'
 
 const BLOB = '/artifacts/projects/p1/blob?script=screenshots&key=commit%2Fabc1234def0567&file=home-dark.png'
@@ -165,5 +165,26 @@ describe('video timestamps', () => {
     // The carry must reach the MINUTE, or 59.96s reads as "0:60.0".
     expect(formatTimecode(59.96)).toBe('1:00.0')
     expect(formatTimecode(119.99)).toBe('2:00.0')
+  })
+})
+
+// The card shows the pinned spot from the LIVE file rather than a stored copy, so
+// this URL has to round-trip with the parser that produced the anchor - if the two
+// ever disagreed, a comment would render against the wrong picture.
+describe('artifactBlobUrl', () => {
+  it('round-trips with artifactRefFromUrl', () => {
+    const anchor = buildImageAnchor({ url: BLOB, x: 0.1, y: 0.2 })!
+    const url = artifactBlobUrl('p1', anchor)!
+    expect(artifactRefFromUrl(url)).toEqual({
+      script: 'screenshots',
+      key: 'commit/abc1234def0567',
+      file: 'home-dark.png',
+    })
+  })
+
+  it('is null without everything it needs to address a blob', () => {
+    const anchor = buildImageAnchor({ url: BLOB, x: 0, y: 0 })!
+    expect(artifactBlobUrl(null, anchor)).toBeNull()
+    expect(artifactBlobUrl('p1', { file: 'x.png', x: 0, y: 0 })).toBeNull()
   })
 })

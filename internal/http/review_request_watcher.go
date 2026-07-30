@@ -240,7 +240,7 @@ func (s *Server) hydraCommentsText(projectRoot, id string, r reviewq.Request) re
 	// Full context only for a narrowed read. "Show me everything" should stay
 	// cheap enough to call habitually; a diff block per comment would make an
 	// unfiltered read on a long review the most expensive tool in the session.
-	return reviewq.Result{OK: true, Message: reviewstore.RenderForAgent(all, len(r.Numbers) > 0, s.artifactImagePath(projectRoot, owner))}
+	return reviewq.Result{OK: true, Message: reviewstore.RenderForAgent(all, len(r.Numbers) > 0, s.artifactImagePath(projectRoot))}
 }
 
 // artifactImagePath resolves a comment's image anchor back to the picture it was
@@ -253,7 +253,7 @@ func (s *Server) hydraCommentsText(projectRoot, id string, r reviewq.Request) re
 // from a browser like any other client input. A file that no longer exists (the
 // artifact cache was cleared, or it has been regenerated under a new key) returns
 // "", which renders the anchor without a path rather than a path that 404s.
-func (s *Server) artifactImagePath(projectRoot, headID string) reviewstore.ImagePathFunc {
+func (s *Server) artifactImagePath(projectRoot string) reviewstore.ImagePathFunc {
 	return func(c reviewstore.Comment) (string, string) {
 		a := c.Image
 		picture := ""
@@ -264,11 +264,10 @@ func (s *Server) artifactImagePath(projectRoot, headID string) reviewstore.Image
 				}
 			}
 		}
-		crop := paths.GetReviewCropPath(projectRoot, headID, c.Number)
-		if _, err := os.Stat(crop); err != nil {
-			crop = ""
-		}
-		return picture, crop
+		// No second path any more: the artifact entry a comment points at is
+		// PINNED against pruning, so the full picture stays retrievable and there
+		// is nothing derived to keep alongside it.
+		return picture, ""
 	}
 }
 

@@ -370,16 +370,11 @@ func GetReviewCommentsJson(projectRoot, id string) string {
 	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-comments", id+".json")
 }
 
-// GetReviewCropPath returns where a review comment's frozen close-up is stored -
-// the picture analogue of the fenced diff block a line comment keeps.
-//
-// A file per comment rather than base64 inside the comments JSON: that file is
-// rewritten whole on every write, and inlining ~20KB per pin would make a head
-// with a dozen of them rewrite a quarter of a megabyte each time somebody ticks
-// a checkbox. Keyed by the comment's number, which is never reused, so a crop
-// can never be served for a different comment than the one that made it.
-func GetReviewCropPath(projectRoot, id string, number int) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-crops", id, fmt.Sprintf("%d.png", number))
+// GetReviewCommentsDir returns the directory holding every head's review
+// comments (.hydra/local/review-comments). Scanned to find which artifact cache
+// entries are still referenced by a comment, without needing the head list.
+func GetReviewCommentsDir(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-comments")
 }
 
 // GetReviewReqRootDir returns the parent dir holding every head's review-refresh

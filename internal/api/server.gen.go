@@ -3131,12 +3131,6 @@ type ReviewConfigResponse struct {
 
 // ReviewImageAnchor A pin on a generated artifact, the way path/line pin a comment to a diff. The position is normalized (0..1) because the same picture is laid out at different sizes and densities depending on the pane; natural_w/natural_h are kept alongside so real pixels can be recovered, which is the form an agent is told.
 type ReviewImageAnchor struct {
-	// Crop WRITE ONLY. A PNG data URL of the close-up around the pin, taken in the browser when the pin was placed - the picture analogue of a line comment's frozen diff block. Stored as a file beside the comment and served back as crop_url; it is never echoed here, because a response carrying a base64 image per comment would dwarf everything else in it.
-	Crop *string `json:"crop,omitempty"`
-
-	// CropUrl READ ONLY. Where to fetch the stored close-up. Absent when the comment has none.
-	CropUrl *string `json:"crop_url,omitempty"`
-
 	// File The output's name within the artifact, e.g. "home-dark.png".
 	File string `json:"file"`
 

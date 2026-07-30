@@ -510,6 +510,49 @@ func PublishDrafts(projectRoot, id string, numbers []int) ([]Comment, error) {
 	return published, nil
 }
 
+// ArtifactPin names one artifact cache entry a review comment is anchored to.
+type ArtifactPin struct {
+	Script string
+	Key    string
+}
+
+// PinnedArtifacts returns every artifact cache entry this project's review
+// comments point at.
+//
+// It exists because a pin's whole value is that you can go back and look at what
+// was pinned. The cache is pruned by age and size, so without this an artifact
+// referenced by a comment is reclaimed like any other and the comment degrades to
+// coordinates into a picture nobody can retrieve.
+//
+// Scans the comments DIRECTORY rather than taking a head list: comments outlive
+// their head (an archived one keeps its store), and a caller that had to
+// enumerate heads first would silently stop pinning the moment one was missed.
+func PinnedArtifacts(projectRoot string) []ArtifactPin {
+	entries, err := os.ReadDir(paths.GetReviewCommentsDir(projectRoot))
+	if err != nil {
+		return nil
+	}
+	seen := map[ArtifactPin]bool{}
+	var out []ArtifactPin
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		for _, c := range LoadComments(projectRoot, id) {
+			if c.Image == nil || c.Image.Script == "" || c.Image.Key == "" {
+				continue
+			}
+			p := ArtifactPin{Script: c.Image.Script, Key: c.Image.Key}
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
 func saveComments(projectRoot, id string, all []Comment) error {
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Number < all[j].Number })
 	data, err := json.Marshal(all)

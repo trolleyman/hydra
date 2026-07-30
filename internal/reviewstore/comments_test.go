@@ -415,3 +415,47 @@ func TestFormatTimecode(t *testing.T) {
 		}
 	}
 }
+
+// The pruner needs to know which artifact entries are still spoken for. It reads
+// the comments DIRECTORY rather than a head list, because comments outlive their
+// head and a caller that enumerated heads would silently stop pinning one.
+func TestPinnedArtifacts(t *testing.T) {
+	root := t.TempDir()
+	img := func(script, key string) *ImageAnchor {
+		return &ImageAnchor{Script: script, Key: key, File: "home.png", X: 0.5, Y: 0.5}
+	}
+	if _, err := AppendComment(root, "h1", Comment{Body: "a", Image: img("screenshots", "commit/aaaa")}); err != nil {
+		t.Fatal(err)
+	}
+	// A second head's comment must be found too, and a duplicate must not double.
+	if _, err := AppendComment(root, "h2", Comment{Body: "b", Image: img("screenshots", "commit/aaaa")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AppendComment(root, "h2", Comment{Body: "c", Image: img("videos", "worktree/9f3a")}); err != nil {
+		t.Fatal(err)
+	}
+	// A line comment anchors to no artifact and must contribute nothing.
+	if _, err := AppendComment(root, "h1", Comment{Body: "d", Path: "a.go", Line: 3}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := PinnedArtifacts(root)
+	if len(got) != 2 {
+		t.Fatalf("got %d pins, want 2: %+v", len(got), got)
+	}
+	want := map[ArtifactPin]bool{
+		{Script: "screenshots", Key: "commit/aaaa"}: true,
+		{Script: "videos", Key: "worktree/9f3a"}:    true,
+	}
+	for _, p := range got {
+		if !want[p] {
+			t.Errorf("unexpected pin %+v", p)
+		}
+	}
+
+	// A DRAFT still pins: it is a comment you are about to send, and losing the
+	// picture between writing it and submitting it is exactly the gap to avoid.
+	if len(PinnedArtifacts(t.TempDir())) != 0 {
+		t.Error("an empty project reported pins")
+	}
+}

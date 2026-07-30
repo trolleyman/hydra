@@ -43,6 +43,16 @@ export function artifactRefFromUrl(url: string | null | undefined): ArtifactRef 
   return { script, key, file }
 }
 
+/** The blob URL that serves the picture an anchor points at - the inverse of
+ *  artifactRefFromUrl, and the reason a card can show the spot from the LIVE
+ *  file: the cache entry a comment references is pinned against pruning
+ *  server-side, so this keeps resolving for as long as the comment exists. */
+export function artifactBlobUrl(projectId: string | null, a: ReviewImageAnchor): string | null {
+  if (!projectId || !a.script || !a.key || !a.file) return null
+  const q = new URLSearchParams({ script: a.script, key: a.key, file: a.file })
+  return `/artifacts/projects/${encodeURIComponent(projectId)}/blob?${q.toString()}`
+}
+
 /** Which half of a comparison a URL is, given the pair. Null when the picture is
  *  single-sided (a repository-view artifact), where "left" and "right" mean
  *  nothing and claiming one would be a fiction. */

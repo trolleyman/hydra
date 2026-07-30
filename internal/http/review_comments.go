@@ -14,26 +14,17 @@ package http
 // which is what makes "you raised #3, is it fixed?" work two rounds later.
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image/png"
 	"log"
-	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/heads"
-	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/reviewstore"
 )
 
@@ -44,7 +35,7 @@ func (s *Server) GetReviewComments(ctx context.Context, request api.GetReviewCom
 	if errResp != nil {
 		return api.GetReviewComments404JSONResponse(*errResp), nil
 	}
-	return api.GetReviewComments200JSONResponse(commentsResponse(request.ProjectId, projectRoot, head.ID, nil)), nil
+	return api.GetReviewComments200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 }
 
 // AddReviewComment stores a comment - a draft by default, published straight away
@@ -79,23 +70,14 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 	if err != nil {
 		return commentBadRequest(fmt.Sprintf("the comment could not be saved: %v", err)), nil
 	}
-	// Written AFTER the append, because the crop is keyed by the number the
-	// append assigns. A failure here is logged and swallowed: the comment is
-	// already stored and still says where to look, and losing the remark because
-	// its thumbnail could not be written would be much the worse outcome.
-	if request.Body.Image != nil && request.Body.Image.Crop != nil {
-		if err := saveCommentCrop(projectRoot, head.ID, stored.Number, *request.Body.Image.Crop); err != nil {
-			log.Printf("warn: review comment #%d on %s: crop not stored: %v", stored.Number, head.ID, err)
-		}
-	}
-	resp := commentsResponse(request.ProjectId, projectRoot, head.ID, nil)
+	resp := commentsResponse(projectRoot, head.ID, nil)
 	if derefOr(request.Body.Publish, false) {
 		published, err := reviewstore.PublishDrafts(projectRoot, head.ID, []int{stored.Number})
 		if err != nil {
 			return commentBadRequest(fmt.Sprintf("the comment was saved but could not be published: %v", err)), nil
 		}
 		notified, toReviewer := s.notifyComments(ctx, projectRoot, *head, published)
-		resp = commentsResponse(request.ProjectId, projectRoot, head.ID, notified)
+		resp = commentsResponse(projectRoot, head.ID, notified)
 		resp.NotifiedReviewer = ptr(toReviewer)
 	}
 	s.notifyAgentsChanged(projectRoot, false)
@@ -115,7 +97,7 @@ func (s *Server) UpdateReviewComment(ctx context.Context, request api.UpdateRevi
 	if _, err := reviewstore.UpdateDraft(projectRoot, head.ID, request.Number, body); err != nil {
 		return updateCommentBadRequest(commentWriteError(err)), nil
 	}
-	return api.UpdateReviewComment200JSONResponse(commentsResponse(request.ProjectId, projectRoot, head.ID, nil)), nil
+	return api.UpdateReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 }
 
 // DeleteReviewComment discards a draft. Its number stays retired.
@@ -127,7 +109,7 @@ func (s *Server) DeleteReviewComment(ctx context.Context, request api.DeleteRevi
 	if err := reviewstore.DeleteDraft(projectRoot, head.ID, request.Number); err != nil {
 		return deleteCommentBadRequest(commentWriteError(err)), nil
 	}
-	return api.DeleteReviewComment200JSONResponse(commentsResponse(request.ProjectId, projectRoot, head.ID, nil)), nil
+	return api.DeleteReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 }
 
 // PublishReviewComments publishes drafts and notifies the head's agent by id.
@@ -149,7 +131,7 @@ func (s *Server) PublishReviewComments(ctx context.Context, request api.PublishR
 	}
 	notified, toReviewer := s.notifyComments(ctx, projectRoot, *head, published)
 	s.notifyAgentsChanged(projectRoot, false)
-	resp := commentsResponse(request.ProjectId, projectRoot, head.ID, notified)
+	resp := commentsResponse(projectRoot, head.ID, notified)
 	resp.NotifiedReviewer = ptr(toReviewer)
 	return api.PublishReviewComments200JSONResponse(resp), nil
 }
@@ -259,7 +241,7 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 	if _, err := reviewstore.SetResolved(projectRoot, head.ID, request.Number, resolved); err == nil {
 		s.notifyResolved(projectRoot, *head, request.Number, resolved)
 		s.notifyAgentsChanged(projectRoot, false)
-		return api.ResolveReviewComment200JSONResponse(commentsResponse(request.ProjectId, projectRoot, head.ID, nil)), nil
+		return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 	} else if !errors.Is(err, reviewstore.ErrNoComment) {
 		return resolveCommentBadRequest(err.Error()), nil
 	}
@@ -275,7 +257,7 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 	}
 	s.notifyResolved(projectRoot, *head, request.Number, resolved)
 	s.notifyAgentsChanged(projectRoot, false)
-	return api.ResolveReviewComment200JSONResponse(commentsResponse(request.ProjectId, projectRoot, head.ID, nil)), nil
+	return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 }
 
 // MarkReviewCommentsRead records what the user has seen.
@@ -301,7 +283,7 @@ func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkRev
 		log.Printf("warn: review comments: mark read for %s: %v", head.ID, err)
 	}
 	s.notifyAgentsChanged(projectRoot, false)
-	return api.MarkReviewCommentsRead200JSONResponse(commentsResponse(request.ProjectId, projectRoot, head.ID, nil)), nil
+	return api.MarkReviewCommentsRead200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 }
 
 // resolveBatcher collects a run of resolves so clicking through five costs one
@@ -332,7 +314,7 @@ func (s *Server) notifyResolved(projectRoot string, head heads.Head, number int,
 	})
 }
 
-func commentsResponse(projectID, projectRoot, headID string, notified *string) api.ReviewCommentsResponse {
+func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCommentsResponse {
 	stored := reviewstore.LoadComments(projectRoot, headID)
 	read := reviewstore.ReadSet(projectRoot, headID)
 	out := api.ReviewCommentsResponse{
@@ -362,11 +344,6 @@ func commentsResponse(projectID, projectRoot, headID string, notified *string) a
 		setIf(&ac.Context, c.Context, c.Context != "")
 		setIf(&ac.HunkHash, c.HunkHash, c.HunkHash != "")
 		ac.Image = imageAnchorToAPI(c.Image)
-		if ac.Image != nil {
-			if _, err := os.Stat(paths.GetReviewCropPath(projectRoot, headID, c.Number)); err == nil {
-				ac.Image.CropUrl = ptr(cropURL(projectID, headID, c.Number))
-			}
-		}
 		setIf(&ac.PublishedAt, c.PublishedAt, c.PublishedAt != "")
 		setIf(&ac.Resolved, c.Resolved, c.Resolved)
 		setIf(&ac.ResolvedAt, c.ResolvedAt, c.ResolvedAt != "")
@@ -434,99 +411,6 @@ func imageAnchorToAPI(in *reviewstore.ImageAnchor) *api.ReviewImageAnchor {
 	setIf(&out.T, float32(in.T), in.T > 0)
 	setIf(&out.Hash, in.Hash, in.Hash != "")
 	return out
-}
-
-// saveCommentCrop decodes the browser's PNG data URL and writes it beside the
-// comment. Only PNG is accepted, and only up to maxCropBytes: this is an image
-// the SERVER stores on a client's say-so, so the format is pinned rather than
-// sniffed and the size is bounded rather than trusted.
-func saveCommentCrop(projectRoot, headID string, number int, dataURL string) error {
-	const prefix = "data:image/png;base64,"
-	if !strings.HasPrefix(dataURL, prefix) {
-		return errtrace.Wrap(fmt.Errorf("a crop must be a base64 PNG data URL"))
-	}
-	raw, err := base64.StdEncoding.DecodeString(dataURL[len(prefix):])
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-	if len(raw) > maxCropBytes {
-		return errtrace.Wrap(fmt.Errorf("crop is %d bytes, over the %d limit", len(raw), maxCropBytes))
-	}
-	// DIMENSIONS before pixels. The byte bound above is on the COMPRESSED form,
-	// and PNG's zlib ratio on flat colour is enormous: a 2MB file can legitimately
-	// declare 20000x20000, which png.Decode would answer by allocating a ~1.6GB
-	// bitmap before any of the reasoning above applies. DecodeConfig reads only
-	// the IHDR header, so checking first costs nothing.
-	cfg, err := png.DecodeConfig(bytes.NewReader(raw))
-	if err != nil {
-		return errtrace.Wrap(fmt.Errorf("crop is not a PNG: %w", err))
-	}
-	if cfg.Width > maxCropDim || cfg.Height > maxCropDim {
-		return errtrace.Wrap(fmt.Errorf("crop is %dx%d, over the %dpx limit", cfg.Width, cfg.Height, maxCropDim))
-	}
-	// Now decode for real: it costs a millisecond and means the bytes on disk are
-	// a genuine PNG rather than whatever was posted with a PNG header.
-	if _, err := png.Decode(bytes.NewReader(raw)); err != nil {
-		return errtrace.Wrap(fmt.Errorf("crop is not a decodable PNG: %w", err))
-	}
-	path := paths.GetReviewCropPath(projectRoot, headID, number)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return errtrace.Wrap(err)
-	}
-	return errtrace.Wrap(os.WriteFile(path, raw, 0o644))
-}
-
-// maxCropBytes bounds a stored close-up's compressed size, and maxCropDim its
-// decoded one. The browser caps the crop at 400x300 (lib/imageCrop), so both are
-// generous headroom over what this path actually produces - the point is that
-// neither is the client's decision.
-const (
-	maxCropBytes = 2 << 20
-	maxCropDim   = 1024
-)
-
-func cropURL(projectID, headID string, number int) string {
-	return fmt.Sprintf("/review-crops/projects/%s/agents/%s/blob?number=%d",
-		url.PathEscape(projectID), url.PathEscape(headID), number)
-}
-
-// HandleReviewCropBlob serves a comment's stored close-up. Outside the OpenAPI
-// mux because it returns raw image bytes, like the artifact and upload blobs.
-func (s *Server) HandleReviewCropBlob(w http.ResponseWriter, r *http.Request) {
-	projectRoot, err := s.resolveProjectRoot(r.PathValue("project_id"))
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	number, err := strconv.Atoi(r.URL.Query().Get("number"))
-	if err != nil || number <= 0 {
-		http.Error(w, "invalid comment number", http.StatusBadRequest)
-		return
-	}
-	// The head id becomes a path segment, so it must not be able to climb out of
-	// the crops dir. Head ids are generated slugs, but this is a URL.
-	headID := r.PathValue("id")
-	if headID == "" || strings.ContainsAny(headID, `/\`) || strings.Contains(headID, "..") {
-		http.Error(w, "invalid agent id", http.StatusBadRequest)
-		return
-	}
-	f, err := os.Open(paths.GetReviewCropPath(projectRoot, headID, number))
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || info.IsDir() {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "image/png")
-	setBlobSecurityHeaders(w, "image/png")
-	// A crop is immutable once written - its number is never reused - so it can
-	// be cached hard.
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	http.ServeContent(w, r, filepath.Base(f.Name()), info.ModTime(), f)
 }
 
 // commentWriteError turns the store's sentinel errors into something a user can

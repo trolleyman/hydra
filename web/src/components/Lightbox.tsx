@@ -11,7 +11,6 @@ import {
 import { ReviewImageAnchor } from '../api'
 import { placePinPopover, type PopoverPlacement } from '../lib/pinPopover'
 import { agentFilePath, pictureKind } from '../lib/pictureKind'
-import { captureCrop } from '../lib/imageCrop'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff, LightboxDiffControls } from './LightboxDiff'
 import { LightboxFile, LightboxPdf, LightboxText, LightboxVideo } from './LightboxViewers'
@@ -512,12 +511,6 @@ export function Lightbox({
       setPinError('This picture has no artifact identity to pin a comment to.')
       return
     }
-    // Frozen here, while the picture is still on screen and at this exact frame.
-    // An artifact is regenerated on every commit, so a comment that kept only
-    // coordinates stops being readable as soon as the picture moves under it.
-    const el = pinnedKind === 'video' ? videoRef.current : imgRef.current
-    const crop = el && dims ? captureCrop({ el, naturalW: dims.w, naturalH: dims.h }, pending) : null
-    if (crop) anchor.crop = crop
     setPinBusy(true)
     setPinError('')
     try {

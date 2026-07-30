@@ -20,8 +20,10 @@ import { Tooltip } from './Tooltip'
 import { getFileIcon } from '../lib/fileIcons'
 import { ImageCommentCard } from './ImageCommentCard'
 
-export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, onRemove, onJump }: {
+export function ReviewDraftPopover({ comments, projectId, staleIds, submitting, onSubmit, onRemove, onJump }: {
   comments: PendingReviewComment[]
+  /** Addresses the artifact an image comment's close-up is drawn from. */
+  projectId: string | null
   staleIds: Set<string>
   submitting: boolean
   // Publish these numbers. Empty (never happens - the button disables) would mean
@@ -130,7 +132,7 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
                       />
                     </Tooltip>
                     <div className="min-w-0 flex-1 py-1">
-                      <ImageCommentCard comment={c} />
+                      <ImageCommentCard comment={c} projectId={projectId} />
                     </div>
                     <button
                       onClick={() => onRemove(c.id)}
