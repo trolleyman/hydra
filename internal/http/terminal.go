@@ -176,6 +176,26 @@ func reviewSlotStatus(projectRoot, headID string) string {
 	return "waiting"
 }
 
+// relayReviewSlotStatus forwards changes from a review slot's status file to
+// its open socket. Review slots have no DB row, so the normal head poller cannot
+// publish their lifecycle changes; without this relay the initial "waiting"
+// frame can remain on screen throughout a live review turn.
+func relayReviewSlotStatus(stop <-chan struct{}, ticks <-chan time.Time, projectRoot, headID, initial string, emit func(string)) {
+	last := initial
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticks:
+			status := reviewSlotStatus(projectRoot, headID)
+			if status != last {
+				last = status
+				emit(status)
+			}
+		}
+	}
+}
+
 // HandleTerminalWS handles WebSocket connections for agent terminal access.
 // URL pattern: /ws/projects/{project_id}/agents/{id}/terminal
 func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
@@ -373,11 +393,13 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// already finished its turn, which ResumeHead preserves, so read back the status
 	// it actually wrote rather than assuming "waiting" and flashing it on a finished
 	// head.
+	attachedReviewStatus := ""
 	switch {
 	case useReview:
 		// Attaching to a reviewer says nothing about whether it is working; read
 		// back what it last wrote rather than declaring it running.
-		sendStatusUpdate(conn, reviewSlotStatus(projectRoot, head.ID))
+		attachedReviewStatus = reviewSlotStatus(projectRoot, head.ID)
+		sendStatusUpdate(conn, attachedReviewStatus)
 	case resumed:
 		resumeStatus := "waiting"
 		if a, err := s.DB.GetAgent(head.ID); err == nil && a != nil && a.AgentStatus != nil && *a.AgentStatus != "" {
@@ -401,6 +423,16 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	done := make(chan struct{})
+	if useReview {
+		// A slot is intentionally absent from the heads DB, so watch its own
+		// status file while this pane is attached. The trigger hooks write lifecycle
+		// edges there even when no browser is present.
+		statusTicker := time.NewTicker(200 * time.Millisecond)
+		defer statusTicker.Stop()
+		go relayReviewSlotStatus(done, statusTicker.C, projectRoot, head.ID, attachedReviewStatus, func(status string) {
+			sendStatusUpdate(conn, status)
+		})
+	}
 
 	// The worktree of the session this socket is attached to, needed by the chat
 	// framing both to locate the transcript (backfill / load-older) and to key the

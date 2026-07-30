@@ -42,6 +42,7 @@ import { SiGit } from '@icons-pack/react-simple-icons'
 import { AgentStatus, type ChatEventUnion, type ChatFrame } from '../api'
 import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../lib/chatEvents'
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
+import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
@@ -998,16 +999,6 @@ function decodeEntities(text: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, '&')
-}
-
-// trimWorktreePaths rewrites absolute paths under the head's worktree to
-// worktree-relative ones for display - tool summaries and expanded inputs are
-// dominated by long /home/.../worktrees/<id>/ prefixes otherwise. The Raw
-// view keeps the untouched JSON.
-function trimWorktreePaths(text: string, worktree: string | null): string {
-  if (!worktree) return text
-  const prefix = worktree.endsWith('/') ? worktree : worktree + '/'
-  return text.split(prefix).join('').split(worktree).join('.')
 }
 
 // Input fields that hold PROSE (a sentence the agent wrote), rendered in the
@@ -3299,6 +3290,7 @@ const ToolCard = memo(function ToolCard({
   const isRead = item.name === 'Read'
   const readPath = isRead && typeof input?.file_path === 'string' ? (input.file_path as string) : ''
   const mem = isRead ? memoryName(readPath) : null
+  const toolResult = isRead ? toolResultName(readPath) : null
   // The bare git_* name for a Hydra git tool ('' for anything else).
   const gitTool = /^mcp__hydra__(git_.+)$/.exec(item.name)?.[1] ?? ''
   // A single-file git_add's subject is a file, so it gets the same lowlit-path
@@ -3362,6 +3354,8 @@ const ToolCard = memo(function ToolCard({
     : []
   const summary = mem
     ? `memory ${mem}`
+    : toolResult
+      ? `tool result ${toolResult}`
     : isWebSearch
       ? (typeof input?.query === 'string' && input.query.trim() ? input.query : 'Preparing search…')
     : isFileChanges
@@ -3372,7 +3366,7 @@ const ToolCard = memo(function ToolCard({
   // description / task subject / prose input field (a ScheduleWakeup prompt)
   // are prose (sans) already.
   const isPathSummary =
-    !isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string')
+    !isBash && !mem && !toolResult && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string')
   const summaryPaths = isFileChanges
       ? changedPaths
       : gitAddPaths.length > 0
@@ -3380,7 +3374,7 @@ const ToolCard = memo(function ToolCard({
         : isPathSummary
           ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
           : []
-  const summaryMono = !mem && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
+  const summaryMono = !mem && !toolResult && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
   // `{}` input, e.g. EnterPlanMode), where a `{}` panel is pure noise. Bash shows
@@ -6475,7 +6469,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // it (item 20).
   const lastScrollRef = useRef({ top: 0, pinned: true })
 
-  const status = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
+  const headStatus = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
+  // A review slot has no db.Agent row, so its lifecycle comes from this pane's
+  // socket. Using the owning head's status here made a finished reviewer offer
+  // to queue messages whenever the head itself was still working.
+  const [reviewStatus, setReviewStatus] = useState<string>(AgentStatus.PENDING)
+  const status = review ? reviewStatus : headStatus
   const isTurnRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   // Whether this agent still had unread changes when it was opened - the cue to
   // land on the top of its last message instead of pinned to the bottom (see
@@ -6575,7 +6574,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // frame without re-running the reducer effect.
   const smoothStream = useChatStreamStore((s) => s.smooth)
 
-  const onStatusUpdateRef = useRef(onStatusUpdate)
+  const onStatusUpdateRef = useRef<(status: string) => void>(() => {})
   const onDiffRefreshRef = useRef(onDiffRefresh)
   // The current head status, read from inside the WS reducer closure (which is
   // pinned to its own render) to decide at replay_done whether a still-"working"
@@ -6590,7 +6589,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const questionMayBeLiveRef = useRef(false)
   const smoothStreamRef = useRef(smoothStream)
   useEffect(() => {
-    onStatusUpdateRef.current = onStatusUpdate
+    onStatusUpdateRef.current = (nextStatus) => {
+      if (review) setReviewStatus(nextStatus)
+      onStatusUpdate?.(nextStatus)
+    }
     onDiffRefreshRef.current = onDiffRefresh
     isTurnRunningRef.current = isTurnRunning
     questionMayBeLiveRef.current = isTurnRunning || status === AgentStatus.NEEDS_INPUT
@@ -9330,7 +9332,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // It starts a turn; nudge the status optimistically (like the terminal's
       // Enter handling), unless the agent is answering our question.
       if (status !== AgentStatus.NEEDS_INPUT) {
-        useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
+        // A reviewer's status is socket-local; never mark the owning head as
+        // running just because somebody asked the reviewer a follow-up.
+        if (!review) useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
         onStatusUpdateRef.current?.(AgentStatus.RUNNING)
       }
     }

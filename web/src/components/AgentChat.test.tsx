@@ -2,6 +2,10 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
+import { AgentStatus, type AgentResponse } from '../api'
+import { useAgentStore } from '../stores/agentStore'
+import { formatBashForDisplay } from '../lib/bashFormat'
+import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
 // paste-markers preference on) a "[filename]" marker in the text. Both mutations
@@ -94,11 +98,75 @@ function renderChat(agentId = `agent-${++agentSeq}`) {
   )
 }
 
+describe('review checkout path display', () => {
+  const reviewRoot = '/home/callum/code/hydra/.hydra/local/review-checkouts/add-review-comments'
+
+  it('renders files relative to the detached review checkout', () => {
+    expect(trimWorktreePaths(`${reviewRoot}/web/src/AgentChat.tsx`, '/some/head/worktree'))
+      .toBe('web/src/AgentChat.tsx')
+  })
+
+  it('turns the detached checkout itself into the display root', () => {
+    const trimmed = trimWorktreePaths(`cd '${reviewRoot}'\nsed -n '1,20p' web/x.ts`, '/some/head/worktree')
+    expect(formatBashForDisplay(trimmed)).toBe("sed -n '1,20p' web/x.ts")
+  })
+
+  it('names Claude tool-result spill files without its transcript cache path', () => {
+    expect(toolResultName('/home/callum/.claude/projects/-long-slug/session/tool-results/bij43gmi4.txt'))
+      .toBe('bij43gmi4.txt')
+  })
+})
+
 async function connectedComposer(): Promise<HTMLTextAreaElement> {
   const ta = screen.getByRole('textbox') as HTMLTextAreaElement
   await waitFor(() => expect(ta).not.toBeDisabled())
   return ta
 }
+
+describe('review composer status', () => {
+  beforeAll(() => {
+    vi.stubGlobal('WebSocket', RecordingWebSocket)
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    sockets.length = 0
+    localStorage.clear()
+    useAgentStore.setState({ agents: [] })
+  })
+
+  it('offers Send when the reviewer finishes even if the owning head is running', async () => {
+    const agentId = `agent-${++agentSeq}`
+    useAgentStore.setState({
+      agents: [{ id: agentId, agent_status: { status: AgentStatus.RUNNING } } as AgentResponse],
+    })
+    render(
+      <ChatPane
+        agentId={agentId}
+        projectId="proj"
+        active
+        reconnectAttempt={0}
+        onStatusUpdate={vi.fn()}
+        onDiffRefresh={vi.fn()}
+        onSelectCommit={vi.fn()}
+        review
+      />,
+    )
+    const ta = await connectedComposer()
+    fireEvent.change(ta, { target: { value: 'one more question' } })
+
+    act(() => sockets[0].emit({ type: 'status', status: AgentStatus.RUNNING }))
+    await screen.findByRole('button', { name: 'Queue message' })
+
+    act(() => sockets[0].emit({ type: 'status', status: AgentStatus.FINISHED }))
+    await screen.findByRole('button', { name: 'Send message' })
+    expect(useAgentStore.getState().agents[0].agent_status?.status).toBe(AgentStatus.RUNNING)
+  })
+})
 
 describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
   beforeAll(() => {
