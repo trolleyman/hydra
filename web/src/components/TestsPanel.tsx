@@ -365,7 +365,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
       secondaryLabel: 'Spawn agent',
       details: { prompt },
       onConfirm: () => {
-        void runWithToast(() => api.default.sendAgentInput(projectId, agentId, { text: prompt }), {
+        void runWithToast(() => api.default.sendAgentInput(projectId, agentId, { text: prompt, origin: 'fix_test' }), {
           success: 'Sent the test failure to the agent',
           errorPrefix: 'Failed to send to the agent',
         })

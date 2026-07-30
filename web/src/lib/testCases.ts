@@ -54,9 +54,14 @@ export function caseLocation(c: TestCase): string {
 // clicked the button on a failure.
 export function buildFixTestMessage(runner: string, c: TestCase): string {
   const loc = caseLocation(c)
+  const name = c.scope?.length ? `${c.scope.join(' > ')} > ${c.name}` : c.name
   const lines = [`The \`${runner}\` test runner reports a ${c.status === 'warning' ? 'warning' : 'failure'}.`, '']
-  lines.push(`Test: ${c.scope?.length ? `${c.scope.join(' > ')} > ${c.name}` : c.name}`)
-  if (loc) lines.push(`Location: ${loc}`)
+  // The name in inline code and the location as a markdown link: in the chat the
+  // link resolves to the repository view at that line (the renderer parses the
+  // trailing :line - see MarkdownRenderer's RepoLink), and the agent still reads
+  // a plain, actionable path out of the link text.
+  lines.push(`Test: \`${name}\``)
+  if (loc) lines.push(`Location: [${loc}](${loc})`)
   if (c.message) lines.push('', 'Output:', '```', c.message.trimEnd(), '```')
   lines.push('', 'Find out what is actually wrong and fix the underlying cause. Only change the test itself if the test is the thing that is wrong.')
   return lines.join('\n')

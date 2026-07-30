@@ -92,6 +92,18 @@ describe('serverUpdateStore', () => {
     expect(store().lines.at(-1)).toBe('line 699')
   })
 
+  // A daemon that predates the omitempty fix drops `line` entirely for a BLANK
+  // line of build output, so the frame arrives as {kind:"log"} - and `mage build`
+  // emits plenty of those. The undefined that used to land in `lines` reached
+  // LogView, threw in hasAnsi, and took the whole app down mid-restart.
+  it('keeps a log frame with no line as a blank line', () => {
+    store().begin({ restartOnly: false })
+    store().apply({ kind: 'log', line: 'building' })
+    store().apply({ kind: 'log' } as never)
+
+    expect(store().lines).toEqual(['building', ''])
+  })
+
   it('begin clears the previous run', () => {
     store().begin({ restartOnly: false })
     store().apply({ kind: 'log', line: 'old' })
