@@ -570,6 +570,22 @@ var simChatEvents = []simNorm{
 	// count per file, then the files that matched (web/src/lib/searchSummary.ts).
 	simTool("toolu_sim_summary", "Bash", simRaw(`{"command":"grep -rc \"sleepBackoff\" internal/artifacts\necho \"=== which files mention it at all ===\"\nrg -l \"sleepBackoff\" internal | sort","description":"Count the callers, then list the files"}`)),
 	simToolOut("toolu_sim_summary", "internal/artifacts/backoff.go:1\ninternal/artifacts/upload.go:3\ninternal/artifacts/store.go:0\n=== which files mention it at all ===\ninternal/artifacts/backoff.go\ninternal/artifacts/upload.go\ninternal/http/simulation.go"),
+	// A script whose last step FAILED, which is most of the scripts an agent
+	// writes about a file it turns out not to have. The stderr mixed into the
+	// output is the only part of it that announces who wrote it (`sed: ...`), so
+	// those lines are taken out of the attribution and coloured as the errors
+	// they are (web/src/lib/buildOutput.ts): the searches above keep their gutter,
+	// their lowlit paths and their Go highlighting, the heading is still the
+	// string the script printed, and the read that died claims none of it -
+	// rather than the whole card falling back to one wall of terminal text
+	// because one step of it went wrong.
+	//
+	// The two searches also print DIFFERENT prefixes - the first names one file
+	// so grep numbers its lines bare (`9:`), the second names two so every line
+	// carries its own path - and they are one section, which is what
+	// parseMatchLines reads both shapes for.
+	simTool("toolu_sim_failedstep", "Bash", simRaw(`{"command":"rg -n \"sleepBackoff\" internal/artifacts/backoff.go | head -3\nrg -n \"sleepBackoff\" -A2 internal/artifacts/upload.go internal/artifacts/store.go\necho ===\nsed -n 1,40p internal/artifacts/retry.go","description":"Find the backoff callers, then read the retry helper"}`)),
+	simToolErr("toolu_sim_failedstep", "Exit code 2\n9:func sleepBackoff(attempt int) {\n11:\td := base << attempt // sleepBackoff doubles it per attempt\ninternal/artifacts/upload.go:88:// sleepBackoff waits out the jittered exponential delay for one attempt.\ninternal/artifacts/upload.go:119:\t\tsleepBackoff(attempt)\ninternal/artifacts/upload.go-120-\t\tif err = u.put(ctx, key, r); err == nil {\ninternal/artifacts/upload.go-121-\t\t\treturn nil\n===\nsed: can't read internal/artifacts/retry.go: No such file or directory"),
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20). This settles the chained command
 	// opened well above.

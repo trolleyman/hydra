@@ -167,6 +167,24 @@ describe('parseScriptSteps', () => {
     expect(kinds('git commit -m x\necho ----')).toEqual(['unknown', 'marker'])
   })
 
+  it('reads a context flag with its number written against it', () => {
+    // `-A35`, `-C3`, `-m10`, and grep's bare `-3`: how many lines come back,
+    // never what a line is. Read as an unknown cluster, each one cost the step
+    // its whole shape.
+    expect(steps('rg -n "func Put" -A35 internal/artifacts/upload.go | head -45')[0]).toMatchObject({
+      kind: 'matches', match: { paths: ['internal/artifacts/upload.go'], numbered: true },
+    })
+    expect(steps('rg -n pat -C3 a.go')[0]).toMatchObject({ kind: 'matches', match: { numbered: true } })
+    expect(steps('rg -nA12 pat a.go')[0]).toMatchObject({ kind: 'matches', match: { numbered: true } })
+    expect(steps('grep -3 pat a.go\ncat b.go')[0]).toMatchObject({ kind: 'matches' })
+    // The number does not swallow the file after it, the way `-A 35` would.
+    expect(steps('rg -n pat -m5 a.go')[0]).toMatchObject({ kind: 'matches', match: { paths: ['a.go'] } })
+    // A letter that takes no number is not a spelling of anything, and one that
+    // reshapes the output is still refused.
+    expect(kinds('rg -i3 pat a.go\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('rg -o5 pat a.go\ncat b.go')).toEqual(['unknown', 'view'])
+  })
+
   it('keeps a search through a sed slice, which only drops lines', () => {
     // The lines that survive are still that file's, still carrying the numbers
     // the search printed in front of them.
@@ -495,9 +513,150 @@ describe('splitScriptOutput', () => {
     ])
   })
 
+  it('gives up the gutter when a read could have fallen short of its range', () => {
+    // A `sed -n 1,3p` prints three lines or however many the file has, and
+    // nothing in the output says which - so with an unbounded step in front of
+    // it, the peel off the end walks one line too far and hands the read a line
+    // the `ls` printed. These are still that file's lines (the language holds),
+    // but WHICH of its lines they are is a guess, so there is no gutter to
+    // misnumber: `view.start` is dropped.
+    const sections = splitScriptOutput(steps('ls docs/\nsed -n 1,3p a.ts'), 'notes.md\nconst a = 1\nconst b = 2')
+    expect(sections?.map((s) => [s.kind, s.lines.length])).toEqual([['view', 3]])
+    expect(sections?.[0]).toMatchObject({ view: { path: 'a.ts', start: null, end: null } })
+  })
+
+  it('keeps the gutter when a separator or the arithmetic pins the start down', () => {
+    // The same script with the separator agents write between their steps: the
+    // marker is found in the output, so the read starts where it says it does.
+    const anchored = splitScriptOutput(steps('ls docs/\necho ---\nsed -n 1,3p a.ts'), 'notes.md\n---\nconst a = 1\nconst b = 2')
+    expect(anchored?.map((s) => [s.kind, s.lines.length])).toEqual([['plain', 1], ['marker', 1], ['view', 2]])
+    expect(anchored?.[2]).toMatchObject({ view: { path: 'a.ts', start: 1 } })
+    // And with no separator at all, when every step is bounded and the bounds
+    // add up to exactly what came back: each one printed its whole range, so
+    // there is nowhere for a line to have gone missing.
+    const exact = splitScriptOutput(steps('sed -n 1,2p a.ts\nsed -n 1,2p b.ts'), 'a1\na2\nb1\nb2')
+    expect(exact?.map((s) => [s.kind, s.lines])).toEqual([['view', ['a1', 'a2']], ['view', ['b1', 'b2']]])
+    expect(exact?.map((s) => s.kind === 'view' && s.view.start)).toEqual([1, 1])
+  })
+
   it('has nothing to say about output it cannot attribute', () => {
     expect(splitScriptOutput(steps('cat a.go\ncat b.go'), 'x\ny')).toBeNull()
     expect(splitScriptOutput(steps('cat a.go'), '  \n')).toBeNull()
+  })
+})
+
+describe('splitScriptOutput over a command that failed', () => {
+  it('sections the output around what the tools said about themselves', () => {
+    // The case this was built for: a search whose matches are perfectly
+    // attributable, a heading, and a read of a file that does not exist - which
+    // used to leave the whole card as one wall of plain text because ONE step
+    // failed.
+    const script = [
+      'rg -n "getFileIcon" web/src/DiffViewer.tsx web/src/components/RepositoryView.tsx | head',
+      'echo ===',
+      'sed -n 1,60p web/src/lib/fileIcons.ts',
+    ].join('\n')
+    const output = [
+      'Exit code 2',
+      "web/src/components/RepositoryView.tsx:17:import { getFileIcon } from '../lib/fileIcons'",
+      'web/src/components/RepositoryView.tsx:521:    : getFileIcon(node.name)',
+      '===',
+      "sed: can't read web/src/lib/fileIcons.ts: No such file or directory",
+    ].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([
+      ['error', ['Exit code 2']],
+      ['matches', [
+        "web/src/components/RepositoryView.tsx:17:import { getFileIcon } from '../lib/fileIcons'",
+        'web/src/components/RepositoryView.tsx:521:    : getFileIcon(node.name)',
+      ]],
+      ['marker', ['===']],
+      ['error', ["sed: can't read web/src/lib/fileIcons.ts: No such file or directory"]],
+    ])
+  })
+
+  it('leaves a step that died with nothing rather than the next step lines', () => {
+    // `sed -n 1,60p` is bounded to sixty lines, so without the diagnostic saying
+    // that read never happened it takes the first sixty lines of whatever ran
+    // next - and renders b.go's contents as a file called missing.go.
+    const sections = splitScriptOutput(
+      steps('sed -n 1,60p missing.go\ncat b.go'),
+      "sed: can't read missing.go: No such file or directory\npackage b\n\nfunc B() {}",
+    )
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([
+      ['error', ["sed: can't read missing.go: No such file or directory"]],
+      ['view', ['package b', '', 'func B() {}']],
+    ])
+    expect(sections?.[1]).toMatchObject({ view: { path: 'b.go' } })
+    // The same for a search: one file named, and the output says it was not read.
+    expect(splitScriptOutput(
+      steps('rg -n x missing.go\ncat b.go'),
+      'rg: missing.go: IO error for operation on missing.go\npackage b',
+    )?.map((s) => [s.kind, s.lines])).toEqual([
+      ['error', ['rg: missing.go: IO error for operation on missing.go']],
+      ['view', ['package b']],
+    ])
+  })
+
+  it('renders an output that is nothing but the error as the error', () => {
+    // Previously this was line 1 of missing.ts, highlighted as TypeScript.
+    expect(splitScriptOutput(
+      steps('sed -n 1,60p missing.ts'),
+      "sed: can't read missing.ts: No such file or directory",
+    )).toEqual([
+      { kind: 'error', lines: ["sed: can't read missing.ts: No such file or directory"], raw: undefined },
+    ])
+  })
+
+  it('reads a diagnostic only from a tool the script actually ran', () => {
+    // `sed: ...` at the start of a line is a diagnostic under a script that ran
+    // sed, and somebody's YAML otherwise.
+    expect(splitScriptOutput(steps('cat notes.yaml'), 'sed: a stream editor\nawk: also useful')).toEqual([
+      { kind: 'view', view: expect.objectContaining({ path: 'notes.yaml' }), lines: ['sed: a stream editor', 'awk: also useful'], raw: undefined },
+    ])
+    // The shell is not one of the script's commands, but everything it says is
+    // about the script rather than about a file.
+    expect(splitScriptOutput(steps('cat a.go'), '/bin/bash: line 1: cat: command not found')?.map((s) => s.kind))
+      .toEqual(['error'])
+  })
+
+  it('never takes a line the script itself printed for stderr', () => {
+    // An `echo` is an anchor, and losing one to the diagnostics would cost the
+    // section it anchors its whole attribution.
+    const sections = splitScriptOutput(steps('echo "sed: done"\nsed -n 1,2p a.go'), 'sed: done\npackage a')
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([
+      ['marker', ['sed: done']],
+      ['view', ['package a']],
+    ])
+  })
+
+  it('gives up a file view interrupted by a diagnostic rather than misnumber it', () => {
+    // The lines either side are still that file's, but the numbering is counted
+    // from the top of the section - so a section cut in two would restart it
+    // half way down the file.
+    const sections = splitScriptOutput(
+      steps('sed -n 1,4p a.go'),
+      'package a\nsed: couldn\'t write 4 items to stdout: Broken pipe\nfunc A() {}',
+    )
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([
+      ['plain', ['package a']],
+      ['error', ["sed: couldn't write 4 items to stdout: Broken pipe"]],
+      ['plain', ['func A() {}']],
+    ])
+  })
+
+  it('takes the exit status for the harness line it is, and only at the top', () => {
+    const sections = splitScriptOutput(
+      steps('cat a.md\necho ----\ncat b.md'),
+      'Exit code 1\nnotes\n----\nExit code 1\n',
+    )
+    // The second one is a line of b.md that happens to read like the first.
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([
+      ['error', ['Exit code 1']],
+      ['view', ['notes']],
+      ['marker', ['----']],
+      ['view', ['Exit code 1']],
+    ])
   })
 })
 
@@ -589,6 +748,21 @@ describe('parseMatchLines', () => {
     // at all.
     expect(parseMatchLines(['./go.mod:\tgithub.com/google/go-cmp v0.6.0'], ['.'])).toEqual([
       { path: './go.mod', num: '', text: '\tgithub.com/google/go-cmp v0.6.0', separator: false },
+    ])
+  })
+
+  it('reads both numbered shapes out of one section', () => {
+    // Two searches merged into one section: the first named one file, so grep
+    // printed `12:`, and the second named several, so it printed `path:441:`.
+    // Both are numbered output; each line says whether it also names a file.
+    expect(parseMatchLines([
+      "10:import { renderMarkdownSource } from '../lib/markdown'",
+      'web/src/lib/markdown.tsx:441:export function renderMarkdownSource(text: string) {',
+      'web/src/lib/markdown.tsx-442-  const segs = parseInline(text)',
+    ], [])).toEqual([
+      { path: '', num: '10', text: "import { renderMarkdownSource } from '../lib/markdown'", separator: false },
+      { path: 'web/src/lib/markdown.tsx', num: '441', text: 'export function renderMarkdownSource(text: string) {', separator: false },
+      { path: 'web/src/lib/markdown.tsx', num: '442', text: '  const segs = parseInline(text)', separator: false },
     ])
   })
 

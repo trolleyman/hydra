@@ -46,7 +46,7 @@ import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { FILE_BANNER, viewLineNumbers } from '../lib/fileViewCommand'
-import { buildOutputSpans } from '../lib/buildOutput'
+import { buildOutputSpans, diagnosticSpans } from '../lib/buildOutput'
 import { diskOutputSpans } from '../lib/diskOutput'
 import { searchSummarySpans } from '../lib/searchSummary'
 import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
@@ -2374,6 +2374,22 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       }
       continue
     }
+    if (section.kind === 'error') {
+      // What a tool said about ITSELF, in the colours an error takes: the
+      // subject at full strength, the reason as the verdict, the tool that is
+      // talking behind them both (lib/buildOutput's diagnosticSpans). Unless the
+      // tool coloured the line itself, in which case that is better informed
+      // than any shape read off the text - the same rule the plain stretches
+      // below follow.
+      const raw = section.raw
+      const ansi = raw ? splitHighlightedLines(ansiToHtml(raw.join('\n'))) : null
+      const coloured = ansi && ansi.length === section.lines.length ? ansi : null
+      section.lines.forEach((line, i) => {
+        if (coloured && raw && hasAnsi(raw[i])) rows.push({ num: '', html: coloured[i], tone: 'plain' })
+        else rows.push({ num: '', html: '', spans: diagnosticSpans(line), tone: 'plain' })
+      })
+      continue
+    }
     if (section.kind === 'plain') {
       // Three answers, in the order of who knows most about the line.
       //
@@ -3166,10 +3182,14 @@ const ToolCard = memo(function ToolCard({
   // was, with its content rendered as source; a card that renamed itself "Read"
   // hid the script that actually ran.
   //
-  // Not over an error: stderr interleaves with stdout in an order no parse of
-  // the script can predict, so every section boundary would be a guess. ANSI
-  // colour is fine - it is stripped for the matching and the highlighting, and
-  // put back for the stretches that render as terminal text (lib/shellSections).
+  // Over an error too - that is the output an agent stares at hardest. The stderr
+  // an error mixes into it used to make every section boundary a guess, and does
+  // not any more: a tool's own complaint names the tool that wrote it, so those
+  // lines are taken out of the attribution and rendered as the errors they are,
+  // and the one naming a file a step was asked to read tells the split that step
+  // printed nothing (see lib/shellSections). ANSI colour is fine as well - it is
+  // stripped for the matching and the highlighting, and put back for the
+  // stretches that render as terminal text.
   //
   // A plain const, not useMemo: it derives from `item`, which the reducer mutates
   // in place (see the ToolCard memo note), and a manual dependency on a mutated
@@ -3177,7 +3197,7 @@ const ToolCard = memo(function ToolCard({
   // this for us instead.
   const scriptSteps = isBash ? parseScriptSteps(unwrapBashLoginCommand(bashSource)) : null
   const scriptSections =
-    scriptSteps && renderedResult !== undefined && !item.isError
+    scriptSteps && renderedResult !== undefined
       ? splitScriptOutput(scriptSteps, renderedResult)
       : null
   // What the script's own `echo`s printed, for the output that gets NO sections:

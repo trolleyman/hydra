@@ -20,6 +20,11 @@
 //
 // The shapes are deliberately the ones that carry a `file:line`. A line saying
 // only "Error: something failed" is prose, and it stays prose.
+//
+// diagnosticSpans at the bottom is the one shape that does NOT carry a location:
+// what a tool said about ITSELF (`sed: can't read f: No such file or
+// directory`). It is exported on its own rather than folded into the pass above,
+// because recognising one needs the script that ran it - see the comment there.
 import type { OutputSpan } from './outputSpan'
 
 const DIM = 'text-stone-400 dark:text-stone-500'
@@ -27,6 +32,11 @@ const PASS = 'text-green-600 dark:text-green-400'
 const FAIL = 'text-red-600 dark:text-red-400'
 const WARN = 'text-amber-600 dark:text-amber-400'
 const LOC = 'text-sky-700 dark:text-sky-400'
+
+// The harness's own line above a failed command's output, and the only part of
+// that output no command wrote. Anchored at both ends: it is that line or it is
+// a sentence about exit codes.
+const EXIT_STATUS = /^(Exit code )(\d+)$/
 
 // `path/to/file.go:12:5: message`, `path/to/file.ts:12: message`. The path must
 // carry an extension and the line a number, which is what keeps a URL, a
@@ -80,6 +90,9 @@ function locationSpans(indent: string, path: string, line: string, col: string |
 }
 
 function lineSpans(line: string): OutputSpan[] | null {
+  const status = EXIT_STATUS.exec(line)
+  if (status) return exitStatusSpans(status)
+
   const colon = COLON_LOC.exec(line)
   if (colon) {
     const [, indent, path, num, col, sep, message] = colon
@@ -158,4 +171,58 @@ export function buildOutputSpans(lines: string[]): OutputSpan[][] | null {
     return (spans ?? [{ text: line, cls: '' }]).filter((s) => s.text !== '')
   })
   return recognised > 0 ? out : null
+}
+
+function exitStatusSpans(m: RegExpExecArray): OutputSpan[] {
+  return [{ text: m[1], cls: DIM }, { text: m[2], cls: FAIL }]
+}
+
+// --- What the shell and its tools said about themselves -----------------------
+
+// A diagnostic a tool wrote about what it was ASKED to do rather than about a
+// file it read - the other half of a failed command's output:
+//
+//   sed: can't read web/src/lib/fileIcons.ts: No such file or directory
+//   /bin/bash: line 3: node: command not found
+//   go: downloading github.com/x v1.2.3
+//
+// Which lines these are cannot be read off the line alone: `sed: ...` in a
+// file's own content is content, and it is only sed talking when the script ran
+// sed. That question belongs to the script, so it is answered in
+// lib/shellSections; this colours a line already known to be one.
+const DIAG = /^((?:[\w.+-]*\/)*[\w.+-]+)((?:: line \d+)?):(\s+)(.*)$/
+
+// Whether a diagnostic is reporting a FAILURE or only narrating. Both come out
+// of the same `tool: message` shape - `go: downloading ...` and `go: cannot find
+// module` are the same line to any parser - so the verdict is red only when the
+// message says something went wrong, and the rest recedes as the furniture it
+// is.
+const FAILURE = /\b(no such|not found|cannot|can't|could not|couldn't|unable|denied|invalid|unrecognized|unrecognised|illegal|missing|failed|failure|errors?|not a|too many|unexpected|syntax|ambiguous|bad|refused|timed out|broken|read-only)\b/i
+
+// diagnosticSpans colours one such line. Its three parts are worth reading in
+// this order: the SUBJECT it names is the thing that failed and reads at full
+// strength, the REASON it ends with is the verdict, and the TOOL that is talking
+// is furniture - the opposite weighting to a compiler diagnostic above, where
+// every line of the log repeats the same path and the message is the news.
+export function diagnosticSpans(line: string): OutputSpan[] {
+  const status = EXIT_STATUS.exec(line)
+  if (status) return exitStatusSpans(status)
+  const m = DIAG.exec(line)
+  // Not a shape this knows: rendered as it arrived rather than guessed at.
+  if (!m) return [{ text: line, cls: '' }]
+  const [, tool, at, sep, message] = m
+  const cls = FAILURE.test(message) ? FAIL : DIM
+  // `tool: subject: reason`, split at the LAST colon: the reason is one clause
+  // with no colon of its own ("No such file or directory", "command not found"),
+  // and everything before it names what the tool was working on - which for a
+  // shell's own error is a `cd:`/`node:` of its own, and reads correctly as part
+  // of the subject.
+  const cut = message.lastIndexOf(': ')
+  return [
+    { text: tool, cls: DIM },
+    { text: at, cls: LOC },
+    { text: `:${sep}`, cls: DIM },
+    { text: cut > 0 ? message.slice(0, cut + 2) : '', cls: '' },
+    { text: cut > 0 ? message.slice(cut + 2) : message, cls },
+  ].filter((s) => s.text !== '')
 }
