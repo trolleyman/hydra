@@ -72,7 +72,7 @@ const (
 // sees a user turn and nothing else - so without a prefix it cannot tell a
 // notification from something the user typed. Both, therefore: the prefix is for
 // the model, the metadata is for you.
-const autoPrefix = "[Hydra] "
+const autoPrefix = "`[Hydra]` "
 
 // notifyHead delivers one line to a head, subject to its gate. Reports whether it
 // was sent, which the callers use only for logging - a notice that was gated out
