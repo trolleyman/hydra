@@ -159,6 +159,11 @@ export interface ShellStep {
   unfinished?: boolean
   // A backgrounded command runs in its own shell, so its `cd`s do not outlive it.
   background?: boolean
+  // The agent process was replaced before this command (Hydra's session_resumed
+  // marker - the daemon knows, and nothing in the provider's stream says so).
+  // The shell went with it, so this command runs in a brand new one at the
+  // worktree, whatever the commands before it did.
+  shellRestarted?: boolean
 }
 
 // trackShellCwds returns, per step id, the absolute directory that step's
@@ -169,6 +174,10 @@ export function trackShellCwds(steps: ShellStep[], worktree: string | null): Map
   const root = worktree ? normalize(worktree) : null
   let current: string | null = root
   for (const step of steps) {
+    // A new process means a new shell, back where the session's first command
+    // began - so the resume re-anchors the walk (and undoes an unknown left by
+    // whatever the old process was killed in the middle of).
+    if (step.shellRestarted) current = root
     const reported = step.cwd && step.cwd !== '.' ? normalize(step.cwd) : ''
     const entry = reported || current
     out.set(step.id, entry)

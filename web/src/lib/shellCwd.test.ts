@@ -115,6 +115,21 @@ describe('trackShellCwds', () => {
     ).toEqual([WT, `${WT}/web`, null, null, `${WT}/web`])
   })
 
+  // The resume marker (chat.SessionResumed) says the process - and so the shell -
+  // was replaced: a new one starts at the worktree however deep the old one was,
+  // which also re-anchors the unknown left by the command it died in.
+  it('starts again at the worktree after a resume', () => {
+    expect(
+      track([
+        'cd web/src',
+        { command: 'sleep 25 && cd lib', unfinished: true } as ShellStep,
+        { command: 'ls', shellRestarted: true } as ShellStep,
+        'cd web',
+        'ls',
+      ]),
+    ).toEqual([WT, `${WT}/web/src`, WT, WT, `${WT}/web`])
+  })
+
   it('does not follow a backgrounded shell', () => {
     expect(track([{ command: 'cd web && sleep 100', background: true } as ShellStep, 'ls'])).toEqual([WT, WT])
   })

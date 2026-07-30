@@ -6304,6 +6304,22 @@ components:
           type: string
           x-go-type-skip-optional-pointer: true
 
+    ChatSessionResumedPayload:
+      type: object
+      description: >-
+        The head's agent process was replaced and its conversation restored - a
+        daemon restart, or an attach after the process exited. Recorded because
+        nothing in the provider's own stream marks it: `--continue` reuses the
+        session id, so its second `conversation_started` dedups against the
+        first and never reaches a client. Everything the old process owned is
+        gone, notably the Bash tool's ONE persistent shell, which starts again
+        at the worktree (see web/src/lib/shellCwd.ts).
+      properties:
+        worktree:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Where the new process - and so its new shell - starts.
+
     ChatInteractionPayload:
       type: object
       description: >-
@@ -6883,6 +6899,7 @@ components:
         - $ref: '#/components/schemas/UsageUpdatedEvent'
         - $ref: '#/components/schemas/MessagesRetractedEvent'
         - $ref: '#/components/schemas/NoticeEvent'
+        - $ref: '#/components/schemas/SessionResumedEvent'
         - $ref: '#/components/schemas/InteractionRequestedEvent'
         - $ref: '#/components/schemas/InteractionResolvedEvent'
         - $ref: '#/components/schemas/CommitCreatedEvent'
@@ -6921,6 +6938,7 @@ components:
           usage_updated: '#/components/schemas/UsageUpdatedEvent'
           messages_retracted: '#/components/schemas/MessagesRetractedEvent'
           notice: '#/components/schemas/NoticeEvent'
+          session_resumed: '#/components/schemas/SessionResumedEvent'
           interaction_requested: '#/components/schemas/InteractionRequestedEvent'
           interaction_resolved: '#/components/schemas/InteractionResolvedEvent'
           commit_created: '#/components/schemas/CommitCreatedEvent'
@@ -7301,6 +7319,18 @@ components:
               allOf:
                 - $ref: '#/components/schemas/ChatProviderContext'
                 - $ref: '#/components/schemas/ChatNoticePayload'
+
+    SessionResumedEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [session_resumed]
+            payload:
+              $ref: '#/components/schemas/ChatSessionResumedPayload'
 
     InteractionRequestedEvent:
       allOf:

@@ -108,6 +108,14 @@ func simInjectedContext(id, text string) simNorm {
 	}}
 }
 
+// simSessionResumed is Hydra's own marker for replacing the agent process
+// (chat.SessionResumed). Nothing in a provider's stream says this happened, and
+// it matters to everything that outlived a turn - the Bash tool's shell above
+// all, which comes back new at the worktree.
+func simSessionResumed(worktree string) simNorm {
+	return simNorm{typ: "session_resumed", payload: map[string]any{"worktree": worktree}}
+}
+
 func simSay(messageID, text string) simNorm {
 	return simNorm{typ: "assistant_message", payload: map[string]any{
 		"message_id": messageID, "text": text,
@@ -593,6 +601,11 @@ var simChatEvents = []simNorm{
 	simSay("msg_sim_int", "Sure - I'll thread a MaxAttempts option through the uploader config and"),
 	simTurnInterrupted(),
 	simTurnFailed(),
+	// The head was stopped there and attached again later, so the process - and
+	// the conversation in it - was restored from the transcript. Drawn as a rule
+	// across the chat, because the break is otherwise invisible and it decides
+	// what survives: the Bash tool's shell is a new one, back at the worktree.
+	simSessionResumed("/repo/.hydra/local/worktrees/feat-uploader-retry"),
 	// A user turn that referenced an uploaded image + the CLI's image
 	// placeholder: renders as an attachment chip, not a raw path/placeholder
 	// (items 41, 43). The CLI's own downscale note is filtered upstream, so

@@ -74,6 +74,7 @@ export type { ChatQueueMessageRemovedPayload } from './models/ChatQueueMessageRe
 export type { ChatReasoningCompletedPayload } from './models/ChatReasoningCompletedPayload';
 export type { ChatReasoningDurationPayload } from './models/ChatReasoningDurationPayload';
 export type { ChatReplayDoneFrame } from './models/ChatReplayDoneFrame';
+export type { ChatSessionResumedPayload } from './models/ChatSessionResumedPayload';
 export type { ChatShellOutputFrame } from './models/ChatShellOutputFrame';
 export type { ChatShellResult } from './models/ChatShellResult';
 export type { ChatStateSnapshotFrame } from './models/ChatStateSnapshotFrame';
@@ -171,6 +172,7 @@ export type { ServerUpdatePhaseFrame } from './models/ServerUpdatePhaseFrame';
 export type { ServiceScript } from './models/ServiceScript';
 export { ServiceStatus } from './models/ServiceStatus';
 export type { ServiceStatusResponse } from './models/ServiceStatusResponse';
+export { SessionResumedEvent } from './models/SessionResumedEvent';
 export type { SetProjectHiddenRequest } from './models/SetProjectHiddenRequest';
 export type { SetProjectIconRequest } from './models/SetProjectIconRequest';
 export type { SpawnAgentRequest } from './models/SpawnAgentRequest';

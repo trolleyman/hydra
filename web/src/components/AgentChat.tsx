@@ -272,6 +272,12 @@ type ChatItem =
   | { kind: 'skill'; id: number; name: string; text: string }
   | { kind: 'meta'; id: number; text: string }
   | { kind: 'interrupted'; id: number }
+  // The agent process was replaced and its conversation restored (session_resumed
+  // - a daemon restart, or an attach after it exited). Drawn as a rule across the
+  // conversation because the break is otherwise invisible while mattering to
+  // everything that outlived a turn: the Bash tool's shell is a new one, back at
+  // the worktree (see shellCwdsFor).
+  | { kind: 'resumed'; id: number; noEntrance?: boolean }
   // noEntrance suppresses the fade/slide entrance when this settled block simply
   // replaces the in-flight streamed copy already on screen - it was visible, so
   // re-animating it as it settles reads as a flicker (item 56), same rationale
@@ -839,6 +845,11 @@ export function toProviderEvents(ev: ChatEventUnion, showEmptyReasoning = false)
       const text = ev.payload.text ?? ''
       return text && !isAgentCompletionNotification(text) ? [{ ...providerBase(ev, ev.payload), type: 'queue-operation', content: text }] : []
     }
+    // Hydra's own marker for replacing the agent process (chat.SessionResumed).
+    // It sits in the log where the old process stopped, so it converts like any
+    // other event and lands between the right two messages.
+    case 'session_resumed':
+      return [{ ...providerBase(ev, {}), type: 'hydra_session_resumed' }]
     case 'interaction_requested': {
       const p = ev.payload
       const base = providerBase(ev, {})
@@ -3749,7 +3760,15 @@ interface SubagentLinks {
 // there. A sub-agent has its own shell, so each timeline tracks its own.
 function shellCwdsFor(items: ChatItem[], worktree: string | null): Map<string, string | null> {
   const steps: ShellStep[] = []
+  // A resume replaced the agent process, so the next command runs in a shell
+  // that has never seen a `cd` - carried to that command rather than recorded on
+  // its own, since only commands are steps.
+  let restarted = false
   for (const it of items) {
+    if (it.kind === 'resumed') {
+      restarted = true
+      continue
+    }
     if (it.kind !== 'tool' || it.name !== 'Bash') continue
     const input = (typeof it.input === 'object' && it.input !== null ? it.input : {}) as Record<string, unknown>
     if (typeof input.command !== 'string' || !input.command) continue
@@ -3765,7 +3784,9 @@ function shellCwdsFor(items: ChatItem[], worktree: string | null): Map<string, s
       // mid-command and resumed into a fresh shell (see lib/shellCwd).
       unfinished: it.result === undefined,
       background: input.run_in_background === true,
+      shellRestarted: restarted || undefined,
     })
+    restarted = false
   }
   return trackShellCwds(steps, worktree)
 }
@@ -5502,6 +5523,11 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
     const notifText = typeof ev.content === 'string' && isTaskNotification(ev.content) ? ev.content : ''
     if (notifText) {
       pushNotification(notifText)
+      continue
+    }
+    if (ev.type === 'hydra_session_resumed') {
+      flushHistFooter()
+      push({ kind: 'resumed', noEntrance: true })
       continue
     }
     if (ev.type === 'hydra_subagent_completed' && ev.subagentNotice) {
@@ -7461,6 +7487,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // (--dangerously-skip-permissions auto-allows everything else): the
           // daemon auto-approves that one server-side, so the client ignores it
           // and just renders the proposed plan as a card (see PlanCard).
+          return
+        }
+        case 'hydra_session_resumed': {
+          // The old process's turn cannot continue - settle whatever it was
+          // mid-way through before drawing the break, so the rule sits below the
+          // partial reply rather than above it.
+          settleLiveStream()
+          endPendingTools()
+          push({ kind: 'resumed', noEntrance: replaying || undefined })
           return
         }
         case 'hydra_subagent_completed': {
@@ -9621,6 +9656,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             <div className="rounded-lg border border-red-300/60 bg-red-50 dark:border-red-900/60 dark:bg-red-950/30 px-2.5 py-1 text-xs text-red-600 dark:text-red-300 select-none">
               Interrupted by user
             </div>
+          </div>
+        )
+      case 'resumed':
+        return (
+          <div className="flex items-center gap-2.5 select-none" aria-label="Agent resumed">
+            <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
+            <span className="optical-center text-[11px] text-stone-400 dark:text-stone-500">Resumed</span>
+            <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
           </div>
         )
       case 'assistant':

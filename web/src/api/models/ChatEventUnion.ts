@@ -23,6 +23,7 @@ import type { QueueMessageRemovedEvent } from './QueueMessageRemovedEvent';
 import type { ReasoningCompletedEvent } from './ReasoningCompletedEvent';
 import type { ReasoningDeltaEvent } from './ReasoningDeltaEvent';
 import type { ReasoningDurationEvent } from './ReasoningDurationEvent';
+import type { SessionResumedEvent } from './SessionResumedEvent';
 import type { SubagentCompletedEvent } from './SubagentCompletedEvent';
 import type { SubagentStartedEvent } from './SubagentStartedEvent';
 import type { SubagentUpdatedEvent } from './SubagentUpdatedEvent';
@@ -40,5 +41,5 @@ import type { UserMessageEvent } from './UserMessageEvent';
 /**
  * One normalized event, narrowed by its type to the payload it carries.
  */
-export type ChatEventUnion = (ConversationStartedEvent | UserMessageEvent | UserMessageEchoedEvent | ContextMessageEvent | AssistantMessageEvent | AssistantDeltaEvent | ReasoningCompletedEvent | ReasoningDeltaEvent | ReasoningDurationEvent | ContentStreamStartedEvent | ContentStreamCompletedEvent | ToolStartedEvent | ToolCompletedEvent | ToolDeltaEvent | PlanUpdatedEvent | PlanDeltaEvent | SubagentStartedEvent | SubagentUpdatedEvent | SubagentCompletedEvent | TurnStartedEvent | TurnCompletedEvent | TurnFailedEvent | TurnInterruptedEvent | TurnErrorEvent | UsageUpdatedEvent | MessagesRetractedEvent | NoticeEvent | InteractionRequestedEvent | InteractionResolvedEvent | CommitCreatedEvent | HeadChangedEvent | HeadObservedEvent | ModelChangedEvent | QueuedMessageEvent | QueueMessageRemovedEvent);
+export type ChatEventUnion = (ConversationStartedEvent | UserMessageEvent | UserMessageEchoedEvent | ContextMessageEvent | AssistantMessageEvent | AssistantDeltaEvent | ReasoningCompletedEvent | ReasoningDeltaEvent | ReasoningDurationEvent | ContentStreamStartedEvent | ContentStreamCompletedEvent | ToolStartedEvent | ToolCompletedEvent | ToolDeltaEvent | PlanUpdatedEvent | PlanDeltaEvent | SubagentStartedEvent | SubagentUpdatedEvent | SubagentCompletedEvent | TurnStartedEvent | TurnCompletedEvent | TurnFailedEvent | TurnInterruptedEvent | TurnErrorEvent | UsageUpdatedEvent | MessagesRetractedEvent | NoticeEvent | SessionResumedEvent | InteractionRequestedEvent | InteractionResolvedEvent | CommitCreatedEvent | HeadChangedEvent | HeadObservedEvent | ModelChangedEvent | QueuedMessageEvent | QueueMessageRemovedEvent);
 

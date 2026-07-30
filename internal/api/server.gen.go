@@ -415,6 +415,11 @@ const (
 	Up         ServiceStatusState = "up"
 )
 
+// Defines values for SessionResumedEventType.
+const (
+	SessionResumed SessionResumedEventType = "session_resumed"
+)
+
 // Defines values for SubagentCompletedEventType.
 const (
 	SubagentCompleted SubagentCompletedEventType = "subagent_completed"
@@ -1415,6 +1420,12 @@ type ChatReplayDoneFrame struct {
 
 // ChatReplayDoneFrameType defines model for ChatReplayDoneFrame.Type.
 type ChatReplayDoneFrameType string
+
+// ChatSessionResumedPayload The head's agent process was replaced and its conversation restored - a daemon restart, or an attach after the process exited. Recorded because nothing in the provider's own stream marks it: `--continue` reuses the session id, so its second `conversation_started` dedups against the first and never reaches a client. Everything the old process owned is gone, notably the Bash tool's ONE persistent shell, which starts again at the worktree (see web/src/lib/shellCwd.ts).
+type ChatSessionResumedPayload struct {
+	// Worktree Where the new process - and so its new shell - starts.
+	Worktree string `json:"worktree,omitempty"`
+}
 
 // ChatShellOutputFrame A live chunk of a running composer "!command", keyed by the send frame's id. Ephemeral - the durable record is the user_message it settles into.
 type ChatShellOutputFrame struct {
@@ -3241,6 +3252,23 @@ type ServiceStatusState string
 type ServiceStatusResponse struct {
 	Services []ServiceStatus `json:"services"`
 }
+
+// SessionResumedEvent defines model for SessionResumedEvent.
+type SessionResumedEvent struct {
+	// Payload The head's agent process was replaced and its conversation restored - a daemon restart, or an attach after the process exited. Recorded because nothing in the provider's own stream marks it: `--continue` reuses the session id, so its second `conversation_started` dedups against the first and never reaches a client. Everything the old process owned is gone, notably the Bash tool's ONE persistent shell, which starts again at the worktree (see web/src/lib/shellCwd.ts).
+	Payload ChatSessionResumedPayload `json:"payload"`
+
+	// Seq Per-head sequence number; also the history cursor.
+	Seq uint64 `json:"seq"`
+
+	// SourceId Ingestion identity used to deduplicate.
+	SourceId  string                  `json:"source_id,omitempty"`
+	Timestamp time.Time               `json:"timestamp"`
+	Type      SessionResumedEventType `json:"type"`
+}
+
+// SessionResumedEventType defines model for SessionResumedEvent.Type.
+type SessionResumedEventType string
 
 // SetProjectHiddenRequest defines model for SetProjectHiddenRequest.
 type SetProjectHiddenRequest struct {
@@ -5399,6 +5427,34 @@ func (t *ChatEventUnion) MergeNoticeEvent(v NoticeEvent) error {
 	return err
 }
 
+// AsSessionResumedEvent returns the union data inside the ChatEventUnion as a SessionResumedEvent
+func (t ChatEventUnion) AsSessionResumedEvent() (SessionResumedEvent, error) {
+	var body SessionResumedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSessionResumedEvent overwrites any union data inside the ChatEventUnion as the provided SessionResumedEvent
+func (t *ChatEventUnion) FromSessionResumedEvent(v SessionResumedEvent) error {
+	v.Type = "session_resumed"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSessionResumedEvent performs a merge with any union data inside the ChatEventUnion, using the provided SessionResumedEvent
+func (t *ChatEventUnion) MergeSessionResumedEvent(v SessionResumedEvent) error {
+	v.Type = "session_resumed"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 // AsInteractionRequestedEvent returns the union data inside the ChatEventUnion as a InteractionRequestedEvent
 func (t ChatEventUnion) AsInteractionRequestedEvent() (InteractionRequestedEvent, error) {
 	var body InteractionRequestedEvent
@@ -5679,6 +5735,8 @@ func (t ChatEventUnion) ValueByDiscriminator() (interface{}, error) {
 		return t.AsReasoningDeltaEvent()
 	case "reasoning_duration":
 		return t.AsReasoningDurationEvent()
+	case "session_resumed":
+		return t.AsSessionResumedEvent()
 	case "subagent_completed":
 		return t.AsSubagentCompletedEvent()
 	case "subagent_started":
