@@ -9,6 +9,7 @@ import type { ApprovalDecisionRequest } from '../models/ApprovalDecisionRequest'
 import type { ApprovalListResponse } from '../models/ApprovalListResponse';
 import type { ArtifactsResponse } from '../models/ArtifactsResponse';
 import type { ClaudeUsageResponse } from '../models/ClaudeUsageResponse';
+import type { CodexUsageResponse } from '../models/CodexUsageResponse';
 import type { CommitInfo } from '../models/CommitInfo';
 import type { CommitRepositoryRequest } from '../models/CommitRepositoryRequest';
 import type { ConfigResponse } from '../models/ConfigResponse';
@@ -107,6 +108,28 @@ export class DefaultService {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/usage/claude',
+            query: {
+                'refresh': refresh,
+            },
+            errors: {
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Get cached Codex subscription usage
+     * Probes the locally-installed Codex app server for the account's subscription rate-limit windows and returns a cached snapshot. Pass refresh=true to force a fresh probe.
+     *
+     * @param refresh Bypass the cache and re-probe the CLI.
+     * @returns CodexUsageResponse OK
+     * @throws ApiError
+     */
+    public getCodexUsage(
+        refresh?: boolean,
+    ): CancelablePromise<CodexUsageResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/usage/codex',
             query: {
                 'refresh': refresh,
             },

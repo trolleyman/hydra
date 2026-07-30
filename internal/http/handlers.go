@@ -112,6 +112,9 @@ type Server struct {
 	// scoped per project).
 	claudeUsageOnce sync.Once
 	claudeUsage     *usage.Cache
+	// codexUsage is the equivalent host-account-wide Codex snapshot.
+	codexUsageOnce sync.Once
+	codexUsage     *usage.Cache
 
 	// Memoise git history reads keyed by resolved commit SHAs. Commits are
 	// immutable, so the commit list and committed diff between a fixed pair of SHAs
@@ -157,6 +160,16 @@ func (s *Server) claudeUsageCache() *usage.Cache {
 		})
 	})
 	return s.claudeUsage
+}
+
+func (s *Server) codexUsageCache() *usage.Cache {
+	s.codexUsageOnce.Do(func() {
+		root := s.ProjectRoot
+		s.codexUsage = usage.NewCache(usage.DefaultPolicy(), func(ctx context.Context) (usage.Snapshot, error) {
+			return errtrace.Wrap2(usage.ProbeCodex(ctx, "codex", root))
+		})
+	})
+	return s.codexUsage
 }
 
 // SetSandboxError records the most recent sandbox-availability error (or clears
@@ -924,6 +937,37 @@ func (s *Server) GetClaudeUsage(ctx context.Context, request api.GetClaudeUsageR
 		resp.WeeklyResetText = &txt
 	}
 	return api.GetClaudeUsage200JSONResponse(resp), nil
+}
+
+func (s *Server) GetCodexUsage(ctx context.Context, request api.GetCodexUsageRequestObject) (api.GetCodexUsageResponseObject, error) {
+	force := request.Params.Refresh != nil && *request.Params.Refresh
+	snap, err := s.codexUsageCache().Get(ctx, force)
+	if err != nil {
+		msg := err.Error()
+		return api.GetCodexUsage200JSONResponse(api.CodexUsageResponse{Available: false, Error: &msg}), nil
+	}
+
+	resp := api.CodexUsageResponse{Available: snap.Available}
+	if snap.Error != "" {
+		e := snap.Error
+		resp.Error = &e
+	}
+	if !snap.CapturedAt.IsZero() {
+		t := snap.CapturedAt
+		resp.CapturedAt = &t
+	}
+	resp.SessionPercentUsed = f64ToF32(snap.SessionPercentUsed)
+	resp.SessionResetsAt = snap.SessionResetsAt
+	if snap.SessionResetText != "" {
+		txt := snap.SessionResetText
+		resp.SessionResetText = &txt
+	}
+	resp.WeeklyPercentUsed = f64ToF32(snap.WeeklyPercentUsed)
+	if snap.WeeklyResetText != "" {
+		txt := snap.WeeklyResetText
+		resp.WeeklyResetText = &txt
+	}
+	return api.GetCodexUsage200JSONResponse(resp), nil
 }
 
 // f64ToF32 converts an optional float64 to an optional float32 for the API.
@@ -1961,7 +2005,7 @@ func (s *Server) GenerateAgentTitle(ctx context.Context, request api.GenerateAge
 		}, nil
 	}
 
-	title, err := heads.GenerateTitle(ctx, projectRoot, head.Prompt)
+	title, err := heads.GenerateTitle(ctx, projectRoot, head.AgentType, head.Prompt)
 	switch {
 	case errors.Is(err, heads.ErrNoPrompt):
 		return api.GenerateAgentTitle400JSONResponse{

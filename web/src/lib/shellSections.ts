@@ -969,10 +969,17 @@ function echoLines(step: ScriptStep): string[] | null {
 // A search whose files this module could not enumerate (a glob, a variable)
 // makes the merged path list unknown rather than contributing nothing: guessing
 // the other's file for its lines would highlight them as the wrong language.
-function mergeSearches(steps: ScriptStep[]): ScriptStep[] {
+function mergeCompatibleSteps(steps: ScriptStep[]): ScriptStep[] {
   const out: ScriptStep[] = []
   for (const step of steps) {
     const prev = out[out.length - 1]
+    // Git's report renderer is line-shaped and already moves between status,
+    // metadata and patch modes inside one stream. Exact command boundaries add
+    // nothing, so adjacent reports can share a section just like searches can.
+    if (step.kind === 'git' && prev?.kind === 'git') {
+      out[out.length - 1] = { kind: 'git', command: `${prev.command}; ${step.command}` }
+      continue
+    }
     if (step.kind !== 'matches' || prev?.kind !== 'matches') { out.push(step); continue }
     const known = prev.match.paths.length > 0 && step.match.paths.length > 0
     out[out.length - 1] = {
@@ -1026,9 +1033,52 @@ function searchExtent(step: ScriptStep, slice: string[], lo: number, hi: number,
 //
 // A search at either end is bounded too, by its own prefixes rather than by a
 // count - see searchExtent.
-function distribute(producers: ScriptStep[], slice: string[]): string[][] | null {
+interface Distribution {
+  parts: string[][]
+  // A run can be bounded as a whole while the boundaries inside it remain
+  // unknowable. Keep that run plain without throwing away a self-identifying
+  // neighbour (most often a trailing `rg -n`).
+  plain: Set<number>
+}
+
+function distribute(producers: ScriptStep[], slice: string[]): Distribution | null {
   if (producers.length === 0) return null
-  if (producers.length === 1) return [slice]
+  if (producers.length === 1) return { parts: [slice], plain: new Set() }
+
+  // Peel a search-shaped suffix before using file-view limits. A sed range is
+  // an UPPER bound, not an exact count: a range past EOF emits fewer lines.
+  // Greedily taking that maximum made a preceding sed claim the `path:line:`
+  // rows of a later rg. Those rows identify themselves, so preserve the useful
+  // boundary even when everything before it has to remain one plain run.
+  const suffix = searchExtent(producers[producers.length - 1], slice, 0, slice.length, 'end')
+  if (suffix != null && suffix < slice.length) {
+    const last = producers.length - 1
+    const before = distribute(producers.slice(0, last), slice.slice(0, -suffix))
+    const parts = producers.map(() => [] as string[])
+    const plain = new Set<number>()
+    if (before) {
+      before.parts.forEach((part, i) => { parts[i] = part })
+      before.plain.forEach((i) => plain.add(i))
+    } else {
+      // Several consecutive reads with no headers have no recoverable internal
+      // boundary. Put their combined output on the first slot and explicitly
+      // render it as terminal text.
+      parts[0] = slice.slice(0, -suffix)
+      plain.add(0)
+    }
+    parts[last] = slice.slice(-suffix)
+    return { parts, plain }
+  }
+
+  // Consecutive finite ranges are only individually separable when they all
+  // reach their requested end. If their combined output is shorter, at least
+  // one hit EOF and stdout contains no clue which one; assigning maximums from
+  // the left is the false boundary this module exists to avoid.
+  const limits = producers.map(stepLimit)
+  if (limits.every((n) => n != null) && slice.length < limits.reduce((sum, n) => sum + (n ?? 0), 0)) {
+    return null
+  }
+
   const out: string[][] = producers.map(() => [])
   let lo = 0
   let hi = slice.length
@@ -1069,7 +1119,7 @@ function distribute(producers: ScriptStep[], slice: string[]): string[][] | null
   let rest = head === tail ? head : producers.length - 1
   while (rest > 0 && producers[rest].kind === 'echo') rest--
   out[rest] = out[rest].concat(slice.slice(lo, hi))
-  return out
+  return { parts: out, plain: new Set() }
 }
 
 // splitScriptOutput cuts a command's output into one section per step that
@@ -1103,13 +1153,14 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
     const start = pos
     pos = end
     if (slice.length === 0) { pending = []; return }
-    const producers = mergeSearches(pending)
-    const parts = distribute(producers, slice)
-    if (!parts) {
+    const producers = mergeCompatibleSteps(pending)
+    const distribution = distribute(producers, slice)
+    if (!distribution) {
       sections.push({ kind: 'plain', lines: slice, raw: rawSlice(start, end) })
       pending = []
       return
     }
+    const { parts, plain } = distribution
     // The parts partition the slice in order, so walking them keeps each one's
     // offset into the output - which is what pairs it with its raw lines.
     let at = start
@@ -1120,6 +1171,10 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
       const rawPart = rawSlice(from, at)
       const step = producers[i]
       const limit = stepLimit(step)
+      if (plain.has(i)) {
+        sections.push({ kind: 'plain', lines: part, raw: rawPart })
+        return
+      }
       // More lines than the range could have produced (an error, a banner, a
       // marker that did not fire) means this is not what the parse thinks it is.
       if (step.kind === 'view' && (limit == null || part.length <= limit)) {
