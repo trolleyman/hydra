@@ -1244,7 +1244,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         setFileContexts(new Map(fileContextsRef.current))
       }
       setDiff((prev) => prev
-        ? { ...prev, files: prev.files.map((f) => f.path === path ? { ...f, hunks: updated?.hunks ?? [], expanded: promoted } : f) }
+        ? { ...prev, files: prev.files.map((f) => f.path === path ? { ...f, hunks: updated?.hunks ?? [], expanded: promoted, total_lines: updated?.total_lines ?? f.total_lines } : f) }
         : prev)
     } catch (e) {
       console.error('Failed to fetch repository file diff:', e)

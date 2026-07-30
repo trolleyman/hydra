@@ -98,3 +98,51 @@ describe('savedCommentNumber', () => {
     expect(savedCommentNumber('The reply was empty, so nothing was recorded.')).toBe(0)
   })
 })
+
+// A pin's header contains SPACES ("home.png @ 34%,71%"), which the path-shaped
+// anchor pattern could not match. That is not a cosmetic loss: an unrecognised
+// header stops starting a comment, so its text is swallowed into the body of the
+// card above it - one comment's remark appearing under another's file name.
+describe('image-anchored comments', () => {
+  it('parses a pin, and keeps its detail lines out of the body', () => {
+    const parsed = parseReviewCommentsText([
+      '#9 home-dark.png @ 34%,71% - user, on main -> abc1234',
+      'image: /home/x/.hydra/local/artifacts/out/screenshots/commit/bbbb/home-dark.png (right side of the screenshots artifact, rendered from abc1234)',
+      'point: 514,697 px, in a 1512x982 image',
+      'This tile is 3px low.',
+    ].join('\n'))
+    expect(parsed).not.toBeNull()
+    expect(parsed!.comments).toHaveLength(1)
+    const c = parsed!.comments[0]
+    expect(c.number).toBe(9)
+    expect(c.image).toEqual({ file: 'home-dark.png', position: '34%,71%' })
+    expect(c.path).toBe('')
+    expect(c.body).toBe('This tile is 3px low.')
+  })
+
+  it('keeps a clip’s timecode, which is part of where it points', () => {
+    const parsed = parseReviewCommentsText('#4 loader.webm @ 40%,60% at 0:01.4 - user\n\nThe spinner stalls.')
+    expect(parsed!.comments[0].image).toEqual({ file: 'loader.webm', position: '40%,60% at 0:01.4' })
+  })
+
+  // The regression the loose anchor pattern exists to prevent.
+  it('does not swallow a pin into the line comment above it', () => {
+    const parsed = parseReviewCommentsText([
+      '#3 a.go:12 - user',
+      'this leaks',
+      '',
+      '#9 home.png @ 10%,20% - user',
+      'and this is crooked',
+    ].join('\n'))
+    expect(parsed!.comments.map((c) => c.number)).toEqual([3, 9])
+    expect(parsed!.comments[0].body).toBe('this leaks')
+    expect(parsed!.comments[1].body).toBe('and this is crooked')
+  })
+
+  it('still parses a plain path anchor unchanged', () => {
+    const parsed = parseReviewCommentsText('#3 internal/a.go:12 (reply to #2) [resolved] - reviewer, on main -> abc1234\n\nbody')
+    const c = parsed!.comments[0]
+    expect(c).toMatchObject({ path: 'internal/a.go', line: 12, replyTo: 2, resolved: true, author: 'reviewer', diff: 'main -> abc1234' })
+    expect(c.image).toBeUndefined()
+  })
+})

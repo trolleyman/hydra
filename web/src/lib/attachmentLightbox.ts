@@ -26,5 +26,9 @@ export function attachmentLightboxItems(attachments: Attachment[]): LightboxItem
     filename: a.filename,
     size: a.size,
     kind: fileKind(a.filename),
+    // Says what these ARE, so a pin on one becomes markup on the prompt being
+    // written. It has to be stated here: a file attached moments ago previews
+    // from a local `blob:` URL, which carries no clue that it is an attachment.
+    attachment: true,
   }))
 }

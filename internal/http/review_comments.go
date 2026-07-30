@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/reviewstore"
@@ -51,6 +52,10 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 	if body == "" && len(attachments) == 0 {
 		return commentBadRequest("the comment is empty"), nil
 	}
+	image, err := imageAnchorFromAPI(request.Body.Image)
+	if err != nil {
+		return commentBadRequest(err.Error()), nil
+	}
 	c := reviewstore.Comment{
 		Body:        body,
 		Author:      reviewstore.AuthorUser,
@@ -63,6 +68,7 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 		HunkHash:    derefOr(request.Body.HunkHash, ""),
 		ReplyTo:     derefOr(request.Body.ReplyTo, 0),
 		Attachments: attachments,
+		Image:       image,
 	}
 	stored, err := reviewstore.AppendComment(projectRoot, head.ID, c)
 	if err != nil {
@@ -334,6 +340,7 @@ func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCo
 		setIf(&ac.Diff, c.Diff, c.Diff != "")
 		setIf(&ac.Context, c.Context, c.Context != "")
 		setIf(&ac.HunkHash, c.HunkHash, c.HunkHash != "")
+		ac.Image = imageAnchorToAPI(c.Image)
 		setIf(&ac.PublishedAt, c.PublishedAt, c.PublishedAt != "")
 		setIf(&ac.Resolved, c.Resolved, c.Resolved)
 		setIf(&ac.ResolvedAt, c.ResolvedAt, c.ResolvedAt != "")
@@ -343,6 +350,64 @@ func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCo
 		setIf(&ac.Read, true, read[c.Number] || c.Author == reviewstore.AuthorUser)
 		out.Comments = append(out.Comments, ac)
 	}
+	return out
+}
+
+// imageAnchorFromAPI validates and converts a pin as it arrives from a browser.
+//
+// Strict rather than forgiving: a pin outside the picture, or one naming no file,
+// is a client bug, and storing it would produce a comment that points at nothing
+// and cannot be fixed later (published comments are immutable). Failing the write
+// puts the mistake where it can be seen.
+func imageAnchorFromAPI(in *api.ReviewImageAnchor) (*reviewstore.ImageAnchor, error) {
+	if in == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(in.File) == "" {
+		return nil, errtrace.Wrap(fmt.Errorf("the pin names no file"))
+	}
+	out := &reviewstore.ImageAnchor{
+		Script:   derefOr(in.Script, ""),
+		Key:      derefOr(in.Key, ""),
+		Side:     string(derefOr(in.Side, "")),
+		File:     in.File,
+		X:        float64(in.X),
+		Y:        float64(in.Y),
+		W:        float64(derefOr(in.W, 0)),
+		H:        float64(derefOr(in.H, 0)),
+		NaturalW: derefOr(in.NaturalW, 0),
+		NaturalH: derefOr(in.NaturalH, 0),
+		T:        float64(derefOr(in.T, 0)),
+		Hash:     derefOr(in.Hash, ""),
+	}
+	// A slice, not a map: two bad coordinates should always name the same one
+	// first, or the same mistake reports differently each time it is made.
+	for _, f := range []struct {
+		name string
+		v    float64
+	}{{"x", out.X}, {"y", out.Y}, {"w", out.W}, {"h", out.H}} {
+		if f.v < 0 || f.v > 1 {
+			return nil, errtrace.Wrap(fmt.Errorf("the pin's %s is %g, which is outside the picture (positions are fractions of it)", f.name, f.v))
+		}
+	}
+	return out, nil
+}
+
+// imageAnchorToAPI is the way back out, for the diff viewer to draw the pin.
+func imageAnchorToAPI(in *reviewstore.ImageAnchor) *api.ReviewImageAnchor {
+	if in == nil {
+		return nil
+	}
+	out := &api.ReviewImageAnchor{File: in.File, X: float32(in.X), Y: float32(in.Y)}
+	setIf(&out.Script, in.Script, in.Script != "")
+	setIf(&out.Key, in.Key, in.Key != "")
+	setIf(&out.Side, api.ReviewImageAnchorSide(in.Side), in.Side != "")
+	setIf(&out.W, float32(in.W), in.W > 0)
+	setIf(&out.H, float32(in.H), in.H > 0)
+	setIf(&out.NaturalW, in.NaturalW, in.NaturalW > 0)
+	setIf(&out.NaturalH, in.NaturalH, in.NaturalH > 0)
+	setIf(&out.T, float32(in.T), in.T > 0)
+	setIf(&out.Hash, in.Hash, in.Hash != "")
 	return out
 }
 

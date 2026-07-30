@@ -142,6 +142,9 @@ describe('parseScriptSteps', () => {
       kind: 'matches',
       command: 'grep -rn foo src | grep -v _test.go | head -20',
       match: { paths: ['src'], numbered: true },
+      // The `head` bounds it whatever the grep in front of it found, and it
+      // reaches back past the second grep, which only drops lines.
+      cap: 20,
     })
     // A filtered file view is no longer a contiguous slice, so it keeps the
     // file's language and loses the line numbers it could no longer count.
@@ -168,7 +171,7 @@ describe('parseScriptSteps', () => {
     expect(kinds('git log -1\necho ----')).toEqual(['git', 'marker'])
     expect(kinds('git --no-pager log --graph --oneline --all\necho ----')).toEqual(['git', 'marker'])
     // The `| cat` that stops git paging changes nothing about what it printed.
-    expect(steps('git log --oneline -1 | cat')[0]).toEqual({ kind: 'git', command: 'git log --oneline -1 | cat' })
+    expect(steps('git log --oneline -1 | cat')[0]).toEqual({ kind: 'git', command: 'git log --oneline -1 | cat', cap: 1 })
     expect(kinds('git log | cat | head -20\necho ----')).toEqual(['git', 'marker'])
     // A patch is a shape too.
     expect(kinds('git show HEAD\necho ----')).toEqual(['git', 'marker'])
@@ -182,6 +185,59 @@ describe('parseScriptSteps', () => {
     expect(kinds('git diff --name-only\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git status --porcelain=v2\necho ----')).toEqual(['unknown', 'marker'])
     expect(kinds('git commit -m x\necho ----')).toEqual(['unknown', 'marker'])
+  })
+
+  it('takes the line count out of a trailing head or tail', () => {
+    // The bound lands on the step that carries it, which is the last one here.
+    const cap = (script: string) => steps(script).at(-1)!.cap
+    // The point of the bound: `mage build` is a step this module can say
+    // nothing at all about, and two lines is all the split needs from it.
+    expect(steps('cat a.go\nmage build 2>&1 | tail -2')[1]).toEqual({
+      kind: 'unknown', command: 'mage build 2>&1 | tail -2', cap: 2,
+    })
+    expect(cap('cat a.go\nls -la | head -5')).toBe(5)
+    // Every spelling of the count, including the two-word one that used to make
+    // the `5` read as a file operand and the whole thing not a filter at all.
+    expect(cap('cat a.go\nls -la | head -n 5')).toBe(5)
+    expect(cap('cat a.go\nls -la | head -n5')).toBe(5)
+    expect(cap('cat a.go\nls -la | head --lines=5')).toBe(5)
+    // What both tools do when nothing says otherwise.
+    expect(cap('cat a.go\nls -la | tail')).toBe(10)
+    // The tighter of two, reaching back past a filter that only drops lines.
+    expect(cap('cat a.go\nls -la | head -20 | grep foo | tail -3')).toBe(3)
+    // A count from the OTHER end, or of bytes, or one that never ends: each
+    // leaves the output as long as the stream is.
+    expect(cap('cat a.go\nls -la | tail -n +5')).toBeUndefined()
+    expect(cap('cat a.go\nls -la | head -n -5')).toBeUndefined()
+    expect(cap('cat a.go\nls -la | head -c 200')).toBeUndefined()
+    expect(cap('cat a.go\nls -la | tail -f')).toBeUndefined()
+    // A `head` naming a file of its own is reading it, not trimming a pipe -
+    // which is a view, and keeps being read as one.
+    expect(steps('head -5 a.go\ncat b.go')[0]).toMatchObject({ kind: 'view' })
+  })
+
+  it('takes the commit count off a one-line log', () => {
+    // The bound lands on the step that carries it, which is the last one here.
+    const cap = (script: string) => steps(script).at(-1)!.cap
+    expect(cap('git log --oneline -3')).toBe(3)
+    expect(cap('git log --oneline -n 3')).toBe(3)
+    expect(cap('git log --oneline -n3')).toBe(3)
+    expect(cap('git log --oneline --max-count=3')).toBe(3)
+    expect(cap('git -C /repo log --oneline --all -3')).toBe(3)
+    // The tighter of the two bounds when the pipeline carries one as well.
+    expect(cap('git log --oneline -3 | head -1')).toBe(1)
+    // A count with no bound on it is no bound.
+    expect(cap('git log --oneline')).toBeUndefined()
+    // A count over a format that spends SEVERAL lines on a commit bounds
+    // commits, not lines - which is not the same thing and not what is wanted.
+    expect(cap('git log -3')).toBeUndefined()
+    expect(cap('git log --oneline --stat -3')).toBeUndefined()
+    expect(cap('git log --oneline -p -3')).toBeUndefined()
+    // `--graph` draws edges on lines of their own between the commits.
+    expect(cap('git log --graph --oneline -3')).toBeUndefined()
+    // Only `log`. Nothing else git reports is as long as its arguments say.
+    expect(cap('git status --short')).toBeUndefined()
+    expect(cap('git shortlog -sn')).toBeUndefined()
   })
 
   it('reads a context flag with its number written against it', () => {
@@ -242,7 +298,7 @@ describe('parseScriptSteps', () => {
 
   it('reads a du, however its operands are spelled', () => {
     expect(steps('du -sh ~/.cache/* | sort -rh | head -8')[0]).toEqual({
-      kind: 'disk', tool: 'du', command: 'du -sh ~/.cache/* | sort -rh | head -8',
+      kind: 'disk', tool: 'du', command: 'du -sh ~/.cache/* | sort -rh | head -8', cap: 8,
     })
     // A glob, a variable, a bare directory: what du prints does not depend on
     // knowing which paths it was given.
@@ -428,6 +484,31 @@ describe('splitScriptOutput', () => {
     // The file's own text contains the marker; the section must not stop there.
     const sections = splitScriptOutput(steps('sed -n 1,3p a.go\necho ---\nsed -n 1,1p b.go'), 'a1\n---\na3\n---\nb1')
     expect(sections?.map((s) => s.lines)).toEqual([['a1', '---', 'a3'], ['---'], ['b1']])
+  })
+
+  it('splits a git report off an opaque step the pipeline bounds', () => {
+    // The "where am I" script, with no separator anywhere in it: two git reports
+    // that merge into one section, and a build whose output only a `| tail -2`
+    // says anything about. Two lines is enough - it is what leaves the three
+    // commit lines above them to git's own colours instead of taking them down
+    // into one plain block.
+    const script = [
+      'git status --short',
+      'git log --oneline -3',
+      'mage build 2>&1 | tail -2',
+    ].join('\n')
+    const output = [
+      "a56e8a7d Merge branch 'main'",
+      'd10b2b2c Stop spending a model turn on a resolved comment',
+      "2672df7c Merge branch 'main'",
+      '--- Done ---',
+      '$ go build ./...',
+    ].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections?.map((s) => [s.kind, s.lines.length])).toEqual([['git', 3], ['plain', 2]])
+    // The status found nothing, so all three lines are the log's - and the pair
+    // renders as one report either way, since a git shape is read off the line.
+    expect(sections?.[0]).toMatchObject({ command: 'git status --short; git log --oneline -3' })
   })
 
   it('splits a search off an unmodellable neighbour by its own prefixes', () => {

@@ -1779,7 +1779,7 @@ export function AgentDetail({
   async function respondToReview() {
     await runWithToast(
       () => api.default.sendAgentInput(projectId ?? '', agent.id, {
-        text: "Fetch your MR's unresolved review comments with the hydra MCP tools (get_review_comments) and address them, then commit.",
+        text: "Fetch your MR's unresolved review comments with the `mcp__hydra__get_review_comments` tool and address them, then commit.",
         origin: 'review_comments',
       }),
       { success: 'Asked the agent to address review comments', errorPrefix: 'Failed to send' },
