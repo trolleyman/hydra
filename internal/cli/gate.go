@@ -66,7 +66,7 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 	// and we explain that afterwards instead of pre-emptively killing the whole
 	// Bash call over one git clause.
 	if event := stringField(input, "hook_event_name"); event == "PostToolUse" || event == "PostToolUseFailure" {
-		emitPostAdvice(stdout, toolName, toolInput, input["tool_response"])
+		emitPostAdvice(stdout, toolName, toolInput, input["tool_response"], stringField(input, "cwd"))
 		return nil
 	}
 
@@ -106,17 +106,25 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 }
 
 // emitPostAdvice attaches after-the-fact guidance to a tool call that already
-// ran. Currently the only advice is the read-only .git explanation, which needs
-// both the command and its output, so it applies to Bash alone. Silence is the
-// normal case - a hook that printed on every tool call would be noise.
-func emitPostAdvice(w io.Writer, toolName string, toolInput map[string]any, response any) {
+// ran. Both pieces of advice are about the shell, so this applies to Bash alone:
+// the read-only .git explanation (which needs the command and its output) and the
+// shell's resulting cwd (which the Bash result itself never reports). Silence is
+// the normal case - a hook that printed on every tool call would be noise.
+func emitPostAdvice(w io.Writer, toolName string, toolInput map[string]any, response any, cwd string) {
 	if toolName != "Bash" {
 		return
 	}
-	advice := gate.GitReadonlyAdvice(stringField(toolInput, "command"), toolResponseText(response))
-	if advice == "" {
+	var parts []string
+	if a := gate.GitReadonlyAdvice(stringField(toolInput, "command"), toolResponseText(response)); a != "" {
+		parts = append(parts, a)
+	}
+	if a := gate.ShellCwdAdvice(cwd, os.Getenv(gate.EnvWorktree)); a != "" {
+		parts = append(parts, a)
+	}
+	if len(parts) == 0 {
 		return
 	}
+	advice := strings.Join(parts, " ")
 	appendJSONLine(w, map[string]any{
 		"hookSpecificOutput": map[string]any{
 			"hookEventName":     "PostToolUse",

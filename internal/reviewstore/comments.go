@@ -408,7 +408,7 @@ func NotifyLine(comments []Comment) string {
 	parts := make([]string, 0, len(comments))
 	for _, c := range comments {
 		if anchor := c.Anchor(); anchor != "" {
-			parts = append(parts, fmt.Sprintf("%s (%s)", c.Label(), anchor))
+			parts = append(parts, fmt.Sprintf("%s [%s](%s)", c.Label(), anchor, anchor))
 		} else {
 			parts = append(parts, c.Label())
 		}
@@ -417,6 +417,6 @@ func NotifyLine(comments []Comment) string {
 	if len(comments) == 1 {
 		noun = "comment"
 	}
-	return fmt.Sprintf("Review %s added: %s. Read them with the get_review_comments tool (they are not repeated here).",
+	return fmt.Sprintf("Review %s added: %s. Read them with the `mcp__hydra__get_review_comments` tool.",
 		noun, strings.Join(parts, ", "))
 }

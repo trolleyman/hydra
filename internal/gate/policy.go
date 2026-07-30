@@ -28,6 +28,9 @@ const (
 	// MCP servers (name+source), used by the `hydra mcp` control server to tell the
 	// agent which servers it can request access to.
 	EnvMCPCatalogPath = "HYDRA_MCP_CATALOG_PATH"
+	// EnvWorktree is the head's worktree path, which is also where its Bash shell
+	// starts. ShellCwdAdvice compares the post-command cwd against it.
+	EnvWorktree = "HYDRA_WORKTREE"
 )
 
 // NotificationPolicyApproval is the status.json notification_type the gate sets

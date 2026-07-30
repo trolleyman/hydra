@@ -44,7 +44,7 @@ import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../l
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 import { useAgentStore } from '../stores/agentStore'
-import { Markdown } from '../lib/MarkdownRenderer'
+import { Markdown, type RepoLinkContext } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { FILE_BANNER, viewLineNumbers } from '../lib/fileViewCommand'
@@ -1821,6 +1821,10 @@ const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
   fix_conflicts: {
     label: 'Sent from a button',
     why: 'You pressed a button rather than typing this - Hydra wrote the wording and sent it on your behalf.',
+  },
+  fix_test: {
+    label: 'Sent from a button',
+    why: 'You asked the agent to fix a failing test from the tests panel - Hydra wrote the wording and sent it on your behalf.',
   },
   review_thread: {
     label: 'Sent from a button',
@@ -5462,6 +5466,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
   dimmed,
   origin,
   projectId,
+  linkCtx,
 }: {
   text: string
   sending?: boolean
@@ -5475,6 +5480,10 @@ const ChatUserMessage = memo(function ChatUserMessage({
   // image thumbnails / chips as a finalized turn instead of raw upload paths.
   dimmed?: boolean
   projectId: string | null
+  // Resolves repo-relative links in the bubble (e.g. the location a "fix this
+  // test" send points at) to the repository view - same context the assistant
+  // bubbles use. Without it a link falls back to a plain, unresolvable anchor.
+  linkCtx?: RepoLinkContext
 }) {
   const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
@@ -5504,7 +5513,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
           handler (copyTranscriptAsMarkdown), which also trims the trailing
           newlines the browser adds for the bubble's block padding. */}
       <div className={`${auto ? AUTOMATED_BUBBLE_CLASS : USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
-        {body && <Markdown text={body} />}
+        {body && <Markdown text={body} linkCtx={linkCtx} />}
         {attachments.length > 0 && (
           <AttachmentChips
             attachments={attachments}
@@ -9860,7 +9869,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function renderChatItem(item: ChatItem, shellCwd: string | null = null): ReactNode {
     switch (item.kind) {
       case 'user':
-        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} projectId={projectId} />
+        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} projectId={projectId} linkCtx={chatLinkCtx} />
       case 'command': {
         const name = item.name.startsWith('/') ? item.name : '/' + item.name
         return (
@@ -10423,7 +10432,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       is sent (a real user bubble) - and rendered the same way, so
                       image thumbnails / attachment chips show here too, not raw
                       upload paths (dimmed while it waits). */}
-                  <ChatUserMessage text={p.text} dimmed projectId={projectId} />
+                  <ChatUserMessage text={p.text} dimmed projectId={projectId} linkCtx={chatLinkCtx} />
                   {/* Discard button (item 52): drops the queued message from the
                       server queue. A floating chip overhanging the bubble's
                       top-right corner (revealed on hover so the resting stack
