@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
-import type { ArtifactSet } from '../api'
-import { LiveLogPanes } from './ArtifactLogView'
+import type { ArtifactLogLine, ArtifactSet } from '../api'
+import { LiveLogPanes, LogView } from './ArtifactLogView'
 
 // Regression guard for "a side that fails mid-generation reads as green"
 // (artifacts: fix failed side reading as green mid-generation). While the set is
@@ -59,5 +59,21 @@ describe('LiveLogPanes side colours', () => {
   it('leaves both sides neutral while both are still generating', () => {
     const { container } = render(<LiveLogPanes set={set({ left_log_url: null, right_log_url: null })} />)
     for (const cls of borders(container)) expect(cls).not.toMatch(/border-(red|green)-/)
+  })
+})
+
+// LogView renders whatever a websocket handed it. `text` is required by the
+// schema, but a frame that omitted it (the server-update stream's `omitempty` on
+// a blank build line) used to throw inside hasAnsi - and a throw in a render
+// effect unmounts the whole app, which is how one blank line of `mage build`
+// output blanked the UI mid-restart.
+describe('LogView malformed lines', () => {
+  it('renders a line with no text instead of throwing', () => {
+    const log = [
+      { text: 'building', stream: 'stdout' },
+      { stream: 'stdout' } as ArtifactLogLine,
+      { text: 'done', stream: 'stdout' },
+    ] as ArtifactLogLine[]
+    expect(() => render(<LogView log={log} />)).not.toThrow()
   })
 })

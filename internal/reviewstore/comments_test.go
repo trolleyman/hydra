@@ -133,7 +133,10 @@ func TestNotifyLineIsOneShortLine(t *testing.T) {
 		{Number: 5, Path: "internal/tests/manager.go", Line: 88, Body: "nor this one"},
 	}
 	line := NotifyLine(comments)
-	for _, want := range []string{"#4 (web/src/DiffViewer.tsx:1204)", "#5 (internal/tests/manager.go:88)"} {
+	for _, want := range []string{
+		"#4 [web/src/DiffViewer.tsx:1204](web/src/DiffViewer.tsx:1204)",
+		"#5 [internal/tests/manager.go:88](internal/tests/manager.go:88)",
+	} {
 		if !strings.Contains(line, want) {
 			t.Errorf("notification missing %q: %s", want, line)
 		}
