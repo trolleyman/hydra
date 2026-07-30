@@ -249,6 +249,7 @@ func fillRenameContext(projectRoot, ref string, f *git.DiffFile) {
 		Lines:    dlines,
 	}}
 	f.Expanded = true
+	f.TotalLines = len(lines)
 }
 
 // GetRepositoryBranches lists the local branches of the project's repository,
