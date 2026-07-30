@@ -13,17 +13,23 @@ import { test, expect } from '@playwright/test'
 test('dark tooltip appears on hover and clears when the pointer leaves', async ({ page }) => {
   await page.goto('/project/sim-project/')
 
-  // The sidebar collapse button. Its aria-label is "Hide sidebar"; the tooltip
-  // adds the "(Ctrl+.)" shortcut, so that parenthetical is unique to the hint.
+  // The sidebar collapse button. Its aria-label is "Hide sidebar" and so is the
+  // tooltip's label, so the hint is identified by role - the box carries
+  // role="tooltip" - rather than by text unique to it. It used to be findable as
+  // "Hide sidebar (Ctrl+.)", but a shortcut is no longer prose in brackets: it
+  // renders as keycaps on their own line (Tooltip's `shortcut` prop), which is
+  // what the <kbd> assertion below pins down.
   const button = page.getByRole('button', { name: 'Hide sidebar' })
   await expect(button).toBeVisible()
 
-  const tip = page.getByText('Hide sidebar (Ctrl+.)')
+  const tip = page.getByRole('tooltip')
   await expect(tip).toHaveCount(0)
 
   await button.hover()
   // Shown after the hover delay (Playwright's expect polls past it).
   await expect(tip).toBeVisible()
+  await expect(tip).toContainText('Hide sidebar')
+  await expect(tip.locator('kbd')).toHaveText(['Ctrl', '.'])
 
   // Non-interactive: moving the pointer off the trigger removes the hint.
   await page.mouse.move(10, 400)
