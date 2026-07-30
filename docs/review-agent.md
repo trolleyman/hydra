@@ -736,15 +736,128 @@ Two UI details that were wrong and are worth remembering:
   number AND the buttons, so they share one centre line - measured at 0.00px
   apart rather than eyeballed.
 
+### Telling a head something: one shape, four rules
+
+The things that could notify a head keep multiplying - published comments, a
+resolve, a forge reviewer, a failing test. They all want the same rules, and the
+rules are worth stating once rather than rediscovering per source:
+
+1. Fire on a **transition**, never on a poll tick.
+2. **Batch.** Resolving five comments is one line, not five model turns.
+3. Respect what the head is **doing** (see below).
+4. Send **one short line** and let the agent pull the detail with the tool it
+   already has. The comment/log is canonical; the message is a pointer.
+
+Rule 3 is not "never interrupt", which is what it looks like at first. It is
+"interrupt only when the interruption is the point", and the two cases pull in
+opposite directions:
+
+- **New information** (comments published, tests failed) waits until the head is
+  NOT mid-turn, so it never lands in the middle of something.
+- **A cancellation** - resolving a comment - only fires BECAUSE it is mid-turn.
+  Otherwise it is silent, and deliberately so: `reviewstore.OpenComments`, the
+  agent's default read, already filters resolved comments out, so an idle agent
+  picks the change up for free the next time it looks. The single case worth
+  spending a turn on is "you are working on #3 right now and I have just
+  cancelled it". Reopening never notifies - the comment is simply back in the
+  list it reads anyway.
+
+Resolve notifications are debounced (`resolveNotifyDelay`) so a run of clicks is
+one message, and re-checked at the end of the debounce: a head that finished while
+you were resolving gets nothing.
+
+**And one of them has to give up.** Test failures are the case where the four
+rules are not enough: dedup is per (runner, commit), and the notify -> fix ->
+commit -> still red -> notify cycle produces a NEW commit each time, so every
+report is genuinely new news and nothing bounds it. `testNotifyMaxStreak` does -
+after three consecutive reports with no human in between, Hydra stops talking. The
+head is not cut off (it can read its own status whenever it likes); Hydra has just
+stopped paying to repeat something it has said three times. The streak resets when
+the suite goes green, or when the USER types something - a message Hydra sent
+itself deliberately does not reset it, or its notifications would keep renewing
+their own licence to send more. Same "no chains without a human" rule the mentions
+follow.
+
+### Unread, in the UI
+
+Three surfaces, deliberately different from each other:
+
+- **In the diff** - a dot on the comment's number, and `N open · N new` in the
+  navigator, with `↑ ↓` and a mark-all-read.
+- **On the sidebar card** - a speech bubble with a count, NOT a third dot. The
+  card already carries a needs-input dot and an unread-changes dot; a third would
+  make none of them readable, and this one has to say how many, which a dot
+  cannot.
+- **A toast** when comments land while you are looking at something else, on the
+  INCREASE only - the count also falls when you read one, and announcing that
+  would be telling you about your own action.
+
+`unread_comments` is its own field on the agent rather than folded into
+`has_unread_changes`, because that flag means "the agent finished" and one
+indicator meaning both would be trustworthy for neither.
+
+### Mentions: who a comment wakes
+
+`@review` addresses the reviewer, `@agent` (or `@head`) the head, naming both
+reaches both - and **no mention means the head**, exactly as it always has.
+That default is what makes the feature free to adopt: every existing gesture keeps
+working, and the reviewer becomes addressable for the first time. The explicit
+`@agent` is redundant with the default and exists anyway, because once two agents
+are on one diff "who am I talking to" is worth saying out loud rather than leaving
+to a rule you have to remember.
+
+Three rules hold it together:
+
+- **An agent's own comment never routes.** Otherwise one "@review this" in a reply
+  becomes a chain of agents summoning each other, which is an unbounded bill and
+  nobody's idea of a review.
+- **`@review` DOES start a reviewer.** This went the other way first, on the
+  grounds that a slot costs a checkout, a sandbox and a model session and typing a
+  word should not spend that. The reasoning was wrong about what a mention is: an
+  accidental spawn would be indefensible, but `@review` is a person typing the
+  reviewer's name to address it, which is the same intent as clicking the Review
+  tab and should not do less. An agent's comment still never routes, so no agent
+  can spawn one. The start is async (a sandbox takes seconds, and a publish should
+  not block on it) and the notice retries briefly, because a just-launched Claude
+  is not ready for stdin the instant Start returns. The UI says a reviewer was
+  addressed - one working in a tab you never opened is otherwise invisible.
+- **The highlighter and the parser share a pattern.**
+  `web/src/lib/mentionHighlight.tsx` deliberately mirrors
+  `internal/reviewstore/mentions.go`, because a token the box paints and the daemon
+  ignores teaches a rule that is not real. It paints in the comment box and the
+  thread reply box ONLY: a mention means nothing in the chat composer, and
+  highlighting it there would promise a behaviour that does not exist.
+
+A local note on a forge thread routes the same way - it is *your* comment. What
+Hydra deliberately does NOT do is notify because an outside reviewer commented:
+that is the forge's conversation, and an agent woken by every drive-by remark is a
+bill rather than a feature.
+
+### Marking an automated turn
+
+`SendAgentInput` injects a plain user turn, so the chat could not tell "you said
+this" from "Hydra said this for you". `origin` on the user message fixes that, and
+the test for what belongs in it is **"did the user type it in the composer"** -
+not "did Hydra write the words". So Fix with agent and Resolve with agent count as
+automated, even though you meant every word of them.
+
+The bubble keeps the user's shape and side - it speaks for you, and the agent
+answers it as if you had - but takes a cooler tint, a dashed edge and a line saying
+who sent it and why.
+
+**The `[Hydra]` text prefix stays.** Metadata is invisible to an agent, which only
+ever sees the text, so it still needs to know Hydra is speaking. The prefix is for
+the model; the marker is for you.
+
 ### Still open in the comment store
 
 None of it blocking:
 
-- **Drafts publish all-or-nothing in the UI.** The API takes a list of numbers.
-- **No head-level unread badge.** Unread is per comment and visible on the diff;
-  the sidebar card does not yet carry a count (see the note below).
-- **Resolving does not tell the agent.** It is a signal an agent would benefit
-  from - "#3 is dealt with, stop working on it" - and nothing sends it.
+- **A forge reviewer's comment does not notify** - the watcher caches the threads
+  and updates the chip, and the agent only finds out if it asks. Deliberate for
+  now (see above), but the shape is there if it is ever wanted.
+- **`resolve_review_thread` as an agent tool**, and the conflict-of-interest
+  question it raises: an agent resolving the comments about its own work.
 
 ### Unread, and where it should go next
 

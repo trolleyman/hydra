@@ -17,6 +17,8 @@ export function TestsEditor({
   concurrency,
   onConcurrencyChange,
   prefetch,
+  notifyFailures,
+  onNotifyFailuresChange,
   onPrefetchChange,
 }: {
   tests: TestScript[]
@@ -28,6 +30,10 @@ export function TestsEditor({
   // Whether the daemon re-runs a head's suites in the background when its verdict
   // goes stale (test_prefetch). undefined/null means "use the default" (enabled).
   prefetch?: boolean | null
+  // Whether a failing run wakes the head ([notify] test_failures). undefined/null
+  // means "use the default" (enabled).
+  notifyFailures?: boolean | null
+  onNotifyFailuresChange: (v: boolean) => void
   onPrefetchChange: (v: boolean) => void
 }) {
   function update(index: number, patch: Partial<TestScript>) {
@@ -101,6 +107,25 @@ export function TestsEditor({
               <p>When on, the daemon re-runs a head's suites in the background whenever its branch-tip verdict is missing or stale (a cached result computed for an older commit), so the verdict is fresh the instant you open the tests panel or arm auto-merge.</p>
               <p className="mt-1.5">Turn it off for a project whose suites are too heavy to run speculatively - tests are then run only when you open the panel or at merge time. Foreground runs and the max-parallel cap above still apply either way.</p>
               <p className="mt-1.5">Default: on.</p>
+            </InfoTooltip>
+          </span>
+        </label>
+      </div>
+
+      <div className="ml-10 mb-5">
+        <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
+          <input
+            type="checkbox"
+            checked={notifyFailures !== false}
+            onChange={(e) => onNotifyFailuresChange(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-2 focus:ring-blue-500/20"
+          />
+          <span className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
+            Tell the agent when tests fail
+            <InfoTooltip title="Failing-test notifications">
+              <p>When a runner settles failing, Hydra sends the head one line naming it. The agent fetches the output itself with its <code>get_test_logs</code> tool, so a failure costs one short message rather than a transcript full of log.</p>
+              <p className="mt-1.5">It only fires while the head is <strong>idle</strong>, so it can never interrupt a turn or start a fix-fail-fix loop, and the same failure is only reported once per commit - a re-run of a red suite is silent.</p>
+              <p className="mt-1.5">Turn it off for a project whose suites are red for reasons the agent cannot fix. Default: on.</p>
             </InfoTooltip>
           </span>
         </label>

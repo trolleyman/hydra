@@ -892,6 +892,11 @@ type Config struct {
 	// (a local-first project never touches any of it). Pointer so its own fields'
 	// nil-means-default convention is preserved across the merge layers.
 	Review *ReviewConfig `toml:"review"`
+	// Notify configures which events wake a head with a short message. Its own
+	// section rather than switches scattered through [review] and [tests], because
+	// the list of things that can notify keeps growing and one place to look is
+	// worth more than each switch sitting next to its source. nil = defaults.
+	Notify *NotifyConfig `toml:"notify"`
 	// Jira configures ticket-key extraction and the JIRA base URL for {ticket}
 	// templating and spawn-from-ticket. nil = unset.
 	Jira *JiraConfig `toml:"jira"`
@@ -1070,6 +1075,7 @@ type rawConfig struct {
 	TestPrefetch        *bool           `toml:"test_prefetch"`
 	PreviewPorts        *string         `toml:"preview_ports"`
 	Review              *ReviewConfig   `toml:"review"`
+	Notify              *NotifyConfig   `toml:"notify"`
 	Jira                *JiraConfig     `toml:"jira"`
 	Resources           *ResourceLimits `toml:"resources"`
 }
@@ -1273,6 +1279,7 @@ func decodeConfig(data []byte) (Config, error) {
 	cfg.TestPrefetch = raw.TestPrefetch
 	cfg.PreviewPorts = raw.PreviewPorts
 	cfg.Review = raw.Review
+	cfg.Notify = raw.Notify
 	cfg.Jira = raw.Jira
 	cfg.Resources = raw.Resources
 	if err := cfg.Review.Validate(); err != nil {
@@ -1505,6 +1512,14 @@ func (c *Config) Merge(other Config) {
 			c.Jira = &JiraConfig{}
 		}
 		c.Jira.Merge(*other.Jira)
+	}
+	if other.Notify != nil {
+		if c.Notify == nil {
+			c.Notify = &NotifyConfig{}
+		}
+		if other.Notify.TestFailures != nil {
+			c.Notify.TestFailures = other.Notify.TestFailures
+		}
 	}
 	// Resources merges field-by-field (its own nil-means-default convention), so a
 	// later layer overriding one limit leaves the rest inherited.

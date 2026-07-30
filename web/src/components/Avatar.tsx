@@ -69,8 +69,8 @@ export type AvatarSize = 'sm' | 'md'
 // what makes it legible is the 20px disc, not the point size. Same reason the
 // icon's w-3.5 is a literal.
 const SIZES: Record<AvatarSize, { box: string; text: string; icon: string }> = {
-  sm: { box: 'w-5 h-5 rounded', text: 'text-[9px]', icon: 'w-3 h-3' },
-  md: { box: 'w-6 h-6 rounded-md', text: 'text-[10px]', icon: 'w-3.5 h-3.5' },
+  sm: { box: 'w-5 h-5 rounded', text: 'text-4xs', icon: 'w-3 h-3' },
+  md: { box: 'w-6 h-6 rounded-md', text: 'text-3xs', icon: 'w-3.5 h-3.5' },
 }
 
 export function Avatar({

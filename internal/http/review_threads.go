@@ -69,11 +69,17 @@ func (s *Server) ReplyToReviewThread(ctx context.Context, request api.ReplyToRev
 		return replyBadRequest("the reply is empty"), nil
 	}
 	if request.Body.Local != nil && *request.Body.Local {
-		if _, err := reviewstore.AppendNote(projectRoot, head.ID, reviewstore.LocalNote{
+		note, err := reviewstore.AppendNote(projectRoot, head.ID, reviewstore.LocalNote{
 			ThreadID: request.ThreadId, Author: "", Body: body,
-		}); err != nil {
+		})
+		if err != nil {
 			return replyBadRequest(fmt.Sprintf("the note could not be saved: %v", err)), nil
 		}
+		// A local note is YOUR comment, so it addresses someone the same way any
+		// other comment of yours does. (What Hydra never does is notify because an
+		// OUTSIDE reviewer commented - that is the forge's conversation, and an
+		// agent woken by every drive-by remark is a bill, not a feature.)
+		s.notifyLocalNote(ctx, projectRoot, *head, request.ThreadId, note, body)
 		s.notifyAgentsChanged(projectRoot, false)
 		return api.ReplyToReviewThread200JSONResponse(s.reviewThreadsResponse(ctx, projectRoot, *head)), nil
 	}
@@ -87,6 +93,27 @@ func (s *Server) ReplyToReviewThread(ctx context.Context, request api.ReplyToRev
 		return replyBadRequest(fmt.Sprintf("the forge rejected the reply: %v", err)), nil
 	}
 	return api.ReplyToReviewThread200JSONResponse(s.reviewThreadsResponse(ctx, projectRoot, *head)), nil
+}
+
+// notifyLocalNote routes a local reply on a forge thread to whoever it names.
+//
+// It quotes the NUMBER rather than the body, like everything else here: the agent
+// fetches what it needs with get_review_comments, and the transcript keeps a handle
+// that cannot drift from the note.
+func (s *Server) notifyLocalNote(ctx context.Context, projectRoot string, head heads.Head, threadID string, note reviewstore.LocalNote, body string) {
+	number := reviewstore.NumberForForgeNote(projectRoot, head.ID, note.ID, threadID)
+	where := fmt.Sprintf("a reply on review thread #%d", number)
+	if number == 0 {
+		where = "a reply on a review thread"
+	}
+	line := fmt.Sprintf("The user left %s. Read it with the get_review_comments tool.", where)
+	m := reviewstore.ParseMentions(body)
+	if m.Reviewer {
+		s.notifyReviewer(projectRoot, head, line)
+	}
+	if m.Head {
+		s.notifyHead(ctx, projectRoot, head.ID, notifyAlways, reasonReviewComments, line)
+	}
 }
 
 // reviewThreadHead resolves the project root + head for a thread request.

@@ -18,7 +18,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Folder, FolderOpen, X, GitMergeConflict, Bot, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
-  CircleCheck, Link2, ArrowUp, ArrowDown,
+  CircleCheck, Link2, ArrowUp, ArrowDown, MailOpen,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
@@ -66,6 +66,7 @@ import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
 import { addReviewComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, draftsOf, type PendingReviewComment } from './lib/reviewComments'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
+import { renderCommentSource } from './lib/mentionHighlight'
 import { Markdown } from './lib/MarkdownRenderer'
 import { useCopyFlash } from './lib/useCopyFlash'
 import { CopyStateIcon } from './components/CopyStateIcon'
@@ -419,6 +420,9 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
         wrapperClassName="w-full h-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus-within:ring-1 focus-within:ring-blue-500"
         textClassName="p-2 text-xs leading-5"
         placeholder={placeholder}
+        // Mentions decide who this comment wakes, so they are painted while you
+        // type it. Only here - they mean nothing in the chat composer.
+        renderContent={renderCommentSource}
       />
       <div className="flex items-center justify-end gap-2 mt-2">
         <button onClick={onCancel} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
@@ -2256,7 +2260,7 @@ function CommitLabel({ commit, sha }: { commit: CommitInfo | null | undefined; s
   const subject = commit ? commitParts(commit.message).subject : ''
   return (
     <span className="flex items-baseline gap-1.5 min-w-0">
-      <span className="font-mono text-[11px] opacity-55 shrink-0">{commit?.short_sha ?? sha.slice(0, 7)}</span>
+      <span className="font-mono text-2xs opacity-55 shrink-0">{commit?.short_sha ?? sha.slice(0, 7)}</span>
       {subject && <span className="max-w-[150px] truncate">{subject}</span>}
     </span>
   )
@@ -2903,6 +2907,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
         await runWithToast(
           () => api.default.sendAgentInput(projectId ?? '', agent.id, {
             text: `Update this branch from its base by merging the local ${baseBranch} branch in (do not git fetch first), resolving any conflicts that arise.`,
+            origin: 'fix_conflicts',
           }),
           { errorPrefix: 'Failed to send update request to agent' },
         )
@@ -4048,6 +4053,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         await api.default.sendAgentInput(projectId, agent.id, {
           text: `Address this review comment on ${where} (thread ${thread.id}) and commit the fix:\n\n${quoted}\n\n`
             + `When you are done, reply to the thread with mcp__hydra__reply_to_review_comment so I can see what you changed.`,
+          origin: 'review_thread',
         })
         showSentToast('Sent the thread to the agent')
       },
@@ -4102,20 +4108,27 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // Flush the whole queued batch to the agent as one message, then clear the
   // draft. Each comment carries its own frozen context, so the message is built
   // entirely from the stored data - independent of what the live diff shows now.
-  const submitReview = useCallback(async () => {
-    const count = queuedComments.length
+  const submitReview = useCallback(async (numbers: number[]) => {
+    const count = numbers.length
     if (count === 0 || submittingReview) return
     setSubmittingReview(true)
     try {
-      const { comments } = await publishReviewComments(projectId, agent.id)
+      const { comments, toReviewer } = await publishReviewComments(projectId, agent.id, numbers)
       setReviewComments(comments)
-      showSentToast(count === 1 ? 'Review sent to agent' : `Review of ${count} comments sent to agent`)
+      // Say when it went to the REVIEWER, and where to find it: an @review comment
+      // may have just started a reviewer in a tab you have not opened, which is
+      // otherwise entirely invisible.
+      showSentToast(
+        toReviewer
+          ? 'Sent to your reviewer - open the Review tab to see the reply'
+          : count === 1 ? 'Review sent to agent' : `Review of ${count} comments sent to agent`,
+      )
     } catch (e) {
       console.error('Failed to submit review:', e)
     } finally {
       setSubmittingReview(false)
     }
-  }, [agent.id, projectId, submittingReview, showSentToast, queuedComments.length])
+  }, [agent.id, projectId, submittingReview, showSentToast])
 
   // Which queued comments have gone stale: the diff under them changed since they
   // were added (the anchoring hunk's content hash no longer matches, or the line
@@ -4662,9 +4675,23 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
                 {openComments.length} open
               </span>
               {unreadCount > 0 && (
-                <span className="optical-center text-2xs tabular-nums text-blue-600 dark:text-blue-400">
-                  · {unreadCount} new
-                </span>
+                <>
+                  <span className="optical-center text-2xs tabular-nums text-blue-600 dark:text-blue-400">
+                    · {unreadCount} new
+                  </span>
+                  {/* For comments you have read in passing rather than by
+                      navigating to them. Nothing clears read state on its own, so
+                      without this the only way out of "3 new" is to visit each. */}
+                  <Tooltip content="Mark every comment read" side="bottom">
+                    <button
+                      onClick={() => markRead(openComments.flatMap((c) => c.numbers))}
+                      aria-label="Mark every comment read"
+                      className="p-0.5 rounded text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                    >
+                      <MailOpen className="w-3 h-3" />
+                    </button>
+                  </Tooltip>
+                </>
               )}
               <Tooltip content="Previous open comment" side="bottom">
                 <button

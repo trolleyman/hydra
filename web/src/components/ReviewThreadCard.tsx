@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, LoaderCircle, Mail, Sparkles } from 'lucide-react'
+import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, LoaderCircle, Mail, Quote, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { Tooltip } from './Tooltip'
@@ -7,6 +7,7 @@ import { ProviderIcon } from './ReviewControls'
 import { providerLabel } from '../lib/forgeDisplay'
 import { formatStartedAgo } from '../lib/agentDisplay'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import { renderCommentSource } from '../lib/mentionHighlight'
 import { copyWithToast } from '../lib/copyToast'
 import { Avatar } from './Avatar'
 import { commentAsMarkdown } from '../lib/reviewComments'
@@ -264,6 +265,23 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                                 Copy as markdown
                               </button>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMenuOpen(null)
+                                // Prefill rather than replace: you almost always
+                                // want to say something after the quote, and
+                                // landing the caret at the end is the difference
+                                // between a quote and a quote you have to escape.
+                                const quoted = n.body.trim().split('\n').map((l) => `> ${l}`).join('\n')
+                                setText((t) => (t.trim() ? `${t.replace(/\n*$/, '')}\n\n` : '') + `${quoted}\n\n`)
+                                setReplying(true)
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer"
+                            >
+                              <Quote className="w-3.5 h-3.5 shrink-0 text-gray-400" />
+                              Quote reply
+                            </button>
                             {n.number != null && n.read !== false && actions.markUnread && (
                               <button
                                 type="button"
@@ -382,6 +400,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                   composers - review replies are markdown on both forges, so what
                   you type should read like what will be posted. */}
               <HighlightedTextarea
+                renderContent={renderCommentSource}
                 ref={replyRef}
                 value={text}
                 onChange={(e) => changeText(e.target.value)}
