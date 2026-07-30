@@ -54,13 +54,18 @@ const LOG_THEME_LIGHT = {
 // the next line. No newline is emitted here - the caller joins lines with CRLF
 // as a SEPARATOR (not a terminator), so the log never ends on a blank line.
 function formatLogLine(l: ArtifactLogLine): string {
+  // `text` is required by the schema, but this renders whatever a websocket sent
+  // us: one frame that omitted it (an `omitempty` on a blank line, a daemon of a
+  // different vintage) used to throw in here, and a throw during render takes the
+  // WHOLE app down - a log line is not worth that. Missing text is a blank line.
+  const text = l.text ?? ''
   // Real terminal colour always wins. When Gradle notices that stdout is being
   // captured it emits plain text, so restore colour only for its distinctive
   // structural lines. stderr's existing red fallback remains the last resort.
-  if (hasAnsi(l.text)) return l.text
-  const gradle = colorizeGradleLogLine(l.text)
+  if (hasAnsi(text)) return text
+  const gradle = colorizeGradleLogLine(text)
   if (gradle) return gradle
-  return (l.stream as string) === 'stderr' ? `\x1b[31m${l.text}\x1b[0m` : l.text
+  return (l.stream as string) === 'stderr' ? `\x1b[31m${text}\x1b[0m` : text
 }
 
 // LogView streams a build's stdout+stderr into an xterm.js terminal. It writes
