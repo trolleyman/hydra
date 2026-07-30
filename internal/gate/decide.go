@@ -180,6 +180,25 @@ func GitReadonlyAdvice(cmd, output string) string {
 	return fmt.Sprintf("%s Use the mcp__hydra__%s tool instead of `git %s` - it runs the operation on your own branch, host-side.", why, tool, sub)
 }
 
+// ShellCwdAdvice returns a note stating where the persistent Bash shell ended up
+// after a command, or "" when it is back at the worktree root (the assumed
+// default, so saying so every call would be noise).
+//
+// Claude's Bash tool runs ONE shell per session, and its cwd is hidden state: the
+// tool result carries stdout and nothing else, so a `cd web` in one call is
+// invisible by the next one and the model keeps re-prefixing `cd web &&` until it
+// fails with "No such file or directory". Prompting a model to track hidden state
+// across a long context does not hold; re-stating the state on every call does.
+// The value is the hook payload's own `cwd`, which Claude stamps AFTER the command
+// ran (measured on CLI 2.1.220), so it already accounts for the cases where the
+// shell discards a `cd` - a non-zero exit, or a cd out of the starting tree.
+func ShellCwdAdvice(cwd, worktree string) string {
+	if cwd == "" || worktree == "" || cwd == worktree {
+		return ""
+	}
+	return fmt.Sprintf("Shell cwd is now %s (not the worktree root). Your Bash shell is persistent, so the next command starts there too - do not prefix it with a relative `cd`.", cwd)
+}
+
 // heredocStartRe matches the start of a heredoc and captures its delimiter word
 // (tolerating <<- and a quoted delimiter). RE2 has no backreferences, so the
 // closing delimiter is matched line-by-line in stripCommitHeredocs.
