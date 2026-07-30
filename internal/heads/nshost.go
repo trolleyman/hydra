@@ -256,7 +256,11 @@ func startAgentSession(reg *session.Registry, projectRoot, id string, agentType 
 	// it back and inject the same vars into this head's sibling sandboxed shells
 	// (StartShellSession), which do not re-run the script.
 	argv := sandbox.WrapPreSpawn(sb.PreSpawnScript, sandbox.SandboxPreSpawnEnvFile(sb.TmpDir), sb.Argv)
-	sp, err := host.client.Spawn(nshost.SpawnRequest{Argv: argv, Env: sb.Env, Cwd: worktree, Rows: rows, Cols: cols, Pipes: sb.StdioPipes})
+	req := nshost.SpawnRequest{Argv: argv, Env: sb.Env, Cwd: worktree, Rows: rows, Cols: cols, Pipes: sb.StdioPipes}
+	if sb.StdioPipes {
+		req.StderrPrefix = fmt.Sprintf("[%s:%s] ", agentType, id)
+	}
+	sp, err := host.client.Spawn(req)
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("spawn agent in namespace host: %w", err))
 	}
