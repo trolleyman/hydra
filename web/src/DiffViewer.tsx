@@ -4471,9 +4471,16 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // Through a ref, not directly: this memo is deliberately identity-stable
       // (every thread card re-renders when it changes), and the jump depends on
       // the live comment list and the diff.
+      // These arrows are stored on the actions object and only ever invoked from
+      // a thread card's event handlers, so .current is read at call time, never
+      // during render - but the refs rule can't prove the object isn't called
+      // while rendering and flags the access. Depending on the live values
+      // instead is exactly the churn the note above rules out.
+      // eslint-disable-next-line react-hooks/refs
       openComment: (number) => openCommentRef.current?.(number),
       markUnread: async (number) => {
         setReviewComments(await markReviewCommentsRead(projectId, agent.id, [number], false))
+        // eslint-disable-next-line react-hooks/refs -- see the note above
         await refreshThreadsRef.current?.()
       },
       setResolved: async (number, resolved) => {
