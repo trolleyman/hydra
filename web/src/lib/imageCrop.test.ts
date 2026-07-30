@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { cropOutputSize, cropRect } from './imageCrop'
+import { cropRect } from './imageCrop'
 
 describe('cropRect', () => {
   // A point says "here", not "this region", so the crop has to supply its own
@@ -44,30 +44,5 @@ describe('cropRect', () => {
     const r = cropRect({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, 1000, 1000)
     expect(r.w).toBeCloseTo(500 * 1.7)
     expect(r.x + r.w / 2).toBeCloseTo(500)
-  })
-})
-
-describe('cropOutputSize', () => {
-  it('scales a large region down to the cap, keeping its shape', () => {
-    const o = cropOutputSize(2000, 1000)
-    expect(o.w).toBe(400)
-    expect(o.h).toBe(200)
-  })
-
-  it('caps height as well, so a tall region stays a thumbnail', () => {
-    const o = cropOutputSize(400, 2000)
-    expect(o.h).toBe(300)
-    expect(o.w).toBe(60)
-  })
-
-  // Blowing a 40px region up to 400 stores blur, not detail.
-  it('never scales up', () => {
-    expect(cropOutputSize(40, 30)).toEqual({ w: 40, h: 30 })
-  })
-
-  it('never rounds down to nothing', () => {
-    const o = cropOutputSize(1, 4000)
-    expect(o.w).toBeGreaterThanOrEqual(1)
-    expect(o.h).toBeGreaterThanOrEqual(1)
   })
 })

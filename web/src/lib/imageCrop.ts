@@ -6,17 +6,14 @@
 // comment anchors to is PINNED against pruning (artifacts.Pin), so it stays
 // retrievable - and this is only the arithmetic that frames it.
 //
-// Nothing is stored. An earlier version froze a PNG of the region at pin time,
-// which meant a write path, a blob route, PNG validation and a decompression-bomb
-// check, all to keep a derived copy of something the cache was about to delete.
-// Keeping the ORIGINAL instead is both less code and more useful: the full
-// picture is still there to open, not just a thumbnail of it.
+// Nothing is stored, and nothing is resized here. An earlier version froze a PNG
+// of the region at pin time, which meant a write path, a blob route, PNG
+// validation and a decompression-bomb check, all to keep a derived copy of
+// something the cache was about to delete. Keeping the ORIGINAL instead is both
+// less code and more useful: the full picture is still there to open, not just a
+// thumbnail of it. The card frames it with percentage background sizing, so how
+// BIG the close-up is drawn is the card's business, not this module's.
 
-/** How wide a close-up is drawn, at most - big enough to read a control in a
- *  screenshot, small enough to sit in a list row. */
-const MAX_W = 400
-/** And how tall, so a very vertical region stays a thumbnail. */
-const MAX_H = 300
 /** For a POINT pin, how much of the picture to take around it. A point says
  *  "here", not "this region", so the crop has to supply its own context - too
  *  tight and it is an unrecognisable patch of pixels. */
@@ -62,18 +59,6 @@ export function cropRect(pin: CropPin, naturalW: number, naturalH: number): { x:
   const x = clamp(cx - w / 2, 0, naturalW - w)
   const y = clamp(cy - h / 2, 0, naturalH - h)
   return { x, y, w, h }
-}
-
-/** How big to draw a source rectangle - scaled down to fit the caps, never up
- *  (blowing a 40px region up to 400 only magnifies its blur).
- *
- *  The caps are parameters because the caller has to size the WINDOW and the
- *  background together: a box sized here and then clamped again in CSS shows the
- *  top-left corner of the region rather than the region, since the background is
- *  scaled for the size this returned. One cap, applied once. */
-export function cropOutputSize(w: number, h: number, maxW = MAX_W, maxH = MAX_H): { w: number; h: number } {
-  const scale = Math.min(1, maxW / w, maxH / h)
-  return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)) }
 }
 
 function clamp(v: number, lo: number, hi: number): number {
