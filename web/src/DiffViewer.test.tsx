@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
-import { FileDiff } from './DiffViewer'
+import { FileDiff, diffMetaKey } from './DiffViewer'
 import { bodyShape } from './lib/diffBody'
-import { DiffFile, DiffHunk, DiffLine } from './api'
+import { DiffFile, DiffHunk, DiffLine, type DiffResponse } from './api'
 import { EXPANDER_ROW, UNIFIED_CODE_CLASS, SBS_CODE, type BodyShape } from './lib/diffMetrics'
 
 // bodyShape tells diffMetrics what a file body WILL render so its height can be
@@ -194,5 +194,32 @@ describe('expander context labels', () => {
     expect(row?.textContent).toContain('function theEnclosingOne() {')
     // The label carries the file's own token markup rather than flat grey text.
     expect(row?.innerHTML).toContain('token keyword')
+  })
+})
+
+// A silent (WS-triggered) refresh skips re-rendering when the FILES it fetched
+// are identical to the ones on screen - that early-out is what keeps an agent's
+// every git command from disturbing the reader's text selection. But merging the
+// base in changes no file at all (the diff is against that base) while taking
+// behind_count to 0, so dropping the whole response left the "N behind" chip and
+// its Update-from-base button sitting there until the page was reloaded.
+// diffMetaKey is what the refresh now compares to notice.
+describe('diffMetaKey', () => {
+  const resp = (over: Partial<DiffResponse> = {}): DiffResponse => ({
+    files: [file({ path: 'a.ts' })], base_ref: 'main', head_ref: 'hydra/x', behind_count: 40, ...over,
+  })
+
+  it('ignores the files', () => {
+    expect(diffMetaKey(resp())).toBe(diffMetaKey(resp({ files: [file({ path: 'b.ts', additions: 9 })] })))
+  })
+
+  it('notices the branch catching up with its base', () => {
+    expect(diffMetaKey(resp())).not.toBe(diffMetaKey(resp({ behind_count: 0 })))
+  })
+
+  it('notices the other header state', () => {
+    expect(diffMetaKey(resp())).not.toBe(diffMetaKey(resp({ uncommitted_changes: true })))
+    expect(diffMetaKey(resp())).not.toBe(diffMetaKey(resp({ merge_conflict: true })))
+    expect(diffMetaKey(resp())).not.toBe(diffMetaKey(resp({ head_ref: 'hydra/y' })))
   })
 })

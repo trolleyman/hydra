@@ -2518,17 +2518,66 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
 // purely about keeping the hover box a readable size.
 const UNCOMMITTED_TOOLTIP_FILES = 10
 
+// Wider than the card's 384px default, because the content is paths rather than
+// prose: this repo's tracked paths run 43 characters at p90 and 54 at the longest
+// (measured over git ls-files), and 420px clears ~60 at the card's text-2xs, so
+// wrapping stays the exception rather than the common case. Approximate by
+// nature - the type ladder scales with the Interface font control, so this is
+// sized at its default step, and a path that overruns still wraps sanely (on a
+// directory boundary, filename onto the next line).
+const UNCOMMITTED_TOOLTIP_WIDTH = 420
+
 // A path too long for the tooltip has to wrap somewhere. Left to itself the
 // browser breaks mid-filename ("UncommittedChangesPane" / "l.tsx"); a <wbr> after
 // each separator gives it directory boundaries to prefer instead, and the
 // break-words on the row still catches a single segment that is too long on its
-// own. Split on "/" and " -> " so a rename breaks between its two paths.
+// own. WrappablePathName handles the other separator, " -> " in a rename.
 function wrappablePath(path: string) {
-  const parts = path.split(/(\/| -> )/)
+  const parts = path.split('/')
   return parts.map((p, i) => (
     // Static list: the parts of one path never reorder, so the index is a stable key.
-    <Fragment key={i}>{p}{/\/| -> /.test(p) && i < parts.length - 1 ? <wbr /> : null}</Fragment>
+    <Fragment key={i}>{p}{i < parts.length - 1 ? <>/<wbr /></> : null}</Fragment>
   ))
+}
+
+// PathName's lowlit-directory treatment, but wrap-safe for the narrow tooltip
+// box. Two differences from PathName:
+//
+//   - the lowlight is opacity rather than a second grey (HostName's reasoning):
+//     these rows are already dimmed relative to their heading, so a fixed colour
+//     would have to be re-picked per row shade to stay *below* it, while opacity
+//     composes with whatever the row inherits;
+//   - a dirty entry may be a rename ("old -> new"), so the split runs per side.
+//     A single last-slash split would call "a/b.ts -> c/" the directory and dim
+//     the old filename along with it.
+function WrappablePathName({ path }: { path: string }) {
+  const sides = path.split(' -> ')
+  return (
+    <>
+      {sides.map((side, i) => {
+        const idx = side.lastIndexOf('/')
+        const dir = idx === -1 ? '' : side.slice(0, idx + 1)
+        const base = idx === -1 ? side : side.slice(idx + 1)
+        // Static list: the sides of one entry never reorder, so the index is a
+        // stable key.
+        return (
+          <Fragment key={i}>
+            {i > 0 && <>{' -> '}<wbr /></>}
+            {dir && <span className="opacity-60">{wrappablePath(dir)}</span>}
+            {base}
+          </Fragment>
+        )
+      })}
+    </>
+  )
+}
+
+// The icon names the file the entry ends up as - the new path of a rename, and
+// the last segment either way - matching what the diff card header does with
+// file.path.
+function uncommittedIconName(entry: string) {
+  const target = entry.split(' -> ').pop() ?? entry
+  return target.split('/').pop() ?? target
 }
 
 function UncommittedButton({ diff, onJumpToUncommitted }: {
@@ -2555,34 +2604,63 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
   }
 
   return (
-    // text-left because the hint tooltip centres its content by default - fine for
-    // a one-line label, but it makes a file list ragged on both sides.
-    <Tooltip className="shrink-0" content={
-      <div className="text-left">
-        <p className="font-semibold mb-1">Uncommitted changes</p>
+    // A card, not a hint: this is a list you are meant to READ (which files are
+    // dirty), not a label for an unlabelled control, and the hint's compact
+    // px-2 py-1 had a two-group file list pressed against its edges. The card
+    // brings the roomier padding, the heading with a divider under it, and a box
+    // the pointer can enter - so a long list is scrollable and a tap can hold it
+    // open on a touch device.
+    <Tooltip
+      className="shrink-0"
+      variant="card"
+      title="Uncommitted changes"
+      width={UNCOMMITTED_TOOLTIP_WIDTH}
+      // The chip's click jumps to the uncommitted section, so the card must not
+      // latch open on it - it would land squarely over the diff you just jumped
+      // to. The click dismisses it instead.
+      pin={false}
+      content={
+      <div>
         {groups.map((g) => (
           <div key={g.heading} className="mt-1 first:mt-0">
             <p className="text-gray-600 dark:text-gray-300">{g.heading}</p>
-            {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => (
-              // Dash and path as two flex cells rather than a "- " prefix in the
-              // text: that hangs the indent, so a wrapped path lines up under the
-              // start of the path above it instead of under its dash.
-              <div key={f} className="flex gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
-                <span aria-hidden className="shrink-0">-</span>
-                <span className="min-w-0 break-words">{wrappablePath(f)}</span>
-              </div>
-            ))}
+            {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => {
+              // The per-filetype icon from the diff's file list stands in for the
+              // "- " bullet these rows used to carry: it marks the row just as
+              // well and additionally says what kind of file it is.
+              const { Icon, className } = getFileIcon(uncommittedIconName(f))
+              return (
+                // Icon and path as two flex cells rather than a prefix in the
+                // text: that hangs the indent, so a wrapped path lines up under
+                // the start of the path above it instead of under its icon.
+                // items-start keeps the icon on the FIRST line of a path that
+                // wraps; the span around it supplies the line box that
+                // vertical-align needs (a flex item has none of its own), and
+                // sizing the mark in em / offsetting it in cap centres it on the
+                // text's cap box at whatever size the tooltip renders at.
+                <div key={f} className="flex items-start gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
+                  <span className="shrink-0">
+                    <Icon className={`inline-block h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)] ${className}`} />
+                  </span>
+                  <span className="min-w-0 break-words"><WrappablePathName path={f} /></span>
+                </div>
+              )
+            })}
             {g.count > Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES) && (
-              <div className="flex gap-1.5 pl-1 text-gray-400 dark:text-gray-500">
-                <span aria-hidden className="shrink-0">-</span>
+              // Empty first cell rather than a dash, so the count lines up with
+              // the filenames above it and nothing looks like a file that lost
+              // its icon.
+              <div className="flex items-start gap-1.5 pl-1 text-gray-400 dark:text-gray-500">
+                <span aria-hidden className="shrink-0 w-[1em]" />
                 <span>+{g.count - Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES)} more</span>
               </div>
             )}
           </div>
         ))}
-        <p className="text-gray-400 dark:text-gray-500 mt-1 text-3xs">Click to view uncommitted changes</p>
+        <p className="text-gray-400 dark:text-gray-500 mt-1.5 text-3xs">Click to view uncommitted changes</p>
       </div>
-    }>
+      }
+    >
       <button
         onClick={onJumpToUncommitted}
         className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors cursor-pointer"
@@ -2992,6 +3070,20 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.agent.review?.url === next.agent.review?.url &&
   prev.agent.review?.provider === next.agent.review?.provider &&
   prev.agent.agent_status?.status === next.agent.agent_status?.status)
+
+// diffMetaKey is everything a diff response says APART from its files: the refs,
+// the behind count, the conflict and uncommitted-change summaries - what the
+// header chips are drawn from. Those can change while the files do not (merging
+// the base in leaves the diff against that base identical and takes behind_count
+// to 0), so a silent refresh that finds no file change still has to look at
+// this. Stringify is fine here in a way it is not for the files (see
+// lib/diffSig): what is left is a handful of scalars and two commit records.
+// eslint-disable-next-line react-refresh/only-export-components
+export function diffMetaKey(d: DiffResponse): string {
+  const meta: Record<string, unknown> = { ...d }
+  delete meta.files
+  return JSON.stringify(meta)
+}
 
 // inspector: renders in the new two-pane layout's right pane. Same stacked
 // layout as the classic single-column page (Changes bar with the base -> head
@@ -3406,7 +3498,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // keyed against, and that state survives the refresh).
   const applySilentDiff = useCallback((d: DiffResponse, contexts: Map<string, number>, promoted: Set<string>) => {
     const { files, changed } = reconcileFiles(d.files)
-    if (!changed) return
+    if (!changed) {
+      // Identical FILES, but the rest of the response can still have moved - and
+      // merging the base in is exactly that case: the diff against the base is
+      // unchanged by definition, while behind_count drops to 0. Returning here
+      // kept the whole stale response, so after an update-from-base the "N
+      // behind" chip and its button sat there until the page was reloaded.
+      // The previous files array is kept as-is, so nothing below the header
+      // re-renders (which is what this early-out is for - see issue #34).
+      setDiff((prev) => (prev && diffMetaKey(prev) !== diffMetaKey(d) ? { ...d, files: prev.files } : prev))
+      return
+    }
     setDiff({ ...d, files })
     applyHiddenFiles(files)
     for (const path of promoted) {

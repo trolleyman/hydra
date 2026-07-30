@@ -769,9 +769,17 @@ body {
    slowly while a pulse of brightness + length travels around its spokes (each
    spoke carries a negative animation-delay, so the wave is already mid-flight
    on the first frame). */
-/* Anticlockwise. The pulse still travels the spokes in index order, so the two
-   motions run against each other - which is what stops the whole mark from
-   reading as one rigid thing being turned. */
+/* The mark turns ANTICLOCKWISE while the pulse travels its spokes CLOCKWISE
+   (the animation-delay in WorkSpark.tsx sets that), so the two motions run
+   against each other - which is what stops the whole thing from reading as one
+   rigid object being turned.
+
+   An earlier version of this note claimed the same counter-motion while the
+   delays in fact sent the pulse anticlockwise too, so both went the same way;
+   a negative delay ADVANCES a spoke, so the LAST spoke to be delayed is the
+   FIRST to peak, and the wave ran backwards from what the index order looks
+   like it should give. Work the peak times out before changing either
+   direction - the two are a pair. */
 @keyframes work-spark-spin {
   to { transform: rotate(-360deg); }
 }

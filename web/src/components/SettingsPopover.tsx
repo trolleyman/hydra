@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { createPortal } from 'react-dom'
 import { Settings2, ChevronDown, Check, RotateCcw } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { placeMenu, type MenuAlign } from '../lib/anchorMenu'
 
 // A small per-section settings popover: a cog button that opens an anchored
 // dropdown of that section's view options, closing on outside-click / Escape.
@@ -10,14 +11,14 @@ import { Tooltip } from './Tooltip'
 // DiffViewer / TestsPanel / ArtifactsPanel.
 //
 // The dropdown renders in a PORTAL with fixed positioning (anchored under the
-// button's right edge). The section headers are sticky with their own stacking
-// contexts and later-in-DOM sibling headers / file-card headers were painting
-// over an in-flow dropdown; a portalled, fixed, high-z panel escapes all of
-// that. Position is recomputed on scroll/resize while open.
+// button). The section headers are sticky with their own stacking contexts and
+// later-in-DOM sibling headers / file-card headers were painting over an
+// in-flow dropdown; a portalled, fixed, high-z panel escapes all of that.
+// Position is recomputed on scroll/resize while open.
 export function SettingsPopover({
   label = 'Settings',
   width = 208,
-  align = 'right',
+  align = 'auto',
   fitContent = false,
   icon,
   chevron = false,
@@ -51,12 +52,12 @@ export function SettingsPopover({
   onOpen?: () => void
   // Panel width in px. With fitContent it acts as the max width instead.
   width?: number
-  // Which of the panel's edges meets the button. 'right' (default) anchors the
-  // panel's right edge to the button and opens leftward - right for a cog near
-  // the right of a wide section header. 'left' anchors the panel's left edge to
-  // the button and opens rightward - right for a cog near the right of a narrow
-  // container (the compact spawn box), where opening left would cramp it.
-  align?: 'left' | 'right'
+  // Which of the panel's edges meets the button - see placeMenu. 'auto'
+  // (default) opens rightward when the panel fits there and falls back to
+  // leftward when it doesn't, which covers both a cog at the right end of a
+  // wide section header and a trigger sitting mid-row. Pin it only to override
+  // that judgement.
+  align?: MenuAlign
   // When true the panel sizes to its content (capped at `width`) instead of
   // always filling `width`, so it doesn't leave dead space to the right of
   // narrower controls. Not for panels with full-width children like a slider.
@@ -72,18 +73,17 @@ export function SettingsPopover({
     const el = anchorRef.current
     if (!el) return
     const r = el.getBoundingClientRect()
-    // Fit the panel to the room on its opening side (from the button's anchored
-    // edge to the far viewport margin), shrinking below the requested width only
-    // when there isn't space. A small floor keeps the option rows readable.
-    let w: number
-    let left: number
-    if (align === 'left') {
-      w = Math.min(width, Math.max(168, window.innerWidth - r.left - 8))
-      left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8)
-    } else {
-      w = Math.min(width, Math.max(168, r.right - 8))
-      left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8)
-    }
+    // Fit the panel to the room on its opening side, shrinking below the
+    // requested width only when there isn't space. A small floor keeps the
+    // option rows readable.
+    const { left, width: w } = placeMenu({
+      triggerLeft: r.left,
+      triggerRight: r.right,
+      width,
+      viewportWidth: window.innerWidth,
+      align,
+      minWidth: 168,
+    })
     // Open below by default, but flip above when there isn't room below and
     // there is above - the compact spawn box anchors this cog near the bottom of
     // the sidebar. popRef is null on the first open (the panel isn't mounted
@@ -259,7 +259,7 @@ export function SettingsSelect({
     if (!el) return
     const r = el.getBoundingClientRect()
     const pad = 8
-    const left = Math.min(Math.max(pad, r.left), Math.max(pad, window.innerWidth - width - pad))
+    const { left } = placeMenu({ triggerLeft: r.left, triggerRight: r.right, width, viewportWidth: window.innerWidth, pad })
     // Flip above when there isn't room below but there is above - this control
     // sits low in the spawn composer, itself pinned to the bottom of the sidebar.
     const est = menuRef.current?.offsetHeight ?? 160

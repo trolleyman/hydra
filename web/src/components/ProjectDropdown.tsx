@@ -5,6 +5,7 @@ import type { ProjectInfo, ResolvedPathResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
 import { useFinePointer } from '../lib/useFinePointer'
+import { placeMenu } from '../lib/anchorMenu'
 import { ProjectIcon } from '../lib/projectIcon'
 import { api } from '../stores/apiClient'
 import { useDialogStore } from '../stores/dialogStore'
@@ -296,20 +297,21 @@ export const ProjectDropdown = memo(function ProjectDropdown({
   const MENU_WIDTH = 288 // w-72
   const GAP = 4 // mt-1
 
-  // Position the portalled menu from the trigger's rect: below and left-aligned,
-  // clamped to the viewport so it never runs off the right edge, and flipped
-  // above when there isn't room below.
+  // Position the portalled menu from the trigger's rect: below and opening
+  // rightward (flipping to open leftward if it would run off the right edge -
+  // see placeMenu), and flipped above when there isn't room below.
   useLayoutEffect(() => {
     if (!isOpen) return
     const updateCoords = () => {
       const el = triggerRef.current
       if (!el) return
       const rect = el.getBoundingClientRect()
-      const padding = 8
-      let left = rect.left
-      if (left + MENU_WIDTH > window.innerWidth - padding) {
-        left = Math.max(padding, window.innerWidth - MENU_WIDTH - padding)
-      }
+      const { left } = placeMenu({
+        triggerLeft: rect.left,
+        triggerRight: rect.right,
+        width: MENU_WIDTH,
+        viewportWidth: window.innerWidth,
+      })
       const maxHeight = window.innerHeight * 0.7 // max-h-[70vh]
       const spaceBelow = window.innerHeight - rect.bottom
       if (spaceBelow < maxHeight && rect.top > spaceBelow) {

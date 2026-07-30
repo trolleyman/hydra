@@ -2268,6 +2268,14 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 		}), nil
 	}
 
+	// Commits that arrive this way are nobody's tool call, and the chat
+	// reconciler only looks at git when the agent finishes one - so without
+	// this the merge showed up in the chat whenever the head next did something,
+	// or never on a finished head.
+	if head.ChatMode && s.ChatEvents != nil {
+		s.ChatEvents.ReconcileCommits(head.ID, mergeRef)
+	}
+
 	// The merge advanced the branch tip, so the cached test verdict is now
 	// stale. Broadcast so the sidebar/agent detail refetch and reflect the new
 	// status immediately, the same way MergeAgent does above.
