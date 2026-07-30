@@ -154,17 +154,79 @@ func TestRenderForAgentCarriesAnchorsAndContext(t *testing.T) {
 		{Number: 3, Path: "a.go", Line: 12, Author: AuthorUser, Body: "this leaks", Context: "```diff\n+ leak()\n```", Diff: "main -> abc1234"},
 		{Number: 4, Author: AuthorReviewer, Body: "agreed", ReplyTo: 3},
 	}
-	out := RenderForAgent(comments, true)
+	out := RenderForAgent(comments, true, nil)
 	for _, want := range []string{"#3 a.go:12", "main -> abc1234", "+ leak()", "this leaks", "#4", "reply to #3", "agreed"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendering missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(RenderForAgent(comments, false), "+ leak()") {
+	if strings.Contains(RenderForAgent(comments, false, nil), "+ leak()") {
 		t.Error("withContext=false still emitted the diff block")
 	}
-	if got := RenderForAgent(nil, true); !strings.Contains(got, "No review comments") {
+	if got := RenderForAgent(nil, true, nil); !strings.Contains(got, "No review comments") {
 		t.Errorf("empty rendering is unhelpful: %q", got)
+	}
+}
+
+// A pin on a picture has to reach an agent as PIXELS. The store keeps fractions
+// so the anchor survives being laid out at another size, but "34%,71%" is not
+// something a model can act on, and the conversion is the whole point of keeping
+// the natural size alongside.
+func TestImageAnchorRendersPixelsAndFindsThePicture(t *testing.T) {
+	a := ImageAnchor{
+		Script: "screenshots", Key: "commit/abc1234def0567", Side: "right", File: "home-dark.png",
+		X: 0.34, Y: 0.71, NaturalW: 1512, NaturalH: 982,
+	}
+	if x, y, _, _, ok := a.Pixels(); !ok || x != 514 || y != 697 {
+		t.Errorf("Pixels() = %d,%d (ok=%v), want 514,697", x, y, ok)
+	}
+	if got := a.Where(); got != "home-dark.png @ 34%,71%" {
+		t.Errorf("Where() = %q", got)
+	}
+	if got := a.Position(); !strings.Contains(got, "514,697 px") || !strings.Contains(got, "1512x982") {
+		t.Errorf("Position() = %q, want the pixels and the image size", got)
+	}
+	c := Comment{Number: 9, Author: AuthorUser, Body: "this is 3px low", Image: &a}
+	out := RenderForAgent([]Comment{c}, true, func(ImageAnchor) string { return "/tmp/out/home-dark.png" })
+	for _, want := range []string{"#9 home-dark.png @ 34%,71%", "/tmp/out/home-dark.png", "right side of the screenshots artifact", "abc1234def05", "point: 514,697 px"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendering missing %q:\n%s", want, out)
+		}
+	}
+	// A drag makes it a box, and the box's SIZE is what the remark is about.
+	a.W, a.H = 0.1, 0.05
+	if got := a.Position(); !strings.Contains(got, "151x49 px") {
+		t.Errorf("box Position() = %q, want the box size in pixels", got)
+	}
+	if out := RenderForAgent([]Comment{{Number: 1, Image: &a}}, true, nil); !strings.Contains(out, "box: ") {
+		t.Errorf("a box should not be rendered as a point:\n%s", out)
+	}
+	// No natural size: percentages, never invented pixels.
+	bare := ImageAnchor{File: "x.png", X: 0.5, Y: 0.5}
+	if got := bare.Position(); strings.Contains(got, "px") {
+		t.Errorf("Position() invented pixels with no natural size: %q", got)
+	}
+}
+
+// The version a picture was rendered from decides what may be done with it, and a
+// working-tree render must never be reported as a commit: an agent told a sha
+// will confidently reason about code that was never what it was looking at.
+func TestImageAnchorNeverCallsAWorktreeRenderACommit(t *testing.T) {
+	commit := ImageAnchor{Key: "commit/abc1234def0567890"}
+	if got := commit.Version(); got != "abc1234def05" {
+		t.Errorf("Version() = %q, want the shortened sha", got)
+	}
+	if !commit.IsCommitted() {
+		t.Error("a commit key should report as committed")
+	}
+	wt := ImageAnchor{Key: "worktree/9f3a1b2c"}
+	// It must say what it is and carry the state hash, so two working-tree renders
+	// can be told apart - but the hash must never read as something git can resolve.
+	if got := wt.Version(); !strings.Contains(got, "uncommitted working tree") || !strings.Contains(got, "9f3a1b2c") {
+		t.Errorf("Version() = %q, want it named as uncommitted, with its state hash", got)
+	}
+	if wt.IsCommitted() {
+		t.Error("a worktree render must not report as committed - git cannot be used on it")
 	}
 }
 

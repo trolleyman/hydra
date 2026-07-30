@@ -240,7 +240,33 @@ func (s *Server) hydraCommentsText(projectRoot, id string, r reviewq.Request) re
 	// Full context only for a narrowed read. "Show me everything" should stay
 	// cheap enough to call habitually; a diff block per comment would make an
 	// unfiltered read on a long review the most expensive tool in the session.
-	return reviewq.Result{OK: true, Message: reviewstore.RenderForAgent(all, len(r.Numbers) > 0)}
+	return reviewq.Result{OK: true, Message: reviewstore.RenderForAgent(all, len(r.Numbers) > 0, s.artifactImagePath(projectRoot))}
+}
+
+// artifactImagePath resolves a comment's image anchor back to the picture it was
+// pinned on, so an agent reading the comment can simply open the file and look at
+// what was meant instead of reasoning from coordinates alone. The sandbox mounts
+// the filesystem read-only, so the path it hands out is one the agent can read.
+//
+// Validation is Manager.BlobPath's, deliberately: it already checks the key's
+// shape and keeps the resolved path inside the entry dir, and an anchor arrives
+// from a browser like any other client input. A file that no longer exists (the
+// artifact cache was cleared, or it has been regenerated under a new key) returns
+// "", which renders the anchor without a path rather than a path that 404s.
+func (s *Server) artifactImagePath(projectRoot string) reviewstore.ImagePathFunc {
+	return func(a reviewstore.ImageAnchor) string {
+		if s.Artifacts == nil || a.Script == "" || a.Key == "" || a.File == "" {
+			return ""
+		}
+		path, _, err := s.Artifacts.Manager(projectRoot).BlobPath(a.Script, a.Key, a.File)
+		if err != nil {
+			return ""
+		}
+		if _, err := os.Stat(path); err != nil {
+			return ""
+		}
+		return path
+	}
 }
 
 // addHydraComment appends an agent-authored review comment and tells the user's

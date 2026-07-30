@@ -36,6 +36,7 @@ package reviewstore
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -87,6 +88,11 @@ type Comment struct {
 	Context  string `json:"context,omitempty"`
 	HunkHash string `json:"hunk_hash,omitempty"`
 
+	// Image pins the comment to a point on a PICTURE instead of a line of a diff.
+	// Set for a comment left on an artifact in the lightbox; nil for every comment
+	// on code, which is why it is a pointer rather than a zero value to test.
+	Image *ImageAnchor `json:"image,omitempty"`
+
 	CreatedAt   string `json:"created_at"`
 	PublishedAt string `json:"published_at,omitempty"`
 
@@ -98,12 +104,144 @@ type Comment struct {
 	ResolvedAt string `json:"resolved_at,omitempty"`
 }
 
+// ImageAnchor pins a comment to a point - or a box - on a generated artifact,
+// the way Path/Line pin one to a diff. "The button is 3px off" is a remark about
+// a place in a picture, and a comment that can only say which FILE it is about
+// makes the reader hunt for what was meant.
+//
+// Three things about the shape are load-bearing:
+//
+//   - The position is stored NORMALIZED (0..1 of the image's width and height),
+//     because the same picture is laid out at different sizes and pixel densities
+//     depending on the pane it is in, and a fraction is the only form that
+//     survives that. NaturalW/NaturalH are kept alongside so real pixels can be
+//     recovered exactly - which is the form an agent should be told, because a
+//     model reasons about "514,697" far better than about "34%,71%".
+//   - Key is the artifact cache key of the SIDE the pin is on, verbatim from
+//     internal/artifacts: "commit/<sha>" or "worktree/<content-hash>". It answers
+//     "which commit was this?" - the question that decides whether an observation
+//     still stands - and it answers it honestly, because the diff viewer routinely
+//     renders one side from the UNCOMMITTED working tree, where reporting a sha
+//     would send a reader to code that is not what they are looking at. It doubles
+//     as the entry's path on disk, so the same field also locates the file.
+//   - Hash is the file's content hash when the pin was placed, so a regenerated
+//     artifact can be detected as having moved under the comment - the picture's
+//     HunkHash.
+type ImageAnchor struct {
+	// Script is the [artifacts.<name>] table the picture came from, File the
+	// output's name within it ("home-dark.png"), and Side which half of the
+	// comparison was pinned ("left" or "right").
+	Script string `json:"script,omitempty"`
+	Key    string `json:"key,omitempty"`
+	Side   string `json:"side,omitempty"`
+	File   string `json:"file"`
+
+	// X and Y are the pin, as fractions of the image's width and height. W and H
+	// make it a box instead of a point when both are above zero - a click places a
+	// point, a drag places a box, and most remarks are one or the other.
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w,omitempty"`
+	H float64 `json:"h,omitempty"`
+
+	// NaturalW and NaturalH are the picture's own pixel dimensions, so the
+	// fractions above can be turned back into the pixels a person (or a model)
+	// would measure. Zero when they could not be determined, in which case the
+	// pixel forms are simply left out rather than guessed.
+	NaturalW int `json:"natural_w,omitempty"`
+	NaturalH int `json:"natural_h,omitempty"`
+
+	Hash string `json:"hash,omitempty"`
+}
+
+// Artifact cache-key kinds, mirroring internal/artifacts.versionKey. Duplicated
+// rather than imported: this package is a leaf that the artifact manager itself
+// has no business depending on, and the two constants are part of the on-disk
+// format either way.
+const (
+	keyKindCommit   = "commit"
+	keyKindWorktree = "worktree"
+)
+
+// IsBox reports whether the anchor covers a region rather than naming a point.
+func (a ImageAnchor) IsBox() bool { return a.W > 0 && a.H > 0 }
+
+// Pixels converts the normalized anchor back to the picture's own pixels, and
+// reports false when the natural size is unknown - in which case there is no
+// honest pixel answer and callers should show the percentages instead.
+func (a ImageAnchor) Pixels() (x, y, w, h int, ok bool) {
+	if a.NaturalW <= 0 || a.NaturalH <= 0 {
+		return 0, 0, 0, 0, false
+	}
+	return int(math.Round(a.X * float64(a.NaturalW))), int(math.Round(a.Y * float64(a.NaturalH))),
+		int(math.Round(a.W * float64(a.NaturalW))), int(math.Round(a.H * float64(a.NaturalH))), true
+}
+
+// Where is the anchor's short form, as it appears in a notification: the file and
+// the spot, and nothing else. Kept short on purpose - NotifyLine's whole reason
+// for existing is that six comments cost one line.
+func (a ImageAnchor) Where() string {
+	return fmt.Sprintf("%s @ %.0f%%,%.0f%%", a.File, a.X*100, a.Y*100)
+}
+
+// Position is the precise form, for a reader who has already decided to look:
+// pixels when the natural size is known, with the box's size when it is a box.
+func (a ImageAnchor) Position() string {
+	x, y, w, h, ok := a.Pixels()
+	if !ok {
+		if a.IsBox() {
+			return fmt.Sprintf("%.1f%%,%.1f%%, %.1f%% x %.1f%%", a.X*100, a.Y*100, a.W*100, a.H*100)
+		}
+		return fmt.Sprintf("%.1f%%,%.1f%%", a.X*100, a.Y*100)
+	}
+	if a.IsBox() {
+		return fmt.Sprintf("%d,%d px, %dx%d px, in a %dx%d image", x, y, w, h, a.NaturalW, a.NaturalH)
+	}
+	return fmt.Sprintf("%d,%d px, in a %dx%d image", x, y, a.NaturalW, a.NaturalH)
+}
+
+// Version says which state of the tree the picture was rendered from, in the
+// words that tell a reader what they may do with it.
+//
+// A commit is named, because it can be checked out and diffed against. A working
+// tree is NOT given a sha - it never had one - and saying so plainly is the point:
+// an agent told "abc1234" for a picture rendered from uncommitted changes will
+// reason confidently about code that was never what it saw. The state hash is
+// included so two working-tree renders can at least be told apart.
+func (a ImageAnchor) Version() string {
+	kind, id, found := strings.Cut(a.Key, "/")
+	if !found {
+		return a.Key
+	}
+	if len(id) > 12 {
+		id = id[:12]
+	}
+	switch kind {
+	case keyKindCommit:
+		return id
+	case keyKindWorktree:
+		return fmt.Sprintf("the uncommitted working tree (state %s)", id)
+	}
+	return a.Key
+}
+
+// IsCommitted reports whether the picture came from a commit, and so whether
+// git can be used to reason about what has changed since.
+func (a ImageAnchor) IsCommitted() bool {
+	kind, _, _ := strings.Cut(a.Key, "/")
+	return kind == keyKindCommit
+}
+
 // IsDraft reports whether a comment is still invisible to agents.
 func (c Comment) IsDraft() bool { return c.Status != StatusPublished }
 
 // Anchor renders a comment's location the way it is quoted to an agent:
-// "web/src/DiffViewer.tsx:1204", or "" for a comment anchored to nothing.
+// "web/src/DiffViewer.tsx:1204", "home-dark.png @ 34%,71%" for a pin on a
+// picture, or "" for a comment anchored to nothing.
 func (c Comment) Anchor() string {
+	if c.Image != nil {
+		return c.Image.Where()
+	}
 	if c.Path == "" {
 		return ""
 	}
@@ -312,11 +450,22 @@ func saveComments(projectRoot, id string, all []Comment) error {
 	return errtrace.Wrap(writeJSON(paths.GetReviewCommentsJson(projectRoot, id), data))
 }
 
+// ImagePathFunc resolves an image anchor to the picture's absolute path on this
+// machine, or "" when it cannot be located (the artifact cache was cleared, say).
+//
+// It is a parameter rather than something this package works out for itself so
+// that reviewstore stays a leaf: the layout it would need to know belongs to
+// internal/artifacts, and the caller that renders for an agent already has both.
+type ImagePathFunc func(ImageAnchor) string
+
 // RenderForAgent formats comments the way an agent reads them from a tool: the
 // handle, where it points, who wrote it, the body, and the frozen diff context.
 // Deliberately the same shape whether one comment or twenty came back, so a model
 // never has to parse two layouts.
-func RenderForAgent(comments []Comment, withContext bool) string {
+//
+// imagePath may be nil, in which case a pin on a picture still renders its
+// position - just without telling the agent where to go and look at it.
+func RenderForAgent(comments []Comment, withContext bool, imagePath ImagePathFunc) string {
 	if len(comments) == 0 {
 		return "No review comments on this head yet."
 	}
@@ -340,6 +489,12 @@ func RenderForAgent(comments []Comment, withContext bool) string {
 			fmt.Fprintf(&b, ", on %s", c.Diff)
 		}
 		b.WriteString("\n")
+		// A pin's detail is always included, unlike a diff block: two short lines,
+		// and without them the comment says only which picture it was about, which
+		// is the thing the anchor exists to improve on.
+		if c.Image != nil {
+			writeImageAnchor(&b, *c.Image, imagePath)
+		}
 		if withContext && c.Context != "" {
 			b.WriteString(c.Context)
 			if !strings.HasSuffix(c.Context, "\n") {
@@ -350,6 +505,37 @@ func RenderForAgent(comments []Comment, withContext bool) string {
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// writeImageAnchor renders the two detail lines under an image comment: where the
+// picture is, and where in it the pin was placed.
+func writeImageAnchor(b *strings.Builder, a ImageAnchor, imagePath ImagePathFunc) {
+	where := a.File
+	if imagePath != nil {
+		if p := imagePath(a); p != "" {
+			where = p
+		}
+	}
+	b.WriteString("image: ")
+	b.WriteString(where)
+	var about []string
+	if a.Side != "" && a.Script != "" {
+		about = append(about, fmt.Sprintf("%s side of the %s artifact", a.Side, a.Script))
+	} else if a.Script != "" {
+		about = append(about, "from the "+a.Script+" artifact")
+	}
+	if v := a.Version(); v != "" {
+		about = append(about, "rendered from "+v)
+	}
+	if len(about) > 0 {
+		fmt.Fprintf(b, " (%s)", strings.Join(about, ", "))
+	}
+	b.WriteString("\n")
+	noun := "point"
+	if a.IsBox() {
+		noun = "box"
+	}
+	fmt.Fprintf(b, "%s: %s\n", noun, a.Position())
 }
 
 // NotifyLine is the one short line an agent is told when comments are published:
