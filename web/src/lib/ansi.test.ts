@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { stripAnsi, hasAnsi, ansiToHtml } from './ansi'
+import { stripAnsi, hasAnsi, ansiToHtml, ansiToText } from './ansi'
 
 const ESC = '\x1b'
 
@@ -52,5 +52,11 @@ describe('ansiToHtml', () => {
 
   it('leaves plain text untouched', () => {
     expect(ansiToHtml('just text')).toBe('just text')
+  })
+})
+
+describe('ansiToText', () => {
+  it('removes styling and resolves carriage-return rewrites', () => {
+    expect(ansiToText(`${ESC}[33m10%${ESC}[0m\r100% done`)).toBe('100% done')
   })
 })

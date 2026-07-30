@@ -54,15 +54,26 @@ export function fileKind(name: string): FileKind {
 // LANG_BY_EXT maps a file extension to a Prism language, so a file's contents can
 // be syntax highlighted by the name it was read under. Shared by the chat's Read
 // tool cards and the lightbox's text viewer.
+//
+// The SECOND such map: lib/language's is the fuller one, and feeds the diff
+// viewer and the repository browser, which highlight through the worker and can
+// therefore use a lazily-loaded grammar. This one is for the callers that
+// highlight on the spot, so a name here has to be an EAGER grammar (prism.ts) to
+// show up at all - which is why the two are not simply merged.
 const LANG_BY_EXT: Record<string, string> = {
   ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
   mjs: 'javascript', cjs: 'javascript', json: 'json', go: 'go', py: 'python',
   rb: 'ruby', rs: 'rust', java: 'java', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp',
-  hpp: 'cpp', cs: 'csharp', php: 'php', swift: 'swift', kt: 'kotlin',
+  hpp: 'cpp', cs: 'csharp', php: 'php', swift: 'swift', kt: 'kotlin', kts: 'kotlin',
   sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash', yml: 'yaml', yaml: 'yaml',
   toml: 'ini', ini: 'ini', md: 'markdown', markdown: 'markdown', html: 'xml',
   xml: 'xml', svg: 'xml', css: 'css', scss: 'scss', sql: 'sql', lua: 'lua',
   dockerfile: 'dockerfile', diff: 'diff', patch: 'diff',
+  // A log is the commonest thing an agent's shell reads out, and Prism has a
+  // grammar for one: it marks the timestamp, the level and the paths in the
+  // message, which is most of what makes a wall of log readable. Eager in
+  // prism.ts, because this map feeds the CHAT, which highlights synchronously.
+  log: 'log',
 }
 
 export function langFromPath(path: string): string {

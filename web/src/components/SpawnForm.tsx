@@ -154,8 +154,8 @@ const AgentModelPicker = memo(function AgentModelPicker({
   return (
     // `flex` so the Tooltip's inline-flex wrapper is a flex item here and can't
     // add baseline/descender space under the trigger.
-    <div ref={ref} className="relative flex shrink-0">
-      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}`} className="shrink-0">
+    <div ref={ref} className="relative flex min-w-0 flex-1">
+      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}`} className="min-w-0 flex-1">
         <button
           ref={btnRef}
           type="button"
@@ -163,7 +163,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           // Measure the trigger before opening so the fixed-position menu lands in
           // the right spot on its first paint; scroll/resize keep it pinned after.
           onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-          className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : 'w-7 justify-center'} ${trigger} ${
+          className={`flex min-w-0 max-w-full items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'min-w-[100px] pr-1.5' : 'w-7 justify-center'} ${trigger} ${
             open
               ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
               : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -172,7 +172,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
             <AgentTypeIcon name={active.id} className={iconCls} />
           </span>
-          {label && <span className="text-3xs font-medium text-gray-600 dark:text-gray-300 max-w-[4rem] truncate">{label}</span>}
+          {label && <span className="min-w-0 truncate text-3xs font-medium text-gray-600 dark:text-gray-300">{label}</span>}
         </button>
       </Tooltip>
       {open && coords && (
@@ -216,11 +216,13 @@ const GIT_ISOLATION_OPTS: { id: string; label: string; desc: string }[] = [
 export const SpawnForm = memo(function SpawnForm({
   projectId,
   onSpawned,
+  onAgentTypeChange,
   compact = false,
   disabled = false,
 }: {
   projectId: string | null
   onSpawned?: (agent: AgentResponse) => void
+  onAgentTypeChange?: (agentType: AgentTypeOption) => void
   compact?: boolean
   disabled?: boolean
 }) {
@@ -379,7 +381,8 @@ export const SpawnForm = memo(function SpawnForm({
   const handleAgentModelChange = useCallback((a: AgentTypeOption, m: string) => {
     setAgentType(a)
     setModel(m)
-  }, [])
+    onAgentTypeChange?.(a)
+  }, [onAgentTypeChange])
   const handleBranchOpen = useCallback(() => {
     void refreshBranches(false)
   }, [refreshBranches])

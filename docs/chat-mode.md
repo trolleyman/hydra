@@ -241,9 +241,11 @@ a delta-only assistant item without `item/completed`, the backend first settles
 the accumulated text as a partial `assistant_message`, so replay retains both
 what the user saw before Ctrl+C and the explicit interruption boundary.
 
-An ordinary follow-up sent during a turn is queued, not mapped to `turn/steer`:
-steering changes the active turn and is a distinct action, not the default
-meaning of typing while busy.
+An ordinary follow-up sent during a turn first enters Hydra's durable queue.
+At the next completed Codex item, the queue drains through `turn/steer`, so the
+message joins the active turn at a provider-defined step boundary. If the turn
+ends before that drain runs, the controller falls back to `turn/start` and the
+message becomes the next turn instead.
 
 ## Attach and history paging
 

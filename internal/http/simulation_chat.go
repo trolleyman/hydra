@@ -552,6 +552,14 @@ var simChatEvents = []simNorm{
 	// search's matches and still gets the gutter and the file's language.
 	simTool("toolu_sim_gitprobe", "Bash", simRaw(`{"command":"git status --short\necho \"== merge commit contents ==\"\ngit show --stat HEAD | tail -12\necho \"== remaining callers ==\"\ngrep -rn \"sleepBackoff\" internal | grep -v _test.go | head -5","description":"Check the worktree, the merge commit and who still calls the helper"}`)),
 	simToolOut("toolu_sim_gitprobe", " M internal/artifacts/upload.go\nA  internal/artifacts/backoff.go\n?? scratch/probe.ts\n== merge commit contents ==\ncommit 5d671ab0a7401035 (HEAD -> hydra/retry-uploads)\nMerge: 5d671ab0 a7401035\nAuthor: Callum Tolley <cgtrolley@gmail.com>\nDate:   Wed Jul 29 12:00:47 2026 +0100\n\n    Merge branch 'main'\n\n docs/artifacts.md              |  7 +-\n internal/artifacts/backoff.go  | 15 +++++++\n internal/artifacts/upload.go   | 32 ++++++++------\n 3 files changed, 45 insertions(+), 9 deletions(-)\n== remaining callers ==\ninternal/artifacts/upload.go:119:\t\tsleepBackoff(attempt)\ninternal/artifacts/backoff.go:9:func sleepBackoff(attempt int) {"),
+	// Two git reports back to back with no separator, the second of which printed
+	// NOTHING - `git stash list` with no stashes. Neither is bounded by anything
+	// the script says, so the boundary between them is not knowable; it also does
+	// not matter, since lib/gitOutput reads the shape off the line. They are one
+	// producer, and the diffstat keeps git's colours rather than the card falling
+	// back to a wall of terminal text over a boundary nobody needed.
+	simTool("toolu_sim_gitpair", "Bash", simRaw(`{"command":"git diff --stat\ngit stash list","description":"Review the full working diff"}`)),
+	simToolOut("toolu_sim_gitpair", " internal/artifacts/backoff.go  |  15 +++++++\n internal/artifacts/upload.go   |  32 ++++++++------\n internal/http/simulation.go    |   6 ++\n docs/artifacts.md              |   7 +-\n 4 files changed, 52 insertions(+), 12 deletions(-)"),
 	// Two searches of the same file back to back, with no separator between them
 	// - the second asking a narrower question than the first. Where one's matches
 	// stop and the other's start is not knowable, but it does not need to be:
@@ -608,6 +616,35 @@ var simChatEvents = []simNorm{
 	// count per file, then the files that matched (web/src/lib/searchSummary.ts).
 	simTool("toolu_sim_summary", "Bash", simRaw(`{"command":"grep -rc \"sleepBackoff\" internal/artifacts\necho \"=== which files mention it at all ===\"\nrg -l \"sleepBackoff\" internal | sort","description":"Count the callers, then list the files"}`)),
 	simToolOut("toolu_sim_summary", "internal/artifacts/backoff.go:1\ninternal/artifacts/upload.go:3\ninternal/artifacts/store.go:0\n=== which files mention it at all ===\ninternal/artifacts/backoff.go\ninternal/artifacts/upload.go\ninternal/http/simulation.go"),
+	// A run of steps hung off one `cd`, wrapped in a `{ ... }` group - which is
+	// how an agent writes that, and which used to be read as ONE opaque producer,
+	// burying the `echo` heading inside it and costing every step in the group its
+	// attribution. The group stands on its own as a step of the script, so its
+	// contents ARE the steps.
+	//
+	// The lines come out of a `.log`, which Prism has a grammar for: the
+	// timestamps, the levels and the paths in the message are the furniture, and
+	// marking them is most of what makes a wall of log readable. The last line is
+	// the Bash tool's own note that it put the shell back where it started - no
+	// step printed that, so it reads as the harness note it is.
+	simTool("toolu_sim_group", "Bash", simRaw(`{"command":"cd /home/callum/code/hydra/hydra-stalls 2>/dev/null &&\n{ grep -E \"STALL|done -\" watch.log | tail -12\necho \"=== captures ===\"\nls -d stall-* 2>/dev/null\n}","description":"Check for new watch captures"}`)),
+	simToolOut("toolu_sim_group", "15:13:42 STALL: io full avg10=5.03% - capturing 1/5 into stall-20260730-151342\n15:18:42 done - /home/callum/code/hydra/hydra-stalls/stall-20260730-151342\n15:20:16 STALL: io full avg10=11.79% - capturing 2/5 into stall-20260730-152016\n=== captures ===\nstall-20260730-151342\nstall-20260730-152016\nShell cwd was reset to /home/callum/code/hydra/.hydra/local/worktrees/feat-uploader-retry"),
+	// A script whose last step FAILED, which is most of the scripts an agent
+	// writes about a file it turns out not to have. The stderr mixed into the
+	// output is the only part of it that announces who wrote it (`sed: ...`), so
+	// those lines are taken out of the attribution and coloured as the errors
+	// they are (web/src/lib/buildOutput.ts): the searches above keep their gutter,
+	// their lowlit paths and their Go highlighting, the heading is still the
+	// string the script printed, and the read that died claims none of it -
+	// rather than the whole card falling back to one wall of terminal text
+	// because one step of it went wrong.
+	//
+	// The two searches also print DIFFERENT prefixes - the first names one file
+	// so grep numbers its lines bare (`9:`), the second names two so every line
+	// carries its own path - and they are one section, which is what
+	// parseMatchLines reads both shapes for.
+	simTool("toolu_sim_failedstep", "Bash", simRaw(`{"command":"rg -n \"sleepBackoff\" internal/artifacts/backoff.go | head -3\nrg -n \"sleepBackoff\" -A2 internal/artifacts/upload.go internal/artifacts/store.go\necho ===\nsed -n 1,40p internal/artifacts/retry.go","description":"Find the backoff callers, then read the retry helper"}`)),
+	simToolErr("toolu_sim_failedstep", "Exit code 2\n9:func sleepBackoff(attempt int) {\n11:\td := base << attempt // sleepBackoff doubles it per attempt\ninternal/artifacts/upload.go:88:// sleepBackoff waits out the jittered exponential delay for one attempt.\ninternal/artifacts/upload.go:119:\t\tsleepBackoff(attempt)\ninternal/artifacts/upload.go-120-\t\tif err = u.put(ctx, key, r); err == nil {\ninternal/artifacts/upload.go-121-\t\t\treturn nil\n===\nsed: can't read internal/artifacts/retry.go: No such file or directory"),
 	// ANSI-coloured output: the chat renders the SGR codes as colours/styles
 	// rather than raw escape garbage (item 20). This settles the chained command
 	// opened well above.

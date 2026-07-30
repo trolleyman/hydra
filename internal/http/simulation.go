@@ -187,6 +187,21 @@ func (s *SimulationServer) GetClaudeUsage(w http.ResponseWriter, r *http.Request
 	})
 }
 
+func (s *SimulationServer) GetCodexUsage(w http.ResponseWriter, r *http.Request, params api.GetCodexUsageParams) {
+	available := true
+	session := float32(38)
+	weekly := float32(65)
+	sessionText := "5h"
+	weeklyText := "week"
+	api.WriteJSON(w, http.StatusOK, api.CodexUsageResponse{
+		Available:          available,
+		SessionPercentUsed: &session,
+		SessionResetText:   &sessionText,
+		WeeklyPercentUsed:  &weekly,
+		WeeklyResetText:    &weeklyText,
+	})
+}
+
 func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) {
 	simUnread := 1             // matches the one unread agent in ListAgents
 	simNeedsInput := 1         // matches the one needs_input agent in ListAgents

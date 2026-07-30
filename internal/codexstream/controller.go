@@ -27,6 +27,7 @@ type Options struct {
 	OnModel        func(string)
 	OnTurnStart    func(string)
 	OnActivity     func()
+	OnStep         func()
 	OnTurnEnd      func(string)
 	OnHistoryLine  func([]byte)
 	OnError        func(error)
@@ -221,6 +222,10 @@ func (c *Controller) OnLine(line []byte) {
 		if c.opts.OnTurnEnd != nil {
 			c.opts.OnTurnEnd(params.Turn.ID)
 		}
+	case msg.Method == "item/completed":
+		if c.opts.OnStep != nil {
+			c.opts.OnStep()
+		}
 	case hasID && AutoApproved(msg.Method):
 		// Hydra runs Codex with approvals disabled, so an approval prompt only
 		// appears when that policy did not reach the thread. Nothing in the web
@@ -389,16 +394,21 @@ func (c *Controller) SendUser(content json.RawMessage) error {
 		return errtrace.Wrap(fmt.Errorf("empty Codex turn input"))
 	}
 	c.mu.Lock()
-	threadID, ready := c.threadID, c.threadReady
+	threadID, turnID, ready, model := c.threadID, c.turnID, c.threadReady, c.model
 	if threadID == "" || !ready {
 		c.pending = append(c.pending, append(json.RawMessage(nil), content...))
 		c.mu.Unlock()
 		return nil
 	}
 	c.mu.Unlock()
-	c.mu.Lock()
-	model := c.model
-	c.mu.Unlock()
+	if turnID != "" {
+		_, err := c.send("turn/steer", map[string]any{
+			"threadId":       threadID,
+			"input":          input,
+			"expectedTurnId": turnID,
+		})
+		return errtrace.Wrap(err)
+	}
 	params := map[string]any{"threadId": threadID, "input": input}
 	if model != "" {
 		params["model"] = model

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { enterEdit, lineBounds, listPrefixFor } from './textareaEdit'
+import { enterEdit, lineBounds, listPrefixFor, minimalReplacement } from './textareaEdit'
 
 // Enter at the end of a list item continues the list; anywhere else it is left
 // to the browser (enterEdit returns null and the keystroke falls through).
@@ -55,5 +55,48 @@ describe('enterEdit', () => {
     expect(enterEdit('- one', 3, 3)).toBeNull()
     expect(enterEdit('- one', 2, 5)).toBeNull()
     expect(enterEdit('plain', 5, 5)).toBeNull()
+  })
+})
+
+// The range applyEdit hands to the browser's own editing pipeline. It has to be
+// the SMALLEST one that does the job: a bigger range still produces the right
+// text, but it is a bigger thing to undo and a bigger region to re-spellcheck,
+// which is the whole reason for editing in place rather than reassigning value.
+describe('minimalReplacement', () => {
+  const apply = (old: string, r: { start: number; end: number; text: string }) =>
+    old.slice(0, r.start) + r.text + old.slice(r.end)
+
+  it('spans only the inserted pair', () => {
+    expect(minimalReplacement('foo', 'foo()')).toEqual({ start: 3, end: 3, text: '()' })
+    expect(minimalReplacement('foo bar', 'foo (bar')).toEqual({ start: 4, end: 4, text: '(' })
+  })
+
+  it('spans both marks when a selection is wrapped', () => {
+    expect(minimalReplacement('a sel b', 'a (sel) b')).toEqual({ start: 2, end: 5, text: '(sel)' })
+  })
+
+  it('reports a deletion as an empty replacement', () => {
+    expect(minimalReplacement('a()b', 'ab')).toEqual({ start: 1, end: 3, text: '' })
+  })
+
+  it('never splits a surrogate pair', () => {
+    // Two emoji sharing a high surrogate: a naive code-unit trim would replace
+    // one code unit with the lone low surrogate of the other.
+    const r = minimalReplacement('x\u{1F600}y', 'x\u{1F601}y')
+    expect(r).toEqual({ start: 1, end: 3, text: '\u{1F601}' })
+    expect([...r.text]).toHaveLength(1)
+  })
+
+  it('round-trips whatever it is given', () => {
+    const cases: [string, string][] = [
+      ['', 'a'],
+      ['a', ''],
+      ['abc', 'abc\n- '],
+      ['- one', 'text\n'],
+      ['```\n', '```\n\n```'],
+      ['aaa', 'aa'],
+      ['\u{1F600}\u{1F600}', '\u{1F600}'],
+    ]
+    for (const [old, next] of cases) expect(apply(old, minimalReplacement(old, next))).toBe(next)
   })
 })

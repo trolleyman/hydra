@@ -27,22 +27,22 @@ afterEach(() => {
 describe('ClaudeUsageIndicator', () => {
   it('fetches on mount (unforced) and renders the usage snapshot', async () => {
     const spy = vi.spyOn(api.default, 'getClaudeUsage').mockResolvedValue(SNAPSHOT)
-    render(<ClaudeUsageIndicator />)
+    render(<ClaudeUsageIndicator agentType="claude" />)
 
     // The visibility poll fires once immediately on mount; flush its microtask.
     await act(async () => { await Promise.resolve() })
 
     // Background poll → not a forced re-probe.
     expect(spy).toHaveBeenCalledWith(undefined)
-    expect(screen.getByText('38%')).toBeInTheDocument()
-    expect(screen.getByText('65%')).toBeInTheDocument()
+    expect(screen.getByText('62%')).toBeInTheDocument()
+    expect(screen.getByText('35%')).toBeInTheDocument()
     // "Resets in " prefix is stripped so only the duration sits under the label.
     expect(screen.getByText('2h 15m')).toBeInTheDocument()
   })
 
   it('forces a fresh probe when clicked', async () => {
     const spy = vi.spyOn(api.default, 'getClaudeUsage').mockResolvedValue(SNAPSHOT)
-    render(<ClaudeUsageIndicator />)
+    render(<ClaudeUsageIndicator agentType="claude" />)
     await act(async () => { await Promise.resolve() })
 
     await act(async () => {
@@ -54,6 +54,23 @@ describe('ClaudeUsageIndicator', () => {
     expect(spy).toHaveBeenLastCalledWith(true)
   })
 
+  it('shows the Codex snapshot when Codex is selected', async () => {
+    const spy = vi.spyOn(api.default, 'getCodexUsage').mockResolvedValue({
+      available: true,
+      session_percent_used: 38,
+      session_reset_text: '5h',
+      weekly_percent_used: 65,
+      weekly_reset_text: 'week',
+    })
+    render(<ClaudeUsageIndicator agentType="codex" />)
+    await act(async () => { await Promise.resolve() })
+
+    expect(spy).toHaveBeenCalledWith(undefined)
+    expect(screen.getByLabelText('Codex usage')).toBeInTheDocument()
+    expect(screen.getByText('62%')).toBeInTheDocument()
+    expect(screen.getByText('35%')).toBeInTheDocument()
+  })
+
   it('forces fresh probes just after the session reset until the snapshot advances', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-30T15:00:00Z'))
@@ -62,7 +79,7 @@ describe('ClaudeUsageIndicator', () => {
       ...SNAPSHOT,
       session_resets_at: resetAt,
     })
-    render(<ClaudeUsageIndicator />)
+    render(<ClaudeUsageIndicator agentType="claude" />)
     await act(async () => { await Promise.resolve() })
 
     expect(spy).toHaveBeenCalledTimes(1)
@@ -87,7 +104,7 @@ describe('ClaudeUsageIndicator', () => {
     const spy = vi.spyOn(api.default, 'getClaudeUsage')
       .mockResolvedValueOnce({ ...SNAPSHOT, session_resets_at: oldReset })
       .mockResolvedValue({ ...SNAPSHOT, session_resets_at: nextReset })
-    render(<ClaudeUsageIndicator />)
+    render(<ClaudeUsageIndicator agentType="claude" />)
     await act(async () => { await Promise.resolve() })
 
     await act(async () => {
@@ -103,7 +120,7 @@ describe('ClaudeUsageIndicator', () => {
 
   it('renders nothing until data arrives', () => {
     vi.spyOn(api.default, 'getClaudeUsage').mockReturnValue(new Promise(() => {}) as ReturnType<typeof api.default.getClaudeUsage>)
-    const { container } = render(<ClaudeUsageIndicator />)
+    const { container } = render(<ClaudeUsageIndicator agentType="claude" />)
     expect(container).toBeEmptyDOMElement()
   })
 })

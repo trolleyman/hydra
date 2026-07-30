@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildOutputSpans } from './buildOutput'
+import { buildOutputSpans, diagnosticSpans } from './buildOutput'
 
 // The colour a span carries, named rather than spelled - as in gitOutput.test.
 function tag(cls: string): string {
@@ -134,5 +134,55 @@ describe('buildOutputSpans', () => {
   it('leaves the lines it does not recognise exactly as they arrived', () => {
     const out = buildOutputSpans(['prose about the build', 'a.go:1:1: oops'])
     expect(out?.[0]).toEqual([{ text: 'prose about the build', cls: '' }])
+  })
+
+  it('reads the harness status line above a failed command', () => {
+    expect(spans('Exit code 2')).toEqual([[['Exit code ', 'dim'], ['2', 'fail']]])
+    // A sentence about one is prose.
+    expect(buildOutputSpans(['Exit code 2 means the pattern was not found'])).toBeNull()
+  })
+})
+
+describe('diagnosticSpans', () => {
+  const of = (line: string) => diagnosticSpans(line).map((s) => [s.text, tag(s.cls)])
+
+  it('reads a tool complaining about what it was asked to do', () => {
+    // The file it could not read is the news, so it reads at full strength; the
+    // tool that is talking is furniture, and the reason is the verdict.
+    expect(of("sed: can't read web/src/lib/fileIcons.ts: No such file or directory")).toEqual([
+      ['sed', 'dim'], [': ', 'dim'],
+      ["can't read web/src/lib/fileIcons.ts: ", ''],
+      ['No such file or directory', 'fail'],
+    ])
+    expect(of('cat: docs/missing.md: No such file or directory')).toEqual([
+      ['cat', 'dim'], [': ', 'dim'], ['docs/missing.md: ', ''], ['No such file or directory', 'fail'],
+    ])
+  })
+
+  it('points at the line of the script the shell fell over on', () => {
+    expect(of('/bin/bash: line 3: node: command not found')).toEqual([
+      ['/bin/bash', 'dim'], [': line 3', 'loc'], [': ', 'dim'], ['node: ', ''], ['command not found', 'fail'],
+    ])
+  })
+
+  it('leaves a tool that is only narrating in the furniture', () => {
+    // The same shape carries `go: downloading ...` as carries `go: cannot find
+    // module`, so the red is spent on the one that says something went wrong.
+    expect(of('go: downloading github.com/google/go-cmp v0.6.0')).toEqual([
+      ['go', 'dim'], [': ', 'dim'], ['downloading github.com/google/go-cmp v0.6.0', 'dim'],
+    ])
+    expect(of('go: cannot find main module')).toEqual([
+      ['go', 'dim'], [': ', 'dim'], ['cannot find main module', 'fail'],
+    ])
+  })
+
+  it('carries the exit status, and renders anything else as it arrived', () => {
+    expect(of('Exit code 127')).toEqual([['Exit code ', 'dim'], ['127', 'fail']])
+    expect(of('something else entirely')).toEqual([['something else entirely', '']])
+  })
+
+  it('lowlights the harness note that stands in for output', () => {
+    expect(of('(Bash completed with no output)')).toEqual([['(Bash completed with no output)', 'dim']])
+    expect(of('(no output)')).toEqual([['(no output)', 'dim']])
   })
 })

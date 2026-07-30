@@ -13,7 +13,11 @@ describe('getLanguage', () => {
     expect(getLanguage('init.lua')).toBe('lua')
     expect(getLanguage('lib.rs')).toBe('rust')
     expect(getLanguage('app.py')).toBe('python')
+    expect(getLanguage('build.gradle.kts')).toBe('kotlin')
     expect(getLanguage('config.toml')).toBe('toml')
+    // A log is the commonest thing a Bash card reads out, and Prism has a
+    // grammar for one: the timestamp, the level and the paths in the message.
+    expect(getLanguage('watch.log')).toBe('log')
   })
 
   it('maps the JSX-bearing extensions to the JSX grammars, not the plain ones', () => {
@@ -71,7 +75,7 @@ describe('getLanguage', () => {
       'a.ts', 'a.tsx', 'a.js', 'a.jsx', 'a.mjs', 'a.cjs', 'a.json', 'a.html', 'a.xml',
       'a.svg', 'a.vue', 'a.svelte', 'a.css', 'a.scss', 'a.less', 'a.styl', 'a.go',
       'a.rs', 'a.c', 'a.h', 'a.cpp', 'a.cs', 'a.swift', 'a.dart', 'a.nim', 'a.d',
-      'a.v', 'a.vhdl', 'a.wasm', 'a.java', 'a.kt', 'a.scala', 'a.groovy', 'a.clj',
+      'a.v', 'a.vhdl', 'a.wasm', 'a.java', 'a.kt', 'a.kts', 'a.scala', 'a.groovy', 'a.clj',
       'a.py', 'a.rb', 'a.pl', 'a.lua', 'a.r', 'a.php', 'a.tcl', 'a.coffee', 'a.ex',
       'a.erl', 'a.hs', 'a.ml', 'a.fs', 'a.elm', 'a.jl', 'a.lisp', 'a.scm', 'a.sh',
       'a.ps1', 'a.bat', 'a.yaml', 'a.toml', 'a.ini', 'a.properties', 'a.sql',
@@ -112,7 +116,7 @@ describe('shebangLanguage', () => {
 
 describe('eager Prism grammars', () => {
   it('bundles lua and other common languages up front', () => {
-    for (const lang of ['lua', 'typescript', 'tsx', 'go', 'python', 'rust', 'bash', 'json', 'yaml']) {
+    for (const lang of ['lua', 'typescript', 'tsx', 'go', 'python', 'rust', 'bash', 'json', 'yaml', 'log']) {
       expect(hasLanguage(lang), lang).toBe(true)
     }
   })

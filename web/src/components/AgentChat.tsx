@@ -47,7 +47,7 @@ import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { FILE_BANNER, viewLineNumbers } from '../lib/fileViewCommand'
-import { buildOutputSpans } from '../lib/buildOutput'
+import { buildOutputSpans, diagnosticSpans } from '../lib/buildOutput'
 import { isJsonOutput } from '../lib/jsonOutput'
 import { diskOutputSpans } from '../lib/diskOutput'
 import { searchSummarySpans } from '../lib/searchSummary'
@@ -64,7 +64,7 @@ import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
-import { useAutoPairStore, usePasteMarkersStore } from '../lib/composerPrefs'
+import { useAutoPairStore, usePasteMarkersStore, useSpellcheckStore } from '../lib/composerPrefs'
 import { fenceEnterEdit } from '../lib/autoPair'
 import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
@@ -87,6 +87,7 @@ import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentL
 // highlighted by, item 3) now lives in lib/fileKind, beside the file-type
 // classifier, so the lightbox's text viewer highlights by the same table.
 import { langFromPath } from '../lib/fileKind'
+import { getFileIcon } from '../lib/fileIcons'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
@@ -2148,12 +2149,19 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
         const diff = typeof change.diff === 'string' ? change.diff : ''
         const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
+        const slash = path.lastIndexOf('/')
+        const directory = slash >= 0 ? path.slice(0, slash + 1) : ''
+        const fileName = slash >= 0 ? path.slice(slash + 1) : path
+        const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName)
         return (
           <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
             {showFileHeaders && (
               <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
-                <FileText className="h-3 w-3 shrink-0 text-blue-500" />
-                <span className="min-w-0 truncate font-medium text-stone-700 dark:text-stone-200">{path}</span>
+                <FileIcon className={`h-3.5 w-3.5 shrink-0 ${fileIconClass}`} />
+                <span className="min-w-0 truncate font-medium">
+                  {directory && <span className="text-stone-400 dark:text-stone-500">{directory}</span>}
+                  <span className="text-stone-700 dark:text-stone-200">{fileName}</span>
+                </span>
                 <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
               </div>
             )}
@@ -2338,7 +2346,7 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
     }))
     run = []
   }
-  for (const line of parseMatchLines(section.lines, section.match.paths)) {
+  for (const line of parseMatchLines(section.lines, section.match.paths, section.match.numbered)) {
     if (line.separator) {
       flush()
       rows.push({ num: '', html: '', tone: 'plain' })
@@ -2454,6 +2462,22 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       for (const spans of diskOutputSpans(section.tool, section.lines)) {
         rows.push({ num: '', html: '', spans, tone: 'code' })
       }
+      continue
+    }
+    if (section.kind === 'error') {
+      // What a tool said about ITSELF, in the colours an error takes: the
+      // subject at full strength, the reason as the verdict, the tool that is
+      // talking behind them both (lib/buildOutput's diagnosticSpans). Unless the
+      // tool coloured the line itself, in which case that is better informed
+      // than any shape read off the text - the same rule the plain stretches
+      // below follow.
+      const raw = section.raw
+      const ansi = raw ? splitHighlightedLines(ansiToHtml(raw.join('\n'))) : null
+      const coloured = ansi && ansi.length === section.lines.length ? ansi : null
+      section.lines.forEach((line, i) => {
+        if (coloured && raw && hasAnsi(raw[i])) rows.push({ num: '', html: coloured[i], tone: 'plain' })
+        else rows.push({ num: '', html: '', spans: diagnosticSpans(line), tone: 'plain' })
+      })
       continue
     }
     if (section.kind === 'plain') {
@@ -3242,10 +3266,14 @@ const ToolCard = memo(function ToolCard({
   // was, with its content rendered as source; a card that renamed itself "Read"
   // hid the script that actually ran.
   //
-  // Not over an error: stderr interleaves with stdout in an order no parse of
-  // the script can predict, so every section boundary would be a guess. ANSI
-  // colour is fine - it is stripped for the matching and the highlighting, and
-  // put back for the stretches that render as terminal text (lib/shellSections).
+  // Over an error too - that is the output an agent stares at hardest. The stderr
+  // an error mixes into it used to make every section boundary a guess, and does
+  // not any more: a tool's own complaint names the tool that wrote it, so those
+  // lines are taken out of the attribution and rendered as the errors they are,
+  // and the one naming a file a step was asked to read tells the split that step
+  // printed nothing (see lib/shellSections). ANSI colour is fine as well - it is
+  // stripped for the matching and the highlighting, and put back for the
+  // stretches that render as terminal text.
   //
   // A plain const, not useMemo: it derives from `item`, which the reducer mutates
   // in place (see the ToolCard memo note), and a manual dependency on a mutated
@@ -3253,7 +3281,7 @@ const ToolCard = memo(function ToolCard({
   // this for us instead.
   const scriptSteps = isBash ? parseScriptSteps(unwrapBashLoginCommand(bashSource)) : null
   const scriptSections =
-    scriptSteps && renderedResult !== undefined && !item.isError
+    scriptSteps && renderedResult !== undefined
       ? splitScriptOutput(scriptSteps, renderedResult)
       : null
   // What the script's own `echo`s printed, for the output that gets NO sections:
@@ -4860,6 +4888,12 @@ export function QuestionCard({
   // is simply gone.
   const [submitted, setSubmitted] = useState(false)
   const [sent, setSent] = useState(false)
+  // The free-text boxes below are plain textareas rather than
+  // HighlightedTextareas, so they follow the same spellcheck preference by hand
+  // (see lib/composerPrefs) - an answer typed here is the same kind of text as
+  // one typed in the composer, and the two reading differently was the point of
+  // the setting.
+  const spellcheck = useSpellcheckStore((s) => s.enabled)
   // `submitted` stops counting the moment the card is known expired: that is
   // the daemon reporting it never delivered the answer (question_expired), so
   // the optimistic "Answered" was a lie and the card unlocks for the message
@@ -5068,6 +5102,7 @@ export function QuestionCard({
           </span>
           <textarea
             rows={1}
+            spellCheck={spellcheck}
             autoFocus={value === '' && !answered}
             value={value}
             onClick={(e) => e.stopPropagation()}
@@ -5212,6 +5247,7 @@ export function QuestionCard({
                     </span>
                     <textarea
                       rows={1}
+                      spellCheck={spellcheck}
                       value={showOther[qi]}
                       onChange={(e) => {
                         const v = e.target.value

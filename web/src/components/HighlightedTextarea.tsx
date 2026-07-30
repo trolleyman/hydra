@@ -10,7 +10,7 @@ import {
 import { renderMarkdownSource } from '../lib/markdown'
 import { applyEdit, enterEdit, ensureCaretVisible, moveCaret, visualLineTarget } from '../lib/textareaEdit'
 import { autoPairEdit, backspacePairEdit, fenceEnterEdit } from '../lib/autoPair'
-import { useAutoPairStore } from '../lib/composerPrefs'
+import { useAutoPairStore, useSpellcheckStore } from '../lib/composerPrefs'
 
 type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'className'> & {
   value: string
@@ -70,6 +70,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
     const backdropRef = useRef<HTMLDivElement>(null)
     useImperativeHandle(ref, () => innerRef.current as HTMLTextAreaElement)
     const autoPair = useAutoPairStore((s) => s.enabled)
+    const spellcheck = useSpellcheckStore((s) => s.enabled)
 
     function syncScroll() {
       const ta = innerRef.current
@@ -183,6 +184,11 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
             const ta = e.currentTarget
             requestAnimationFrame(() => ensureCaretVisible(ta))
           }}
+          // The browser's own spellchecker, off unless the Browser setting turns
+          // it on (see lib/composerPrefs). Before {...rest} so a caller that has
+          // its own opinion - the config editors, which are never prose - still
+          // wins.
+          spellCheck={spellcheck}
           // Match the backdrop's reserved scrollbar gutter so both layers wrap
           // text at the same width (see the backdrop above).
           style={{ scrollbarGutter: 'stable', ...style }}

@@ -25,7 +25,16 @@
 // one makes its section (only its section) plain, because a file name and line
 // numbers attached to text from somewhere else would be worse than no
 // highlighting at all.
+//
+// A command that FAILED is sectioned like any other, which it could not be while
+// the stderr mixed into its output was indistinguishable from it. It is not: a
+// tool's own error message names the tool that wrote it (`sed: can't read f: ...`),
+// so those lines are lifted out before the split and put back after it - and the
+// one that names a file some step was asked to read also says that step printed
+// nothing, which is what stops a step that died from being handed the next one's
+// lines. See diagnosticLines / failedSteps.
 import { hasAnsi, stripAnsi } from './ansi'
+import { CWD_RESET, EXIT_STATUS, NO_OUTPUT } from './buildOutput'
 import type { DiskTool } from './diskOutput'
 import type { SearchSummary } from './searchSummary'
 import {
@@ -90,6 +99,11 @@ interface SectionLines {
 
 export type ScriptSection =
   | ({ kind: 'marker' } & SectionLines)
+  // What the shell or one of its tools said about ITSELF: the `sed: can't read
+  // f: No such file or directory` half of a failed command's output, and the
+  // harness's `Exit code 2` above it. Not one line of any file (see
+  // lib/buildOutput's diagnosticSpans).
+  | ({ kind: 'error' } & SectionLines)
   | ({ kind: 'view'; view: FileView } & SectionLines)
   | ({ kind: 'matches'; match: MatchesView; command: string } & SectionLines)
   | ({ kind: 'git'; command: string } & SectionLines)
@@ -143,6 +157,12 @@ interface Pipeline {
 
 // Characters that end an unquoted word.
 const WORD_END = /[\s;|&<>()]/
+
+// What has to follow a `{ ... }`/`( ... )` group for the group to be a step of
+// the script in its own right rather than something being done to as a whole:
+// the end of the script, or an operator that separates steps. A `|`, a `>` or a
+// `&` there belongs to the group, not to the last command inside it.
+const STEP_END = /^[ \t]*(?:$|[;\n]|&&|\|\|)/
 
 // closingDouble returns the index of the `"` that closes the one at `at`, or -1
 // when the string is unterminated. A backslash escapes the next character.
@@ -368,12 +388,34 @@ function lexPipelines(script: string): Pipeline[] | null {
       i++
       continue
     }
-    // A group runs commands this module is not going to describe, but it is ONE
-    // producer's worth of output, so it is stepped over as a single opaque word
-    // rather than costing the whole script its parse.
     if (ch === '(' || (ch === '{' && WORD_END.test(script[i + 1] ?? ' '))) {
       const end = skipGroup(script, i)
       if (end === -1) return null
+      // A group that stands on its own as a step of the script prints exactly
+      // what the commands inside it print, in that order - so its CONTENTS are
+      // the steps, and the `echo` heading an agent wrapped up in one is an anchor
+      // like any other. (Agents write `cd x && { a; echo ===; b; }` constantly,
+      // to hang a run of steps off one `cd`; read as one opaque word, the group
+      // cost every step in it its attribution.)
+      //
+      // Only when nothing is done to the group as a WHOLE: a `|` after it filters
+      // the lot, a `>` redirects the lot, and either makes the group one producer
+      // again. What follows has to be the end of the script or something that
+      // separates steps.
+      const inner = words.length === 0 && cmds.length === 0 && STEP_END.test(script.slice(end))
+        ? lexPipelines(script.slice(i + 1, end - 1))
+        : null
+      if (inner) {
+        pipelines.push(...inner)
+        i = end
+        lastEnd = i
+        pipeStart = i
+        cmdStart = i
+        continue
+      }
+      // Otherwise it is ONE producer's worth of output that this module is not
+      // going to describe, stepped over as a single opaque word rather than
+      // costing the whole script its parse.
       words.push({ text: script.slice(i, end), dynamic: true, quoted: false, quotedStart: false })
       i = end
       lastEnd = i
@@ -477,8 +519,15 @@ const GREP_SHAPE_LETTERS = new Set(['c', 'l', 'L', 'o', 'q', 'Z', 'z'])
 // Of those, the two that summarise rather than reshape.
 const GREP_COUNT_LETTERS = new Set(['c'])
 const GREP_FILES_LETTERS = new Set(['l', 'L'])
-// Cluster letters whose argument follows the cluster (`-m5` is not modelled).
+// Cluster letters whose argument follows the cluster.
 const GREP_ARG_LETTERS = new Set(['e', 'f', 'm', 'A', 'B', 'C', 'd', 'g', 't', 'T'])
+
+// A short flag carrying its number inline - `-A35`, `-C3`, `-m10`, and the
+// `-3` GNU grep takes as `-C 3`. Agents write the context flags this way as
+// often as with a space, and reading one as an unknown cluster cost the whole
+// step its shape: the output still came back as `NNN:` lines of a file, but with
+// no step claiming them.
+const GREP_INLINE_NUM = /^-([A-Za-z]*)(\d+)$/
 
 // parseEcho returns the text a bare `echo` prints, or null when the step is not
 // one whose output is known in advance. Flags are refused: `-n` drops the
@@ -532,6 +581,21 @@ function parseMatches(words: Word[]): ParsedGrep | null {
       continue
     }
     if (flag.startsWith('--')) continue
+    // `-A35`, `-nC3`, `-3`: the number is the flag's own argument, so it does not
+    // eat the next word - and a count of context lines only changes how many
+    // lines come back, never what a line IS.
+    const inline = GREP_INLINE_NUM.exec(flag)
+    if (inline) {
+      const letters = inline[1].split('')
+      if (letters.some((c) => GREP_SHAPE_LETTERS.has(c))) return null
+      // Only a flag that TAKES a number can carry one (`-i3` is not a spelling
+      // of anything), and `-3` on its own carries it for grep's context.
+      const last = letters[letters.length - 1]
+      if (letters.length > 0 && !GREP_ARG_LETTERS.has(last)) return null
+      if (letters.includes('n')) numbered = true
+      if (letters.some((c) => c === 'e' || c === 'f')) patternGiven = true
+      continue
+    }
     // A short cluster: `-rn`, `-in`, `-iE`. The whole cluster is refused if any
     // letter reshapes the output, and a trailing argument-taking letter eats the
     // next word.
@@ -936,6 +1000,96 @@ export function parseScriptSteps(script: string): ScriptStep[] | null {
   return steps.some((s) => describes.has(s.kind)) ? steps : null
 }
 
+// --- Diagnostics: the output no step printed ----------------------------------
+
+// A tool complaining about what it was asked to do, in the shape the whole
+// coreutils family writes it:
+//
+//   sed: can't read web/src/lib/fileIcons.ts: No such file or directory
+//   rg: docs/missing.md: IO error for operation on docs/missing.md
+//   /bin/bash: line 3: node: command not found
+//
+// These are the lines that make an errored command's output hard to attribute,
+// and they are also the ones that can be told apart from it: they arrive on
+// stderr wherever the failing command ran, they are no step's content, and the
+// step that provoked one usually printed nothing else at all. So they are lifted
+// OUT before the output is split up - which is what lets a command that failed be
+// sectioned like any other - and rendered as the errors they are.
+//
+// The tool name is checked against the script's own commands, because the line
+// alone cannot say: a `sed: ...` at the start of a line is a diagnostic under a
+// script that ran sed and a line of somebody's YAML otherwise.
+const DIAGNOSTIC = /^((?:[\w.+-]*\/)*([\w.+-]+))(?:: line \d+)?: \S/
+
+// The shell is not one of the script's commands, but it is the thing that RAN
+// them, and everything it says is about the script rather than about a file.
+const SHELL = /^-?(?:bash|sh|dash|zsh|ksh|fish)$/
+
+// stepTools collects the commands a script ran, by name, for the gate above.
+// Every step carries the text it was parsed from, so this reads the name at the
+// head of each `|`-separated piece of it - a diagnostic can come from any command
+// in a pipeline, not just the one whose output was being described.
+function stepTools(steps: ScriptStep[]): Set<string> {
+  const out = new Set<string>()
+  for (const step of steps) {
+    const command = step.kind === 'view' ? step.view.command : 'command' in step ? step.command : ''
+    for (const piece of command.split('|')) {
+      // A leading `(`/`sudo `/`env X=1 ` is not what a diagnostic names itself
+      // after; the first bare word is.
+      const name = /^[\s(]*(?:(?:sudo|env|command|time|xargs)\s+)*([\w.+/-]+)/.exec(piece)?.[1]
+      if (name) out.add(name.split('/').pop() ?? name)
+    }
+  }
+  return out
+}
+
+// diagnosticLines marks which lines of the output are a tool talking about
+// itself rather than a step's output.
+//
+// A line the script itself PRINTS is never one of them, however it reads: an
+// `echo "sed: skipped"` is that echo, and taking it for stderr would cost the
+// section it anchors its whole attribution.
+function diagnosticLines(lines: string[], steps: ScriptStep[]): boolean[] {
+  const tools = stepTools(steps)
+  const printed = new Set(
+    steps.flatMap((s) => (s.kind === 'marker' || s.kind === 'echo' ? s.text.split('\n') : [])).map((l) => l.trimEnd()),
+  )
+  return lines.map((line, i) => {
+    if (printed.has(line.trimEnd())) return false
+    // The harness's own notes (lib/buildOutput), each only where the tool result
+    // puts it: the exit status above a failed command's output, the line that
+    // stands in for output when there was none, and - after everything the
+    // command printed - the note that the shell was put back where it started.
+    if (i === 0 && (EXIT_STATUS.test(line) || (lines.length === 1 && NO_OUTPUT.test(line)))) return true
+    if (i === lines.length - 1 && CWD_RESET.test(line)) return true
+    const name = DIAGNOSTIC.exec(line)?.[2]
+    return name != null && (tools.has(name) || SHELL.test(name))
+  })
+}
+
+// failedSteps are the steps a diagnostic says printed nothing: it names the very
+// file they were asked to read, so the file was not read.
+//
+// Without this a step that died is still expected to have printed something, and
+// `distribute` hands it the lines of the step AFTER it - a `sed -n 1,60p missing`
+// bounded to sixty lines takes the first sixty lines of whatever ran next, and
+// renders them as a file they did not come from. That is the one way an errored
+// output can be attributed WRONGLY rather than just plainly, so it is closed here
+// rather than by declining to section the output at all.
+//
+// Only for a step that reads ONE named file. A search over two of them prints
+// the matches from the one that exists and complains about the other, so the same
+// diagnostic proves nothing about what it printed.
+function failedSteps(steps: ScriptStep[], lines: string[], diag: boolean[]): Set<ScriptStep> {
+  const said = lines.filter((_, i) => diag[i])
+  const named = (path: string) => path !== '' && said.some((l) => l.includes(path))
+  return new Set(steps.filter((step) => {
+    if (step.kind === 'view') return named(step.view.path)
+    if (step.kind === 'matches') return step.match.paths.length === 1 && named(step.match.paths[0])
+    return false
+  }))
+}
+
 // --- Splitting the output -----------------------------------------------------
 
 function matchesAt(lines: string[], pos: number, expected: string[]): boolean {
@@ -944,8 +1098,10 @@ function matchesAt(lines: string[], pos: number, expected: string[]): boolean {
 }
 
 // stepLimit is the most lines a step can have printed, or null when it is not
-// bounded by anything the script says.
-function stepLimit(step: ScriptStep): number | null {
+// bounded by anything the script says. A step the output says failed printed
+// nothing, which is the tightest bound there is (see failedSteps).
+function stepLimit(step: ScriptStep, failed: ReadonlySet<ScriptStep>): number | null {
+  if (failed.has(step)) return 0
   if (step.kind === 'echo') return step.text.split('\n').length
   if (step.kind !== 'view') return null
   return viewLimit(step.view)
@@ -957,39 +1113,71 @@ function echoLines(step: ScriptStep): string[] | null {
   return step.kind === 'echo' ? step.text.split('\n') : null
 }
 
-// mergeSearches collapses a run of searches with nothing between them into one
-// producer. Where one grep's matches stop and the next one's start is not
-// knowable - but a search's rendering does not depend on it. Every line already
-// says which file it came from (its own `path:` prefix, or the single file the
-// searches all named), and that is all the gutter and the highlighting read. Two
-// greps back to back are what an agent writes when the second one asks a
-// narrower question than the first, and calling that pair unattributable cost
-// BOTH of them their line numbers over a boundary neither renderer wanted.
+// mergeStep is the ONE producer a neighbouring pair makes when the boundary
+// between them is not knowable and no renderer wants it anyway - or null when the
+// pair has to stay two.
+//
+// This is the difference between output whose every line stands on its own and
+// output that is a stretch of a file. Two greps back to back are what an agent
+// writes when the second asks a narrower question than the first, and every line
+// either of them printed already says which file it came from (its own `path:`
+// prefix, or the single file they named) - which is all the gutter and the
+// highlighting read. The same holds for two git reports (lib/gitOutput reads the
+// shape off the LINE - a status is a status wherever it was printed), for two
+// measurements by the same tool, and for two searches summarising the same way.
+// A file view is the opposite case: its lines are numbered from where the
+// section starts, so merging two would number the second file's lines as the
+// first one's.
 //
 // A search whose files this module could not enumerate (a glob, a variable)
 // makes the merged path list unknown rather than contributing nothing: guessing
 // the other's file for its lines would highlight them as the wrong language.
-function mergeCompatibleSteps(steps: ScriptStep[]): ScriptStep[] {
-  const out: ScriptStep[] = []
-  for (const step of steps) {
-    const prev = out[out.length - 1]
-    // Git's report renderer is line-shaped and already moves between status,
-    // metadata and patch modes inside one stream. Exact command boundaries add
-    // nothing, so adjacent reports can share a section just like searches can.
-    if (step.kind === 'git' && prev?.kind === 'git') {
-      out[out.length - 1] = { kind: 'git', command: `${prev.command}; ${step.command}` }
-      continue
-    }
-    if (step.kind !== 'matches' || prev?.kind !== 'matches') { out.push(step); continue }
+function mergeStep(prev: ScriptStep, step: ScriptStep): ScriptStep | null {
+  if (prev.kind === 'matches' && step.kind === 'matches') {
     const known = prev.match.paths.length > 0 && step.match.paths.length > 0
-    out[out.length - 1] = {
+    return {
       kind: 'matches',
-      command: `${prev.command}; ${step.command}`,
+      command: joinCommands(prev.command, step.command),
       match: {
         paths: known ? [...new Set([...prev.match.paths, ...step.match.paths])] : [],
         numbered: prev.match.numbered && step.match.numbered,
       },
     }
+  }
+  if (prev.kind === 'git' && step.kind === 'git') {
+    return { kind: 'git', command: joinCommands(prev.command, step.command) }
+  }
+  // The tool is what says how to read a line of a listing, and the summary kind
+  // what a number on one means, so those have to agree.
+  if (prev.kind === 'disk' && step.kind === 'disk' && prev.tool === step.tool) {
+    return { kind: 'disk', tool: prev.tool, command: joinCommands(prev.command, step.command) }
+  }
+  if (prev.kind === 'summary' && step.kind === 'summary' && prev.summary === step.summary) {
+    return { kind: 'summary', summary: prev.summary, command: joinCommands(prev.command, step.command) }
+  }
+  return null
+}
+
+function joinCommands(prev: string, next: string): string {
+  return `${prev}; ${next}`
+}
+
+// mergeProducers collapses each such run into one producer. Calling a pair like
+// that unattributable cost BOTH of them their rendering over a boundary neither
+// of them needed - a `git diff --stat` followed by a `git stash list` that found
+// nothing had no boundary to find at all, and the diffstat lost git's colours.
+//
+// `failed` is the set of steps that printed nothing (see failedSteps), keyed by
+// identity - so the merged step has to be entered into it, and only when BOTH
+// halves died: one of them still printing something is a producer.
+function mergeProducers(steps: ScriptStep[], failed: Set<ScriptStep>): ScriptStep[] {
+  const out: ScriptStep[] = []
+  for (const step of steps) {
+    const prev = out[out.length - 1]
+    const merged = prev ? mergeStep(prev, step) : null
+    if (!merged) { out.push(step); continue }
+    if (failed.has(prev) && failed.has(step)) failed.add(merged)
+    out[out.length - 1] = merged
   }
   return out
 }
@@ -1020,6 +1208,25 @@ function searchExtent(step: ScriptStep, slice: string[], lo: number, hi: number,
   return n > 0 ? n : null
 }
 
+// What one stretch of output was split into: the lines each producer printed,
+// and - per producer - whether the FIRST of those lines is provably the first
+// line it printed.
+//
+// The two are different questions, and only the second one licenses a gutter. A
+// view is numbered from the start of the range it asked for, so a section that
+// begins one line late numbers every line of a file wrongly and says so in the
+// tooltip; the language it is highlighted as, by contrast, is the same either
+// way. See `exact` below for what pins a start down.
+interface Distribution {
+  parts: string[][]
+  pinned: boolean[]
+  // Parts that must render as the plain terminal text they are: a run can be
+  // bounded as a WHOLE while the boundaries inside it stay unknowable, and
+  // saying so is what keeps a self-identifying neighbour (most often a trailing
+  // `rg -n`) from being thrown away along with them.
+  plain: Set<number>
+}
+
 // distribute hands a stretch of output to the producers that ran inside it.
 // Null when the boundaries between them are not knowable.
 //
@@ -1033,55 +1240,65 @@ function searchExtent(step: ScriptStep, slice: string[], lo: number, hi: number,
 //
 // A search at either end is bounded too, by its own prefixes rather than by a
 // count - see searchExtent.
-interface Distribution {
-  parts: string[][]
-  // A run can be bounded as a whole while the boundaries inside it remain
-  // unknowable. Keep that run plain without throwing away a self-identifying
-  // neighbour (most often a trailing `rg -n`).
-  plain: Set<number>
-}
-
-function distribute(producers: ScriptStep[], slice: string[]): Distribution | null {
+function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySet<ScriptStep>): Distribution | null {
   if (producers.length === 0) return null
-  if (producers.length === 1) return { parts: [slice], plain: new Set() }
+  if (producers.length === 1) return { parts: [slice], pinned: [true], plain: new Set() }
 
-  // Peel a search-shaped suffix before using file-view limits. A sed range is
-  // an UPPER bound, not an exact count: a range past EOF emits fewer lines.
-  // Greedily taking that maximum made a preceding sed claim the `path:line:`
-  // rows of a later rg. Those rows identify themselves, so preserve the useful
-  // boundary even when everything before it has to remain one plain run.
+  // Peel a search-shaped suffix before using any file-view limit. A sed range is
+  // an UPPER bound, not an exact count: a range past the end of the file emits
+  // fewer lines, and greedily taking the maximum made a preceding sed claim the
+  // `path:line:` rows of a later rg. Those rows identify themselves, so the one
+  // boundary the output really does carry is kept even when everything before it
+  // has to stay one plain run.
   const suffix = searchExtent(producers[producers.length - 1], slice, 0, slice.length, 'end')
   if (suffix != null && suffix < slice.length) {
     const last = producers.length - 1
-    const before = distribute(producers.slice(0, last), slice.slice(0, -suffix))
+    const before = distribute(producers.slice(0, last), slice.slice(0, -suffix), failed)
     const parts = producers.map(() => [] as string[])
+    const pinned = producers.map(() => false)
     const plain = new Set<number>()
     if (before) {
       before.parts.forEach((part, i) => { parts[i] = part })
+      before.pinned.forEach((p, i) => { pinned[i] = p })
       before.plain.forEach((i) => plain.add(i))
     } else {
-      // Several consecutive reads with no headers have no recoverable internal
-      // boundary. Put their combined output on the first slot and explicitly
-      // render it as terminal text.
+      // Several consecutive reads with no headings between them have no
+      // recoverable boundary at all. Their combined output goes on the first
+      // slot, rendered as the terminal text it is.
       parts[0] = slice.slice(0, -suffix)
       plain.add(0)
     }
     parts[last] = slice.slice(-suffix)
-    return { parts, plain }
-  }
-
-  // Consecutive finite ranges are only individually separable when they all
-  // reach their requested end. If their combined output is shorter, at least
-  // one hit EOF and stdout contains no clue which one; assigning maximums from
-  // the left is the false boundary this module exists to avoid.
-  const limits = producers.map(stepLimit)
-  if (limits.every((n) => n != null) && slice.length < limits.reduce((sum, n) => sum + (n ?? 0), 0)) {
-    return null
+    // Every line of a search says which file and line it is; nothing about it is
+    // counted from where the section starts.
+    pinned[last] = true
+    return { parts, pinned, plain }
   }
 
   const out: string[][] = producers.map(() => [])
   let lo = 0
   let hi = slice.length
+
+  const bounds = producers.map((p) => stepLimit(p, failed))
+  // Consecutive finite ranges are only separable when they all reached the end
+  // they asked for. If their combined output is SHORTER, at least one stopped at
+  // the end of its file and nothing in the output says which - so assigning each
+  // one its maximum from the left is exactly the false boundary this module
+  // exists not to draw.
+  const capped = bounds.reduce<number | null>((sum, b) => (sum == null || b == null ? null : sum + b), 0)
+  if (capped != null && slice.length < capped) return null
+  // Whether the counts leave no room for a producer to have fallen short of its
+  // range: every one of them bounded, and the bounds adding up to exactly what
+  // came back. Short of that, a `sed -n 1,20p f` prints twenty lines or however
+  // many f has and nothing in the output says which, so the peel below is the
+  // likeliest split rather than the only one.
+  //
+  // Which producers' line count the output itself vouches for. Everything the
+  // script only bounds from above starts out unvouched-for, and is set below
+  // where something settles it: an `echo` whose text was found where it should
+  // be, a step a diagnostic says printed nothing, a search whose own `path:`
+  // prefixes say how far it reaches.
+  const exact = producers.map(() => capped === slice.length)
 
   // An `echo` whose line is not where it should be printed nothing - it sat
   // behind a `||`, or its trailing blank was trimmed off the end of the output.
@@ -1090,24 +1307,31 @@ function distribute(producers: ScriptStep[], slice: string[]): Distribution | nu
     const expected = echoLines(step)
     return !expected || matchesAt(slice, at, expected)
   }
+  // Whether what was just peeled off an end is a COUNT the output vouches for
+  // rather than the range the script asked for.
+  const vouched = (step: ScriptStep, bound: number | null) =>
+    bound == null || step.kind === 'echo' || failed.has(step)
 
   let head = 0
   for (; head < producers.length; head++) {
-    const limit = stepLimit(producers[head]) ?? searchExtent(producers[head], slice, lo, hi, 'start')
+    const limit = bounds[head] ?? searchExtent(producers[head], slice, lo, hi, 'start')
     if (limit == null) break
     const n = Math.min(limit, hi - lo)
-    if (!fits(producers[head], lo)) continue
+    // Printed nothing, which is a count like any other.
+    if (!fits(producers[head], lo)) { exact[head] = true; continue }
     out[head] = slice.slice(lo, lo + n)
     lo += n
+    if (vouched(producers[head], bounds[head])) exact[head] = true
   }
   let tail = producers.length - 1
   for (; tail > head; tail--) {
-    const limit = stepLimit(producers[tail]) ?? searchExtent(producers[tail], slice, lo, hi, 'end')
+    const limit = bounds[tail] ?? searchExtent(producers[tail], slice, lo, hi, 'end')
     if (limit == null) break
     const n = Math.min(limit, hi - lo)
-    if (!fits(producers[tail], hi - n)) continue
+    if (!fits(producers[tail], hi - n)) { exact[tail] = true; continue }
     out[tail] = slice.slice(hi - n, hi)
     hi -= n
+    if (vouched(producers[tail], bounds[tail])) exact[tail] = true
   }
   // More than one producer with no bound of its own leaves a boundary nothing
   // in the script pins down - the common case, and why those separators matter.
@@ -1119,7 +1343,17 @@ function distribute(producers: ScriptStep[], slice: string[]): Distribution | nu
   let rest = head === tail ? head : producers.length - 1
   while (rest > 0 && producers[rest].kind === 'echo') rest--
   out[rest] = out[rest].concat(slice.slice(lo, hi))
-  return { parts: out, plain: new Set() }
+  // Whatever is left over is what this one printed, so its count is settled once
+  // every other producer's is.
+  if (exact.every((e, i) => e || i === rest)) exact[rest] = true
+  // A producer's first line is where it says it is only if everything printed
+  // before it in this stretch is accounted for exactly. The stretch's own start
+  // is pinned: it is the output's, or the separator the marker search matched.
+  return {
+    parts: out,
+    pinned: producers.map((_, i) => exact.every((e, j) => j >= i || e)),
+    plain: new Set(),
+  }
 }
 
 // splitScriptOutput cuts a command's output into one section per step that
@@ -1130,6 +1364,13 @@ function distribute(producers: ScriptStep[], slice: string[]): Distribution | nu
 // anchor that never appears is skipped rather than fatal - a separator behind a
 // `||` only prints when the command before it failed, and an agent writes those
 // constantly - so a missing one costs a section its highlighting, not the split.
+//
+// Everything the SHELL and its tools said about themselves is taken out of the
+// way first (see diagnosticLines) and put back afterwards as the errors it is.
+// That is what makes this work on a command that failed - which is exactly the
+// output an agent stares at hardest - rather than only on one that did not: the
+// stderr an error adds is the one part of the output that can be told apart from
+// the rest, since it announces which tool wrote it.
 export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSection[] | null {
   const body = output.replace(/\r\n?/g, '\n').replace(/\n$/, '')
   if (!body.trim()) return null
@@ -1139,28 +1380,34 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
   // everything below reads the STRIPPED lines, and the originals ride along for
   // the stretches that render as terminal text rather than as code.
   const coloured = hasAnsi(body)
-  const raw = body.split('\n')
-  const lines = coloured ? raw.map(stripAnsi) : raw
-  if (lines.length > MAX_LINES) return null
+  const rawAll = body.split('\n')
+  const all = coloured ? rawAll.map(stripAnsi) : rawAll
+  if (all.length > MAX_LINES) return null
+  // Attribution runs over the output MINUS the diagnostics; `keep` is where each
+  // of the lines it sees sat in the real output, which is what puts them back.
+  const diag = diagnosticLines(all, steps)
+  const keep = all.map((_, i) => i).filter((i) => !diag[i])
+  const lines = keep.map((i) => all[i])
+  const failed = failedSteps(steps, all, diag)
   const sections: ScriptSection[] = []
   let pending: ScriptStep[] = []
   let pos = 0
   // The lines as they arrived, for the slice `lines.slice(from, to)` covers.
-  const rawSlice = (from: number, to: number) => (coloured ? raw.slice(from, to) : undefined)
+  const rawSlice = (from: number, to: number) => (coloured ? keep.slice(from, to).map((i) => rawAll[i]) : undefined)
 
   const flush = (end: number) => {
     const slice = lines.slice(pos, end)
     const start = pos
     pos = end
     if (slice.length === 0) { pending = []; return }
-    const producers = mergeCompatibleSteps(pending)
-    const distribution = distribute(producers, slice)
-    if (!distribution) {
+    const producers = mergeProducers(pending, failed)
+    const split = distribute(producers, slice, failed)
+    if (!split) {
       sections.push({ kind: 'plain', lines: slice, raw: rawSlice(start, end) })
       pending = []
       return
     }
-    const { parts, plain } = distribution
+    const { parts, pinned, plain } = split
     // The parts partition the slice in order, so walking them keeps each one's
     // offset into the output - which is what pairs it with its raw lines.
     let at = start
@@ -1170,7 +1417,9 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
       if (part.length === 0) return
       const rawPart = rawSlice(from, at)
       const step = producers[i]
-      const limit = stepLimit(step)
+      const limit = stepLimit(step, failed)
+      // A run whose internal boundaries are not knowable renders as the terminal
+      // text it is, whatever the steps inside it were.
       if (plain.has(i)) {
         sections.push({ kind: 'plain', lines: part, raw: rawPart })
         return
@@ -1178,7 +1427,13 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
       // More lines than the range could have produced (an error, a banner, a
       // marker that did not fire) means this is not what the parse thinks it is.
       if (step.kind === 'view' && (limit == null || part.length <= limit)) {
-        sections.push({ kind: 'view', view: step.view, lines: part, raw: rawPart })
+        // These are that file's lines either way; WHICH of its lines they are is
+        // only knowable when nothing before them in the stretch could have
+        // printed one line more or fewer (see Distribution.pinned). So an
+        // unpinned view keeps its language and gives up its gutter, rather than
+        // numbering a file's lines from a start that is a guess.
+        const view = pinned[i] ? step.view : { ...step.view, start: null, end: null, ranges: undefined }
+        sections.push({ kind: 'view', view, lines: part, raw: rawPart })
       } else if (step.kind === 'echo' && part.length <= (limit ?? 0)) {
         // The script says what these lines are, so they render as the string it
         // printed - the same as the separators long enough to anchor on.
@@ -1210,7 +1465,7 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
     // whose own text contains the separator (`---` is a real line in plenty of
     // files) must not cut its section short.
     const total = pending.reduce<number | null>((sum, s) => {
-      const limit = stepLimit(s)
+      const limit = stepLimit(s, failed)
       return sum == null || limit == null ? null : sum + limit
     }, 0)
     let at = total != null && matchesAt(lines, pos + total, expected) ? pos + total : -1
@@ -1228,7 +1483,60 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
   }
   flush(lines.length)
 
-  return sections.some((s) => s.kind !== 'plain') ? sections : null
+  const spliced = spliceDiagnostics(sections, keep, all, coloured ? rawAll : undefined)
+  return spliced.some((s) => s.kind !== 'plain') ? spliced : null
+}
+
+// Section kinds whose line NUMBERS come from where a line sits in the section
+// rather than from the line itself. Cutting one in two would restart a file's
+// numbering part way down it, so a diagnostic that landed INSIDE one costs that
+// section its attribution instead (rather than costing it its honesty).
+const POSITIONAL = new Set(['view', 'banners'])
+
+// spliceDiagnostics puts the lines that were held back for being a tool's own
+// error message back where they came from, as sections of their own.
+//
+// The sections handed in partition the output MINUS those lines, in order, so
+// `keep` maps each one back to where it really sat: a section whose original
+// indices run on consecutively had nothing taken out of it, and a break in them
+// is exactly where a diagnostic interrupted that producer.
+function spliceDiagnostics(
+  sections: ScriptSection[],
+  keep: number[],
+  all: string[],
+  rawAll: string[] | undefined,
+): ScriptSection[] {
+  if (keep.length === all.length) return sections
+  const out: ScriptSection[] = []
+  const errors = (from: number, to: number) => {
+    if (to > from) out.push({ kind: 'error', lines: all.slice(from, to), raw: rawAll?.slice(from, to) })
+  }
+  const piece = (section: ScriptSection, from: number, to: number, plain: boolean): ScriptSection => {
+    const lines = section.lines.slice(from, to)
+    const raw = section.raw?.slice(from, to)
+    return plain ? { kind: 'plain', lines, raw } : { ...section, lines, raw }
+  }
+
+  let at = 0 // where in the filtered lines this section started
+  let last = -1 // the last original line already accounted for
+  for (const section of sections) {
+    const origin = keep.slice(at, at + section.lines.length)
+    at += section.lines.length
+    if (origin.length === 0) continue
+    errors(last + 1, origin[0])
+    last = origin[origin.length - 1]
+    const cuts = origin.flatMap((line, i) => (i > 0 && line !== origin[i - 1] + 1 ? [i] : []))
+    if (cuts.length === 0) { out.push(section); continue }
+    const plain = POSITIONAL.has(section.kind)
+    let from = 0
+    for (const cut of [...cuts, origin.length]) {
+      out.push(piece(section, from, cut, plain))
+      if (cut < origin.length) errors(origin[cut - 1] + 1, origin[cut])
+      from = cut
+    }
+  }
+  errors(last + 1, all.length)
+  return out
 }
 
 // --- Reading a grep's own line prefixes ---------------------------------------
@@ -1272,6 +1580,15 @@ function namesOneFile(paths: string[]): boolean {
   return paths.length === 1 && /\.[^./]+$/.test(paths[0].split('/').pop() ?? '')
 }
 
+// A time of day at the head of a line, which is what a log puts there.
+//
+// `15:13:42 STALL: io full` splits into a `15:` path and a `13:` number as
+// readily as a real `path:12:` prefix does, and comes out as line 13 of a file
+// called 15 - so a line that opens with a clock carries no prefix. Only asked
+// when the search did NOT ask for numbers: a `-n` says the leading number IS the
+// line's, and `12:15:13:42 done` is then line 12 of a log, not a clock.
+const CLOCK = /^\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d+)?\b/
+
 // parseMatchLines reads the prefixes off a search's output. The SHAPE is taken
 // from the lines themselves rather than from the flags, because the same tool
 // prints different ones (`rg` numbers its output for a terminal and not for a
@@ -1281,27 +1598,53 @@ function namesOneFile(paths: string[]): boolean {
 // A majority has to agree on one shape before it is applied - the odd line that
 // does not fit (a truncation notice, a warning on stderr) then renders bare
 // rather than dragging the whole section down with it.
-export function parseMatchLines(lines: string[], paths: string[]): MatchLine[] {
+//
+// The two NUMBERED shapes are counted together, because they are the same output
+// with and without the file named and one section really does carry both: an
+// agent's second search names one file (so grep prints `12:`) where the first
+// named several (so it prints `path:12:`), and a section is what holds the pair.
+// So a majority carrying EITHER is enough, and each line is then asked which of
+// the two it is - a bare `12:` cannot be read as a path prefix and a
+// `path:12:` cannot be read as a bare one, so there is nothing to confuse.
+export function parseMatchLines(lines: string[], paths: string[], asked = true): MatchLine[] {
   const bare = (text: string): MatchLine => ({ path: '', num: '', text, separator: false })
   const body = lines.filter((l) => l.trim() !== '--' && l !== '')
-  const majority = (re: RegExp) => body.length > 0 && body.filter((l) => re.test(l)).length > body.length / 2
+  const majority = (test: (line: string) => boolean) =>
+    body.length > 0 && body.filter(test).length > body.length / 2
 
-  const shape = majority(NUMBERED)
-    ? NUMBERED
-    : majority(PATH_NUMBERED)
-      ? PATH_NUMBERED
-      : !namesOneFile(paths) && majority(PATH_ONLY)
-        ? PATH_ONLY
-        : null
-  if (!shape) return lines.map(bare)
+  // A search that named ONE file prints no `path:` in front of anything, so a
+  // line that looks like it carries one is carrying its own text: `12:15:13:42
+  // done` is line 12 of a log, not line 15 of a file called 12. Same reasoning
+  // as namesOneFile's, which the bare `path:` shape below already follows.
+  const named = (line: string) => {
+    if (namesOneFile(paths)) return null
+    const m = PATH_NUMBERED.exec(line)
+    // A path of nothing but digits is a line number that met another one.
+    return m && !/^\d+$/.test(m[1]) ? m : null
+  }
+  // `asked` is whether the search asked for line numbers (`-n`). It did not
+  // settle the shape - rg numbers its output for a terminal and not for a pipe,
+  // so the lines are still what is read - but it settles how far to trust a
+  // number found there: unasked-for, a leading `15:13:42` is a clock far more
+  // often than it is line 13 of a file called 15.
+  const numberedLine = (l: string) => (asked || !CLOCK.test(l)) && (NUMBERED.test(l) || named(l) !== null)
+  const numbered = majority(numberedLine)
+  const pathOnly = !numbered && !namesOneFile(paths) && majority((l) => PATH_ONLY.test(l))
+  if (!numbered && !pathOnly) return lines.map(bare)
 
   return lines.map((line) => {
     if (line.trim() === '--') return { path: '', num: '', text: line, separator: true }
-    const m = shape.exec(line)
-    if (!m) return bare(line)
-    if (shape === NUMBERED) return { path: '', num: m[1], text: m[2], separator: false }
-    // PATH_NUMBERED's second group is the separator it matched, not content.
-    if (shape === PATH_NUMBERED) return { path: m[1], num: m[3], text: m[4], separator: false }
-    return { path: m[1], num: '', text: m[2], separator: false }
+    if (numbered && !numberedLine(line)) return bare(line)
+    if (numbered) {
+      // A bare number cannot be read as a path prefix and a `path:12:` cannot be
+      // read as a bare one, so there is nothing to choose between here.
+      const n = NUMBERED.exec(line)
+      if (n) return { path: '', num: n[1], text: n[2], separator: false }
+      // PATH_NUMBERED's second group is the separator it matched, not content.
+      const p = named(line)
+      return p ? { path: p[1], num: p[3], text: p[4], separator: false } : bare(line)
+    }
+    const m = PATH_ONLY.exec(line)
+    return m ? { path: m[1], num: '', text: m[2], separator: false } : bare(line)
   })
 }

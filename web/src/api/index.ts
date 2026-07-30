@@ -92,6 +92,7 @@ export type { ChatUsageUpdatedPayload } from './models/ChatUsageUpdatedPayload';
 export type { ChatUserMessageEchoedPayload } from './models/ChatUserMessageEchoedPayload';
 export type { ChatUserMessagePayload } from './models/ChatUserMessagePayload';
 export type { ClaudeUsageResponse } from './models/ClaudeUsageResponse';
+export type { CodexUsageResponse } from './models/CodexUsageResponse';
 export { CommitCreatedEvent } from './models/CommitCreatedEvent';
 export type { CommitInfo } from './models/CommitInfo';
 export type { CommitRepositoryRequest } from './models/CommitRepositoryRequest';
