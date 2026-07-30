@@ -76,6 +76,10 @@ const (
 	// branch tip and start a fresh run. The ONLY write ops in the status family:
 	// they kick work and return immediately, so the agent polls OpHeadStatus for
 	// the result rather than holding a tool call open for minutes.
+	//
+	// The wire value stays "run_tests" though the TOOL is now retry_tests: this
+	// is a request written to a file the daemon picks up, so a rename would
+	// strand any request already on disk for no gain.
 	OpRunTests     Op = "run_tests"
 	OpRunArtifacts Op = "run_artifacts"
 )

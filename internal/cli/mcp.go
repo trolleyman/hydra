@@ -351,7 +351,7 @@ func testLogsFromMCP(runner string, tail int) (string, bool) {
 	return res.Message, res.OK
 }
 
-// runFromMCP backs run_tests / generate_artifacts: it asks the daemon to discard
+// runFromMCP backs retry_tests / generate_artifacts: it asks the daemon to discard
 // the cached result for this head's branch tip and start a fresh run. The daemon
 // returns as soon as the work is queued - it never waits for a suite to finish -
 // so this round trip stays as short as any other, and the agent learns the

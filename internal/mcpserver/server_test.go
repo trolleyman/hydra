@@ -268,7 +268,7 @@ func TestHeadStatusTools(t *testing.T) {
 func TestRunToolsHiddenWithoutDeps(t *testing.T) {
 	resps := runLines(t, Deps{}, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	for _, tl := range resps[0]["result"].(map[string]any)["tools"].([]any) {
-		if n := tl.(map[string]any)["name"].(string); n == "run_tests" || n == "generate_artifacts" {
+		if n := tl.(map[string]any)["name"].(string); n == "retry_tests" || n == "generate_artifacts" {
 			t.Errorf("%s advertised with no backing dep", n)
 		}
 	}
@@ -282,21 +282,23 @@ func TestRunTools(t *testing.T) {
 		RunArtifacts: func(n string) (string, bool) { gotArtifact = n; return "Started 1 artifact(s): shots.", true },
 	}
 	resps := runLines(t, deps,
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_tests","arguments":{"runner":"  unit  "}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"retry_tests","arguments":{"runner":"  unit  "}}}`,
 		// No argument at all means "all of them" - it must not be an error.
+		// Sent under the PRE-RENAME name, which stays dispatchable so a config or
+		// a doc quoting it does not break.
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_tests","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"generate_artifacts","arguments":{"name":"shots"}}}`,
 	)
 	// The name is trimmed before it reaches the host, and an omitted argument
 	// arrives as "" - the "run all of them" form, not an error.
 	if len(seen) != 2 || seen[0] != "unit" || seen[1] != "" {
-		t.Errorf("run_tests saw %q, want [\"unit\", \"\"]", seen)
+		t.Errorf("retry_tests saw %q, want [\"unit\", \"\"]", seen)
 	}
 	if resps[0]["result"].(map[string]any)["isError"] != false {
-		t.Errorf("run_tests should not be a tool error: %v", resps[0])
+		t.Errorf("retry_tests should not be a tool error: %v", resps[0])
 	}
 	if text := firstText(t, resps[1]); !strings.Contains(text, "Started") {
-		t.Errorf("run_tests relayed %q", text)
+		t.Errorf("retry_tests relayed %q", text)
 	}
 	if gotArtifact != "shots" {
 		t.Errorf("generate_artifacts passed name=%q, want \"shots\"", gotArtifact)

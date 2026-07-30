@@ -1108,7 +1108,7 @@ function summarizeToolInput(input: unknown, name = ''): { text: string; prose: b
     const tail = typeof obj.tail === 'number' ? `last ${obj.tail} lines` : ''
     return { text: [runner, tail].filter(Boolean).join(' - '), prose: true }
   }
-  if (name === 'mcp__hydra__run_tests') {
+  if (name === 'mcp__hydra__retry_tests' || name === 'mcp__hydra__run_tests') {
     return { text: typeof obj.runner === 'string' && obj.runner ? obj.runner : 'All runners', prose: true }
   }
   if (name === 'mcp__hydra__generate_artifacts') {
@@ -1295,7 +1295,8 @@ function gitToolHeading(tool: string, input: Record<string, unknown> | null): st
 const HYDRA_TOOL_LABELS: Record<string, string> = {
   get_head_status: 'Check status',
   get_test_logs: 'Test logs',
-  run_tests: 'Run tests',
+  retry_tests: 'Retry tests',
+  run_tests: 'Retry tests',
   generate_artifacts: 'Generate artifacts',
   get_review_comments: 'Review comments',
   add_review_comment: 'Add review comment',
@@ -1308,6 +1309,7 @@ const HYDRA_TOOL_LABELS: Record<string, string> = {
 
 const HYDRA_SUMMARY_ONLY_TOOLS = new Set([
   'mcp__hydra__get_test_logs',
+  'mcp__hydra__retry_tests',
   'mcp__hydra__run_tests',
   'mcp__hydra__generate_artifacts',
   'mcp__hydra__request_mcp_server',
@@ -3461,6 +3463,10 @@ const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   mcp__hydra__git_stash: GitMark,//Archive,
   mcp__hydra__get_head_status: ClipboardList,
   mcp__hydra__get_test_logs: FileText,
+  mcp__hydra__retry_tests: Zap,
+  // Pre-rename name (retry_tests). Every one of these maps keeps both: a
+  // transcript is durable, so a conversation from before the rename still
+  // carries run_tests calls that must not fall back to the raw tool name.
   mcp__hydra__run_tests: Zap,
   mcp__hydra__generate_artifacts: Sparkles,
   mcp__hydra__get_review_comments: MessageSquare,

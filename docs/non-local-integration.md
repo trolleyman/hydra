@@ -235,8 +235,10 @@ linked or not (`internal/http/head_status.go` renders them):
   state, and the project's supervised services.
 - `get_test_logs` - the tail of one runner's captured output (default 200 lines,
   cap 2000), named by runner.
-- `run_tests` / `generate_artifacts` - discard the cached verdict/output for the
-  branch tip and start a fresh run.
+- `retry_tests` / `generate_artifacts` - discard the cached verdict/output for
+  the branch tip and start a fresh run. (`retry_tests` was called `run_tests`;
+  the dispatcher still accepts the old name, and the wire op on the `reviewq`
+  channel is still `run_tests` - see the naming note below.)
 
 They exist because an agent could run its own test command but could not see
 **the thing that actually gates its merge**: the daemon's cached per-runner
@@ -251,11 +253,27 @@ Design notes worth keeping:
   (`tests.Manager.Peek` / `PeekCases`, and a new `artifacts.Manager.Peek`), so a
   status call never starts a run or a generation - a status call that causes the
   thing it reports is a trap. Starting work is a separate, explicit tool.
-- **`run_tests` exists because the agent cannot reproduce the gate.** Hydra's
+- **It is `retry_tests`, not `run_tests`, and the name is the whole design.**
+  Hydra runs a head's runners ITSELF whenever its branch tip moves
+  (`RunTestPrefetch` in `internal/http/tests_prefetch.go`, on by default,
+  `[tests] prefetch = false` to opt out), so "run my tests" is not something an
+  agent ever needs to ask for. A tool called `run_tests` gets called exactly
+  then - after a commit, by an agent that wants a verdict - and every one of
+  those calls is a wasted turn that mostly no-ops anyway, because a runner that
+  settled inside `runCooldown` is reported rather than repeated. Renaming was
+  the fix, not deleting: see the next note for the job that is left, which is a
+  real one. The old name still dispatches (a tool name gets quoted in
+  `mcp_tools_allowed` lists and in project docs), and only `retry_tests` is
+  advertised.
+- **`retry_tests` exists because the agent cannot reproduce the gate.** Hydra's
   runner executes in a separate checkout with the project's real
   `[tests.<name>]` command, possibly `unsafe_host`, possibly needing egress the
   head does not have - so "make the gate re-evaluate" is genuinely not something
-  a head can do with its own shell. It invalidates the branch-tip entry and calls
+  a head can do with its own shell. So when a verdict is wrong rather than
+  merely red - a flake, a run that died on something environmental - clearing it
+  is the one thing an agent has no other route to, and merge-when-green gates on
+  that verdict, so without this a flaky red wedges the head until a human clicks
+  re-run. It invalidates the branch-tip entry and calls
   `Get`, which returns as soon as the run is queued: an agent must never hold a
   tool call open for a suite's runtime, so it polls `get_head_status` instead.
   This is the only place an agent spends the user's CPU, and it is bounded twice
