@@ -87,7 +87,18 @@ export function WorkSpark({ className = '', still = false, size = 'default' }: W
               strokeWidth={long ? 2.1 : 1.7}
               strokeLinecap="round"
               className={still ? undefined : 'work-spark-spoke'}
-              style={still ? undefined : { animationDelay: `${(-i * 0.22).toFixed(2)}s` }}
+              // Delays run in REVERSE index order, which sends the pulse
+              // CLOCKWISE, against the anticlockwise spin (see index.css).
+              // A negative delay ADVANCES a spoke, so the one delayed most
+              // peaks FIRST and the wave runs opposite to the order the
+              // delays are handed out in - reversing them is what turns the
+              // pulse round. Same set of values either way, so it still wraps
+              // exactly onto the 1.32s cycle.
+              style={
+                still
+                  ? undefined
+                  : { animationDelay: `${(-(SPOKE_ANGLES.length - 1 - i) * 0.22).toFixed(2)}s` }
+              }
             />
           </g>
         )
