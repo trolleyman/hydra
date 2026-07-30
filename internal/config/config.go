@@ -91,7 +91,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 const claudeShellCwdPrompt = "## The Bash shell's working directory\n" +
 	"- Your Bash tool runs ONE persistent shell: a `cd` in one call is STILL IN EFFECT in the next call, so chaining `cd web && ...` onto each command works once and then fails.\n" +
 	"- Therefore never `cd` to a RELATIVE path. Either pass the path to the command instead (`rg pat web/src`, `npm --prefix web run lint`, `node web/scripts/x.ts`), or `cd` to an ABSOLUTE one (`cd /abs/path/to/worktree/web && ...`) - which lands in the same place no matter where the shell already is.\n" +
-	"- You do not have to track where the shell is: whenever it is NOT at your worktree root, the Bash result ends with a `Shell cwd is now <path>` note. No note means the shell is at the worktree root.\n" +
+	"- You do not have to track where the shell is: whenever it is NOT at your worktree root, a `Shell cwd is ...` note rides on the Bash call telling you where it is. No note means the shell is at the worktree root.\n" +
 	"- The shell keeps a `cd` only when the whole command exits 0, and it refuses to stay outside the directory it started in, so `cd` is not a reliable way to move - passing paths to commands is.\n"
 
 // Codex does not have Claude's Bash `description` input field. A leading shell

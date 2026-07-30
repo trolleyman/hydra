@@ -21,7 +21,7 @@ func TestCodexPrePromptRequestsBashDescriptions(t *testing.T) {
 // The persistent-shell rules describe Claude's Bash tool and lean on the
 // Claude-only advice hook, so they must not reach an agent that has neither.
 func TestShellCwdPrePromptIsClaudeOnly(t *testing.T) {
-	const marker = "Shell cwd is now"
+	const marker = "Shell cwd is"
 	claude := BuildFinalPrePrompt(Config{}, string(sandbox.AgentTypeClaude))
 	if !strings.Contains(claude, marker) {
 		t.Fatalf("Claude pre-prompt does not explain the persistent Bash shell's cwd")

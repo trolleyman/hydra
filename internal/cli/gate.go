@@ -88,10 +88,14 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 		}
 	}
 
+	// A hook emits at most ONE decision object, so the advice below is confined to
+	// the paths where nothing else is being said: a deny already carries its own
+	// reason, and stacking a second object on it would be a malformed response.
 	result := gate.Decide(policy, toolName, toolInput)
 	switch result.Decision {
 	case gate.Allow:
-		return nil // silence = proceed
+		emitPreAdvice(stdout, toolName, stringField(input, "cwd"))
+		return nil
 	case gate.Deny:
 		emitDeny(stdout, result.Reason)
 		return nil
@@ -99,10 +103,34 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 		decision := resolveAsk(toolName, result)
 		if decision == gate.Deny {
 			emitDeny(stdout, result.Reason+" (denied)")
+			return nil
 		}
+		emitPreAdvice(stdout, toolName, stringField(input, "cwd"))
 		return nil
 	}
 	return nil
+}
+
+// emitPreAdvice states where the persistent Bash shell already is, before the
+// command runs. This is the half that survives a FAILING call: Claude drops
+// additionalContext from PostToolUseFailure (measured), so without it the shell's
+// position goes unmentioned for every command that exits non-zero - and a run of
+// failures is exactly when the agent is most likely to be lost. Silent at the
+// worktree root, and silent for every tool but Bash.
+func emitPreAdvice(w io.Writer, toolName, cwd string) {
+	if toolName != "Bash" {
+		return
+	}
+	advice := gate.ShellCwdAdviceBefore(cwd, os.Getenv(gate.EnvWorktree))
+	if advice == "" {
+		return
+	}
+	appendJSONLine(w, map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":     "PreToolUse",
+			"additionalContext": advice,
+		},
+	})
 }
 
 // emitPostAdvice attaches after-the-fact guidance to a tool call that already
@@ -110,6 +138,18 @@ func runGate(agentType string, stdin io.Reader, stdout io.Writer) error {
 // the read-only .git explanation (which needs the command and its output) and the
 // shell's resulting cwd (which the Bash result itself never reports). Silence is
 // the normal case - a hook that printed on every tool call would be noise.
+//
+// KNOWN GAP (measured on CLI 2.1.220): Claude delivers additionalContext from
+// PostToolUse but silently DROPS it from PostToolUseFailure - the hook runs and
+// emits, and the model never sees it. So everything here reaches the agent only
+// when the Bash call exited 0. The cwd note covers itself (emitPreAdvice restates
+// it before the next call), but GitReadonlyAdvice cannot: it needs the output, and
+// a git write that hit the read-only .git exits non-zero by definition. It
+// therefore lands only when the git command is not what set the script's exit
+// status (e.g. it is piped into something that succeeds). The subcommands with a
+// mcp__hydra__git_* equivalent are unaffected - they are redirected at PreToolUse,
+// before running - so what is lost is the explanation for the uncovered writes
+// (`git tag`, `git worktree add`, ...).
 func emitPostAdvice(w io.Writer, toolName string, toolInput map[string]any, response any, cwd string) {
 	if toolName != "Bash" {
 		return
@@ -118,7 +158,7 @@ func emitPostAdvice(w io.Writer, toolName string, toolInput map[string]any, resp
 	if a := gate.GitReadonlyAdvice(stringField(toolInput, "command"), toolResponseText(response)); a != "" {
 		parts = append(parts, a)
 	}
-	if a := gate.ShellCwdAdvice(cwd, os.Getenv(gate.EnvWorktree)); a != "" {
+	if a := gate.ShellCwdAdviceAfter(cwd, os.Getenv(gate.EnvWorktree)); a != "" {
 		parts = append(parts, a)
 	}
 	if len(parts) == 0 {
