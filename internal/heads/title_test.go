@@ -7,9 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
 func TestDeriveTitle(t *testing.T) {
@@ -164,12 +167,55 @@ func TestTitleEnvDisablesThinking(t *testing.T) {
 	}
 }
 
+func TestTitleCommandUsesHeadProvider(t *testing.T) {
+	instruction := "summarise this"
+	tests := []struct {
+		name      string
+		agentType sandbox.AgentType
+		want      []string
+	}{
+		{
+			name:      "claude",
+			agentType: sandbox.AgentTypeClaude,
+			want:      []string{"claude", "-p", instruction, "--model", "haiku", "--tools", "", "--strict-mcp-config", "--system-prompt", titleSystemPrompt},
+		},
+		{
+			name:      "codex",
+			agentType: sandbox.AgentTypeCodex,
+			want:      []string{"codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", instruction},
+		},
+		{
+			name:      "gemini",
+			agentType: sandbox.AgentTypeGemini,
+			want:      []string{"gemini", "--approval-mode", "plan", "--output-format", "text", "-p", instruction},
+		},
+		{
+			name:      "copilot",
+			agentType: sandbox.AgentTypeCopilot,
+			want:      []string{"copilot", "--autopilot", "-p", instruction},
+		},
+		{
+			name:      "bash falls back to claude",
+			agentType: sandbox.AgentTypeBash,
+			want:      []string{"claude", "-p", instruction, "--model", "haiku", "--tools", "", "--strict-mcp-config", "--system-prompt", titleSystemPrompt},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := titleCommand(context.Background(), tt.agentType, instruction)
+			if got := cmd.Args; !slices.Equal(got, tt.want) {
+				t.Errorf("args = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTitleCallError(t *testing.T) {
 	// A killed-on-deadline child reports a bare "signal: killed"; the caller has
 	// to learn it was a timeout from the context, not the process error.
 	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	err := titleCallError(expired, errors.New("signal: killed"))
+	err := titleCallError(expired, "claude", errors.New("signal: killed"))
 	if !errors.Is(err, ErrTitleTimeout) {
 		t.Errorf("expired ctx: got %v, want ErrTitleTimeout", err)
 	}
@@ -180,9 +226,12 @@ func TestTitleCallError(t *testing.T) {
 	// A real non-zero exit surfaces the CLI's own first stderr line, which
 	// cmd.Output() captures but nothing used to read.
 	exit := exitErrorWithStderr(t, "Invalid API key - please run /login\nmore noise\n")
-	err = titleCallError(context.Background(), exit)
+	err = titleCallError(context.Background(), "gemini", exit)
 	if !strings.Contains(err.Error(), "Invalid API key") {
 		t.Errorf("exit error dropped stderr: %v", err)
+	}
+	if !strings.Contains(err.Error(), "gemini:") {
+		t.Errorf("exit error dropped provider name: %v", err)
 	}
 	if strings.Contains(err.Error(), "more noise") {
 		t.Errorf("exit error should keep only the first stderr line: %v", err)
@@ -193,7 +242,7 @@ func TestTitleCallError(t *testing.T) {
 
 	// Nothing on stderr, nothing to add: pass the error through untouched.
 	plain := errors.New("exec: \"claude\": executable file not found in $PATH")
-	if err := titleCallError(context.Background(), plain); !errors.Is(err, plain) {
+	if err := titleCallError(context.Background(), "claude", plain); !errors.Is(err, plain) {
 		t.Errorf("plain error should pass through, got %v", err)
 	}
 }
