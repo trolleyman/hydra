@@ -59,6 +59,27 @@ func TestBuildCodexConfigMergesAndPreserves(t *testing.T) {
 	if len(args) != 2 || args[0] != "mcp" || args[1] != "codex" {
 		t.Errorf("codex hydra args = %v, want [mcp codex]", args)
 	}
+	envVars, _ := hydra["env_vars"].([]any)
+	gotEnv := make(map[string]bool, len(envVars))
+	for _, raw := range envVars {
+		if name, ok := raw.(string); ok {
+			gotEnv[name] = true
+		}
+	}
+	for _, name := range []string{
+		"HYDRA_WORKTREE",
+		"HYDRA_BRANCH",
+		"HYDRA_GITOPS_DIR",
+		"HYDRA_REVIEW_PATH",
+		"HYDRA_REVIEW_REQ_DIR",
+		"HYDRA_APPROVAL_DIR",
+		"HYDRA_GATE_POLICY_PATH",
+		"HYDRA_MCP_CATALOG_PATH",
+	} {
+		if !gotEnv[name] {
+			t.Errorf("codex hydra env_vars missing %s: %v", name, envVars)
+		}
+	}
 }
 
 func TestBuildCodexConfigRejectsMalformed(t *testing.T) {

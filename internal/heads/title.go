@@ -16,6 +16,7 @@ import (
 
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
 // maxTitleLen bounds both prompt-derived and LLM-generated titles so the
@@ -54,9 +55,9 @@ func truncateTitle(s string) string {
 	return strings.TrimSpace(cut) + "..."
 }
 
-// titleModel is the cheapest Claude tier - title generation is a throwaway
+// claudeTitleModel is the cheapest Claude tier - title generation is a throwaway
 // one-liner where quality barely matters but cost and latency do.
-const titleModel = "haiku"
+const claudeTitleModel = "haiku"
 
 // titleGenTimeout caps how long the one-shot title call may run before we give
 // up and keep the prompt-derived title. With thinking off (see titleEnv) the
@@ -73,17 +74,16 @@ var ErrNoPrompt = errors.New("agent has no task prompt to summarise")
 // can tell "the model said nothing" from "the call never landed".
 var ErrNoTitle = errors.New("the model did not return a usable title")
 
-// ErrTitleTimeout is returned when the `claude` call outlived titleGenTimeout.
+// ErrTitleTimeout is returned when the provider CLI call outlived titleGenTimeout.
 // It exists because the raw error in that case is a bare "signal: killed" (exec
 // SIGKILLs the child when the context expires), which told the user nothing -
 // that opaque toast is what sent us looking for this bug in the first place.
 var ErrTitleTimeout = errors.New("timed out waiting for the title model")
 
-// GenerateTitle asks the host `claude` CLI (cheapest model, non-interactive) for
-// a concise title summarising a head's task prompt. Blocking and bounded by
-// titleGenTimeout; used both by the background refinement on spawn and by the
-// rename box's "Generate" button.
-func GenerateTitle(ctx context.Context, projectRoot, prompt string) (string, error) {
+// GenerateTitle asks the head's own provider CLI for a concise title summarising
+// its task prompt. Blocking and bounded by titleGenTimeout; used both by the
+// background refinement on spawn and by the rename box's "Generate" button.
+func GenerateTitle(ctx context.Context, projectRoot string, agentType sandbox.AgentType, prompt string) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return "", errtrace.Wrap(ErrNoPrompt)
 	}
@@ -92,7 +92,7 @@ func GenerateTitle(ctx context.Context, projectRoot, prompt string) (string, err
 	// of that text (and shrink image paths to their filename) so the title is
 	// about the task, not a path the model can't read.
 	prompt = inlineUploadRefs(prompt, paths.GetUploadsDirFromProjectRoot(projectRoot))
-	title, err := generateTitle(ctx, prompt)
+	title, err := generateTitle(ctx, agentType, prompt)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -107,14 +107,14 @@ func GenerateTitle(ctx context.Context, projectRoot, prompt string) (string, err
 // the prompt, then writing it to the DB for the next poll to pick up. It is
 // strictly best-effort: any failure (no credits, offline, CLI missing) leaves
 // the prompt-derived title in place. Runs detached from the request lifecycle,
-// but bound to ctx (the server-lifetime context) so it - and its `claude` child
+// but bound to ctx (the server-lifetime context) so it - and its provider child
 // - are cancelled on shutdown rather than left orphaned.
-func generateTitleAsync(ctx context.Context, store *db.Store, projectRoot, id, prompt string, onChange func()) {
+func generateTitleAsync(ctx context.Context, store *db.Store, projectRoot, id string, agentType sandbox.AgentType, prompt string, onChange func()) {
 	if store == nil || strings.TrimSpace(prompt) == "" {
 		return
 	}
 	go func() {
-		title, err := GenerateTitle(ctx, projectRoot, prompt)
+		title, err := GenerateTitle(ctx, projectRoot, agentType, prompt)
 		if err != nil {
 			// A cancelled context means the server is shutting down (typically a
 			// daemon auto-upgrade restart moments after the spawn), not a real
@@ -222,10 +222,10 @@ func readUploadSnippet(path string) (string, bool) {
 	return snippet, true
 }
 
-// generateTitle shells out to `claude -p` for a one-shot title. Kept separate
+// generateTitle shells out to the matching provider for a one-shot title. Kept separate
 // from generateTitleAsync so the shell-out is easy to swap for a local model
 // later without touching the spawn flow.
-func generateTitle(ctx context.Context, prompt string) (string, error) {
+func generateTitle(ctx context.Context, agentType sandbox.AgentType, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, titleGenTimeout)
 	defer cancel()
 
@@ -237,23 +237,42 @@ func generateTitle(ctx context.Context, prompt string) (string, error) {
 		"Respond with ONLY the title: no quotes, no trailing punctuation, no preamble.\n\n" +
 		"Task:\n" + prompt
 
-	cmd := exec.CommandContext(ctx, "claude", "-p", instruction,
-		"--model", titleModel,
-		// No tools and no MCP servers: this is a pure text summary, and an agent
-		// that can reach for Read/Bash will hit a permission prompt it cannot
-		// answer in -p mode and reply with a question instead of a title.
-		"--tools", "",
-		"--strict-mcp-config",
-		"--system-prompt", titleSystemPrompt,
-	)
-	// Run outside any project so a repo's CLAUDE.md can't steer the summary.
+	cmd := titleCommand(ctx, agentType, instruction)
+	// Run outside any project so repository instructions cannot steer the summary.
 	cmd.Dir = os.TempDir()
 	cmd.Env = titleEnv()
 	out, err := cmd.Output()
 	if err != nil {
-		return "", errtrace.Wrap(titleCallError(ctx, err))
+		return "", errtrace.Wrap(titleCallError(ctx, filepath.Base(cmd.Path), err))
 	}
 	return sanitizeGeneratedTitle(string(out)), nil
+}
+
+// titleCommand uses the same provider as the head. Apart from avoiding one
+// provider's exhausted quota breaking every head, this keeps title generation
+// inside the account and model family the user selected for the work.
+func titleCommand(ctx context.Context, agentType sandbox.AgentType, instruction string) *exec.Cmd {
+	switch agentType {
+	case sandbox.AgentTypeCodex:
+		return exec.CommandContext(ctx, "codex", "exec",
+			"--skip-git-repo-check", "--sandbox", "read-only", "--color", "never",
+			instruction)
+	case sandbox.AgentTypeGemini:
+		return exec.CommandContext(ctx, "gemini",
+			"--approval-mode", "plan", "--output-format", "text", "-p", instruction)
+	case sandbox.AgentTypeCopilot:
+		return exec.CommandContext(ctx, "copilot", "--autopilot", "-p", instruction)
+	default:
+		// Claude remains the default for old rows with an empty agent type and
+		// for Bash heads, which do not have an LLM provider of their own.
+		return exec.CommandContext(ctx, "claude", "-p", instruction,
+			"--model", claudeTitleModel,
+			// No tools and no MCP servers: this is a pure text summary.
+			"--tools", "",
+			"--strict-mcp-config",
+			"--system-prompt", titleSystemPrompt,
+		)
+	}
 }
 
 // titleEnv is the environment for the title call: the daemon's own environment
@@ -281,14 +300,14 @@ const maxTitleErrDetail = 200
 // something a user can act on. Left raw it is a bare "signal: killed" on
 // timeout (exec SIGKILLs the child when ctx expires) and a bare "exit status 1"
 // otherwise, with the CLI's own diagnosis sitting unread in ExitError.Stderr.
-func titleCallError(ctx context.Context, err error) error {
+func titleCallError(ctx context.Context, provider string, err error) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return errtrace.Errorf("%w after %s", ErrTitleTimeout, titleGenTimeout)
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		if detail := truncate(firstLine(string(exitErr.Stderr)), maxTitleErrDetail); detail != "" {
-			return errtrace.Errorf("claude: %s (%w)", detail, err)
+			return errtrace.Errorf("%s: %s (%w)", provider, detail, err)
 		}
 	}
 	return errtrace.Wrap(err)

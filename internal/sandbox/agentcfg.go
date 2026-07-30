@@ -600,6 +600,21 @@ func BuildCodexHooks(existing []byte, hydraBin string) ([]byte, error) {
 // config.toml (`[mcp_servers.hydra]`), preserving everything else (model, auth,
 // etc.). Codex reads MCP servers from ~/.codex/config.toml. A malformed host
 // config is a hard error so the caller can skip seeding rather than clobber it.
+var codexHydraMCPEnvVars = []string{
+	"HYDRA_HEAD_ID",
+	"HYDRA_AGENT_TYPE",
+	"HYDRA_PROJECT_ROOT",
+	"HYDRA_WORKTREE",
+	"HYDRA_BRANCH",
+	"HYDRA_BASE_BRANCH",
+	"HYDRA_GITOPS_DIR",
+	"HYDRA_REVIEW_PATH",
+	"HYDRA_REVIEW_REQ_DIR",
+	"HYDRA_APPROVAL_DIR",
+	"HYDRA_GATE_POLICY_PATH",
+	"HYDRA_MCP_CATALOG_PATH",
+}
+
 func BuildCodexConfig(existing []byte, hydraBin string) ([]byte, error) {
 	cfg := map[string]interface{}{}
 	if len(existing) > 0 {
@@ -612,7 +627,11 @@ func BuildCodexConfig(existing []byte, hydraBin string) ([]byte, error) {
 		servers = map[string]interface{}{}
 	}
 	name, command, args := HydraMCPServer(hydraBin, "codex")
-	servers[name] = map[string]interface{}{"command": command, "args": args}
+	servers[name] = map[string]interface{}{
+		"command":  command,
+		"args":     args,
+		"env_vars": codexHydraMCPEnvVars,
+	}
 	cfg["mcp_servers"] = servers
 
 	data, err := toml.Marshal(cfg)
