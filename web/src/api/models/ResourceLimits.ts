@@ -34,5 +34,29 @@ export type ResourceLimits = {
      * Hard write ceiling in MB/s (systemd IOWriteBandwidthMax, i.e. cgroup io.max). Unlike io_weight this needs no particular IO scheduler, so it is the cap that reliably bites - weights are inert unless the host uses bfq or blk-iocost. null uses the 40 MB/s safe default; 0 = no cap.
      */
     io_write_bandwidth_max?: number | null;
+    /**
+     * Machine-wide CPU ceiling for all Hydra workloads. User scope only; null uses the machine-scaled default and 0 disables the ceiling.
+     */
+    machine_cpu_quota?: number | null;
+    /**
+     * Machine-wide read ceiling in MB/s for all Hydra workloads. User scope only.
+     */
+    machine_io_read_bandwidth_max?: number | null;
+    /**
+     * Machine-wide write ceiling in MB/s for all Hydra workloads. User scope only.
+     */
+    machine_io_write_bandwidth_max?: number | null;
+    /**
+     * Shared CPU ceiling for tests, artifacts, and updates. User scope only.
+     */
+    background_cpu_quota?: number | null;
+    /**
+     * Shared background read ceiling in MB/s. User scope only.
+     */
+    background_io_read_bandwidth_max?: number | null;
+    /**
+     * Shared background write ceiling in MB/s. User scope only.
+     */
+    background_io_write_bandwidth_max?: number | null;
 };
 

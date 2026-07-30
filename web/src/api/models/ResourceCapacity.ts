@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Read-only built-in safety ceilings resolved for the server machine. CPU quotas use systemd's percent-of-one-core units (400 = four logical CPUs). Workloads retain explicit [resources] overrides, while machine and background values are aggregate parent-slice ceilings.
+ * Effective safety ceilings resolved for the server machine and user config. CPU quotas use systemd's percent-of-one-core units (400 = four logical CPUs). Workloads retain explicit [resources] overrides, while machine and background values are aggregate parent-slice ceilings.
  */
 export type ResourceCapacity = {
     logical_cpus: number;

@@ -22,10 +22,12 @@ CPU defaults have a one-core floor. This keeps small machines usable rather than
 assuming a 32-core development host. The aggregate IO limits target the device
 backing `/`, while each workload targets the device backing its project root.
 
-The Settings "Machine capacity" section shows these resolved defaults. The
-editable "Resource limits" section controls the one-workload limits: an empty
-CPU or IO field uses the safe default, while an explicit `0` opts out. Memory
-and task limits remain opt-in.
+The Settings User tab edits the machine and background rows in "Machine
+capacity"; those values are stored in the user `[resources]` table and applied
+immediately. Project and local config cannot change machine-wide policy. The
+"Resource limits" section controls one-workload limits. Empty CPU or IO fields
+use safe defaults, while an explicit `0` opts out. Memory and task limits remain
+opt-in.
 
 ## Motivation
 

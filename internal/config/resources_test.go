@@ -113,6 +113,27 @@ func TestResolveResourceLimits(t *testing.T) {
 	}
 }
 
+func TestResolveAggregateResourceLimits(t *testing.T) {
+	got := (Config{}).ResolveAggregateResourceLimits()
+	want := sandbox.DefaultAggregateLimits(runtime.NumCPU())
+	if got != want {
+		t.Fatalf("defaults got %+v, want %+v", got, want)
+	}
+
+	got = (Config{Resources: &ResourceLimits{
+		MachineCPUQuota:              iptr(800),
+		MachineIOWriteBandwidthMax:   iptr(0),
+		BackgroundIOReadBandwidthMax: iptr(25),
+	}}).ResolveAggregateResourceLimits()
+	if got.MachineCPUQuota != 800 || got.MachineIOWriteBandwidthMax != 0 ||
+		got.BackgroundIOReadBandwidthMax != 25 {
+		t.Fatalf("overrides not retained: %+v", got)
+	}
+	if got.BackgroundCPUQuota != want.BackgroundCPUQuota {
+		t.Fatalf("unset field lost default: %+v", got)
+	}
+}
+
 // TestRenderConfigEmitsResources verifies renderConfig writes a real [resources]
 // table from cfg.Resources (only the set fields) and that it reloads to the same
 // values - the round-trip the Settings resource-limits editor relies on.

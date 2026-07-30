@@ -1745,7 +1745,7 @@ type ConfigResponse struct {
 	// Previews Per-project live-server scripts, each proxied on demand as a clickable preview of the head's app ([previews.<name>] in config.toml). A config still spelling one as an [artifacts.<name>] with type = "server" is upgraded on read, so it appears here and not under artifacts.
 	Previews *[]PreviewScript `json:"previews"`
 
-	// ResourceCapacity Read-only built-in safety ceilings resolved for the server machine. CPU quotas use systemd's percent-of-one-core units (400 = four logical CPUs). Workloads retain explicit [resources] overrides, while machine and background values are aggregate parent-slice ceilings.
+	// ResourceCapacity Effective safety ceilings resolved for the server machine and user config. CPU quotas use systemd's percent-of-one-core units (400 = four logical CPUs). Workloads retain explicit [resources] overrides, while machine and background values are aggregate parent-slice ceilings.
 	ResourceCapacity ResourceCapacity `json:"resource_capacity"`
 
 	// Resources The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below. Built-in defaults apply CPU and IO ceilings as well as 50/50 weights; explicit zero disables a hard cap. Weights are soft (bite only under contention); hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
@@ -2934,7 +2934,7 @@ type ResolvedPathResponse struct {
 	RepoRoot *string `json:"repo_root,omitempty"`
 }
 
-// ResourceCapacity Read-only built-in safety ceilings resolved for the server machine. CPU quotas use systemd's percent-of-one-core units (400 = four logical CPUs). Workloads retain explicit [resources] overrides, while machine and background values are aggregate parent-slice ceilings.
+// ResourceCapacity Effective safety ceilings resolved for the server machine and user config. CPU quotas use systemd's percent-of-one-core units (400 = four logical CPUs). Workloads retain explicit [resources] overrides, while machine and background values are aggregate parent-slice ceilings.
 type ResourceCapacity struct {
 	BackgroundCpuQuota   int `json:"background_cpu_quota"`
 	BackgroundIoReadMax  int `json:"background_io_read_max"`
@@ -2958,6 +2958,15 @@ type ResourceChangedEventType string
 
 // ResourceLimits The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below. Built-in defaults apply CPU and IO ceilings as well as 50/50 weights; explicit zero disables a hard cap. Weights are soft (bite only under contention); hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
 type ResourceLimits struct {
+	// BackgroundCpuQuota Shared CPU ceiling for tests, artifacts, and updates. User scope only.
+	BackgroundCpuQuota *int `json:"background_cpu_quota"`
+
+	// BackgroundIoReadBandwidthMax Shared background read ceiling in MB/s. User scope only.
+	BackgroundIoReadBandwidthMax *int `json:"background_io_read_bandwidth_max"`
+
+	// BackgroundIoWriteBandwidthMax Shared background write ceiling in MB/s. User scope only.
+	BackgroundIoWriteBandwidthMax *int `json:"background_io_write_bandwidth_max"`
+
 	// CpuQuota Hard CPU cap in percent of one core (systemd CPUQuota; 200 = 2 cores). null uses the machine-scaled safe default; 0 = no cap.
 	CpuQuota *int `json:"cpu_quota"`
 
@@ -2972,6 +2981,15 @@ type ResourceLimits struct {
 
 	// IoWriteBandwidthMax Hard write ceiling in MB/s (systemd IOWriteBandwidthMax, i.e. cgroup io.max). Unlike io_weight this needs no particular IO scheduler, so it is the cap that reliably bites - weights are inert unless the host uses bfq or blk-iocost. null uses the 40 MB/s safe default; 0 = no cap.
 	IoWriteBandwidthMax *int `json:"io_write_bandwidth_max"`
+
+	// MachineCpuQuota Machine-wide CPU ceiling for all Hydra workloads. User scope only; null uses the machine-scaled default and 0 disables the ceiling.
+	MachineCpuQuota *int `json:"machine_cpu_quota"`
+
+	// MachineIoReadBandwidthMax Machine-wide read ceiling in MB/s for all Hydra workloads. User scope only.
+	MachineIoReadBandwidthMax *int `json:"machine_io_read_bandwidth_max"`
+
+	// MachineIoWriteBandwidthMax Machine-wide write ceiling in MB/s for all Hydra workloads. User scope only.
+	MachineIoWriteBandwidthMax *int `json:"machine_io_write_bandwidth_max"`
 
 	// MemoryMax Hard memory ceiling in MB (systemd MemoryMax); the cgroup is OOM-killed past it. null/0 = no cap.
 	MemoryMax *int `json:"memory_max"`

@@ -96,7 +96,7 @@ func ScopesAvailable() bool {
 		if ioOK && !ioWeightEffective() {
 			log.Printf("sandbox: cgroup io.weight does nothing on this host (no device using the bfq scheduler, and blk-iocost is unconfigured), so IOWeight is accepted but inert - a heavy workload can still stall the machine. Set [resources] io_write_bandwidth_max (and io_read_bandwidth_max) for a ceiling that bites regardless, or enable bfq/iocost on the host.")
 		}
-		configureHydraSlices()
+		configureHydraSlices(DefaultAggregateLimits(runtime.NumCPU()))
 	})
 	return scopeOK
 }
@@ -114,7 +114,7 @@ const (
 // workload on another device still gets its per-scope project-path cap; the
 // aggregate IO ceiling currently protects the overwhelmingly common case where
 // Hydra's projects and caches live below the home directory on the root device.
-func configureHydraSlices() {
+func configureHydraSlices(limits AggregateLimits) {
 	if systemctlPath == "" {
 		return
 	}
@@ -137,25 +137,49 @@ func configureHydraSlices() {
 	}
 	var allProps []string
 	if cpuOK {
-		allProps = append(allProps, "CPUQuota="+strconv.Itoa(DefaultMachineCPUQuota(runtime.NumCPU()))+"%")
+		allProps = append(allProps, quotaProperty(limits.MachineCPUQuota))
 	}
 	if ioMaxOK {
-		allProps = append(allProps,
-			"IOReadBandwidthMax=/ "+strconv.Itoa(DefaultMachineIOReadBandwidthMax)+"M",
-			"IOWriteBandwidthMax=/ "+strconv.Itoa(DefaultMachineIOWriteBandwidthMax)+"M")
+		allProps = append(allProps, bandwidthProperties(
+			limits.MachineIOReadBandwidthMax, limits.MachineIOWriteBandwidthMax)...)
 	}
 	set(hydraSlice, allProps...)
 
 	var backgroundProps []string
 	if cpuOK {
-		backgroundProps = append(backgroundProps, "CPUQuota="+strconv.Itoa(DefaultBackgroundCPUQuota(runtime.NumCPU()))+"%")
+		backgroundProps = append(backgroundProps, quotaProperty(limits.BackgroundCPUQuota))
 	}
 	if ioMaxOK {
-		backgroundProps = append(backgroundProps,
-			"IOReadBandwidthMax=/ "+strconv.Itoa(DefaultBackgroundIOReadBandwidthMax)+"M",
-			"IOWriteBandwidthMax=/ "+strconv.Itoa(DefaultBackgroundIOWriteBandwidthMax)+"M")
+		backgroundProps = append(backgroundProps, bandwidthProperties(
+			limits.BackgroundIOReadBandwidthMax, limits.BackgroundIOWriteBandwidthMax)...)
 	}
 	set(hydraBackgroundSlice, backgroundProps...)
+}
+
+func quotaProperty(value int) string {
+	if value <= 0 {
+		return "CPUQuota="
+	}
+	return "CPUQuota=" + strconv.Itoa(value) + "%"
+}
+
+func bandwidthProperties(read, write int) []string {
+	readProperty, writeProperty := "IOReadBandwidthMax=", "IOWriteBandwidthMax="
+	if read > 0 {
+		readProperty += "/ " + strconv.Itoa(read) + "M"
+	}
+	if write > 0 {
+		writeProperty += "/ " + strconv.Itoa(write) + "M"
+	}
+	return []string{readProperty, writeProperty}
+}
+
+// ConfigureAggregateLimits applies machine-wide slice ceilings immediately.
+// It is safe to call at startup and after saving User settings.
+func ConfigureAggregateLimits(limits AggregateLimits) {
+	if ScopesAvailable() {
+		configureHydraSlices(limits)
+	}
 }
 
 // probeScope runs a throwaway scope around /bin/true and reports whether it was

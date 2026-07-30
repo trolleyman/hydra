@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ChangeEvent, ReactNode } from 'react'
 import type { ResourceLimits } from '../../api/models/ResourceLimits'
 import type { ResourceCapacity } from '../../api/models/ResourceCapacity'
 import { StorageKeys } from '../../lib/storage'
@@ -156,7 +156,24 @@ export function ResourceLimitsSection({
   )
 }
 
-export function MachineCapacitySection({ capacity }: { capacity: ResourceCapacity }) {
+export function MachineCapacitySection({
+  capacity,
+  resources,
+  onChange,
+}: {
+  capacity: ResourceCapacity
+  resources: ResourceLimits | null | undefined
+  onChange: (r: ResourceLimits | null) => void
+}) {
+  const r = resources ?? {}
+  function set<K extends keyof ResourceLimits>(key: K, val: ResourceLimits[K] | null) {
+    const next = { ...r, [key]: val } as ResourceLimits
+    const cleaned = Object.fromEntries(Object.entries(next).filter(([, value]) => value !== null && value !== undefined)) as ResourceLimits
+    onChange(Object.keys(cleaned).length ? cleaned : null)
+  }
+  const machineDefaultCPU = Math.min(1600, Math.max(100, capacity.logical_cpus * 50))
+  const backgroundDefaultCPU = Math.min(400, Math.max(100, capacity.logical_cpus * 25))
+
   return (
     <SettingSection
       title="Machine capacity"
@@ -170,18 +187,30 @@ export function MachineCapacitySection({ capacity }: { capacity: ResourceCapacit
           <span>CPU max</span>
           <span>Read / write</span>
         </div>
-        <CapacityRow
+        <CapacityEditRow
           label="All Hydra workloads"
-          cpu={capacity.machine_cpu_quota}
-          read={capacity.machine_io_read_max}
-          write={capacity.machine_io_write_max}
+          cpu={r.machine_cpu_quota}
+          read={r.machine_io_read_bandwidth_max}
+          write={r.machine_io_write_bandwidth_max}
+          defaultCPU={machineDefaultCPU}
+          defaultRead={160}
+          defaultWrite={80}
+          onCPU={(value) => set('machine_cpu_quota', value)}
+          onRead={(value) => set('machine_io_read_bandwidth_max', value)}
+          onWrite={(value) => set('machine_io_write_bandwidth_max', value)}
         />
-        <CapacityRow
+        <CapacityEditRow
           label="Tests and artifacts"
           detail="Shared subset of the total above"
-          cpu={capacity.background_cpu_quota}
-          read={capacity.background_io_read_max}
-          write={capacity.background_io_write_max}
+          cpu={r.background_cpu_quota}
+          read={r.background_io_read_bandwidth_max}
+          write={r.background_io_write_bandwidth_max}
+          defaultCPU={backgroundDefaultCPU}
+          defaultRead={80}
+          defaultWrite={40}
+          onCPU={(value) => set('background_cpu_quota', value)}
+          onRead={(value) => set('background_io_read_bandwidth_max', value)}
+          onWrite={(value) => set('background_io_write_bandwidth_max', value)}
         />
         <CapacityRow
           label="One workload"
@@ -192,9 +221,47 @@ export function MachineCapacitySection({ capacity }: { capacity: ResourceCapacit
         />
       </div>
       <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-        CPU capacity scales with the host and is bounded on very small or large machines. IO ceilings use cgroup io.max, so they remain effective when IO weight is inert on NVMe storage.
+        Empty fields use the machine-scaled defaults shown. Enter 0 to remove a ceiling. Saving applies these machine-wide limits immediately.
       </p>
     </SettingSection>
+  )
+}
+
+function CapacityEditRow({
+  label, detail, cpu, read, write, defaultCPU, defaultRead, defaultWrite, onCPU, onRead, onWrite,
+}: {
+  label: string
+  detail?: string
+  cpu?: number | null
+  read?: number | null
+  write?: number | null
+  defaultCPU: number
+  defaultRead: number
+  defaultWrite: number
+  onCPU: (value: number | null) => void
+  onRead: (value: number | null) => void
+  onWrite: (value: number | null) => void
+}) {
+  const change = (handler: (value: number | null) => void) => (event: ChangeEvent<HTMLInputElement>) =>
+    handler(event.target.value === '' ? null : Math.max(0, parseInt(event.target.value, 10) || 0))
+  const compactInput = 'w-24 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-right font-mono text-sm text-gray-700 shadow-inner focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200'
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-5 border-t border-gray-100 px-3.5 py-3 text-sm dark:border-gray-800">
+      <span className="min-w-0">
+        <span className="block text-gray-700 dark:text-gray-200">{label}</span>
+        {detail && <span className="block text-xs text-gray-400 dark:text-gray-500">{detail}</span>}
+      </span>
+      <label className="flex items-center gap-1.5">
+        <input type="number" min={0} value={cpu ?? ''} placeholder={String(defaultCPU)} onChange={change(onCPU)} className={compactInput} aria-label={`${label} CPU max`} />
+        <span className="text-xs text-gray-400">%</span>
+      </label>
+      <span className="flex items-center gap-1.5">
+        <input type="number" min={0} value={read ?? ''} placeholder={String(defaultRead)} onChange={change(onRead)} className={compactInput} aria-label={`${label} read max`} />
+        <span className="text-gray-400">/</span>
+        <input type="number" min={0} value={write ?? ''} placeholder={String(defaultWrite)} onChange={change(onWrite)} className={compactInput} aria-label={`${label} write max`} />
+        <span className="text-xs text-gray-400">MB/s</span>
+      </span>
+    </div>
   )
 }
 

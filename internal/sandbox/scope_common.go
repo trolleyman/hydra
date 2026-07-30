@@ -47,6 +47,25 @@ const (
 	ScopeBackground
 )
 
+// AggregateLimits are the machine-wide ceilings applied to the parent Hydra
+// slices. They are configured separately from per-workload ScopeLimits because
+// one daemon serves many projects and only user config may set machine policy.
+type AggregateLimits struct {
+	MachineCPUQuota, MachineIOReadBandwidthMax, MachineIOWriteBandwidthMax          int
+	BackgroundCPUQuota, BackgroundIOReadBandwidthMax, BackgroundIOWriteBandwidthMax int
+}
+
+func DefaultAggregateLimits(logicalCPUs int) AggregateLimits {
+	return AggregateLimits{
+		MachineCPUQuota:               DefaultMachineCPUQuota(logicalCPUs),
+		MachineIOReadBandwidthMax:     DefaultMachineIOReadBandwidthMax,
+		MachineIOWriteBandwidthMax:    DefaultMachineIOWriteBandwidthMax,
+		BackgroundCPUQuota:            DefaultBackgroundCPUQuota(logicalCPUs),
+		BackgroundIOReadBandwidthMax:  DefaultBackgroundIOReadBandwidthMax,
+		BackgroundIOWriteBandwidthMax: DefaultBackgroundIOWriteBandwidthMax,
+	}
+}
+
 // DefaultWorkloadCPUQuota allows about half of a small machine, capped at four
 // logical CPUs so one workload cannot saturate a large workstation.
 func DefaultWorkloadCPUQuota(logicalCPUs int) int {

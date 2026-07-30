@@ -133,7 +133,13 @@ export function SettingsContent({
       {/* Resource limits apply to every scoped workload of a project and layer
           like other config, so they are offered at all scopes (a user-scope
           value is the default for every project). */}
-      {scope === 'user' && <MachineCapacitySection capacity={config.resource_capacity} />}
+      {scope === 'user' && (
+        <MachineCapacitySection
+          capacity={config.resource_capacity}
+          resources={config.resources}
+          onChange={(resources) => setConfig({ ...config, resources: resources ?? undefined })}
+        />
+      )}
       <ResourceLimitsSection
         resources={config.resources}
         capacity={config.resource_capacity}

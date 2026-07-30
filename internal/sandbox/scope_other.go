@@ -6,7 +6,8 @@ package sandbox
 // no-ops elsewhere so callers can invoke them unconditionally. The pure helpers
 // (ScopeUnit, ScopeHash) live in scope_common.go and are shared across platforms.
 
-func ScopesAvailable() bool { return false }
+func ScopesAvailable() bool                    { return false }
+func ConfigureAggregateLimits(AggregateLimits) {}
 func WrapScope(unit string, spec *Spec, limits ScopeLimits, class ScopeClass) bool {
 	return false
 }

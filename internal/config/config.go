@@ -770,6 +770,15 @@ type ResourceLimits struct {
 	// a warning at startup when it detects that io_weight is inert.
 	IOReadBandwidthMax  *int `toml:"io_read_bandwidth_max"`
 	IOWriteBandwidthMax *int `toml:"io_write_bandwidth_max"`
+
+	// Machine and background fields are machine-wide and are resolved only from
+	// the user config. Project/local values are preserved but never applied.
+	MachineCPUQuota               *int `toml:"machine_cpu_quota"`
+	MachineIOReadBandwidthMax     *int `toml:"machine_io_read_bandwidth_max"`
+	MachineIOWriteBandwidthMax    *int `toml:"machine_io_write_bandwidth_max"`
+	BackgroundCPUQuota            *int `toml:"background_cpu_quota"`
+	BackgroundIOReadBandwidthMax  *int `toml:"background_io_read_bandwidth_max"`
+	BackgroundIOWriteBandwidthMax *int `toml:"background_io_write_bandwidth_max"`
 }
 
 // isEmpty reports whether no field is set at this layer (all pointers nil), so
@@ -777,7 +786,10 @@ type ResourceLimits struct {
 func (r ResourceLimits) isEmpty() bool {
 	return r.CPUWeight == nil && r.IOWeight == nil && r.CPUQuota == nil &&
 		r.MemoryMax == nil && r.TasksMax == nil &&
-		r.IOReadBandwidthMax == nil && r.IOWriteBandwidthMax == nil
+		r.IOReadBandwidthMax == nil && r.IOWriteBandwidthMax == nil &&
+		r.MachineCPUQuota == nil && r.MachineIOReadBandwidthMax == nil &&
+		r.MachineIOWriteBandwidthMax == nil && r.BackgroundCPUQuota == nil &&
+		r.BackgroundIOReadBandwidthMax == nil && r.BackgroundIOWriteBandwidthMax == nil
 }
 
 // Merge merges another ResourceLimits into this one: per-field last-wins, so a
@@ -804,6 +816,24 @@ func (r *ResourceLimits) Merge(other ResourceLimits) {
 	}
 	if other.IOWriteBandwidthMax != nil {
 		r.IOWriteBandwidthMax = other.IOWriteBandwidthMax
+	}
+	if other.MachineCPUQuota != nil {
+		r.MachineCPUQuota = other.MachineCPUQuota
+	}
+	if other.MachineIOReadBandwidthMax != nil {
+		r.MachineIOReadBandwidthMax = other.MachineIOReadBandwidthMax
+	}
+	if other.MachineIOWriteBandwidthMax != nil {
+		r.MachineIOWriteBandwidthMax = other.MachineIOWriteBandwidthMax
+	}
+	if other.BackgroundCPUQuota != nil {
+		r.BackgroundCPUQuota = other.BackgroundCPUQuota
+	}
+	if other.BackgroundIOReadBandwidthMax != nil {
+		r.BackgroundIOReadBandwidthMax = other.BackgroundIOReadBandwidthMax
+	}
+	if other.BackgroundIOWriteBandwidthMax != nil {
+		r.BackgroundIOWriteBandwidthMax = other.BackgroundIOWriteBandwidthMax
 	}
 }
 
@@ -962,6 +992,35 @@ func (c Config) ResolveResourceLimits(ioPath string) sandbox.ScopeLimits {
 	}
 	if r.TasksMax != nil {
 		limits.TasksMax = *r.TasksMax
+	}
+	return limits
+}
+
+// ResolveAggregateResourceLimits resolves machine-wide parent-slice ceilings.
+// Call this only on the raw user config, never a project-merged Config.
+func (c Config) ResolveAggregateResourceLimits() sandbox.AggregateLimits {
+	limits := sandbox.DefaultAggregateLimits(runtime.NumCPU())
+	if c.Resources == nil {
+		return limits
+	}
+	r := c.Resources
+	if r.MachineCPUQuota != nil {
+		limits.MachineCPUQuota = *r.MachineCPUQuota
+	}
+	if r.MachineIOReadBandwidthMax != nil {
+		limits.MachineIOReadBandwidthMax = *r.MachineIOReadBandwidthMax
+	}
+	if r.MachineIOWriteBandwidthMax != nil {
+		limits.MachineIOWriteBandwidthMax = *r.MachineIOWriteBandwidthMax
+	}
+	if r.BackgroundCPUQuota != nil {
+		limits.BackgroundCPUQuota = *r.BackgroundCPUQuota
+	}
+	if r.BackgroundIOReadBandwidthMax != nil {
+		limits.BackgroundIOReadBandwidthMax = *r.BackgroundIOReadBandwidthMax
+	}
+	if r.BackgroundIOWriteBandwidthMax != nil {
+		limits.BackgroundIOWriteBandwidthMax = *r.BackgroundIOWriteBandwidthMax
 	}
 	return limits
 }
@@ -3851,6 +3910,12 @@ func resourceFieldLines(r ResourceLimits) []string {
 	addInt("tasks_max", r.TasksMax)
 	addInt("io_read_bandwidth_max", r.IOReadBandwidthMax)
 	addInt("io_write_bandwidth_max", r.IOWriteBandwidthMax)
+	addInt("machine_cpu_quota", r.MachineCPUQuota)
+	addInt("machine_io_read_bandwidth_max", r.MachineIOReadBandwidthMax)
+	addInt("machine_io_write_bandwidth_max", r.MachineIOWriteBandwidthMax)
+	addInt("background_cpu_quota", r.BackgroundCPUQuota)
+	addInt("background_io_read_bandwidth_max", r.BackgroundIOReadBandwidthMax)
+	addInt("background_io_write_bandwidth_max", r.BackgroundIOWriteBandwidthMax)
 	return out
 }
 
@@ -3879,6 +3944,13 @@ func resourcesExampleLines() []string {
 		"# tasks_max  = 512  # hard cap on processes/threads; omit = no cap",
 		fmt.Sprintf("# io_read_bandwidth_max  = %d # hard read ceiling in MB/s for this project's device", sandbox.DefaultWorkloadIOReadBandwidthMax),
 		fmt.Sprintf("# io_write_bandwidth_max = %d # hard write ceiling in MB/s; set 0 for no cap", sandbox.DefaultWorkloadIOWriteBandwidthMax),
+		docPrefix + " The machine_* and background_* fields are honored only in the user config.",
+		fmt.Sprintf("# machine_cpu_quota = %d", sandbox.DefaultMachineCPUQuota(runtime.NumCPU())),
+		fmt.Sprintf("# machine_io_read_bandwidth_max = %d", sandbox.DefaultMachineIOReadBandwidthMax),
+		fmt.Sprintf("# machine_io_write_bandwidth_max = %d", sandbox.DefaultMachineIOWriteBandwidthMax),
+		fmt.Sprintf("# background_cpu_quota = %d", sandbox.DefaultBackgroundCPUQuota(runtime.NumCPU())),
+		fmt.Sprintf("# background_io_read_bandwidth_max = %d", sandbox.DefaultBackgroundIOReadBandwidthMax),
+		fmt.Sprintf("# background_io_write_bandwidth_max = %d", sandbox.DefaultBackgroundIOWriteBandwidthMax),
 	}
 }
 
