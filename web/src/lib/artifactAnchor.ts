@@ -140,6 +140,17 @@ export function anchorPositionLabel(a: ReviewImageAnchor): string {
   return a.t ? `${where} @ ${formatTimecode(a.t)}` : where
 }
 
+/** The pin's spot alone, for sitting inline after a filename the way a line
+ *  number does. The full form (size, version) belongs where there is room for it
+ *  - here it would crowd out the name it is qualifying. */
+export function anchorPointLabel(a: ReviewImageAnchor): string {
+  const px = anchorPixels(a)
+  const where = px ? `${px.x},${px.y}` : `${pct(a.x)},${pct(a.y)}`
+  // For a recording the MOMENT is the part worth the space: two clips' worth of
+  // frames share the same coordinates, and only the timecode separates them.
+  return a.t ? `${where} @ ${formatTimecode(a.t)}` : where
+}
+
 /** A moment in a clip, as m:ss.t - the same form the agent is given. Deliberately
  *  not h:mm:ss: these are UI recordings of a few seconds, and padding every one
  *  with an hour field costs more than the rare long clip saves. Mirrors

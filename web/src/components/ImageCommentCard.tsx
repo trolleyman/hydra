@@ -1,6 +1,7 @@
 import { MessageSquare } from 'lucide-react'
 import type { ReviewImageAnchor } from '../api'
-import { anchorPositionLabel, anchorVersionLabel, artifactBlobUrl } from '../lib/artifactAnchor'
+import { anchorPointLabel, artifactBlobUrl } from '../lib/artifactAnchor'
+import { getFileIcon } from '../lib/fileIcons'
 import { cropRect } from '../lib/imageCrop'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { useLightboxStore } from '../stores/lightboxStore'
@@ -19,7 +20,7 @@ import { useLightboxStore } from '../stores/lightboxStore'
 // both less machinery than storing a derived copy and more useful, since
 // clicking through opens the whole picture rather than a thumbnail of it.
 
-export function ImageCommentCard({ comment, projectId, className, onOpen }: {
+export function ImageCommentCard({ comment, projectId, onOpen }: {
   comment: {
     number: number
     text: string
@@ -30,7 +31,6 @@ export function ImageCommentCard({ comment, projectId, className, onOpen }: {
   }
   /** Needed to address the artifact blob the close-up is drawn from. */
   projectId: string | null
-  className?: string
   /** Called instead of the default lightbox open, when a caller wants the click
    *  to navigate somewhere of its own (a permalink to the comment, say). */
   onOpen?: () => void
@@ -73,28 +73,34 @@ export function ImageCommentCard({ comment, projectId, className, onOpen }: {
       openLightbox([{ url, filename: a.file, size: 0, width: a.natural_w, height: a.natural_h }], 0, e.currentTarget)
     }
   }
+  const slash = a.file.lastIndexOf('/')
+  const directory = slash >= 0 ? a.file.slice(0, slash + 1) : ''
+  const fileName = slash >= 0 ? a.file.slice(slash + 1) : a.file
+  const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName)
   return (
-    // Stacked, the way an artifact tile is: a header naming the file, then the
-    // picture, then the remark. Side by side, the thumbnail took a third of a
-    // narrow card and left the coordinates and the remark fighting over what was
-    // left - the position truncated to "576,370 · 317 ×…" and a one-sentence
-    // remark broke across three lines.
-    <div className={`p-3 w-full min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 ${className ?? ''}`}>
-      <div className="flex items-baseline gap-1.5 text-3xs font-mono text-gray-500 dark:text-gray-400">
-        <span className="truncate" title={a.file}>{a.file}</span>
-        <span className="ml-auto shrink-0 tabular-nums text-gray-400 dark:text-gray-500">
-          {comment.published ? `#${comment.number}` : 'draft'}
+    // Stacked, and NOT a card: the file line, the picture, the remark. Side by
+    // side the picture took a third of a narrow row and left the rest fighting
+    // over what was left; a bordered box around it then made a list of comments
+    // read as a list of panels rather than a list of remarks.
+    <div className="min-w-0">
+      {/* Deliberately the same file line as a line comment's, down to the icon
+          and the lowlit directory - two kinds of comment in one list should not
+          announce themselves in two different visual languages. The position sits
+          where the line number does, and is the only thing left in mono: it is a
+          coordinate, and it lines up when several are stacked. */}
+      <div className="flex items-center gap-1.5 text-2xs text-gray-500 dark:text-gray-400">
+        <FileIcon className={`w-3.5 h-3.5 shrink-0 ${fileIconClass}`} />
+        <span className="truncate" title={a.file}>
+          {directory && <span className="text-gray-400 dark:text-gray-500">{directory}</span>}
+          <span>{fileName}</span>
         </span>
-      </div>
-      <div className="truncate text-3xs font-mono text-gray-400 dark:text-gray-500 mb-2" title={anchorPositionLabel(a)}>
-        {anchorPositionLabel(a)}
-        {a.key && ` · ${anchorVersionLabel(a)}`}
+        <span className="shrink-0 font-mono text-gray-400 dark:text-gray-500">@ {anchorPointLabel(a)}</span>
       </div>
       {frame ? (
         <button
           type="button"
           onClick={open}
-          className="block w-full cursor-zoom-in"
+          className="block w-full mt-1.5 cursor-zoom-in"
           aria-label={`Open ${a.file}, the picture comment #${comment.number} is on`}
         >
           <div
@@ -105,12 +111,12 @@ export function ImageCommentCard({ comment, projectId, className, onOpen }: {
       ) : (
         // No natural size recorded, or nothing to address the blob with. The
         // remark is still worth showing - it just costs a trip to the picture to
-        // place, which is what the anchor line above is for.
-        <div className="w-full h-16 rounded border border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center">
+        // place, which is what the position above is for.
+        <div className="w-full h-14 mt-1.5 rounded border border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center">
           <MessageSquare className="w-5 h-5 text-gray-400 dark:text-gray-600" />
         </div>
       )}
-      <div className={`mt-2 text-xs ${comment.resolved ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-gray-200'}`}>
+      <div className={`mt-1.5 text-xs ${comment.resolved ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-800 dark:text-gray-200'}`}>
         <Markdown text={comment.text} variant="chat" />
       </div>
     </div>
