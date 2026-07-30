@@ -1822,6 +1822,10 @@ const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
     label: 'Sent from a button',
     why: 'You pressed a button rather than typing this - Hydra wrote the wording and sent it on your behalf.',
   },
+  fix_test: {
+    label: 'Sent from a button',
+    why: 'You asked the agent to fix a failing test from the tests panel - Hydra wrote the wording and sent it on your behalf.',
+  },
   review_thread: {
     label: 'Sent from a button',
     why: 'You sent a review thread to the agent - Hydra quoted it and wrote the request on your behalf.',
