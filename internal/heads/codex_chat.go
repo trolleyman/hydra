@@ -60,7 +60,7 @@ func startCodexChatController(reg *session.Registry, store *db.Store, projectRoo
 		OnTurnEnd: func(string) {
 			reg.ChatTurnEnded(id)
 		},
-		OnHistoryLine: func(line []byte) { reg.ObserveChatLine(id, "codex", line) },
+		OnHistoryLine: func(line []byte) { reg.ObserveChatLine(id, "codex_history", line) },
 		OnError: func(controllerErr error) {
 			log.Printf("warn: Codex app-server for %s: %v", id, controllerErr)
 			ts := time.Now().Format(time.RFC3339Nano)

@@ -206,6 +206,38 @@ func TestManagerDropsReimportedTranscriptUserMessage(t *testing.T) {
 	// so a live user_message never reaches this path to be tested here.)
 }
 
+// Codex thread/read returns old assistant messages under synthetic item ids,
+// rather than the msg_ ids used when those messages were observed live.
+func TestManagerDropsReplayedCodexAssistantBlocks(t *testing.T) {
+	root := t.TempDir()
+	m := NewManager(func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" })
+
+	m.ObserveProviderLine("head", "codex", []byte(`{"method":"item/completed","params":{"item":{"id":"msg_live","type":"agentMessage","text":"The fix is complete."}}}`))
+	m.ObserveProviderLine("head", "codex_history", []byte(`{"method":"item/completed","params":{"item":{"id":"item-2","type":"agentMessage","text":"The fix is complete."}}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+
+	events, _, _, err := m.Before("head", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != "assistant_message" {
+		t.Fatalf("want one copy of the assistant block, got %+v", events)
+	}
+
+	// Count matches are one-to-one. A second identical recovered message is a
+	// distinct historical turn, not another copy of the one live block.
+	m.ObserveProviderLine("head", "codex_history", []byte(`{"method":"item/completed","params":{"item":{"id":"item-3","type":"agentMessage","text":"The fix is complete."}}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+	events, _, _, _ = m.Before("head", "", 10)
+	if len(events) != 2 {
+		t.Fatalf("want the second historical occurrence kept, got %+v", events)
+	}
+}
+
 func TestManagerLinksCodexChildThreadToSpawn(t *testing.T) {
 	root := t.TempDir()
 	m := NewManager(func(id string) (HeadContext, bool) { return HeadContext{ProjectRoot: root}, id == "head" })
