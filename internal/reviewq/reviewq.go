@@ -48,6 +48,16 @@ const (
 	// forge: an agent has no forge credentials, and Hydra only ever writes to a PR
 	// as an explicit user action (docs/review-threads.md).
 	OpNote Op = "note"
+	// OpComments reads Hydra's OWN review comments on this head - the numbered,
+	// line-anchored ones the user (or a reviewer agent) left in the diff viewer,
+	// which exist with or without a forge MR (docs/review-agent.md). Published
+	// only: a draft is never shown to an agent. Numbers narrows it to specific
+	// comments; empty means all of them.
+	OpComments Op = "comments"
+	// OpAddComment appends a review comment as this agent, anchored to a line.
+	// It is published on write - an agent has no drafts, since a draft exists so a
+	// person can think before speaking.
+	OpAddComment Op = "add_comment"
 	// OpHeadStatus returns a rendered summary of this head's own tests, artifacts
 	// and services. Read-only: it never starts a test run or a generation.
 	OpHeadStatus Op = "head_status"
@@ -72,6 +82,13 @@ type Request struct {
 	// note
 	ThreadID string `json:"thread_id,omitempty"`
 	Body     string `json:"body,omitempty"`
+
+	// comments / add_comment. Numbers selects specific comments to read (empty =
+	// all); Path/Line/ReplyTo anchor a new one.
+	Numbers []int  `json:"numbers,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Line    int    `json:"line,omitempty"`
+	ReplyTo int    `json:"reply_to,omitempty"`
 
 	// test_logs / run_tests / run_artifacts. Runner names one test runner or one
 	// artifact script; empty means all of them.

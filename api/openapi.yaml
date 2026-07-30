@@ -1100,6 +1100,212 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{id}/review/comments:
+    get:
+      summary: This head's Hydra-native review comments
+      operationId: getReviewComments
+      description: >
+        Hydra's OWN review comments on this head - numbered, anchored to a line of its
+        diff, and durable (docs/review-agent.md). Unlike the forge threads above these
+        exist with no MR at all, and agents read them with a tool rather than having them
+        pasted into their context. Returns drafts and published alike; only the browser
+        ever sees drafts.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The head's comments, oldest (lowest-numbered) first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewCommentsResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Add a review comment on this head
+      operationId: addReviewComment
+      description: >
+        Stores a new comment and assigns its number. Defaults to a draft - visible to you,
+        synced across reloads and devices, invisible to every agent tool - until it is
+        published. The anchor (path/line/commit/context) is frozen at write time, so the
+        comment keeps its meaning when the diff moves under it.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewReviewCommentBody'
+      responses:
+        '200':
+          description: Stored (returns the full list, so the client never re-reads).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewCommentsResponse'
+        '400':
+          description: Bad Request (an empty body)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/review/comments/{number}:
+    patch:
+      summary: Edit a draft review comment
+      operationId: updateReviewComment
+      description: >
+        Replaces a DRAFT's body. A published comment is immutable - append-only is what
+        makes a thread an audit log rather than something that can be rewritten after the
+        fact - so editing one is a 400, not a silent no-op.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: number
+          required: true
+          schema: { type: integer }
+          description: The comment's number, as rendered "#4".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateReviewCommentBody'
+      responses:
+        '200':
+          description: Edited (returns the full list).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewCommentsResponse'
+        '400':
+          description: Bad Request (no such comment, or it is published)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Discard a draft review comment
+      operationId: deleteReviewComment
+      description: >
+        Drops an unpublished comment. Its number is retired rather than freed - "#3" has
+        to mean one thing forever. A published comment cannot be deleted.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: number
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Discarded (returns the full list).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewCommentsResponse'
+        '400':
+          description: Bad Request (no such comment, or it is published)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/projects/{project_id}/agents/{id}/review/comments/publish:
+    post:
+      summary: Publish this head's draft comments and notify its agent
+      operationId: publishReviewComments
+      description: >
+        Flips the named drafts (or every draft) to published and sends the head's agent ONE
+        short line naming their numbers and locations - not their bodies. The agent pulls
+        what it needs with get_review_comments, so six comments cost one line instead of
+        six diff excerpts, the transcript holds a pointer that cannot drift from the
+        comment, and the handle survives a compaction that an injected blob would not.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishReviewCommentsBody'
+      responses:
+        '200':
+          description: Published (returns the full list plus what the agent was told).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewCommentsResponse'
+        '400':
+          description: Bad Request (nothing to publish, or the agent could not be reached)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/reviews:
     get:
       summary: List existing PRs/MRs on the project's forge, for the adoption picker
@@ -3517,6 +3723,107 @@ components:
           type: string
           enum: [forge, local_only]
           description: "\"forge\" - on the PR for everyone to see; \"local_only\" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants."
+
+    ReviewCommentsResponse:
+      type: object
+      description: A head's Hydra-native review comments (docs/review-agent.md).
+      required: [comments]
+      properties:
+        comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewComment'
+        notified:
+          type: string
+          description: On a publish, the one line the agent was told. Absent otherwise.
+
+    ReviewComment:
+      type: object
+      description: >
+        One durable, numbered review comment. The number is the handle everything else
+        uses ("fix #3") - one token for a model, speakable by a person, and never reused.
+      required: [number, status, author, body, created_at]
+      properties:
+        number:
+          type: integer
+          description: Per-head sequence number, rendered "#4". Retired numbers are never reissued.
+        status:
+          type: string
+          enum: [draft, published]
+          description: A draft is yours alone - synced across reloads and devices, invisible to every agent tool.
+        author:
+          type: string
+          description: '"user" | "reviewer" | "agent".'
+        body:
+          type: string
+        reply_to:
+          type: integer
+          description: The comment this replies to, which is how a thread forms without a separate thread object.
+        path:
+          type: string
+        line:
+          type: integer
+        old_side:
+          type: boolean
+          description: The line is on the OLD side of the diff (removed lines).
+        commit:
+          type: string
+          description: Head commit the comment was written against.
+        diff:
+          type: string
+          description: The comparison it was written on, e.g. "main -> abc1234".
+        context:
+          type: string
+          description: Fenced ```diff block of the surrounding lines, frozen at write time.
+        hunk_hash:
+          type: string
+          description: Hash of the anchoring hunk when written, so staleness is detectable later.
+        created_at:
+          type: string
+        published_at:
+          type: string
+
+    NewReviewCommentBody:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+        path:
+          type: string
+        line:
+          type: integer
+        old_side:
+          type: boolean
+        commit:
+          type: string
+        diff:
+          type: string
+        context:
+          type: string
+        hunk_hash:
+          type: string
+        reply_to:
+          type: integer
+        publish:
+          type: boolean
+          description: Publish immediately instead of storing a draft (the "Comment to agent" one-shot path).
+
+    UpdateReviewCommentBody:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+
+    PublishReviewCommentsBody:
+      type: object
+      properties:
+        numbers:
+          type: array
+          items:
+            type: integer
+          description: Which drafts to publish. Omitted or empty publishes every draft.
 
     NewReviewCommentRequest:
       type: object

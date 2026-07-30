@@ -217,14 +217,27 @@ func (m *ChatQueueManager) queue(projectRoot, id string) *ChatQueue {
 	return q
 }
 
-// resolveRoot maps an agent id to its project root via the DB (the registry
+// resolveRoot maps a session id to its project root via the DB (the registry
 // callback only carries the id).
+//
+// A slot session (`<head>@review`) has no db.Agent row of its own, so it resolves
+// through the head that owns it. Without this the review slot's turn ends would
+// be dropped on the floor: no post-turn status, and a queued message that never
+// drains.
 func (m *ChatQueueManager) resolveRoot(id string) (string, bool) {
 	agent, err := m.store.GetAgent(id)
-	if err != nil || agent == nil {
+	if err == nil && agent != nil {
+		return agent.ProjectPath, true
+	}
+	head, _, ok := SplitSlotID(id)
+	if !ok {
 		return "", false
 	}
-	return agent.ProjectPath, true
+	owner, err := m.store.GetAgent(head)
+	if err != nil || owner == nil {
+		return "", false
+	}
+	return owner.ProjectPath, true
 }
 
 // MarkInterrupted records that the user interrupted id's in-flight turn, so the

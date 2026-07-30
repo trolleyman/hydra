@@ -523,6 +523,33 @@ function StatusIcon({ status }: { status: TestRunResult['status'] }) {
   }
 }
 
+// statusLabel is the runner chip's text. It is deliberately NOT the enum value:
+// this chip is the verdict for a whole RUN, and printing `passing` raw put it two
+// lines above a "group by result" section headed `passed` - a near-rhyme that read
+// as an inconsistency when it is really two different scopes.
+//
+// The words are GitHub's commit-status vocabulary (`error | failure | pending |
+// success`), onto which our states map one-to-one. So a run gets an OUTCOME noun
+// and an individual case keeps its past participle (RESULT_SECTIONS below), and
+// the two can no longer be mistaken for each other. Prose stays pass-as-a-verb
+// ("Tests passing - 79 passed", "No passing test verdict for this commit"), the
+// way GitHub's own "All checks have passed" does.
+//
+// `running` stays `running` rather than GitHub's `pending` - the chip is a live
+// spinner carrying progress text, so naming the state beats naming the queue.
+// `errored` reads `error`: the awkward participle only exists because the enum
+// value can't be `error` (it collides with Go's predeclared `error` and makes
+// oapi-codegen prefix the whole enum).
+const STATUS_LABEL: Partial<Record<TestRunResult['status'], string>> = {
+  passing: 'success',
+  failing: 'failure',
+  errored: 'error',
+}
+
+function statusLabel(status: TestRunResult['status']): string {
+  return STATUS_LABEL[status] ?? status
+}
+
 // TestRunnerCard renders one runner through the shared CollapsibleCard, so it lays
 // out identically to an artifact set card: the runner name + verdict chip +
 // summary on the left, the build-log toggle and Re-run melt buttons on the right,
@@ -634,7 +661,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
     <>
       <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${TONE_BADGE[tone]}`}>
         <StatusIcon status={runner.status} />
-        {runner.status}
+        {statusLabel(runner.status)}
       </span>
       <Summary runner={runner} />
       {/* Format + duration, right-aligned against the actions cluster. Inside the
@@ -762,6 +789,8 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
 // "warnings" as a plural noun since "warned" isn't a word anyone says about a
 // test). The set used to mix tenses - "failing"/"passing" beside "skipped" -
 // which also read as though the run were still going; these are settled results.
+// These stay past participles precisely so they contrast with the runner chip
+// above, which names a whole run's outcome instead (see STATUS_LABEL).
 //
 // `defaultOpen` doubles as the tree's `defaultExpanded` inside the section: a
 // section worth opening on sight is worth unfolding, and one you had to open

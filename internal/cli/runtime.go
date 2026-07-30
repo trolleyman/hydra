@@ -44,6 +44,44 @@ type daemonRuntime struct {
 	deploy      config.DeployConfig
 }
 
+// chatContextResolver maps a chat SESSION id to the project root, working
+// directory and seed material its normalized event log is built from.
+//
+// Two kinds of id arrive here. A head's own session id is its db.Agent id.
+// A review slot is `<head>@review` (docs/review-agent.md) - a second agent with
+// no DB row of its own, so it resolves through the head that owns it, but onto
+// its OWN checkout and with no prompt or plan: it holds a different
+// conversation, and inheriting the head's would open the reviewer's transcript
+// with the head's task and to-do list. Returning false here is not harmless -
+// the manager drops every line the session produces, which is what left the
+// review pane replaying the head's chat instead of its own.
+func chatContextResolver(store *db.Store) chat.ContextResolver {
+	return func(id string) (chat.HeadContext, bool) {
+		if agent, err := store.GetAgent(id); err == nil && agent != nil {
+			return chat.HeadContext{
+				ProjectRoot: agent.ProjectPath,
+				Worktree:    paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID),
+				Prompt:      agent.Prompt,
+				AgentType:   agent.AgentType,
+				Plan:        agent.Plan,
+			}, true
+		}
+		headID, slot, ok := heads.SplitSlotID(id)
+		if !ok || slot != heads.ReviewSlot {
+			return chat.HeadContext{}, false
+		}
+		owner, err := store.GetAgent(headID)
+		if err != nil || owner == nil {
+			return chat.HeadContext{}, false
+		}
+		return chat.HeadContext{
+			ProjectRoot: owner.ProjectPath,
+			Worktree:    paths.GetReviewCheckoutDirFromProjectRoot(owner.ProjectPath, headID),
+			AgentType:   string(sandbox.AgentTypeClaude),
+		}, true
+	}
+}
+
 // setupRuntime opens the DB, builds the session registry + HTTP server, starts
 // the background pollers, and returns a ready-to-serve handler.
 func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, error) {
@@ -158,14 +196,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// the registry's stdout hooks so the queue drains even with no client
 	// attached (the agent keeps working through the queue).
 	chatQueues := heads.NewChatQueueManager(reg, store)
-	chatEvents := chat.NewManager(func(id string) (chat.HeadContext, bool) {
-		agent, err := store.GetAgent(id)
-		if err != nil || agent == nil {
-			return chat.HeadContext{}, false
-		}
-		ctx := chat.HeadContext{ProjectRoot: agent.ProjectPath, Worktree: paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID), Prompt: agent.Prompt, AgentType: agent.AgentType, Plan: agent.Plan}
-		return ctx, true
-	})
+	chatEvents := chat.NewManager(chatContextResolver(store))
 	chatQueues.SetEventSink(func(id string, payload chat.Payload) {
 		if _, err := chatEvents.Append(id, payload); err != nil {
 			log.Printf("warn: persist normalized queue event for %s: %v", id, err)
@@ -394,6 +425,10 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	go heads.RunJSONStatusPoller(ctx, store, roots, eventHub, func(projectRoot, headID string) {
 		go server.PrefetchHeadNow(server.BackgroundCtx, projectRoot, headID)
 	})
+	// Keep every open reviewer's checkout on its head's branch tip, so a
+	// long-lived review conversation is about the head's current work rather than
+	// whichever commit it opened on (docs/review-agent.md).
+	go heads.RunReviewSyncWatcher(ctx, reg, store, roots)
 	go runStoragePruner(ctx, artifactReg, testReg, roots)
 	// Proactively pre-generate artifacts for settled heads so they're ready
 	// before a user clicks in, instead of starting the work only on view.

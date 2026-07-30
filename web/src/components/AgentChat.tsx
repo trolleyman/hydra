@@ -10,6 +10,7 @@ import {
   Circle,
   CircleStop,
   ClipboardList,
+  Eye,
   FilePen,
   FileText,
   GitCommitHorizontal,
@@ -101,6 +102,8 @@ import { claimOrphanResult, newToolResultLink, stashOrphanResult } from '../lib/
 import type { ToolResultLink } from '../lib/toolResultLink'
 import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
+import { markWhitespace } from '../lib/whitespaceMarks'
+import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -2110,7 +2113,11 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
     }
     return out
   }, [diff, kind])
-  const highlighted = useMemo(() => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext'), [rows, lang])
+  const ws = useWhitespaceMarks()
+  const highlighted = useMemo(
+    () => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext').map((l) => markWhitespace(l, ws)),
+    [rows, lang, ws],
+  )
   return (
     <div className="bg-white dark:bg-[#20201e] font-mono text-2xs leading-4">
       {rows.map((row, i) => (
@@ -2130,7 +2137,11 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
 // constructs colourise correctly) and is split back into per-line HTML
 // (highlightLines, which falls back to escaped plain lines for an unknown lang).
 function GutterCodePanel({ nums, code, lang }: { nums: string[]; code: string[]; lang: string }) {
-  const lines = useMemo(() => highlightLines(code.join('\n'), lang || 'plaintext'), [code, lang])
+  const ws = useWhitespaceMarks()
+  const lines = useMemo(
+    () => highlightLines(code.join('\n'), lang || 'plaintext').map((l) => markWhitespace(l, ws)),
+    [code, lang, ws],
+  )
   return (
     <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
       {/* data-copy-code / data-copy-line: the rows are grid cells, not block
@@ -2493,6 +2504,7 @@ const EDIT_NUM_CLASS = 'min-h-4 select-none text-right pr-1.5 text-stone-400 dar
 function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: string; newStr: string; lang: string; replaceAll?: boolean; hunks?: EditHunk[] | null }) {
   const rows = useMemo(() => buildEditRows(oldStr, newStr, hunks), [oldStr, newStr, hunks])
   const numbered = useMemo(() => hasLineNumbers(rows), [rows])
+  const ws = useWhitespaceMarks()
   // Each side is highlighted as ONE run of code, not line by line, so a
   // multi-line construct (a block comment, a template string) colourises
   // correctly - and each side is reassembled whole (context lines belong to
@@ -2534,9 +2546,10 @@ function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: st
             const bg = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
             const marker = isAdd ? '+' : isDel ? '-' : ' '
             const markerCls = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-stone-300 dark:text-stone-700'
-            const code = row.ranges?.length
+            // Whitespace marks last, over the word diff as well as the highlighting.
+            const code = markWhitespace(row.ranges?.length
               ? renderWordDiffHtml(html[i], row.content, row.ranges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
-              : html[i]
+              : html[i], ws)
             return (
               <Fragment key={i}>
                 {numbered && (
@@ -5999,6 +6012,15 @@ const SettledMessages = memo(
 )
 
 export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit, review }: ChatProps) {
+  // The key for everything this pane stores per CONVERSATION rather than per
+  // head: the composer draft and its attachments, the composer height, the
+  // transcript scroll offset, and the local plan mirror. A review pane is a
+  // different agent sharing the head's page, so keying those by agentId alone
+  // had it typing into the head's draft and showing the head's to-do list.
+  // Mirrors the backend's slot id (`<head>@review`, see docs/review-agent.md).
+  // Head-level state - approvals, unread, the diff's branch - deliberately stays
+  // on agentId: those belong to the head whatever tab you are looking at.
+  const stateId = review ? `${agentId}@review` : agentId
   const [items, setItems] = useState<ChatItem[]>([])
   // Wall-clock time per item id (epoch ms) - the message side of the
   // commit-chip interleave. Stamped by the reducers: replayed events carry the
@@ -6038,7 +6060,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // the last known plan even when the replay window no longer includes the
   // TaskCreate events. Live events reconcile on top (see the reducer).
   const [todos, setTodos] = useState<TodoItem[]>(() =>
-    loadPlan(projectId, agentId)
+    loadPlan(projectId, stateId)
       .sort((a, b) => a.order - b.order)
       .map(({ content, status, activeForm, description }) => ({ content, status, activeForm, description })),
   )
@@ -6131,8 +6153,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const initialComposer = useRef<ReturnType<typeof makeSnapshot> | null>(null)
   if (!initialComposer.current) {
     initialComposer.current = makeSnapshot(
-      loadAgentViewPrefs(projectId, agentId).chatDraft ?? '',
-      loadChatAttachments(projectId, agentId),
+      loadAgentViewPrefs(projectId, stateId).chatDraft ?? '',
+      loadChatAttachments(projectId, stateId),
       0,
       0,
     )
@@ -6214,7 +6236,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // grows the box line by line up to MAX_ROWS regardless. Persisted per agent
   // like the terminal height (item 23).
   const [minRows, setMinRows] = useState(() => {
-    const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
+    const saved = loadAgentViewPrefs(projectId, stateId).chatComposerRows
     return saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
   })
   // Explicit composer height (px), driven by the per-line auto-grow effect. The
@@ -6223,7 +6245,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // it from the saved min rows (leading-5 = 20px line, pt-2.5 + pb-1 = 14px pad)
   // so the composer opens at the right height before the effect measures.
   const [composerHeight, setComposerHeight] = useState<number>(() => {
-    const saved = loadAgentViewPrefs(projectId, agentId).chatComposerRows
+    const saved = loadAgentViewPrefs(projectId, stateId).chatComposerRows
     const rows = saved && saved >= 1 && saved <= 10 ? Math.round(saved) : 1
     return rows * 20 + 14
   })
@@ -6324,11 +6346,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // the only copy of the plan; seed it into localStorage (only when local is
   // empty) so the reconnect effect's loadPlan restores it. Runs when the value
   // arrives (the agent-list poll can land after mount).
+  //
+  // A review pane takes no seed at all: that field is the HEAD's plan (the slot
+  // has no db.Agent row to carry one), and seeding it here is what put the head's
+  // to-do chip on the reviewer's transcript. Its own plan arrives live.
   const serverPlan = useAgentStore(
-    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.plan,
+    (s) => (review ? undefined : (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.plan),
   )
   useEffect(() => {
-    const seeded = seedLocalPlan(projectId, agentId, serverPlan)
+    const seeded = seedLocalPlan(projectId, stateId, serverPlan)
     if (seeded.length) {
       // Legitimate effect: seedLocalPlan writes to localStorage (a side effect that
       // belongs in an effect), and we adopt its result. Can't move to render.
@@ -6339,7 +6365,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           .map(({ content, status: st, activeForm, description }) => ({ content, status: st, activeForm, description })),
       )
     }
-  }, [serverPlan, projectId, agentId])
+  }, [serverPlan, projectId, stateId])
 
   // The daemon-captured model (AgentResponse.model). Adopt it while the selector
   // is still on the placeholder, so the right model shows on load before any
@@ -6395,7 +6421,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setStream(null)
     // Restore the persisted plan (not []) so a reconnect / re-navigation shows
     // the last known plan before the replay reconstructs it (planStore).
-    setTodos(restoredPlan(projectId, agentId))
+    setTodos(restoredPlan(projectId, stateId))
     setSubagents({})
     setReplayDone(false)
     setLiveFromId(null)
@@ -6443,8 +6469,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // PlanPanel. The reducer itself lives in lib/planReducer (it is pure, and
     // tested there); here it is wired to the persisted plan on both ends - the
     // seed it starts from, and savePlan/setTodos on every change.
-    const plan = createPlanBuilder(loadPlan(projectId, agentId), (entries) => {
-      savePlan(projectId, agentId, entries)
+    const plan = createPlanBuilder(loadPlan(projectId, stateId), (entries) => {
+      savePlan(projectId, stateId, entries)
       setTodos(toTodoItems(entries))
     })
 
@@ -8309,8 +8335,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       setConnected(false)
     }
     // `review` picks the socket (and therefore the whole conversation), so it
-    // belongs here - though in practice the two panes are separate mounts.
-  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry, review])
+    // belongs here - though in practice the two panes are separate mounts, and
+    // stateId is derived from the same two values.
+  }, [agentId, agentType, projectId, reconnectAttempt, autoRetry, review, stateId])
 
   // Tool cards by tool_use id: a sub-agent view reads its parent Task card for
   // labels, the live/done state and the final report. A NESTED sub-agent's
@@ -8616,7 +8643,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // otherwise the auto-scroll effect has already pinned to the bottom.
   useEffect(() => {
     if (!replayDone) return
-    const saved = loadAgentViewPrefs(projectId, agentId).chatScrollTop
+    const saved = loadAgentViewPrefs(projectId, stateId).chatScrollTop
     if (saved == null) return
     const el = scrollRef.current
     if (!el) return
@@ -8628,7 +8655,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       lastScrollRef.current = { top: saved, pinned: false }
     })
     return () => cancelAnimationFrame(raf)
-  }, [replayDone, projectId, agentId])
+  }, [replayDone, projectId, stateId])
 
   // Opening an agent that has unread changes: land on the TOP of its last
   // message rather than pinned to the bottom, so a long reply is read from its
@@ -8720,9 +8747,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     () => () => {
       if (persistScrollTimer.current) clearTimeout(persistScrollTimer.current)
       const last = lastScrollRef.current
-      patchAgentViewPrefs(projectId, agentId, { chatScrollTop: last.pinned ? undefined : last.top })
+      patchAgentViewPrefs(projectId, stateId, { chatScrollTop: last.pinned ? undefined : last.top })
     },
-    [projectId, agentId],
+    [projectId, stateId],
   )
 
   // requestOlderHistory asks the daemon for the batch older than the current
@@ -8821,7 +8848,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (persistScrollTimer.current) clearTimeout(persistScrollTimer.current)
     persistScrollTimer.current = setTimeout(() => {
       const last = lastScrollRef.current
-      patchAgentViewPrefs(projectId, agentId, { chatScrollTop: last.pinned ? undefined : last.top })
+      patchAgentViewPrefs(projectId, stateId, { chatScrollTop: last.pinned ? undefined : last.top })
     }, 250)
   }
 
@@ -8830,9 +8857,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Save the composer text (debounced) so a half-written message survives an
   // agent switch or reload. Sending clears input, which persists as "no draft".
   useEffect(() => {
-    const t = setTimeout(() => patchAgentViewPrefs(projectId, agentId, { chatDraft: input || undefined }), 300)
+    const t = setTimeout(() => patchAgentViewPrefs(projectId, stateId, { chatDraft: input || undefined }), 300)
     return () => clearTimeout(t)
-  }, [input, projectId, agentId])
+  }, [input, projectId, stateId])
 
   // --- Composer: attachments ------------------------------------------------
 
@@ -8842,8 +8869,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Mirror to the per-agent caches so a switch away - or a reload - restores
     // them. Running on every change (rather than only on unmount) is what makes
     // the reload case work: a reload tears the page down without unmounting.
-    saveChatAttachments(projectId, agentId, attachments)
-  }, [attachments, projectId, agentId])
+    saveChatAttachments(projectId, stateId, attachments)
+  }, [attachments, projectId, stateId])
   // Every preview object URL minted this session. We can't revoke on remove (an
   // undo can bring the chip back) or on unmount (the attachments are stashed to
   // the cache and restored on return), so URLs live until a send consumes the
@@ -8854,10 +8881,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // thumbnails. They're freed on send, or when the page fully reloads.
   useEffect(
     () => () => {
-      saveChatAttachments(projectId, agentId, attachmentsRef.current)
-      patchAgentViewPrefs(projectId, agentId, { chatDraft: inputRef.current || undefined })
+      saveChatAttachments(projectId, stateId, attachmentsRef.current)
+      patchAgentViewPrefs(projectId, stateId, { chatDraft: inputRef.current || undefined })
     },
-    [projectId, agentId],
+    [projectId, stateId],
   )
 
   // addFiles queues each dropped/pasted file as an attachment and uploads it.
@@ -9046,7 +9073,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!composerDragRef.current) return
     composerDragRef.current = null
     e.currentTarget.releasePointerCapture(e.pointerId)
-    patchAgentViewPrefs(projectId, agentId, { chatComposerRows: minRows })
+    patchAgentViewPrefs(projectId, stateId, { chatComposerRows: minRows })
   }
 
   // --- Sending ----------------------------------------------------------------
@@ -9420,8 +9447,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // markdown, so a default copy drops the asterisks, fences, bullets and table
   // pipes the agent (or the user) actually wrote. selectionToMarkdown walks the
   // selected DOM and re-serializes it; the chat's non-markdown chrome (tool
-  // cards, diffs) still comes out as plain text, as before. Selecting inside a
-  // single code block yields the raw code, not a fenced block.
+  // cards, diffs) still comes out as plain text, as before. A selection that
+  // covers only code - a fenced block, an inline span - yields the bare code,
+  // so triple-clicking a command gives something you can paste into a shell
+  // rather than a fenced block.
   function copyTranscriptAsMarkdown(event: ClipboardEvent<HTMLDivElement>) {
     const md = selectionToMarkdown(window.getSelection())
     if (!md) return
@@ -10107,6 +10136,21 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           <ResizeGrip orientation="horizontal" />
         </div>
         <div className="relative mx-auto max-w-5xl">
+          {/* What this agent cannot do, said where you are about to ask it to.
+              The failure it heads off is specific and silent: you read a finding,
+              type "just fix that", and the reviewer edits a throwaway checkout it
+              cannot commit from - so the work evaporates with no error anywhere.
+              Above the box rather than in the placeholder, which vanishes the
+              moment you start typing. */}
+          {review && (
+            <div className="mb-1.5 flex items-start gap-1.5 px-1 text-[11px] leading-4 text-stone-400 dark:text-stone-500">
+              <Eye className="mt-px h-3 w-3 shrink-0" />
+              <span>
+                Reviewer - a second agent reading this branch in its own throwaway checkout. It cannot edit
+                your worktree, commit, or reply to the head.
+              </span>
+            </div>
+          )}
           {slashMatches.length > 0 && (
             <div className="absolute bottom-full left-0 mb-1.5 z-20 w-64 max-h-64 overflow-y-auto rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
               {slashMatches.map((c, i) => (
@@ -10151,7 +10195,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               onKeyDown={onComposerKeyDown}
               onPaste={handlePaste}
               renderContent={renderComposerBackdrop}
-              placeholder={connected ? 'Write a message...' : 'Connecting...'}
+              placeholder={connected ? (review ? 'Ask about the diff...' : 'Write a message...') : 'Connecting...'}
               disabled={!connected}
               rows={1}
               wrapperClassName="w-full"

@@ -16,10 +16,12 @@ import type { ConfigTomlResponse } from '../models/ConfigTomlResponse';
 import type { DiffResponse } from '../models/DiffResponse';
 import type { GeneratedTitleResponse } from '../models/GeneratedTitleResponse';
 import type { ListReviewsResponse } from '../models/ListReviewsResponse';
+import type { NewReviewCommentBody } from '../models/NewReviewCommentBody';
 import type { NewReviewCommentRequest } from '../models/NewReviewCommentRequest';
 import type { PreviewsResponse } from '../models/PreviewsResponse';
 import type { PreviewStatus } from '../models/PreviewStatus';
 import type { ProjectInfo } from '../models/ProjectInfo';
+import type { PublishReviewCommentsBody } from '../models/PublishReviewCommentsBody';
 import type { ReorderProjectsRequest } from '../models/ReorderProjectsRequest';
 import type { RepositoryArtifactResponse } from '../models/RepositoryArtifactResponse';
 import type { RepositoryArtifactsResponse } from '../models/RepositoryArtifactsResponse';
@@ -28,6 +30,7 @@ import type { RepositoryFileResponse } from '../models/RepositoryFileResponse';
 import type { RepositoryPushStatus } from '../models/RepositoryPushStatus';
 import type { RepositoryTreeResponse } from '../models/RepositoryTreeResponse';
 import type { ResolvedPathResponse } from '../models/ResolvedPathResponse';
+import type { ReviewCommentsResponse } from '../models/ReviewCommentsResponse';
 import type { ReviewConfigResponse } from '../models/ReviewConfigResponse';
 import type { ReviewReplyRequest } from '../models/ReviewReplyRequest';
 import type { ReviewThreadsResponse } from '../models/ReviewThreadsResponse';
@@ -39,6 +42,7 @@ import type { StatusResponse } from '../models/StatusResponse';
 import type { TestsResponse } from '../models/TestsResponse';
 import type { TrackRemoteResponse } from '../models/TrackRemoteResponse';
 import type { UpdateAgentRequest } from '../models/UpdateAgentRequest';
+import type { UpdateReviewCommentBody } from '../models/UpdateReviewCommentBody';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import type { BaseHttpRequest } from '../core/BaseHttpRequest';
 export class DefaultService {
@@ -760,6 +764,153 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request (unlinked head, empty body, or the forge rejected it)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * This head's Hydra-native review comments
+     * Hydra's OWN review comments on this head - numbered, anchored to a line of its diff, and durable (docs/review-agent.md). Unlike the forge threads above these exist with no MR at all, and agents read them with a tool rather than having them pasted into their context. Returns drafts and published alike; only the browser ever sees drafts.
+     *
+     * @param projectId
+     * @param id
+     * @returns ReviewCommentsResponse The head's comments, oldest (lowest-numbered) first.
+     * @throws ApiError
+     */
+    public getReviewComments(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<ReviewCommentsResponse> {
+        return this.httpRequest.request({
+            method: 'GET',
+            url: '/api/projects/{project_id}/agents/{id}/review/comments',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Add a review comment on this head
+     * Stores a new comment and assigns its number. Defaults to a draft - visible to you, synced across reloads and devices, invisible to every agent tool - until it is published. The anchor (path/line/commit/context) is frozen at write time, so the comment keeps its meaning when the diff moves under it.
+     *
+     * @param projectId
+     * @param id
+     * @param requestBody
+     * @returns ReviewCommentsResponse Stored (returns the full list, so the client never re-reads).
+     * @throws ApiError
+     */
+    public addReviewComment(
+        projectId: string,
+        id: string,
+        requestBody: NewReviewCommentBody,
+    ): CancelablePromise<ReviewCommentsResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/review/comments',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (an empty body)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Edit a draft review comment
+     * Replaces a DRAFT's body. A published comment is immutable - append-only is what makes a thread an audit log rather than something that can be rewritten after the fact - so editing one is a 400, not a silent no-op.
+     *
+     * @param projectId
+     * @param id
+     * @param number The comment's number, as rendered "#4".
+     * @param requestBody
+     * @returns ReviewCommentsResponse Edited (returns the full list).
+     * @throws ApiError
+     */
+    public updateReviewComment(
+        projectId: string,
+        id: string,
+        number: number,
+        requestBody: UpdateReviewCommentBody,
+    ): CancelablePromise<ReviewCommentsResponse> {
+        return this.httpRequest.request({
+            method: 'PATCH',
+            url: '/api/projects/{project_id}/agents/{id}/review/comments/{number}',
+            path: {
+                'project_id': projectId,
+                'id': id,
+                'number': number,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (no such comment, or it is published)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Discard a draft review comment
+     * Drops an unpublished comment. Its number is retired rather than freed - "#3" has to mean one thing forever. A published comment cannot be deleted.
+     *
+     * @param projectId
+     * @param id
+     * @param number
+     * @returns ReviewCommentsResponse Discarded (returns the full list).
+     * @throws ApiError
+     */
+    public deleteReviewComment(
+        projectId: string,
+        id: string,
+        number: number,
+    ): CancelablePromise<ReviewCommentsResponse> {
+        return this.httpRequest.request({
+            method: 'DELETE',
+            url: '/api/projects/{project_id}/agents/{id}/review/comments/{number}',
+            path: {
+                'project_id': projectId,
+                'id': id,
+                'number': number,
+            },
+            errors: {
+                400: `Bad Request (no such comment, or it is published)`,
+                404: `Not Found`,
+            },
+        });
+    }
+    /**
+     * Publish this head's draft comments and notify its agent
+     * Flips the named drafts (or every draft) to published and sends the head's agent ONE short line naming their numbers and locations - not their bodies. The agent pulls what it needs with get_review_comments, so six comments cost one line instead of six diff excerpts, the transcript holds a pointer that cannot drift from the comment, and the handle survives a compaction that an injected blob would not.
+     *
+     * @param projectId
+     * @param id
+     * @param requestBody
+     * @returns ReviewCommentsResponse Published (returns the full list plus what the agent was told).
+     * @throws ApiError
+     */
+    public publishReviewComments(
+        projectId: string,
+        id: string,
+        requestBody?: PublishReviewCommentsBody,
+    ): CancelablePromise<ReviewCommentsResponse> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/review/comments/publish',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request (nothing to publish, or the agent could not be reached)`,
                 404: `Not Found`,
             },
         });

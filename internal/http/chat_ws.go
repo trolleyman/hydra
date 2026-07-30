@@ -100,9 +100,14 @@ func (s *Server) handleChatClientMessage(conn *safeConn, projectRoot, worktree, 
 		return
 	case "task_output":
 		// The expandable background-task chip asking for the task's output file
-		// (the <output-file> path its <task-notification> carried). sessionID is
-		// the head ID for a chat socket, which keys the head's private /tmp.
-		sendChatTaskOutput(conn, projectRoot, sessionID, msg.File)
+		// (the <output-file> path its <task-notification> carried). The private
+		// /tmp is keyed by the HEAD, and a review slot shares the head's (see
+		// StartReviewSession), so resolve back through the slot id.
+		tmpOwner := sessionID
+		if head, _, ok := heads.SplitSlotID(sessionID); ok {
+			tmpOwner = head
+		}
+		sendChatTaskOutput(conn, projectRoot, tmpOwner, msg.File)
 		return
 	case "user_message":
 		if !json.Valid(msg.Content) {
@@ -474,26 +479,32 @@ func claudeProjectDir(worktree string) string {
 // sub-agent's inner steps and a background sub-agent's completion notification
 // never reach stdout, so they are polled here and handed to the manager, which
 // normalizes them onto the same log and back out through `events` below.
-func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, agentID, worktree string) {
+//
+// Every key here is the SESSION id, not the head id. They are the same thing for
+// a head's own chat tab, but a review slot is `<head>@review` (docs/review-agent.md)
+// - its conversation, its queue and its pending questions are all its own, and
+// keying any of them by the head would replay the head's transcript into the
+// review pane.
+func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, sessionID, worktree string) {
 	var events <-chan chat.Event
 	if s.ChatEvents == nil {
-		sendChatError(conn, agentID, "chat events unavailable", errors.New("no chat event manager"))
-	} else if err := s.ChatEvents.Flush(agentID); err != nil {
-		sendChatError(conn, agentID, "flush chat events", err)
-	} else if snapshot, live, cancel, err := s.ChatEvents.Watch(agentID); err != nil {
-		sendChatError(conn, agentID, "watch chat events", err)
+		sendChatError(conn, sessionID, "chat events unavailable", errors.New("no chat event manager"))
+	} else if err := s.ChatEvents.Flush(sessionID); err != nil {
+		sendChatError(conn, sessionID, "flush chat events", err)
+	} else if snapshot, live, cancel, err := s.ChatEvents.Watch(sessionID); err != nil {
+		sendChatError(conn, sessionID, "watch chat events", err)
 	} else {
 		defer cancel()
 		events = live
 		writeFrame(conn, api.ChatStateSnapshotFrame{Type: api.StateSnapshot, State: snapshot})
 		// The initial display window ends exactly at the snapshot watermark;
 		// live contains only events appended after it.
-		s.sendChatHistory(conn, agentID, fmt.Sprintf("%d", snapshot.Through+1), 100)
+		s.sendChatHistory(conn, sessionID, fmt.Sprintf("%d", snapshot.Through+1), 100)
 	}
 	dir := claudeProjectDir(worktree)
 	// Which of the questions just replayed is the CLI actually still blocked on.
 	// Ahead of replay_done, so the client has it when it settles the transcript.
-	if pending, known := s.Sessions.PendingQuestions(agentID); known {
+	if pending, known := s.Sessions.PendingQuestions(sessionID); known {
 		if pending == nil {
 			pending = []claudestream.PendingAsk{} // a definite none, not a null
 		}
@@ -508,9 +519,9 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 	// so a restored-from-disk queue drains even without a live turn to end it.
 	if s.ChatQueues != nil {
 		writeFrame(conn, api.ChatQueueFrame{
-			Type: api.Queue, Messages: toAPIQueuedMessages(s.ChatQueues.List(projectRoot, agentID)),
+			Type: api.Queue, Messages: toAPIQueuedMessages(s.ChatQueues.List(projectRoot, sessionID)),
 		})
-		s.ChatQueues.OnAttach(projectRoot, agentID)
+		s.ChatQueues.OnAttach(projectRoot, sessionID)
 	}
 
 	// Live sub-agent activity: tail the session's subagents/*.jsonl growth (its
@@ -551,7 +562,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 						// Idempotent: the manager keys each event by source id, so a
 						// reconnect re-reading this sub-agent's backfill window (or a
 						// second browser tailing the same file) appends nothing new.
-						s.ChatEvents.ObserveClaudeSidechain(agentID, g.AgentID, meta, line)
+						s.ChatEvents.ObserveClaudeSidechain(sessionID, g.AgentID, meta, line)
 					}
 				}
 			}
@@ -561,7 +572,7 @@ func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, project
 			// settles a finished background sub-agent's card.
 			for _, line := range lines {
 				if s.ChatEvents != nil {
-					s.ChatEvents.ObserveProviderLine(agentID, "claude", line)
+					s.ChatEvents.ObserveProviderLine(sessionID, "claude", line)
 				}
 			}
 		case _, ok := <-att.Output:

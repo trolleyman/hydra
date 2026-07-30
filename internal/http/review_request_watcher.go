@@ -2,11 +2,13 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/reviewq"
 	"github.com/trolleyman/hydra/internal/reviewstore"
@@ -89,6 +91,10 @@ func (s *Server) drainReviewRequests(ctx context.Context, projectRoot string) {
 			switch r.Op {
 			case reviewq.OpNote:
 				res = s.recordLocalNote(projectRoot, id, r)
+			case reviewq.OpComments:
+				res = s.hydraCommentsText(projectRoot, id, r)
+			case reviewq.OpAddComment:
+				res = s.addHydraComment(projectRoot, id, r)
 			case reviewq.OpHeadStatus:
 				res = s.headStatusText(ctx, id)
 			case reviewq.OpTestLogs:
@@ -155,6 +161,74 @@ func (s *Server) recordLocalNote(projectRoot, id string, r reviewq.Request) revi
 	}
 	s.notifyAgentsChanged(projectRoot, false)
 	return reviewq.Result{OK: true}
+}
+
+// commentOwner maps the session id a review request arrived under to the HEAD
+// whose comment store it belongs to, and the author to record for a write.
+//
+// A review slot has its own request dir (`<head>@review`) but no comment store of
+// its own - the comments are about the head, and a reviewer that wrote into a
+// private store would be talking to nobody. It signs as the reviewer rather than
+// as the agent, because "your reviewer says this" and "the head says this" are
+// very different claims, and the head must not be able to sign as its own
+// reviewer.
+func commentOwner(sessionID string) (headID, author string) {
+	if head, slot, ok := heads.SplitSlotID(sessionID); ok && slot == heads.ReviewSlot {
+		return head, reviewstore.AuthorReviewer
+	}
+	return sessionID, reviewstore.AuthorAgent
+}
+
+// hydraCommentsText answers an agent's read of Hydra's own review comments.
+//
+// PublishedComments, never LoadComments: a draft is the user's half-written
+// thought, and half-written thoughts are not instructions. The filter lives in
+// the store so a new caller cannot leak them by forgetting to apply it.
+func (s *Server) hydraCommentsText(projectRoot, id string, r reviewq.Request) reviewq.Result {
+	owner, _ := commentOwner(id)
+	all := reviewstore.PublishedComments(projectRoot, owner)
+	if len(r.Numbers) > 0 {
+		want := map[int]bool{}
+		for _, n := range r.Numbers {
+			want[n] = true
+		}
+		var picked []reviewstore.Comment
+		for _, c := range all {
+			if want[c.Number] {
+				picked = append(picked, c)
+			}
+		}
+		if len(picked) == 0 {
+			return reviewq.Result{OK: false, Message: "No published comment matches those numbers. Call get_review_comments with no arguments to see what is there."}
+		}
+		all = picked
+	}
+	// Full context only for a narrowed read. "Show me everything" should stay
+	// cheap enough to call habitually; a diff block per comment would make an
+	// unfiltered read on a long review the most expensive tool in the session.
+	return reviewq.Result{OK: true, Message: reviewstore.RenderForAgent(all, len(r.Numbers) > 0)}
+}
+
+// addHydraComment appends an agent-authored review comment and tells the user's
+// UI to refresh. Published on write: an agent has no drafts.
+func (s *Server) addHydraComment(projectRoot, id string, r reviewq.Request) reviewq.Result {
+	if strings.TrimSpace(r.Body) == "" {
+		return reviewq.Result{Message: "The comment was empty, so nothing was recorded."}
+	}
+	owner, author := commentOwner(id)
+	c, err := reviewstore.AppendComment(projectRoot, owner, reviewstore.Comment{
+		Status: reviewstore.StatusPublished, Author: author, Body: r.Body,
+		Path: r.Path, Line: r.Line, ReplyTo: r.ReplyTo,
+	})
+	if err != nil {
+		return reviewq.Result{Message: "The comment could not be saved: " + err.Error()}
+	}
+	s.notifyAgentsChanged(projectRoot, false)
+	msg := fmt.Sprintf("Saved as %s", c.Label())
+	if anchor := c.Anchor(); anchor != "" {
+		msg += " on " + anchor
+	}
+	return reviewq.Result{OK: true, Message: msg + ". The user can see it in Hydra's diff viewer; refer to it by its number from here on."}
 }
 
 // fresh reports whether an RFC3339 timestamp is within d of now. An empty or

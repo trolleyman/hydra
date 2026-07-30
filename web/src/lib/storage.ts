@@ -91,6 +91,11 @@ export const StorageKeys = {
   // a wrapped long line apart from a genuinely new one. Client-only, global
   // (localStorage, like Theme). See lib/chatPrefs.
   chatCodeLineNumbers: 'hydra-chat-code-line-numbers',
+  // Which whitespace the code surfaces (diff viewer, repository browser, the
+  // chat's file cards) draw a mark on: 'boundary' (the indent and any trailing
+  // spaces) or 'all'. Absent = off, the default. Client-only, global
+  // (localStorage, like Theme). See lib/whitespacePrefs + lib/whitespaceMarks.
+  codeWhitespace: 'hydra-code-whitespace',
   // Spaces the shell-command formatter indents a block body by when it lays a
   // one-line for/while/if/case out over several lines - in the chat transcript
   // and on the security approval card. A bare number ('0' = flush left); absent
@@ -241,22 +246,12 @@ export const AGENT_VIEW_PREFS_PREFIX = 'hydra-agent-view-'
 export const agentViewPrefsKey = (projectId: string | null, agentId: string): string =>
   `${AGENT_VIEW_PREFS_PREFIX}${projectId ?? '_'}-${agentId}`
 
-// Pending review comments the user has queued (via "Add to review" in the diff
-// viewer) but not yet submitted to the agent - one draft per project + agent, so
-// each agent accumulates its own batch and the "Submit review" button in the
-// Changes bar can flush them all at once. Kept in a dedicated store (not
-// agentViewPrefs) because this is user-authored content with its own
-// clear-on-submit lifecycle, not view state. See lib/reviewDrafts.ts. projectId
-// may be null → '_' keeps the key shape stable.
-export const REVIEW_DRAFT_PREFIX = 'hydra-review-draft-'
-export const reviewDraftKey = (projectId: string | null, agentId: string): string =>
-  `${REVIEW_DRAFT_PREFIX}${projectId ?? '_'}-${agentId}`
-
 // In-progress (not yet "Add to review"ed) line-comment drafts, one entry per
-// project + agent holding a map of line-key -> the half-written text. Kept apart
-// from REVIEW_DRAFT so submitting/clearing a review batch never wipes a comment
-// the user is mid-way through typing on another line, and the two prune on their
-// own timers. See lib/reviewDrafts.ts. projectId may be null -> '_'.
+// project + agent holding a map of line-key -> the half-written text. This is the
+// only half of a review that is still local: once a comment is queued it becomes
+// a numbered server-side object (lib/reviewComments.ts), but the text you are
+// mid-sentence on is keystroke-frequency and belongs to nobody but this browser.
+// See lib/reviewDrafts.ts. projectId may be null -> '_'.
 export const LINE_DRAFT_PREFIX = 'hydra-line-draft-'
 export const lineDraftKey = (projectId: string | null, agentId: string): string =>
   `${LINE_DRAFT_PREFIX}${projectId ?? '_'}-${agentId}`

@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { MessagesSquare, Trash2, Send, TriangleAlert, X } from 'lucide-react'
-import type { PendingReviewComment } from '../lib/reviewDrafts'
+import type { PendingReviewComment } from '../lib/reviewComments'
 import { Tooltip } from './Tooltip'
 
 export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, onRemove, onJump }: {

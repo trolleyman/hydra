@@ -79,6 +79,7 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     terminalHeight: stored.terminalHeight,
     collapsedFiles: stored.collapsedFiles,
     bashTabs: stored.bashTabs,
+    reviewTabOpen: stored.reviewTabOpen,
     activeTabId: stored.activeTabId,
     testGroupResult: stored.testGroupResult,
     testUseScope: stored.testUseScope,

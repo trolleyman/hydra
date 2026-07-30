@@ -28,6 +28,8 @@ import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './li
 import { buildRepoSplat } from './lib/repoSplat'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { buildWordRangeMaps, renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS, type WordRange } from './lib/wordDiff'
+import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from './lib/whitespaceMarks'
+import { useWhitespaceMarks } from './lib/whitespacePrefs'
 import { Tooltip } from './components/Tooltip'
 import { CollapseSlide } from './components/CollapseSlide'
 import { ResizeGrip } from './components/ResizeGrip'
@@ -57,7 +59,8 @@ import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
-import { addReviewComment, removeReviewComment, updateReviewComment, clearReviewDraft, loadReviewDraft, loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft, type PendingReviewComment } from './lib/reviewDrafts'
+import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
+import { addReviewComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, draftsOf, type PendingReviewComment } from './lib/reviewComments'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
 import { Markdown } from './lib/MarkdownRenderer'
 import { useCopyFlash } from './lib/useCopyFlash'
@@ -186,20 +189,37 @@ function QueuedCommentCard({ comment, stale, onEdit, onRemove }: {
   onEdit: () => void
   onRemove: () => void
 }) {
+  // A published comment is a record, not a draft: it has left, an agent may
+  // already have acted on it, and the server refuses to edit or delete it. So it
+  // renders in a quieter colour, carries its number (the handle everyone - you,
+  // the head, its reviewer - refers to it by), names its author when that is not
+  // you, and has no controls that would lie about what is still possible.
+  const sent = comment.published
+  const mine = comment.author === 'user'
   return (
-    <div className="border-y border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20 px-4 py-2">
+    <div className={`border-y px-4 py-2 ${
+      sent
+        ? 'border-stone-200 dark:border-white/10 bg-stone-50/60 dark:bg-white/[0.03]'
+        : 'border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20'
+    }`}>
       <div className="flex items-start gap-2">
-        <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0 text-blue-500" />
+        <MessageSquare className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${sent ? 'text-stone-400 dark:text-stone-500' : 'text-blue-500'}`} />
         <div className="min-w-0 flex-1">
+          {sent && (
+            <div className="mb-0.5 flex items-center gap-1.5 text-2xs text-stone-400 dark:text-stone-500">
+              <span className="font-mono">#{comment.number}</span>
+              {!mine && <span>{comment.author}</span>}
+            </div>
+          )}
           <Markdown text={comment.text} className="text-xs text-gray-700 dark:text-gray-200 break-words" />
-          {stale && (
+          {stale && !sent && (
             <div className="mt-1 flex items-start gap-1 text-2xs text-amber-700 dark:text-amber-300">
               <TriangleAlert className="w-3 h-3 mt-px shrink-0" />
               <span>The diff around this line changed after this comment was queued; it will still be sent with its original context.</span>
             </div>
           )}
         </div>
-        <div className="flex items-center gap-0.5 shrink-0">
+        <div className={`flex items-center gap-0.5 shrink-0 ${sent ? 'hidden' : ''}`}>
           <Tooltip content="Edit comment" side="top">
             <button
               onClick={onEdit}
@@ -562,11 +582,15 @@ const EMPTY_WORD_RANGES: Map<number, WordRange[]> = new Map()
 
 // codeCellHtml resolves the HTML for a diff line's code cell: the word-diff
 // overlay when this line has changed ranges, else the plain syntax-highlighted
-// HTML. Returns null to signal "render the raw content as a text node" (no
-// highlight, no word ranges) - the safe path that needs no dangerouslySetInnerHTML.
-function codeCellHtml(highlighted: string | undefined, content: string, ranges: WordRange[] | undefined, wordClass: string): string | null {
-  if (ranges && ranges.length) return renderWordDiffHtml(highlighted, content, ranges, wordClass)
-  return highlighted ?? null
+// HTML, with the whitespace marks (lib/whitespaceMarks) laid over whichever it
+// is - last, so neither the highlighter nor the word diff has to know about
+// them. Returns null to signal "render the raw content as a text node" (no
+// highlight, no word ranges, nothing to mark) - the safe path that needs no
+// dangerouslySetInnerHTML.
+function codeCellHtml(highlighted: string | undefined, content: string, ranges: WordRange[] | undefined, wordClass: string, ws: WhitespaceMarks): string | null {
+  const html = ranges && ranges.length ? renderWordDiffHtml(highlighted, content, ranges, wordClass) : highlighted
+  if (html != null) return markWhitespace(html, ws)
+  return markWhitespaceText(content, ws)
 }
 
 const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, lineDraftApi, readOnly, selection, onSelectLine }: {
@@ -589,6 +613,10 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   // Stable so the memo'd CommentButton on each line skips a re-highlight tick.
   const toggleComment = useCallback((idx: number) => setOpenCommentIdx((cur) => (cur === idx ? null : idx)), [])
+  // Read here rather than threaded down as a prop: the hunks are memo'd on their
+  // props, so a subscription inside is what re-renders them when the setting
+  // changes (and nothing re-highlights - the marks go on the finished HTML).
+  const ws = useWhitespaceMarks()
   return (
     <div>
       {hunk.lines.map((line, idx) => {
@@ -601,7 +629,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
         const wordRanges = isAdd
           ? (line.new_line_num != null ? wordRangesNew.get(line.new_line_num) : undefined)
           : isDel ? (line.old_line_num != null ? wordRangesOld.get(line.old_line_num) : undefined) : undefined
-        const codeHtml = codeCellHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
+        const codeHtml = codeCellHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS, ws)
         const bgClass = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
         const markerClass = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
         const selOld = selectionHas(selection, 'old', line.old_line_num)
@@ -676,6 +704,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   const toggleComment = useCallback((idx: number) => setOpenCommentIdx((cur) => (cur === idx ? null : idx)), [])
+  const ws = useWhitespaceMarks()
   const sbsLines = buildSideBySide(hunk.lines)
   return (
     <div>
@@ -686,8 +715,8 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
         // a context line shown on both sides.
         const oldWordRanges = line.oldType === 'deletion' && line.oldLineNum != null ? wordRangesOld.get(line.oldLineNum) : undefined
         const newWordRanges = line.newType === 'addition' && line.newLineNum != null ? wordRangesNew.get(line.newLineNum) : undefined
-        const oldCodeHtml = line.oldContent != null ? codeCellHtml(oldHighlighted, line.oldContent, oldWordRanges, WORD_DEL_CLASS) : null
-        const newCodeHtml = line.newContent != null ? codeCellHtml(newHighlighted, line.newContent, newWordRanges, WORD_ADD_CLASS) : null
+        const oldCodeHtml = line.oldContent != null ? codeCellHtml(oldHighlighted, line.oldContent, oldWordRanges, WORD_DEL_CLASS, ws) : null
+        const newCodeHtml = line.newContent != null ? codeCellHtml(newHighlighted, line.newContent, newWordRanges, WORD_ADD_CLASS, ws) : null
         const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-500/15' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-500/15' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const selOld = selectionHas(selection, 'old', line.oldLineNum)
@@ -1782,44 +1811,6 @@ function diffContextBlock(path: string, hunk: DiffHunk | undefined, lineNum: num
   })
   const header = hunk.header ? `${hunk.header}\n` : ''
   return `\`\`\`diff\n--- ${path}\n+++ ${path}\n${header}${rows.join('\n')}\n\`\`\`\n`
-}
-
-// One comment's worth of data needed to render the chat message: the authored
-// text, the diff comparison it was written against, and its frozen context block.
-// Both the live "Send" path and a stored PendingReviewComment satisfy this shape.
-type ReviewMessagePart = Pick<PendingReviewComment, 'text' | 'fromLabel' | 'toLabel' | 'contextBlock'>
-
-// Build the chat message sent to the agent for one or more review comments.
-// A single comment gets a "Comment on <from> -> <to> diff:" header; multiple are
-// grouped by their comparison (usually just one group) under a "Comments on
-// <from> -> <to> diff:" header, separated by a blank line. Each comment carries
-// its own ```diff context block (already fenced) followed by its text.
-function buildReviewMessage(comments: ReviewMessagePart[]): string {
-  if (comments.length === 0) return ''
-  if (comments.length === 1) {
-    const c = comments[0]
-    let s = `Comment on ${c.fromLabel} -> ${c.toLabel} diff:\n`
-    if (c.contextBlock) s += `\n${c.contextBlock}`
-    s += `\n_Comment:_\n${c.text}`
-    return s
-  }
-  // Group by comparison, preserving first-seen order.
-  const groups: { label: string; items: ReviewMessagePart[] }[] = []
-  comments.forEach((c) => {
-    const label = `${c.fromLabel} -> ${c.toLabel}`
-    let g = groups.find((grp) => grp.label === label)
-    if (!g) { g = { label, items: [] }; groups.push(g) }
-    g.items.push(c)
-  })
-  return groups.map((g) => {
-    const parts = g.items.map((c) => {
-      let s = ''
-      if (c.contextBlock) s += `${c.contextBlock}\n`
-      s += `_Comment:_\n${c.text}`
-      return s
-    })
-    return `Comments on ${g.label} diff:\n\n${parts.join('\n\n')}`
-  }).join('\n\n')
 }
 
 function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
@@ -3473,17 +3464,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // the count/badge and the review popover update as the user adds or removes
   // them. Reloaded when the agent changes (DiffViewerImpl is not remounted per
   // agent - see the memo comparator - so switching agents re-runs this effect).
-  const [reviewComments, setReviewComments] = useState<PendingReviewComment[]>(
-    () => loadReviewDraft(projectId, agent.id),
-  )
-  // Reload the mirrored draft when the agent changes, during render (previous-key
-  // idiom) rather than in an effect - DiffViewerImpl isn't remounted per agent, so
-  // this reacts to the id change without a cascading effect render.
-  const [prevReviewDraftKey, setPrevReviewDraftKey] = useState(`${projectId}\0${agent.id}`)
-  if (prevReviewDraftKey !== `${projectId}\0${agent.id}`) {
-    setPrevReviewDraftKey(`${projectId}\0${agent.id}`)
-    setReviewComments(loadReviewDraft(projectId, agent.id))
-  }
+  const [reviewComments, setReviewComments] = useState<PendingReviewComment[]>([])
+  // Refetch when the agent changes. The store is server-side now, so this starts
+  // empty and fills in - which also means a draft written in another browser (or
+  // before a reload) is simply there, the thing localStorage could never do.
+  // DiffViewerImpl isn't remounted per agent, so the effect keys on the id.
+  useEffect(() => {
+    let cancelled = false
+    fetchReviewComments(projectId, agent.id)
+      .then((cs) => { if (!cancelled) setReviewComments(cs) })
+      .catch((e) => console.error('Failed to load review comments:', e))
+    return () => { cancelled = true }
+  }, [projectId, agent.id])
   const [submittingReview, setSubmittingReview] = useState(false)
 
   // Latest-value refs so handleComment (passed to every FileDiff) keeps a stable
@@ -3506,10 +3498,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     const file = diffRef.current?.files.find(f => f.path === path)
     const block = diffContextBlock(path, findHunkForLine(file, lineNum, isNew), lineNum, isNew)
 
-    const msg = buildReviewMessage([{ text, fromLabel, toLabel, contextBlock: block }])
+    const hunk = findHunkForLine(file, lineNum, isNew)
 
     try {
-      await api.default.sendAgentInput(projectId ?? '', agent.id, { text: msg })
+      // Stored AND published in one call, so a comment sent straight to the agent
+      // is as durable and as citable ("#4") as one that went through the queue.
+      // The agent is notified by number server-side; nothing is pasted into it.
+      await sendReviewComment(projectId, agent.id, {
+        path, lineNum, isNew, text, fromLabel, toLabel,
+        contextBlock: block,
+        hunkHash: hunk ? hashHunks([hunk]) : '',
+      })
       showSentToast('Comment sent to agent')
     } catch (e) {
       console.error('Failed to send comment:', e)
@@ -3524,22 +3523,27 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
     const file = diffRef.current?.files.find(f => f.path === path)
     const hunk = findHunkForLine(file, lineNum, isNew)
-    const next = addReviewComment(projectId, agent.id, {
+    addReviewComment(projectId, agent.id, {
       path, lineNum, isNew, text, fromLabel, toLabel,
       contextBlock: diffContextBlock(path, hunk, lineNum, isNew),
       hunkHash: hunk ? hashHunks([hunk]) : '',
     })
-    setReviewComments(next)
+      .then(setReviewComments)
+      .catch((e) => console.error('Failed to queue comment:', e))
   }, [agent.id, agent.base_branch, projectId])
 
   const removeQueuedComment = useCallback((id: string) => {
-    setReviewComments(removeReviewComment(projectId, agent.id, id))
+    removeReviewComment(projectId, agent.id, Number(id))
+      .then(setReviewComments)
+      .catch((e) => console.error('Failed to discard comment:', e))
   }, [projectId, agent.id])
 
   // Edit a queued comment in place (from its inline card). Stable so it doesn't
   // bust the hunks' memo.
   const handleUpdateReviewComment = useCallback((id: string, text: string) => {
-    setReviewComments(updateReviewComment(projectId, agent.id, id, text))
+    updateReviewComment(projectId, agent.id, Number(id), text)
+      .then(setReviewComments)
+      .catch((e) => console.error('Failed to edit comment:', e))
   }, [projectId, agent.id])
 
   // Forge review threads for this head's MR, fetched when the head is linked. The
@@ -3621,6 +3625,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // Queued comments grouped by file, so each FileDiff gets only its own. Files
   // with none share EMPTY_FILE_COMMENTS (stable identity) so their hunks' memo
   // holds. Rebuilds only when the queued set changes.
+  // The unpublished subset - what the popover lists and "Submit review" sends.
+  // The gutter (commentsByPath below) deliberately gets ALL of them: a comment
+  // your reviewer left is worth nothing if you cannot see it next to the code.
+  const queuedComments = useMemo(() => draftsOf(reviewComments), [reviewComments])
+
   const commentsByPath = useMemo(() => {
     const m = new Map<string, PendingReviewComment[]>()
     for (const c of reviewComments) {
@@ -3643,21 +3652,19 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // draft. Each comment carries its own frozen context, so the message is built
   // entirely from the stored data - independent of what the live diff shows now.
   const submitReview = useCallback(async () => {
-    const comments = loadReviewDraft(projectId, agent.id)
-    if (comments.length === 0 || submittingReview) return
+    const count = queuedComments.length
+    if (count === 0 || submittingReview) return
     setSubmittingReview(true)
-    const text = buildReviewMessage(comments)
     try {
-      await api.default.sendAgentInput(projectId ?? '', agent.id, { text })
-      clearReviewDraft(projectId, agent.id)
-      setReviewComments([])
-      showSentToast(comments.length === 1 ? 'Review sent to agent' : `Review of ${comments.length} comments sent to agent`)
+      const { comments } = await publishReviewComments(projectId, agent.id)
+      setReviewComments(comments)
+      showSentToast(count === 1 ? 'Review sent to agent' : `Review of ${count} comments sent to agent`)
     } catch (e) {
       console.error('Failed to submit review:', e)
     } finally {
       setSubmittingReview(false)
     }
-  }, [agent.id, projectId, submittingReview, showSentToast])
+  }, [agent.id, projectId, submittingReview, showSentToast, queuedComments.length])
 
   // Which queued comments have gone stale: the diff under them changed since they
   // were added (the anchoring hunk's content hash no longer matches, or the line
@@ -3666,14 +3673,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // comment stored with no hunk (hash '') can't be judged, so it's never stale.
   const staleReviewIds = useMemo(() => {
     const stale = new Set<string>()
-    for (const c of reviewComments) {
+    for (const c of queuedComments) {
       if (!c.hunkHash) continue
       const file = diff?.files.find(f => f.path === c.path)
       const hunk = findHunkForLine(file, c.lineNum, c.isNew)
       if ((hunk ? hashHunks([hunk]) : '') !== c.hunkHash) stale.add(c.id)
     }
     return stale
-  }, [diff, reviewComments])
+  }, [diff, queuedComments])
 
   const [isResizing, setIsResizing] = useState(false)
   const startResizing = useCallback((e: React.MouseEvent) => {
@@ -4186,7 +4193,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           {/* "Submit review" - shown only once the user has queued at least one
               "Add to review" comment for this agent. */}
           <ReviewDraftPopover
-            comments={reviewComments}
+            comments={queuedComments}
             staleIds={staleReviewIds}
             submitting={submittingReview}
             onSubmit={submitReview}

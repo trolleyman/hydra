@@ -15,6 +15,13 @@
 // markdown with the chat's non-markdown chrome (tool cards, diffs) - which the
 // serializer passes through as plain text, as the browser would.
 //
+// The one place that is deliberately NOT markdown is a selection that lies
+// wholly inside code - a fenced block, an inline span, a preformatted panel.
+// There the point of selecting is to run or paste the code itself, so it is
+// copied as the bare characters, with no fence and no backticks around them
+// (see rangeToMarkdown, and narrowRange for why a triple-click counts as
+// "wholly inside" even though the browser's range reaches past the block).
+//
 // Elements are recognised by the data attributes MarkdownRenderer sets
 // (data-md-root, data-md-code, data-md-lang) plus standard tag names, so this
 // stays independent of the Tailwind classes those elements happen to carry.
@@ -27,6 +34,10 @@ const BLOCK_TAGS = new Set([
   'HEADER', 'HR', 'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'TABLE',
   'TR', 'UL',
 ])
+
+// Elements that put something on the clipboard without holding any text of
+// their own - narrowRange must not step over one on its way in.
+const VOID_CONTENT = new Set(['IMG', 'BR', 'HR', 'INPUT'])
 
 // Never contribute text: decorative icons, and anything explicitly hidden.
 // data-copy-skip is the opt-out for chrome that would otherwise read as content.
@@ -139,16 +150,96 @@ function isUnselectable(el: Element): boolean {
   return style.userSelect === 'none' || style.display === 'none' || style.visibility === 'hidden'
 }
 
-// textOf returns a text node's contribution, clipped to the selection at the
-// two ends of the range and whitespace-collapsed unless inside a code block.
-function textOf(node: Text, ctx: Ctx): string {
-  const { range } = ctx
+// skipped reports whether an element contributes nothing at all: chrome the
+// browser's own copy would leave behind, and anything not rendered.
+function skipped(el: Element): boolean {
+  return (
+    SKIP_TAGS.has(el.tagName.toUpperCase()) ||
+    el.getAttribute('aria-hidden') === 'true' ||
+    el.hasAttribute('data-copy-skip') ||
+    // `hidden` is boolean | 'until-found'; both mean it isn't on screen.
+    !!(el as HTMLElement).hidden ||
+    isUnselectable(el)
+  )
+}
+
+// selectedSpan is the half-open slice of a text node the range covers.
+function selectedSpan(node: Text, range: Range): [number, number] {
   let start = 0
   let end = node.data.length
   if (node === range.startContainer) start = range.startOffset
   if (node === range.endContainer) end = range.endOffset
-  const raw = node.data.slice(start, Math.max(start, end))
+  return [start, Math.max(start, end)]
+}
+
+// textOf returns a text node's contribution, clipped to the selection at the
+// two ends of the range and whitespace-collapsed unless inside a code block.
+function textOf(node: Text, ctx: Ctx): string {
+  const [start, end] = selectedSpan(node, ctx.range)
+  const raw = node.data.slice(start, end)
   return ctx.pre ? raw : raw.replace(/\s+/g, ' ')
+}
+
+// narrowRange pulls a selection's boundaries in to the first and last nodes
+// that actually put something on the clipboard.
+//
+// A browser's own selection is routinely wider than what it covers: a
+// triple-click ends at offset 0 of the NEXT block's container, and a drag that
+// overshoots ends in the whitespace between two elements. Those empty ends do
+// not change a character of the output, but they do lift the range's common
+// ancestor above the thing that was selected - so a triple-click on a one-line
+// code block looked like a selection of the whole message, and came back fenced
+// (```sh ... ```) instead of as the command the user meant to paste into a
+// shell. Narrowing first means the context walk in rangeToMarkdown sees the
+// innermost element that really contains the selection.
+function narrowRange(range: Range): Range {
+  const root = range.commonAncestorContainer
+  const doc = root.ownerDocument
+  if (!doc || root.nodeType !== Node.ELEMENT_NODE) return range
+  // "Contributes" means a visible character, as in wholeSource: react-markdown
+  // leaves a newline text node between every pair of block elements, and a
+  // triple-click that ends at the next block reaches over one of them. Trimming
+  // those off the ends costs nothing - the result is trimmed at the end anyway.
+  const covers = (t: Text) => {
+    const [s, e] = selectedSpan(t, range)
+    return /\S/.test(t.data.slice(s, e))
+  }
+  // Both ends already sit on text the selection includes: nothing to pull in,
+  // and this is the common case (any ordinary drag), so skip the walk.
+  const startText = range.startContainer.nodeType === Node.TEXT_NODE ? (range.startContainer as Text) : null
+  const endText = range.endContainer.nodeType === Node.TEXT_NODE ? (range.endContainer as Text) : null
+  if (startText && endText && covers(startText) && covers(endText)) return range
+
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+    acceptNode(node) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const t = node as Text
+        return intersectsRange(range, t) && covers(t) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+      }
+      const el = node as Element
+      // FILTER_REJECT prunes the subtree; FILTER_SKIP descends without
+      // reporting the element itself, which only replaced content needs.
+      if (skipped(el) || !intersectsRange(range, el)) return NodeFilter.FILTER_REJECT
+      return VOID_CONTENT.has(el.tagName) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
+    },
+  })
+  let first: Node | null = null
+  let last: Node | null = null
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!first) first = n
+    last = n
+  }
+  if (!first || !last) return range
+  const r = doc.createRange()
+  try {
+    if (first.nodeType === Node.TEXT_NODE) r.setStart(first, selectedSpan(first as Text, range)[0])
+    else r.setStartBefore(first)
+    if (last.nodeType === Node.TEXT_NODE) r.setEnd(last, selectedSpan(last as Text, range)[1])
+    else r.setEndAfter(last)
+  } catch {
+    return range
+  }
+  return r
 }
 
 // block wraps a block-level element's content with separators; adjacent
@@ -302,11 +393,7 @@ function convert(node: Node, ctx: Ctx): string {
   if (node.nodeType !== Node.ELEMENT_NODE) return ''
   const el = node as Element
   const tag = el.tagName.toUpperCase()
-  if (SKIP_TAGS.has(tag)) return ''
-  if (el.getAttribute('aria-hidden') === 'true') return ''
-  if (el.hasAttribute('data-copy-skip')) return ''
-  if ((el as HTMLElement).hidden) return ''
-  if (isUnselectable(el)) return ''
+  if (skipped(el)) return ''
   if (!intersectsRange(ctx.range, el)) return ''
 
   if (tag === 'BR') return '\n'
@@ -412,45 +499,36 @@ function convert(node: Node, ctx: Ctx): string {
 // rangeToMarkdown serializes one selection range.
 export function rangeToMarkdown(range: Range): string {
   if (range.collapsed) return ''
-  const root = range.commonAncestorContainer
-  const ctx: Ctx = { range, md: false, pre: false, tight: false }
+  const narrowed = narrowRange(range)
+  const root = narrowed.commonAncestorContainer
+  const ctx: Ctx = { range: narrowed, md: false, pre: false, tight: false }
   // Start from the common ancestor so ancestor context (list type, code block,
-  // markdown root) is known, and let the intersection test prune the rest.
-  // Walking up also catches the selection-within-one-message case: whichever of
-  // the two markers is hit first wins, so a selection inside a code block stays
-  // raw code even when it happens to be that message's only content.
+  // preformatted panel, markdown root) is known, and let the intersection test
+  // prune the rest. Walking up is also what keeps a selection *inside* one
+  // message from being treated as the message: whichever marker is hit first
+  // wins, so code stays code even when it is that message's only content.
   for (let n: Node | null = root; n; n = n.parentNode) {
     if (n.nodeType !== Node.ELEMENT_NODE) continue
     const el = n as Element
+    // Wholly inside code - the whole point of selecting it is to run or paste
+    // the code itself, so hand back exactly the characters, with no fence and
+    // no backticks around them. `md: false` is what suppresses those: the
+    // preformatted branch of convert() copies visible text verbatim.
+    if (el.tagName === 'CODE' || el.tagName === 'PRE' || el.hasAttribute('data-copy-code')) {
+      ctx.pre = true
+      break
+    }
     if (el.hasAttribute('data-md-root')) {
       // The whole message is selected - hand back exactly what it was rendered
       // from rather than a re-serialization of it.
-      const source = wholeSource(el, range)
+      const source = wholeSource(el, narrowed)
       if (source) return source
       ctx.md = true
       break
     }
-    if (el.hasAttribute('data-md-code-block')) {
-      ctx.md = true
-      ctx.pre = true
-      break
-    }
   }
-  const md = ctx.pre ? textOfSubtree(root, ctx) : convert(root, ctx)
+  const md = convert(root, ctx)
   return md.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
-}
-
-// textOfSubtree is the verbatim path used when the selection starts inside a
-// code block: no markdown syntax to recover, just the selected characters.
-function textOfSubtree(node: Node, ctx: Ctx): string {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return intersectsRange(ctx.range, node) ? textOf(node as Text, ctx) : ''
-  }
-  if (node.nodeType !== Node.ELEMENT_NODE) return ''
-  if (!intersectsRange(ctx.range, node)) return ''
-  let out = ''
-  for (const child of Array.from(node.childNodes)) out += textOfSubtree(child, ctx)
-  return out
 }
 
 // selectionToMarkdown serializes the whole selection (Firefox allows several
