@@ -832,17 +832,17 @@ reports on code that never existed.
    through the same notification path. At this point it is routing plus a
    loop-cap rule, because both ends already exist.
 
-Still open on the built slot, none of it blocking:
+Still open on the built slot:
 
 - **Exercise it against a live head.** It has never launched a real Claude in a
-  real checkout (see the caveat at the top).
-- **A status dot on the Review tab**, and a composer note saying what the
-  reviewer cannot do.
-- **Syncing the checkout forward** as the head commits. `EnsureReviewCheckout`
-  takes a ref and moves an existing tree, but nothing calls it between turns yet,
-  so a long-lived reviewer keeps looking at the commit it started on.
+  real checkout (see the caveat at the top). This is the only item here that is
+  actually blocking - everything else is an addition, this is "does it work".
 - **Lens-named extra slots** (`<head>@review-security`). The naming leaves room;
   nothing creates them.
+
+Done since this list was written: the status dot on the Review tab and the
+composer note (`AgentTerminal.tsx`, `AgentChat.tsx`), and syncing the checkout
+forward as the head commits (`internal/heads/reviewsync.go`).
 
 ## Deliberately not
 
