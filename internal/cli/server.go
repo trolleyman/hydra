@@ -204,6 +204,15 @@ func runSimulationServer() error {
 		_, _ = w.Write([]byte(`{"auth_required":false,"authenticated":true}`))
 	})
 
+	// Folder-picker availability (mirrors the real server's non-OpenAPI route).
+	// The sim has no native picker to open, so it answers "no" - the project
+	// dropdown just hides its "Browse..." button. Same reason as the auth route:
+	// without it every project-dropdown open logs a 404.
+	mux.HandleFunc("GET /folder-picker/available", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"available":false}`))
+	})
+
 	registerFrontend(mux)
 
 	addr := defaultWebAddr
