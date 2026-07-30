@@ -61,7 +61,7 @@ import { highlightHtml, highlightLines, splitHighlightedLines } from '../lib/hig
 import { escapeText } from '../lib/prismHtml'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
-import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
+import { agentFileUrl, uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
@@ -3156,6 +3156,12 @@ function LowlitPath({ path }: { path: string }) {
 // is under the provider in ChatPane.
 const ToolFoldContext = createContext<Map<string, boolean>>(new Map())
 
+// A Codex imageView item carries the local path it opened, but no image result
+// block: the pixels were delivered out-of-band to Codex itself. Tool cards need
+// the head identity to route that path through HandleAgentFileBlob, the same
+// secure endpoint chat markdown uses for an agent-authored screenshot.
+const AgentFileContext = createContext<{ projectId: string; agentId: string } | null>(null)
+
 // memo'd so composer keystrokes (a sibling state change) don't re-render every
 // tool card in the transcript (item 16). Props are stable per settled item.
 // recipient* / openSub describe a SendMessage's target agent. They are passed
@@ -3181,6 +3187,7 @@ const ToolCard = memo(function ToolCard({
   openSub?: (key: string) => void
 }) {
   const folds = useContext(ToolFoldContext)
+  const agentFile = useContext(AgentFileContext)
   const [open, setOpen] = useState(() => folds.get(item.toolUseId) ?? false)
   // Toggling records the choice so it survives the card's next remount (see
   // ToolFoldContext). The auto-open below deliberately doesn't - an approval
@@ -3194,14 +3201,26 @@ const ToolCard = memo(function ToolCard({
   const [imgLightbox, setImgLightbox] = useState<number | null>(null)
   // The thumbnail clicked, so the lightbox flies the picture out of it.
   const [imgOrigin, setImgOrigin] = useState<Element | null>(null)
-  // Eagerly decode result images (the card mounts collapsed the moment the
-  // result lands), so opening later measures the true expanded height.
-  const imageDims = useImageDims(item.resultImages)
-  const pending = item.result === undefined && !item.ended
-	const visibleResult = item.result ?? item.runningOutput
   const rawInput = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
     | Record<string, unknown>
     | null
+  const viewImagePath =
+    item.name === 'View Image' && typeof rawInput?.path === 'string'
+      ? rawInput.path
+      : ''
+  // Claude returns image blocks in the tool result. Codex's imageView instead
+  // returns only the path it viewed, so turn that into the same result-image
+  // model and let the shared thumbnail/lightbox UI handle both providers.
+  const resultImages = useMemo(() => {
+    if (item.resultImages?.length) return item.resultImages
+    if (!viewImagePath || !agentFile) return undefined
+    return [agentFileUrl(agentFile.projectId, agentFile.agentId, viewImagePath)]
+  }, [item.resultImages, viewImagePath, agentFile])
+  // Eagerly decode result images (the card mounts collapsed the moment the
+  // result lands), so opening later measures the true expanded height.
+  const imageDims = useImageDims(resultImages)
+  const pending = item.result === undefined && !item.ended
+	const visibleResult = item.result ?? item.runningOutput
 	const input = useMemo(() => visibleToolInput(rawInput), [rawInput])
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
 	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
@@ -3341,7 +3360,7 @@ const ToolCard = memo(function ToolCard({
   // A tool's image output is laid out at its logical size. A data-URL image
   // carries no name, so the density hint comes from the path that produced it
   // (shot@2x.png) - see lib/imageDensity.
-  const imageDensity = densityFromPath(readPath || filePath)
+  const imageDensity = densityFromPath(readPath || filePath || viewImagePath)
   const isWrite = item.name === 'Write' && typeof input?.content === 'string'
   const isEdit = item.name === 'Edit' && typeof input?.old_string === 'string' && typeof input?.new_string === 'string'
   const fileLang = isWrite || isEdit ? langFromPath(filePath) : ''
@@ -3573,7 +3592,7 @@ const ToolCard = memo(function ToolCard({
               ) : hideInput ? null : (
                 <CodePanel code={trimWorktreePaths(JSON.stringify(input, null, 2) ?? '', worktree)} lang="json" />
               )}
-				{(renderedResult !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
+				{(renderedResult !== undefined || (resultImages && resultImages.length > 0)) && (
                 <div>
                   {/* "Output" only when there's an input panel above it to
                       separate from; a plain Read's body is output-only (item 32). */}
@@ -3582,9 +3601,9 @@ const ToolCard = memo(function ToolCard({
                       Output
                     </div>
                   )}
-                  {item.resultImages && item.resultImages.length > 0 && (
+                  {resultImages && resultImages.length > 0 && (
                     <div className="mb-1 max-h-80 overflow-y-auto space-y-1">
-                      {item.resultImages.map((src, i) => {
+                      {resultImages.map((src, i) => {
                         // width/height attrs (from the eager decode) + h-auto:
                         // layout reserves the image's aspect box before the
                         // browser paints the pixels - see useImageDims. The size
@@ -3616,7 +3635,7 @@ const ToolCard = memo(function ToolCard({
                       })}
                     </div>
                   )}
-					{renderedResult !== undefined && !(renderedResult === '' && item.resultImages?.length) && (
+					{renderedResult !== undefined && !(renderedResult === '' && resultImages?.length) && (
                     messageResult && !item.isError
                       ? <SendMessageOutcome result={messageResult} recipientRunning={recipientRunning} onOpenChat={openRecipientChat} />
                     : mem && !item.isError
@@ -3641,12 +3660,12 @@ const ToolCard = memo(function ToolCard({
           )}
         </div>
       </Expandable>
-      {/* Read of an image returns image blocks (item 4); clicking one opens it
-          full-size in the shared lightbox, like an attachment image. */}
-      {imgLightbox !== null && item.resultImages && item.resultImages.length > 0 && (
+      {/* An image result (or Codex's path-only imageView) opens full-size in the
+          shared lightbox, like an attachment image. */}
+      {imgLightbox !== null && resultImages && resultImages.length > 0 && (
         <Lightbox
-          items={item.resultImages.map((url, i) => ({ url, filename: `image ${i + 1}`, size: 0, dpi: imageDensity }))}
-          index={Math.min(imgLightbox, item.resultImages.length - 1)}
+          items={resultImages.map((url, i) => ({ url, filename: viewImagePath || `image ${i + 1}`, size: 0, dpi: imageDensity }))}
+          index={Math.min(imgLightbox, resultImages.length - 1)}
           origin={imgOrigin}
           onIndexChange={setImgLightbox}
           onClose={() => setImgLightbox(null)}
@@ -10162,6 +10181,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // brand accent instead of Claude's unconditionally.
     <ChatAgentTypeContext.Provider value={agentType ?? 'claude'}>
     <ChatApprovalContext.Provider value={approvalCtx}>
+    <AgentFileContext.Provider value={approvalCtx}>
     {/* A card the reader unfolds has to survive its run folding into a step
         group, which remounts it - the map is how, and living here is what makes
         it forgotten when the pane does (see ToolFoldContext). */}
@@ -10625,6 +10645,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       )}
     </div>
     </ToolFoldContext.Provider>
+    </AgentFileContext.Provider>
     </ChatApprovalContext.Provider>
     </ChatAgentTypeContext.Provider>
   )

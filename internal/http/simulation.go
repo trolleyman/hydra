@@ -4379,6 +4379,10 @@ func handleSimCodexChatWS(conn *safeConn) {
 			map[string]any{"path": "docs/sim-added.md", "kind": map[string]any{"type": "add"}, "diff": "# Added document\n First character and indentation preserved\n+literal plus preserved\n"},
 		}}}},
 		{"tool_completed", map[string]any{"id": "sim-codex-write", "name": "Write", "output": "File updated", "status": "completed"}},
+		// Codex imageView has no image result block: its path must flow through
+		// the agent-file endpoint into the shared tool-result image viewer.
+		{"tool_started", map[string]any{"id": "sim-codex-image", "name": "View Image", "status": "in_progress", "input": map[string]any{"path": "/tmp/codex-screenshot@2x.png", "_raw": map[string]any{"id": "sim-codex-image", "type": "imageView", "path": "/tmp/codex-screenshot@2x.png"}}}},
+		{"tool_completed", map[string]any{"id": "sim-codex-image", "name": "View Image", "output": "", "status": "completed"}},
 		{"tool_started", map[string]any{"id": "sim-codex-spawn", "name": "Agent", "input": map[string]any{"prompt": "Inspect chat replay and report the key invariant.", "description": "Inspect chat replay", "_raw": map[string]any{"tool": "spawnAgent"}}}},
 		{"subagent_started", map[string]any{"id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "agent_type": "codex", "description": "Inspect chat replay", "prompt": "Inspect chat replay and report the key invariant.", "status": "running"}},
 		{"assistant_message", map[string]any{"message_id": "sim-codex-child-report", "agent_id": "sim-codex-child", "parent_item_id": "sim-codex-spawn", "sidechain": true, "text": "Replay uses the same sequenced normalized events as live delivery."}},
