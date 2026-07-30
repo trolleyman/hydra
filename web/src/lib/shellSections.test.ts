@@ -23,6 +23,15 @@ describe('parseScriptSteps', () => {
     expect(step).toEqual({ kind: 'marker', text: '=== README tail ===' })
   })
 
+  it('takes a constant printf line as a marker', () => {
+    expect(steps("printf '%s\\n' '--- run log ---'\ncat a.go")[0]).toEqual({
+      kind: 'marker', text: '--- run log ---',
+    })
+    expect(steps(`printf "%s\\n" "--- context ---"\ncat a.go`)[0]).toEqual({
+      kind: 'marker', text: '--- context ---',
+    })
+  })
+
   it('refuses an echo that is not a constant line of its own', () => {
     // A variable, a substitution, and the flags that change what is printed.
     expect(kinds('echo "$file"\ncat a.go')).toEqual(['unknown', 'view'])
@@ -30,6 +39,14 @@ describe('parseScriptSteps', () => {
     expect(kinds('echo -n ---\ncat a.go')).toEqual(['unknown', 'view'])
     // Piped somewhere, so what reaches the transcript is not this text.
     expect(kinds('echo ---- | tee log\ncat a.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('refuses a printf whose exact output is not one known line', () => {
+    expect(kinds("printf '%s\\n' \"$heading\"\ncat a.go")).toEqual(['unknown', 'view'])
+    expect(kinds("printf '%s\\n' one two\ncat a.go")).toEqual(['unknown', 'view'])
+    expect(kinds("printf '%s' '--- no newline ---'\ncat a.go")).toEqual(['unknown', 'view'])
+    expect(kinds("printf '%b\\n' '---\\\\n---'\ncat a.go")).toEqual(['unknown', 'view'])
+    expect(kinds("printf '%s\\n' '--- piped ---' | tee log\ncat a.go")).toEqual(['unknown', 'view'])
   })
 
   it('keeps an echo too short to anchor on as a step of known length', () => {
@@ -583,6 +600,35 @@ describe('splitScriptOutput', () => {
       ['plain', ['build failed']],
       ['marker', ['=== the file ===']],
       ['view', ['package main']],
+    ])
+  })
+
+  it('uses constant printf lines to split an investigation script', () => {
+    const script = [
+      "printf '%s\\n' '--- run log ---'",
+      'cat /tmp/capture/run.log',
+      "printf '%s\\n' '--- context ---'",
+      'cat /tmp/capture/context.txt',
+      "printf '%s\\n' '--- Hydra log window ---'",
+      "sed -n '1,2p' /home/user/hydra.log",
+    ].join('\n')
+    const output = [
+      '--- run log ---',
+      'run line',
+      '--- context ---',
+      'context line',
+      '--- Hydra log window ---',
+      'log one',
+      'log two',
+    ].join('\n')
+
+    expect(splitScriptOutput(steps(script), output)?.map((section) => [section.kind, section.lines])).toEqual([
+      ['marker', ['--- run log ---']],
+      ['view', ['run line']],
+      ['marker', ['--- context ---']],
+      ['view', ['context line']],
+      ['marker', ['--- Hydra log window ---']],
+      ['view', ['log one', 'log two']],
     ])
   })
 
