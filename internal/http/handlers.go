@@ -1961,7 +1961,7 @@ func (s *Server) GenerateAgentTitle(ctx context.Context, request api.GenerateAge
 		}, nil
 	}
 
-	title, err := heads.GenerateTitle(ctx, projectRoot, head.Prompt)
+	title, err := heads.GenerateTitle(ctx, projectRoot, head.AgentType, head.Prompt)
 	switch {
 	case errors.Is(err, heads.ErrNoPrompt):
 		return api.GenerateAgentTitle400JSONResponse{

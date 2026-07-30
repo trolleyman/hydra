@@ -11,6 +11,13 @@ import type { ClaudeUsageResponse } from '../api'
 // hours - there is nothing to gain from asking faster. The poll is also paused
 // while the tab is hidden (useServerData), and clicking forces a re-probe.
 const POLL_MS = 5 * 60_000
+// Claude can take a moment to roll the usage window over. Probe just after the
+// advertised boundary, then retry at the server's forced-probe cadence if the
+// returned snapshot still names the old reset. A new resetsAt value tears this
+// schedule down through the effect dependency below.
+const RESET_REFRESH_GRACE_MS = 5_000
+const RESET_REFRESH_RETRY_MS = 31_000
+const RESET_REFRESH_ATTEMPTS = 4
 
 // fmtCountdown renders a millisecond remaining-time as "2h 14m" / "14m" / "<1m".
 function fmtCountdown(ms: number): string {
@@ -69,6 +76,25 @@ export function ClaudeUsageIndicator() {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [resetsAt])
+
+  // The regular poll is intentionally relaxed, but that leaves an old, often
+  // nearly-full usage value visible after its known reset. Force a few probes
+  // around that boundary instead of waiting for the normal cache to expire.
+  useEffect(() => {
+    if (Number.isNaN(resetsAt)) return
+
+    let attempts = 0
+    let timer: ReturnType<typeof setTimeout>
+    const refresh = () => {
+      fetchUsage(true)
+      attempts += 1
+      if (attempts < RESET_REFRESH_ATTEMPTS) {
+        timer = setTimeout(refresh, RESET_REFRESH_RETRY_MS)
+      }
+    }
+    timer = setTimeout(refresh, Math.max(0, resetsAt + RESET_REFRESH_GRACE_MS - Date.now()))
+    return () => clearTimeout(timer)
+  }, [fetchUsage, resetsAt])
 
   if (!data) return null
   const session = data.session_percent_used
