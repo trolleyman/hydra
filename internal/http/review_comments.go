@@ -233,7 +233,6 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 	}
 	resolved := request.Body.Resolved
 	if _, err := reviewstore.SetResolved(projectRoot, head.ID, request.Number, resolved); err == nil {
-		s.notifyResolved(projectRoot, *head, request.Number, resolved)
 		s.notifyAgentsChanged(projectRoot, false)
 		return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 	} else if !errors.Is(err, reviewstore.ErrNoComment) {
@@ -249,7 +248,6 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 	if err := reviewstore.SetThreadResolved(projectRoot, head.ID, ref.Thread, resolved, time.Now().Format(time.RFC3339)); err != nil {
 		return resolveCommentBadRequest(err.Error()), nil
 	}
-	s.notifyResolved(projectRoot, *head, request.Number, resolved)
 	s.notifyAgentsChanged(projectRoot, false)
 	return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 }
@@ -280,33 +278,21 @@ func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkRev
 	return api.MarkReviewCommentsRead200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 }
 
-// resolveBatcher collects a run of resolves so clicking through five costs one
-// message. Long enough to catch a burst, short enough that a single resolve still
-// lands while the turn it is cancelling is plausibly still running.
-var resolveBatcher = newNotifyBatcher(4 * time.Second)
-
-// notifyResolved tells a WORKING head that a comment has been dealt with.
+// Resolving does NOT notify the head, deliberately, and it used to.
 //
-// notifyWorking, not notifyIdle, and that is the whole point: resolving is
-// otherwise the user's own bookkeeping, and an idle agent picks the change up for
-// free next time it reads its comments (reviewstore.OpenComments already filters
-// resolved ones out). The single case worth spending a turn on is "you are working
-// on #3 right now and I have just cancelled it". Reopening never notifies - the
-// comment is simply back in the list it reads anyway.
-func (s *Server) notifyResolved(projectRoot string, head heads.Head, number int, resolved bool) {
-	if !resolved || !s.headIsWorking(projectRoot, head.ID) {
-		return
-	}
-	resolveBatcher.add(head.ID, fmt.Sprintf("#%d", number), func(items []string) {
-		it := "them"
-		if len(items) == 1 {
-			it = "it"
-		}
-		s.notifyHead(s.BackgroundCtx, projectRoot, head.ID, notifyWorking, reasonReviewResolved, fmt.Sprintf(
-			"Review %s resolved: %s. No further work is needed on %s - stop if you are part-way through.",
-			map[bool]string{true: "comment", false: "comments"}[len(items) == 1], strings.Join(items, ", "), it))
-	})
-}
+// The argument for it was narrow and turned out to be wrong in practice: "you
+// are working on #3 right now and I have just cancelled it" is worth a turn, so
+// a resolve fired a notice at a WORKING head. But the far commoner resolver is
+// now the head itself - an agent that finished #3 calls resolve_review_comments
+// (see resolveHydraComments) - and a head is always "working" while it is doing
+// that, so the notice was a message the agent had just caused itself to receive,
+// arriving mid-turn, telling it to stop doing the thing it had already finished.
+// A user resolving by hand hits the same path and is rarely doing it to
+// interrupt.
+//
+// Nothing is lost by dropping it: the resolve is durable the moment it is
+// written, and reviewstore.OpenComments filters resolved ones out - so the next
+// time the agent reads its comments, for any reason, #3 is simply not there.
 
 func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCommentsResponse {
 	stored := reviewstore.LoadComments(projectRoot, headID)

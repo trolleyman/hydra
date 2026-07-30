@@ -277,11 +277,10 @@ func (s *Server) addHydraComment(projectRoot, id string, r reviewq.Request) revi
 // which case what resolves is the thread it belongs to - the same rule the user's
 // own button follows (see ResolveReviewComment).
 //
-// It deliberately does not notify the head. notifyResolved exists to tell a
-// WORKING head "stop, that is dealt with"; here the head is the one saying it, so
-// the notice would be it talking to itself. A reviewer resolving the head's
-// comment is the one case where a notice could be argued for, and it is not worth
-// a model turn: the head reads the current state the next time it looks.
+// Nothing here notifies the head, and nor does the user's own resolve any more -
+// this path is why (see review_comments.go). A head resolving its own comments is
+// the commonest case by far, and a notice for it is a message the agent caused
+// itself to receive, mid-turn, about work it has already finished.
 func (s *Server) resolveHydraComments(projectRoot, id string, r reviewq.Request) reviewq.Result {
 	if len(r.Numbers) == 0 {
 		return reviewq.Result{Message: "No comment numbers were given. Pass the numbers you are done with, from get_review_comments."}
