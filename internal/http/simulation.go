@@ -1562,7 +1562,7 @@ func simNotifyLine(published []api.ReviewComment) string {
 	parts := make([]string, 0, len(published))
 	for _, c := range published {
 		if c.Path != nil && c.Line != nil {
-			parts = append(parts, fmt.Sprintf("#%d (%s:%d)", c.Number, *c.Path, *c.Line))
+			parts = append(parts, fmt.Sprintf("#%d [%s:%d](%s:%d)", c.Number, *c.Path, *c.Line, *c.Path, *c.Line))
 		} else {
 			parts = append(parts, fmt.Sprintf("#%d", c.Number))
 		}
@@ -1571,7 +1571,7 @@ func simNotifyLine(published []api.ReviewComment) string {
 	if len(published) == 1 {
 		noun = "comment"
 	}
-	return fmt.Sprintf("Review %s added: %s. Read them with the get_review_comments tool (they are not repeated here).",
+	return fmt.Sprintf("Review %s added: %s. Read them with the `mcp__hydra__get_review_comments` tool.",
 		noun, strings.Join(parts, ", "))
 }
 
