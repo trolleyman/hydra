@@ -61,7 +61,7 @@ function DownloadLink({ url, label, tip }: { url: string; label: string; tip: st
         // The lightbox closes on a backdrop click and the panels stop propagation
         // for that; this stops it again in case a viewer forgets to.
         onClick={(e) => e.stopPropagation()}
-        className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${CHIP_IDLE}`}
+        className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-2xs font-medium transition-colors cursor-pointer ${CHIP_IDLE}`}
       >
         <Download className="w-3.5 h-3.5" />
         {/* The label carries the trim, never the icon - see .optical-center. The
@@ -168,7 +168,7 @@ function HeaderToggle({ active, onClick, tip, children }: {
         // The lightbox closes on a backdrop click; this keeps a toggle from
         // reaching it, like the download links do.
         onClick={(e) => { e.stopPropagation(); onClick() }}
-        className={`flex items-center gap-1.5 h-7 px-2 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${active ? CHIP_ON : CHIP_IDLE}`}
+        className={`flex items-center gap-1.5 h-7 px-2 rounded-md border text-2xs font-medium transition-colors cursor-pointer ${active ? CHIP_ON : CHIP_IDLE}`}
       >
         {children}
       </button>
@@ -193,7 +193,7 @@ function SegmentedSwitch<T extends string>({ value, options, onChange }: {
             type="button"
             aria-pressed={value === o.value}
             onClick={(e) => { e.stopPropagation(); onChange(o.value) }}
-            className={`h-7 px-2.5 text-[11px] font-medium transition-colors cursor-pointer ${i > 0 ? 'border-l border-gray-200 dark:border-white/15' : ''} ${value === o.value
+            className={`h-7 px-2.5 text-2xs font-medium transition-colors cursor-pointer ${i > 0 ? 'border-l border-gray-200 dark:border-white/15' : ''} ${value === o.value
               ? 'bg-gray-200 dark:bg-white/15 text-gray-900 dark:text-white'
               : 'bg-gray-50 dark:bg-white/5 text-gray-600 dark:text-white/60 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white/90'}`}
           >
@@ -345,10 +345,10 @@ export function LightboxText({ url, filename, diff }: {
             actually see. Safe under `truncate` - the class pads the box and takes
             the same amount back as a negative margin, so a descender (the p/y/g
             in "upload-retry.log") isn't sliced off by the overflow clip. */}
-        <span className="optical-center min-w-0 flex-1 truncate text-[11px] font-mono text-gray-500 dark:text-white/60">{filename}</span>
+        <span className="optical-center min-w-0 flex-1 truncate text-2xs font-mono text-gray-500 dark:text-white/60">{filename}</span>
         {shown?.truncated && (
           <Tooltip content={`Only the first ${formatBytes(MAX_TEXT_BYTES)} is shown - download the file for the rest`}>
-            <span className="flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+            <span className="flex items-center gap-1 text-3xs font-medium text-amber-600 dark:text-amber-400">
               <TriangleAlert className="w-3 h-3" />
               truncated
             </span>
@@ -428,7 +428,7 @@ export function LightboxFile({ filename, url, kind, diff }: {
       <Icon className="w-12 h-12 text-gray-300 dark:text-white/30" />
       <div className="flex flex-col items-center gap-1 min-w-0 max-w-full">
         <span className="max-w-full truncate text-sm font-mono text-gray-700 dark:text-white/80">{filename}</span>
-        <span className="text-[11px] text-gray-400 dark:text-white/40">No preview available</span>
+        <span className="text-2xs text-gray-400 dark:text-white/40">No preview available</span>
       </div>
       <div className="flex items-center gap-2">
         <DownloadLinks url={url} diff={diff} />

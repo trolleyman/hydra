@@ -288,6 +288,11 @@ go test ./...
 These cover subsystem internals. Read the relevant one **before** working in that
 area; do not re-derive it by reading source. Skip them otherwise.
 
+- **Adding a `text-*` class, or touching a font / type size** (the four font
+  roles, the size steps, the named interface type ladder - `text-4xs` ...
+  `text-3xl` - and what is deliberately off it) -> [docs/typography.md](docs/typography.md).
+  Read it before writing `text-[13px]`: the only arbitrary px sizes left in
+  `web/src` are an avatar's monogram, and `text-xs` is 13px here, not Tailwind's 12
 - **Touching the agent page / diff viewer** (`AgentDetail.tsx`, `DiffViewer.tsx`,
   sticky headers, per-agent view state, preview proxy) -> [docs/web-agent-page.md](docs/web-agent-page.md)
 - **Touching the test gate** (`internal/tests`, tests panel, `[tests.<name>]`

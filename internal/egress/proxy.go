@@ -206,6 +206,22 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		upstream.Close()
 		return
 	}
+	// Deliberately no idle timeout, and deliberately no explicit keepalive.
+	//
+	// A tunnel is legitimately idle for long stretches - a streaming model
+	// response, or an HTTP/2 connection reused across calls - so a read deadline
+	// would kill live traffic. The case that does need catching is a peer that
+	// vanishes WITHOUT a FIN, leaving both goroutines pinned in splice(2) forever;
+	// but the Go runtime already enables SO_KEEPALIVE on dialed and accepted TCP
+	// conns (15s idle by default), so the kernel notices and the splice fails.
+	// TestGoEnablesKeepAliveByDefault pins that assumption, because it is the only
+	// thing standing between an unreachable peer and a leaked tunnel.
+	//
+	// Setting it explicitly here was tried and reverted: it changed nothing except
+	// to lengthen the probe interval. And the tempting fix - wrapping each side in
+	// a reader that calls SetReadDeadline per Read - would defeat io.Copy's
+	// ReadFrom fast path, dropping every proxied byte from zero-copy splice(2) to
+	// a userspace copy.
 	go pipe(upstream, client)
 	go pipe(client, upstream)
 }

@@ -16,7 +16,7 @@ import { ReviewThreadContext, useReviewThreadActions } from './lib/reviewThreadC
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Folder, FolderOpen, X, GitMergeConflict, Bot, File, FileDiff as FileDiffIcon, Files as FilesIcon,
+  Folder, FolderOpen, X, GitMergeConflict, Bot, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   CircleCheck, Link2, ArrowUp, ArrowDown,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
+import { CodePane } from './components/CodePane'
 import { Avatar } from './components/Avatar'
 import { getFileIcon } from './lib/fileIcons'
 import { copyText } from './lib/clipboard'
@@ -229,7 +230,7 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
               rode ~3px high of the icons beside it. One row, one centre line.
               h-5 fixes the row to the icon buttons' height so it does not jump
               when a chip appears. */}
-          <div className="mb-0.5 flex h-5 items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
+          <div className="mb-0.5 flex h-5 items-center gap-1.5 text-2xs text-stone-400 dark:text-stone-500">
               {/* "You" rather than your git name: the name is on the avatar's tip,
                   and in a list of comments what matters is which ones are yours. */}
               <span className={mine ? 'text-stone-500 dark:text-stone-400' : ''}>{mine ? 'You' : comment.author}</span>
@@ -237,7 +238,7 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
                 // A draft is the one state worth a chip: it is the difference
                 // between something the agent has been told and something only you
                 // can see, and that is not obvious from the card alone.
-                <span className="rounded bg-blue-100 px-1 text-[10px] font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                <span className="rounded bg-blue-100 px-1 text-3xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
                   draft
                 </span>
               )}
@@ -308,7 +309,7 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
             </div>
           <Markdown text={comment.text} className="text-xs text-gray-700 dark:text-gray-200 break-words" />
           {stale && !sent && (
-            <div className="mt-1 flex items-start gap-1 text-[11px] text-amber-700 dark:text-amber-300">
+            <div className="mt-1 flex items-start gap-1 text-2xs text-amber-700 dark:text-amber-300">
               <TriangleAlert className="w-3 h-3 mt-px shrink-0" />
               <span>The diff around this line changed after this comment was queued; it will still be sent with its original context.</span>
             </div>
@@ -396,13 +397,17 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
     } else if (e.key === 'Escape') onCancel()
   }
 
-  const placeholder = onSave
-    ? 'Edit comment... (Ctrl+Enter to save)'
-    : onAddToReview
-      ? 'Write a comment... (Ctrl+Enter to add to the agent review)'
-      : 'Write a comment... (Ctrl+Enter to submit)'
+  // The placeholder says what the box is FOR; what the keys do rides on the
+  // button row below as keycaps. A placeholder is the one hint that disappears
+  // exactly when it becomes relevant - the moment you start typing - and it
+  // cannot hold a component, so the shortcut was prose in brackets there.
+  const placeholder = onSave ? 'Edit comment...' : 'Write a comment...'
+  // Ctrl+Enter fires whichever button is primary here, so the hint lives on THAT
+  // button's tooltip rather than as a line in the row. The row is three buttons
+  // wide in a pane that can be half the window, and they already wrap.
+  const submitShortcut = { keys: ['Ctrl', 'Enter'] }
 
-  const btn = 'px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer'
+  const btn = 'px-2 py-1 text-3xs font-medium rounded transition-colors cursor-pointer'
 
   return (
     <div className="border-y border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/10 px-4 py-3">
@@ -415,18 +420,20 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
         textClassName="p-2 text-xs leading-5"
         placeholder={placeholder}
       />
-      <div className="flex justify-end gap-2 mt-2">
+      <div className="flex items-center justify-end gap-2 mt-2">
         <button onClick={onCancel} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
           Cancel
         </button>
         {onSave ? (
-          <button
-            disabled={!text.trim()}
-            onClick={handleSave}
-            className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
-          >
-            Save
-          </button>
+          <Tooltip content="Save the edit." shortcut={submitShortcut} side="top">
+            <button
+              disabled={!text.trim()}
+              onClick={handleSave}
+              className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
+            >
+              Save
+            </button>
+          </Tooltip>
         ) : (
           <>
             {onCommentOnPR && (
@@ -441,7 +448,11 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
                 </button>
               </Tooltip>
             )}
-            <Tooltip content="Send this to the agent on its own, right now." side="top">
+            <Tooltip
+              content="Send this to the agent on its own, right now."
+              shortcut={onAddToReview ? undefined : submitShortcut}
+              side="top"
+            >
               <button
                 disabled={!text.trim() || sending}
                 onClick={handleSubmit}
@@ -454,7 +465,11 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
             {onAddToReview && (
               // The primary action: batching several comments and sending them as
               // one review is the usual way to brief a head, so it leads.
-              <Tooltip content="Queue this for the agent - the whole batch is sent when you submit the review, and none of it reaches the pull request." side="top">
+              <Tooltip
+                content="Queue this for the agent - the whole batch is sent when you submit the review, and none of it reaches the pull request."
+                shortcut={submitShortcut}
+                side="top"
+              >
                 <button
                   disabled={!text.trim() || sending}
                   onClick={handleAdd}
@@ -468,7 +483,7 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
           </>
         )}
       </div>
-      {prError && <p className="mt-1 text-[10px] text-red-500 break-words">{prError}</p>}
+      {prError && <p className="mt-1 text-3xs text-red-500 break-words">{prError}</p>}
     </div>
   )
 }
@@ -1272,6 +1287,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // (after a paint at height 0) so the 0→height glide can play.
   const bodyOpen = !isCollapsed && bodyMounted
 
+
   // Signature of the visible hunks. A background refresh hands us new file
   // objects even when nothing changed, so keying derived work on identity would
   // recompute on every refresh. The string signature is stable across no-op
@@ -1438,6 +1454,61 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     () => (near ? 0 : measuredBodyH ?? (isHidden || file.binary ? 100 : estimateVisibleRows(file) * EST_ROW_H)),
     [near, measuredBodyH, isHidden, file],
   )
+
+  // The height the body wrapper renders at. Held in one place because it is not
+  // only a style: when it changes for a card that has already scrolled past, the
+  // whole diff below that card moves, and the pane switches the browser's own
+  // scroll anchoring off ([overflow-anchor:none] in InspectorPane - the cards
+  // own their scroll positioning explicitly), so nothing puts it back.
+  const wrapperH = headless ? null : !bodyOpen ? 0 : near ? bodyH : estBodyH
+  const prevWrapperH = useRef<number | null>(wrapperH)
+  // The wrapper element itself, for the one thing React's style prop cannot
+  // express: whether a height change is allowed to animate.
+  const boxEl = useRef<HTMLDivElement | null>(null)
+  const prevBodyOpen = useRef(bodyOpen)
+  useLayoutEffect(() => {
+    const prev = prevWrapperH.current
+    const wasOpen = prevBodyOpen.current
+    prevWrapperH.current = wrapperH
+    prevBodyOpen.current = bodyOpen
+    if (prev == null || wrapperH == null) return
+    const delta = wrapperH - prev
+    if (!delta) return
+    // The 200ms glide belongs to the collapse/expand toggle. This height is also
+    // where a measurement correction lands - the placeholder's predicted height
+    // giving way to the body's real one when the card mounts - and animating
+    // THAT spent a fifth of a second dragging every card below it down the pane,
+    // under a scroll in flight, which is when a sticky file header ends up
+    // painted off its card. So a change with no toggle behind it has its
+    // transition killed and the new height forced in (reading offsetHeight
+    // commits it) before this frame paints: the reader sees one reflow, not a
+    // slide. Restoring the empty string hands the glide straight back to the
+    // class for the next real toggle.
+    if (wasOpen === bodyOpen && boxEl.current) {
+      const el = boxEl.current
+      el.style.transition = 'none'
+      void el.offsetHeight
+      el.style.transition = ''
+    }
+    const card = cardRef.current
+    const scroller = card?.closest<HTMLElement>('[data-inspector-scroll], [data-main-scroll]')
+    if (!card || !scroller) return
+    // Only where the browser has been told to keep its hands off. A container
+    // that still has scroll anchoring on corrects this itself, and correcting it
+    // twice moves the view by double the difference.
+    if (getComputedStyle(scroller).overflowAnchor !== 'none') return
+    // Only for a card wholly above the viewport, which is the case the reader
+    // cannot see coming: the placeholder for a file scrolled back up to mounts
+    // at its real height, or an idle measurement lands late, and everything on
+    // screen - including every sticky file header, which then paints away from
+    // its card until the next scroll - slides by the difference. A card that is
+    // even partly visible is left alone: its growth happens where the reader is
+    // looking, and yanking the scroll to hide that would be the worse artifact.
+    // Runs in a layout effect so the correction and the resize land in the same
+    // frame; the reader sees neither.
+    if (card.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top) return
+    scroller.scrollTop += delta
+  }, [wrapperH, bodyOpen])
 
   // A file with whole-file content but no additions/deletions (e.g. a pure
   // rename) has nothing to collapse - render its lines plainly rather than
@@ -1665,14 +1736,18 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
           open, and never animates. */}
       <div
         // Also the width reference for the offscreen body measurement above: its
-        // clientWidth is exactly the width the rows inside it wrap at.
-        ref={boxRef}
+        // clientWidth is exactly the width the rows inside it wrap at. boxEl is
+        // the same node, kept for the transition-cancelling layout effect.
+        ref={(el) => { boxEl.current = el; boxRef(el) }}
         // `isolate` keeps this body's positioned content (an in-tree image renders
         // as `absolute inset-0` via ImageDiffView) in its own stacking context so
         // it can't paint over the sticky file/section/changes bars above it - see
         // the matching note in CollapsibleCard.
+        // The height glide stays declared here for the collapse/expand toggle;
+        // the layout effect above cancels it for a height change that is only a
+        // measurement correction.
         className={headless ? 'isolate' : 'isolate overflow-hidden rounded-b-lg transition-[height] duration-200 ease-out motion-reduce:transition-none'}
-        style={headless ? undefined : { height: !bodyOpen ? 0 : near ? bodyH : estBodyH }}
+        style={headless ? undefined : { height: wrapperH ?? 0 }}
         aria-hidden={headless ? undefined : !bodyOpen}
       >
         {(headless || bodyMounted) && (
@@ -1902,12 +1977,6 @@ function commentPermalink(projectId: string | null, agentId: string, number: num
   return `${window.location.origin}/project/${encodeURIComponent(projectId ?? '_')}/agent/${encodeURIComponent(agentId)}?comment=${number}`
 }
 
-function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
-  if (!commit) return sha.slice(0, 7)
-  const msg = commit.message.slice(0, 24)
-  return `${commit.short_sha} ${msg}${commit.message.length > 24 ? '...' : ''}`
-}
-
 // ── Commit info formatting ────────────────────────────────────────────────────
 
 function formatCommitDate(iso: string): string {
@@ -2127,7 +2196,7 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
   const { subject, body } = commitParts(commit.message)
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-2xs text-gray-500 dark:text-gray-400">
         <span className={COMMIT_SHA_CHIP}>{commit.short_sha}</span>
         <span className="text-gray-600 dark:text-gray-300">{commit.author_name}</span>
         <span className="text-gray-400 dark:text-gray-500">&middot;</span>
@@ -2137,7 +2206,7 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
           the same prose as the body, and weighting it made the card read as a
           document with a title rather than as a commit message. */}
       <div className="border-t border-gray-200 pt-2 dark:border-gray-700">
-        <p className="text-[13px] leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>
+        <p className="text-sm leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>
         {body && (
           <Markdown
             text={body}
@@ -2175,13 +2244,29 @@ function menuOffset(el: HTMLElement | null): number {
 
 // The short-sha chip, shared by the selector rows and the hover card header.
 const COMMIT_SHA_CHIP =
-  'font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0'
+  'font-mono text-3xs text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0'
+
+// The label a commit selector's trigger wears: the short sha lowlit ahead of the
+// subject, the way HostName fades everything but the registrable domain. The sha
+// is the part you only reach for deliberately, so it recedes and lets the subject
+// - which is what tells the two ends of the comparison apart at a glance - read
+// first. Lowlit with opacity rather than a colour so it composes on the trigger's
+// own text colour in both themes, and the subject alone takes the truncation.
+function CommitLabel({ commit, sha }: { commit: CommitInfo | null | undefined; sha: string }) {
+  const subject = commit ? commitParts(commit.message).subject : ''
+  return (
+    <span className="flex items-baseline gap-1.5 min-w-0">
+      <span className="font-mono text-[11px] opacity-55 shrink-0">{commit?.short_sha ?? sha.slice(0, 7)}</span>
+      {subject && <span className="max-w-[150px] truncate">{subject}</span>}
+    </span>
+  )
+}
 
 // The shift-click affordance, spelled out at the foot of both commit dropdowns -
 // otherwise nobody would ever find it.
 function ShiftClickHint() {
   return (
-    <p className="border-t border-gray-100 px-3 py-1.5 text-[10px] leading-snug text-gray-400 dark:border-gray-700 dark:text-gray-500">
+    <p className="border-t border-gray-100 px-3 py-1.5 text-3xs leading-snug text-gray-400 dark:border-gray-700 dark:text-gray-500">
       Shift-click a commit to see just that commit's changes
     </p>
   )
@@ -2223,11 +2308,9 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const label = selected.type === 'base'
-    ? baseBranch
-    : selected.type === 'latest'
-      ? 'Latest commit'
-      : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
+  const label = selected.type === 'commit'
+    ? <CommitLabel commit={commits.find((c) => c.sha === selected.sha)} sha={selected.sha} />
+    : <span className="max-w-[150px] truncate">{selected.type === 'base' ? baseBranch : 'Latest commit'}</span>
 
   // Determine which commits are valid for the left selector (must be older than right)
   const rightIdx = rightSel.type === 'commit' ? commitIdx(rightSel.sha, commits) : -1
@@ -2240,7 +2323,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        <span className="max-w-[150px] truncate">{label}</span>
+        {label}
         <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" />
       </button>
 
@@ -2256,7 +2339,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
               >
                 <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                 <span className="font-medium text-gray-800 dark:text-gray-200">Latest commit</span>
-                <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">HEAD</span>
+                <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">HEAD</span>
                 {selected.type === 'latest' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
               </button>
             </div>
@@ -2264,7 +2347,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
           {/* Commits in the middle */}
           {commits.length > 0 && (
             <div className="max-h-64 overflow-y-auto py-1">
-              <p className="px-3 py-1 text-[11px] text-gray-400 dark:text-gray-500 font-medium">
+              <p className="px-3 py-1 text-2xs text-gray-400 dark:text-gray-500 font-medium">
                 Commits · {commits.length}
               </p>
               {commits.map((c, cIdx) => {
@@ -2304,7 +2387,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">{baseBranch}</span>
-              <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">branch point</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">branch point</span>
               {selected.type === 'base' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
           </div>
@@ -2348,9 +2431,9 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const label = selected.type === 'uncommitted' ? 'Latest changes'
-    : selected.type === 'latest' ? 'Latest commit'
-      : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
+  const label = selected.type === 'commit'
+    ? <CommitLabel commit={commits.find((c) => c.sha === selected.sha)} sha={selected.sha} />
+    : <span className="max-w-[150px] truncate">{selected.type === 'uncommitted' ? 'Latest changes' : 'Latest commit'}</span>
 
   const validCommits = commits.filter((_, idx) => {
     if (left.type === 'base') return true
@@ -2367,7 +2450,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        <span className="max-w-[150px] truncate">{label}</span>
+        {label}
         {hasUncommitted && selected.type !== 'uncommitted' && (
           <TriangleAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
         )}
@@ -2384,7 +2467,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
             >
               <Plus className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Latest changes</span>
-              <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">incl. uncommitted</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">incl. uncommitted</span>
               {selected.type === 'uncommitted' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
             <button
@@ -2394,13 +2477,13 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Latest commit</span>
-              <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">HEAD</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">HEAD</span>
               {selected.type === 'latest' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
           </div>
           {validCommits.length > 0 && (
             <div className="max-h-64 overflow-y-auto py-1">
-              <p className="px-3 py-1 text-[11px] text-gray-400 dark:text-gray-500 font-medium">
+              <p className="px-3 py-1 text-2xs text-gray-400 dark:text-gray-500 font-medium">
                 Commits · {validCommits.length}
               </p>
               {validCommits.map((c) => (
@@ -2497,7 +2580,7 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
             )}
           </div>
         ))}
-        <p className="text-gray-400 dark:text-gray-500 mt-1 text-[10px]">Click to view uncommitted changes</p>
+        <p className="text-gray-400 dark:text-gray-500 mt-1 text-3xs">Click to view uncommitted changes</p>
       </div>
     }>
       <button
@@ -2557,6 +2640,21 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const count = n || '?'
   const plural = n !== 1
   const worktreePath = agent.worktree_path ?? '<worktree-path>'
+  const resolveScript = [
+    "# Navigate to the agent's worktree",
+    `cd ${worktreePath}`,
+    '',
+    '# Merge the base branch (triggers conflict markers)',
+    `git merge ${baseBranch}`,
+    '',
+    '# Edit conflicting files, then stage and commit',
+    // `git add -A` rather than a `<resolved-files>` placeholder: after a merge
+    // you resolve every conflicted file before committing anyway, so naming
+    // them adds nothing but a token to hand-edit - and the whole point of this
+    // block is that you can paste it and have it run.
+    'git add -A',
+    'git commit',
+  ].join('\n')
 
   return (
     <>
@@ -2565,7 +2663,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
           <div>
             <p className="font-semibold mb-1">Merge Conflict</p>
             <p className="text-gray-300">{count} file{count !== 1 ? 's' : ''} conflict with <span className="font-mono">{baseBranch}</span></p>
-            <p className="text-gray-400 mt-1 text-[10px]">Click for resolution instructions</p>
+            <p className="text-gray-400 mt-1 text-3xs">Click for resolution instructions</p>
           </div>
         }>
           <button
@@ -2595,10 +2693,10 @@ function MergeConflictButton({ diff, agent, projectId }: {
                   <GitMergeConflict className="w-5 h-5" />
                 </DialogIconTile>
                 <div className="flex flex-col gap-1 min-w-0 pt-0.5 flex-1">
-                  <h3 className="text-[16px] font-bold leading-tight text-gray-900 dark:text-gray-100">
+                  <h3 className="text-base font-bold leading-tight text-gray-900 dark:text-gray-100">
                     Merge conflict
                   </h3>
-                  <p className="text-[12.5px] leading-snug text-gray-500 dark:text-gray-400">
+                  <p className="text-xs leading-snug text-gray-500 dark:text-gray-400">
                     {count} file{plural ? 's' : ''} conflict{plural ? '' : 's'} with{' '}
                     <span className="font-mono font-semibold text-red-600 dark:text-red-400">{baseBranch}</span> - resolve{' '}
                     {plural ? 'them' : 'it'} before this branch can merge.
@@ -2615,12 +2713,21 @@ function MergeConflictButton({ diff, agent, projectId }: {
                   <div>
                     <DialogSectionLabel>Conflicting files</DialogSectionLabel>
                     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 divide-y divide-gray-100 dark:divide-gray-700/50 max-h-40 overflow-y-auto">
-                      {conflictFiles.map((f) => (
-                        <div key={f} className="flex items-center gap-2.5 px-3.5 py-2.5">
-                          <File className="w-4 h-4 shrink-0 text-red-500 dark:text-red-400" />
-                          <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{f}</span>
-                        </div>
-                      ))}
+                      {/* A row reads exactly like a row of the diff's file list:
+                          the shared per-filetype icon (getFileIcon) rather than
+                          a generic red page - the panel around it already says
+                          "conflict", so colouring the icon red only hid which
+                          KIND of file each one is - and PathName's lowlit
+                          directories with the filename in normal text. */}
+                      {conflictFiles.map((f) => {
+                        const { Icon, className } = getFileIcon(f.split('/').pop() ?? f)
+                        return (
+                          <div key={f} className="flex items-center gap-2.5 px-3.5 py-2.5">
+                            <Icon className={`w-4 h-4 shrink-0 ${className}`} />
+                            <span className="text-sm truncate min-w-0" title={f}><PathName path={f} /></span>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -2628,14 +2735,15 @@ function MergeConflictButton({ diff, agent, projectId }: {
                 {/* Resolution instructions */}
                 <div>
                   <DialogSectionLabel>Resolving locally</DialogSectionLabel>
-                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4 space-y-1.5 text-[13px] font-mono leading-relaxed">
-                    <p className="text-gray-500 dark:text-gray-400"># Navigate to the agent's worktree</p>
-                    <p className="text-green-600 dark:text-green-400 break-all">cd {worktreePath}</p>
-                    <p className="text-gray-500 dark:text-gray-400 pt-2"># Merge the base branch (triggers conflict markers)</p>
-                    <p className="text-green-600 dark:text-green-400">git merge {baseBranch}</p>
-                    <p className="text-gray-500 dark:text-gray-400 pt-2"># Edit conflicting files, then stage and commit</p>
-                    <p className="text-green-600 dark:text-green-400">git add {'<resolved-files>'}</p>
-                    <p className="text-green-600 dark:text-green-400">git commit</p>
+                  {/* The script goes through CodePane - the app's one
+                      syntax-highlighted code surface - so it reads as bash
+                      here exactly as it does in the repository browser and the
+                      lightbox, rather than as hand-coloured paragraphs. wrap,
+                      because a long worktree path must stay readable in a
+                      dialog that can't scroll sideways; the gutter numbers are
+                      select-none, so copying still yields a runnable script. */}
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden py-1.5">
+                    <CodePane content={resolveScript} lang="bash" wrap />
                   </div>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-2.5 leading-snug">
                     The worktree at <span className="font-mono">{worktreePath}</span> is isolated - changes only affect this agent's branch.
@@ -2763,7 +2871,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
       <div>
         <p className="font-semibold mb-1">Branch out of date</p>
         <p className="text-gray-300">{behind} commit{behind !== 1 ? 's' : ''} behind <span className="font-mono">{baseBranch}</span></p>
-        <p className="text-gray-400 mt-1 text-[10px]">Click to merge {baseBranch} in</p>
+        <p className="text-gray-400 mt-1 text-3xs">Click to merge {baseBranch} in</p>
       </div>
     }>
       <button
@@ -2803,8 +2911,8 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
       </Tooltip>
       <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
       <div className="flex items-center gap-1 shrink-0 ml-auto">
-        {file.additions > 0 && <span className="text-[10px] text-green-600 dark:text-green-400">+{file.additions}</span>}
-        {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">-{file.deletions}</span>}
+        {file.additions > 0 && <span className="text-3xs text-green-600 dark:text-green-400">+{file.additions}</span>}
+        {file.deletions > 0 && <span className="text-3xs text-red-600 dark:text-red-400">-{file.deletions}</span>}
       </div>
     </button>
   )
@@ -3997,7 +4105,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           {folder && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 dark:bg-gray-700/50 border-y border-gray-100 dark:border-gray-700/50 group">
               <Folder className="w-3 h-3 text-blue-400 dark:text-blue-500 shrink-0" />
-              <span className="font-mono text-[9px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
+              <span className="font-mono text-4xs text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
             </div>
           )}
           {groupFiles.map((f) => {
@@ -4345,9 +4453,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         <p>Every file changed between the two selected refs (the <strong>vs</strong> base and the target on the Changes bar). The list on the left jumps to a file; the diffs render on the right.</p>
         <p>The cog holds this section's view options: the file-list grouping (<strong>tree</strong>, flat, or grouped by folder) and how the diffs render - <strong>side by side</strong> vs inline, <strong>ignore whitespace</strong>, and <strong>one file at a time</strong> (a pager instead of the full stack). Very large files start collapsed - expand them from their header.</p>
       </InfoTooltip>
-      <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
+      <span className="text-2xs font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
       {viewedCount > 0 && (
-        <span className="text-[11px] font-medium text-blue-500 dark:text-blue-400" title="Files you have marked viewed">
+        <span className="text-2xs font-medium text-blue-500 dark:text-blue-400" title="Files you have marked viewed">
           {viewedCount}/{diff.files.length} viewed
         </span>
       )}
@@ -4448,11 +4556,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           {openComments.length > 0 && (
             <div className="flex items-center gap-0.5 rounded-md border border-stone-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] px-1.5 py-0.5">
               <MessageSquare className="w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500" />
-              <span className="optical-center text-[11px] tabular-nums text-stone-500 dark:text-stone-400">
+              <span className="optical-center text-2xs tabular-nums text-stone-500 dark:text-stone-400">
                 {openComments.length} open
               </span>
               {unreadCount > 0 && (
-                <span className="optical-center text-[11px] tabular-nums text-blue-600 dark:text-blue-400">
+                <span className="optical-center text-2xs tabular-nums text-blue-600 dark:text-blue-400">
                   · {unreadCount} new
                 </span>
               )}

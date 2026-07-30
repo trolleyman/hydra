@@ -144,7 +144,7 @@ export function TestsEditor({
                         <InfoTooltip title="Result parsing">
                           <p><strong>report file</strong> (default): after the command exits, Hydra parses the JUnit-XML / Hydra-JSON files it wrote into <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code>.</p>
                           <p className="mt-1.5"><strong>stdout stream</strong>: Hydra parses <code className="text-blue-300">::hydra:test:*::</code> markers live from the command's stdout - counts tick in the panel and sidebar as tests run, and the accumulated cases are the report (no file needed). One line per case:</p>
-                          <p className="mt-1 font-mono text-[11px]">::hydra:test:pass:: src/x.test.ts › adds<br />::hydra:test:fail:: src/x.test.ts:48:24 › grace window | expected kid-2<br />::hydra:test:warn:: src/y.ts:12:5 › no-console | Unexpected console<br />::hydra:test:skip:: pkg › TestResume | needs daemon<br />::hydra:test:total:: 4556</p>
+                          <p className="mt-1 font-mono text-2xs">::hydra:test:pass:: src/x.test.ts › adds<br />::hydra:test:fail:: src/x.test.ts:48:24 › grace window | expected kid-2<br />::hydra:test:warn:: src/y.ts:12:5 › no-console | Unexpected console<br />::hydra:test:skip:: pkg › TestResume | needs daemon<br />::hydra:test:total:: 4556</p>
                         </InfoTooltip>
                       </label>
                       <select
@@ -228,7 +228,7 @@ export function TestsEditor({
                     />
                   </div>
                   {unsafe && (
-                    <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5">
+                    <div className="flex items-start gap-1.5 text-2xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5">
                       <TriangleAlert className="w-3.5 h-3.5 mt-px shrink-0" />
                       <span>Runs unsandboxed on the host with full access to your credentials. Only enable for trusted refs.</span>
                     </div>

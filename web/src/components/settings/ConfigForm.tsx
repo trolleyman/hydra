@@ -64,7 +64,7 @@ function SegmentedControl<T extends string>({ options, labels, value, onChange }
             type="button"
             onClick={() => onChange(m)}
             aria-pressed={isActive}
-            className={`relative z-10 flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
+            className={`relative z-10 flex-1 px-2 py-1.5 rounded-md text-2xs font-medium cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
               isActive
                 ? 'text-gray-900 dark:text-gray-100'
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
@@ -254,7 +254,7 @@ function SandboxPathSection({
         <InfoTooltip title={tooltipTitle}>{tooltip}</InfoTooltip>
       </div>
       {inheritedPaths && inheritedPaths.length > 0 && (
-        <p className="text-[11px] text-gray-400 dark:text-gray-500 italic ml-0.5">
+        <p className="text-2xs text-gray-400 dark:text-gray-500 italic ml-0.5">
           Inherited: <span className="font-mono">{inheritedPaths.join(', ')}</span>
         </p>
       )}
@@ -364,23 +364,23 @@ export function ConfigForm({
           System Pre-Prompt
         </label>
         {defaultPrePrompt != null && (
-          <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+          <div className="flex items-center gap-1.5 text-2xs text-gray-500 dark:text-gray-400 font-medium">
             <span className="italic">&lt;default pre-prompt&gt;</span>
             <InfoTooltip title="Default Pre-Prompt">
               <p className="mb-1.5">This built-in pre-prompt is always prepended before any configured pre-prompts:</p>
-              <Markdown text={defaultPrePrompt} className="text-[10px] leading-relaxed text-gray-200 bg-gray-800 rounded p-1.5 max-h-48 overflow-y-auto" />
+              <Markdown text={defaultPrePrompt} className="text-3xs leading-relaxed text-gray-200 bg-gray-800 rounded p-1.5 max-h-48 overflow-y-auto" />
               <p className="mt-1.5 text-gray-400 italic">{'<branch>'} and {'<base-branch>'} are substituted at spawn time.</p>
             </InfoTooltip>
           </div>
         )}
         {allAgentsPrePrompt != null && (
-          <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 font-medium">
+          <div className="flex items-center gap-1.5 text-2xs text-gray-500 dark:text-gray-400 font-medium">
             <span className="italic">&lt;all agents pre-prompt&gt;</span>
             <InfoTooltip title="All Agents Pre-Prompt">
               {allAgentsPrePrompt ? (
                 <>
                   <p className="mb-1.5">The "All Agents" pre-prompt is prepended before this agent's pre-prompt:</p>
-                  <Markdown text={allAgentsPrePrompt} className="text-[10px] leading-relaxed text-gray-200 bg-gray-800 rounded p-1.5 max-h-32 overflow-y-auto" />
+                  <Markdown text={allAgentsPrePrompt} className="text-3xs leading-relaxed text-gray-200 bg-gray-800 rounded p-1.5 max-h-32 overflow-y-auto" />
                 </>
               ) : (
                 <p>No "All Agents" pre-prompt is configured. Set one in the <strong>All Agents</strong> tab to have it prepended here.</p>
@@ -466,7 +466,7 @@ export function ConfigForm({
           </div>
           <SegmentedControl options={NETWORK_MODES} labels={NETWORK_MODE_LABELS} value={mode} onChange={setMode} />
           {NETWORK_MODE_WARNINGS[mode] && (
-            <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5 motion-safe:animate-egress-warn-in">
+            <div className="flex items-start gap-1.5 text-2xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5 motion-safe:animate-egress-warn-in">
               <TriangleAlert className="w-3.5 h-3.5 mt-px shrink-0" />
               <span>{NETWORK_MODE_WARNINGS[mode]}</span>
             </div>
@@ -474,7 +474,7 @@ export function ConfigForm({
           {showHosts && (
             <div className="space-y-3 ml-0.5">
               <div className="space-y-1">
-                <p className="text-[11px] text-gray-400 dark:text-gray-500">Allowed hosts <span className="text-gray-400 dark:text-gray-600">(added to the built-in defaults)</span></p>
+                <p className="text-2xs text-gray-400 dark:text-gray-500">Allowed hosts <span className="text-gray-400 dark:text-gray-600">(added to the built-in defaults)</span></p>
                 <PathListEditor
                   paths={network.allowed_hosts ?? []}
                   onChange={(allowed_hosts) => updateNetwork({ allowed_hosts })}
@@ -484,7 +484,7 @@ export function ConfigForm({
                 />
               </div>
               <div className="space-y-1">
-                <p className="text-[11px] text-gray-400 dark:text-gray-500">Blocked hosts <span className="text-gray-400 dark:text-gray-600">(override allowed + defaults)</span></p>
+                <p className="text-2xs text-gray-400 dark:text-gray-500">Blocked hosts <span className="text-gray-400 dark:text-gray-600">(override allowed + defaults)</span></p>
                 <PathListEditor
                   paths={network.blocked_hosts ?? []}
                   onChange={(blocked_hosts) => updateNetwork({ blocked_hosts })}
@@ -496,7 +496,7 @@ export function ConfigForm({
               {mode === 'hard' && (
                 <div className="space-y-1">
                   <div className="flex items-center gap-1.5">
-                    <p className="text-[11px] text-gray-400 dark:text-gray-500">Allowed loopback ports</p>
+                    <p className="text-2xs text-gray-400 dark:text-gray-500">Allowed loopback ports</p>
                     <InfoTooltip title="Allowed loopback ports">
                       <p>Host-loopback TCP ports the sandbox may still reach at <code className="text-blue-300">127.0.0.1</code> under hard mode, whose network namespace otherwise cuts off every host-local daemon.</p>
                       <p className="mt-1.5">For tools that hardcode loopback - e.g. adb's server: <code className="text-blue-300">5037</code> lets a sandboxed <code className="text-blue-300">adb</code> see the host's emulators.</p>
@@ -530,9 +530,9 @@ export function ConfigForm({
           </div>
           <SegmentedControl options={GIT_ISOLATION_MODES} labels={GIT_ISOLATION_LABELS} value={gitIsolation} onChange={setGitIsolation} />
           {gitIsolation === 'readonly' && (
-            <div className="flex items-start gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/40 rounded-lg px-2.5 py-1.5">
+            <div className="flex items-start gap-1.5 text-2xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/40 rounded-lg px-2.5 py-1.5">
               <Lock className="w-3.5 h-3.5 mt-px shrink-0" />
-              <span>Commits run host-side via the git_commit tool. In-sandbox <code className="text-[10px]">git add -p</code> / <code className="text-[10px]">rebase</code> and husky/LFS/submodule setup won't work - use host-run for those.</span>
+              <span>Commits run host-side via the git_commit tool. In-sandbox <code className="text-3xs">git add -p</code> / <code className="text-3xs">rebase</code> and husky/LFS/submodule setup won't work - use host-run for those.</span>
             </div>
           )}
         </div>
@@ -610,13 +610,13 @@ export function ConfigForm({
                 <li><code className="text-blue-300">HYDRA_BASE_BRANCH</code> - the branch it targets</li>
               </ul>
               <p className="mt-1.5">To set <strong>environment variables for the agent</strong>, append <code className="text-blue-300">KEY=value</code> lines to the file at <code className="text-blue-300">$HYDRA_ENV</code> (the GitHub Actions <code className="text-blue-300">$GITHUB_ENV</code> model):</p>
-              <pre className="mt-1 text-[11px] whitespace-pre-wrap"><code className="text-blue-300">{'echo "GRADLE_USER_HOME=/tmp/gradle-iso" >> "$HYDRA_ENV"'}</code></pre>
+              <pre className="mt-1 text-2xs whitespace-pre-wrap"><code className="text-blue-300">{'echo "GRADLE_USER_HOME=/tmp/gradle-iso" >> "$HYDRA_ENV"'}</code></pre>
               <p className="mt-1.5">Each line is exported into the agent and every command it runs, overriding any inherited value. It re-applies on resume (the script re-runs). Values are taken literally - no shell evaluation - and one <code className="text-blue-300">KEY=value</code> per line.</p>
               <p className="mt-1.5">These vars are also injected into the head's <strong>sandboxed</strong> bash shells (the terminal <code className="text-blue-300">+</code> tabs), so a shell shares the agent's environment - the script itself is not re-run there. The non-sandboxed "Regular shell" is left out (its paths differ from the sandbox's).</p>
             </InfoTooltip>
           </div>
           {inheritedSandbox?.pre_spawn_script && (
-            <p className="text-[11px] text-gray-400 dark:text-gray-500 italic ml-0.5">
+            <p className="text-2xs text-gray-400 dark:text-gray-500 italic ml-0.5">
               Inherited: <span className="font-mono">{inheritedSandbox.pre_spawn_script}</span>
             </p>
           )}
@@ -646,7 +646,7 @@ export function ConfigForm({
             </InfoTooltip>
           </div>
           {inheritedSandbox?.pre_exit_script && (
-            <p className="text-[11px] text-gray-400 dark:text-gray-500 italic ml-0.5">
+            <p className="text-2xs text-gray-400 dark:text-gray-500 italic ml-0.5">
               Inherited: <span className="font-mono">{inheritedSandbox.pre_exit_script}</span>
             </p>
           )}
@@ -672,7 +672,7 @@ export function ConfigForm({
         </div>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Strict config</label>
+            <label className="text-2xs font-semibold text-gray-400 dark:text-gray-500">Strict config</label>
             <InfoTooltip title="Strict config">
               <p>Launch the agent with <strong>only</strong> the servers allowed here: Hydra writes them to its own config file and starts Claude with <code className="text-blue-300">--strict-mcp-config</code>, so your <code className="text-blue-300">~/.claude.json</code> and the branch's <code className="text-blue-300">.mcp.json</code> are ignored outright.</p>
               <p className="mt-1.5">Turning this off falls back to filtering a seeded copy of your config instead. That copy is a bind mount over the real file, and anything on the host that rewrites <code className="text-blue-300">~/.claude.json</code> silently detaches it - after which the agent sees your unfiltered config. Only strict actually holds.</p>
@@ -690,12 +690,12 @@ export function ConfigForm({
           </label>
         </div>
         {policy.strict_mcp === false && (
-          <p className="text-[11px] text-amber-600 dark:text-amber-400 italic">
+          <p className="text-2xs text-amber-600 dark:text-amber-400 italic">
             Not strict: allow-listed servers are filtered out of a seeded copy of your config, which the host can silently detach. The runtime gate still denies non-allow-listed tool calls.
           </p>
         )}
         {discovered.length === 0 && extraAllowed.length === 0 ? (
-          <p className="text-[11px] text-gray-400 dark:text-gray-500 italic">No MCP servers found in <span className="font-mono">~/.claude.json</span> or <span className="font-mono">.mcp.json</span>. Add one by name below to pre-authorise it.</p>
+          <p className="text-2xs text-gray-400 dark:text-gray-500 italic">No MCP servers found in <span className="font-mono">~/.claude.json</span> or <span className="font-mono">.mcp.json</span>. Add one by name below to pre-authorise it.</p>
         ) : (
           <div className="space-y-1">
             {discovered.map((s) => (
@@ -707,7 +707,7 @@ export function ConfigForm({
                   onChange={(e) => toggleMcp(s.name, e.target.checked)}
                 />
                 <span className="text-sm font-mono text-gray-700 dark:text-gray-200">{s.name}</span>
-                <span className="text-[10px] tracking-wide text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 rounded px-1 py-px">{s.source}</span>
+                <span className="text-3xs tracking-wide text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 rounded px-1 py-px">{s.source}</span>
               </label>
             ))}
             {extraAllowed.map((name) => (
@@ -719,7 +719,7 @@ export function ConfigForm({
                   onChange={() => toggleMcp(name, false)}
                 />
                 <span className="text-sm font-mono text-gray-700 dark:text-gray-200">{name}</span>
-                <span className="text-[10px] tracking-wide text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900 rounded px-1 py-px">not found</span>
+                <span className="text-3xs tracking-wide text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900 rounded px-1 py-px">not found</span>
               </label>
             ))}
           </div>
@@ -756,7 +756,7 @@ export function ConfigForm({
         {/* Per-tool grants + read/write auto-allow */}
         <div className="pt-1 space-y-2 border-t border-gray-100 dark:border-gray-800">
           <div className="flex items-center gap-1.5 pt-1">
-            <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Allowed individual tools</label>
+            <label className="text-2xs font-semibold text-gray-400 dark:text-gray-500">Allowed individual tools</label>
             <InfoTooltip title="Per-tool grants">
               <p>Allow specific tools of a server that is <em>not</em> fully allow-listed, as <code className="text-blue-300">server__tool</code> (e.g. <code className="text-blue-300">linear__create_issue</code>). The server is kept so those tools work; its other tools are parked for your approval when first used.</p>
             </InfoTooltip>
@@ -768,7 +768,7 @@ export function ConfigForm({
             addLabel="Add Tool"
           />
           <div className="flex items-center gap-1.5 pt-1">
-            <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Blocked servers</label>
+            <label className="text-2xs font-semibold text-gray-400 dark:text-gray-500">Blocked servers</label>
             <InfoTooltip title="Blocked servers">
               <p>Servers refused outright: stripped before launch and <strong>denied</strong> at runtime - never parked for approval. Block overrides allow.</p>
               <p className="mt-1.5">The allow-lists combine across the user, project and local config layers, so blocking here is how this layer removes a server a broader layer granted.</p>
@@ -781,7 +781,7 @@ export function ConfigForm({
             addLabel="Block Server"
           />
           <div className="flex items-center gap-1.5 pt-1">
-            <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Blocked individual tools</label>
+            <label className="text-2xs font-semibold text-gray-400 dark:text-gray-500">Blocked individual tools</label>
             <InfoTooltip title="Blocked individual tools">
               <p>Deny specific tools as <code className="text-blue-300">server__tool</code> (e.g. <code className="text-blue-300">github__delete_repo</code>), even when their server is allowed. Block overrides allow.</p>
             </InfoTooltip>
@@ -794,7 +794,7 @@ export function ConfigForm({
           />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
-              <label className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">Auto-allow read-only tools</label>
+              <label className="text-2xs font-semibold text-gray-400 dark:text-gray-500">Auto-allow read-only tools</label>
               <InfoTooltip title="Auto-allow read-only tools">
                 <p>Automatically allow MCP tools that look read-only (by name - <code className="text-blue-300">get_*</code>, <code className="text-blue-300">list_*</code>, <code className="text-blue-300">search_*</code>...), parking only writes and unrecognised tools for approval.</p>
                 <p className="mt-1.5 text-gray-400 italic">This is a best-effort heuristic, not a guarantee - a server can mislabel a destructive tool. Off by default.</p>

@@ -53,6 +53,9 @@ type worker struct {
 	// message. Keep its durable deltas until the turn boundary so an interrupt
 	// can settle the partial reply into one replayable assistant_message.
 	codexAssistantDeltas map[string]string
+	// Bash calls whose recorded working directory has not been read off the
+	// transcript yet - see shellcwd.go.
+	pendingBash map[string]struct{}
 }
 
 type codexSpawn struct {
@@ -101,6 +104,26 @@ func (m *Manager) store(id string) (*Store, error) {
 	}
 	go w.run(id)
 	return s, nil
+}
+
+// Forget drops what a head's chat store holds in memory, after its files have
+// been deleted (wired to heads.SetOnStateRemoved). The store keeps the whole
+// event log resident to page from, and nothing else would ever tell it the log
+// it is holding no longer exists - so a killed head went on costing tens of
+// megabytes for the life of the daemon.
+//
+// The worker itself stays. Its goroutine is a few KB against the log's tens of
+// megabytes, and taking it out would mean either racing a straggler line onto a
+// closed channel or letting a later one open a SECOND worker for the same id,
+// with two stores appending to one file. A store reset to empty is exactly a
+// fresh one, which is also what an id taken over by a forced respawn wants.
+func (m *Manager) Forget(id string) {
+	m.mu.Lock()
+	w := m.workers[id]
+	m.mu.Unlock()
+	if w != nil {
+		w.store.Discard()
+	}
 }
 
 func (m *Manager) worker(id string) (*worker, error) {
@@ -210,6 +233,16 @@ func (w *worker) run(id string) {
 			if kind == "tool_completed" || kind == "turn_completed" || kind == "turn_failed" {
 				w.reconcileCommits(id, causalItemID(spec.payload))
 			}
+			// Read the shell's directory off the transcript for the call that
+			// just finished, and for whatever the one starting now has left
+			// outstanding (see shellcwd.go).
+			if kind == "tool_started" {
+				w.noteBashCall(spec)
+				w.syncShellCwds()
+			}
+			if kind == "tool_completed" {
+				w.syncShellCwds()
+			}
 		}
 	}
 }
@@ -240,10 +273,7 @@ func (w *worker) isEchoedQueuedCommand(spec eventSpec) bool {
 	if text == "" {
 		return false
 	}
-	for _, event := range w.store.Events() {
-		if event.Type != "user_message" {
-			continue
-		}
+	for _, event := range w.store.EventsOfType("user_message") {
 		var payload struct {
 			Content json.RawMessage `json:"content"`
 		}
@@ -274,7 +304,10 @@ func (w *worker) reconcileClaudeUserEcho(spec eventSpec, provider string) bool {
 	// Copies already in the log that came from the transcript rather than from
 	// Hydra - see the re-import case below.
 	fromTranscript := 0
-	for _, event := range w.store.Events() {
+	// Only the two kinds below can pair, and the timeline is mostly tool output -
+	// scanning it whole meant copying and then parsing tens of megabytes of it per
+	// user turn to read a few hundred bytes (see Store.EventsOfType).
+	for _, event := range w.store.EventsOfType("user_message", "user_message_echoed") {
 		var payload struct {
 			Content json.RawMessage `json:"content"`
 		}
@@ -508,6 +541,11 @@ func (m *Manager) Flush(id string) error {
 	done := make(chan struct{})
 	w.in <- observedLine{done: done}
 	<-done
+	// A quiet point - the queue is empty and a client is usually about to attach.
+	// Appends only checkpoint the projection every so often (see
+	// checkpointInterval), so put the current fold down while nothing is racing
+	// it, and Open has less to replay if the daemon dies mid-conversation.
+	w.store.Checkpoint()
 	return nil
 }
 

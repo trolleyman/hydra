@@ -260,7 +260,7 @@ function RepoSettingsFields({ settings, onChange }: { settings: RepoSettings; on
   ]
   return (
     <>
-      <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Options</p>
+      <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Options</p>
       <div className="flex flex-col gap-0.5">
         {options.map(({ key, label }) => (
           <label key={key} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -338,7 +338,7 @@ function DiffSettingsFields({ settings, onChange }: { settings: DiffSettings; on
   ]
   return (
     <>
-      <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">File list</p>
+      <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 mb-2">File list</p>
       <div className="flex flex-col gap-0.5 mb-3">
         {viewOptions.map((opt) => (
           <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -353,7 +353,7 @@ function DiffSettingsFields({ settings, onChange }: { settings: DiffSettings; on
           </label>
         ))}
       </div>
-      <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-2">Diff options</p>
+      <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Diff options</p>
       <div className="flex flex-col gap-0.5">
         {options.map(({ key, label }) => (
           <label key={key} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -369,7 +369,7 @@ function DiffSettingsFields({ settings, onChange }: { settings: DiffSettings; on
       </div>
       {/* Image diff mode - applies to in-tree images in the diff, mirroring the
           agent diff viewer's settings (shared storage key). */}
-      <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-3 mb-2">Image diff</p>
+      <p className="text-2xs font-semibold text-gray-500 dark:text-gray-400 mt-3 mb-2">Image diff</p>
       <div className="flex flex-col gap-0.5">
         {IMAGE_DIFF_MODES.map((opt) => (
           <label key={opt.value} className="flex items-center gap-2 py-0.5 cursor-pointer">
@@ -1395,7 +1395,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                     {folder && (
                       <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 dark:bg-gray-700/50 border-y border-gray-100 dark:border-gray-700/50">
                         <Folder className="w-3 h-3 text-blue-400 dark:text-blue-500 shrink-0" />
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
+                        <span className="text-3xs text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
                       </div>
                     )}
                     {groupFiles.map((f) => (

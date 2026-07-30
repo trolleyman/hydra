@@ -166,7 +166,7 @@ export function LogView({ log, emptyText = 'Waiting for output...', failed = fal
     }`}>
       <div ref={containerRef} className="h-full w-full" />
       {log.length === 0 && (
-        <div className="pointer-events-none absolute inset-0 flex items-start p-2 font-mono text-[11px] text-gray-400 dark:text-gray-500">
+        <div className="pointer-events-none absolute inset-0 flex items-start p-2 font-mono text-2xs text-gray-400 dark:text-gray-500">
           {emptyText}
         </div>
       )}
@@ -179,7 +179,7 @@ export function LogView({ log, emptyText = 'Waiting for output...', failed = fal
 function LogColumnFrame({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex-1 min-w-0">
-      <div className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
+      <div className="text-3xs font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {children}
     </div>
   )
@@ -190,7 +190,7 @@ function LogColumnFrame({ label, children }: { label: string; children: React.Re
 // balanced when only one side has a log.
 function NoLog() {
   return (
-    <div className="my-2 flex items-center justify-center h-64 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 text-[11px] text-gray-400 dark:text-gray-500">
+    <div className="my-2 flex items-center justify-center h-64 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 text-2xs text-gray-400 dark:text-gray-500">
       No log
     </div>
   )

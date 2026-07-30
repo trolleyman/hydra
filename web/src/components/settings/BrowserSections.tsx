@@ -10,12 +10,14 @@ import { BashIndentSection } from './BashIndentSection'
 import { ChatHeightSection } from './ChatHeightSection'
 import { TerminalSection } from './TerminalSection'
 import { NotificationsSection } from './NotificationsSection'
+import { ResetBrowserSection } from './ResetBrowserSection'
 
 // The Browser tab of the settings pages: the client-only preferences (theme /
 // paste markers / auto-close pairs / fonts / step folding / smooth streaming /
 // code line numbers / whitespace marks / shell command indent / chat height /
 // terminal / desktop notifications) that live in this browser's localStorage.
-// They save instantly on change - no config file, no Save button.
+// They save instantly on change - no config file, no Save button - which is why
+// the tab ends with a reset: there is no Cancel to fall back on.
 export function BrowserSections() {
   return (
     <>
@@ -31,6 +33,7 @@ export function BrowserSections() {
       <ChatHeightSection />
       <TerminalSection />
       <NotificationsSection />
+      <ResetBrowserSection />
     </>
   )
 }

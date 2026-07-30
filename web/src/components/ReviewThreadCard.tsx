@@ -67,7 +67,7 @@ function OriginBadge({ note, provider }: { note: ReviewThreadNote; provider?: st
   if (note.origin === 'local_only') {
     return (
       <Tooltip content="Kept in Hydra - it was never posted to the pull request, so only you can see it.">
-        <span className="inline-flex items-center gap-1 h-5 px-1 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/60 rounded cursor-help">
+        <span className="inline-flex items-center gap-1 h-5 px-1 text-3xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/60 rounded cursor-help">
           <EyeOff className="w-3 h-3" />
           private
         </span>
@@ -154,7 +154,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
     }
   }
 
-  const btn = 'px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer disabled:opacity-50'
+  const btn = 'px-2 py-1 text-3xs font-medium rounded transition-colors cursor-pointer disabled:opacity-50'
 
   return (
     <div className="border-y border-violet-200 dark:border-violet-900/60 bg-violet-50/40 dark:bg-violet-950/20 px-4 py-2">
@@ -174,7 +174,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
               />
               <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-medium text-gray-700 dark:text-gray-200 truncate">
+                <span className="text-2xs font-medium text-gray-700 dark:text-gray-200 truncate">
                   {n.author || 'someone'}
                 </span>
                 {noteAgo(n.created_at) && (
@@ -191,12 +191,12 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                         e.preventDefault()
                         actions.openComment?.(n.number!)
                       }}
-                      className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:underline"
+                      className="text-3xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:underline"
                     >
                       {noteAgo(n.created_at)}
                     </a>
                   ) : (
-                    <span className="text-[10px] text-gray-400">{noteAgo(n.created_at)}</span>
+                    <span className="text-3xs text-gray-400">{noteAgo(n.created_at)}</span>
                   )
                 )}
                 {/* Fixed-height row so the badge and the menu trigger share a
@@ -209,7 +209,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                   {n.number != null && (
                     <span className="flex items-center gap-1">
                       {n.read === false && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
-                      <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500">#{n.number}</span>
+                      <span className="font-mono text-2xs text-gray-400 dark:text-gray-500">#{n.number}</span>
                     </span>
                   )}
                   <OriginBadge note={n} provider={actions.provider} />
@@ -298,7 +298,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                                   <Sparkles className="w-3.5 h-3.5 mt-px shrink-0 text-violet-500" fill="currentColor" />
                                   <span>
                                     <span className="block text-xs text-gray-700 dark:text-gray-200">Resolve with agent</span>
-                                    <span className="block text-[10px] text-gray-400 leading-snug">Send this thread to the head and ask it to address the comment.</span>
+                                    <span className="block text-3xs text-gray-400 leading-snug">Send this thread to the head and ask it to address the comment.</span>
                                   </span>
                                 </button>
                                 {thread.url && (
@@ -338,19 +338,19 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                     : `Resolved on ${providerLabel(actions.provider)}.`
                 }
               >
-                <span className="flex items-center gap-1 text-[10px] text-green-700 dark:text-green-300 cursor-help">
+                <span className="flex items-center gap-1 text-3xs text-green-700 dark:text-green-300 cursor-help">
                   <Check className="w-3 h-3" /> resolved{thread.resolved_locally ? ' here' : ''}
                 </span>
               </Tooltip>
             )}
             {thread.outdated && (
-              <span className="text-[10px] text-amber-700 dark:text-amber-300">outdated</span>
+              <span className="text-3xs text-amber-700 dark:text-amber-300">outdated</span>
             )}
             {!replying && (
               <button
                 type="button"
                 onClick={() => setReplying(true)}
-                className="text-[10px] text-violet-700 dark:text-violet-300 hover:underline cursor-pointer"
+                className="text-3xs text-violet-700 dark:text-violet-300 hover:underline cursor-pointer"
               >
                 Reply
               </button>
@@ -364,13 +364,13 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                 type="button"
                 disabled={busy === 'resolve'}
                 onClick={() => void run('resolve', () => actions.setResolved!(thread.notes[0].number!, !thread.resolved))}
-                className="text-[10px] text-gray-500 dark:text-gray-400 hover:underline cursor-pointer disabled:opacity-50"
+                className="text-3xs text-gray-500 dark:text-gray-400 hover:underline cursor-pointer disabled:opacity-50"
               >
                 {thread.resolved ? 'Reopen' : 'Resolve here'}
               </button>
             )}
             {busy === 'agent' && (
-              <span className="flex items-center gap-1 text-[10px] text-gray-500">
+              <span className="flex items-center gap-1 text-3xs text-gray-500">
                 <LoaderCircle className="w-3 h-3 animate-spin" /> sending to the agent...
               </span>
             )}
@@ -391,11 +391,11 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                     void run('forge', () => actions.reply(thread.id, text))
                   } else if (e.key === 'Escape') setReplying(false)
                 }}
-                placeholder={`Reply... (Ctrl+Enter to post on ${forge})`}
+                placeholder="Reply..."
                 wrapperClassName="w-full h-16 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus-within:ring-1 focus-within:ring-violet-500"
                 textClassName="p-2 text-xs leading-5"
               />
-              <div className="flex justify-end gap-2 mt-1.5">
+              <div className="flex items-center justify-end gap-2 mt-1.5">
                 <button type="button" onClick={() => { setReplying(false) }} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
                   Cancel
                 </button>
@@ -410,19 +410,23 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                     {busy === 'local' ? 'Saving...' : 'Note in Hydra'}
                   </button>
                 </Tooltip>
-                <button
-                  type="button"
-                  disabled={!text.trim() || busy !== null}
-                  onClick={() => void run('forge', () => actions.reply(thread.id, text))}
-                  className={`${btn} flex items-center gap-1 text-white bg-violet-600 hover:bg-violet-700`}
-                >
-                  <ProviderIcon provider={actions.provider} className="w-3 h-3" />
-                  {busy === 'forge' ? 'Posting...' : `Reply on ${forge}`}
-                </button>
+                {/* Ctrl+Enter fires this one, so the hint rides its tooltip - the
+                    row is already three buttons wide inside a thread card. */}
+                <Tooltip content={`Post the reply on ${forge}.`} shortcut={{ keys: ['Ctrl', 'Enter'] }} side="top">
+                  <button
+                    type="button"
+                    disabled={!text.trim() || busy !== null}
+                    onClick={() => void run('forge', () => actions.reply(thread.id, text))}
+                    className={`${btn} flex items-center gap-1 text-white bg-violet-600 hover:bg-violet-700`}
+                  >
+                    <ProviderIcon provider={actions.provider} className="w-3 h-3" />
+                    {busy === 'forge' ? 'Posting...' : `Reply on ${forge}`}
+                  </button>
+                </Tooltip>
               </div>
             </div>
           )}
-          {error && <p className="mt-1 text-[10px] text-red-500 break-words">{error}</p>}
+          {error && <p className="mt-1 text-3xs text-red-500 break-words">{error}</p>}
         </div>
       </div>
     </div>

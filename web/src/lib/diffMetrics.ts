@@ -25,10 +25,15 @@
 // ── Row classes (shared with DiffViewer's renderers) ──────────────────────────
 
 // Size and leading come from the Code size control (Settings -> Browser ->
-// Fonts): CODE_TEXT is `text-xs` and CODE_LEADING is `leading-5` plus
+// Fonts): 0.75rem/1.25rem (what `text-xs`/`leading-5` used to mean) plus
 // --app-font-code-step, a signed whole-px length that is 0px by default - so an
 // untouched build renders the 12px/20px row it always did. Whole-px leading, so
 // a stepped row stays on the device-pixel grid.
+//
+// Spelled as the rem literal rather than `text-xs` on purpose, and now doubly so:
+// a diff row is a Code surface, so it must follow the Code step and NOT the
+// Interface one - and `text-xs` is 13px on the interface ladder these days
+// (index.css @theme), which would silently resize every diff row.
 //
 // The gutter and marker widths are stated in em rather than px for the same
 // reason: at the element's own (stepped) size, 3.334em IS the 40px `w-10` used

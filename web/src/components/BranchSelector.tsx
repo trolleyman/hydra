@@ -130,7 +130,7 @@ export const BranchSelector = memo(function BranchSelector({
     >
       {b.is_agent ? <Bot className="w-3.5 h-3.5 shrink-0 text-purple-500" /> : <GitBranch className="w-3.5 h-3.5 shrink-0 text-gray-400" />}
       <span className="truncate font-mono">{b.name}</span>
-      {b.is_current && <span className="ml-1 text-[9px] px-1 py-px rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 shrink-0">HEAD</span>}
+      {b.is_current && <span className="ml-1 text-4xs px-1 py-px rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 shrink-0">HEAD</span>}
       {b.name === activeRef && <Check className="w-3.5 h-3.5 ml-auto shrink-0 text-blue-500" />}
     </button>
   )
@@ -173,7 +173,10 @@ export const BranchSelector = memo(function BranchSelector({
             // GitCompare became GitCompareArrows. Same idea as data-main-scroll.
             data-branch-selector=""
             onClick={() => setOpen((o) => !o)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer ${triggerSize} ${open
+            // h-7 rather than py-1: this trigger sits in a row with the
+            // options popovers and the terminal/chat toggle, which are h-7, and
+            // arriving at 27px from padding read as a misalignment.
+            className={`flex h-7 items-center gap-1.5 px-2.5 rounded-md border text-xs font-medium transition-colors cursor-pointer ${triggerSize} ${open
               ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
               : 'text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
               }`}
@@ -198,7 +201,7 @@ export const BranchSelector = memo(function BranchSelector({
             <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
               <Check className="w-3.5 h-3.5 shrink-0 text-blue-500" />
               <span className="truncate font-mono">{shortSha(activeRef)}</span>
-              <span className="ml-auto text-[10px]">Commit</span>
+              <span className="ml-auto text-3xs">Commit</span>
             </div>
           )}
           {current && (
@@ -211,13 +214,13 @@ export const BranchSelector = memo(function BranchSelector({
           )}
           {agentBranches.length > 0 && (
             <>
-              <p className="px-2 pt-1.5 pb-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500">Agent branches · {agentBranches.length}</p>
+              <p className="px-2 pt-1.5 pb-1 text-3xs font-semibold text-gray-400 dark:text-gray-500">Agent branches · {agentBranches.length}</p>
               {agentBranches.map((b) => <Row key={b.name} b={b} />)}
             </>
           )}
           {otherBranches.length > 0 && (
             <>
-              <p className="px-2 pt-2 pb-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500">Other branches · {otherBranches.length}</p>
+              <p className="px-2 pt-2 pb-1 text-3xs font-semibold text-gray-400 dark:text-gray-500">Other branches · {otherBranches.length}</p>
               {otherBranches.map((b) => <Row key={b.name} b={b} />)}
             </>
           )}

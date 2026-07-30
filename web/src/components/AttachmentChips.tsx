@@ -33,7 +33,7 @@ export const AttachmentChips = memo(function AttachmentChips({
 }) {
   if (attachments.length === 0) return null
   const thumb = size === 'sm' ? 'w-6 h-6' : 'w-8 h-8'
-  const text = size === 'sm' ? 'text-[10px]' : 'text-xs'
+  const text = size === 'sm' ? 'text-3xs' : 'text-xs'
   // Two rows of image chips: 2 * (thumb + py-1 + border) + one gap-1.5.
   const maxH = size === 'sm' ? 'max-h-[74px]' : 'max-h-[90px]'
   return (

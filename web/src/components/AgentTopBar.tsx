@@ -97,9 +97,9 @@ function actionBtnClass(mode: 'labels' | 'icons', a: AgentTopBarAction): string 
   // Segment members are smaller (h-7) and borderless - the pill frames them.
   if (v === 'segment') {
     const shape = mode === 'labels' ? 'gap-1.5 px-2.5' : 'w-7'
-    return `shrink-0 h-7 inline-flex items-center justify-center rounded-md text-[12.5px] font-semibold transition-colors ${dis} ${shape} bg-transparent text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100`
+    return `shrink-0 h-7 inline-flex items-center justify-center rounded-md text-xs font-semibold transition-colors ${dis} ${shape} bg-transparent text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100`
   }
-  const base = `shrink-0 h-8 inline-flex items-center justify-center rounded-lg text-[13px] font-semibold transition-colors ${dis}`
+  const base = `shrink-0 h-8 inline-flex items-center justify-center rounded-lg text-sm font-semibold transition-colors ${dis}`
   const shape = mode === 'labels' ? 'gap-1.5 px-3' : 'w-8'
   if (v === 'primary') {
     return `${base} ${shape} bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-700/30 shadow-sm`
@@ -112,7 +112,7 @@ function actionBtnClass(mode: 'labels' | 'icons', a: AgentTopBarAction): string 
   // 'muted' is the in-flight "Merging..." state: a solid quiet grey, not dimmed (so it
   // reads as deliberately inert rather than a disabled CTA), and non-interactive.
   if (v === 'muted') {
-    return `shrink-0 h-8 inline-flex items-center justify-center rounded-lg text-[13px] font-semibold ${shape} cursor-default bg-gray-100 dark:bg-[#1c2330] text-gray-400 dark:text-[#8b94a6] border border-gray-200 dark:border-[#2e3747]`
+    return `shrink-0 h-8 inline-flex items-center justify-center rounded-lg text-sm font-semibold ${shape} cursor-default bg-gray-100 dark:bg-[#1c2330] text-gray-400 dark:text-[#8b94a6] border border-gray-200 dark:border-[#2e3747]`
   }
   if (v === 'danger') {
     return `${base} ${shape} bg-white dark:bg-gray-800 border border-red-300 dark:border-red-800/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20`
@@ -255,8 +255,8 @@ function SplitActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mo
             >
               <MenuTile tone={m.tone ?? (m.danger ? 'red' : 'neutral')}>{m.icon}</MenuTile>
               <span className="flex flex-col gap-0.5 min-w-0 pt-0.5">
-                <span className={`text-[13px] font-semibold leading-tight ${m.danger ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-[#eef1f6]'}`}>{m.label}</span>
-                {m.description && <span className="text-[12px] leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(m.description)}</span>}
+                <span className={`text-sm font-semibold leading-tight ${m.danger ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-[#eef1f6]'}`}>{m.label}</span>
+                {m.description && <span className="text-xs leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(m.description)}</span>}
               </span>
             </button>
           ))}
@@ -461,7 +461,7 @@ function AdaptiveActions({
                     <span className="shrink-0">{a.icon}</span>
                     {a.label}
                     {showShortcut && a.shortcut && (
-                      <span className="ml-auto pl-6 text-[11px] font-medium text-gray-400 dark:text-gray-500">{a.shortcut}</span>
+                      <span className="ml-auto pl-6 text-2xs font-medium text-gray-400 dark:text-gray-500">{a.shortcut}</span>
                     )}
                   </button>
                   {/* A split action that folded into the overflow menu keeps its
@@ -667,7 +667,7 @@ export function AgentTopBarContent({
                 disabled={rename.generating || rename.saving}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={rename.onGenerate}
-                className="shrink-0 h-7 inline-flex items-center gap-1.5 px-2.5 rounded-md text-[12.5px] font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
+                className="shrink-0 h-7 inline-flex items-center gap-1.5 px-2.5 rounded-md text-xs font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100"
               >
                 {rename.generating ? (
                   <LoaderCircle className="w-3.5 h-3.5 animate-spin" />

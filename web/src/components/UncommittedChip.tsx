@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { TriangleAlert, LoaderCircle } from 'lucide-react'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import { ShortcutHint } from './Kbd'
 import type { RepositoryUncommittedChanges } from '../api'
 import { Tooltip } from './Tooltip'
 
@@ -147,7 +148,11 @@ export function UncommittedChip({
             {uncommitted.files.map((f) => (
               <li key={f.path} className="flex items-baseline gap-1.5 text-xs">
                 <span className="shrink-0 w-14 text-gray-400 dark:text-gray-500">{f.status}</span>
-                <span className="truncate font-mono text-gray-700 dark:text-gray-300" title={f.path}>
+                {/* Not mono. A path here is being read as a name - "which files
+                    am I about to commit" - not as code to be compared column by
+                    column with the line above it, which is what the diff and
+                    repository trees use the Code font for. */}
+                <span className="truncate text-gray-700 dark:text-gray-300" title={f.path}>
                   {f.path}
                 </span>
               </li>
@@ -177,7 +182,7 @@ export function UncommittedChip({
             textClassName="px-2 py-1.5 text-xs leading-relaxed placeholder-gray-400 dark:placeholder-gray-500"
           />
           <div className="flex items-center justify-end gap-2">
-            <span className="text-[10px] text-gray-400 dark:text-gray-500 select-none">Ctrl+Enter to commit</span>
+            <span className="select-none"><ShortcutHint keys={['Ctrl', 'Enter']} note="to commit" /></span>
             <button
               type="button"
               onClick={() => void submit()}

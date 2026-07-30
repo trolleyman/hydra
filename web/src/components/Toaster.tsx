@@ -38,7 +38,7 @@ const actionClass = (variant?: 'primary' | 'danger') => {
 
 // Shared body styling for a toast's code block, used by both the highlighted and
 // the plain-text render so the two are pixel-identical apart from token colour.
-const codeClass = 'max-h-40 overflow-auto text-[11px] font-mono text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words'
+const codeClass = 'max-h-40 overflow-auto text-2xs font-mono text-gray-600 dark:text-gray-300 whitespace-pre-wrap break-words'
 
 // The two size scales a toast renders at. `compact` is for a glance-and-gone
 // acknowledgement (a copy confirmation): same anatomy, but the padding, the icon
@@ -64,7 +64,7 @@ const SIZE = {
     pad: 'p-2.5',
     row: 'gap-2.5',
     tile: 'w-7 h-7 rounded-lg',
-    message: 'text-[13px] leading-snug',
+    message: 'text-sm leading-snug',
     codeWrap: 'mt-1.5 rounded',
     code: 'px-2 pb-1.5 leading-snug',
     codeTop: { tagged: 'pt-1', plain: 'pt-1.5' },
@@ -163,7 +163,7 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
               // trailed a band of empty tint out to the right edge.
               <div className={`w-fit max-w-full overflow-hidden bg-gray-100 dark:bg-gray-900/60 ${size.codeWrap}`}>
                 {toast.codeLang && (
-                  <div className={`pt-1.5 text-[10px] font-mono tracking-wide text-gray-400 dark:text-gray-500 ${toast.compact ? 'px-2' : 'px-2.5'}`}>
+                  <div className={`pt-1.5 text-3xs font-mono tracking-wide text-gray-400 dark:text-gray-500 ${toast.compact ? 'px-2' : 'px-2.5'}`}>
                     {toast.codeLang}
                   </div>
                 )}

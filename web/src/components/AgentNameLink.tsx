@@ -77,7 +77,7 @@ export function AgentNameLink({
   const blockCls = `optical-center max-w-full ${title ? 'line-clamp-2' : 'truncate'} ${
     title
       ? 'text-sm font-semibold text-gray-900 dark:text-gray-100'
-      : 'text-[11px] text-gray-500 dark:text-gray-400'
+      : 'text-2xs text-gray-500 dark:text-gray-400'
   }`
   const hoverCls = `transition-colors cursor-pointer ${
     title ? 'hover:text-blue-600 dark:hover:text-blue-400' : 'hover:text-gray-800 dark:hover:text-gray-200'

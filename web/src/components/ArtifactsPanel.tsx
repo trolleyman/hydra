@@ -136,7 +136,7 @@ function FileRow({ file, mode, changeThreshold = 0, gallery, index }: {
         )}
         {file.unverified && (
           <span
-            className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20"
+            className="inline-flex items-center gap-1 text-3xs px-1.5 py-0.5 rounded font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20"
             title={'Compared by byte hash only - install ffmpeg for frame-accurate video diffs. This "modified" result may be spurious (e.g. only container metadata changed).'}
           >
             <TriangleAlert className="w-3 h-3" />
@@ -205,7 +205,7 @@ function FileTile({ file, gallery, index }: { file: ArtifactFile; gallery?: Ligh
     >
       <Icon className="w-6 h-6 shrink-0 text-gray-400 dark:text-gray-500" />
       <div className="min-w-0 flex-1">
-        <div className="text-[11px] text-gray-400 dark:text-gray-500">
+        <div className="text-2xs text-gray-400 dark:text-gray-500">
           {file.size != null ? formatBytes(file.size) : isPdf ? 'PDF' : isText ? 'text' : 'download'}
         </div>
         <div className="flex items-center gap-1.5 mt-1">
@@ -215,7 +215,7 @@ function FileTile({ file, gallery, index }: { file: ArtifactFile; gallery?: Ligh
                 href={side.url}
                 download
                 onClick={(e) => e.stopPropagation()}
-                className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+                className="flex items-center gap-1 h-6 px-2 rounded-md border text-2xs font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
               >
                 <Download className="w-3 h-3" />
                 {/* optical-center on the label, not a nudge on the icon (see
@@ -1638,7 +1638,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
             wraps) onto a fractional height - and a box on a fractional height
             paints 1px taller or shorter depending on its subpixel offset. */}
         {generatingCount > 0 && (
-          <span className="flex items-center gap-1.5 text-[11px] leading-4 font-normal text-gray-400 dark:text-gray-500">
+          <span className="flex items-center gap-1.5 text-2xs leading-4 font-normal text-gray-400 dark:text-gray-500">
             <LoaderCircle className="w-3 h-3 animate-spin" />
             {isSkeleton ? 'Loading' : `Generating ${settledCount}/${displaySets.length}`}
           </span>
@@ -1657,7 +1657,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
                 />
               </Tooltip>
               <Tooltip content="Highlight changed pixels in magenta on every tile - shortcut: H">
-                <label className="flex items-center gap-1 text-[10px] font-medium tracking-wide text-gray-500 dark:text-gray-400 cursor-pointer select-none">
+                <label className="flex items-center gap-1 text-3xs font-medium tracking-wide text-gray-500 dark:text-gray-400 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={artifactHighlight}
@@ -1705,9 +1705,9 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
                   className="flex-1 accent-blue-500 cursor-pointer"
                 />
               </Tooltip>
-              <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 w-8 text-right shrink-0">{Math.round(artifactScale * 100)}%</span>
+              <span className="text-3xs tabular-nums text-gray-400 dark:text-gray-500 w-8 text-right shrink-0">{Math.round(artifactScale * 100)}%</span>
             </div>
-            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 leading-snug">Tiles auto-size by shape - drag a tile to resize it.</p>
+            <p className="text-3xs text-gray-400 dark:text-gray-500 mt-1 leading-snug">Tiles auto-size by shape - drag a tile to resize it.</p>
           </SettingsPopover>
         </div>
       </div>

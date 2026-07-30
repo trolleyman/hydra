@@ -49,7 +49,7 @@ export function DialogIconTile({
 // there, mb-2 reads as a separation rather than a caption.
 export function DialogSectionLabel({ children, className = 'mb-2' }: { children: ReactNode; className?: string }) {
   return (
-    <p className={`text-[11px] font-semibold tracking-wider text-gray-400 dark:text-gray-500 ${className}`.trim()}>
+    <p className={`text-2xs font-semibold tracking-wider text-gray-400 dark:text-gray-500 ${className}`.trim()}>
       {children}
     </p>
   )
