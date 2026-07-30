@@ -2520,8 +2520,11 @@ const UNCOMMITTED_TOOLTIP_FILES = 10
 
 // Wider than the card's 384px default, because the content is paths rather than
 // prose: this repo's tracked paths run 43 characters at p90 and 54 at the longest
-// (measured over git ls-files), and 420px clears ~65 at the card's 11px, so
-// wrapping stays the exception rather than the common case.
+// (measured over git ls-files), and 420px clears ~60 at the card's text-2xs, so
+// wrapping stays the exception rather than the common case. Approximate by
+// nature - the type ladder scales with the Interface font control, so this is
+// sized at its default step, and a path that overruns still wraps sanely (on a
+// directory boundary, filename onto the next line).
 const UNCOMMITTED_TOOLTIP_WIDTH = 420
 
 // A path too long for the tooltip has to wrap somewhere. Left to itself the
