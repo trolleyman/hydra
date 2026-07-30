@@ -153,7 +153,15 @@ export function UncommittedChip({
                     column with the line above it, which is what the diff and
                     repository trees use the Code font for. */}
                 <span className="truncate text-gray-700 dark:text-gray-300" title={f.path}>
-                  {f.path}
+                  {(() => {
+                    const slash = f.path.lastIndexOf('/')
+                    const directory = slash >= 0 ? f.path.slice(0, slash + 1) : ''
+                    const fileName = slash >= 0 ? f.path.slice(slash + 1) : f.path
+                    return <>
+                      {directory && <span className="text-gray-400 dark:text-gray-500">{directory}</span>}
+                      {fileName}
+                    </>
+                  })()}
                 </span>
               </li>
             ))}

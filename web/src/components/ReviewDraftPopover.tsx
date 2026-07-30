@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from 'react'
 import { MessagesSquare, Trash2, Send, TriangleAlert, X } from 'lucide-react'
 import type { PendingReviewComment } from '../lib/reviewComments'
 import { Tooltip } from './Tooltip'
+import { getFileIcon } from '../lib/fileIcons'
 
 export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, onRemove, onJump }: {
   comments: PendingReviewComment[]
@@ -112,6 +113,10 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
           <div className="max-h-72 overflow-y-auto py-1">
             {comments.map((c) => {
               const stale = staleIds.has(c.id)
+              const slash = c.path.lastIndexOf('/')
+              const directory = slash >= 0 ? c.path.slice(0, slash + 1) : ''
+              const fileName = slash >= 0 ? c.path.slice(slash + 1) : c.path
+              const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName)
               return (
                 <div key={c.id} className="group flex items-start gap-2 px-1 hover:bg-gray-50 dark:hover:bg-gray-700/40">
                   <Tooltip content={heldBack.has(c.number) ? 'Include in this review' : 'Hold this one back'} side="top">
@@ -134,9 +139,13 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
                       aria-label="Jump to this line in the diff"
                       className="min-w-0 w-full text-left px-2 py-2 rounded cursor-pointer"
                     >
-                      <div className="flex items-center gap-1.5 text-2xs font-mono text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                        <span className="truncate" title={c.path}>{c.path}</span>
-                        <span className="shrink-0 text-gray-400 dark:text-gray-500">:{c.lineNum}</span>
+                      <div className="flex items-center gap-1.5 text-2xs text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                        <FileIcon className={`w-3.5 h-3.5 shrink-0 ${fileIconClass}`} />
+                        <span className="truncate" title={c.path}>
+                          {directory && <span className="text-gray-400 dark:text-gray-500">{directory}</span>}
+                          <span>{fileName}</span>
+                        </span>
+                        <span className="shrink-0 font-mono text-gray-400 dark:text-gray-500">:{c.lineNum}</span>
                         {stale && (
                           <Tooltip content="The diff around this line changed after the comment was queued" side="top">
                             <span className="shrink-0 inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">

@@ -634,12 +634,18 @@ function FileContent({
 // only exists on another branch. A dedicated state reads more clearly than a raw
 // error string.
 function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
+  const slash = path.lastIndexOf('/')
+  const directory = slash >= 0 ? path.slice(0, slash + 1) : ''
+  const fileName = slash >= 0 ? path.slice(slash + 1) : path
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
       <FileQuestion className="w-12 h-12 text-gray-300 dark:text-gray-600" />
       <div className="space-y-1">
         <p className="text-sm font-medium text-gray-700 dark:text-gray-300">File not found</p>
-        <p className="text-xs text-gray-500 dark:text-gray-400 break-all">{path}</p>
+        <p className="text-xs break-all">
+          {directory && <span className="text-gray-400 dark:text-gray-500">{directory}</span>}
+          <span className="text-gray-600 dark:text-gray-300">{fileName}</span>
+        </p>
         <p className="text-xs text-gray-400 dark:text-gray-500">
           This file doesn’t exist at <span className="font-mono">{refStr}</span>.
         </p>
@@ -1485,7 +1491,18 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                 {(() => { const { Icon, className } = getFileIcon(selectedDiffFile.path.split('/').pop() ?? selectedDiffFile.path); return <Icon className={`w-4 h-4 shrink-0 ${className}`} /> })()}
                 {selectedDiffFile.change_type === 'renamed' && selectedDiffFile.old_path ? (
                   <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
-                    {selectedDiffFile.old_path} <span className="text-gray-400 dark:text-gray-500">→</span> {selectedDiffFile.path}
+                    {(() => {
+                      const renamedPath = (path: string) => {
+                        const slash = path.lastIndexOf('/')
+                        const directory = slash >= 0 ? path.slice(0, slash + 1) : ''
+                        const fileName = slash >= 0 ? path.slice(slash + 1) : path
+                        return <>
+                          {directory && <span className="text-gray-400 dark:text-gray-500">{directory}</span>}
+                          <span>{fileName}</span>
+                        </>
+                      }
+                      return <>{renamedPath(selectedDiffFile.old_path)} <span className="text-gray-400 dark:text-gray-500">→</span> {renamedPath(selectedDiffFile.path)}</>
+                    })()}
                   </span>
                 ) : (
                   <FilePathLabel path={selectedDiffFile.path} />
