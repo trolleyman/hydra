@@ -22,26 +22,30 @@ export function commentPermalink(projectId: string | null, agentId: string, numb
   return `${window.location.origin}/project/${encodeURIComponent(projectId ?? '_')}/agent/${encodeURIComponent(agentId)}?comment=${number}`
 }
 
-// Which comment the review cursor is on - the one a permalink, a chat link or the
-// up/down navigator last took you to. The card carrying that number draws itself
-// highlighted, and STAYS highlighted until the cursor moves.
+// Every comment you have been TAKEN to - by a permalink, a chat link, or a step
+// of the up/down navigator - marked, and left marked.
 //
 // It replaces a 1.6s flash on the diff LINE, which was wrong twice over: it drew
-// attention to the code rather than to the remark you had just asked to be taken
-// to, and by the time you had finished reading the line it was gone - so a jump
-// into a file with several comments left you with no way to tell which one you
-// had arrived at. A mark that persists is also what makes "next" legible: you can
-// see where you were standing.
+// attention to the code rather than to the remark you had asked to be taken to,
+// and by the time you had finished reading the line it was gone - so a jump into
+// a file with several comments left you with no way to tell which one you had
+// arrived at.
+//
+// A SET rather than "wherever the cursor is now", because clearing the mark as
+// you move on throws away the only record of where you have been: kept, stepping
+// through a review leaves a trail you can scroll back over. It is per-mount
+// deliberately - a trail through one sitting, not a second and worse copy of
+// read/unread, which is stored server-side and means something else.
 //
 // By CONTEXT, not a prop, for the same reason ReviewThreadContext is: the cards
-// render inside two memo'd hunk components, and a number threaded through them
-// would re-render every line of every file each time the cursor moved.
-export const CurrentCommentContext = createContext<number | null>(null)
+// render inside two memo'd hunk components, and a set threaded through them
+// would re-render every line of every file each time it grew.
+export const VisitedCommentsContext = createContext<ReadonlySet<number>>(new Set())
 
-// useIsCurrentComment reports whether this comment is the one the cursor is on.
+// useIsCurrentComment reports whether this comment is one you have been taken to.
 // Numbers are never reused, so identity is the whole test.
 export function useIsCurrentComment(number: number): boolean {
-  return useContext(CurrentCommentContext) === number
+  return useContext(VisitedCommentsContext).has(number)
 }
 
 type Jump = (number: number) => void

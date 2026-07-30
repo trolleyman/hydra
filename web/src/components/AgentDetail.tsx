@@ -815,6 +815,7 @@ export function AgentDetail({
   onUnselect,
   onRefresh,
   focusComment,
+  focusLine,
 }: {
   agent: AgentResponse
   projectId: string | null
@@ -827,6 +828,7 @@ export function AgentDetail({
   // `?comment=4` from the URL: a permalink to one review comment. Passed down to
   // the diff, which scrolls to it and flashes it once it has a diff to find it in.
   focusComment?: number
+  focusLine?: string
 }) {
   const [killing, setKilling] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -2103,6 +2105,7 @@ export function AgentDetail({
           >
             <InspectorPane
               focusComment={focusComment}
+              focusLine={focusLine}
               agent={agent}
               projectId={projectId}
               externalRefreshTrigger={diffRefreshTrigger}
@@ -2186,7 +2189,8 @@ export function AgentDetail({
             </div>
             <div className="w-1/2 flex flex-col min-w-0 min-h-0 overflow-hidden">
               <InspectorPane
-              focusComment={focusComment}
+                focusComment={focusComment}
+                focusLine={focusLine}
                 agent={agent}
                 projectId={projectId}
                 changesLeading={narrowBackButton}
