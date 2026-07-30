@@ -36,8 +36,10 @@ const BLOCK_TAGS = new Set([
 ])
 
 // Elements that put something on the clipboard without holding any text of
-// their own - narrowRange must not step over one on its way in.
-const VOID_CONTENT = new Set(['IMG', 'BR', 'HR', 'INPUT'])
+// their own - narrowRange must not step over one on its way in. VIDEO is here
+// for the markdown one, which serializes as an image link; the players elsewhere
+// in the app are chrome and never get this far (see skipped).
+const VOID_CONTENT = new Set(['IMG', 'BR', 'HR', 'INPUT', 'VIDEO'])
 
 // Never contribute text: decorative icons, and anything explicitly hidden.
 // data-copy-skip is the opt-out for chrome that would otherwise read as content.
@@ -153,6 +155,11 @@ function isUnselectable(el: Element): boolean {
 // skipped reports whether an element contributes nothing at all: chrome the
 // browser's own copy would leave behind, and anything not rendered.
 function skipped(el: Element): boolean {
+  // A rendered markdown video is the exception among the media tags: it stands
+  // for `![alt](clip.webm)` in the source, exactly as an <img> stands for an
+  // image, so it has to survive to be serialized back into that (VIDEO is in
+  // SKIP_TAGS for the players elsewhere in the app, which are chrome).
+  if (el.tagName.toUpperCase() === 'VIDEO' && el.hasAttribute('data-md-src')) return false
   return (
     SKIP_TAGS.has(el.tagName.toUpperCase()) ||
     el.getAttribute('aria-hidden') === 'true' ||
@@ -486,6 +493,13 @@ function convert(node: Node, ctx: Ctx): string {
       // copying should give back the source, not our internal URL.
       const src = el.getAttribute('data-md-src') || el.getAttribute('src') || ''
       return src ? `![${el.getAttribute('alt') ?? ''}](${src})` : ''
+    }
+    case 'VIDEO': {
+      // Same syntax as an image (that is what it was written as), and the same
+      // authored path. A <video> has no alt attribute, so the authored alt text
+      // rides on data-md-alt - see MarkdownRenderer.MarkdownVideo.
+      const src = el.getAttribute('data-md-src') || ''
+      return src ? `![${el.getAttribute('data-md-alt') ?? ''}](${src})` : ''
     }
     case 'INPUT':
       // Task-list checkboxes are handled by their <li>; nothing else in

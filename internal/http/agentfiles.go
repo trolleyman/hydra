@@ -10,7 +10,7 @@ import (
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
-// Agent-authored image files.
+// Agent-authored image and video files.
 //
 // An agent that takes a screenshot writes it to a path only IT can see - its
 // worktree, or /tmp, which for a sandboxed head is a private host-backed dir
@@ -23,13 +23,33 @@ import (
 // show the picture inline. No copying - the file is served where it already is,
 // which also means it disappears from the transcript when the head's scratch dir
 // is reclaimed (an image only lives as long as the file does).
+//
+// Video rides the same route. A screen recording is the natural way to show a
+// transition or a flow that a still cannot, and the markdown for it is the same
+// `![alt](path)` - the renderer picks a <video> over an <img> by extension (see
+// MarkdownRenderer.MarkdownMedia). http.ServeContent answers Range requests, so
+// the player can seek without the endpoint doing anything special.
 
-// agentImageExts is the extension allowlist. This endpoint exists to make chat
-// markdown images render, so it serves images and nothing else - a much narrower
-// surface than "any file the agent can name".
+// agentImageExts is the still-image half of the extension allowlist.
 var agentImageExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
 	".avif": true, ".bmp": true, ".ico": true, ".svg": true, ".tif": true, ".tiff": true,
+}
+
+// agentVideoExts is the video half - the formats a browser plays in a <video>,
+// matching web/src/lib/fileKind's VIDEO_RE so the frontend and this endpoint
+// agree on what a markdown image target is allowed to be.
+var agentVideoExts = map[string]bool{
+	".webm": true, ".mp4": true, ".m4v": true, ".mov": true, ".ogv": true,
+}
+
+// agentServableExt reports whether a path an agent embedded names a media file
+// this endpoint will serve. The endpoint exists to make chat markdown render, so
+// it serves what the renderer can show and nothing else - a much narrower surface
+// than "any file the agent can name".
+func agentServableExt(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return agentImageExts[ext] || agentVideoExts[ext]
 }
 
 // rootedPath is a candidate host path together with the root it must stay
@@ -84,10 +104,10 @@ func resolveAgentFile(projectRoot, worktree, tmpDir, raw string) string {
 	return ""
 }
 
-// HandleAgentFileBlob serves an image file an agent referenced by path in a chat
-// message. Registered outside the OpenAPI mux (like HandleAgentBlob) because it
-// returns raw bytes. Query: path (required) - absolute as the agent saw it, or
-// relative to its worktree.
+// HandleAgentFileBlob serves an image or video file an agent referenced by path
+// in a chat message. Registered outside the OpenAPI mux (like HandleAgentBlob)
+// because it returns raw bytes. Query: path (required) - absolute as the agent
+// saw it, or relative to its worktree.
 func (s *Server) HandleAgentFileBlob(w http.ResponseWriter, r *http.Request) {
 	projectRoot, err := s.resolveProjectRoot(r.PathValue("project_id"))
 	if err != nil {
@@ -99,7 +119,7 @@ func (s *Server) HandleAgentFileBlob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no file path given", http.StatusBadRequest)
 		return
 	}
-	if !agentImageExts[strings.ToLower(filepath.Ext(raw))] {
+	if !agentServableExt(raw) {
 		http.NotFound(w, r)
 		return
 	}

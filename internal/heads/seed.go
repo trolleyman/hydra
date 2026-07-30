@@ -341,29 +341,46 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 			res.Binds = append(res.Binds, sandbox.Bind{Source: agentsHost, Target: path.Join(home, ".codex", "AGENTS.md")})
 		}
 
-		hooksHost := filepath.Join(cacheDir, "codex-hooks.json")
-		hooks, err := sandbox.BuildCodexHooks(readHostFile(filepath.Join(home, ".codex", "hooks.json")), stableHydraBin)
+		hooksHost := filepath.Join(cacheDir, id+"-codex-hooks.json")
+		hooks, err := sandbox.BuildCodexHooks(readHostFile(filepath.Join(home, ".codex", "hooks.json")), stableHydraBin, policy.GateEnabled)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 		if err := os.WriteFile(hooksHost, hooks, 0o644); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
-		res.Binds = append(res.Binds, sandbox.Bind{Source: hooksHost, Target: path.Join(home, ".codex", "hooks.json")})
+		res.Binds = append(res.Binds, sandbox.Bind{Source: hooksHost, Target: path.Join(home, ".codex", "hooks.json"), ReadOnly: true})
 
-		// Seed the Hydra control MCP server into ~/.codex/config.toml (git_* tools +
-		// MCP discovery), merged over the host's config so model/auth are preserved.
+		// Keep only trusted MCP servers and seed the Hydra control server into
+		// ~/.codex/config.toml (git_* tools + MCP discovery), while preserving
+		// model/auth and every other Codex setting.
 		// A malformed host config would error - skip seeding then (codex keeps its
 		// real config, just without the hydra tools) rather than clobber it.
-		codexCfg, cfgErr := sandbox.BuildCodexConfig(readHostFile(filepath.Join(home, ".codex", "config.toml")), stableHydraBin)
+		hostCodexConfig := readHostFile(filepath.Join(home, ".codex", "config.toml"))
+		mcpKeep := mcpKeepSet(policy.MCPAllowed, policy.MCPToolsAllowed, policy.MCPBlocked)
+		codexCfg, cfgErr := sandbox.BuildCodexConfig(hostCodexConfig, stableHydraBin, mcpKeep)
 		if cfgErr != nil {
 			log.Printf("warn: not seeding hydra MCP into codex config for %s: %v", id, cfgErr)
 		} else {
-			codexCfgHost := filepath.Join(cacheDir, "codex-config.toml")
+			codexCfgHost := filepath.Join(cacheDir, id+"-codex-config.toml")
 			if err := os.WriteFile(codexCfgHost, codexCfg, 0o644); err != nil {
 				return nil, errtrace.Wrap(err)
 			}
-			res.Binds = append(res.Binds, sandbox.Bind{Source: codexCfgHost, Target: path.Join(home, ".codex", "config.toml")})
+			res.Binds = append(res.Binds, sandbox.Bind{Source: codexCfgHost, Target: path.Join(home, ".codex", "config.toml"), ReadOnly: true})
+		}
+
+		// Discovery reads the unfiltered host config, so a server omitted above is
+		// still available through request_mcp_server and can be approved for the
+		// next launch.
+		if err := seedMCPCatalogEntries(res, cacheDir, id, sandbox.ListCodexMCPServers(hostCodexConfig)); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+
+		if policy.GateEnabled {
+			policy.HostMediatedGit = gitIso.HostMediatedCommit()
+			if err := seedGatePolicy(res, cacheDir, id, projectRoot, worktreePath, home, policy); err != nil {
+				return nil, errtrace.Wrap(err)
+			}
 		}
 	}
 
@@ -409,7 +426,10 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 // for the agent to request. Best-effort: an empty catalog just means the agent
 // has nothing extra to request.
 func seedMCPCatalog(res *seedResult, cacheDir, id string, hostClaudeJSON, mcpJSON []byte) error {
-	catalog := sandbox.ListMCPServers(hostClaudeJSON, mcpJSON)
+	return errtrace.Wrap(seedMCPCatalogEntries(res, cacheDir, id, sandbox.ListMCPServers(hostClaudeJSON, mcpJSON)))
+}
+
+func seedMCPCatalogEntries(res *seedResult, cacheDir, id string, catalog []sandbox.MCPServer) error {
 	data, err := json.Marshal(catalog)
 	if err != nil {
 		return errtrace.Wrap(err)
