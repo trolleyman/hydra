@@ -3266,29 +3266,54 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
-	if err != nil {
+	switch err := s.sendAgentInput(ctx, projectRoot, request.Id, request.Body.Text, derefOr(request.Body.Origin, "")); {
+	case errors.Is(err, errAgentNotRunning):
+		return api.SendAgentInput404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: errAgentNotRunning.Error(),
+		}, nil
+	case err != nil:
 		return api.SendAgentInput500JSONResponse{
 			Code:    500,
 			Error:   api.ErrorResponseErrorInternalError,
 			Details: err.Error(),
 		}, nil
 	}
+	return api.SendAgentInput200Response{}, nil
+}
+
+// errAgentNotRunning is the one failure a caller acts on differently: the head is
+// gone or has no live session, so there is nobody to deliver to. Everything the
+// message says is still durable elsewhere (a review comment, a test report), so
+// this is "not delivered", not "lost".
+var errAgentNotRunning = errors.New("agent not found or not running")
+
+// sendAgentInput delivers one message to a head, identified by its project ROOT.
+//
+// Split out of the handler above because every INTERNAL caller - notify.go, and
+// so every automated notice routed through it - holds a project root, while the
+// handler's request object carries the project ID from the URL. Calling the
+// handler with a root in the ID field type-checks perfectly and then 404s inside
+// resolveProjectRoot ("project not found: /home/callum/code/hydra"), which is
+// exactly how review-comment, review-resolved and test-failure notices all went
+// quietly undelivered. The root is the honest signature for those callers; the
+// one ID -> root lookup stays at the HTTP edge where the ID actually comes from.
+func (s *Server) sendAgentInput(ctx context.Context, projectRoot, headID, text, origin string) error {
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, headID)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
 	if head == nil || head.SessionPID == 0 {
-		return api.SendAgentInput404JSONResponse{
-			Code:    404,
-			Error:   api.ErrorResponseErrorNotFound,
-			Details: "agent not found or not running",
-		}, nil
+		return errtrace.Wrap(errAgentNotRunning)
 	}
 
-	text := request.Body.Text
 	// A message the user actually typed puts a human back in the loop, which is
 	// what the test-failure streak cap waits for (see tests_notify.go). An
 	// automated message carries an origin and deliberately does NOT reset it -
 	// otherwise Hydra's own notifications would keep renewing their own licence
 	// to send more.
-	if request.Body.Origin == nil || *request.Body.Origin == "" {
+	if origin == "" {
 		ResetTestNotifyStreak(head.ID)
 	}
 
@@ -3305,9 +3330,9 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 		s.ChatQueues.Submit(projectRoot, head.ID, heads.QueuedMessage{
 			ID:      id,
 			Content: claudestream.TextUserContent(text),
-			Origin:  derefOr(request.Body.Origin, ""),
+			Origin:  origin,
 		}, false)
-		return api.SendAgentInput200Response{}, nil
+		return nil
 	}
 
 	if head.AgentType != sandbox.AgentTypeBash {
@@ -3321,11 +3346,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	}
 
 	if err := s.Sessions.Write(head.ID, []byte(text)); err != nil {
-		return api.SendAgentInput500JSONResponse{
-			Code:    500,
-			Error:   api.ErrorResponseErrorInternalError,
-			Details: "failed to write to agent stdin: " + err.Error(),
-		}, nil
+		return errtrace.Errorf("failed to write to agent stdin: %w", err)
 	}
 
 	// Submit with a separate Enter keystroke once the paste has settled. Sent in
@@ -3335,15 +3356,11 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	select {
 	case <-time.After(100 * time.Millisecond):
 	case <-ctx.Done():
-		return nil, errtrace.Wrap(ctx.Err())
+		return errtrace.Wrap(ctx.Err())
 	}
 	if err := s.Sessions.Write(head.ID, []byte("\r")); err != nil {
-		return api.SendAgentInput500JSONResponse{
-			Code:    500,
-			Error:   api.ErrorResponseErrorInternalError,
-			Details: "failed to submit agent input: " + err.Error(),
-		}, nil
+		return errtrace.Errorf("failed to submit agent input: %w", err)
 	}
 
-	return api.SendAgentInput200Response{}, nil
+	return nil
 }

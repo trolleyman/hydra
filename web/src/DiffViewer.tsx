@@ -61,6 +61,7 @@ import { InfoTooltip } from './components/InfoTooltip'
 import { isImagePath, agentBlobUrl } from './lib/imageDiff'
 import { useArtifactSpans } from './lib/artifactColumns'
 import { useDialogStore } from './stores/dialogStore'
+import { useToastStore, type ToastType } from './stores/toastStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
@@ -166,6 +167,14 @@ export interface LineDraftApi {
   save: (path: string, lineNum: number, isNew: boolean, text: string) => void
   clear: (path: string, lineNum: number, isNew: boolean) => void
 }
+
+// What a published comment that reached nobody says. Publishing always SAVES the
+// comment - it is durable, numbered and citable the moment the request returns -
+// so the only thing that can fail is telling the head about it, and the only
+// reason it fails is that there is no running agent to tell. Saying so is the
+// point: "sent to agent" over a stopped head is the message that made a whole
+// class of silently-undelivered notices look like they had landed.
+const UNDELIVERED_COMMENT = 'Saved, but the agent is not running - it will not see this until you start it'
 
 // A per-line index of queued review comments, keyed by `${side}:${lineNum}` (side
 // = 'new'|'old', matching how a comment's isNew resolves to a diff line). Each
@@ -3770,12 +3779,15 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     setRightSel({ type: 'uncommitted' })
   }, [])
 
-  // Confirmation toast text (a single "Comment sent" or a batch "Review sent"),
-  // or null when hidden. One state so both paths share the same toast UI.
-  const [sentToast, setSentToast] = useState<string | null>(null)
-  const showSentToast = useCallback((text: string) => {
-    setSentToast(text)
-    setTimeout(() => setSentToast(null), 3000)
+  // Confirmation for a review action (a single "Comment sent", a batch "Review
+  // sent", a copied link). It goes through the app's toast store like every other
+  // acknowledgement in the UI rather than the bespoke green box this used to
+  // render: that one drew itself bottom-right underneath the real notification
+  // column, so a comment sent while anything else was on screen produced two
+  // unrelated toast systems overlapping, and it could not be dismissed, paused by
+  // hovering, or carry the failure detail below.
+  const showSentToast = useCallback((message: string, type: ToastType = 'success') => {
+    useToastStore.getState().show({ message, type, compact: true })
   }, [])
 
   // Queued "Add to review" comments for THIS agent, mirrored from localStorage so
@@ -3825,7 +3837,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // Stored AND published in one call, so a comment sent straight to the agent
       // is as durable and as citable ("#4") as one that went through the queue.
       // The agent is notified by number server-side; nothing is pasted into it.
-      const { comments, toReviewer } = await sendReviewComment(projectId, agent.id, {
+      const { comments, notified, toReviewer } = await sendReviewComment(projectId, agent.id, {
         path, lineNum, isNew, text, fromLabel, toLabel,
         contextBlock: block,
         hunkHash: hunk ? hashHunks([hunk]) : '',
@@ -3833,11 +3845,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // The write response is the canonical full list. Apply it immediately so
       // the published comment appears under its diff line without a reload.
       setReviewComments(comments)
-      showSentToast(
-        toReviewer
-          ? 'Sent to your reviewer - open the Review tab to see the reply'
-          : 'Comment sent to agent',
-      )
+      if (toReviewer) showSentToast('Sent to your reviewer - open the Review tab to see the reply')
+      else if (notified) showSentToast('Comment sent to agent')
+      else showSentToast(UNDELIVERED_COMMENT, 'warning')
     } catch (e) {
       console.error('Failed to send comment:', e)
     }
@@ -4169,16 +4179,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     if (count === 0 || submittingReview) return
     setSubmittingReview(true)
     try {
-      const { comments, toReviewer } = await publishReviewComments(projectId, agent.id, numbers)
+      const { comments, notified, toReviewer } = await publishReviewComments(projectId, agent.id, numbers)
       setReviewComments(comments)
       // Say when it went to the REVIEWER, and where to find it: an @review comment
       // may have just started a reviewer in a tab you have not opened, which is
       // otherwise entirely invisible.
-      showSentToast(
-        toReviewer
-          ? 'Sent to your reviewer - open the Review tab to see the reply'
-          : count === 1 ? 'Review sent to agent' : `Review of ${count} comments sent to agent`,
-      )
+      //
+      // `notified` is the line the HEAD was actually told, so it is also the only
+      // honest test of whether anything reached it - the comments are published
+      // (and durable) either way, but a stopped head is told nothing.
+      if (toReviewer) showSentToast('Sent to your reviewer - open the Review tab to see the reply')
+      else if (notified) showSentToast(count === 1 ? 'Review sent to agent' : `Review of ${count} comments sent to agent`)
+      else showSentToast(UNDELIVERED_COMMENT, 'warning')
     } catch (e) {
       console.error('Failed to submit review:', e)
     } finally {
@@ -4648,12 +4660,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   )
 
   const dragOverlay = isResizing && <div className="fixed inset-0 z-[100] cursor-col-resize" />
-  const commentToast = sentToast && (
-    <div className="fixed bottom-4 right-4 z-[500] flex items-center gap-2 px-3 py-2 bg-green-600 text-white text-xs font-semibold rounded-lg shadow-lg pointer-events-none">
-      <Check className="w-3.5 h-3.5" />
-      {sentToast}
-    </div>
-  )
 
   // ── Stacked layout (single-column page AND the split layout's inspector pane) ─
   return (
@@ -4804,7 +4810,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       {filesHeaderEl}
       {diffContentEl}
       {dragOverlay}
-      {commentToast}
       {/* Mobile file-picker sheet (item 31). Portalled to document.body so its
           position:fixed is viewport-relative - the narrow screen-stack track has
           a transform, which would otherwise be its containing block. md:hidden so
