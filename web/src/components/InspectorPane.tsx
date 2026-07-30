@@ -23,6 +23,7 @@ export function InspectorPane({
   changesLeading,
   leadingInline,
   focusComment,
+  focusLine,
 }: {
   agent: AgentResponse
   projectId: string | null
@@ -39,6 +40,7 @@ export function InspectorPane({
   leadingInline?: boolean
   // A review comment number from `?comment=N`, forwarded to the diff.
   focusComment?: number
+  focusLine?: string
 }) {
   return (
     // pt-4 mirrors the classic scroll container so DiffViewer's `-top-4` sticky
@@ -63,6 +65,7 @@ export function InspectorPane({
         changesLeading={changesLeading}
         leadingInline={leadingInline}
         focusComment={focusComment}
+        focusLine={focusLine}
       />
     </div>
   )

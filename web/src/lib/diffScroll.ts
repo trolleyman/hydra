@@ -84,13 +84,16 @@ let cancelActive: (() => void) | null = null
 // not be mounted yet at call time (single-file view swaps the card; a collapsed
 // or hidden file mounts its body only once it nears the viewport). Until the row
 // exists we glide the card toward the top to force its lazy body to mount; once
-// the row appears we glide it to the vertical centre. onArrive fires once, when
-// the row first lands, for a transient highlight.
+// the row appears we glide it to the vertical centre.
+//
+// It used to take an onArrive callback, for a transient highlight on the row it
+// landed on. Nothing wants one now: the only caller was the jump to a review
+// comment, and a mark that fades is the wrong mark for "this is the comment you
+// asked for" - the card carries a persistent one instead (CurrentCommentContext).
 export function scrollToDiffLine(
   getCard: () => HTMLElement | null,
   side: 'old' | 'new',
   lineNum: number,
-  onArrive?: (row: HTMLElement) => void,
 ) {
   cancelActive?.()
   const sel = `[data-diff-ln="${side}:${lineNum}"]`
@@ -136,7 +139,7 @@ export function scrollToDiffLine(
     const rr = row.getBoundingClientRect()
     const delta = (rr.top + rr.height / 2) - (sc.top + scroller.clientHeight / 2)
     if (Math.abs(delta) <= 1) {
-      if (!arrivedAt) { arrivedAt = now; onArrive?.(row) }
+      if (!arrivedAt) arrivedAt = now
       if (now - arrivedAt >= SETTLE_MS) return stop()
     } else if (now - start >= DEADLINE_MS) {
       return stop()

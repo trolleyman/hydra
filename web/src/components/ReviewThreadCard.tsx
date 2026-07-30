@@ -11,6 +11,7 @@ import { renderCommentSource } from '../lib/mentionHighlight'
 import { copyWithToast } from '../lib/copyToast'
 import { Avatar } from './Avatar'
 import { commentAsMarkdown } from '../lib/reviewComments'
+import { useIsCurrentComment } from '../lib/reviewCommentLink'
 
 // The actions a thread card can perform, supplied by the diff viewer through
 // context (see reviewThreadContext) so the memo'd hunks between them never need
@@ -157,8 +158,21 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
 
   const btn = 'px-2 py-1 text-3xs font-medium rounded transition-colors cursor-pointer disabled:opacity-50'
 
+  // The review cursor lands on a thread by its FIRST numbered note - the number
+  // the navigator and a permalink both use for it - and the whole card carries
+  // the mark, because a thread is one stop however many notes are under it. Same
+  // amber as a Hydra comment's: which side of the review something came from is
+  // the card's colour, and where you are standing must read the same on both.
+  const anchorNumber = thread.notes.map((n) => n.number).find((n): n is number => n != null)
+  const current = useIsCurrentComment(anchorNumber ?? -1)
+
   return (
-    <div className="border-y border-violet-200 dark:border-violet-900/60 bg-violet-50/40 dark:bg-violet-950/20 px-4 py-2">
+    <div
+      data-comment-card={anchorNumber}
+      className={`border-y px-4 py-2 ${current
+        ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]'
+        : 'border-violet-200 dark:border-violet-900/60 bg-violet-50/40 dark:bg-violet-950/20'}`}
+    >
       <div className="min-w-0">
         <div className="min-w-0">
           {thread.notes.map((n, i) => (
