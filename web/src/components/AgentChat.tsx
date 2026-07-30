@@ -110,7 +110,8 @@ import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordD
 import { markWhitespace } from '../lib/whitespaceMarks'
 import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommentsText'
-import { commentPermalink, jumpToReviewComment } from '../lib/reviewCommentLink'
+import { CommentLink } from './CommentLink'
+import { CommentIdentityContext } from './commentIdentity'
 import { BranchPill } from './BranchPill'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
@@ -2223,32 +2224,6 @@ function WebSearchOutput({ text }: { text: string }) {
 // reference you quote back ("fix #3"), not part of the sentence, so it should
 // look the same wherever it appears.
 //
-// It is also the comment's permalink, so reading about a comment in the chat and
-// going to look at it are one click apart. A real <a href> - so copy-link-address
-// and middle-click behave - whose plain click is handled in-app: the diff is on
-// this very page, and navigating to `?comment=N` would push a history entry to
-// scroll it, then do nothing at all the second time you clicked the same link.
-// Without a mounted diff for this head (a sub-agent view), the href is followed
-// and the page honours the number on load.
-function CommentLink({ number, className, children }: { number: number; className: string; children: ReactNode }) {
-  const ctx = useContext(AgentFileContext)
-  if (!ctx) return <span className={className}>{children}</span>
-  return (
-    <Tooltip content={`Go to #${number} in the diff`} side="top">
-      <a
-        href={commentPermalink(ctx.projectId, ctx.agentId, number)}
-        onClick={(e) => {
-          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
-          if (jumpToReviewComment(ctx.agentId, number)) e.preventDefault()
-        }}
-        className={className}
-      >
-        {children}
-      </a>
-    </Tooltip>
-  )
-}
-
 // The handle as a card carries it: on the right, with the link mark that says it
 // goes somewhere.
 function CommentRef({ number }: { number: number }) {
@@ -10572,6 +10547,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     <ChatAgentTypeContext.Provider value={agentType ?? 'claude'}>
     <ChatApprovalContext.Provider value={approvalCtx}>
     <AgentFileContext.Provider value={approvalCtx}>
+    <CommentIdentityContext.Provider value={approvalCtx}>
     {/* A card the reader unfolds has to survive its run folding into a step
         group, which remounts it - the map is how, and living here is what makes
         it forgotten when the pane does (see ToolFoldContext). */}
@@ -11035,6 +11011,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       )}
     </div>
     </ToolFoldContext.Provider>
+    </CommentIdentityContext.Provider>
     </AgentFileContext.Provider>
     </ChatApprovalContext.Provider>
     </ChatAgentTypeContext.Provider>
