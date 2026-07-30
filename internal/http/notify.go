@@ -85,17 +85,12 @@ func (s *Server) notifyHead(ctx context.Context, projectRoot, headID string, whe
 	if (when == notifyIdle && working) || (when == notifyWorking && !working) {
 		return false
 	}
-	response, err := s.SendAgentInput(ctx, api.SendAgentInputRequestObject{
-		ProjectId: projectRoot,
-		Id:        headID,
-		Body:      &api.SendAgentInputJSONRequestBody{Text: autoPrefix + text, Origin: ptr(string(reason))},
-	})
-	if err != nil {
+	// By ROOT, not by project id: this is the one place every automated notice
+	// funnels through, and it holds a root. Going through the HTTP handler instead
+	// meant putting a path in the id field, which resolved to nothing and made
+	// every notice a logged 404 - see sendAgentInput.
+	if err := s.sendAgentInput(ctx, projectRoot, headID, autoPrefix+text, string(reason)); err != nil {
 		log.Printf("warn: notify %s (%s): %v", headID, reason, err)
-		return false
-	}
-	if _, ok := response.(api.SendAgentInput200Response); !ok {
-		log.Printf("warn: notify %s (%s): agent input rejected (%T)", headID, reason, response)
 		return false
 	}
 	return true
