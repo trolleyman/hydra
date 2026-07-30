@@ -505,13 +505,18 @@ body {
    background / pseudo-element, neither of which lands on the clipboard, so a
    copied diff is still code and not a field of dots. Nothing here takes part in
    layout either, so a marked line wraps exactly where it did before. */
+/* Lowlit hard: these are an aid you consult, not a second thing to read past,
+   so they sit close to the floor of legibility rather than competing with the
+   code. The two alphas are not the same number because they are not the same
+   contrast - a white mark on the dark surface reads brighter than a black one
+   on white does at the same alpha, so dark can carry more and still recede. */
 .ws-space,
 .ws-tab {
-  --ws-mark: rgba(0, 0, 0, 0.28);
+  --ws-mark: rgba(0, 0, 0, 0.15);
 }
 .dark .ws-space,
 .dark .ws-tab {
-  --ws-mark: rgba(255, 255, 255, 0.3);
+  --ws-mark: rgba(255, 255, 255, 0.22);
 }
 
 /* One dot per space, from a background tiled at 1ch - the advance width of the
