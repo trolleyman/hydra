@@ -2175,6 +2175,14 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
           }}
           onMouseEnter={cancelHide}
           onMouseLeave={scheduleHide}
+          // The box is portalled outside the commit selector's DOM subtree.
+          // Without this, the selector's document-level outside-click handler
+          // closes the menu on mouse-down, unmounting the card before a click or
+          // text selection inside it can begin.
+          onMouseDown={(e) => {
+            e.stopPropagation()
+            cancelHide()
+          }}
         >
           {content}
         </div>,
