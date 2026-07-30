@@ -195,6 +195,14 @@ type SessionResumed struct {
 	api.ChatSessionResumedPayload
 }
 
+// ShellCwd is where a Bash command left the shell, lifted off the provider's
+// transcript by the tail in manager.go. Hydra's own event rather than a
+// provider one: the CLI records the directory on every transcript entry but
+// prints none of it on the stdout the chat is built from.
+type ShellCwd struct {
+	api.ChatShellCwdPayload
+}
+
 type InteractionRequested struct {
 	ProviderContext
 	api.ChatInteractionPayload
@@ -262,6 +270,7 @@ func (UsageUpdated) EventType() string           { return "usage_updated" }
 func (MessagesRetracted) EventType() string      { return "messages_retracted" }
 func (Notice) EventType() string                 { return "notice" }
 func (SessionResumed) EventType() string         { return "session_resumed" }
+func (ShellCwd) EventType() string               { return "shell_cwd" }
 func (InteractionRequested) EventType() string   { return "interaction_requested" }
 func (InteractionResolved) EventType() string    { return "interaction_resolved" }
 func (CommitCreated) EventType() string          { return "commit_created" }

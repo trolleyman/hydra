@@ -116,6 +116,13 @@ func simSessionResumed(worktree string) simNorm {
 	return simNorm{typ: "session_resumed", payload: map[string]any{"worktree": worktree}}
 }
 
+// simShellCwd is the daemon's reading of where a Bash command left the shell
+// (chat.ShellCwd), lifted off the CLI's transcript because its stdout carries no
+// such thing. Its own event, arriving after the result it belongs to.
+func simShellCwd(toolUseID, cwd string) simNorm {
+	return simNorm{typ: "shell_cwd", payload: map[string]any{"tool_use_id": toolUseID, "cwd": cwd}}
+}
+
 func simSay(messageID, text string) simNorm {
 	return simNorm{typ: "assistant_message", payload: map[string]any{
 		"message_id": messageID, "text": text,
@@ -483,10 +490,12 @@ var simChatEvents = []simNorm{
 	// the no-op cd, splits the chain, keeps the subshell on one line, and leaves
 	// the heredoc body exactly as written (semicolons and all).
 	simTool("toolu_sim_heredoc", "Bash", simRaw(`{"command":"cd /repo/.hydra/local/worktrees/feat-uploader-retry && (fuser -k 26788/tcp >/dev/null 2>&1; true) && cd web && cat > scripts/probe.ts <<'EOF'\nimport { chromium } from 'playwright'\nconst page = await (await chromium.launch()).newPage()\nawait page.goto('http://localhost:26788/')\nconsole.log(await page.title());\nEOF\nnode scripts/probe.ts && echo done","description":"Probe the rendered page with a throwaway script"}`)),
-	// `cwd` on the RESULT's entry is where the CLI says the shell was left - the
-	// chat prefers it over working the directory out from the commands.
-	simToolOut("toolu_sim_heredoc", "Hydra\ndone").
-		set("entry", map[string]any{"type": "user", "cwd": "/repo/.hydra/local/worktrees/feat-uploader-retry/web"}),
+	simToolOut("toolu_sim_heredoc", "Hydra\ndone"),
+	// Where that command left the shell, READ off the CLI's transcript by the
+	// daemon (internal/chat/shellcwd.go) rather than worked out from the script.
+	// The chat prefers it over its own walk of the `cd`s, which is a fallback
+	// for logs recorded before this existed.
+	simShellCwd("toolu_sim_heredoc", "/repo/.hydra/local/worktrees/feat-uploader-retry/web"),
 	// The command after it: the shell is STILL in web/ (one shell per session),
 	// which is why this runs a bare `bun test` - so the card shows the tracked
 	// `cd web` above it. Without that line the command reads as if it ran at the

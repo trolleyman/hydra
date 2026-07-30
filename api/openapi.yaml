@@ -6454,6 +6454,23 @@ components:
           x-go-type-skip-optional-pointer: true
           description: Where the new process - and so its new shell - starts.
 
+    ChatShellCwdPayload:
+      type: object
+      description: >-
+        Where a Bash command left the agent's shell, read from the provider's
+        own transcript rather than inferred from the script. The Bash tool runs
+        ONE shell per session, so this is the anchor the client's fallback walk
+        (web/src/lib/shellCwd.ts) cannot get right on its own: it only ever sees
+        the page of history that is loaded.
+      properties:
+        tool_use_id:
+          type: string
+          x-go-type-skip-optional-pointer: true
+        cwd:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: The directory the shell was in AFTER that command.
+
     ChatInteractionPayload:
       type: object
       description: >-
@@ -7034,6 +7051,7 @@ components:
         - $ref: '#/components/schemas/MessagesRetractedEvent'
         - $ref: '#/components/schemas/NoticeEvent'
         - $ref: '#/components/schemas/SessionResumedEvent'
+        - $ref: '#/components/schemas/ShellCwdEvent'
         - $ref: '#/components/schemas/InteractionRequestedEvent'
         - $ref: '#/components/schemas/InteractionResolvedEvent'
         - $ref: '#/components/schemas/CommitCreatedEvent'
@@ -7073,6 +7091,7 @@ components:
           messages_retracted: '#/components/schemas/MessagesRetractedEvent'
           notice: '#/components/schemas/NoticeEvent'
           session_resumed: '#/components/schemas/SessionResumedEvent'
+          shell_cwd: '#/components/schemas/ShellCwdEvent'
           interaction_requested: '#/components/schemas/InteractionRequestedEvent'
           interaction_resolved: '#/components/schemas/InteractionResolvedEvent'
           commit_created: '#/components/schemas/CommitCreatedEvent'
@@ -7465,6 +7484,18 @@ components:
               enum: [session_resumed]
             payload:
               $ref: '#/components/schemas/ChatSessionResumedPayload'
+
+    ShellCwdEvent:
+      allOf:
+        - $ref: '#/components/schemas/ChatEventEnvelope'
+        - type: object
+          required: [type, payload]
+          properties:
+            type:
+              type: string
+              enum: [shell_cwd]
+            payload:
+              $ref: '#/components/schemas/ChatShellCwdPayload'
 
     InteractionRequestedEvent:
       allOf:

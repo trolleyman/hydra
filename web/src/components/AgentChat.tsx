@@ -97,7 +97,7 @@ import { ChatApprovalContext, usePendingToolApproval } from '../lib/toolApproval
 import { approvalMatchesTool } from '../lib/approvalMatch'
 import { useApprovalStore } from '../stores/approvalStore'
 import { selectionToMarkdown } from '../lib/copyMarkdown'
-import { claimOrphanResult, newToolResultLink, stashOrphanResult } from '../lib/toolResultLink'
+import { claimOrphanResult, newToolResultLink, stashOrphanCwd, stashOrphanResult } from '../lib/toolResultLink'
 import type { ToolResultLink } from '../lib/toolResultLink'
 import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
@@ -469,8 +469,11 @@ interface ProviderEvent {
   // ran - and it is read from the TOOL RESULT entry, where it is the directory
   // AFTER the command. (On the assistant entry carrying the tool_use it is
   // stamped at flush time and can land either side of the call, so it is
-  // ignored.) Absent from live stdout lines on some CLI versions, in which case
-  // the chat infers the directory instead - see lib/shellCwd.
+  // ignored.) Claude's stdout carries none of it, so for Claude this arrives via
+  // the daemon's own shell_cwd event instead (internal/chat/shellcwd.go); a
+  // provider that reports its own cwd (Codex) puts it here directly. Absent for
+  // logs recorded before either, in which case the chat infers the directory -
+  // see lib/shellCwd.
   cwd?: string
   // Set on the events toProviderEvents rebuilds from the backend
   // timeline: THIS object is Hydra's reconstruction, not a line a provider sent,
@@ -527,6 +530,9 @@ interface ProviderEvent {
   agentId?: string
   parent_tool_use_id?: string | null
   subagentNotice?: { key: string; label: string; description: string }
+  // The call a hydra_shell_cwd event reports on: it patches that card's
+  // cwdAfter rather than building anything of its own.
+  toolUseId?: string
   // Set by the CLI on machine-injected context that rides in a `user` envelope
   // but was never typed by the user - the resume nudge, and a Skill's auto-loaded
   // SKILL.md body. The reducer routes these out of the normal chat flow (a
@@ -852,6 +858,12 @@ export function toProviderEvents(ev: ChatEventUnion, showEmptyReasoning = false)
     // other event and lands between the right two messages.
     case 'session_resumed':
       return [{ ...providerBase(ev, {}), type: 'hydra_session_resumed' }]
+    // Where the daemon READ that a Bash command left the shell, off the
+    // provider's transcript (internal/chat/shellcwd.go). It arrives as its own
+    // event a moment after the result, so it patches the card rather than
+    // building one.
+    case 'shell_cwd':
+      return [{ ...providerBase(ev, {}), type: 'hydra_shell_cwd', toolUseId: ev.payload.tool_use_id, cwd: ev.payload.cwd }]
     case 'interaction_requested': {
       const p = ev.payload
       const base = providerBase(ev, {})
@@ -5436,6 +5448,20 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
     // the only way it can ever show its result.
     stashOrphanResult(link, toolUseId, { result: text, isError, images, raw, editPatch })
   }
+  // The daemon's reading of where a command left the shell, which arrives as its
+  // own event after the result - so it can equally well land in a page reduced
+  // before the one that builds its card.
+  const patchToolCwd = (toolUseId: string, cwd: string) => {
+    if (!toolUseId || !cwd) return
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i]
+      if (it.kind === 'tool' && it.toolUseId === toolUseId) {
+        it.cwdAfter = cwd
+        return
+      }
+    }
+    stashOrphanCwd(link, toolUseId, cwd)
+  }
   // Distinct task-notifications already rendered in this batch: the CLI records
   // each one several times (queue-operation, attachment, sometimes a consumed
   // user turn) and only ONE chip should show (mirrors the live reducer's
@@ -5540,6 +5566,10 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
     if (ev.type === 'hydra_session_resumed') {
       flushHistFooter()
       push({ kind: 'resumed', noEntrance: true })
+      continue
+    }
+    if (ev.type === 'hydra_shell_cwd') {
+      patchToolCwd(ev.toolUseId ?? '', ev.cwd ?? '')
       continue
     }
     if (ev.type === 'hydra_subagent_completed' && ev.subagentNotice) {
@@ -7111,6 +7141,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       )
     }
 
+    // Where the daemon read that a command left the shell (shell_cwd). Its own
+    // event, appended after the result it belongs to, so the card it patches is
+    // usually settled already - and, on the newest history window, may belong to
+    // a page not scrolled back to yet.
+    const patchToolCwd = (toolUseId: string, cwd: string) => {
+      if (!toolUseId || !cwd) return
+      const inPending = pending.find((it) => it.kind === 'tool' && it.toolUseId === toolUseId)
+      if (inPending && inPending.kind === 'tool') {
+        inPending.cwdAfter = cwd
+        return
+      }
+      if (!toolResults.known.has(toolUseId)) {
+        stashOrphanCwd(toolResults, toolUseId, cwd)
+        return
+      }
+      setItems((prev) => prev.map((it) => (it.kind === 'tool' && it.toolUseId === toolUseId ? { ...it, cwdAfter: cwd } : it)))
+    }
+
     // Some Codex items only reveal useful fields on item/completed. Refresh
     // the existing card before applying its result so it does not retain the
     // raw started-frame id or empty input.
@@ -7499,6 +7547,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // (--dangerously-skip-permissions auto-allows everything else): the
           // daemon auto-approves that one server-side, so the client ignores it
           // and just renders the proposed plan as a card (see PlanCard).
+          return
+        }
+        case 'hydra_shell_cwd': {
+          patchToolCwd(ev.toolUseId ?? '', ev.cwd ?? '')
           return
         }
         case 'hydra_session_resumed': {

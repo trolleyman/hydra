@@ -7,11 +7,19 @@
 // so the chat has to reconstruct it: start at the worktree, apply the `cd`s each
 // command performs, and hand every card the directory its command started in.
 //
-// Where the CLI records the directory itself, that wins: Claude writes a `cwd`
-// on every transcript entry, and the one on a tool RESULT is exactly where the
-// shell was left (the daemon relays it - internal/chat/claude.go). The walk
-// below is the fallback for what that does not cover: live stdout lines on CLI
-// versions that omit the field, and the first command of a conversation.
+// Where the directory is RECORDED, that wins, and this walk is only the
+// fallback. Claude writes a `cwd` on every transcript entry - the one on a tool
+// RESULT is exactly where the shell was left - and the daemon reads it back off
+// that file as a shell_cwd event (internal/chat/shellcwd.go), because the stdout
+// the chat is built from carries none of it. What is left for the walk: logs
+// recorded before that existed, the first command of a conversation, and any
+// provider with no transcript to read.
+//
+// The walk cannot replace it, either, and not only because parsing shell is
+// guesswork: history is PAGED, so the walk restarts at the worktree part-way
+// through a session and would caption a command that really ran in web/ as
+// running at the root. A recorded directory travels with its own event and does
+// not care which page it lands in.
 //
 // It is deliberately a KNOWN-or-nothing tracker. Anything it cannot resolve - a
 // `cd $DIR`, a `cd -`, a bare `cd` (which goes to $HOME, a path the browser does
@@ -138,10 +146,11 @@ export interface ShellStep {
   // one at all (Codex does). Authoritative: it beats anything tracked.
   cwd?: string
   // The directory recorded on this command's RESULT, i.e. where the shell was
-  // left afterwards (Claude writes it on every transcript entry - see
-  // internal/chat/claude.go). Ground truth, so it replaces whatever the walk
-  // below worked out, and the next command inherits it. Absent on live stdout
-  // from some CLI versions, which is what the walk is for.
+  // left afterwards - read off the provider's transcript by the daemon and
+  // delivered as a shell_cwd event (internal/chat/shellcwd.go). Ground truth, so
+  // it replaces whatever the walk below worked out, and the next command
+  // inherits it. Absent for logs recorded before that existed, which is what the
+  // walk is for.
   cwdAfter?: string
   // The command's output, read only to spot a `cd` that failed.
   output?: string
