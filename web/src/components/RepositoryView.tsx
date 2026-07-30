@@ -3,6 +3,7 @@ import { useNavigate, useLocation, useSearch, Link, linkOptions, type LinkProps 
 import { Markdown } from '../lib/MarkdownRenderer'
 import { formatBytes } from '../lib/formatBytes'
 import { getLanguage } from '../lib/language'
+import { fetchBranches, peekBranches } from '../lib/branchCache'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
 import { ApiError } from '../api'
@@ -10,7 +11,7 @@ import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
   ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
-  GitBranch, GitCompareArrows, ArrowRightLeft, Menu,
+  GitCompareArrows, ArrowRightLeft, Menu,
   LoaderCircle, Settings2, FileQuestion, FileSymlink, CornerDownRight,
   Images, Camera, ExternalLink,
 } from 'lucide-react'
@@ -728,8 +729,17 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // them from whichever repository route matched (bare or splat).
   const search = useSearch({ strict: false }) as RepositorySearch
 
-  const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
+  // Seeded from the shared cache (lib/branchCache) so the branch pickers render
+  // populated on the first frame; null only on a cold first visit to a project.
+  const [branches, setBranches] = useState<RepositoryBranch[] | null>(
+    () => peekBranches(projectId)?.branches ?? null,
+  )
   const [currentBranch, setCurrentBranch] = useState('')
+  // The cached name of HEAD, used to LABEL the branch trigger before the request
+  // lands. Deliberately not folded into `currentBranch`: that one decides which
+  // ref the tree/blob is fetched at, and a stale cached name there would fetch
+  // the wrong ref. Worst case here is a stale label for one round trip.
+  const cachedCurrentBranch = useMemo(() => peekBranches(projectId)?.current ?? '', [projectId])
 
   const [files, setFiles] = useState<string[]>([])
   const [defaultPath, setDefaultPath] = useState<string | null>(null)
@@ -872,9 +882,16 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const queryRef = parsed.ref && parsed.ref !== currentBranch ? parsed.ref : undefined
   // The ref string for blob URLs / display, resolved to something concrete.
   const refStr = parsed.ref || currentBranch || 'HEAD'
-  // activeRef is what the branch selector shows as selected.
+  // activeRef is which ref the view is on (what a diff compares against).
   const activeRef = parsed.ref ?? (currentBranch || 'HEAD')
-  const isKnownBranch = !!branches?.some((b) => b.name === activeRef)
+  // What the branch selector shows as selected. On the bare /repository URL the
+  // branch's NAME only arrives with the request, so until then use the cached
+  // name, and failing that an empty ref (which renders a placeholder bar) rather
+  // than flashing the literal "HEAD" and swapping it for the real name a moment
+  // later. "HEAD" is still the label once the request has answered without
+  // naming a branch.
+  const activeLabelRef = parsed.ref ?? (currentBranch || cachedCurrentBranch || (branches === null ? '' : 'HEAD'))
+  const isKnownBranch = !!branches?.some((b) => b.name === activeLabelRef)
 
   // Diff is "live" only once a distinct compare branch is chosen. compareKnown
   // drives the compare selector's known-branch vs short-SHA rendering.
@@ -923,11 +940,14 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const [prevBranchProject, setPrevBranchProject] = useState(projectId)
   if (prevBranchProject !== projectId) {
     setPrevBranchProject(projectId)
-    setBranches(null)
+    // The new project's cached list if there is one, so the pickers stay
+    // populated across a project switch instead of blanking.
+    setBranches(peekBranches(projectId)?.branches ?? null)
+    setCurrentBranch('')
   }
   useEffect(() => {
     let cancelled = false
-    api.default.getRepositoryBranches(projectId)
+    fetchBranches(projectId)
       .then((r) => { if (!cancelled) { setBranches(r.branches); setCurrentBranch(r.current) } })
       .catch(() => { if (!cancelled) { setBranches([]); setCurrentBranch('') } })
     return () => { cancelled = true }
@@ -1306,22 +1326,18 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       <div
         className={`shrink-0 h-12 px-3 sm:px-4 items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 ${mobileContentOpen ? 'hidden md:flex' : 'flex'}`}
       >
-        {branches !== null ? (
-          // The base picker always sizes to its own content (it stays
-          // shrink-0 + truncates at its own max width). Keeping it un-shrinkable
-          // means a short base like "main" can't collapse to a bare icon when the
-          // long head selector is fighting for room beside it on a narrow header.
-          <BranchSelector
-            branches={branches}
-            activeRef={activeRef}
-            isKnownBranch={isKnownBranch}
-            onSelect={selectBranch}
-          />
-        ) : (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-gray-400">
-            <GitBranch className="w-3.5 h-3.5" /> ...
-          </div>
-        )}
+        {/* The base picker always sizes to its own content (it stays
+            shrink-0 + truncates at its own max width). Keeping it un-shrinkable
+            means a short base like "main" can't collapse to a bare icon when the
+            long head selector is fighting for room beside it on a narrow header.
+            It renders as a dropdown from the first frame - `branches: null` is
+            its own loading state inside the same chrome. */}
+        <BranchSelector
+          branches={branches}
+          activeRef={activeLabelRef}
+          isKnownBranch={isKnownBranch}
+          onSelect={selectBranch}
+        />
         {diffActive && branches !== null ? (
           // Diffing: "base → head", each capped + clipped so they stay compact.
           // Gated on branches being loaded: a deep-linked ?compare= makes diff
@@ -1342,7 +1358,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
           </>
         ) : (
           <>
-            {branches !== null && branches.length > 0 && (
+            {/* Shown while the list is still loading too (`branches === null`),
+                so the header doesn't gain a button a beat after it paints; only
+                a repo that genuinely has no branches drops it. */}
+            {(branches === null || branches.length > 0) && (
               <BranchSelector
                 branches={branches}
                 activeRef=""

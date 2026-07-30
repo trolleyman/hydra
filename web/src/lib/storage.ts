@@ -201,6 +201,15 @@ export const AGENTS_CACHE_PREFIX = 'hydra-agents-'
 export const agentsCacheKey = (projectId: string): string =>
   `${AGENTS_CACHE_PREFIX}${projectId}`
 
+// Last-seen branch list, one entry per project, so every branch selector (the
+// agent header's base picker, the repository view's branch/compare pickers, the
+// spawn options popover) paints as a real dropdown on the first frame instead of
+// popping in when `git branch` lands. Replaced by the first real response. See
+// lib/branchCache.ts.
+export const BRANCHES_CACHE_PREFIX = 'hydra-branches-'
+export const branchesCacheKey = (projectId: string): string =>
+  `${BRANCHES_CACHE_PREFIX}${projectId}`
+
 // Per-artifact view prefs, keyed by project + agent + artifact name (see
 // artifactPrefs.ts). projectId may be null → '_' keeps the key shape stable.
 export const ARTIFACT_PREFS_PREFIX = 'hydra-artifact-'

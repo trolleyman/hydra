@@ -26,8 +26,17 @@ import { PRPicker } from './PRPicker'
 import { Badge } from './Badge'
 import type { ReviewRef } from '../api/models/ReviewRef'
 import { type AgentTypeOption, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
+import { fetchBranches, peekBranches } from '../lib/branchCache'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+
+// The base branch to start on before the branch list has loaded, from the shared
+// cache. Same rule the real load uses (HEAD, else the first branch), so the
+// seeded pick matches what the response would have chosen and nothing jumps.
+function cachedDefaultBranch(projectId: string | null): string {
+  const cached = peekBranches(projectId)
+  return cached ? cached.current || cached.branches[0]?.name || '' : ''
+}
 
 // Selectable agent types with their display label. The AgentTypeOption ids line
 // up with AgentTypeIcon's names, so the icon and its brand accent colour
@@ -233,12 +242,18 @@ export const SpawnForm = memo(function SpawnForm({
   // Base branch the new agent will be created from. Defaults to the project's
   // current branch; can be pointed at another agent's hydra/<id> branch to stack
   // agents on top of one another. `branches` is null until the list loads.
-  const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
-  const [baseBranch, setBaseBranch] = useState('')
+  // Seeded from the shared cache (lib/branchCache), so opening the spawn options
+  // straight after a reload shows a populated Base branch picker instead of a
+  // section that appears once `git branch` lands. The load below still runs and
+  // replaces both.
+  const [branches, setBranches] = useState<RepositoryBranch[] | null>(
+    () => peekBranches(projectId)?.branches ?? null,
+  )
+  const [baseBranch, setBaseBranch] = useState(() => cachedDefaultBranch(projectId))
   // The branch `baseBranch` was seeded with (the project's current branch). Kept
   // so the options cog can tell "still on the default" from "stacked on another
   // branch", and so Reset can put it back.
-  const [defaultBranch, setDefaultBranch] = useState('')
+  const [defaultBranch, setDefaultBranch] = useState(() => cachedDefaultBranch(projectId))
   // When set, the spawn adopts an existing PR/MR instead of branching from a base
   // branch: the worktree is based on the PR head and the head is pre-linked to the
   // MR (docs/pr-adoption.md). The base-branch picker is hidden while adopting.
@@ -342,7 +357,7 @@ export const SpawnForm = memo(function SpawnForm({
       return
     }
     try {
-      const res = await api.default.getRepositoryBranches(projectId)
+      const res = await fetchBranches(projectId)
       if (branchReqProjectRef.current !== projectId) return
       setBranches(res.branches)
       // The default follows the project's current branch on every refresh (it
