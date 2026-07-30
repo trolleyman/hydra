@@ -673,8 +673,19 @@ than a monogram.
 
 A rounded square rather than a circle, to match the chips and tiles the rest of
 the UI is built from - a lone circle in a square-cornered gutter reads as a
-different system. A DRAFT keeps the plain speech-bubble glyph instead: it has not
-been said yet, so attributing it to anyone is premature.
+different system.
+
+**The avatar owns the left column**, replacing the speech-bubble glyph that used
+to sit there, and a forge thread gets one PER NOTE rather than one per card: a
+thread has several authors, so a single icon for the whole card could only ever
+be generic. Everything else in a note hangs off that column, and the thread's
+actions and reply box indent to match (`pl-7` - the avatar plus its gap). A draft
+carries one too: a draft is still yours, and a bubble in the same slot said less.
+
+**The number sits on the right**, at the far edge of the header row, where it
+reads as a reference rather than as part of the sentence - the same place the
+forge threads put theirs. The unread dot rides on it, so what is new and what to
+call it are one glance.
 
 ### Permalinks
 

@@ -209,28 +209,27 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
         : 'border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20'
     }`}>
       <div className="flex items-start gap-2">
-        {/* A DRAFT keeps the plain speech-bubble: it has not been said yet, so
-            attributing it to anyone is premature. Once published it carries whose
-            it is - which for an agent is its brand mark, and for you a monogram
-            of git's user.name. */}
-        {sent ? (
-          <Avatar
-            name={mine ? (you || 'You') : comment.author}
-            agentType={mine ? undefined : 'claude'}
-            className="mt-0.5"
-          />
-        ) : (
-          <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0 text-blue-500" />
-        )}
+        {/* The avatar owns the left column, draft or not: a draft is still YOURS,
+            and a generic speech bubble in the same slot said less. For an agent it
+            is the brand mark; for you a monogram of git's user.name. */}
+        <Avatar
+          name={mine ? (you || 'You') : comment.author}
+          agentType={mine ? undefined : 'claude'}
+          className="mt-0.5"
+        />
         <div className="min-w-0 flex-1">
           {sent && (
             <div className="mb-0.5 flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
-              {/* The unread dot sits on the NUMBER, which is the thing you would
-                  quote - so what is new and what to call it are one glance. */}
-              {!comment.read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" title="Unread" />}
-              <span className="font-mono">#{comment.number}</span>
               {!mine && <span>{comment.author}</span>}
               {comment.resolved && <span className="text-emerald-600 dark:text-emerald-500">resolved</span>}
+              {/* The number sits on the RIGHT, where it reads as a reference rather
+                  than as part of the sentence - the same place the forge threads
+                  put theirs. The unread dot rides on it, so what is new and what to
+                  call it are one glance. */}
+              <span className="ml-auto flex items-center gap-1 shrink-0">
+                {!comment.read && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
+                <span className="font-mono">#{comment.number}</span>
+              </span>
             </div>
           )}
           <Markdown text={comment.text} className="text-xs text-gray-700 dark:text-gray-200 break-words" />

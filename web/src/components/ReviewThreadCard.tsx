@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, EllipsisVertical, EyeOff, LoaderCircle, MessageSquare, Sparkles } from 'lucide-react'
+import { Check, Copy, EllipsisVertical, EyeOff, LoaderCircle, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { Tooltip } from './Tooltip'
@@ -148,32 +148,22 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
 
   return (
     <div className="border-y border-violet-200 dark:border-violet-900/60 bg-violet-50/40 dark:bg-violet-950/20 px-4 py-2">
-      <div className="flex items-start gap-2">
-        <MessageSquare className="w-3.5 h-3.5 mt-1 shrink-0 text-violet-500" />
-        <div className="min-w-0 flex-1">
+      <div className="min-w-0">
+        <div className="min-w-0">
           {thread.notes.map((n, i) => (
-            <div key={n.id} className={i > 0 ? 'mt-2 pt-2 border-t border-violet-200/60 dark:border-violet-900/40' : ''}>
+            // The avatar OWNS the left column, one per note - a thread has several
+            // authors, so a single icon for the whole card could only ever be a
+            // generic speech bubble saying nothing. Everything else in the note
+            // hangs off it, and the footer below indents to match.
+            <div key={n.id} className={`flex items-start gap-2 ${i > 0 ? 'mt-2 pt-2 border-t border-violet-200/60 dark:border-violet-900/40' : ''}`}>
+              <Avatar
+                name={n.author || 'someone'}
+                avatarUrl={n.avatar_url}
+                agentType={n.author === 'agent' ? 'claude' : undefined}
+                className="mt-0.5"
+              />
+              <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                {/* Who said it, before what they said. A forge user gets the
-                    picture the forge already hosts; an agent gets its brand mark;
-                    anyone else a monogram. See components/Avatar.tsx - Hydra hosts
-                    no images and proxies none. */}
-                <Avatar
-                  name={n.author || 'someone'}
-                  avatarUrl={n.avatar_url}
-                  agentType={n.author === 'agent' ? 'claude' : undefined}
-                />
-                {/* The number is the handle you would quote ("fix #3"), and it is
-                    the SAME sequence Hydra's own comments use - a gutter with two
-                    numbering schemes in it would be worse than none. The unread
-                    dot rides on it, so what is new and what to call it are one
-                    glance. */}
-                {n.number != null && (
-                  <span className="flex items-center gap-1 shrink-0">
-                    {n.read === false && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
-                    <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500">#{n.number}</span>
-                  </span>
-                )}
                 <span className="text-[11px] font-medium text-gray-700 dark:text-gray-200 truncate">
                   {n.author || 'someone'}
                 </span>
@@ -182,7 +172,17 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                 )}
                 {/* Fixed-height row so the badge and the menu trigger share a
                     centre line whichever of them renders. */}
-                <span className="ml-auto shrink-0 flex items-center gap-1 h-5">
+                <span className="ml-auto shrink-0 flex items-center gap-1.5 h-5">
+                  {/* The handle you would quote ("fix #3"), from the SAME sequence
+                      Hydra's own comments use. On the right, where it reads as a
+                      reference rather than as part of the sentence, with the unread
+                      dot on it so what is new and what to call it are one glance. */}
+                  {n.number != null && (
+                    <span className="flex items-center gap-1">
+                      {n.read === false && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
+                      <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500">#{n.number}</span>
+                    </span>
+                  )}
                   <OriginBadge note={n} provider={actions.provider} />
                   {i === 0 && (
                     <div className="relative flex items-center">
@@ -235,10 +235,13 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                 </span>
               </div>
               <Markdown text={n.body} className="mt-0.5 text-xs text-gray-700 dark:text-gray-200 break-words" />
+              </div>
             </div>
           ))}
 
-          <div className="mt-2 flex items-center gap-2">
+          {/* pl-7 = the avatar column (w-5) plus its gap-2, so the thread's actions
+              and its reply box line up with the note bodies above them. */}
+          <div className="mt-2 pl-7 flex items-center gap-2">
             {thread.resolved && (
               <Tooltip
                 content={
@@ -286,7 +289,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
           </div>
 
           {replying && (
-            <div className="mt-2">
+            <div className="mt-2 pl-7">
               {/* The same live inline-markdown highlighting as the chat and spawn
                   composers - review replies are markdown on both forges, so what
                   you type should read like what will be posted. */}
