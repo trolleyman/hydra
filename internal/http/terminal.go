@@ -131,7 +131,7 @@ func sendDiffRefresh(conn *safeConn, headMoved bool) {
 // HandleShellClose terminates a single web bash shell immediately, so closing a
 // terminal tab kills its process now instead of waiting out the idle grace
 // period (which only covers reloads / transient disconnects).
-// URL pattern: POST /shells/projects/{project_id}/agents/{id}/close?shell_id=...&sandboxed=...
+// URL pattern: POST /api/projects/{project_id}/agents/{id}/shell/close?shell_id=...&sandboxed=...
 func (s *Server) HandleShellClose(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	if agentID == "" {
@@ -152,7 +152,7 @@ func (s *Server) HandleShellClose(w http.ResponseWriter, r *http.Request) {
 // attached to a head, opened from the same `+` menu as the bash tabs, and this is
 // the same verb. What it ends is the process and the checkout; the conversation
 // survives, so re-opening the tab resumes it (see heads.KillReviewSession).
-// URL pattern: POST /shells/projects/{project_id}/agents/{id}/review/close
+// URL pattern: POST /api/projects/{project_id}/agents/{id}/review/close
 func (s *Server) HandleReviewClose(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
 	if agentID == "" {

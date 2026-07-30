@@ -66,7 +66,7 @@ func TestHandleUpload(t *testing.T) {
 
 	content := []byte("\x89PNG fake image bytes")
 	body, ctype := multipartFile(t, "file", "My Screenshot (1).png", content)
-	req := httptest.NewRequest(http.MethodPost, "/uploads/projects/"+projID, body)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+projID+"/uploads", body)
 	req.Header.Set("Content-Type", ctype)
 	req.SetPathValue("project_id", projID)
 	rr := httptest.NewRecorder()
@@ -106,7 +106,7 @@ func TestHandleUploadUnknownProject(t *testing.T) {
 	s, _, _ := newUploadServer(t)
 
 	body, ctype := multipartFile(t, "file", "x.txt", []byte("hi"))
-	req := httptest.NewRequest(http.MethodPost, "/uploads/projects/nope", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/nope/uploads", body)
 	req.Header.Set("Content-Type", ctype)
 	req.SetPathValue("project_id", "nope")
 	rr := httptest.NewRecorder()
@@ -120,7 +120,7 @@ func TestHandleUploadUnknownProject(t *testing.T) {
 
 func TestHandleUploadRejectsGet(t *testing.T) {
 	s, projID, _ := newUploadServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/uploads/projects/"+projID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projID+"/uploads", nil)
 	req.SetPathValue("project_id", projID)
 	rr := httptest.NewRecorder()
 
@@ -146,7 +146,7 @@ func TestHandleUploadBlob(t *testing.T) {
 	}
 
 	serve := func(query string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/uploads/projects/"+projID+"/blob?name="+query, nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projID+"/uploads/blob?name="+query, nil)
 		req.SetPathValue("project_id", projID)
 		rr := httptest.NewRecorder()
 		s.HandleUploadBlob(rr, req)
@@ -180,7 +180,7 @@ func TestHandleUploadBlob(t *testing.T) {
 
 func TestHandleUploadBlobUnknownProject(t *testing.T) {
 	s, _, _ := newUploadServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/uploads/projects/nope/blob?name=x.png", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/nope/uploads/blob?name=x.png", nil)
 	req.SetPathValue("project_id", "nope")
 	rr := httptest.NewRecorder()
 	s.HandleUploadBlob(rr, req)

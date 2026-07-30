@@ -974,7 +974,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
     // same review rather than starting a fresh one.
     if (tab?.kind === 'review') {
       setReviewStatus('pending')
-      void fetch(`/shells/projects/${pid}/agents/${encodeURIComponent(agentId)}/review/close`, {
+      void fetch(`/api/projects/${pid}/agents/${encodeURIComponent(agentId)}/review/close`, {
         method: 'POST',
       }).catch(() => { /* best-effort; the reviewer is idle either way */ })
     }

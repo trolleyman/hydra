@@ -292,6 +292,31 @@ export class ManualService {
         });
     }
     /**
+     * Terminate a head's review session immediately
+     * The review slot is a second agent against the head's own detached checkout (docs/review-agent.md), so closing its tab has to end that session rather than the head's.
+     * @param projectId Project ID
+     * @param id Head ID - the slot is derived from it, not passed separately
+     * @returns void
+     * @throws ApiError
+     */
+    public closeReviewSession(
+        projectId: string,
+        id: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{id}/review/close',
+            path: {
+                'project_id': projectId,
+                'id': id,
+            },
+            errors: {
+                400: `Agent ID required`,
+                404: `Project not found`,
+            },
+        });
+    }
+    /**
      * Report whether a native folder dialog can be offered
      * @returns FolderPickerAvailableResponse OK
      * @throws ApiError

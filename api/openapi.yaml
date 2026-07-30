@@ -3581,6 +3581,36 @@ paths:
         '400':
           description: Agent ID required
 
+  /api/projects/{project_id}/agents/{id}/review/close:
+    post:
+      summary: Terminate a head's review session immediately
+      operationId: closeReviewSession
+      tags: [manual]
+      description: >-
+        The review slot is a second agent against the head's own detached
+        checkout (docs/review-agent.md), so closing its tab has to end that
+        session rather than the head's.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Head ID - the slot is derived from it, not passed separately
+      responses:
+        '204':
+          description: Closed (or already gone - this is idempotent)
+        '400':
+          description: Agent ID required
+        '404':
+          description: Project not found
+
   /api/folder-picker/available:
     get:
       summary: Report whether a native folder dialog can be offered
