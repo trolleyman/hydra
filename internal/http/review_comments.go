@@ -284,17 +284,36 @@ func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkRev
 // message. Long enough to catch a burst, short enough that a single resolve still
 // lands while the turn it is cancelling is plausibly still running.
 var resolveBatcher = newNotifyBatcher(4 * time.Second)
+var unresolveBatcher = newNotifyBatcher(4 * time.Second)
 
-// notifyResolved tells a WORKING head that a comment has been dealt with.
+// notifyResolved tells a head when a comment's resolved state changes. The two
+// directions pull opposite ways, so they gate and word differently.
 //
-// notifyWorking, not notifyIdle, and that is the whole point: resolving is
+// RESOLVING is a cancellation, and notifyWorking is the whole point: it is
 // otherwise the user's own bookkeeping, and an idle agent picks the change up for
 // free next time it reads its comments (reviewstore.OpenComments already filters
 // resolved ones out). The single case worth spending a turn on is "you are working
-// on #3 right now and I have just cancelled it". Reopening never notifies - the
-// comment is simply back in the list it reads anyway.
+// on #3 right now and I have just cancelled it".
+//
+// REOPENING is the user re-raising a comment on purpose and expecting the agent to
+// look again, so notifyAlways - and it is the direction that actually needs a
+// signal: the head may have STOPPED on the matching "resolved" notice, and without
+// this it would never know the comment is live again. Its own batcher, so a rapid
+// resolve-then-reopen does not fold the two opposite notices into one list.
 func (s *Server) notifyResolved(projectRoot string, head heads.Head, number int, resolved bool) {
-	if !resolved || !s.headIsWorking(projectRoot, head.ID) {
+	if !resolved {
+		unresolveBatcher.add(head.ID, fmt.Sprintf("#%d", number), func(items []string) {
+			noun, subj, obj := "comments", "They need", "them"
+			if len(items) == 1 {
+				noun, subj, obj = "comment", "It needs", "it"
+			}
+			s.notifyHead(s.BackgroundCtx, projectRoot, head.ID, notifyAlways, reasonReviewUnresolved, fmt.Sprintf(
+				"Review %s unresolved: %s. %s another look - please address %s.",
+				noun, strings.Join(items, ", "), subj, obj))
+		})
+		return
+	}
+	if !s.headIsWorking(projectRoot, head.ID) {
 		return
 	}
 	resolveBatcher.add(head.ID, fmt.Sprintf("#%d", number), func(items []string) {

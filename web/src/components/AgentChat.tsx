@@ -1814,6 +1814,10 @@ const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
     label: 'Sent by Hydra',
     why: 'Sent automatically when you resolved a review comment while the agent was working, so it stops on something you have already dealt with.',
   },
+  review_unresolved: {
+    label: 'Sent by Hydra',
+    why: 'Sent automatically when you reopened a review comment, so the agent picks it back up - it may have stopped when you resolved it.',
+  },
   tests_failed: {
     label: 'Sent by Hydra',
     why: 'Sent automatically when a test runner went red while the agent was idle. Turn it off with [notify] test_failures = false.',

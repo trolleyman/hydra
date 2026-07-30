@@ -61,9 +61,10 @@ const (
 type notifyReason string
 
 const (
-	reasonReviewComments notifyReason = "review_comments"
-	reasonReviewResolved notifyReason = "review_resolved"
-	reasonTestsFailed    notifyReason = "tests_failed"
+	reasonReviewComments   notifyReason = "review_comments"
+	reasonReviewResolved   notifyReason = "review_resolved"
+	reasonReviewUnresolved notifyReason = "review_unresolved"
+	reasonTestsFailed      notifyReason = "tests_failed"
 )
 
 // autoPrefix marks a message as Hydra's rather than the user's, in the TEXT.
