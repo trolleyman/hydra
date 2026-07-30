@@ -226,29 +226,53 @@ export const FONT_ROLE_SPEC: Record<FontRole, FontRoleSpec> = {
 //   - A step of 0 is the default, so the stored value is absent for anyone who
 //     never touched it and every surface renders byte-identically to before.
 //
-// Only three roles have one. There is no Interface size: the shell has no single
-// lever to pull - fixed row heights (h-7/h-8), sticky-header offsets and
-// `calc(100vh-140px)` viewport math do not follow a font-size change - and the
-// only global lever, root font-size, scales Tailwind's rem spacing too, which is
-// browser zoom with extra steps. Ctrl +/- already does that job properly.
-export type FontSizeRole = 'chat' | 'code' | 'terminal'
-export const FONT_SIZE_ROLES: FontSizeRole[] = ['chat', 'code', 'terminal']
+// Interface included - but it took a named type ladder to make it possible, and
+// the objection that kept it out before is still half true, so it is worth being
+// precise about what changed.
+//
+// The old note here said the shell has no single lever to pull: fixed row
+// heights (h-7/h-8), sticky-header offsets and `calc(100vh-140px)` viewport math
+// do not follow a font-size change, and the only global lever - root font-size -
+// scales Tailwind's rem spacing too, which is browser zoom with extra steps.
+//
+// The second half is why this is NOT root font-size. Every rung of the shell's
+// scale (--text-4xs ... --text-3xl in index.css) carries + var(--app-font-ui-step)
+// instead, so the step moves type and nothing else: no padding, no gaps, no
+// widths. The first half still stands, and it is what bounds the range rather
+// than the range being a taste question - text grows inside rows that don't, so
+// a big enough step eventually crowds an h-7 row. UI_MAX_FONT_STEP is that
+// bound, measured rather than guessed (see the sweep in the commit that added
+// it): +3 keeps every fixed-height row clear.
+// Every role has a size now, so this is FontRole under the name the size code
+// reads better with. It stays a distinct name rather than being search-replaced
+// away: a role without a size is a plausible future (a fixed-size surface), and
+// the call sites already say which of the two things they mean.
+export type FontSizeRole = FontRole
+export const FONT_SIZE_ROLES: FontSizeRole[] = FONT_ROLES
 
 export const MIN_FONT_STEP = -2
 export const MAX_FONT_STEP = 4
+// Interface stops one step short of the others - see above.
+export const UI_MAX_FONT_STEP = 3
 
 // What each role renders at with the step at 0 - the number the Settings stepper
 // counts from, and the one the CSS falls back to when no variable is set. Chat's
 // is the sans figure; a serif chat font adds the pixel .chat-serif already adds.
-export const FONT_BASE_PX: Record<FontSizeRole, number> = { chat: 13, code: 12, terminal: 13 }
+// Interface names the `text-xs` rung, which is not the largest rung but is the
+// one the shell is mostly built from - 293 of its ~600 sized elements - so it is
+// the number that describes what a step will feel like.
+export const FONT_BASE_PX: Record<FontSizeRole, number> = { ui: 13, chat: 13, code: 12, terminal: 13 }
 
-export function hasFontSize(role: FontRole): role is FontSizeRole {
-  return (FONT_SIZE_ROLES as FontRole[]).includes(role)
+// The step a role may actually be set to. Interface is capped a step lower than
+// the rest (UI_MAX_FONT_STEP), because its type grows inside rows whose heights
+// are fixed in px.
+export function maxFontStep(role?: FontSizeRole): number {
+  return role === 'ui' ? UI_MAX_FONT_STEP : MAX_FONT_STEP
 }
 
-export function clampFontStep(step: number): number {
+export function clampFontStep(step: number, role?: FontSizeRole): number {
   if (!Number.isFinite(step)) return 0
-  return Math.min(MAX_FONT_STEP, Math.max(MIN_FONT_STEP, Math.round(step)))
+  return Math.min(maxFontStep(role), Math.max(MIN_FONT_STEP, Math.round(step)))
 }
 
 // The px a role's text lands on at this step. `fontId` only matters for chat,
@@ -256,7 +280,7 @@ export function clampFontStep(step: number): number {
 // the Settings stepper shows the size the prose will actually be.
 export function fontSizePx(role: FontSizeRole, step: number, fontId?: string): number {
   const serifChat = role === 'chat' && FONT_BY_ID.get(fontId ?? '')?.category === 'serif'
-  return FONT_BASE_PX[role] + (serifChat ? 1 : 0) + clampFontStep(step)
+  return FONT_BASE_PX[role] + (serifChat ? 1 : 0) + clampFontStep(step, role)
 }
 
 // The options a role may be set to, in category order.

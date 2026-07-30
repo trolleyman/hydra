@@ -38,7 +38,7 @@ export function ProjectSwitcher({
         aria-modal="true"
         aria-label="Switch project"
       >
-        <div className="px-5 pt-4 pb-2 text-[11px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">
+        <div className="px-5 pt-4 pb-2 text-2xs font-semibold tracking-wide text-gray-400 dark:text-gray-500">
           Switch project
         </div>
         <div className="px-2 pb-2 max-h-[60vh] overflow-y-auto">
@@ -81,7 +81,7 @@ export function ProjectSwitcher({
             )
           })}
         </div>
-        <div className="px-5 py-2.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
+        <div className="px-5 py-2.5 border-t border-gray-100 dark:border-gray-700 text-3xs text-gray-400 dark:text-gray-500 font-mono">
           Hold Ctrl, tap ` to cycle - Shift+` back - release Ctrl to switch
         </div>
       </div>

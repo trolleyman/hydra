@@ -230,7 +230,7 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
               rode ~3px high of the icons beside it. One row, one centre line.
               h-5 fixes the row to the icon buttons' height so it does not jump
               when a chip appears. */}
-          <div className="mb-0.5 flex h-5 items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
+          <div className="mb-0.5 flex h-5 items-center gap-1.5 text-2xs text-stone-400 dark:text-stone-500">
               {/* "You" rather than your git name: the name is on the avatar's tip,
                   and in a list of comments what matters is which ones are yours. */}
               <span className={mine ? 'text-stone-500 dark:text-stone-400' : ''}>{mine ? 'You' : comment.author}</span>
@@ -238,7 +238,7 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
                 // A draft is the one state worth a chip: it is the difference
                 // between something the agent has been told and something only you
                 // can see, and that is not obvious from the card alone.
-                <span className="rounded bg-blue-100 px-1 text-[10px] font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                <span className="rounded bg-blue-100 px-1 text-3xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
                   draft
                 </span>
               )}
@@ -309,7 +309,7 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
             </div>
           <Markdown text={comment.text} className="text-xs text-gray-700 dark:text-gray-200 break-words" />
           {stale && !sent && (
-            <div className="mt-1 flex items-start gap-1 text-[11px] text-amber-700 dark:text-amber-300">
+            <div className="mt-1 flex items-start gap-1 text-2xs text-amber-700 dark:text-amber-300">
               <TriangleAlert className="w-3 h-3 mt-px shrink-0" />
               <span>The diff around this line changed after this comment was queued; it will still be sent with its original context.</span>
             </div>
@@ -397,13 +397,17 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
     } else if (e.key === 'Escape') onCancel()
   }
 
-  const placeholder = onSave
-    ? 'Edit comment... (Ctrl+Enter to save)'
-    : onAddToReview
-      ? 'Write a comment... (Ctrl+Enter to add to the agent review)'
-      : 'Write a comment... (Ctrl+Enter to submit)'
+  // The placeholder says what the box is FOR; what the keys do rides on the
+  // button row below as keycaps. A placeholder is the one hint that disappears
+  // exactly when it becomes relevant - the moment you start typing - and it
+  // cannot hold a component, so the shortcut was prose in brackets there.
+  const placeholder = onSave ? 'Edit comment...' : 'Write a comment...'
+  // Ctrl+Enter fires whichever button is primary here, so the hint lives on THAT
+  // button's tooltip rather than as a line in the row. The row is three buttons
+  // wide in a pane that can be half the window, and they already wrap.
+  const submitShortcut = { keys: ['Ctrl', 'Enter'] }
 
-  const btn = 'px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer'
+  const btn = 'px-2 py-1 text-3xs font-medium rounded transition-colors cursor-pointer'
 
   return (
     <div className="border-y border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/10 px-4 py-3">
@@ -416,18 +420,20 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
         textClassName="p-2 text-xs leading-5"
         placeholder={placeholder}
       />
-      <div className="flex justify-end gap-2 mt-2">
+      <div className="flex items-center justify-end gap-2 mt-2">
         <button onClick={onCancel} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
           Cancel
         </button>
         {onSave ? (
-          <button
-            disabled={!text.trim()}
-            onClick={handleSave}
-            className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
-          >
-            Save
-          </button>
+          <Tooltip content="Save the edit." shortcut={submitShortcut} side="top">
+            <button
+              disabled={!text.trim()}
+              onClick={handleSave}
+              className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
+            >
+              Save
+            </button>
+          </Tooltip>
         ) : (
           <>
             {onCommentOnPR && (
@@ -442,7 +448,11 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
                 </button>
               </Tooltip>
             )}
-            <Tooltip content="Send this to the agent on its own, right now." side="top">
+            <Tooltip
+              content="Send this to the agent on its own, right now."
+              shortcut={onAddToReview ? undefined : submitShortcut}
+              side="top"
+            >
               <button
                 disabled={!text.trim() || sending}
                 onClick={handleSubmit}
@@ -455,7 +465,11 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
             {onAddToReview && (
               // The primary action: batching several comments and sending them as
               // one review is the usual way to brief a head, so it leads.
-              <Tooltip content="Queue this for the agent - the whole batch is sent when you submit the review, and none of it reaches the pull request." side="top">
+              <Tooltip
+                content="Queue this for the agent - the whole batch is sent when you submit the review, and none of it reaches the pull request."
+                shortcut={submitShortcut}
+                side="top"
+              >
                 <button
                   disabled={!text.trim() || sending}
                   onClick={handleAdd}
@@ -469,7 +483,7 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
           </>
         )}
       </div>
-      {prError && <p className="mt-1 text-[10px] text-red-500 break-words">{prError}</p>}
+      {prError && <p className="mt-1 text-3xs text-red-500 break-words">{prError}</p>}
     </div>
   )
 }
@@ -1963,12 +1977,6 @@ function commentPermalink(projectId: string | null, agentId: string, number: num
   return `${window.location.origin}/project/${encodeURIComponent(projectId ?? '_')}/agent/${encodeURIComponent(agentId)}?comment=${number}`
 }
 
-function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
-  if (!commit) return sha.slice(0, 7)
-  const msg = commit.message.slice(0, 24)
-  return `${commit.short_sha} ${msg}${commit.message.length > 24 ? '...' : ''}`
-}
-
 // ── Commit info formatting ────────────────────────────────────────────────────
 
 function formatCommitDate(iso: string): string {
@@ -2188,7 +2196,7 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
   const { subject, body } = commitParts(commit.message)
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-2xs text-gray-500 dark:text-gray-400">
         <span className={COMMIT_SHA_CHIP}>{commit.short_sha}</span>
         <span className="text-gray-600 dark:text-gray-300">{commit.author_name}</span>
         <span className="text-gray-400 dark:text-gray-500">&middot;</span>
@@ -2198,7 +2206,7 @@ function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
           the same prose as the body, and weighting it made the card read as a
           document with a title rather than as a commit message. */}
       <div className="border-t border-gray-200 pt-2 dark:border-gray-700">
-        <p className="text-[13px] leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>
+        <p className="text-sm leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>
         {body && (
           <Markdown
             text={body}
@@ -2236,13 +2244,29 @@ function menuOffset(el: HTMLElement | null): number {
 
 // The short-sha chip, shared by the selector rows and the hover card header.
 const COMMIT_SHA_CHIP =
-  'font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0'
+  'font-mono text-3xs text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0'
+
+// The label a commit selector's trigger wears: the short sha lowlit ahead of the
+// subject, the way HostName fades everything but the registrable domain. The sha
+// is the part you only reach for deliberately, so it recedes and lets the subject
+// - which is what tells the two ends of the comparison apart at a glance - read
+// first. Lowlit with opacity rather than a colour so it composes on the trigger's
+// own text colour in both themes, and the subject alone takes the truncation.
+function CommitLabel({ commit, sha }: { commit: CommitInfo | null | undefined; sha: string }) {
+  const subject = commit ? commitParts(commit.message).subject : ''
+  return (
+    <span className="flex items-baseline gap-1.5 min-w-0">
+      <span className="font-mono text-[11px] opacity-55 shrink-0">{commit?.short_sha ?? sha.slice(0, 7)}</span>
+      {subject && <span className="max-w-[150px] truncate">{subject}</span>}
+    </span>
+  )
+}
 
 // The shift-click affordance, spelled out at the foot of both commit dropdowns -
 // otherwise nobody would ever find it.
 function ShiftClickHint() {
   return (
-    <p className="border-t border-gray-100 px-3 py-1.5 text-[10px] leading-snug text-gray-400 dark:border-gray-700 dark:text-gray-500">
+    <p className="border-t border-gray-100 px-3 py-1.5 text-3xs leading-snug text-gray-400 dark:border-gray-700 dark:text-gray-500">
       Shift-click a commit to see just that commit's changes
     </p>
   )
@@ -2284,11 +2308,9 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const label = selected.type === 'base'
-    ? baseBranch
-    : selected.type === 'latest'
-      ? 'Latest commit'
-      : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
+  const label = selected.type === 'commit'
+    ? <CommitLabel commit={commits.find((c) => c.sha === selected.sha)} sha={selected.sha} />
+    : <span className="max-w-[150px] truncate">{selected.type === 'base' ? baseBranch : 'Latest commit'}</span>
 
   // Determine which commits are valid for the left selector (must be older than right)
   const rightIdx = rightSel.type === 'commit' ? commitIdx(rightSel.sha, commits) : -1
@@ -2301,7 +2323,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        <span className="max-w-[150px] truncate">{label}</span>
+        {label}
         <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" />
       </button>
 
@@ -2317,7 +2339,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
               >
                 <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                 <span className="font-medium text-gray-800 dark:text-gray-200">Latest commit</span>
-                <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">HEAD</span>
+                <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">HEAD</span>
                 {selected.type === 'latest' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
               </button>
             </div>
@@ -2325,7 +2347,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
           {/* Commits in the middle */}
           {commits.length > 0 && (
             <div className="max-h-64 overflow-y-auto py-1">
-              <p className="px-3 py-1 text-[11px] text-gray-400 dark:text-gray-500 font-medium">
+              <p className="px-3 py-1 text-2xs text-gray-400 dark:text-gray-500 font-medium">
                 Commits · {commits.length}
               </p>
               {commits.map((c, cIdx) => {
@@ -2365,7 +2387,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">{baseBranch}</span>
-              <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">branch point</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">branch point</span>
               {selected.type === 'base' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
           </div>
@@ -2409,9 +2431,9 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const label = selected.type === 'uncommitted' ? 'Latest changes'
-    : selected.type === 'latest' ? 'Latest commit'
-      : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
+  const label = selected.type === 'commit'
+    ? <CommitLabel commit={commits.find((c) => c.sha === selected.sha)} sha={selected.sha} />
+    : <span className="max-w-[150px] truncate">{selected.type === 'uncommitted' ? 'Latest changes' : 'Latest commit'}</span>
 
   const validCommits = commits.filter((_, idx) => {
     if (left.type === 'base') return true
@@ -2428,7 +2450,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        <span className="max-w-[150px] truncate">{label}</span>
+        {label}
         {hasUncommitted && selected.type !== 'uncommitted' && (
           <TriangleAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
         )}
@@ -2445,7 +2467,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
             >
               <Plus className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Latest changes</span>
-              <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">incl. uncommitted</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">incl. uncommitted</span>
               {selected.type === 'uncommitted' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
             <button
@@ -2455,13 +2477,13 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Latest commit</span>
-              <span className="text-gray-400 dark:text-gray-500 ml-auto text-[10px]">HEAD</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">HEAD</span>
               {selected.type === 'latest' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
           </div>
           {validCommits.length > 0 && (
             <div className="max-h-64 overflow-y-auto py-1">
-              <p className="px-3 py-1 text-[11px] text-gray-400 dark:text-gray-500 font-medium">
+              <p className="px-3 py-1 text-2xs text-gray-400 dark:text-gray-500 font-medium">
                 Commits · {validCommits.length}
               </p>
               {validCommits.map((c) => (
@@ -2632,7 +2654,7 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
             )}
           </div>
         ))}
-        <p className="text-gray-400 dark:text-gray-500 mt-1.5 text-[10px]">Click to view uncommitted changes</p>
+        <p className="text-gray-400 dark:text-gray-500 mt-1.5 text-3xs">Click to view uncommitted changes</p>
       </div>
       }
     >
@@ -2716,7 +2738,7 @@ function MergeConflictButton({ diff, agent, projectId }: {
           <div>
             <p className="font-semibold mb-1">Merge Conflict</p>
             <p className="text-gray-300">{count} file{count !== 1 ? 's' : ''} conflict with <span className="font-mono">{baseBranch}</span></p>
-            <p className="text-gray-400 mt-1 text-[10px]">Click for resolution instructions</p>
+            <p className="text-gray-400 mt-1 text-3xs">Click for resolution instructions</p>
           </div>
         }>
           <button
@@ -2746,10 +2768,10 @@ function MergeConflictButton({ diff, agent, projectId }: {
                   <GitMergeConflict className="w-5 h-5" />
                 </DialogIconTile>
                 <div className="flex flex-col gap-1 min-w-0 pt-0.5 flex-1">
-                  <h3 className="text-[16px] font-bold leading-tight text-gray-900 dark:text-gray-100">
+                  <h3 className="text-base font-bold leading-tight text-gray-900 dark:text-gray-100">
                     Merge conflict
                   </h3>
-                  <p className="text-[12.5px] leading-snug text-gray-500 dark:text-gray-400">
+                  <p className="text-xs leading-snug text-gray-500 dark:text-gray-400">
                     {count} file{plural ? 's' : ''} conflict{plural ? '' : 's'} with{' '}
                     <span className="font-mono font-semibold text-red-600 dark:text-red-400">{baseBranch}</span> - resolve{' '}
                     {plural ? 'them' : 'it'} before this branch can merge.
@@ -2924,7 +2946,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
       <div>
         <p className="font-semibold mb-1">Branch out of date</p>
         <p className="text-gray-300">{behind} commit{behind !== 1 ? 's' : ''} behind <span className="font-mono">{baseBranch}</span></p>
-        <p className="text-gray-400 mt-1 text-[10px]">Click to merge {baseBranch} in</p>
+        <p className="text-gray-400 mt-1 text-3xs">Click to merge {baseBranch} in</p>
       </div>
     }>
       <button
@@ -2964,8 +2986,8 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
       </Tooltip>
       <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
       <div className="flex items-center gap-1 shrink-0 ml-auto">
-        {file.additions > 0 && <span className="text-[10px] text-green-600 dark:text-green-400">+{file.additions}</span>}
-        {file.deletions > 0 && <span className="text-[10px] text-red-600 dark:text-red-400">-{file.deletions}</span>}
+        {file.additions > 0 && <span className="text-3xs text-green-600 dark:text-green-400">+{file.additions}</span>}
+        {file.deletions > 0 && <span className="text-3xs text-red-600 dark:text-red-400">-{file.deletions}</span>}
       </div>
     </button>
   )
@@ -4158,7 +4180,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           {folder && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 dark:bg-gray-700/50 border-y border-gray-100 dark:border-gray-700/50 group">
               <Folder className="w-3 h-3 text-blue-400 dark:text-blue-500 shrink-0" />
-              <span className="font-mono text-[9px] text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
+              <span className="font-mono text-4xs text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
             </div>
           )}
           {groupFiles.map((f) => {
@@ -4506,9 +4528,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         <p>Every file changed between the two selected refs (the <strong>vs</strong> base and the target on the Changes bar). The list on the left jumps to a file; the diffs render on the right.</p>
         <p>The cog holds this section's view options: the file-list grouping (<strong>tree</strong>, flat, or grouped by folder) and how the diffs render - <strong>side by side</strong> vs inline, <strong>ignore whitespace</strong>, and <strong>one file at a time</strong> (a pager instead of the full stack). Very large files start collapsed - expand them from their header.</p>
       </InfoTooltip>
-      <span className="text-[11px] font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
+      <span className="text-2xs font-normal text-gray-400 dark:text-gray-500">{diff.files.length}</span>
       {viewedCount > 0 && (
-        <span className="text-[11px] font-medium text-blue-500 dark:text-blue-400" title="Files you have marked viewed">
+        <span className="text-2xs font-medium text-blue-500 dark:text-blue-400" title="Files you have marked viewed">
           {viewedCount}/{diff.files.length} viewed
         </span>
       )}
@@ -4609,11 +4631,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           {openComments.length > 0 && (
             <div className="flex items-center gap-0.5 rounded-md border border-stone-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] px-1.5 py-0.5">
               <MessageSquare className="w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500" />
-              <span className="optical-center text-[11px] tabular-nums text-stone-500 dark:text-stone-400">
+              <span className="optical-center text-2xs tabular-nums text-stone-500 dark:text-stone-400">
                 {openComments.length} open
               </span>
               {unreadCount > 0 && (
-                <span className="optical-center text-[11px] tabular-nums text-blue-600 dark:text-blue-400">
+                <span className="optical-center text-2xs tabular-nums text-blue-600 dark:text-blue-400">
                   · {unreadCount} new
                 </span>
               )}

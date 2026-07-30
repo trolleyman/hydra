@@ -8,9 +8,15 @@
 // can actually animate.
 //
 // The shape is a six-spoke sparkle (alternating long/short spokes rather than
-// a plain even asterisk), the whole thing turning slowly while a pulse of
-// brightness/length travels around the spokes. `still` drops both animations
-// for the settled result line, where nothing is in flight any more.
+// a plain even asterisk), the whole thing turning slowly ANTICLOCKWISE while a
+// pulse of brightness/length travels around the spokes. `still` drops both
+// animations for the settled result line, where nothing is in flight any more.
+//
+// 20px rather than the 16px it started at: it is the one piece of motion in a
+// chat row and it was drawn small enough to read as a bullet. The spokes are
+// hairlines, so the extra 4px costs nothing in weight - it just lets the shape
+// be seen. Rows sized by their own text (h-7 and friends) are unaffected; the
+// mark is `shrink-0` and sits in flex rows that were already taller than it.
 //
 // It paints itself in the head's brand accent - Claude clay in a Claude chat,
 // Gemini violet in a Gemini one, and so on - read from ChatAgentTypeContext so
@@ -52,7 +58,7 @@ export function WorkSpark({ className = '', still = false }: WorkSparkProps) {
       // where a fixed px nudge on the mark is tuned to one size and one font
       // (see CLAUDE.md). So: `.optical-center` on every label sat next to one of
       // these, and nothing on the spark.
-      className={`shrink-0 w-4 h-4 ${accent} ${still ? '' : 'work-spark'} ${className}`}
+      className={`shrink-0 w-5 h-5 ${accent} ${still ? '' : 'work-spark'} ${className}`}
     >
       {SPOKE_ANGLES.map((angle, i) => {
         const long = i % 2 === 0

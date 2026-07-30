@@ -416,7 +416,7 @@ export function CreateMRDialog({
           <label className="flex flex-col gap-1">
             <FieldLabel>Downstream branch</FieldLabel>
             <input value={branch} onChange={(e) => setBranch(e.target.value)} className={`${inputClass} font-mono`} />
-            <span className="text-[11px] text-gray-400">The local branch stays {agent.branch_name}; this is the name it is pushed as.</span>
+            <span className="text-2xs text-gray-400">The local branch stays {agent.branch_name}; this is the name it is pushed as.</span>
           </label>
           <div className="flex gap-3">
             {remotes.length > 1 && (

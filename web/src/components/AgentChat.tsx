@@ -76,6 +76,7 @@ import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { WorkSpark } from './WorkSpark'
+import { ShortcutHint } from './Kbd'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
@@ -181,7 +182,7 @@ function mergeChipLabel(subject: string, count: number): string {
 // baseline. That trim also takes the line box's spare ascender/descender out of the
 // pill's height (~4px), which left the text sitting tight against the border - so
 // the padding gives back what the trim removed rather than leaving the chip shorter.
-const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-[3px] text-[11px] text-stone-500 dark:text-stone-400 select-none'
+const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-[3px] text-2xs text-stone-500 dark:text-stone-400 select-none'
 const COMMIT_HOVER = 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors'
 
 // MergeCommitChip renders a merge as a single pill that expands to list the commits
@@ -215,7 +216,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               tabIndex={clickable ? 0 : undefined}
               onClick={clickable ? () => onSelectCommit?.(m.sha) : undefined}
               onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectCommit?.(m.sha) } } : undefined}
-              className={`flex items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
+              className={`flex items-center gap-1.5 rounded px-1 py-0.5 text-2xs text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
               title={clickable ? `Show ${m.shortSha} in the diff view` : m.shortSha}
             >
               <GitCommitHorizontal className="w-3 h-3 shrink-0" />
@@ -225,7 +226,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
             </div>
           ))}
           {shown < count && (
-            <div className="px-1 py-0.5 text-[11px] italic text-stone-400 dark:text-stone-500">
+            <div className="px-1 py-0.5 text-2xs italic text-stone-400 dark:text-stone-500">
               ... and {count - shown} more
             </div>
           )}
@@ -1541,7 +1542,7 @@ function TodoLi({ t }: { t: TodoItem }) {
       </div>
       {hasDesc && (
         <Expandable open={open}>
-          <div className="pl-5 pr-1 pt-0.5 pb-0.5 text-[11px] leading-snug text-stone-500 dark:text-stone-400 whitespace-pre-wrap break-words">
+          <div className="pl-5 pr-1 pt-0.5 pb-0.5 text-2xs leading-snug text-stone-500 dark:text-stone-400 whitespace-pre-wrap break-words">
             {t.description}
           </div>
         </Expandable>
@@ -1643,7 +1644,7 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
       >
         <ListChecks className="w-3.5 h-3.5 shrink-0" />
         <span className="text-xs font-semibold shrink-0">Plan</span>
-        <span className="shrink-0 text-[11px] tabular-nums">{done}/{total}</span>
+        <span className="shrink-0 text-2xs tabular-nums">{done}/{total}</span>
         <ChevronRight className="w-3 h-3 shrink-0" />
       </div>
       <button
@@ -1659,7 +1660,7 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
       >
         <ListChecks className={`w-3.5 h-3.5 shrink-0 ${allDone ? 'text-emerald-500' : 'text-[#c96442]'}`} />
         <span className="text-xs font-semibold shrink-0">Plan</span>
-        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-stone-400 dark:text-stone-500">
+        <span className="ml-auto shrink-0 text-2xs tabular-nums text-stone-400 dark:text-stone-500">
           {done}/{total}
         </span>
         <ChevronRight
@@ -1677,7 +1678,7 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
             <>
               <button
                 onClick={() => setShowDone((v) => !v)}
-                className="flex w-full items-center gap-1 text-left text-[11px] text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors cursor-pointer"
+                className="flex w-full items-center gap-1 text-left text-2xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors cursor-pointer"
               >
                 <ChevronRight className={`w-3 h-3 shrink-0 transition-transform duration-200 ${showDone ? 'rotate-90' : ''}`} />
                 <span>{completed.length} completed</span>
@@ -1862,7 +1863,7 @@ function CodePanel({ code, lang }: { code: string; lang: string }) {
   const html = useMemo(() => highlightHtml(code, lang), [code, lang])
   if (lineNumbers && code.trimEnd().includes('\n')) return <NumberedCodePanel code={code} lang={lang} />
 
-  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
+  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
   if (html != null) {
     return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
   }
@@ -1930,7 +1931,7 @@ function OutputPanel({ text, lang, markers }: { text: string; lang: string; isEr
     },
     [text, lang, markerKey],
   )
-  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
+  const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
   if (html != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
   return <pre className={cls}>{stripAnsi(text) || '(no output)'}</pre>
 }
@@ -2000,7 +2001,7 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, stop
           <ShellCommandBash command={command} />
           {running ? (
             <span className="shrink-0 self-center flex items-center gap-1.5">
-              <span className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400/90">
+              <span className="flex items-center gap-1 text-3xs text-amber-600 dark:text-amber-400/90">
                 <LoaderCircle className="w-3 h-3 animate-spin" /> running
               </span>
               {onStop && (
@@ -2010,7 +2011,7 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, stop
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); onStop() }}
-                    className="flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium text-stone-500 hover:bg-red-500/10 hover:text-red-600 dark:text-stone-400 dark:hover:text-red-400 transition-colors cursor-pointer"
+                    className="flex items-center gap-0.5 rounded px-1 py-0.5 text-3xs font-medium text-stone-500 hover:bg-red-500/10 hover:text-red-600 dark:text-stone-400 dark:hover:text-red-400 transition-colors cursor-pointer"
                   >
                     <CircleStop className="w-3 h-3" /> stop
                   </button>
@@ -2018,11 +2019,11 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, stop
               )}
             </span>
           ) : timedOut ? (
-            <span className="shrink-0 self-center text-[10px] font-medium text-amber-600 dark:text-amber-400">timed out</span>
+            <span className="shrink-0 self-center text-3xs font-medium text-amber-600 dark:text-amber-400">timed out</span>
           ) : stopped ? (
-            <span className="shrink-0 self-center text-[10px] font-medium text-amber-600 dark:text-amber-400">stopped</span>
+            <span className="shrink-0 self-center text-3xs font-medium text-amber-600 dark:text-amber-400">stopped</span>
           ) : (
-            <span className={`shrink-0 self-center text-[10px] font-medium ${failed ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-500'}`}>
+            <span className={`shrink-0 self-center text-3xs font-medium ${failed ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-500'}`}>
               exit {exitCode ?? 0}
             </span>
           )}
@@ -2032,12 +2033,12 @@ function ShellCommandCard({ command, output, exitCode, truncated, timedOut, stop
             {hasOutput ? (
               <OutputPanel text={output} lang="" isError={failed} />
             ) : (
-              <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-[11px] italic text-stone-400 dark:text-stone-500`}>
+              <div className={`${PANEL_CLASS} px-2.5 py-1.5 font-mono text-2xs italic text-stone-400 dark:text-stone-500`}>
                 {running ? 'Waiting for output...' : '(no output)'}
               </div>
             )}
             {truncated && (
-              <div className="px-1 text-[10px] text-stone-400 dark:text-stone-500">
+              <div className="px-1 text-3xs text-stone-400 dark:text-stone-500">
                 Output truncated to the last part of a longer log.
               </div>
             )}
@@ -2066,7 +2067,7 @@ function WebSearchOutput({ text }: { text: string }) {
     <div className="space-y-2 break-words leading-relaxed chat-font">
       {parsed.links.length > 0 && (
         <div className="rounded-md border border-stone-200 dark:border-white/[0.06] bg-[#fdfcf9] dark:bg-[#1d1c1a] px-2.5 py-2 font-sans">
-          <div className="mb-1 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500">Sources</div>
+          <div className="mb-1 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500">Sources</div>
           <ul className="space-y-1">
             {parsed.links.map((link, i) => <li key={`${link.url}:${i}`}><a className="text-blue-600 dark:text-blue-400 hover:underline" href={link.url} target="_blank" rel="noreferrer">{link.title}</a></li>)}
           </ul>
@@ -2141,7 +2142,7 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
     [rows, lang, ws],
   )
   return (
-    <div className="bg-white dark:bg-[#20201e] font-mono text-[11px] leading-4">
+    <div className="bg-white dark:bg-[#20201e] font-mono text-2xs leading-4">
       {rows.map((row, i) => (
         <div key={i} className={`grid ${kind === 'add' || kind === 'delete' ? 'grid-cols-[2.25rem_1fr]' : 'grid-cols-[2.25rem_2.25rem_1fr]'} ${row.added ? 'bg-emerald-50 dark:bg-emerald-950/25' : row.removed ? 'bg-red-50 dark:bg-red-950/25' : ''}`}>
           {kind !== 'add' && <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.oldNo}</span>}
@@ -2170,7 +2171,7 @@ function GutterCodePanel({ nums, code, lang }: { nums: string[]; code: string[];
           elements, so nothing in this panel tells a copy where the lines end -
           the chat's copy-as-markdown handler would hand over the whole script
           on one line. See lib/copyMarkdown. */}
-      <div data-copy-code className="grid grid-cols-[auto_1fr] text-[11px] leading-4 font-mono">
+      <div data-copy-code className="grid grid-cols-[auto_1fr] text-2xs leading-4 font-mono">
         {nums.map((n, i) => (
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
@@ -2479,7 +2480,7 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
       {/* data-copy-code / data-copy-line: the rows are grid cells, not block
           elements, so without them a copy hands over every line run together
           (see lib/copyMarkdown). */}
-      <div data-copy-code className={`grid ${gutter ? 'grid-cols-[auto_1fr]' : 'grid-cols-[1fr]'} text-[11px] leading-4 font-mono`}>
+      <div data-copy-code className={`grid ${gutter ? 'grid-cols-[auto_1fr]' : 'grid-cols-[1fr]'} text-2xs leading-4 font-mono`}>
         {rows.map((row, i) => (
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
@@ -2546,7 +2547,7 @@ function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: st
   return (
     <div className="space-y-1">
       {replaceAll && (
-        <div className="text-[10px] font-medium text-amber-600 dark:text-amber-400/90 select-none">replace all</div>
+        <div className="text-3xs font-medium text-amber-600 dark:text-amber-400/90 select-none">replace all</div>
       )}
       <div className={`${PANEL_CLASS} max-h-64 overflow-auto py-1.5`}>
         {/* data-copy-code / data-copy-line: grid cells are not block elements,
@@ -2554,7 +2555,7 @@ function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: st
             lib/copyMarkdown). The -/+ marker sits INSIDE the copied cell and
             the line numbers outside it, so what you copy is a diff you can
             paste, not a column of numbers. */}
-        <div data-copy-code className={`grid ${numbered ? 'grid-cols-[auto_auto_1fr]' : 'grid-cols-[1fr]'} text-[11px] leading-4 font-mono`}>
+        <div data-copy-code className={`grid ${numbered ? 'grid-cols-[auto_auto_1fr]' : 'grid-cols-[1fr]'} text-2xs leading-4 font-mono`}>
           {rows.map((row, i) => {
             if (row.type === 'gap') {
               return (
@@ -2632,11 +2633,11 @@ function parseMemory(raw: string): { reminder: string | null; yaml: string; body
 function MemoryPanel({ text }: { text: string }) {
   const { reminder, yaml, body } = useMemo(() => parseMemory(text), [text])
   const yamlHtml = useMemo(() => (yaml ? highlightHtml(yaml, 'yaml') : null), [yaml])
-  const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-[11px] leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
+  const codeCls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
   return (
     <div className="space-y-2">
       {reminder && (
-        <div className="flex gap-1.5 rounded-md border border-amber-200/70 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20 px-2.5 py-1.5 text-[11px] leading-snug text-amber-800 dark:text-amber-200/90">
+        <div className="flex gap-1.5 rounded-md border border-amber-200/70 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20 px-2.5 py-1.5 text-2xs leading-snug text-amber-800 dark:text-amber-200/90">
           <Info className="w-3.5 h-3.5 shrink-0 mt-px" />
           <span>{reminder}</span>
         </div>
@@ -2660,7 +2661,7 @@ function MemoryPanel({ text }: { text: string }) {
 function LabeledField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">{label}</div>
+      <div className="mb-0.5 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">{label}</div>
       {children}
     </div>
   )
@@ -2678,7 +2679,7 @@ function TaskToolFields({ input }: { input: Record<string, unknown> }) {
   return (
     <div className="space-y-1.5">
       {(taskId || status) && (
-        <div className="text-[11px] text-stone-500 dark:text-stone-400">
+        <div className="text-2xs text-stone-500 dark:text-stone-400">
           {taskId && <span className="font-medium">#{taskId}</span>}
           {status && <span>{taskId ? ' -> ' : ''}{status}</span>}
         </div>
@@ -2721,8 +2722,8 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
   const str = (key: string) => (typeof input[key] === 'string' ? (input[key] as string) : '')
   const strs = (key: string) => (Array.isArray(input[key]) ? (input[key] as unknown[]).filter((v): v is string => typeof v === 'string') : [])
   const path = (p: string) => collapseHome(trimWorktreePaths(p, worktree))
-  const note = 'text-[11px] text-stone-500 dark:text-stone-400'
-  const sha = (value: string) => <span className="font-mono text-[11px] text-stone-600 dark:text-stone-300">{value}</span>
+  const note = 'text-2xs text-stone-500 dark:text-stone-400'
+  const sha = (value: string) => <span className="font-mono text-2xs text-stone-600 dark:text-stone-300">{value}</span>
 
   // A "- " bulleted path row. LowlitPath is a FRAGMENT of two spans (dir + name),
   // so it must sit inside its own element: dropping it straight into a flex row
@@ -2752,7 +2753,7 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
             and the panel already frames it. Rendered as markdown with paragraph
             reflow (hardBreaks={false}) - messages are hard-wrapped at ~72
             columns, so a <br> per source newline would shred every paragraph. */}
-        <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-[11px] leading-relaxed text-stone-700 dark:text-stone-200 chat-font`}>
+        <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-2xs leading-relaxed text-stone-700 dark:text-stone-200 chat-font`}>
           <Markdown text={str('message')} hardBreaks={false} />
         </div>
         {paths.length > 0 && (
@@ -2774,7 +2775,7 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
             <span>
               <LowlitPath path={path(s.path)} />
               {s.lines.length > 0 && (
-                <span className="ml-1.5 font-mono text-[10px] text-stone-500 dark:text-stone-400">lines {s.lines.join(', ')}</span>
+                <span className="ml-1.5 font-mono text-3xs text-stone-500 dark:text-stone-400">lines {s.lines.join(', ')}</span>
               )}
             </span>,
           ),
@@ -2854,7 +2855,7 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
             const message = typeof step.message === 'string' ? step.message.split('\n')[0] : ''
             return bullet(
               `${String(step.commit)}:${index}`,
-              <span className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
+              <span className="flex min-w-0 items-baseline gap-1.5 text-2xs">
                 <span className="font-medium text-stone-600 dark:text-stone-300">{String(step.action ?? '')}</span>
                 {sha(String(step.commit ?? ''))}
                 {message && <span className="truncate text-stone-500 dark:text-stone-400 chat-font">{message}</span>}
@@ -2885,13 +2886,13 @@ function AgentChip({
     <>
       <Bot className="w-3 h-3 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
       <span className="truncate">{label}</span>
-      {id && <span className="shrink-0 font-mono text-[10px] text-stone-400 dark:text-stone-500">{id.slice(0, 8)}</span>}
+      {id && <span className="shrink-0 font-mono text-3xs text-stone-400 dark:text-stone-500">{id.slice(0, 8)}</span>}
       {running && <LoaderCircle className="w-3 h-3 shrink-0 animate-spin text-violet-500/80 dark:text-violet-400/80" />}
       {onOpenChat && <MessageSquare className="w-3 h-3 shrink-0" />}
     </>
   )
   const cls =
-    'flex max-w-full items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2 py-0.5 text-[11px] text-stone-500 dark:text-stone-400'
+    'flex max-w-full items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2 py-0.5 text-2xs text-stone-500 dark:text-stone-400'
   return onOpenChat ? (
     <button
       onClick={(e) => { e.stopPropagation(); onOpenChat() }}
@@ -2980,7 +2981,7 @@ function SendMessageOutcome({
       {result.resumed && onOpenChat && (
         <button
           onClick={onOpenChat}
-          className="flex items-center gap-1.5 text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer"
+          className="flex items-center gap-1.5 text-2xs text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer"
         >
           {recipientRunning && <LoaderCircle className="w-3 h-3 animate-spin text-violet-500/80 dark:text-violet-400/80" />}
           <span>{recipientRunning ? 'Working - open its chat' : 'Open its chat'}</span>
@@ -3376,7 +3377,7 @@ const ToolCard = memo(function ToolCard({
           {/* A host run leaves the sandbox - say so in the collapsed header, where
               it can't be missed, not only in the body. */}
           {isHostRun && (
-            <span className="shrink-0 self-center rounded px-1 py-px text-[10px] font-semibold bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300">
+            <span className="shrink-0 self-center rounded px-1 py-px text-3xs font-semibold bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300">
               outside sandbox
             </span>
           )}
@@ -3401,14 +3402,14 @@ const ToolCard = memo(function ToolCard({
           {lineInfo && <span className="shrink-0 text-stone-400/70 dark:text-stone-500/70">{lineInfo}</span>}
         </div>
         {(pending || awaitingApproval) && (
-          <span className="shrink-0 self-center text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">
+          <span className="shrink-0 self-center text-3xs text-amber-600 dark:text-amber-400/90 animate-pulse">
             {awaitingApproval ? 'needs approval' : 'running'}
           </span>
         )}
         {open && (
           <button
             onClick={(e) => { e.stopPropagation(); setShowRaw((r) => !r) }}
-            className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+            className={`shrink-0 self-center px-1.5 py-0.5 rounded text-3xs font-medium transition-colors cursor-pointer ${
               showRaw
                 ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
                 : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300'
@@ -3431,12 +3432,12 @@ const ToolCard = memo(function ToolCard({
               {isBash ? (
                 <div>
                   {interactiveTranscript && (
-                    <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                    <div className="mb-0.5 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                       Terminal input (inferred from echo)
                     </div>
                   )}
                   {isHostRun && !interactiveTranscript && (
-                    <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                    <div className="mb-0.5 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                       Command to run on the host
                     </div>
                   )}
@@ -3482,7 +3483,7 @@ const ToolCard = memo(function ToolCard({
                   {/* "Output" only when there's an input panel above it to
                       separate from; a plain Read's body is output-only (item 32). */}
                   {hasInput && (
-                    <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                    <div className="mb-0.5 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                       Output
                     </div>
                   )}
@@ -3597,7 +3598,7 @@ const PlanCard = memo(function PlanCard({ item }: { item: ToolItem }) {
         {open && (
           <button
             onClick={(e) => { e.stopPropagation(); setShowRaw((r) => !r) }}
-            className={`shrink-0 self-center px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+            className={`shrink-0 self-center px-1.5 py-0.5 rounded text-3xs font-medium transition-colors cursor-pointer ${
               showRaw
                 ? 'bg-stone-200 text-stone-700 dark:bg-white/10 dark:text-stone-200'
                 : 'text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300'
@@ -3723,7 +3724,7 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
           {clipped && !showAll && (
             <button
               onClick={() => setShowAll(true)}
-              className="mt-1 text-[11px] font-medium text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200 transition-colors cursor-pointer"
+              className="mt-1 text-2xs font-medium text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200 transition-colors cursor-pointer"
             >
               Show more
             </button>
@@ -3731,7 +3732,7 @@ const ThinkingCard = memo(function ThinkingCard({ text, streaming, durationMs }:
           {showAll && (
             <button
               onClick={() => setShowAll(false)}
-              className="mt-1 text-[11px] font-medium text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200 transition-colors cursor-pointer"
+              className="mt-1 text-2xs font-medium text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200 transition-colors cursor-pointer"
             >
               Show less
             </button>
@@ -3942,7 +3943,7 @@ function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
       tabIndex={clickable ? 0 : undefined}
       onClick={clickable ? onClick : undefined}
       onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
-      className={`flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none ${
+      className={`flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-2xs text-stone-500 dark:text-stone-400 select-none ${
         clickable ? 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors' : ''
       }`}
       title={text}
@@ -3964,7 +3965,7 @@ function NoticePill({ text, onOpenChat, outputFile, requestTaskOutput }: {
       <Expandable open={open}>
         <div className="w-full">
           {result?.error ? (
-            <div className="text-center py-1 text-[11px] text-stone-400 dark:text-stone-500">{result.error}</div>
+            <div className="text-center py-1 text-2xs text-stone-400 dark:text-stone-500">{result.error}</div>
           ) : (
             <OutputPanel text={result?.content ?? ''} lang="" />
           )}
@@ -4036,7 +4037,7 @@ function reportSkipId(sub: SubagentView, report: SubReport | null): number | und
 function SubagentReport({ report }: { report: SubReport }) {
   return (
     <div>
-      <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+      <div className="mb-0.5 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
         Report
       </div>
       {report.isError ? (
@@ -4097,7 +4098,7 @@ function FinishedReportCard({
       <div className="flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 text-stone-600 dark:text-stone-300">
         <Bot className="w-3.5 h-3.5 shrink-0 text-violet-500/80 dark:text-violet-400/80" />
         <span className="font-medium shrink-0">{label}</span>
-        <span className="shrink-0 flex items-center gap-1 text-[10px] text-stone-400 dark:text-stone-500">
+        <span className="shrink-0 flex items-center gap-1 text-3xs text-stone-400 dark:text-stone-500">
           <Check className="w-3 h-3" />
           finished
         </span>
@@ -4121,7 +4122,7 @@ function FinishedReportCard({
             </div>
           )
         ) : (
-          <div className="text-[11px] italic text-stone-400 dark:text-stone-500">No report returned.</div>
+          <div className="text-2xs italic text-stone-400 dark:text-stone-500">No report returned.</div>
         )}
       </div>
     </div>
@@ -4202,23 +4203,23 @@ const SubagentCard = memo(function SubagentCard({
           <span className="font-medium shrink-0">{label}</span>
           {desc && <span className="truncate text-stone-400 dark:text-stone-500">{desc}</span>}
           {running ? (
-            <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-medium text-violet-600 dark:text-violet-400/90">
+            <span className="ml-auto shrink-0 flex items-center gap-1 text-3xs font-medium text-violet-600 dark:text-violet-400/90">
               <LoaderCircle className="w-3 h-3 animate-spin" />
               working{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
             </span>
           ) : waiting ? (
-            <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-medium text-violet-600 dark:text-violet-400/90">
+            <span className="ml-auto shrink-0 flex items-center gap-1 text-3xs font-medium text-violet-600 dark:text-violet-400/90">
               <LoaderCircle className="w-3 h-3 animate-spin" />
               waiting on sub-agents
             </span>
           ) : finishedBadge ? (
-            <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] text-stone-400 dark:text-stone-500">
+            <span className="ml-auto shrink-0 flex items-center gap-1 text-3xs text-stone-400 dark:text-stone-500">
               <Check className="w-3 h-3" />
               finished{steps > 0 ? ` - ${steps} step${steps === 1 ? '' : 's'}` : ''}
             </span>
           ) : (
             steps > 0 && (
-              <span className="ml-auto shrink-0 text-[10px] text-stone-400 dark:text-stone-500">
+              <span className="ml-auto shrink-0 text-3xs text-stone-400 dark:text-stone-500">
                 {steps} step{steps === 1 ? '' : 's'}
               </span>
             )
@@ -4240,7 +4241,7 @@ const SubagentCard = memo(function SubagentCard({
         <div className="px-2.5 pb-2 space-y-2 border-t border-stone-200/70 dark:border-white/[0.05] pt-2">
           {sub.prompt && (
             <div>
-              <div className="mb-0.5 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+              <div className="mb-0.5 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                 Prompt
               </div>
               <div className="break-words chat-leading-xs chat-font">
@@ -4252,7 +4253,7 @@ const SubagentCard = memo(function SubagentCard({
             <div>
               <button
                 onClick={() => setStepsOpen((o) => !o)}
-                className="flex items-center gap-1 text-[10px] font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none hover:text-stone-600 dark:hover:text-stone-300 transition-colors cursor-pointer"
+                className="flex items-center gap-1 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none hover:text-stone-600 dark:hover:text-stone-300 transition-colors cursor-pointer"
               >
                 <ChevronRight
                   className={`w-3 h-3 transition-transform duration-200 ${stepsOpen ? 'rotate-90' : ''}`}
@@ -4300,12 +4301,12 @@ function SubagentChatView({
         <span className="text-sm font-semibold">{label}</span>
         {desc && <span className="truncate text-xs text-stone-400 dark:text-stone-500">{desc}</span>}
         {running || waiting ? (
-          <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[11px] text-violet-600 dark:text-violet-400/90">
+          <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-2xs text-violet-600 dark:text-violet-400/90">
             <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
             {running ? 'working' : 'waiting on sub-agents'}
           </span>
         ) : (
-          <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-[11px] text-stone-400 dark:text-stone-500">
+          <span className="ml-auto shrink-0 self-center flex items-center gap-1 text-2xs text-stone-400 dark:text-stone-500">
             <Check className="w-3.5 h-3.5" />
             finished
           </span>
@@ -4329,7 +4330,7 @@ function SubagentChatView({
           label swaps between "Working..." and the longer "Waiting on
           sub-agents...", and a wrap there would shift the mark. */}
       {(running || waiting) && (
-        <div className="flex items-center gap-1.5 text-[11px] select-none whitespace-nowrap">
+        <div className="flex items-center gap-1.5 text-2xs select-none whitespace-nowrap">
           <WorkSpark />
           <span className="chat-text-shimmer font-medium min-w-0 truncate optical-center">{running ? 'Working...' : 'Waiting on sub-agents...'}</span>
         </div>
@@ -5091,7 +5092,7 @@ export function QuestionCard({
                     <span className="min-w-0">
                       <span className="block text-xs font-medium">{o.label}</span>
                       {o.description && (
-                        <span className="block text-[11px] text-stone-500 dark:text-stone-400">{o.description}</span>
+                        <span className="block text-2xs text-stone-500 dark:text-stone-400">{o.description}</span>
                       )}
                     </span>
                   </button>
@@ -5185,7 +5186,7 @@ export function QuestionCard({
           <div key={qi} className="space-y-1.5">
             <div className="flex items-baseline gap-1.5">
               {q.header && (
-                <span className="shrink-0 rounded bg-[#c96442]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#a8522f] dark:text-[#e0a184]">
+                <span className="shrink-0 rounded bg-[#c96442]/10 px-1.5 py-0.5 text-3xs font-semibold text-[#a8522f] dark:text-[#e0a184]">
                   {q.header}
                 </span>
               )}
@@ -5198,14 +5199,14 @@ export function QuestionCard({
         )
       })}
       {expired && !answered && (
-        <div className="text-[11px] text-stone-500 dark:text-stone-400">
+        <div className="text-2xs text-stone-500 dark:text-stone-400">
           This turn ended before the question was answered, so the agent is no longer waiting on it - your answer goes
           back as an ordinary message instead.
         </div>
       )}
       <div className="flex items-center justify-end gap-2">
         {answeredText != null && (
-          <span className="min-w-0 truncate text-[11px] italic text-stone-400 dark:text-stone-500">{answeredText}</span>
+          <span className="min-w-0 truncate text-2xs italic text-stone-400 dark:text-stone-500">{answeredText}</span>
         )}
         <button
           onClick={submit}
@@ -5309,7 +5310,7 @@ const ContextNoteCard = memo(function ContextNoteCard({ text, outOfContext }: { 
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
+        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-2xs text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
         aria-expanded={open}
       >
         <History className="w-3 h-3 shrink-0" />
@@ -5338,7 +5339,7 @@ const SkillCard = memo(function SkillCard({ name, text }: { name: string; text: 
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
+        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-2xs text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
         aria-expanded={open}
       >
         <Sparkles className="w-3 h-3 shrink-0" fill="currentColor" />
@@ -5367,7 +5368,7 @@ const MetaCard = memo(function MetaCard({ text }: { text: string }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
+        className="flex max-w-[92%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-2xs text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-white/[0.07] transition-colors cursor-pointer select-none"
         aria-expanded={open}
       >
         <Info className="w-3 h-3 shrink-0" />
@@ -5907,7 +5908,7 @@ function StepGroup({
           one says "running", the parked one carries its own Allow/Deny row - so
           repeating any of it on the header is just a second voice. */}
       {!shown && (needsApproval || running) && (
-        <span className="ml-auto pl-1.5 shrink-0 text-[10px] text-amber-600 dark:text-amber-400/90 animate-pulse">
+        <span className="ml-auto pl-1.5 shrink-0 text-3xs text-amber-600 dark:text-amber-400/90 animate-pulse">
           {needsApproval ? 'needs approval' : `running ${running}`}
         </span>
       )}
@@ -9616,7 +9617,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return (
           <div className="flex justify-center">
             <div
-              className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 select-none"
+              className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-2xs text-stone-500 dark:text-stone-400 select-none"
               title={item.text}
             >
               <SlidersHorizontal className="w-3 h-3 shrink-0" />
@@ -9646,7 +9647,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           const { desc } = subLabels(sub, tool)
           return (
             <div className="flex justify-center">
-              <button onClick={() => openSubView(sub.agentId)} className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer">
+              <button onClick={() => openSubView(sub.agentId)} className="flex max-w-[90%] items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-0.5 text-2xs text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer">
                 <span className="truncate">Sub-agent finished{desc ? `: ${desc}` : ''}</span>
                 <MessageSquare className="h-3 w-3 shrink-0" />
               </button>
@@ -9728,7 +9729,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return (
           <div className="flex items-center gap-2.5 select-none" aria-label="Agent resumed">
             <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
-            <span className="optical-center text-[11px] text-stone-400 dark:text-stone-500">Resumed</span>
+            <span className="optical-center text-2xs text-stone-400 dark:text-stone-500">Resumed</span>
             <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
           </div>
         )
@@ -9853,7 +9854,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             <span key="stop" className="text-amber-600 dark:text-amber-500">{stopNote}</span>,
           )
           return (
-            <div className="flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500 select-none">
+            <div className="flex items-center gap-1.5 text-2xs text-stone-400 dark:text-stone-500 select-none">
               <WorkSpark still />
               {/* Inline, not a flex row: `.optical-center` trims a block's line
                   boxes, and a flex container has none - so the separator carries
@@ -9876,7 +9877,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         const exhaustive: never = item
         return (
           <div className="flex justify-center">
-            <div className="rounded-full border border-amber-300/70 bg-amber-50 dark:border-amber-800/60 dark:bg-amber-950/30 px-2.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-400 select-none">
+            <div className="rounded-full border border-amber-300/70 bg-amber-50 dark:border-amber-800/60 dark:bg-amber-950/30 px-2.5 py-0.5 text-2xs text-amber-700 dark:text-amber-400 select-none">
               Unknown event kind: {(exhaustive as { kind?: string }).kind ?? 'unknown'}
             </div>
           </div>
@@ -10093,13 +10094,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           )}
           {/* Load-older affordance at the very top (item 25). */}
           {replayDone && loadingOlder && (
-            <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-stone-400 dark:text-stone-500 select-none">
+            <div className="flex items-center justify-center gap-1.5 py-1 text-2xs text-stone-400 dark:text-stone-500 select-none">
               <LoaderCircle className="w-3 h-3 animate-spin" />
               Loading older messages...
             </div>
           )}
           {replayDone && allHistoryLoaded && items.length > 0 && (
-            <div className="text-center py-1 text-[11px] text-stone-300 dark:text-stone-600 select-none">
+            <div className="text-center py-1 text-2xs text-stone-300 dark:text-stone-600 select-none">
               Beginning of conversation
             </div>
           )}
@@ -10138,7 +10139,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               follow was blamed for. Truncating the secondary text instead keeps
               the mark on one fixed line at any width. */}
           {isTurnRunning && replayDone && !lastIsResult && (
-            <div className="flex items-center gap-1.5 text-[11px] select-none whitespace-nowrap animate-chat-item-in">
+            <div className="flex items-center gap-1.5 text-2xs select-none whitespace-nowrap animate-chat-item-in">
               <WorkSpark />
               <span className="chat-text-shimmer font-medium shrink-0 optical-center">{turnVerb}...</span>
               {/* tabular-nums so the ticking elapsed seconds / token count keep a
@@ -10191,7 +10192,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         {!pinned && replayDone && (
           // The float (absolute + centring translate) moves to the wrapper, which
           // is now what sits in the transcript pane.
-          <Tooltip content="Jump to bottom (Ctrl+End)" side="top" className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
+          <Tooltip content="Jump to bottom" shortcut={{ keys: ['Ctrl', 'End'] }} side="top" className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
             <button
               onClick={() => scrollToBottom(true)}
               aria-label="Jump to bottom"
@@ -10241,7 +10242,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               Above the box rather than in the placeholder, which vanishes the
               moment you start typing. */}
           {review && (
-            <div className="mb-1.5 flex items-start gap-1.5 px-1 text-[11px] leading-4 text-stone-400 dark:text-stone-500">
+            <div className="mb-1.5 flex items-start gap-1.5 px-1 text-2xs leading-4 text-stone-400 dark:text-stone-500">
               <Eye className="mt-px h-3 w-3 shrink-0" />
               <span>
                 Reviewer - a second agent reading this branch in its own throwaway checkout. It cannot edit
@@ -10300,7 +10301,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               wrapperStyle={{ height: composerHeight }}
               textColorClassName="text-stone-800 dark:text-stone-100"
               caretClassName="caret-stone-800 dark:caret-stone-100"
-              textClassName="px-3.5 pt-2.5 pb-1 text-[13px] leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
+              textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
             />
             <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
               <Tooltip content="Attach files" side="top">
@@ -10336,8 +10337,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     the running turn at its next step (terminal-style
                     steering); otherwise show nothing. */}
                 {canSend && isTurnRunning && (
-                  <span className="optical-center hidden sm:inline text-[10px] text-stone-400 dark:text-stone-500 select-none">
-                    Enter to queue
+                  <span className="hidden select-none sm:inline">
+                    <ShortcutHint keys={['Enter']} note="to queue" />
                   </span>
                 )}
                 {/* Context-left chip (item 40): how much of the model's window
@@ -10350,7 +10351,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     side="top"
                   >
                     <span
-                      className={`optical-center hidden sm:inline text-[11px] tabular-nums select-none ${
+                      className={`optical-center hidden sm:inline text-2xs tabular-nums select-none ${
                         contextPct < 10
                           ? 'text-red-500 dark:text-red-400'
                           : contextPct < 20
@@ -10401,7 +10402,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   )}
                 </div>
                 {isTurnRunning && (
-                  <Tooltip content="Interrupt (Ctrl+C)" side="top">
+                  <Tooltip content="Interrupt" shortcut={{ keys: ['Ctrl', 'C'] }} side="top">
                     <button
                       onClick={interrupt}
                       className="p-1.5 rounded-lg text-red-500/90 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
@@ -10411,7 +10412,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     </button>
                   </Tooltip>
                 )}
-                <Tooltip content={isTurnRunning ? 'Queue message (Enter)' : 'Send (Enter)'} side="top">
+                <Tooltip content={isTurnRunning ? 'Queue message' : 'Send'} shortcut={{ keys: ['Enter'] }} side="top">
                   <button
                     onClick={send}
                     disabled={!canSend}

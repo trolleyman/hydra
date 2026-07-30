@@ -47,7 +47,7 @@ describe('Badge', () => {
     expect(sm).not.toHaveClass('rounded-full')
 
     const xs = render(<Badge variant="xs">xs</Badge>).container.querySelector('span')!
-    expect(xs).toHaveClass('text-[10px]', 'rounded')
+    expect(xs).toHaveClass('text-3xs', 'rounded')
 
     const pill = render(<Badge variant="pill">pill</Badge>).container.querySelector('span')!
     expect(pill).toHaveClass('rounded-full', 'px-2.5')

@@ -18,7 +18,6 @@ import {
   clampFontStep,
   fontFeaturesFor,
   fontSizePx,
-  hasFontSize,
   fontStackFor,
   isValidFontFor,
   type FontRole,
@@ -58,6 +57,7 @@ function writeFont(role: FontRole, id: string) {
 }
 
 const SIZE_KEY: Record<FontSizeRole, string> = {
+  ui: StorageKeys.fontSizeUi,
   chat: StorageKeys.fontSizeChat,
   code: StorageKeys.fontSizeCode,
   terminal: StorageKeys.fontSizeTerminal,
@@ -70,7 +70,7 @@ export function loadFontSize(role: FontSizeRole): number {
   const stored = readLocal(SIZE_KEY[role])
   if (stored === null || stored === '') return 0
   const n = Number(stored)
-  return Number.isFinite(n) ? clampFontStep(n) : 0
+  return Number.isFinite(n) ? clampFontStep(n, role) : 0
 }
 
 function writeFontSize(role: FontSizeRole, step: number) {
@@ -109,7 +109,7 @@ function createFontSizeStore(role: FontSizeRole): UseBoundStore<StoreApi<FontSiz
     persist(
       (set) => ({
         step: loadFontSize(role),
-        setStep: (step) => set({ step: clampFontStep(step) }),
+        setStep: (step) => set({ step: clampFontStep(step, role) }),
       }),
       {
         name: SIZE_KEY[role],
@@ -132,6 +132,7 @@ export const fontStores: Record<FontRole, UseBoundStore<StoreApi<FontState>>> = 
 }
 
 export const fontSizeStores: Record<FontSizeRole, UseBoundStore<StoreApi<FontSizeState>>> = {
+  ui: createFontSizeStore('ui'),
   chat: createFontSizeStore('chat'),
   code: createFontSizeStore('code'),
   terminal: createFontSizeStore('terminal'),
@@ -158,19 +159,6 @@ export function useFontSizePx(role: FontSizeRole): number {
   const step = fontSizeStores[role]((s) => s.step)
   const font = fontStores[role]((s) => s.font)
   return fontSizePx(role, step, font)
-}
-
-// The same, for a caller holding a role that MAY not have a size (the Settings
-// row renders all four). Every size store is read unconditionally - hooks can't
-// be called behind a branch - and the extra two subscriptions cost nothing at
-// four rows; `null` means "this role has no size control".
-export function useOptionalFontSizePx(role: FontRole, fontId: string): number | null {
-  const chat = fontSizeStores.chat((s) => s.step)
-  const code = fontSizeStores.code((s) => s.step)
-  const terminal = fontSizeStores.terminal((s) => s.step)
-  if (!hasFontSize(role)) return null
-  const step: Record<FontSizeRole, number> = { chat, code, terminal }
-  return fontSizePx(role, step[role], fontId)
 }
 
 // The resolved CSS font-family value for a role, and its font-feature-settings.
@@ -211,6 +199,7 @@ export function useApplyFonts() {
   const chat = fontStores.chat((s) => s.font)
   const code = fontStores.code((s) => s.font)
   const terminal = fontStores.terminal((s) => s.font)
+  const uiStep = fontSizeStores.ui((s) => s.step)
   const chatStep = fontSizeStores.chat((s) => s.step)
   const codeStep = fontSizeStores.code((s) => s.step)
   const terminalStep = fontSizeStores.terminal((s) => s.step)
@@ -231,9 +220,17 @@ export function useApplyFonts() {
     // did before the control existed. The terminal has no CSS surface (xterm
     // takes a number, see AgentTerminal), so it is published for completeness
     // and read through useFontSizePx.
-    const steps: Record<FontSizeRole, number> = { chat: chatStep, code: codeStep, terminal: terminalStep }
+    //
+    // Interface is the one whose variable is read by a scale rather than by a
+    // surface: every rung of the shell's type ladder in index.css is a
+    // `calc(<its own px> + var(--app-font-ui-step))`, so one step moves all of
+    // them and each rung keeps its distance from its neighbours. Type only -
+    // padding, gaps and row heights are rem/px and stay put, which is what keeps
+    // this from being browser zoom (and why the Interface step is capped one
+    // lower than the rest - see UI_MAX_FONT_STEP in lib/fonts).
+    const steps: Record<FontSizeRole, number> = { ui: uiStep, chat: chatStep, code: codeStep, terminal: terminalStep }
     for (const role of FONT_SIZE_ROLES) {
-      style.setProperty(`${FONT_ROLE_SPEC[role].cssVar}-step`, `${clampFontStep(steps[role])}px`)
+      style.setProperty(`${FONT_ROLE_SPEC[role].cssVar}-step`, `${clampFontStep(steps[role], role)}px`)
     }
-  }, [ui, chat, code, terminal, chatStep, codeStep, terminalStep])
+  }, [ui, chat, code, terminal, uiStep, chatStep, codeStep, terminalStep])
 }

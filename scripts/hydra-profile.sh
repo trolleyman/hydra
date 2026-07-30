@@ -25,6 +25,19 @@
 #   --pid PID     the daemon's pid, if pgrep cannot find it (io-stall.sh prints it)
 #
 # The result is a directory of plain text plus two pprof files; see its MANIFEST.
+#
+# Watch mode - for a stall that will not happen while you are watching:
+#   scripts/hydra-profile.sh --watch [--threshold PCT] [--max-captures N]
+#
+# Polls /proc/pressure/io every 2s (which costs nothing) and captures a full
+# window only once the machine is ACTUALLY stalling, so it can sit running for a
+# day and you end up with the stall on disk instead of a pile of healthy windows.
+#
+#   --threshold PCT   io "full" avg10 that counts as a stall, default 5. For
+#                     calibration: a healthy machine here measured 0.43-3.06,
+#                     and the freezes measured 18-25.
+#   --max-captures N  stop after N captures, default 5. Each is a directory of a
+#                     few MB, so this is what stops a bad night filling the disk.
 
 set -uo pipefail
 
@@ -32,6 +45,9 @@ minutes=5
 url="http://localhost:26600"
 out=""
 pid_override=""
+watch=0
+threshold=5
+max_captures=5
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 while [ $# -gt 0 ]; do
@@ -40,10 +56,51 @@ while [ $# -gt 0 ]; do
     --url) url="${2:-$url}"; shift 2 ;;
     --out) out="${2:-}"; shift 2 ;;
     --pid) pid_override="${2:-}"; shift 2 ;;
+    --watch) watch=1; shift ;;
+    --threshold) threshold="${2:-5}"; shift 2 ;;
+    --max-captures) max_captures="${2:-5}"; shift 2 ;;
     -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# ---- watch mode --------------------------------------------------------------
+# Deliberately a thin loop that re-runs THIS script for the capture rather than
+# wrapping the collection logic in another layer of shell: the watcher stays
+# small enough to read, and a capture is exactly the same code path as a manual
+# run, so there is only one thing to keep working.
+if [ "$watch" = 1 ]; then
+  [ -z "$out" ] && out="hydra-stalls"
+  mkdir -p "$out" || exit 1
+  out="$(cd "$out" && pwd)"
+  log="$out/watch.log"
+  wsay() { echo "$(date +%H:%M:%S) $*" | tee -a "$log"; }
+
+  wsay "watching /proc/pressure/io; capturing when full avg10 >= ${threshold}% (max ${max_captures} captures) -> $out"
+  captures=0
+  peak=0
+  while [ "$captures" -lt "$max_captures" ]; do
+    full=$(grep '^full' /proc/pressure/io 2>/dev/null | grep -oP 'avg10=\K[0-9.]+')
+    [ -z "$full" ] && full=0
+    # Track the high-water mark so a run that never triggers still tells you how
+    # close it got - "nothing happened" and "it peaked at 4.9" are different.
+    peak=$(awk -v a="$peak" -v b="$full" 'BEGIN{print (b>a)?b:a}')
+    if awk -v v="$full" -v t="$threshold" 'BEGIN{exit !(v>=t)}'; then
+      captures=$(( captures + 1 ))
+      dir="$out/stall-$(date +%Y%m%d-%H%M%S)"
+      wsay "STALL: io full avg10=${full}% - capturing ${captures}/${max_captures} into $(basename "$dir")"
+      args=(--minutes "$minutes" --out "$dir" --url "$url")
+      [ -n "$pid_override" ] && args+=(--pid "$pid_override")
+      bash "$0" "${args[@]}" >> "$log" 2>&1
+      wsay "capture ${captures}/${max_captures} done"
+      # Let the machine settle, so one long stall does not consume every capture.
+      sleep 60
+    fi
+    sleep 2
+  done
+  wsay "done - ${captures} capture(s), peak io full avg10 was ${peak}%"
+  exit 0
+fi
 
 # pgrep is not reliable here - it has come back empty on a box where the daemon
 # was demonstrably running - so --pid is the override, and scripts/io-stall.sh

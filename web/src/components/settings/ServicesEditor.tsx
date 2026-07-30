@@ -16,7 +16,7 @@ import { EnabledToggle } from './shared'
 // serviceStateBadge maps a live service state to a coloured label + icon.
 function ServiceStateBadge({ status }: { status: ServiceStatus | undefined }) {
   if (!status) {
-    return <span className="text-[11px] text-gray-400 dark:text-gray-500 italic">not started</span>
+    return <span className="text-2xs text-gray-400 dark:text-gray-500 italic">not started</span>
   }
   const map: Record<string, { label: string; cls: string; icon: ReactNode }> = {
     up: { label: 'Running', cls: 'text-emerald-600 dark:text-emerald-400', icon: <CheckCircle2 className="w-3.5 h-3.5" /> },
@@ -28,7 +28,7 @@ function ServiceStateBadge({ status }: { status: ServiceStatus | undefined }) {
   const m = map[status.state] ?? map.down
   return (
     <Tooltip content={status.message || undefined}>
-      <span className={`inline-flex items-center gap-1 text-[11px] font-semibold ${m.cls}`}>
+      <span className={`inline-flex items-center gap-1 text-2xs font-semibold ${m.cls}`}>
         {m.icon}
         {m.label}
         {status.restarts > 0 && <span className="font-normal opacity-70">· {status.restarts}/{status.max_restarts} restarts</span>}
@@ -216,7 +216,7 @@ export function ServicesEditor({
                     <div className="h-[38px] flex items-center ml-auto">
                       {enabled
                         ? <ServiceStateBadge status={statusByName.get(svc.name)} />
-                        : <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-400 dark:text-gray-500"><X className="w-3.5 h-3.5" />Disabled</span>}
+                        : <span className="inline-flex items-center gap-1 text-2xs font-semibold text-gray-400 dark:text-gray-500"><X className="w-3.5 h-3.5" />Disabled</span>}
                     </div>
                   </div>
                   <div className="space-y-1">
@@ -229,13 +229,13 @@ export function ServicesEditor({
                     />
                   </div>
                   {host && (
-                    <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5">
+                    <div className="flex items-start gap-1.5 text-2xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg px-2.5 py-1.5">
                       <TriangleAlert className="w-3.5 h-3.5 mt-px shrink-0" />
                       <span>Runs unsandboxed on the host with full access to your credentials. Only use for trusted commands.</span>
                     </div>
                   )}
                   {statusByName.get(svc.name)?.state === 'failed' && statusByName.get(svc.name)?.message && (
-                    <div className="flex items-start gap-1.5 text-[11px] text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-2.5 py-1.5">
+                    <div className="flex items-start gap-1.5 text-2xs text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg px-2.5 py-1.5">
                       <TriangleAlert className="w-3.5 h-3.5 mt-px shrink-0" />
                       <span className="font-mono break-all">{statusByName.get(svc.name)?.message}</span>
                     </div>

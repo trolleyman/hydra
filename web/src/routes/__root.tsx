@@ -171,11 +171,11 @@ const AgentSidebarList = memo(function AgentSidebarList({
               ) : (
                 <ChevronDown className="w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300" />
               )}
-              <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 tracking-wide transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300">
+              <span className="text-3xs font-semibold text-gray-400 dark:text-gray-500 tracking-wide transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300">
                 Archived
               </span>
-              <span className="text-[10px] text-gray-300 dark:text-gray-600">·</span>
-              <span className="text-[10px] text-gray-300 dark:text-gray-600">{archived.length}</span>
+              <span className="text-3xs text-gray-300 dark:text-gray-600">·</span>
+              <span className="text-3xs text-gray-300 dark:text-gray-600">{archived.length}</span>
               <div className="flex-1 h-px bg-gray-100 dark:bg-gray-700" />
             </button>
             {!archivedCollapsed &&
@@ -856,7 +856,7 @@ function RootLayout() {
         {/* Sidebar toggle: always present, so it never jumps in and out of the
             bar - the icon flips between hide and show. On mobile it's the
             hamburger for the full-screen sidebar panel. */}
-        <Tooltip content={`${sidebarVisible ? 'Hide' : 'Show'} sidebar (Ctrl+.)`}>
+        <Tooltip content={`${sidebarVisible ? 'Hide' : 'Show'} sidebar`} shortcut={{ keys: ['Ctrl', '.'] }}>
           <button
             type="button"
             aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
@@ -1105,20 +1105,42 @@ function RootLayout() {
 
           {/* Sidebar footer - a single row: restart (icon) + uptime on the left,
               Claude usage + Settings (icon) on the right. The theme switcher now
-              lives inside Settings, not here. */}
-          <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
+              lives inside Settings, not here.
+
+              The two halves are grouped, and only the left one may shrink. The
+              sidebar is a fixed width but its footer is not: the icon buttons
+              are fixed squares and the usage strip is three tabular figures that
+              mean nothing clipped, so the uptime label - which already
+              truncates, and is the one thing here you can still read half of -
+              is what gives when the row runs out of room. That is what keeps the
+              strip from drawing over the settings gear, which it did at every
+              size before this (the row simply overflowed), and it is why a
+              larger Interface size costs a few characters of "up 2 hours"
+              instead of a second line. */}
+          <div className="group border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
             {canRestart && (
               // Primary action is whichever one is actually useful here: a server
               // that can rebuild itself gets "update", one that can't gets a plain
               // restart. The secondary is offered as a hold-Alt variant rather
-              // than a second control, to keep the footer a single row.
+              // than a second control, to keep the footer a single row - and it
+              // is a `shortcut` rather than prose in brackets, so the modifier
+              // reads as a key.
+              //
+              // The uptime rides along here because this button is what it is
+              // about (the server, and how long this one has been up), and
+              // because the label beside it gives way to the usage strip.
               <Tooltip
                 content={
                   restarting
                     ? 'Restarting...'
                     : canUpdate
-                      ? 'Rebuild and restart the server (Alt: restart without rebuilding)'
+                      ? 'Rebuild and restart the server'
                       : 'Restart the server'
+                }
+                shortcut={canUpdate && !restarting ? { keys: ['Alt'], note: 'restart without rebuilding' } : undefined}
+                footnote={
+                  spawnedAt.current !== null ? <Uptime spawnedAt={spawnedAt.current} format={formatUptime} /> : undefined
                 }
               >
                 <button
@@ -1132,15 +1154,31 @@ function RootLayout() {
               </Tooltip>
             )}
             {spawnedAt.current !== null && (
-              <Tooltip content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
-                <span className="text-[11px] text-gray-400 dark:text-gray-500 cursor-default truncate">
+              // Hidden outright once the Claude usage strip is on screen, rather
+              // than truncated to "up 2 h...": the two of them do not fit beside
+              // the icon buttons in a 264px sidebar, and half a word is worth
+              // less than the strip's figures. `group-has-[[data-usage]]` reads
+              // the strip's own marker off the footer row, so this needs no
+              // second copy of the poll that decides whether it renders.
+              //
+              // Only when there is a restart button to hold it: that button's
+              // tooltip is where the uptime goes, so with no button the label
+              // stays and truncates as before (min-w-0 on the Tooltip's own
+              // inline-flex wrapper, or the label's `truncate` never engages).
+              <Tooltip
+                className={`min-w-0 ${canRestart ? 'group-has-[[data-usage]]:hidden' : ''}`}
+                content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}
+              >
+                <span className="block min-w-0 truncate text-2xs text-gray-400 dark:text-gray-500 cursor-default">
                   <Uptime spawnedAt={spawnedAt.current} format={formatUptime} />
                 </span>
               </Tooltip>
             )}
-            <div className="ml-auto shrink-0">
-              <ClaudeUsageIndicator />
             </div>
+            {/* The right half, as one group: usage strip + settings, neither of
+                which may shrink - see above. */}
+            <div className="flex shrink-0 items-center gap-1.5">
+              <ClaudeUsageIndicator />
             {(() => {
               const settingsActive = /\/settings(\/|$)/.test(location.pathname)
               const cls = settingsActive
@@ -1178,6 +1216,7 @@ function RootLayout() {
                 </Tooltip>
               )
             })()}
+            </div>
           </div>
         </div>
       </aside>
