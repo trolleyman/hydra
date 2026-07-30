@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 
@@ -65,7 +66,7 @@ func handleConn(c *net.UnixConn) {
 	cmd.Env = req.Env
 	cmd.Dir = req.Cwd
 	if req.Pipes {
-		if !startPipesChild(c, cmd) {
+		if !startPipesChild(c, cmd, req.StderrPrefix) {
 			return
 		}
 	} else {
@@ -118,7 +119,7 @@ func handleConn(c *net.UnixConn) {
 // stderr, which the daemon folds into its log. Reports false when the spawn
 // failed or the reply could not be delivered (the connection is then dead and
 // the caller must not wait on the child's exit relay).
-func startPipesChild(c *net.UnixConn, cmd *exec.Cmd) bool {
+func startPipesChild(c *net.UnixConn, cmd *exec.Cmd, stderrPrefix string) bool {
 	stdinR, stdinW, err := os.Pipe()
 	if err != nil {
 		_ = writeReply(c, spawnReply{Err: err.Error()})
@@ -134,6 +135,9 @@ func startPipesChild(c *net.UnixConn, cmd *exec.Cmd) bool {
 	cmd.Stdin = stdinR
 	cmd.Stdout = stdoutW
 	cmd.Stderr = os.Stderr
+	if stderrPrefix != "" {
+		cmd.Stderr = &linePrefixWriter{dst: os.Stderr, prefix: []byte(stderrPrefix), lineStart: true}
+	}
 	if err := cmd.Start(); err != nil {
 		for _, f := range []*os.File{stdinR, stdinW, stdoutR, stdoutW} {
 			_ = f.Close()
@@ -157,6 +161,46 @@ func startPipesChild(c *net.UnixConn, cmd *exec.Cmd) bool {
 		return false
 	}
 	return true
+}
+
+// stderrWriteMu keeps prefixed writes from separate children of this supervisor
+// intact on the shared stderr.
+var stderrWriteMu sync.Mutex
+
+type linePrefixWriter struct {
+	dst       io.Writer
+	prefix    []byte
+	lineStart bool
+}
+
+func (w *linePrefixWriter) Write(p []byte) (int, error) {
+	stderrWriteMu.Lock()
+	defer stderrWriteMu.Unlock()
+
+	inputLen := len(p)
+	out := make([]byte, 0, len(p)+len(w.prefix))
+	for len(p) > 0 {
+		if w.lineStart {
+			out = append(out, w.prefix...)
+			w.lineStart = false
+		}
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			out = append(out, p...)
+			break
+		}
+		out = append(out, p[:i+1]...)
+		p = p[i+1:]
+		w.lineStart = true
+	}
+	n, err := w.dst.Write(out)
+	if err != nil {
+		return 0, errtrace.Wrap(err)
+	}
+	if n != len(out) {
+		return 0, errtrace.Wrap(io.ErrShortWrite)
+	}
+	return inputLen, nil
 }
 
 // writeReply sends a JSON reply line, optionally carrying fds as an SCM_RIGHTS
