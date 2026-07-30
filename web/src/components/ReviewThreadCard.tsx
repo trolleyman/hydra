@@ -23,6 +23,10 @@ export interface ReviewThreadActions {
   // resolveWithAgent asks the head to address this thread (an agent-pull prompt,
   // the same pattern as "Fix the merge conflicts").
   resolveWithAgent: (thread: ReviewThread) => Promise<void>
+  // setResolved marks a thread dealt with BY NUMBER - the same call a Hydra
+  // comment takes, because they share one numbering. Local to Hydra; it is never
+  // sent to the forge.
+  setResolved?: (number: number, resolved: boolean) => Promise<void>
   // draft persists the in-progress reply for a thread, so a card that scrolls out
   // of view (unmounting it) or a reload doesn't lose a half-written reply.
   draft: {
@@ -99,7 +103,7 @@ function OriginBadge({ note, provider }: { note: ReviewThreadNote; provider?: st
 export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; actions: ReviewThreadActions }) {
   const [text, setText] = useState(() => actions.draft.load(thread.id))
   const [replying, setReplying] = useState(() => !!actions.draft.load(thread.id))
-  const [busy, setBusy] = useState<'forge' | 'local' | 'agent' | null>(null)
+  const [busy, setBusy] = useState<'forge' | 'local' | 'agent' | 'resolve' | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const forge = providerLabel(actions.provider)
@@ -120,12 +124,14 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
     actions.draft.save(thread.id, v)
   }
 
-  const run = async (kind: 'forge' | 'local' | 'agent', fn: () => Promise<void>) => {
+  const run = async (kind: 'forge' | 'local' | 'agent' | 'resolve', fn: () => Promise<void>) => {
     setBusy(kind)
     setError(null)
     try {
       await fn()
-      if (kind !== 'agent') {
+      // Only a REPLY clears the composer; the agent hand-off and the resolve
+      // mark leave a half-written reply exactly where it was.
+      if (kind === 'forge' || kind === 'local') {
         setText('')
         actions.draft.clear(thread.id)
         setReplying(false)
@@ -147,6 +153,17 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
           {thread.notes.map((n, i) => (
             <div key={n.id} className={i > 0 ? 'mt-2 pt-2 border-t border-violet-200/60 dark:border-violet-900/40' : ''}>
               <div className="flex items-center gap-2">
+                {/* The number is the handle you would quote ("fix #3"), and it is
+                    the SAME sequence Hydra's own comments use - a gutter with two
+                    numbering schemes in it would be worse than none. The unread
+                    dot rides on it, so what is new and what to call it are one
+                    glance. */}
+                {n.number != null && (
+                  <span className="flex items-center gap-1 shrink-0">
+                    {n.read === false && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
+                    <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500">#{n.number}</span>
+                  </span>
+                )}
                 <span className="text-[11px] font-medium text-gray-700 dark:text-gray-200 truncate">
                   {n.author || 'someone'}
                 </span>
@@ -213,9 +230,17 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
 
           <div className="mt-2 flex items-center gap-2">
             {thread.resolved && (
-              <span className="flex items-center gap-1 text-[10px] text-green-700 dark:text-green-300">
-                <Check className="w-3 h-3" /> resolved
-              </span>
+              <Tooltip
+                content={
+                  thread.resolved_locally
+                    ? `Resolved in Hydra only - ${providerLabel(actions.provider)} still shows this thread open. Hydra never writes a resolve to a pull request.`
+                    : `Resolved on ${providerLabel(actions.provider)}.`
+                }
+              >
+                <span className="flex items-center gap-1 text-[10px] text-green-700 dark:text-green-300 cursor-help">
+                  <Check className="w-3 h-3" /> resolved{thread.resolved_locally ? ' here' : ''}
+                </span>
+              </Tooltip>
             )}
             {thread.outdated && (
               <span className="text-[10px] text-amber-700 dark:text-amber-300">outdated</span>
@@ -227,6 +252,20 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                 className="text-[10px] text-violet-700 dark:text-violet-300 hover:underline cursor-pointer"
               >
                 Reply
+              </button>
+            )}
+            {/* Resolving a forge thread is a LOCAL mark (the tooltip above says
+                so). It still earns its place: it is what takes the thread out of
+                the open count and the next/previous walk, which is the difference
+                between a review you can work through and a wall of comments. */}
+            {actions.setResolved && thread.notes[0]?.number != null && !thread.notes[0].url?.includes('#resolved') && (
+              <button
+                type="button"
+                disabled={busy === 'resolve'}
+                onClick={() => void run('resolve', () => actions.setResolved!(thread.notes[0].number!, !thread.resolved))}
+                className="text-[10px] text-gray-500 dark:text-gray-400 hover:underline cursor-pointer disabled:opacity-50"
+              >
+                {thread.resolved ? 'Reopen' : 'Resolve here'}
               </button>
             )}
             {busy === 'agent' && (

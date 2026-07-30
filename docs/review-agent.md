@@ -556,9 +556,12 @@ request via `provider.Threads(...)` (~1s) and the server-side copy exists only a
 a fallback when that call fails (`internal/http/review_threads.go`).
 
 **So split ownership: Hydra owns the numbering, the forge owns its content.**
+BUILT, exactly as described - `internal/reviewstore/sidecar.go`.
 
 - An append-only local map, `(origin, external_id) -> #N`, assigned on **first
-  sight** of a comment from any origin.
+  sight** of a comment from any origin. Numbering is idempotent, because the diff
+  viewer re-numbers every note on every render: a repeat lookup must not burn a
+  number, or the sequence would run away while you scrolled.
 - One sequence per head across all origins, so the numbers interleave in the order
   Hydra first saw them.
 - Numbers are never reused. A comment deleted on the forge retires its number
@@ -587,8 +590,8 @@ Four, mirroring what already exists rather than inventing a surface:
 | --- | --- | --- |
 | `get_review_comments` | no args = every published comment; `numbers` = those, with their frozen diff context | **BUILT.** ONE tool over both sources - Hydra's own comments first, the forge's unresolved discussions after. They are the same job to an agent ("what has someone said about my code, and where"), so splitting them by where they happen to be stored would only make the model pick, and pick wrong |
 | `add_review_comment` | `path`, `line`, `reply_to`, `body` | **BUILT** - `reviewq.OpAddComment`. Published on write: an agent has no drafts, because a draft exists so a person can think before speaking |
-| `reply_to_review_comment` | `thread_id`, `body` | **already built** - `reviewq.OpNote`, writes an agent-authored note on a FORGE thread |
-| `resolve_review_thread` | `thread_id` | still open. A state change, not an edit of content, so it would not break the append-only rule |
+| `reply_to_review_comment` | `number`, `body` | **BUILT** - takes a NUMBER, so one tool answers either origin: a Hydra comment gets a threaded reply inheriting its anchor, a forge note gets a local note on its thread. Never posted to the forge, and scoped to the calling head by construction - the request arrives on that head's own reviewq dir and the number resolves against that head's own store. A draft is not repliable: an agent must not answer something the user has not said yet |
+| `resolve_review_thread` | `number` | still open for AGENTS (a user resolves in the UI). The state exists; nothing exposes it as a tool, and an agent resolving its own review comments is a conflict of interest worth thinking about first |
 
 Scope every tool to the calling head's own comments. `reviewq` is already a
 per-head file channel, so that falls out of the existing design.
@@ -605,20 +608,77 @@ Two details the implementation settled:
   to nobody. `commentOwner` maps the slot back to the head and swaps the author,
   so the head cannot sign as its own reviewer.
 
+### Resolve, read, and working through a review
+
+Three things turn a numbered list into something you can actually work through,
+and they are all built. Each is Hydra's own state about a comment it may not own,
+so all three live in the sidecar (`internal/reviewstore/sidecar.go`).
+
+**Resolve** is a state change, not an edit, so it does not break the append-only
+rule: the body stays exactly as written and stays readable, it just leaves the
+open list. On a Hydra comment it is a flag; on a forge comment it resolves the
+THREAD, which is the unit anyone actually resolves.
+
+Resolving a forge thread is **local to Hydra**, and that is a decision rather
+than a gap. Resolving on the forge is a write to someone else's PR, and the two
+providers do not make it equally reachable: GitHub's `resolveReviewThread` is a
+GraphQL mutation keyed by a thread *node* id, which Hydra does not fetch (its
+thread handle is the root comment's id). A resolve that silently worked on GitLab
+and silently did not on GitHub would be worse than one that is honestly local
+everywhere, so the API returns `resolved_locally` and the card says "resolved
+here" with a tooltip naming the forge that still shows it open. The forge's own
+flag still wins when it is set.
+
+**Read** is per-number and only ever set explicitly - nothing becomes read by the
+passage of time, and nothing is marked read by merely scrolling past. A comment
+you wrote yourself is born read; anything an agent or a reviewer left is not. The
+unit that gets marked is the *conversation*: arriving at a thread marks every
+note in it, because otherwise the dot stays lit on the reply you just read.
+
+**The navigator** (`↑ ↓` in the Changes bar) steps through what is still open, in
+document order, across both origins - a forge thread and a Hydra comment are the
+same thing to someone working through a review. Two counts, because they answer
+different questions: `N open` is how much is left, `N new` is what arrived while
+you were elsewhere. The cursor is held as a NUMBER rather than an index, so
+resolving the comment you are standing on does not silently move you somewhere
+else.
+
+### Permalinks
+
+`?comment=4` on the agent page. The number is the whole address - the head is
+already in the path, and a number is stable and never reused - so the link is
+short enough to paste into a message and still means one exact thing months
+later. Landing on one jumps to it and marks it read. The jump keys on the number
+rather than on the diff, so a background refresh cannot yank the view back to the
+anchor after you have scrolled away.
+
 ### Still open in the comment store
 
-None of it blocking, and each is smaller than what is built:
+None of it blocking:
 
-- **Forge comments are not in the same numbering sequence.** `#N` covers Hydra's
-  own comments only, so "fix #3" works for those and not for a GitHub reviewer's.
-  The design above (an append-only `(origin, external_id) -> #N` map, assigned on
-  first sight) still stands; nothing implements it.
-- **No permalink.** `?comment=4` needs the URL sub-view state in
-  [agent-page-tabs.md](agent-page-tabs.md).
-- **Drafts are per-head, and there is no bulk edit.** Publishing takes a list of
-  numbers, but the UI only ever publishes all of them.
-- **`resolve_review_thread`**, and a resolved/addressed state generally. A
-  comment is currently either a draft or published forever.
+- **Drafts publish all-or-nothing in the UI.** The API takes a list of numbers.
+- **No head-level unread badge.** Unread is per comment and visible on the diff;
+  the sidebar card does not yet carry a count (see the note below).
+- **Resolving does not tell the agent.** It is a signal an agent would benefit
+  from - "#3 is dealt with, stop working on it" - and nothing sends it.
+
+### Unread, and where it should go next
+
+Worth writing down, because the shape matters more than the code. Per-comment
+read state is the primitive, and the head-level "something happened here" dot is
+derived from it, not the other way round: the existing unread flag means "the
+agent finished", and folding "someone commented" into the same dot would make
+neither trustworthy. A separate count is cheap and can render as its own badge.
+
+What is deliberately NOT the rule is *read on scroll into view*. A comment can
+scroll past while you are jumping to a file, and losing the dot without having
+read it is worse than the dot lingering. Arriving at a comment - a permalink, or
+a step of the navigator - is the signal, because it is the one that means you
+looked.
+
+A toast with a link is the right thing for a comment that lands while you are on
+another page, and it must be one toast per batch rather than per comment - the
+same batching principle as the notify-by-id line the agent gets. Not built.
 
 ## What is already built vs what is new
 
@@ -636,10 +696,14 @@ None of it blocking, and each is smaller than what is built:
 | `add_review_comment` / native `get_review_comments` | **built** (`reviewq.OpAddComment` / `OpComments`) |
 | Notify-by-id replacing `buildReviewMessage` | **built** (and deleted it) |
 | Agent-authored comments rendered in the gutter | **built** (the quiet numbered card in `QueuedCommentCard`) |
-| Numbering FORGE comments into the same sequence | new (see "Numbering forge comments" above) |
+| Numbering FORGE comments into the same sequence | **built** (`sidecar.go`, assigned on first sight) |
+| Resolve, for a Hydra comment and a forge thread alike | **built** (local-only for the forge, and says so) |
+| Per-comment read state + the open/new navigator | **built** |
+| Permalink (`?comment=4`) | **built** (`validateSearch` on the agent route) |
+| Agent replies to a comment by number | **built** (`reviewq.OpNote` takes a number) |
 | Third origin badge for agent-authored notes | new (`ReviewThreadCard.tsx` knows only `forge` / `local_only`) |
-| Permalink / URL sub-view state | new (see [agent-page-tabs.md](agent-page-tabs.md)) |
-| `resolve_review_thread` | new (optional; a state change, not an edit) |
+| A head-level unread-comments badge, and an arrival toast | new (see "Unread, and where it should go next") |
+| `resolve_review_thread` as an agent tool | new |
 | Conditional `resolveGitIsolation` fallback | new (small; see the gotcha above) |
 
 ## What state gets reviewed

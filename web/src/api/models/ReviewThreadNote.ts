@@ -7,6 +7,11 @@
  */
 export type ReviewThreadNote = {
     id: string;
+    /**
+     * The note's handle in the head's ONE numbering sequence, shared with Hydra's own comments so "fix
+     */
+    number?: number;
+    read?: boolean;
     author?: string;
     body: string;
     url?: string;

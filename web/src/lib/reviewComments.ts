@@ -47,6 +47,12 @@ export interface PendingReviewComment {
   /** "user" | "reviewer" | "agent" - shown on a published comment that isn't yours. */
   author: string
   published: boolean
+  /** Dealt with. A published comment that is resolved drops out of the open list. */
+  resolved: boolean
+  /** Seen by the user. Set only by an explicit mark-read. */
+  read: boolean
+  /** The comment this answers, which is how a thread forms without a thread object. */
+  replyTo: number
   createdAt: number
 }
 
@@ -79,6 +85,9 @@ function toPending(c: ReviewComment): PendingReviewComment {
     hunkHash: c.hunk_hash ?? '',
     author: c.author,
     published: c.status === 'published',
+    resolved: !!c.resolved,
+    read: !!c.read,
+    replyTo: c.reply_to ?? 0,
     createdAt: Date.parse(c.created_at) || 0,
   }
 }
@@ -149,6 +158,29 @@ export async function publishReviewComments(
   if (!projectId) return { comments: [], notified: null }
   const res = await api.default.publishReviewComments(projectId, agentId, {})
   return { comments: all(res), notified: res.notified ?? null }
+}
+
+// Resolve (or reopen) a comment by number. Works for a forge comment too - the
+// numbering is one sequence, so from here it is the same call - and resolving a
+// forge thread is local to Hydra (see the API description).
+export async function resolveReviewComment(
+  projectId: string | null,
+  agentId: string,
+  number: number,
+  resolved: boolean,
+): Promise<PendingReviewComment[]> {
+  if (!projectId) return []
+  return all(await api.default.resolveReviewComment(projectId, agentId, number, { resolved }))
+}
+
+// Record that the user has seen these numbers (empty = all of them).
+export async function markReviewCommentsRead(
+  projectId: string | null,
+  agentId: string,
+  numbers: number[],
+): Promise<PendingReviewComment[]> {
+  if (!projectId) return []
+  return all(await api.default.markReviewCommentsRead(projectId, agentId, { numbers }))
 }
 
 // The one-shot "Comment to agent" path: store and publish in a single call, so a
