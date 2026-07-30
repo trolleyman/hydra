@@ -452,8 +452,20 @@ func saveCommentCrop(projectRoot, headID string, number int, dataURL string) err
 	if len(raw) > maxCropBytes {
 		return errtrace.Wrap(fmt.Errorf("crop is %d bytes, over the %d limit", len(raw), maxCropBytes))
 	}
-	// Decode before writing: it costs a millisecond and means the bytes on disk
-	// are a real PNG rather than whatever was posted with a PNG header.
+	// DIMENSIONS before pixels. The byte bound above is on the COMPRESSED form,
+	// and PNG's zlib ratio on flat colour is enormous: a 2MB file can legitimately
+	// declare 20000x20000, which png.Decode would answer by allocating a ~1.6GB
+	// bitmap before any of the reasoning above applies. DecodeConfig reads only
+	// the IHDR header, so checking first costs nothing.
+	cfg, err := png.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("crop is not a PNG: %w", err))
+	}
+	if cfg.Width > maxCropDim || cfg.Height > maxCropDim {
+		return errtrace.Wrap(fmt.Errorf("crop is %dx%d, over the %dpx limit", cfg.Width, cfg.Height, maxCropDim))
+	}
+	// Now decode for real: it costs a millisecond and means the bytes on disk are
+	// a genuine PNG rather than whatever was posted with a PNG header.
 	if _, err := png.Decode(bytes.NewReader(raw)); err != nil {
 		return errtrace.Wrap(fmt.Errorf("crop is not a decodable PNG: %w", err))
 	}
@@ -464,10 +476,14 @@ func saveCommentCrop(projectRoot, headID string, number int, dataURL string) err
 	return errtrace.Wrap(os.WriteFile(path, raw, 0o644))
 }
 
-// maxCropBytes bounds a stored close-up. The browser caps the crop at 400x300,
-// which is a few tens of KB; this is well clear of that and still far short of
-// anything that would matter on disk.
-const maxCropBytes = 2 << 20
+// maxCropBytes bounds a stored close-up's compressed size, and maxCropDim its
+// decoded one. The browser caps the crop at 400x300 (lib/imageCrop), so both are
+// generous headroom over what this path actually produces - the point is that
+// neither is the client's decision.
+const (
+	maxCropBytes = 2 << 20
+	maxCropDim   = 1024
+)
 
 func cropURL(projectID, headID string, number int) string {
 	return fmt.Sprintf("/review-crops/projects/%s/agents/%s/blob?number=%d",
