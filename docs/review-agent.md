@@ -889,9 +889,38 @@ Three things worth knowing before touching this:
   Hydra does not drive the forges' asset-upload APIs, so the new-comment box says
   so plainly when the "Comment on GitHub/GitLab" button is also on screen.
 
-Agents can read attachments but cannot write them: `add_review_comment` takes no
-attachments, because an agent's own screenshot lives in its worktree rather than
-in uploads, and copying it across is a bigger decision than this needed.
+**An agent can attach too.** `add_review_comment` takes an `attachments` array of
+paths as the AGENT sees them - a screenshot it just wrote into its worktree, or
+into its own `/tmp`. It cannot write into the uploads dir itself (it is read-only
+in the sandbox), so the daemon does two things on its behalf, in
+`Server.storeAgentAttachments`:
+
+1. **Resolves** each path with `resolveAgentFile` - the same resolver that guards
+   the agent-file blob endpoint. It confines the path to the head's own worktree,
+   its private `/tmp`, and the uploads dir, and re-checks containment *after*
+   symlinks. An agent naming `/etc/passwd` gets nothing. (A head with no private
+   `/tmp` legitimately reads the host's, which is the pre-existing rule that
+   endpoint already follows.)
+2. **Copies** it into uploads via `StoreUploadFile`, under the same 25MB cap a
+   browser upload gets. The copy is the whole point: a worktree is deleted when
+   the head is merged or killed and the per-head `/tmp` goes with it, so a comment
+   that merely pointed at one would rot while still looking fine.
+
+A path that resolves to nothing does **not** cost the comment - the remark is
+saved either way, and the tool's answer names the files that did not make it, so
+the agent does not go on describing a screenshot the user cannot see.
+
+Two deliberate gaps. `reply_to_review_comment` (a local note) takes none - notes
+live in the forge-thread sidecar, not the comment store. And an image-PIN comment
+takes none: its composer is the lightbox pin popover, and attaching a second
+picture to a comment that already points at one is a combination nobody has asked
+for.
+
+In the UI the chips sit INSIDE the comment box, under the text they belong to,
+the way the spawn composer does it - so the box, not the textarea, owns the
+border and the focus ring (drawn as `focus-within:`, since the highlighted input
+is a transparent layer on top and a ring drawn there frames the text rather than
+the box).
 
 The composer half is `lib/useAttachmentUploads.ts` - the pick/paste/drop +
 optimistic-chip loop, extracted in its plain form because the chat's copy is

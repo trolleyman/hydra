@@ -511,36 +511,46 @@ function CommentRow({ initialText = '', initialAttachments, projectId, onSubmit,
         addFiles(extractFiles(e.dataTransfer))
       }}
     >
-      <HighlightedTextarea
-        ref={ref}
-        value={text}
-        onChange={(e) => change(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onPaste={(e) => {
-          const files = extractFiles(e.clipboardData)
-          if (files.length === 0) return
-          // Only swallow the paste when it really carried files - a normal text
-          // paste must still land in the textarea.
-          e.preventDefault()
-          addFiles(files)
-        }}
-        wrapperClassName="w-full h-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus-within:ring-1 focus-within:ring-blue-500"
-        textClassName="p-2 text-xs leading-5"
-        placeholder={placeholder}
-        // Mentions decide who this comment wakes, so they are painted while you
-        // type it. Only here - they mean nothing in the chat composer.
-        renderContent={renderCommentSource}
-      />
-      <AttachmentChips
-        attachments={attachments}
-        size="sm"
-        className="mt-2"
-        onRemove={removeAttachment}
-        onOpen={(id, origin) => {
-          setLightboxOrigin(origin)
-          setLightboxIndex(openable.findIndex((a) => a.id === id))
-        }}
-      />
+      {/* The box, not the textarea, owns the border/background/focus ring - so
+          the chips sit INSIDE it, under the text they belong to, the way the
+          spawn composer does it. The ring has to be drawn out here as
+          focus-within for the same reason it is on HighlightedInput: the input
+          is a transparent layer on top, and a ring drawn there would frame the
+          text from above rather than the box around it. */}
+      <div className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus-within:ring-1 focus-within:ring-blue-500">
+        <HighlightedTextarea
+          ref={ref}
+          value={text}
+          onChange={(e) => change(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onPaste={(e) => {
+            const files = extractFiles(e.clipboardData)
+            if (files.length === 0) return
+            // Only swallow the paste when it really carried files - a normal text
+            // paste must still land in the textarea.
+            e.preventDefault()
+            addFiles(files)
+          }}
+          wrapperClassName="w-full h-20"
+          textClassName="p-2 text-xs leading-5"
+          placeholder={placeholder}
+          // Mentions decide who this comment wakes, so they are painted while you
+          // type it. Only here - they mean nothing in the chat composer.
+          renderContent={renderCommentSource}
+        />
+        {/* Renders nothing when empty, so the box keeps its plain height until
+            something is actually attached. */}
+        <AttachmentChips
+          attachments={attachments}
+          size="sm"
+          className="px-2 pb-2"
+          onRemove={removeAttachment}
+          onOpen={(id, origin) => {
+            setLightboxOrigin(origin)
+            setLightboxIndex(openable.findIndex((a) => a.id === id))
+          }}
+        />
+      </div>
       {/* A forge comment is text on someone else's server; an upload here only
           exists on this machine, at a path only this Hydra and its agents can
           resolve. So say what will happen rather than silently dropping them. */}
