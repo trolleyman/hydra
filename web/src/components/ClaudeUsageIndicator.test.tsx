@@ -20,6 +20,7 @@ const SNAPSHOT: ClaudeUsageResponse = {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -51,6 +52,53 @@ describe('ClaudeUsageIndicator', () => {
 
     // The click routes through the hook's refetch(arg) → forced probe.
     expect(spy).toHaveBeenLastCalledWith(true)
+  })
+
+  it('forces fresh probes just after the session reset until the snapshot advances', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-30T15:00:00Z'))
+    const resetAt = '2026-07-30T15:01:00Z'
+    const spy = vi.spyOn(api.default, 'getClaudeUsage').mockResolvedValue({
+      ...SNAPSHOT,
+      session_resets_at: resetAt,
+    })
+    render(<ClaudeUsageIndicator />)
+    await act(async () => { await Promise.resolve() })
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(65_000)
+    })
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy).toHaveBeenLastCalledWith(true)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(spy).toHaveBeenCalledTimes(3)
+    expect(spy).toHaveBeenLastCalledWith(true)
+  })
+
+  it('cancels reset retries when a probe returns the next reset time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-30T15:00:00Z'))
+    const oldReset = '2026-07-30T15:01:00Z'
+    const nextReset = '2026-07-30T19:01:00Z'
+    const spy = vi.spyOn(api.default, 'getClaudeUsage')
+      .mockResolvedValueOnce({ ...SNAPSHOT, session_resets_at: oldReset })
+      .mockResolvedValue({ ...SNAPSHOT, session_resets_at: nextReset })
+    render(<ClaudeUsageIndicator />)
+    await act(async () => { await Promise.resolve() })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(65_000)
+    })
+    expect(spy).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 31_000)
+    })
+    expect(spy).toHaveBeenCalledTimes(2)
   })
 
   it('renders nothing until data arrives', () => {
