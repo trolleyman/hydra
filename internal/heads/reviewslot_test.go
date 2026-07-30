@@ -11,6 +11,7 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/session"
 )
 
 func TestReviewSessionIDIsASlot(t *testing.T) {
@@ -182,6 +183,60 @@ func TestEnsureReviewCheckout(t *testing.T) {
 	RemoveReviewCheckout(root, "h1")
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Errorf("RemoveReviewCheckout left %q behind", dir)
+	}
+}
+
+// Closing the Review tab reclaims the checkout, and the reviewer's conversation
+// has to survive that: it is keyed by the checkout PATH (Claude's transcript dir
+// is a slug of it), so a re-open must land on the same path or --continue resumes
+// nothing. This is the property that lets a close be cheap AND non-destructive.
+func TestKillReviewSessionReclaimsTheCheckoutAtAStablePath(t *testing.T) {
+	root := t.TempDir()
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run(root, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("one\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run(root, "add", "-A")
+	run(root, "commit", "-m", "one")
+
+	dir, err := EnsureReviewCheckout(root, "h1", "main")
+	if err != nil {
+		t.Fatalf("EnsureReviewCheckout: %v", err)
+	}
+
+	// No session was ever started for this head, which is the case that must not
+	// panic or leave debris - a reviewer opened and closed without the registry
+	// ever knowing about it.
+	KillReviewSession(session.NewRegistry(), root, "h1")
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("closing the reviewer left its checkout at %q", dir)
+	}
+
+	// Re-opening rebuilds the tree at the SAME path - a fresh path would be a
+	// fresh transcript, i.e. a reviewer that forgot the conversation.
+	again, err := EnsureReviewCheckout(root, "h1", "main")
+	if err != nil {
+		t.Fatalf("EnsureReviewCheckout after close: %v", err)
+	}
+	if again != dir {
+		t.Errorf("re-opened checkout at %q, want the stable path %q", again, dir)
+	}
+	if got := run(again, "rev-parse", "--abbrev-ref", "HEAD"); got != "HEAD" {
+		t.Errorf("re-opened checkout is on branch %q, want a detached HEAD", got)
 	}
 }
 

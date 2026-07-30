@@ -967,10 +967,11 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
       }).catch(() => { /* best-effort; the idle reaper is the backstop */ })
     }
     // The reviewer is a model session, not a shell: left running it keeps a
-    // sandbox, a supervisor and (once the head commits) a live agent around for
-    // a pane nobody is looking at. So closing the tab ends it - the same verb the
-    // shells use - while its checkout and transcript stay, so re-opening Review
-    // resumes the same conversation rather than starting a new review.
+    // sandbox, a supervisor and a second checkout of the whole repo around for a
+    // pane nobody is looking at. So closing the tab ends it - the same verb the
+    // shells use - and reclaims the tree. Its CONVERSATION survives (it is keyed
+    // by the checkout path, which is stable), so re-opening Review resumes the
+    // same review rather than starting a fresh one.
     if (tab?.kind === 'review') {
       setReviewStatus('pending')
       void fetch(`/shells/projects/${pid}/agents/${encodeURIComponent(agentId)}/review/close`, {

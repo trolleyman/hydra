@@ -173,23 +173,34 @@ func RemoveReviewSessionDir(projectRoot, headID string, agentType sandbox.AgentT
 	}
 }
 
-// KillReviewSession ends a head's reviewer: the model session, its egress proxy
-// and the supervisor bwrap it runs under - the same teardown KillHeadNoLock does
-// for a head, keyed by the slot id, because the reviewer gets a supervisor of its
-// own (see StartReviewSession) rather than sharing the head's.
+// KillReviewSession ends a head's reviewer: the model session, its egress proxy,
+// the supervisor bwrap it runs under, and its checkout - the same teardown
+// KillHeadNoLock does for a head, keyed by the slot id, because the reviewer gets
+// a supervisor of its own (see StartReviewSession) rather than sharing the head's.
 //
-// What it deliberately does NOT touch is the checkout and the transcript. Killing
-// a process is reversible and deleting a conversation is not, so this mirrors the
-// head's own kill: the reviewer stops costing anything, and re-opening the Review
-// tab starts it again on the same conversation (--continue is keyed by the
-// checkout path, which is why the path has to be stable). The transcript goes on
-// purge, with the head's - see RemoveReviewSessionDir.
-func KillReviewSession(reg *session.Registry, headID string) {
+// The CONVERSATION survives, and that split is the point: killing a process and
+// reclaiming a working tree are reversible, deleting a conversation is not. It
+// works because neither provider keeps its history inside the tree - Claude's
+// transcript lives in ~/.claude/projects/<slug of the checkout PATH>, Codex's
+// thread id in .hydra/local/cache - and the path is derived from (projectRoot,
+// headID), so the tree EnsureReviewCheckout recreates on the next open lands on
+// the same slug and --continue picks the conversation straight back up. Removing
+// the checkout is what makes closing the tab worth something on disk (a full
+// second working copy of the repo), and it also drops the head out of the review
+// sync loop, which skips any head with no checkout.
+//
+// The transcript itself goes on purge, with the head's - see
+// RemoveReviewSessionDir.
+func KillReviewSession(reg *session.Registry, projectRoot, headID string) {
 	id := ReviewSessionID(headID)
 	_ = reg.Kill(id)
 	reg.Remove(id)
 	stopEgressProxy(id)
 	removeNamespaceHost(id)
+	// After the supervisor is gone: it has the tree bind-mounted, and pulling a
+	// worktree out from under a live bwrap is how you get a half-removed tree that
+	// `worktree add` then refuses to reclaim.
+	RemoveReviewCheckout(projectRoot, headID)
 }
 
 // StartReviewSession starts, or reattaches to, a head's review agent and returns

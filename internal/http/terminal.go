@@ -150,8 +150,8 @@ func (s *Server) HandleShellClose(w http.ResponseWriter, r *http.Request) {
 //
 // It sits under /shells/ with the tab-close it mirrors: the reviewer is a session
 // attached to a head, opened from the same `+` menu as the bash tabs, and this is
-// the same verb. What it kills is the PROCESS - the checkout and the conversation
-// survive, so re-opening the tab resumes it (see heads.KillReviewSession).
+// the same verb. What it ends is the process and the checkout; the conversation
+// survives, so re-opening the tab resumes it (see heads.KillReviewSession).
 // URL pattern: POST /shells/projects/{project_id}/agents/{id}/review/close
 func (s *Server) HandleReviewClose(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
@@ -159,8 +159,13 @@ func (s *Server) HandleReviewClose(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent ID required", http.StatusBadRequest)
 		return
 	}
+	projectRoot, err := s.resolveProjectRoot(r.PathValue("project_id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
 	log.Printf("review close: agent=%q", agentID)
-	heads.KillReviewSession(s.Sessions, agentID)
+	heads.KillReviewSession(s.Sessions, projectRoot, agentID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

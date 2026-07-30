@@ -441,12 +441,21 @@ Decisions inside that shape:
 
   So there is a `/close` now (`POST .../review/close` ->
   `heads.KillReviewSession`), and both affordances - the tab's X and un-ticking
-  the `+` menu entry - go through it. What it ends is the **process**: the
-  checkout and the transcript stay, so re-opening Review resumes the same
-  conversation rather than starting a new review. That split is deliberate and
-  matches how a head's own kill behaves - killing a process is reversible,
-  deleting a conversation is not, and the transcript goes on purge
+  the `+` menu entry - go through it. It ends the process **and removes the
+  checkout**; the CONVERSATION survives. That is the split worth keeping:
+  killing a process and reclaiming a working tree are reversible, deleting a
+  conversation is not, and the transcript goes on purge
   (`RemoveReviewSessionDir`), with the head's.
+
+  Dropping the tree is only safe because neither provider keeps its history
+  inside it - Claude's transcript is `~/.claude/projects/<slug of the checkout
+  PATH>`, Codex's thread id is a file in `.hydra/local/cache` - and the path is
+  derived from `(projectRoot, headID)`. So `EnsureReviewCheckout` rebuilds the
+  same path on the next open and `--continue` picks the review back up. This is
+  the same stable-path requirement that ruled out a pooled checkout, arrived at
+  from a third direction: a close that moved the path would silently be a reset.
+  It also drops the head out of the sync loop, which skips any head with no
+  checkout.
 
   The reviewer is also the one slot that needs a kill of its own rather than the
   `KillMatching(SlotPrefix)` sweep: it runs in a different tree, so it has its
