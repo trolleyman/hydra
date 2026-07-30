@@ -217,8 +217,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
-  /api/projects/order:
     put:
       summary: Reorder the project list (the order the project selector shows)
       operationId: reorderProjects
@@ -407,7 +405,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/config-toml:
+  /api/projects/{project_id}/config/toml:
     get:
       summary: Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
       operationId: getProjectConfigToml
@@ -437,7 +435,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/config-toml-preview:
+  /api/config/preview:
     get:
       summary: Preview the .hydra/config.toml at a filesystem path for the add-project trust prompt (read-only, does not register the project)
       operationId: previewConfigToml
@@ -508,6 +506,28 @@ paths:
           schema:
             type: string
           description: Project ID to scope the agent list
+        - in: query
+          name: archived
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: >-
+            List archived (killed/merged) heads instead of live ones, newest
+            first. Archived entries are read straight from the DB, so they carry
+            no live session, review or test summary.
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+          description: Page size; archived listings only
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+          description: Page offset; archived listings only
       responses:
         '200':
           description: OK
@@ -577,53 +597,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/archived:
-    get:
-      summary: List archived (killed/merged) Hydra agents, newest first
-      description: Returns a page of finished agents retained for the browsable history list. Supports limit/offset for infinite scroll.
-      operationId: listArchivedAgents
-      parameters:
-        - in: path
-          name: project_id
-          required: true
-          schema:
-            type: string
-          description: Project ID to scope the archived agent list
-        - in: query
-          name: limit
-          required: false
-          schema:
-            type: integer
-          description: Maximum number of archived agents to return (page size). Omit or <=0 for all.
-        - in: query
-          name: offset
-          required: false
-          schema:
-            type: integer
-          description: Number of archived agents to skip (for pagination).
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/AgentResponse'
-        '404':
-          description: Project Not Found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal Server Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /api/projects/{project_id}/agents/{id}/restart:
+  /api/projects/{project_id}/agents/{agent_id}/restart:
     post:
       summary: Restart a Hydra agent (kill and respawn with the same prompt)
       operationId: restartAgent
@@ -635,7 +609,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -665,7 +639,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/restart-session:
+  /api/projects/{project_id}/agents/{agent_id}/restart/session:
     post:
       summary: Restart just the agent process (keeps the worktree, branch and conversation)
       description: >-
@@ -682,7 +656,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -708,7 +682,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/resume:
+  /api/projects/{project_id}/agents/{agent_id}/resume:
     post:
       summary: Resume an archived (killed/merged) agent, restoring its conversation
       description: >-
@@ -726,7 +700,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -756,7 +730,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/merge:
+  /api/projects/{project_id}/agents/{agent_id}/merge:
     post:
       summary: Merge a Hydra agent's branch into its base branch and, unless close=false, kill it
       operationId: mergeAgent
@@ -768,7 +742,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -826,7 +800,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/publish:
+  /api/projects/{project_id}/agents/{agent_id}/publish:
     post:
       summary: Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
       operationId: publishAgent
@@ -843,7 +817,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
         - in: query
@@ -906,7 +880,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/publish-push:
+  /api/projects/{project_id}/agents/{agent_id}/publish/push:
     post:
       summary: Push the local head branch to its linked MR's downstream branch (Push to MR)
       operationId: pushToMr
@@ -916,7 +890,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
       responses:
@@ -945,7 +919,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/publish-pull:
+  /api/projects/{project_id}/agents/{agent_id}/publish/pull:
     post:
       summary: Pull the remote downstream branch into the local head branch (Pull from MR)
       operationId: pullFromMr
@@ -956,7 +930,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
       responses:
@@ -991,7 +965,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/downstream-branch:
+  /api/projects/{project_id}/agents/{agent_id}/downstream-branch:
     patch:
       summary: Set a head's downstream branch name (the name it is pushed AS)
       operationId: setDownstreamBranch
@@ -1001,7 +975,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
       requestBody:
@@ -1034,7 +1008,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/review/threads:
+  /api/projects/{project_id}/agents/{agent_id}/review/threads:
     get:
       summary: The review threads on this head's MR, for the diff viewer
       operationId: getReviewThreads
@@ -1050,7 +1024,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
       responses:
@@ -1079,7 +1053,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
       requestBody:
@@ -1108,7 +1082,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply:
+  /api/projects/{project_id}/agents/{agent_id}/review/threads/{thread_id}/reply:
     post:
       summary: Reply to a review thread on this head's MR
       operationId: replyToReviewThread
@@ -1123,7 +1097,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
         - in: path
@@ -1156,7 +1130,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/review/comments:
+  /api/projects/{project_id}/agents/{agent_id}/review/comments:
     get:
       summary: This head's Hydra-native review comments
       operationId: getReviewComments
@@ -1172,7 +1146,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
       responses:
@@ -1202,7 +1176,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
       requestBody:
@@ -1231,7 +1205,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/review/comments/{number}:
+  /api/projects/{project_id}/agents/{agent_id}/review/comments/{number}:
     patch:
       summary: Edit a draft review comment
       operationId: updateReviewComment
@@ -1245,7 +1219,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
         - in: path
@@ -1290,7 +1264,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
         - in: path
@@ -1317,7 +1291,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/review/comments/{number}/resolve:
+  /api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve:
     post:
       summary: Resolve (or reopen) a review comment by its number
       operationId: resolveReviewComment
@@ -1336,7 +1310,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
         - in: path
@@ -1369,7 +1343,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/review/comments/read:
+  /api/projects/{project_id}/agents/{agent_id}/review/comments/read:
     post:
       summary: Mark review comments as read
       operationId: markReviewCommentsRead
@@ -1383,7 +1357,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
       requestBody:
@@ -1406,7 +1380,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/review/comments/publish:
+  /api/projects/{project_id}/agents/{agent_id}/review/comments/publish:
     post:
       summary: Publish this head's draft comments and notify its agent
       operationId: publishReviewComments
@@ -1422,7 +1396,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
       requestBody:
@@ -1451,7 +1425,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/reviews:
+  /api/projects/{project_id}/merge-requests:
     get:
       summary: List existing PRs/MRs on the project's forge, for the adoption picker
       operationId: listReviews
@@ -1494,7 +1468,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/review-config:
+  /api/projects/{project_id}/config/review:
     get:
       summary: Resolved [review] config + live forge auth status for a project
       operationId: getReviewConfig
@@ -1518,7 +1492,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/update-from-base:
+  /api/projects/{project_id}/agents/{agent_id}/update-from-base:
     post:
       summary: Update a Hydra agent's branch from its base branch (merge base into head)
       operationId: updateAgentFromBase
@@ -1530,7 +1504,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -1556,7 +1530,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/commits:
+  /api/projects/{project_id}/agents/{agent_id}/commits:
     get:
       summary: List commits on an agent's branch (between base branch and agent branch)
       operationId: getAgentCommits
@@ -1568,7 +1542,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -1594,7 +1568,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/diff:
+  /api/projects/{project_id}/agents/{agent_id}/diff:
     get:
       summary: Get the diff for an agent's branch
       operationId: getAgentDiff
@@ -1606,7 +1580,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -1700,7 +1674,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/diff-files:
+  /api/projects/{project_id}/agents/{agent_id}/diff-files:
     get:
       summary: Get the list of changed files for an agent's branch
       operationId: getAgentDiffFiles
@@ -1712,7 +1686,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -1754,7 +1728,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/artifacts:
+  /api/projects/{project_id}/agents/{agent_id}/artifacts:
     get:
       summary: Get generated visual artifacts (e.g. screenshots) for both sides of a diff
       description: >
@@ -1772,7 +1746,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -1834,7 +1808,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/previews:
+  /api/projects/{project_id}/agents/{agent_id}/previews:
     get:
       summary: List live server previews ([previews.<name>]) for a head
       description: >
@@ -1853,7 +1827,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -1889,7 +1863,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/previews/{name}/start:
+  /api/projects/{project_id}/agents/{agent_id}/previews/{name}/start:
     post:
       summary: Start (or ensure) a live server preview instance
       description: >
@@ -1907,7 +1881,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -1949,7 +1923,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/previews/{name}/stop:
+  /api/projects/{project_id}/agents/{agent_id}/previews/{name}/stop:
     post:
       summary: Stop a live server preview instance
       description: >
@@ -1965,7 +1939,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -2003,7 +1977,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/tests:
+  /api/projects/{project_id}/agents/{agent_id}/tests:
     get:
       summary: Get the test-runner verdict(s) for a head's branch
       description: >
@@ -2022,7 +1996,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -2066,7 +2040,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/merge-when-green:
+  /api/projects/{project_id}/agents/{agent_id}/merge/when-green:
     post:
       summary: Arm auto-merge - merge this head when its tests settle passing
       description: >
@@ -2083,7 +2057,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -2113,7 +2087,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -2133,7 +2107,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/publish-when-green:
+  /api/projects/{project_id}/agents/{agent_id}/publish/when-green:
     post:
       summary: Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
       description: >
@@ -2150,7 +2124,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
         - in: query
@@ -2193,7 +2167,7 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema: { type: string }
       responses:
@@ -2212,7 +2186,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/input:
+  /api/projects/{project_id}/agents/{agent_id}/input:
     post:
       summary: Send text input to an agent's terminal stdin
       operationId: sendAgentInput
@@ -2224,7 +2198,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -2250,7 +2224,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/approvals:
+  /api/projects/{project_id}/agents/{agent_id}/approvals:
     get:
       summary: List the agent's pending security-gate approval requests
       operationId: listAgentApprovals
@@ -2262,7 +2236,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -2286,7 +2260,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/approvals/{reqid}:
+  /api/projects/{project_id}/agents/{agent_id}/approvals/{reqid}:
     post:
       summary: Resolve a pending security-gate approval (allow/deny, optionally remember)
       operationId: decideAgentApproval
@@ -2298,7 +2272,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -2330,7 +2304,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/read:
+  /api/projects/{project_id}/agents/{agent_id}/read:
     post:
       summary: Mark an agent as read, clearing its unread-changes flag
       operationId: markAgentRead
@@ -2342,7 +2316,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -2362,7 +2336,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/unread:
+  /api/projects/{project_id}/agents/{agent_id}/unread:
     post:
       summary: Mark an agent as unread, raising its unread-changes flag
       operationId: markAgentUnread
@@ -2374,7 +2348,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -2394,7 +2368,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/generate-title:
+  /api/projects/{project_id}/agents/{agent_id}/generate-title:
     post:
       summary: Generate a title for an agent from its task prompt
       description: >-
@@ -2413,7 +2387,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -3058,7 +3032,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}:
+  /api/projects/{project_id}/agents/{agent_id}:
     get:
       summary: Get a specific Hydra agent by ID
       operationId: getAgent
@@ -3070,7 +3044,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -3104,7 +3078,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -3150,7 +3124,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -3176,7 +3150,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{id}/purge:
+  /api/projects/{project_id}/agents/{agent_id}/purge:
     delete:
       summary: Permanently delete an agent (kill it and erase every record, including its Claude session history)
       description: >-
@@ -3194,7 +3168,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -3248,9 +3222,23 @@ paths:
   # from it, reachable unauthenticated from remote clients. Under /api/ they are
   # protected by construction.
 
-  /api/projects/{project_id}/artifacts/blob:
+  # Addressed by the (script, key, file) TRIPLE that IS an artifact's identity -
+  # the same triple review pins anchor on - laid out to mirror the on-disk entry
+  # exactly: entryDir is out/<script>/<kind>/<id>/, so URL and disk agree segment
+  # for segment and the handler needs no reordering step.
+  #
+  # `files/` is not filler. Without it the trailing {file} wildcard would swallow
+  # `log` too, so an artifact containing a file called "log" and the build log
+  # would collide - the same literal-shadows-wildcard bug as the old
+  # /projects/order and /agents/archived.
+  #
+  # NOTE: {file} may contain slashes (an artifact-relative path). OpenAPI 3.0 has
+  # no way to say that - a path param does not match "/" - so this is the one
+  # place the spec cannot fully describe the route. Go's ServeMux spells it
+  # {file...}.
+  /api/projects/{project_id}/artifacts/{script}/{key_kind}/{key_id}/files/{file}:
     get:
-      summary: Serve a single generated artifact file (raw bytes)
+      summary: Serve one file from a generated artifact (raw bytes)
       operationId: getArtifactBlob
       tags: [manual]
       parameters:
@@ -3260,38 +3248,52 @@ paths:
           schema:
             type: string
           description: Project ID
-        - in: query
+        - in: path
           name: script
           required: true
           schema:
             type: string
-          description: Artifact script name
-        - in: query
-          name: key
+          description: Artifact script name, sanitized as it is on disk
+        - in: path
+          name: key_kind
           required: true
           schema:
             type: string
-          description: Artifact cache key (e.g. commit/<sha> or worktree/<hash>)
-        - in: query
+            enum: [commit, worktree]
+          description: >-
+            Which kind of cache key this is. A commit is keyed by resolved SHA,
+            the working tree by a content fingerprint; they live in separate
+            self-describing subtrees.
+        - in: path
+          name: key_id
+          required: true
+          schema:
+            type: string
+          description: The key's hex id - a commit SHA or a worktree content hash
+        - in: path
           name: file
           required: true
           schema:
             type: string
-          description: Artifact-relative path of the file to serve
+          description: >-
+            Artifact-relative path of the file. MAY CONTAIN SLASHES - see the note
+            above this path. Confined to the artifact's directory server-side.
       responses:
         '200':
-          description: The artifact's bytes. Content-Type is sniffed per file.
+          description: >-
+            The file's bytes. Content-Type is derived per file, and
+            download-class artifacts (.apk, .zip) also get a Content-Disposition.
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
+        '400':
+          description: Invalid artifact request (bad key, unsupported type, escaping path)
         '404':
           description: Project, artifact or file not found
-        '500':
-          description: Internal Server Error
 
-  /api/projects/{project_id}/artifacts/log:
+  /api/projects/{project_id}/artifacts/{script}/{key_kind}/{key_id}/log:
     get:
       summary: Read a settled artifact generation's captured build log
       operationId: getArtifactLog
@@ -3303,18 +3305,25 @@ paths:
           schema:
             type: string
           description: Project ID
-        - in: query
+        - in: path
           name: script
           required: true
           schema:
             type: string
-          description: Artifact script name
-        - in: query
-          name: key
+          description: Artifact script name, sanitized as it is on disk
+        - in: path
+          name: key_kind
           required: true
           schema:
             type: string
-          description: Artifact cache key
+            enum: [commit, worktree]
+          description: Cache-key kind
+        - in: path
+          name: key_id
+          required: true
+          schema:
+            type: string
+          description: The key's hex id
       responses:
         '200':
           description: OK
@@ -3394,7 +3403,7 @@ paths:
         '404':
           description: Project or file not found
 
-  /api/projects/{project_id}/agents/{id}/repository/blob:
+  /api/projects/{project_id}/agents/{agent_id}/repository/blob:
     get:
       summary: Serve a file from a head's worktree (raw bytes)
       operationId: getAgentRepositoryBlob
@@ -3407,7 +3416,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -3429,7 +3438,7 @@ paths:
         '404':
           description: Project, head or file not found
 
-  /api/projects/{project_id}/agents/{id}/files/blob:
+  /api/projects/{project_id}/agents/{agent_id}/media/blob:
     get:
       summary: Serve a file a head referenced by local path (raw bytes)
       operationId: getAgentFileBlob
@@ -3442,7 +3451,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -3538,7 +3547,7 @@ paths:
         '404':
           description: Project or upload not found
 
-  /api/projects/{project_id}/agents/{id}/shell/close:
+  /api/projects/{project_id}/agents/{agent_id}/shell/close:
     post:
       summary: Terminate one web bash shell immediately
       operationId: closeShell
@@ -3554,7 +3563,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -3581,7 +3590,7 @@ paths:
         '400':
           description: Agent ID required
 
-  /api/projects/{project_id}/agents/{id}/review/close:
+  /api/projects/{project_id}/agents/{agent_id}/review/close:
     post:
       summary: Terminate a head's review session immediately
       operationId: closeReviewSession
@@ -3598,7 +3607,7 @@ paths:
             type: string
           description: Project ID
         - in: path
-          name: id
+          name: agent_id
           required: true
           schema:
             type: string
@@ -6452,7 +6461,7 @@ components:
             cancel signal for these tools and can't be reliably told apart from a
             genuine failure, so both are reported as a cancel.
 
-    # --- Terminal WebSocket (/ws/projects/{id}/agents/{id}/terminal) ----------
+    # --- Terminal WebSocket (/ws/projects/{id}/agents/{agent_id}/terminal) ----------
     #
     # A terminal-mode head's socket carries raw PTY bytes as binary frames and
     # these control events as text frames. Each member declares its own single
@@ -7388,7 +7397,7 @@ components:
     # and appends it to a log, which needs a concrete struct - and a generated
     # oneOf is an opaque wrapper it cannot field-access.
 
-    # --- Artifacts WebSocket (/ws/projects/{id}/agents/{id}/artifacts) ---------
+    # --- Artifacts WebSocket (/ws/projects/{id}/agents/{agent_id}/artifacts) ---------
     #
     # Generation progress for a head's artifact scripts, so the panel reflects a
     # run as it happens instead of polling.
@@ -7506,7 +7515,7 @@ components:
             - $ref: '#/components/schemas/ArtifactSide'
           x-go-type-skip-optional-pointer: true
 
-    # --- Tests WebSocket (/ws/projects/{id}/agents/{id}/tests) -----------------
+    # --- Tests WebSocket (/ws/projects/{id}/agents/{agent_id}/tests) -----------------
 
     TestsFrame:
       description: One server-to-client frame on the tests socket.

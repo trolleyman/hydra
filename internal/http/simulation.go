@@ -567,7 +567,13 @@ func (s *SimulationServer) simAgentApprovals() api.AgentResponse {
 	}
 }
 
-func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
+func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, projectId string, params api.ListAgentsParams) {
+	// ?archived=true is the archived listing - one operation now, because the old
+	// /agents/archived path shadowed a head whose id was "archived".
+	if params.Archived != nil && *params.Archived {
+		simListArchivedAgents(w, params)
+		return
+	}
 	createdAt0 := simNow().Add(-30 * time.Minute).Unix()
 	createdAt1 := simNow().Add(-1 * time.Hour).Unix()
 	createdAt2 := simNow().Add(-2 * time.Hour).Unix()
@@ -820,7 +826,7 @@ func simArchivedAgents() []api.AgentResponse {
 	}
 }
 
-func (s *SimulationServer) ListArchivedAgents(w http.ResponseWriter, r *http.Request, projectId string, params api.ListArchivedAgentsParams) {
+func simListArchivedAgents(w http.ResponseWriter, params api.ListAgentsParams) {
 	all := simArchivedAgents()
 	offset := 0
 	if params.Offset != nil && *params.Offset > 0 {
@@ -833,7 +839,7 @@ func (s *SimulationServer) ListArchivedAgents(w http.ResponseWriter, r *http.Req
 	if params.Limit != nil && *params.Limit > 0 && *params.Limit < len(page) {
 		page = page[:*params.Limit]
 	}
-	resp := api.ListArchivedAgents200JSONResponse(page)
+	resp := api.ListAgents200JSONResponse(page)
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
@@ -2962,11 +2968,24 @@ func simArtifactBlob(script, key, file, dataURL string) string {
 	simBlobMu.Unlock()
 
 	q := url.Values{}
-	q.Set("script", script)
-	q.Set("key", key)
-	q.Set("file", file)
 	q.Set("d", dataURL)
-	return "/api/projects/sim-project/artifacts/blob?" + q.Encode()
+	return simArtifactBlobPath("sim-project", script, key, file) + "?" + q.Encode()
+}
+
+// simArtifactBlobPath / simArtifactLogPath mirror the real server's blobURL and
+// logURL: the (script, key, file) triple lives in the path, laid out like the
+// on-disk entry. Kept here rather than reusing those so the simulation stays
+// self-contained, but any change to the route has to land in both.
+func simArtifactBlobPath(projectID, script, key, file string) string {
+	return simArtifactBase(projectID, script, key) + "/files/" + file
+}
+
+func simArtifactLogPath(projectID, script, key string) string {
+	return simArtifactBase(projectID, script, key) + "/log"
+}
+
+func simArtifactBase(projectID, script, key string) string {
+	return "/api/projects/" + projectID + "/artifacts/" + script + "/" + key
 }
 
 type simBlobKey struct{ script, key, file string }
@@ -2981,14 +3000,14 @@ var (
 // simArtifactBlob), so there is nothing to look up: this decodes the data URL it
 // was handed back into bytes and a content type.
 func (s *SimulationServer) HandleArtifactBlob(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	d := q.Get("d")
+	d := r.URL.Query().Get("d")
 	if d == "" {
 		// Addressed by identity rather than by the URL we handed out - which is
 		// how the real blob route works, and how anything holding an artifact
-		// anchor will ask.
+		// anchor will ask. The triple comes from the path, as it does there.
+		script, key, file := artifactPathParts(r)
 		simBlobMu.Lock()
-		d = simBlobs[simBlobKey{q.Get("script"), q.Get("key"), q.Get("file")}]
+		d = simBlobs[simBlobKey{script, key, file}]
 		simBlobMu.Unlock()
 	}
 	mime, body, ok := decodeDataURL(d)
@@ -3138,7 +3157,7 @@ func simArtifactFailedLog(script string) []api.ArtifactLogLine {
 // opaque to the real server; here HandleArtifactLog inspects it ("error" → failed
 // log) so the failure sets resolve to a believable red-bordered terminal.
 func simLogURL(script, key string) string {
-	return "/api/projects/sim-project/artifacts/log?script=" + script + "&key=" + key
+	return simArtifactLogPath("sim-project", script, key)
 }
 
 // The bodies behind the "files" set's text artifacts. Each pair is a before and
@@ -3261,7 +3280,7 @@ func simLightboxSet() api.ArtifactSet {
 				// card is one ←/→ step away from the viewers that do render.
 				Name:       "bundle.tgz",
 				ChangeType: api.ArtifactFileChangeTypeAdded,
-				RightUrl:   ptr("/api/projects/sim-project/artifacts/blob?script=files&key=commit/bbbb&file=bundle.tgz"),
+				RightUrl:   ptr(simArtifactBlobPath("sim-project", "files", "commit/bbbb", "bundle.tgz")),
 				Size:       ptr(int64(9437184)),
 			},
 		},
@@ -3486,8 +3505,8 @@ func simReadyChangedSet() api.ArtifactSet {
 				Name:       "app-debug.apk",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("variant::debug"),
-				LeftUrl:    ptr("/api/projects/sim-project/artifacts/blob?script=screenshots&key=commit/aaaa&file=app-debug.apk"),
-				RightUrl:   ptr("/api/projects/sim-project/artifacts/blob?script=screenshots&key=commit/bbbb&file=app-debug.apk"),
+				LeftUrl:    ptr(simArtifactBlobPath("sim-project", "screenshots", "commit/aaaa", "app-debug.apk")),
+				RightUrl:   ptr(simArtifactBlobPath("sim-project", "screenshots", "commit/bbbb", "app-debug.apk")),
 				Size:       ptr(int64(48522619)),
 			},
 		},
@@ -4111,7 +4130,7 @@ func (s *SimulationServer) GetRepositoryArtifacts(w http.ResponseWriter, r *http
 // show off the flex-wrap layout); "components" demonstrates the in-flight
 // generating state; any other name is a 404.
 func (s *SimulationServer) GetRepositoryArtifact(w http.ResponseWriter, r *http.Request, projectId string, name string, params api.GetRepositoryArtifactParams) {
-	logURL := "/api/projects/" + projectId + "/artifacts/log?script=" + name + "&key=commit/a1b2c3d"
+	logURL := simArtifactLogPath(projectId, name, "commit/a1b2c3d")
 	switch name {
 	case "screenshots":
 		api.WriteJSON(w, http.StatusOK, api.RepositoryArtifactResponse{
@@ -4150,9 +4169,10 @@ func (s *SimulationServer) HandleArtifactLog(w http.ResponseWriter, r *http.Requ
 	// The key is opaque on the real server; here it lets the failure sets
 	// (storybook / dashboard before) resolve to a believable failing log so the
 	// red-bordered terminal treatment is documented.
+	script, key, _ := artifactPathParts(r)
 	lines := simArtifactLog()
-	if strings.Contains(r.URL.Query().Get("key"), "error") {
-		lines = simArtifactFailedLog(r.URL.Query().Get("script"))
+	if strings.Contains(key, "error") {
+		lines = simArtifactFailedLog(script)
 	}
 	api.WriteJSON(w, http.StatusOK, struct {
 		Lines []api.ArtifactLogLine `json:"lines"`

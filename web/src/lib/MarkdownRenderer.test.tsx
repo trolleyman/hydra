@@ -152,7 +152,7 @@ describe('Markdown', () => {
       const img = container.querySelector('img')!
       expect(img).toHaveAttribute(
         'src',
-        '/api/projects/p1/agents/a1/files/blob?path=%2Ftmp%2Fshot.png',
+        '/api/projects/p1/agents/a1/media/blob?path=%2Ftmp%2Fshot.png',
       )
       expect(img).toHaveAttribute('alt', 'shot')
     })
@@ -192,7 +192,7 @@ describe('Markdown', () => {
       const video = container.querySelector('video')!
       expect(video).toHaveAttribute(
         'src',
-        '/api/projects/p1/agents/a1/files/blob?path=%2Ftmp%2Fdemo.webm',
+        '/api/projects/p1/agents/a1/media/blob?path=%2Ftmp%2Fdemo.webm',
       )
       // Controls, so the frame is playable where it sits...
       expect(video).toHaveAttribute('controls')

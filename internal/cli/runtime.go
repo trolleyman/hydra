@@ -573,9 +573,9 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	apiHandler := httppkg.RequestBodyLimitMiddleware(10 * 1024 * 1024)(httppkg.NewHandler(server))
 	mux.Handle("/api/", apiHandler)
 	mux.Handle("/health", apiHandler)
-	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/terminal", server.HandleTerminalWS)
-	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/artifacts", server.HandleArtifactsWS)
-	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/tests", server.HandleTestsWS)
+	mux.HandleFunc("/ws/projects/{project_id}/agents/{agent_id}/terminal", server.HandleTerminalWS)
+	mux.HandleFunc("/ws/projects/{project_id}/agents/{agent_id}/artifacts", server.HandleArtifactsWS)
+	mux.HandleFunc("/ws/projects/{project_id}/agents/{agent_id}/tests", server.HandleTestsWS)
 	mux.HandleFunc("/ws/projects/{project_id}/events", server.HandleEventsWS)
 	mux.HandleFunc("/ws/server/update", server.HandleServerUpdateWS)
 	// Hand-served routes. These sit UNDER /api/ alongside the generated handler
@@ -589,14 +589,14 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	// on prefix, so a route added here is protected without anyone remembering to
 	// extend a list. Two of them (/tests/, /project-icon/) were reachable
 	// unauthenticated for exactly that reason.
-	mux.HandleFunc("POST /api/projects/{project_id}/agents/{id}/shell/close", server.HandleShellClose)
-	mux.HandleFunc("POST /api/projects/{project_id}/agents/{id}/review/close", server.HandleReviewClose)
-	mux.HandleFunc("/api/projects/{project_id}/artifacts/blob", server.HandleArtifactBlob)
-	mux.HandleFunc("/api/projects/{project_id}/artifacts/log", server.HandleArtifactLog)
+	mux.HandleFunc("POST /api/projects/{project_id}/agents/{agent_id}/shell/close", server.HandleShellClose)
+	mux.HandleFunc("POST /api/projects/{project_id}/agents/{agent_id}/review/close", server.HandleReviewClose)
+	mux.HandleFunc("/api/projects/{project_id}/artifacts/{script}/{key_kind}/{key_id}/files/{file...}", server.HandleArtifactBlob)
+	mux.HandleFunc("/api/projects/{project_id}/artifacts/{script}/{key_kind}/{key_id}/log", server.HandleArtifactLog)
 	mux.HandleFunc("/api/projects/{project_id}/tests/log", server.HandleTestLog)
 	mux.HandleFunc("/api/projects/{project_id}/repository/blob", server.HandleRepositoryBlob)
-	mux.HandleFunc("/api/projects/{project_id}/agents/{id}/repository/blob", server.HandleAgentBlob)
-	mux.HandleFunc("GET /api/projects/{project_id}/agents/{id}/files/blob", server.HandleAgentFileBlob)
+	mux.HandleFunc("/api/projects/{project_id}/agents/{agent_id}/repository/blob", server.HandleAgentBlob)
+	mux.HandleFunc("GET /api/projects/{project_id}/agents/{agent_id}/media/blob", server.HandleAgentFileBlob)
 	// GET only: PUT on this same path is the generated setProjectIcon, and falls
 	// through to apiHandler because this pattern does not match it.
 	mux.HandleFunc("GET /api/projects/{project_id}/icon", server.HandleProjectIcon)

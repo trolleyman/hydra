@@ -21,7 +21,7 @@ func (s *Server) ListAgentApprovals(ctx context.Context, request api.ListAgentAp
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -33,7 +33,7 @@ func (s *Server) ListAgentApprovals(ctx context.Context, request api.ListAgentAp
 		}, nil
 	}
 
-	reqs, err := gate.ListRequests(paths.GetApprovalsDirFromProjectRoot(projectRoot, request.Id))
+	reqs, err := gate.ListRequests(paths.GetApprovalsDirFromProjectRoot(projectRoot, request.AgentId))
 	if err != nil {
 		return api.ListAgentApprovals500JSONResponse{
 			Code:    500,
@@ -84,7 +84,7 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -103,7 +103,7 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 		}, nil
 	}
 
-	dir := paths.GetApprovalsDirFromProjectRoot(projectRoot, request.Id)
+	dir := paths.GetApprovalsDirFromProjectRoot(projectRoot, request.AgentId)
 	allow := request.Body.Decision == api.Allow
 	decision := gate.Deny
 	if allow {

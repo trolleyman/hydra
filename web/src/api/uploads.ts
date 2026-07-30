@@ -41,11 +41,11 @@ export function uploadBlobUrl(projectId: string | null, filename: string): strin
 // screenshot it wrote to its worktree or to /tmp). The path is sent exactly as
 // the agent wrote it; the backend translates it to its host location and serves
 // it only if it lands inside that head's worktree, private /tmp, or the project's
-// uploads dir. Backed by GET /api/projects/{id}/agents/{id}/files/blob.
+// uploads dir. Backed by GET /api/projects/{id}/agents/{agent_id}/media/blob.
 export function agentFileUrl(projectId: string, agentId: string, path: string): string {
   const pid = encodeURIComponent(projectId)
   const aid = encodeURIComponent(agentId)
-  return `/api/projects/${pid}/agents/${aid}/files/blob?path=${encodeURIComponent(path)}`
+  return `/api/projects/${pid}/agents/${aid}/media/blob?path=${encodeURIComponent(path)}`
 }
 
 const IMAGE_RE = /^image\//

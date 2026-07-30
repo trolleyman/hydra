@@ -23,24 +23,44 @@ export interface ArtifactRef {
   file: string
 }
 
+// The triple lives in the PATH, laid out to mirror the entry on disk
+// (out/<script>/<kind>/<id>/), so both of these are pure path work:
+//
+//   /api/projects/{project}/artifacts/{script}/{kind}/{id}/files/{file...}
+//
+// `files/` is what separates the contents from the sibling `log` route, and the
+// file may itself contain slashes - hence the greedy tail rather than one
+// segment.
+const ARTIFACT_BLOB_PATH_RE = /^\/api\/projects\/[^/]+\/artifacts\/([^/]+)\/(commit|worktree)\/([^/]+)\/files\/(.+)$/
+
 /** Parses an artifact blob URL back into the triple that addresses it. Returns
  *  null for anything that is not one (an upload, a data: URL, an agent file) -
  *  those have no artifact identity, so they cannot carry a pin. */
 export function artifactRefFromUrl(url: string | null | undefined): ArtifactRef | null {
   if (!url) return null
   // Relative URLs are the norm here, so parse against the document's origin; the
-  // base is discarded, only the query matters.
-  let q: URLSearchParams
+  // base is discarded, only the path matters.
+  let path: string
   try {
-    q = new URL(url, window.location.origin).searchParams
+    path = new URL(url, window.location.origin).pathname
   } catch {
     return null
   }
-  const script = q.get('script')
-  const key = q.get('key')
-  const file = q.get('file')
-  if (!script || !key || !file) return null
-  return { script, key, file }
+  const m = ARTIFACT_BLOB_PATH_RE.exec(path)
+  if (!m) return null
+  // Each segment is escaped on the way out, so decode on the way back in. The
+  // file's separators are structural and must survive, so it is decoded
+  // per-segment rather than in one go - otherwise an encoded %2F inside a
+  // filename would come back as a path separator.
+  try {
+    return {
+      script: decodeURIComponent(m[1]),
+      key: `${m[2]}/${decodeURIComponent(m[3])}`,
+      file: m[4].split('/').map(decodeURIComponent).join('/'),
+    }
+  } catch {
+    return null // malformed percent-encoding
+  }
 }
 
 /** The blob URL that serves the picture an anchor points at - the inverse of
@@ -49,8 +69,18 @@ export function artifactRefFromUrl(url: string | null | undefined): ArtifactRef 
  *  server-side, so this keeps resolving for as long as the comment exists. */
 export function artifactBlobUrl(projectId: string | null, a: ReviewImageAnchor): string | null {
   if (!projectId || !a.script || !a.key || !a.file) return null
-  const q = new URLSearchParams({ script: a.script, key: a.key, file: a.file })
-  return `/api/projects/${encodeURIComponent(projectId)}/artifacts/blob?${q.toString()}`
+  // The key is "<kind>/<id>" and contributes two segments; anything else could
+  // never resolve, so emit nothing rather than a half-formed URL.
+  const slash = a.key.indexOf('/')
+  if (slash <= 0 || slash === a.key.length - 1) return null
+  const kind = a.key.slice(0, slash)
+  const id = a.key.slice(slash + 1)
+  // The file goes last so the URL ends in the real filename - which is what a
+  // browser's "Save image as..." offers. Escaped per segment, keeping the
+  // separators, since an artifact's contents can nest.
+  const file = a.file.replace(/^\//, '').split('/').map(encodeURIComponent).join('/')
+  return `/api/projects/${encodeURIComponent(projectId)}/artifacts/`
+    + `${encodeURIComponent(a.script)}/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/files/${file}`
 }
 
 /** Which half of a comparison a URL is, given the pair. Null when the picture is

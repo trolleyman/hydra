@@ -5,7 +5,42 @@ import {
   formatTimecode, sameArtifactPicture, sideOfUrl,
 } from './artifactAnchor'
 
-const BLOB = '/api/projects/p1/artifacts/blob?script=screenshots&key=commit%2Fabc1234def0567&file=home-dark.png'
+const BLOB = '/api/projects/p1/artifacts/screenshots/commit/abc1234def0567/files/home-dark.png'
+
+// The triple moved from a query string into the path, so build and parse are now
+// two hand-written codecs that have to agree exactly. A pin stores the triple and
+// re-derives its URL on every render, so any asymmetry silently points a review
+// comment at the wrong picture (or none) rather than failing loudly - which is
+// why these round-trip rather than asserting one direction.
+describe('artifact URL round-trip', () => {
+  it.each([
+    ['a plain file', 'screenshots', 'commit/abc1234def0567', 'home-dark.png'],
+    ['a worktree key', 'screenshots', 'worktree/deadbeef01', 'home-dark.png'],
+    ['a NESTED file, whose slashes are structural', 'screenshots', 'commit/abc123', 'mobile/small/home.png'],
+    ['a script name needing escaping', 'my screenshots+v2', 'commit/abc123', 'home.png'],
+    ['a filename needing escaping', 'screenshots', 'commit/abc123', 'home (dark) #1.png'],
+    ['a filename containing an encoded separator', 'screenshots', 'commit/abc123', 'a%2Fb.png'],
+  ])('survives %s', (_label, script, key, file) => {
+    const url = artifactBlobUrl('p1', { script, key, file } as ReviewImageAnchor)
+    expect(url).not.toBeNull()
+    expect(artifactRefFromUrl(url)).toEqual({ script, key, file })
+  })
+
+  // The whole reason the file goes last in the path: a browser derives the
+  // "Save image as..." name from the final segment, and every artifact URL used
+  // to end in "blob".
+  it('ends in the real filename so a download is not named "blob"', () => {
+    const url = artifactBlobUrl('p1', { script: 's', key: 'commit/a1', file: 'deep/report.pdf' } as ReviewImageAnchor)
+    expect(url?.endsWith('/report.pdf')).toBe(true)
+  })
+
+  // A key is "<kind>/<id>" and contributes two path segments; anything else could
+  // never resolve, so emit nothing rather than a URL that 404s.
+  it.each([['no separator', 'commit'], ['empty id', 'commit/'], ['empty kind', '/abc']])(
+    'refuses to build a URL for a malformed key (%s)', (_label, key) => {
+      expect(artifactBlobUrl('p1', { script: 's', key, file: 'x.png' } as ReviewImageAnchor)).toBeNull()
+    })
+})
 
 describe('artifactRefFromUrl', () => {
   it('recovers the triple that addresses an artifact blob', () => {
@@ -22,8 +57,8 @@ describe('artifactRefFromUrl', () => {
   it.each([
     ['a data URL', 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='],
     ['an upload', '/api/projects/p1/uploads/blob?name=1699-shot.png'],
-    ['an agent file', '/api/projects/p1/agents/a1/files/blob?path=%2Ftmp%2Fx.png'],
-    ['a blob URL missing the file', '/api/projects/p1/artifacts/blob?script=s&key=commit%2Fa'],
+    ['an agent file', '/api/projects/p1/agents/a1/media/blob?path=%2Ftmp%2Fx.png'],
+    ['a blob URL missing the file', '/api/projects/p1/artifacts/s/commit/a/files/'],
     ['nothing at all', ''],
   ])('returns null for %s', (_label, url) => {
     expect(artifactRefFromUrl(url)).toBeNull()

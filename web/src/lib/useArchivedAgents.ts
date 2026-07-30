@@ -26,7 +26,9 @@ export function useArchivedAgents(currentProjectId: string | null): {
     let cancelled = false
     archivedLoadingRef.current = true
     setArchivedLoading(true)
-    api.default.listArchivedAgents(currentProjectId, ARCHIVED_PAGE_SIZE, 0)
+    // One listAgents operation now, with archived as a flag: the old
+    // /agents/archived path shadowed a head whose id was "archived".
+    api.default.listAgents(currentProjectId, true, ARCHIVED_PAGE_SIZE, 0)
       .then((page) => { if (!cancelled) setArchivedFirstPage(page) })
       .catch(() => { if (!cancelled) setArchivedLoading(false) })
       .finally(() => { archivedLoadingRef.current = false })
@@ -39,7 +41,7 @@ export function useArchivedAgents(currentProjectId: string | null): {
     if (!hasMore) return
     archivedLoadingRef.current = true
     setArchivedLoading(true)
-    api.default.listArchivedAgents(currentProjectId, ARCHIVED_PAGE_SIZE, current.length)
+    api.default.listAgents(currentProjectId, true, ARCHIVED_PAGE_SIZE, current.length)
       .then((page) => appendArchived(page))
       .catch(() => setArchivedLoading(false))
       .finally(() => { archivedLoadingRef.current = false })

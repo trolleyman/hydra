@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
@@ -24,7 +25,7 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -536,22 +537,45 @@ func toAPILog(lines []artifacts.LogLine) []api.ArtifactLogLine {
 	return out
 }
 
-// blobURL builds the (same-origin) URL the frontend fetches an artifact file from.
+// artifactBase builds the path prefix identifying one artifact entry, laid out
+// to mirror the on-disk entry dir (out/<script>/<kind>/<id>/). A key that is not
+// the expected "<kind>/<id>" shape yields "" so the caller emits no URL rather
+// than a half-formed one - keyRe is enforced again server-side, this is just to
+// avoid minting a path that could never resolve.
+func artifactBase(projectID, script, key string) string {
+	kind, id, ok := strings.Cut(key, "/")
+	if !ok || kind == "" || id == "" {
+		return ""
+	}
+	return fmt.Sprintf("/api/projects/%s/artifacts/%s/%s/%s",
+		url.PathEscape(projectID), url.PathEscape(script), url.PathEscape(kind), url.PathEscape(id))
+}
+
+// blobURL builds the (same-origin) URL the frontend fetches an artifact file
+// from. The file goes LAST and unescaped-per-segment, so the URL ends in the
+// real filename - which is what a browser's "Save image as..." offers, and why
+// this is a path rather than ?file=. An artifact's contents can nest, so each
+// segment is escaped individually and the separators are kept.
 func blobURL(projectID, script, key, file string) string {
-	q := url.Values{}
-	q.Set("script", script)
-	q.Set("key", key)
-	q.Set("file", file)
-	return fmt.Sprintf("/api/projects/%s/artifacts/blob?%s", url.PathEscape(projectID), q.Encode())
+	base := artifactBase(projectID, script, key)
+	if base == "" {
+		return ""
+	}
+	parts := strings.Split(strings.TrimPrefix(filepath.ToSlash(file), "/"), "/")
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	return base + "/files/" + strings.Join(parts, "/")
 }
 
 // logURL builds the (same-origin) URL the frontend fetches a settled side's
 // persisted build log from (see HandleArtifactLog).
 func logURL(projectID, script, key string) string {
-	q := url.Values{}
-	q.Set("script", script)
-	q.Set("key", key)
-	return fmt.Sprintf("/api/projects/%s/artifacts/log?%s", url.PathEscape(projectID), q.Encode())
+	base := artifactBase(projectID, script, key)
+	if base == "" {
+		return ""
+	}
+	return base + "/log"
 }
 
 // nonEmptyPtr returns &s, or nil when s is empty, so an absent progress line
@@ -589,9 +613,9 @@ func (s *Server) HandleArtifactLog(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	q := r.URL.Query()
+	script, key, _ := artifactPathParts(r)
 	mgr := s.Artifacts.Manager(projectRoot)
-	lines, ok := mgr.ReadLog(q.Get("script"), q.Get("key"))
+	lines, ok := mgr.ReadLog(script, key)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -611,9 +635,9 @@ func (s *Server) HandleArtifactBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q := r.URL.Query()
+	script, key, file := artifactPathParts(r)
 	mgr := s.Artifacts.Manager(projectRoot)
-	path, contentType, err := mgr.BlobPath(q.Get("script"), q.Get("key"), q.Get("file"))
+	path, contentType, err := mgr.BlobPath(script, key, file)
 	if err != nil {
 		http.Error(w, "invalid artifact request", http.StatusBadRequest)
 		return
@@ -638,6 +662,22 @@ func (s *Server) HandleArtifactBlob(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(path)+`"`)
 	}
 	http.ServeContent(w, r, filepath.Base(path), info.ModTime(), f)
+}
+
+// artifactPathParts pulls an artifact's identifying triple out of the request
+// path. The route is
+// /api/projects/{project_id}/artifacts/{script}/{key_kind}/{key_id}/... , which
+// mirrors the on-disk entry (out/<script>/<kind>/<id>/) exactly, so the key is
+// simply its two segments rejoined - the same "<kind>/<id>" string the manager
+// stores and keyRe validates. Callers pass the result straight to BlobPath /
+// ReadLog, which do the validating; nothing here needs to trust it.
+//
+// `file` is the trailing {file...} wildcard and MAY contain slashes, since an
+// artifact's contents can nest. BlobPath confines it to the entry directory.
+func artifactPathParts(r *http.Request) (script, key, file string) {
+	return r.PathValue("script"),
+		r.PathValue("key_kind") + "/" + r.PathValue("key_id"),
+		r.PathValue("file")
 }
 
 func joinErrs(a, b error) string {

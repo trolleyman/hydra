@@ -31,7 +31,7 @@ import (
 // GetReviewComments returns every comment on a head, drafts included. Only the
 // browser reaches this; the agent-facing read is reviewstore.PublishedComments.
 func (s *Server) GetReviewComments(ctx context.Context, request api.GetReviewCommentsRequestObject) (api.GetReviewCommentsResponseObject, error) {
-	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.AgentId)
 	if errResp != nil {
 		return api.GetReviewComments404JSONResponse(*errResp), nil
 	}
@@ -41,7 +41,7 @@ func (s *Server) GetReviewComments(ctx context.Context, request api.GetReviewCom
 // AddReviewComment stores a comment - a draft by default, published straight away
 // for the one-shot "Comment to agent" path.
 func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewCommentRequestObject) (api.AddReviewCommentResponseObject, error) {
-	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.AgentId)
 	if errResp != nil {
 		return api.AddReviewComment404JSONResponse(*errResp), nil
 	}
@@ -90,7 +90,7 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 
 // UpdateReviewComment edits a draft's body.
 func (s *Server) UpdateReviewComment(ctx context.Context, request api.UpdateReviewCommentRequestObject) (api.UpdateReviewCommentResponseObject, error) {
-	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.AgentId)
 	if errResp != nil {
 		return api.UpdateReviewComment404JSONResponse(*errResp), nil
 	}
@@ -113,7 +113,7 @@ func (s *Server) UpdateReviewComment(ctx context.Context, request api.UpdateRevi
 
 // DeleteReviewComment discards a draft. Its number stays retired.
 func (s *Server) DeleteReviewComment(ctx context.Context, request api.DeleteReviewCommentRequestObject) (api.DeleteReviewCommentResponseObject, error) {
-	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.AgentId)
 	if errResp != nil {
 		return api.DeleteReviewComment404JSONResponse(*errResp), nil
 	}
@@ -125,7 +125,7 @@ func (s *Server) DeleteReviewComment(ctx context.Context, request api.DeleteRevi
 
 // PublishReviewComments publishes drafts and notifies the head's agent by id.
 func (s *Server) PublishReviewComments(ctx context.Context, request api.PublishReviewCommentsRequestObject) (api.PublishReviewCommentsResponseObject, error) {
-	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.AgentId)
 	if errResp != nil {
 		return api.PublishReviewComments404JSONResponse(*errResp), nil
 	}
@@ -267,7 +267,7 @@ func (s *Server) sendReviewerNotice(projectRoot, slot, line string) bool {
 // PR, and making them two buttons in one gutter would put the storage layout in
 // front of the person using it.
 func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveReviewCommentRequestObject) (api.ResolveReviewCommentResponseObject, error) {
-	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.AgentId)
 	if errResp != nil {
 		return api.ResolveReviewComment404JSONResponse(*errResp), nil
 	}
@@ -294,7 +294,7 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 
 // MarkReviewCommentsRead records what the user has seen.
 func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkReviewCommentsReadRequestObject) (api.MarkReviewCommentsReadResponseObject, error) {
-	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.AgentId)
 	if errResp != nil {
 		return api.MarkReviewCommentsRead404JSONResponse(*errResp), nil
 	}

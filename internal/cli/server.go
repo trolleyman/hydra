@@ -166,13 +166,13 @@ func runSimulationServer() error {
 	api.HandlerFromMux(server, mux)
 
 	// Mock WebSocket terminal endpoint
-	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/terminal", server.HandleTerminalWS)
+	mux.HandleFunc("/ws/projects/{project_id}/agents/{agent_id}/terminal", server.HandleTerminalWS)
 
 	// Mock WebSocket artifacts endpoint (streams the simulated artifact states).
-	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/artifacts", server.HandleArtifactsWS)
+	mux.HandleFunc("/ws/projects/{project_id}/agents/{agent_id}/artifacts", server.HandleArtifactsWS)
 
 	// Mock WebSocket tests endpoint (streams the simulated test verdicts).
-	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/tests", server.HandleTestsWS)
+	mux.HandleFunc("/ws/projects/{project_id}/agents/{agent_id}/tests", server.HandleTestsWS)
 
 	// Mock WebSocket events endpoint (sends the initial refetch nudge, then idles).
 	mux.HandleFunc("/ws/projects/{project_id}/events", server.HandleEventsWS)
@@ -180,11 +180,11 @@ func runSimulationServer() error {
 	// Raw repository blob - image bytes and raw text (mirrors the real server's
 	// hand-served route; backs the image preview and the file viewer's Raw link).
 	mux.HandleFunc("/api/projects/{project_id}/repository/blob", server.HandleRepositoryBlob)
-	mux.HandleFunc("/api/projects/{project_id}/agents/{id}/repository/blob", server.HandleAgentBlob)
+	mux.HandleFunc("/api/projects/{project_id}/agents/{agent_id}/repository/blob", server.HandleAgentBlob)
 
 	// Images an agent embedded in a chat message by local path (mirrors the real
 	// server's hand-served route), so the inline-image rendering can be demoed.
-	mux.HandleFunc("GET /api/projects/{project_id}/agents/{id}/files/blob", server.HandleAgentFileBlob)
+	mux.HandleFunc("GET /api/projects/{project_id}/agents/{agent_id}/media/blob", server.HandleAgentFileBlob)
 
 	// Prompt/comment attachments (mirrors the real server's hand-served routes),
 	// so an attachment chip has bytes behind it here too - the review-comment and
@@ -200,8 +200,8 @@ func runSimulationServer() error {
 	// are (blob?script=&key=&file=), because that triple is an artifact's identity
 	// and the review pins derive their anchor from it - a data URL is a picture
 	// nothing can be pinned to. See simArtifactBlob.
-	mux.HandleFunc("/api/projects/{project_id}/artifacts/blob", server.HandleArtifactBlob)
-	mux.HandleFunc("/api/projects/{project_id}/artifacts/log", server.HandleArtifactLog)
+	mux.HandleFunc("/api/projects/{project_id}/artifacts/{script}/{key_kind}/{key_id}/files/{file...}", server.HandleArtifactBlob)
+	mux.HandleFunc("/api/projects/{project_id}/artifacts/{script}/{key_kind}/{key_id}/log", server.HandleArtifactLog)
 	mux.HandleFunc("/api/projects/{project_id}/tests/log", server.HandleTestLog)
 
 	// Simulated self-update stream, so the update panel is drivable here too.

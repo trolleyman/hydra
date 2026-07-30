@@ -30,8 +30,11 @@ export type PictureKind = 'artifact' | 'agent-file' | 'upload' | 'other'
 // not the head of the string. Anchored at both ends, which also subsumes what the
 // prefix check was guarding against: a filename containing "/uploads/" cannot be
 // mistaken for an upload, because a pathname is only ever these exact routes.
-const ARTIFACT_BLOB_RE = /^\/api\/projects\/[^/]+\/artifacts\/blob$/
-const AGENT_FILE_BLOB_RE = /^\/api\/projects\/[^/]+\/agents\/[^/]+\/files\/blob$/
+// An artifact carries its identity in the path (script / key-kind / key-id /
+// files / file...), and the file may contain slashes, so this ends open rather
+// than anchored on a fixed segment count.
+const ARTIFACT_BLOB_RE = /^\/api\/projects\/[^/]+\/artifacts\/[^/]+\/(commit|worktree)\/[^/]+\/files\/.+$/
+const AGENT_FILE_BLOB_RE = /^\/api\/projects\/[^/]+\/agents\/[^/]+\/media\/blob$/
 const UPLOAD_BLOB_RE = /^\/api\/projects\/[^/]+\/uploads\/blob$/
 
 export function pictureKind(url: string | null | undefined): PictureKind {

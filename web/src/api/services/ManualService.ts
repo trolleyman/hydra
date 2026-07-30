@@ -31,59 +31,61 @@ export class ManualService {
         });
     }
     /**
-     * Serve a single generated artifact file (raw bytes)
+     * Serve one file from a generated artifact (raw bytes)
      * @param projectId Project ID
-     * @param script Artifact script name
-     * @param key Artifact cache key (e.g. commit/<sha> or worktree/<hash>)
-     * @param file Artifact-relative path of the file to serve
-     * @returns binary The artifact's bytes. Content-Type is sniffed per file.
+     * @param script Artifact script name, sanitized as it is on disk
+     * @param keyKind Which kind of cache key this is. A commit is keyed by resolved SHA, the working tree by a content fingerprint; they live in separate self-describing subtrees.
+     * @param keyId The key's hex id - a commit SHA or a worktree content hash
+     * @param file Artifact-relative path of the file. MAY CONTAIN SLASHES - see the note above this path. Confined to the artifact's directory server-side.
+     * @returns binary The file's bytes. Content-Type is derived per file, and download-class artifacts (.apk, .zip) also get a Content-Disposition.
      * @throws ApiError
      */
     public getArtifactBlob(
         projectId: string,
         script: string,
-        key: string,
+        keyKind: 'commit' | 'worktree',
+        keyId: string,
         file: string,
     ): CancelablePromise<Blob> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/artifacts/blob',
+            url: '/api/projects/{project_id}/artifacts/{script}/{key_kind}/{key_id}/files/{file}',
             path: {
                 'project_id': projectId,
-            },
-            query: {
                 'script': script,
-                'key': key,
+                'key_kind': keyKind,
+                'key_id': keyId,
                 'file': file,
             },
             errors: {
+                400: `Invalid artifact request (bad key, unsupported type, escaping path)`,
                 404: `Project, artifact or file not found`,
-                500: `Internal Server Error`,
             },
         });
     }
     /**
      * Read a settled artifact generation's captured build log
      * @param projectId Project ID
-     * @param script Artifact script name
-     * @param key Artifact cache key
+     * @param script Artifact script name, sanitized as it is on disk
+     * @param keyKind Cache-key kind
+     * @param keyId The key's hex id
      * @returns ArtifactLogResponse OK
      * @throws ApiError
      */
     public getArtifactLog(
         projectId: string,
         script: string,
-        key: string,
+        keyKind: 'commit' | 'worktree',
+        keyId: string,
     ): CancelablePromise<ArtifactLogResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/artifacts/log',
+            url: '/api/projects/{project_id}/artifacts/{script}/{key_kind}/{key_id}/log',
             path: {
                 'project_id': projectId,
-            },
-            query: {
                 'script': script,
-                'key': key,
+                'key_kind': keyKind,
+                'key_id': keyId,
             },
             errors: {
                 404: `Project or log not found`,
@@ -149,22 +151,22 @@ export class ManualService {
     /**
      * Serve a file from a head's worktree (raw bytes)
      * @param projectId Project ID
-     * @param id Head ID
+     * @param agentId Head ID
      * @param path Repo-relative path of the file to serve
      * @returns binary The file's bytes. Content-Type is sniffed per file.
      * @throws ApiError
      */
     public getAgentRepositoryBlob(
         projectId: string,
-        id: string,
+        agentId: string,
         path: string,
     ): CancelablePromise<Blob> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/repository/blob',
+            url: '/api/projects/{project_id}/agents/{agent_id}/repository/blob',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'path': path,
@@ -177,22 +179,22 @@ export class ManualService {
     /**
      * Serve a file a head referenced by local path (raw bytes)
      * @param projectId Project ID
-     * @param id Head ID
+     * @param agentId Head ID
      * @param path Absolute host path of the file. Resolved against an allow-list of roots (the head's worktree, the project's uploads dir, the head's private /tmp) and restricted to servable extensions.
      * @returns binary The file's bytes. Content-Type is sniffed per file.
      * @throws ApiError
      */
     public getAgentFileBlob(
         projectId: string,
-        id: string,
+        agentId: string,
         path: string,
     ): CancelablePromise<Blob> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/files/blob',
+            url: '/api/projects/{project_id}/agents/{agent_id}/media/blob',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'path': path,
@@ -263,7 +265,7 @@ export class ManualService {
      * Terminate one web bash shell immediately
      * Closing a terminal tab kills its process now, instead of waiting out the idle grace period - which only covers reloads and transient disconnects.
      * @param projectId Project ID
-     * @param id Head ID
+     * @param agentId Head ID
      * @param shellId The shell's token, as used when opening its WebSocket
      * @param sandboxed Which of the head's two shells to close. Sandboxed and host shells are separate sessions with separate ids, so this has to match the one that was opened.
      * @returns void
@@ -271,16 +273,16 @@ export class ManualService {
      */
     public closeShell(
         projectId: string,
-        id: string,
+        agentId: string,
         shellId?: string,
         sandboxed: boolean = true,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/shell/close',
+            url: '/api/projects/{project_id}/agents/{agent_id}/shell/close',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'shell_id': shellId,
@@ -295,20 +297,20 @@ export class ManualService {
      * Terminate a head's review session immediately
      * The review slot is a second agent against the head's own detached checkout (docs/review-agent.md), so closing its tab has to end that session rather than the head's.
      * @param projectId Project ID
-     * @param id Head ID - the slot is derived from it, not passed separately
+     * @param agentId Head ID - the slot is derived from it, not passed separately
      * @returns void
      * @throws ApiError
      */
     public closeReviewSession(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/review/close',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/close',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 400: `Agent ID required`,

@@ -234,7 +234,7 @@ func previewNotFound(details string) api.ErrorResponse {
 // their instance status, plus still-live instances at other versions. Purely a
 // read - nothing spawns here.
 func (s *Server) GetAgentPreviews(ctx context.Context, request api.GetAgentPreviewsRequestObject) (api.GetAgentPreviewsResponseObject, error) {
-	res, err := s.resolvePreviews(ctx, request.ProjectId, request.Id, request.Params.HeadRef, request.Params.IncludeUncommitted)
+	res, err := s.resolvePreviews(ctx, request.ProjectId, request.AgentId, request.Params.HeadRef, request.Params.IncludeUncommitted)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -261,7 +261,7 @@ func (s *Server) StartAgentPreview(ctx context.Context, request api.StartAgentPr
 	if s.Previews == nil {
 		return api.StartAgentPreview404JSONResponse(previewNotFound("previews disabled")), nil
 	}
-	res, err := s.resolvePreviews(ctx, request.ProjectId, request.Id, request.Params.HeadRef, request.Params.IncludeUncommitted)
+	res, err := s.resolvePreviews(ctx, request.ProjectId, request.AgentId, request.Params.HeadRef, request.Params.IncludeUncommitted)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -287,7 +287,7 @@ func (s *Server) StopAgentPreview(ctx context.Context, request api.StopAgentPrev
 	if s.Previews == nil {
 		return api.StopAgentPreview404JSONResponse(previewNotFound("previews disabled")), nil
 	}
-	res, err := s.resolvePreviews(ctx, request.ProjectId, request.Id, request.Params.HeadRef, request.Params.IncludeUncommitted)
+	res, err := s.resolvePreviews(ctx, request.ProjectId, request.AgentId, request.Params.HeadRef, request.Params.IncludeUncommitted)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}

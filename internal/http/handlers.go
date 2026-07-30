@@ -816,11 +816,48 @@ func (s *Server) agentResponseWithReview(h heads.Head) api.AgentResponse {
 	return resp
 }
 
+// ListAgents lists a project's heads - live by default, archived with
+// ?archived=true.
+//
+// One operation rather than two paths because the old /agents/archived sat in
+// the same position as /agents/{agent_id}, and a literal beats a wildcard in
+// ServeMux: a head whose id was "archived" (nothing forbids it - ValidateHeadID
+// enforces only git-ref shape) was simply unaddressable. A query param cannot
+// collide with an id.
+//
+// The two listings genuinely differ, which is why they branch rather than share
+// a code path: live heads come from the session registry and are enriched with
+// review and test summaries, archived ones are read straight from the DB and
+// paginated. They agree on the response shape, so only the source differs.
 func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestObject) (api.ListAgentsResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+
+	if request.Params.Archived != nil && *request.Params.Archived {
+		limit, offset := 0, 0
+		if request.Params.Limit != nil {
+			limit = *request.Params.Limit
+		}
+		if request.Params.Offset != nil && *request.Params.Offset > 0 {
+			offset = *request.Params.Offset
+		}
+		headList, err := heads.ListArchivedHeads(s.DB, projectRoot, limit, offset)
+		if err != nil {
+			return nil, &apiError{ //errtrace:skip
+				Code: 500,
+				Type: api.ErrorResponseErrorInternalError,
+				Err:  err,
+			}
+		}
+		resp := make(api.ListAgents200JSONResponse, len(headList))
+		for i, h := range headList {
+			resp[i] = agentResponse(h)
+		}
+		return resp, nil
+	}
+
 	headList, err := heads.ListHeads(ctx, s.Sessions, s.DB, projectRoot)
 	if err != nil {
 		return nil, &apiError{ //errtrace:skip
@@ -833,33 +870,6 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 	for i, h := range headList {
 		resp[i] = s.agentResponseWithReview(h)
 		resp[i].Tests = s.testSummaryFor(projectRoot, h)
-	}
-	return resp, nil
-}
-
-func (s *Server) ListArchivedAgents(_ context.Context, request api.ListArchivedAgentsRequestObject) (api.ListArchivedAgentsResponseObject, error) {
-	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	limit, offset := 0, 0
-	if request.Params.Limit != nil {
-		limit = *request.Params.Limit
-	}
-	if request.Params.Offset != nil && *request.Params.Offset > 0 {
-		offset = *request.Params.Offset
-	}
-	headList, err := heads.ListArchivedHeads(s.DB, projectRoot, limit, offset)
-	if err != nil {
-		return nil, &apiError{ //errtrace:skip
-			Code: 500,
-			Type: api.ErrorResponseErrorInternalError,
-			Err:  err,
-		}
-	}
-	resp := make(api.ListArchivedAgents200JSONResponse, len(headList))
-	for i, h := range headList {
-		resp[i] = agentResponse(h)
 	}
 	return resp, nil
 }
@@ -1870,14 +1880,14 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	if head == nil {
 		// Fall back to the archived (killed/merged) record, so an archived
 		// agent's read-only page still loads on a cold open / hard refresh.
-		head, err = heads.GetArchivedHeadByID(s.DB, request.Id)
+		head, err = heads.GetArchivedHeadByID(s.DB, request.AgentId)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -1943,7 +1953,7 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -1975,14 +1985,14 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 				Details: fmt.Sprintf("base branch %q does not exist: %v", baseBranch, err),
 			}, nil
 		}
-		if err := s.DB.UpdateAgentBaseBranch(request.Id, baseBranch); err != nil {
+		if err := s.DB.UpdateAgentBaseBranch(request.AgentId, baseBranch); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 		head.BaseBranch = baseBranch
 	}
 
 	if title != "" {
-		if err := s.DB.UpdateAgentTitle(request.Id, title); err != nil {
+		if err := s.DB.UpdateAgentTitle(request.AgentId, title); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 		head.Title = title
@@ -1998,7 +2008,7 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			}, nil
 		}
 		if chatMode != head.ChatMode {
-			if err := s.DB.UpdateAgentChatMode(request.Id, chatMode); err != nil {
+			if err := s.DB.UpdateAgentChatMode(request.AgentId, chatMode); err != nil {
 				return nil, errtrace.Wrap(err)
 			}
 			head.ChatMode = chatMode
@@ -2033,7 +2043,7 @@ func (s *Server) GenerateAgentTitle(ctx context.Context, request api.GenerateAge
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2054,14 +2064,14 @@ func (s *Server) GenerateAgentTitle(ctx context.Context, request api.GenerateAge
 			Details: "this agent has no task prompt to summarise",
 		}, nil
 	case errors.Is(err, heads.ErrTitleTimeout):
-		log.Printf("api: generate title for %s: %v", request.Id, err)
+		log.Printf("api: generate title for %s: %v", request.AgentId, err)
 		return api.GenerateAgentTitle502JSONResponse{
 			Code:    502,
 			Error:   api.ErrorResponseErrorInternalError,
 			Details: "the title model took too long to answer - try again",
 		}, nil
 	case err != nil:
-		log.Printf("api: generate title for %s: %v", request.Id, err)
+		log.Printf("api: generate title for %s: %v", request.AgentId, err)
 		return api.GenerateAgentTitle502JSONResponse{
 			Code:    502,
 			Error:   api.ErrorResponseErrorInternalError,
@@ -2076,7 +2086,7 @@ func (s *Server) MarkAgentRead(ctx context.Context, request api.MarkAgentReadReq
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2087,7 +2097,7 @@ func (s *Server) MarkAgentRead(ctx context.Context, request api.MarkAgentReadReq
 			Details: "agent not found",
 		}, nil
 	}
-	if err := s.DB.MarkAgentRead(request.Id); err != nil {
+	if err := s.DB.MarkAgentRead(request.AgentId); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	// Clearing the unread flag changes both this project's list and the
@@ -2101,7 +2111,7 @@ func (s *Server) MarkAgentUnread(ctx context.Context, request api.MarkAgentUnrea
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2112,7 +2122,7 @@ func (s *Server) MarkAgentUnread(ctx context.Context, request api.MarkAgentUnrea
 			Details: "agent not found",
 		}, nil
 	}
-	if err := s.DB.RaiseUnread(request.Id); err != nil {
+	if err := s.DB.RaiseUnread(request.AgentId); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	// Raising the unread flag changes both this project's list and the
@@ -2126,7 +2136,7 @@ func (s *Server) MergeAgent(ctx context.Context, request api.MergeAgentRequestOb
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2307,7 +2317,7 @@ func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgen
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2384,7 +2394,7 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2459,8 +2469,8 @@ func (s *Server) RestartAgentSession(ctx context.Context, request api.RestartAge
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	log.Printf("api: restart agent session request: id=%q, project=%q", request.Id, projectRoot)
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	log.Printf("api: restart agent session request: id=%q, project=%q", request.AgentId, projectRoot)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2510,9 +2520,9 @@ func (s *Server) ResumeAgent(ctx context.Context, request api.ResumeAgentRequest
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	log.Printf("api: resume archived agent request: id=%q, project=%q", request.Id, projectRoot)
+	log.Printf("api: resume archived agent request: id=%q, project=%q", request.AgentId, projectRoot)
 
-	newHead, err := heads.ResumeArchivedHead(ctx, s.Sessions, s.DB, projectRoot, request.Id, 0, 0)
+	newHead, err := heads.ResumeArchivedHead(ctx, s.Sessions, s.DB, projectRoot, request.AgentId, 0, 0)
 	if err != nil {
 		if errors.Is(err, db.ErrOperationInProgress) {
 			return api.ResumeAgent409JSONResponse{
@@ -2540,8 +2550,8 @@ func (s *Server) KillAgent(ctx context.Context, request api.KillAgentRequestObje
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	log.Printf("api: kill agent request: id=%q, project=%q", request.Id, projectRoot)
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	log.Printf("api: kill agent request: id=%q, project=%q", request.AgentId, projectRoot)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2578,16 +2588,16 @@ func (s *Server) PurgeAgent(ctx context.Context, request api.PurgeAgentRequestOb
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	log.Printf("api: purge agent request: id=%q, project=%q", request.Id, projectRoot)
+	log.Printf("api: purge agent request: id=%q, project=%q", request.AgentId, projectRoot)
 
 	// Resolve a live head first; fall back to the archived record (the common
 	// case - purging from the read-only archived-history view).
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	if head == nil {
-		head, err = heads.GetArchivedHeadByID(s.DB, request.Id)
+		head, err = heads.GetArchivedHeadByID(s.DB, request.AgentId)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
 		}
@@ -2812,7 +2822,7 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -2913,7 +2923,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -3159,7 +3169,7 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -3278,7 +3288,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	switch err := s.sendAgentInput(ctx, projectRoot, request.Id, request.Body.Text, derefOr(request.Body.Origin, "")); {
+	switch err := s.sendAgentInput(ctx, projectRoot, request.AgentId, request.Body.Text, derefOr(request.Body.Origin, "")); {
 	case errors.Is(err, errAgentNotRunning):
 		return api.SendAgentInput404JSONResponse{
 			Code:    404,

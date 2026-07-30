@@ -216,7 +216,7 @@ export class DefaultService {
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'PUT',
-            url: '/api/projects/order',
+            url: '/api/projects',
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -330,7 +330,7 @@ export class DefaultService {
     ): CancelablePromise<ConfigTomlResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/config-toml',
+            url: '/api/projects/{project_id}/config/toml',
             path: {
                 'project_id': projectId,
             },
@@ -351,7 +351,7 @@ export class DefaultService {
     ): CancelablePromise<ConfigTomlResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/config-toml-preview',
+            url: '/api/config/preview',
             query: {
                 'path': path,
             },
@@ -385,17 +385,28 @@ export class DefaultService {
     /**
      * List all Hydra agents (heads)
      * @param projectId Project ID to scope the agent list
+     * @param archived List archived (killed/merged) heads instead of live ones, newest first. Archived entries are read straight from the DB, so they carry no live session, review or test summary.
+     * @param limit Page size; archived listings only
+     * @param offset Page offset; archived listings only
      * @returns AgentResponse OK
      * @throws ApiError
      */
     public listAgents(
         projectId: string,
+        archived: boolean = false,
+        limit?: number,
+        offset?: number,
     ): CancelablePromise<Array<AgentResponse>> {
         return this.httpRequest.request({
             method: 'GET',
             url: '/api/projects/{project_id}/agents',
             path: {
                 'project_id': projectId,
+            },
+            query: {
+                'archived': archived,
+                'limit': limit,
+                'offset': offset,
             },
             errors: {
                 404: `Project Not Found`,
@@ -431,52 +442,22 @@ export class DefaultService {
         });
     }
     /**
-     * List archived (killed/merged) Hydra agents, newest first
-     * Returns a page of finished agents retained for the browsable history list. Supports limit/offset for infinite scroll.
-     * @param projectId Project ID to scope the archived agent list
-     * @param limit Maximum number of archived agents to return (page size). Omit or <=0 for all.
-     * @param offset Number of archived agents to skip (for pagination).
-     * @returns AgentResponse OK
-     * @throws ApiError
-     */
-    public listArchivedAgents(
-        projectId: string,
-        limit?: number,
-        offset?: number,
-    ): CancelablePromise<Array<AgentResponse>> {
-        return this.httpRequest.request({
-            method: 'GET',
-            url: '/api/projects/{project_id}/agents/archived',
-            path: {
-                'project_id': projectId,
-            },
-            query: {
-                'limit': limit,
-                'offset': offset,
-            },
-            errors: {
-                404: `Project Not Found`,
-                500: `Internal Server Error`,
-            },
-        });
-    }
-    /**
      * Restart a Hydra agent (kill and respawn with the same prompt)
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns AgentResponse OK (Agent restarted, new agent returned)
      * @throws ApiError
      */
     public restartAgent(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/restart',
+            url: '/api/projects/{project_id}/agents/{agent_id}/restart',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -489,20 +470,20 @@ export class DefaultService {
      * Restart just the agent process (keeps the worktree, branch and conversation)
      * Stops the running CLI process (claude/codex/...) and relaunches it in a fresh sandbox, resuming the same conversation. Unlike restartAgent this does no teardown: the worktree, branch, DB record and transcript are untouched.
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns void
      * @throws ApiError
      */
     public restartAgentSession(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/restart-session',
+            url: '/api/projects/{project_id}/agents/{agent_id}/restart/session',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -515,20 +496,20 @@ export class DefaultService {
      * Resume an archived (killed/merged) agent, restoring its conversation
      * Revives a killed or merged agent: recreates its worktree and branch off the current base, un-archives the record, and relaunches the agent so it continues from its saved conversation transcript (the file changes start fresh on a clean branch). Depends on the host conversation transcript still existing.
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns AgentResponse OK (Agent resumed, revived live agent returned)
      * @throws ApiError
      */
     public resumeAgent(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/resume',
+            url: '/api/projects/{project_id}/agents/{agent_id}/resume',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found (no archived agent with that ID)`,
@@ -540,7 +521,7 @@ export class DefaultService {
     /**
      * Merge a Hydra agent's branch into its base branch and, unless close=false, kill it
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param force Bypass the test gate (PLAN #68). Without it, a merge is soft-blocked with 409 tests_failing / tests_errored when the head's configured tests are failing, errored, or still running. force=true merges anyway - covering both "don't wait" (tests still running) and "override" (tests red). Merge-conflict and operation-in-progress checks still apply.
      * @param close Whether to tear the agent down after the merge. Default (true) merges the branch and closes the head - session killed, worktree and branch removed, archived as "merged". close=false merges the branch but keeps the agent running: session, worktree, branch and uncommitted work all survive, and the agent's diff resets to only the work not yet merged. The test gate and conflict checks apply the same either way.
      * @returns void
@@ -548,16 +529,16 @@ export class DefaultService {
      */
     public mergeAgent(
         projectId: string,
-        id: string,
+        agentId: string,
         force?: boolean,
         close: boolean = true,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/merge',
+            url: '/api/projects/{project_id}/agents/{agent_id}/merge',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'force': force,
@@ -575,7 +556,7 @@ export class DefaultService {
      * Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
      * Host-side, by the daemon, with the user's own credentials (docs/non-local-integration.md). Claims the head (publishing), runs the local test gate (like merge; force bypasses), pushes hydra/<id> to the downstream branch on the remote, then creates the MR/PR if none exists. The local branch is untouched. Idempotent: re-publishing pushes again and the MR follows. Returns the updated agent with its review link.
      * @param projectId
-     * @param id
+     * @param agentId
      * @param force Bypass the local test gate (same semantics as merge's force).
      * @param requestBody
      * @returns AgentResponse Published (returns the updated agent with its review link).
@@ -583,7 +564,7 @@ export class DefaultService {
      */
     public publishAgent(
         projectId: string,
-        id: string,
+        agentId: string,
         force?: boolean,
         requestBody?: {
             /**
@@ -605,10 +586,10 @@ export class DefaultService {
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/publish',
+            url: '/api/projects/{project_id}/agents/{agent_id}/publish',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'force': force,
@@ -626,20 +607,20 @@ export class DefaultService {
     /**
      * Push the local head branch to its linked MR's downstream branch (Push to MR)
      * @param projectId
-     * @param id
+     * @param agentId
      * @returns AgentResponse Pushed (returns the updated agent).
      * @throws ApiError
      */
     public pushToMr(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/publish-push',
+            url: '/api/projects/{project_id}/agents/{agent_id}/publish/push',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 400: `Bad Request (not linked, no branch, or push auth failed)`,
@@ -652,20 +633,20 @@ export class DefaultService {
      * Pull the remote downstream branch into the local head branch (Pull from MR)
      * Fetches, then merges the remote-tracking downstream ref INTO the head branch (merge-not-rebase, same as update-from-base). Conflicts surface as 409.
      * @param projectId
-     * @param id
+     * @param agentId
      * @returns AgentResponse Pulled (returns the updated agent).
      * @throws ApiError
      */
     public pullFromMr(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/publish-pull',
+            url: '/api/projects/{project_id}/agents/{agent_id}/publish/pull',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 400: `Bad Request (not linked or no branch)`,
@@ -678,24 +659,24 @@ export class DefaultService {
     /**
      * Set a head's downstream branch name (the name it is pushed AS)
      * @param projectId
-     * @param id
+     * @param agentId
      * @param requestBody
      * @returns AgentResponse Updated (returns the updated agent).
      * @throws ApiError
      */
     public setDownstreamBranch(
         projectId: string,
-        id: string,
+        agentId: string,
         requestBody: {
             downstream_branch: string;
         },
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'PATCH',
-            url: '/api/projects/{project_id}/agents/{id}/downstream-branch',
+            url: '/api/projects/{project_id}/agents/{agent_id}/downstream-branch',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -710,20 +691,20 @@ export class DefaultService {
      * Returns the forge's review conversations for this head's linked MR, anchored to file/line, with Hydra's local-only notes merged in (docs/review-threads.md). Fetched live from the forge host-side; if that call fails the last cached threads are returned with stale=true and an error hint, so the diff still renders. An unlinked head returns an empty list.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @returns ReviewThreadsResponse The head's review threads (empty when unlinked).
      * @throws ApiError
      */
     public getReviewThreads(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<ReviewThreadsResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/review/threads',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/threads',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -735,22 +716,22 @@ export class DefaultService {
      * Posts a new review comment on the MR's diff, as the user, host-side via gh/glab. The line is a NEW-side line number. Fails cleanly when the head has no MR, when the line is not part of the MR's diff, or when the forge CLI is unauthenticated.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @param requestBody
      * @returns ReviewThreadsResponse Posted (returns the refreshed threads).
      * @throws ApiError
      */
     public createReviewComment(
         projectId: string,
-        id: string,
+        agentId: string,
         requestBody: NewReviewCommentRequest,
     ): CancelablePromise<ReviewThreadsResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/review/threads',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/threads',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -765,7 +746,7 @@ export class DefaultService {
      * Adds a reply to an existing thread. `local: true` keeps the reply inside Hydra (visible in the diff viewer, never sent to the forge); otherwise it is posted to the forge as the user. Agents only ever write local notes, and they do so through their MCP tool rather than this endpoint.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @param threadId
      * @param requestBody
      * @returns ReviewThreadsResponse Replied (returns the refreshed threads).
@@ -773,16 +754,16 @@ export class DefaultService {
      */
     public replyToReviewThread(
         projectId: string,
-        id: string,
+        agentId: string,
         threadId: string,
         requestBody: ReviewReplyRequest,
     ): CancelablePromise<ReviewThreadsResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/threads/{thread_id}/reply',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
                 'thread_id': threadId,
             },
             body: requestBody,
@@ -798,20 +779,20 @@ export class DefaultService {
      * Hydra's OWN review comments on this head - numbered, anchored to a line of its diff, and durable (docs/review-agent.md). Unlike the forge threads above these exist with no MR at all, and agents read them with a tool rather than having them pasted into their context. Returns drafts and published alike; only the browser ever sees drafts.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @returns ReviewCommentsResponse The head's comments, oldest (lowest-numbered) first.
      * @throws ApiError
      */
     public getReviewComments(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<ReviewCommentsResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/review/comments',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/comments',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -823,22 +804,22 @@ export class DefaultService {
      * Stores a new comment and assigns its number. Defaults to a draft - visible to you, synced across reloads and devices, invisible to every agent tool - until it is published. The anchor (path/line/commit/context) is frozen at write time, so the comment keeps its meaning when the diff moves under it.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @param requestBody
      * @returns ReviewCommentsResponse Stored (returns the full list, so the client never re-reads).
      * @throws ApiError
      */
     public addReviewComment(
         projectId: string,
-        id: string,
+        agentId: string,
         requestBody: NewReviewCommentBody,
     ): CancelablePromise<ReviewCommentsResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/review/comments',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/comments',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -853,7 +834,7 @@ export class DefaultService {
      * Replaces a DRAFT's body. A published comment is immutable - append-only is what makes a thread an audit log rather than something that can be rewritten after the fact - so editing one is a 400, not a silent no-op.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @param number The comment's number, as rendered "#4".
      * @param requestBody
      * @returns ReviewCommentsResponse Edited (returns the full list).
@@ -861,16 +842,16 @@ export class DefaultService {
      */
     public updateReviewComment(
         projectId: string,
-        id: string,
+        agentId: string,
         number: number,
         requestBody: UpdateReviewCommentBody,
     ): CancelablePromise<ReviewCommentsResponse> {
         return this.httpRequest.request({
             method: 'PATCH',
-            url: '/api/projects/{project_id}/agents/{id}/review/comments/{number}',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
                 'number': number,
             },
             body: requestBody,
@@ -886,22 +867,22 @@ export class DefaultService {
      * Drops an unpublished comment. Its number is retired rather than freed - "#3" has to mean one thing forever. A published comment cannot be deleted.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @param number
      * @returns ReviewCommentsResponse Discarded (returns the full list).
      * @throws ApiError
      */
     public deleteReviewComment(
         projectId: string,
-        id: string,
+        agentId: string,
         number: number,
     ): CancelablePromise<ReviewCommentsResponse> {
         return this.httpRequest.request({
             method: 'DELETE',
-            url: '/api/projects/{project_id}/agents/{id}/review/comments/{number}',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
                 'number': number,
             },
             errors: {
@@ -915,7 +896,7 @@ export class DefaultService {
      * Marks a comment thread dealt with. Works on either origin, because the numbering is one sequence: a Hydra comment resolves its root comment and every reply, and a forge comment resolves the THREAD it belongs to. Resolving a forge thread is LOCAL to Hydra and is never sent to the forge - GitHub's resolveReviewThread needs a thread node id Hydra does not fetch, and a resolve that silently worked on GitLab and silently did not on GitHub would be worse than one that is honestly local everywhere. A state change, not an edit, so it is allowed on a published comment.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @param number
      * @param requestBody
      * @returns ReviewCommentsResponse Resolved (returns the full comment list).
@@ -923,16 +904,16 @@ export class DefaultService {
      */
     public resolveReviewComment(
         projectId: string,
-        id: string,
+        agentId: string,
         number: number,
         requestBody: ResolveReviewCommentBody,
     ): CancelablePromise<ReviewCommentsResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/review/comments/{number}/resolve',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
                 'number': number,
             },
             body: requestBody,
@@ -948,22 +929,22 @@ export class DefaultService {
      * Records that the user has seen these numbers. Read state is a fact about this Hydra install rather than about the comment, so it lives here and never reaches a forge. Nothing becomes read by the passage of time - only this call sets it.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @param requestBody
      * @returns ReviewCommentsResponse Marked (returns the full comment list).
      * @throws ApiError
      */
     public markReviewCommentsRead(
         projectId: string,
-        id: string,
+        agentId: string,
         requestBody: MarkReadBody,
     ): CancelablePromise<ReviewCommentsResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/review/comments/read',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/comments/read',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -977,22 +958,22 @@ export class DefaultService {
      * Flips the named drafts (or every draft) to published and sends the head's agent ONE short line naming their numbers and locations - not their bodies. The agent pulls what it needs with get_review_comments, so six comments cost one line instead of six diff excerpts, the transcript holds a pointer that cannot drift from the comment, and the handle survives a compaction that an injected blob would not.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @param requestBody
      * @returns ReviewCommentsResponse Published (returns the full list plus what the agent was told).
      * @throws ApiError
      */
     public publishReviewComments(
         projectId: string,
-        id: string,
+        agentId: string,
         requestBody?: PublishReviewCommentsBody,
     ): CancelablePromise<ReviewCommentsResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/review/comments/publish',
+            url: '/api/projects/{project_id}/agents/{agent_id}/review/comments/publish',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -1022,7 +1003,7 @@ export class DefaultService {
     ): CancelablePromise<ListReviewsResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/reviews',
+            url: '/api/projects/{project_id}/merge-requests',
             path: {
                 'project_id': projectId,
             },
@@ -1049,7 +1030,7 @@ export class DefaultService {
     ): CancelablePromise<ReviewConfigResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/review-config',
+            url: '/api/projects/{project_id}/config/review',
             path: {
                 'project_id': projectId,
             },
@@ -1061,20 +1042,20 @@ export class DefaultService {
     /**
      * Update a Hydra agent's branch from its base branch (merge base into head)
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns void
      * @throws ApiError
      */
     public updateAgentFromBase(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/update-from-base',
+            url: '/api/projects/{project_id}/agents/{agent_id}/update-from-base',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -1086,20 +1067,20 @@ export class DefaultService {
     /**
      * List commits on an agent's branch (between base branch and agent branch)
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns CommitInfo OK
      * @throws ApiError
      */
     public getAgentCommits(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<Array<CommitInfo>> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/commits',
+            url: '/api/projects/{project_id}/agents/{agent_id}/commits',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -1110,7 +1091,7 @@ export class DefaultService {
     /**
      * Get the diff for an agent's branch
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param baseRef Base commit SHA or ref. Defaults to the agent's base branch.
      * @param headRef Head commit SHA or ref. Defaults to the agent's branch.
      * @param ignoreWhitespace Ignore whitespace changes in the diff
@@ -1125,7 +1106,7 @@ export class DefaultService {
      */
     public getAgentDiff(
         projectId: string,
-        id: string,
+        agentId: string,
         baseRef?: string,
         headRef?: string,
         ignoreWhitespace?: boolean,
@@ -1138,10 +1119,10 @@ export class DefaultService {
     ): CancelablePromise<DiffResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/diff',
+            url: '/api/projects/{project_id}/agents/{agent_id}/diff',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'base_ref': baseRef,
@@ -1163,7 +1144,7 @@ export class DefaultService {
     /**
      * Get the list of changed files for an agent's branch
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param baseRef Base commit SHA or ref. Defaults to the agent's base branch.
      * @param headRef Head commit SHA or ref. Defaults to the agent's branch.
      * @param includeUncommitted Include uncommitted changes in the worktree
@@ -1172,17 +1153,17 @@ export class DefaultService {
      */
     public getAgentDiffFiles(
         projectId: string,
-        id: string,
+        agentId: string,
         baseRef?: string,
         headRef?: string,
         includeUncommitted?: boolean,
     ): CancelablePromise<DiffResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/diff-files',
+            url: '/api/projects/{project_id}/agents/{agent_id}/diff-files',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'base_ref': baseRef,
@@ -1200,7 +1181,7 @@ export class DefaultService {
      * Returns, per configured artifact script, the generated image files for the left and right versions of the comparison and whether they differ. Generation runs in the background and is cached; a script with status "generating" should be polled. Returns an empty list when the project configures no artifact scripts.
      *
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param baseRef Left (base) commit SHA or ref. Defaults to the agent's base branch.
      * @param headRef Right (head) commit SHA or ref. Defaults to the agent's branch tip.
      * @param includeUncommitted Use the agent's uncommitted working tree as the right version.
@@ -1213,7 +1194,7 @@ export class DefaultService {
      */
     public getAgentArtifacts(
         projectId: string,
-        id: string,
+        agentId: string,
         baseRef?: string,
         headRef?: string,
         includeUncommitted?: boolean,
@@ -1222,10 +1203,10 @@ export class DefaultService {
     ): CancelablePromise<ArtifactsResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/artifacts',
+            url: '/api/projects/{project_id}/agents/{agent_id}/artifacts',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'base_ref': baseRef,
@@ -1245,7 +1226,7 @@ export class DefaultService {
      * Returns, per configured [previews.<name>] script, the preview instance status for the requested version (the head's uncommitted working tree or a specific commit - the same selection contract as the artifacts and tests endpoints), plus any still-running instances of those scripts at other versions. Purely a read: nothing is spawned. Returns an empty list when the project configures no server scripts.
      *
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param headRef Commit SHA or ref to preview. Defaults to the agent's branch tip.
      * @param includeUncommitted Preview the agent's uncommitted working tree (its live worktree).
      * @returns PreviewsResponse OK
@@ -1253,16 +1234,16 @@ export class DefaultService {
      */
     public getAgentPreviews(
         projectId: string,
-        id: string,
+        agentId: string,
         headRef?: string,
         includeUncommitted?: boolean,
     ): CancelablePromise<PreviewsResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/previews',
+            url: '/api/projects/{project_id}/agents/{agent_id}/previews',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'head_ref': headRef,
@@ -1279,7 +1260,7 @@ export class DefaultService {
      * Ensures the named preview script has a proxy listener for the requested version and spawns its server if not already running. Returns the instance status including the URL to open; the server may still be "starting" (building) - opening the URL shows a live loading page until it is ready.
      *
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param name The preview script name
      * @param headRef Commit SHA or ref to preview. Defaults to the agent's branch tip.
      * @param includeUncommitted Preview the agent's uncommitted working tree (its live worktree).
@@ -1288,17 +1269,17 @@ export class DefaultService {
      */
     public startAgentPreview(
         projectId: string,
-        id: string,
+        agentId: string,
         name: string,
         headRef?: string,
         includeUncommitted?: boolean,
     ): CancelablePromise<PreviewStatus> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/previews/{name}/start',
+            url: '/api/projects/{project_id}/agents/{agent_id}/previews/{name}/start',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
                 'name': name,
             },
             query: {
@@ -1316,7 +1297,7 @@ export class DefaultService {
      * Tears down the named preview's server process for the requested version (the listener persists, so a later start or visit respawns it). A no-op if nothing is running.
      *
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param name The preview script name
      * @param headRef Commit SHA or ref whose instance to stop. Defaults to the agent's branch tip.
      * @param includeUncommitted Stop the instance for the agent's uncommitted working tree.
@@ -1325,17 +1306,17 @@ export class DefaultService {
      */
     public stopAgentPreview(
         projectId: string,
-        id: string,
+        agentId: string,
         name: string,
         headRef?: string,
         includeUncommitted?: boolean,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/previews/{name}/stop',
+            url: '/api/projects/{project_id}/agents/{agent_id}/previews/{name}/stop',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
                 'name': name,
             },
             query: {
@@ -1353,7 +1334,7 @@ export class DefaultService {
      * Returns, per configured [tests.<name>] runner, the parsed pass/fail verdict for the head's current commit (or working tree). Generation runs in the background and is cached per commit SHA; a runner with status "running" should be polled. Returns an empty list when the project configures no test runners. Single-sided - there is no before/after comparison (PLAN #68).
      *
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param headRef Commit SHA or ref to test. Defaults to the agent's branch tip.
      * @param includeUncommitted Test the agent's uncommitted working tree instead of a commit.
      * @param refresh Name of a single test runner whose cached result (including a cached failure) should be discarded and re-run before responding.
@@ -1362,17 +1343,17 @@ export class DefaultService {
      */
     public getAgentTests(
         projectId: string,
-        id: string,
+        agentId: string,
         headRef?: string,
         includeUncommitted?: boolean,
         refresh?: string,
     ): CancelablePromise<TestsResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/tests',
+            url: '/api/projects/{project_id}/agents/{agent_id}/tests',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'head_ref': headRef,
@@ -1390,20 +1371,20 @@ export class DefaultService {
      * Arms "merge when green" (PLAN #68): the daemon merges this head as soon as its tests settle passing, and disarms it (with a notification) if they settle failing/errored. Arming kicks a fresh test run if none is in flight. Idempotent.
      *
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns void
      * @throws ApiError
      */
     public armMergeWhenGreen(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/merge-when-green',
+            url: '/api/projects/{project_id}/agents/{agent_id}/merge/when-green',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -1414,20 +1395,20 @@ export class DefaultService {
     /**
      * Disarm auto-merge for a head
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns void
      * @throws ApiError
      */
     public disarmMergeWhenGreen(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'DELETE',
-            url: '/api/projects/{project_id}/agents/{id}/merge-when-green',
+            url: '/api/projects/{project_id}/agents/{agent_id}/merge/when-green',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -1440,7 +1421,7 @@ export class DefaultService {
      * Arms "publish when green" (docs/non-local-integration.md): once local tests settle passing and the agent has finished, an unlinked head auto-opens a draft MR and a linked head auto-pushes (plain push only). Idempotent. Arming an ADOPTED PR - one Hydra did not create - additionally requires acknowledge_adopted=true, since it starts pushing into someone else's PR (docs/pr-adoption.md); without it such a head is refused with a 400.
      *
      * @param projectId
-     * @param id
+     * @param agentId
      * @param acknowledgeAdopted Acknowledges that this head is working on a PR Hydra did not create, so arming means auto-pushing into someone else's PR on every green commit. Required (true) to arm an adopted head; ignored for any other head. A read-only adopted PR (no maintainer edits) is refused even with it, since no push can succeed.
      *
      * @returns void
@@ -1448,15 +1429,15 @@ export class DefaultService {
      */
     public armPublishWhenGreen(
         projectId: string,
-        id: string,
+        agentId: string,
         acknowledgeAdopted?: boolean,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/publish-when-green',
+            url: '/api/projects/{project_id}/agents/{agent_id}/publish/when-green',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             query: {
                 'acknowledge_adopted': acknowledgeAdopted,
@@ -1471,20 +1452,20 @@ export class DefaultService {
     /**
      * Disarm publish-when-green for a head
      * @param projectId
-     * @param id
+     * @param agentId
      * @returns void
      * @throws ApiError
      */
     public disarmPublishWhenGreen(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'DELETE',
-            url: '/api/projects/{project_id}/agents/{id}/publish-when-green',
+            url: '/api/projects/{project_id}/agents/{agent_id}/publish/when-green',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -1495,22 +1476,22 @@ export class DefaultService {
     /**
      * Send text input to an agent's terminal stdin
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param requestBody
      * @returns any OK
      * @throws ApiError
      */
     public sendAgentInput(
         projectId: string,
-        id: string,
+        agentId: string,
         requestBody: AgentInputRequest,
     ): CancelablePromise<any> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/input',
+            url: '/api/projects/{project_id}/agents/{agent_id}/input',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -1523,20 +1504,20 @@ export class DefaultService {
     /**
      * List the agent's pending security-gate approval requests
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns ApprovalListResponse OK
      * @throws ApiError
      */
     public listAgentApprovals(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<ApprovalListResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}/approvals',
+            url: '/api/projects/{project_id}/agents/{agent_id}/approvals',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -1547,7 +1528,7 @@ export class DefaultService {
     /**
      * Resolve a pending security-gate approval (allow/deny, optionally remember)
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param reqid The approval request ID
      * @param requestBody
      * @returns void
@@ -1555,16 +1536,16 @@ export class DefaultService {
      */
     public decideAgentApproval(
         projectId: string,
-        id: string,
+        agentId: string,
         reqid: string,
         requestBody: ApprovalDecisionRequest,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/approvals/{reqid}',
+            url: '/api/projects/{project_id}/agents/{agent_id}/approvals/{reqid}',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
                 'reqid': reqid,
             },
             body: requestBody,
@@ -1578,20 +1559,20 @@ export class DefaultService {
     /**
      * Mark an agent as read, clearing its unread-changes flag
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns void
      * @throws ApiError
      */
     public markAgentRead(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/read',
+            url: '/api/projects/{project_id}/agents/{agent_id}/read',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -1602,20 +1583,20 @@ export class DefaultService {
     /**
      * Mark an agent as unread, raising its unread-changes flag
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns void
      * @throws ApiError
      */
     public markAgentUnread(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/unread',
+            url: '/api/projects/{project_id}/agents/{agent_id}/unread',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -1627,20 +1608,20 @@ export class DefaultService {
      * Generate a title for an agent from its task prompt
      * Asks a cheap one-shot LLM call to summarise the agent's original task prompt into a short title - the same call the spawn flow makes in the background. This only RETURNS the title; it does not persist it, so the rename box can drop it in as a draft the user can edit or discard. Blocking (a few seconds) and best-effort: 502 means the model was unreachable or answered with something that doesn't read as a title.
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns GeneratedTitleResponse OK
      * @throws ApiError
      */
     public generateAgentTitle(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<GeneratedTitleResponse> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{id}/generate-title',
+            url: '/api/projects/{project_id}/agents/{agent_id}/generate-title',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 400: `Bad Request (e.g. the agent has no task prompt to summarise)`,
@@ -2029,20 +2010,20 @@ export class DefaultService {
     /**
      * Get a specific Hydra agent by ID
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns AgentResponse OK
      * @throws ApiError
      */
     public getAgent(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'GET',
-            url: '/api/projects/{project_id}/agents/{id}',
+            url: '/api/projects/{project_id}/agents/{agent_id}',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -2053,22 +2034,22 @@ export class DefaultService {
     /**
      * Update a Hydra agent's mutable fields (currently its title)
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @param requestBody
      * @returns AgentResponse OK
      * @throws ApiError
      */
     public updateAgent(
         projectId: string,
-        id: string,
+        agentId: string,
         requestBody: UpdateAgentRequest,
     ): CancelablePromise<AgentResponse> {
         return this.httpRequest.request({
             method: 'PATCH',
-            url: '/api/projects/{project_id}/agents/{id}',
+            url: '/api/projects/{project_id}/agents/{agent_id}',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -2082,20 +2063,20 @@ export class DefaultService {
     /**
      * Kill a Hydra agent by ID
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns void
      * @throws ApiError
      */
     public killAgent(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'DELETE',
-            url: '/api/projects/{project_id}/agents/{id}',
+            url: '/api/projects/{project_id}/agents/{agent_id}',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,
@@ -2108,20 +2089,20 @@ export class DefaultService {
      * Permanently delete an agent (kill it and erase every record, including its Claude session history)
      * Irreversibly removes the agent: stops any live session, removes its worktree/branch and on-disk status files, deletes its Claude session-history directory, and hard-deletes the database record so it no longer appears even in the archived-history list. Works on both live and archived agents.
      * @param projectId Project ID
-     * @param id
+     * @param agentId
      * @returns void
      * @throws ApiError
      */
     public purgeAgent(
         projectId: string,
-        id: string,
+        agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'DELETE',
-            url: '/api/projects/{project_id}/agents/{id}/purge',
+            url: '/api/projects/{project_id}/agents/{agent_id}/purge',
             path: {
                 'project_id': projectId,
-                'id': id,
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,

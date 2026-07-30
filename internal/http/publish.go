@@ -101,7 +101,7 @@ func (s *Server) PublishAgent(ctx context.Context, request api.PublishAgentReque
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -272,7 +272,7 @@ func firstNonEmpty(a, b string) string {
 // PushToMr re-pushes the local head branch to its downstream branch (idempotent
 // publish step 3). Plain push only.
 func (s *Server) PushToMr(ctx context.Context, request api.PushToMrRequestObject) (api.PushToMrResponseObject, error) {
-	projectRoot, head, resp := s.linkedHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, resp := s.linkedHead(ctx, request.ProjectId, request.AgentId)
 	if resp != nil {
 		return pushToMrErr(resp), nil
 	}
@@ -324,7 +324,7 @@ func (s *Server) pushHeadToMR(ctx context.Context, projectRoot string, head head
 // PullFromMr merges the remote downstream ref INTO the head branch (merge, not
 // rebase - same semantics as update-from-base), so conflicts surface the same way.
 func (s *Server) PullFromMr(ctx context.Context, request api.PullFromMrRequestObject) (api.PullFromMrResponseObject, error) {
-	projectRoot, head, resp := s.linkedHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, resp := s.linkedHead(ctx, request.ProjectId, request.AgentId)
 	if resp != nil {
 		return pullFromMrErr(resp), nil
 	}
@@ -388,7 +388,7 @@ func (s *Server) SetDownstreamBranch(ctx context.Context, request api.SetDownstr
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -563,7 +563,7 @@ func (s *Server) ArmPublishWhenGreen(ctx context.Context, request api.ArmPublish
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -590,7 +590,7 @@ func (s *Server) DisarmPublishWhenGreen(ctx context.Context, request api.DisarmP
 		return nil, errtrace.Wrap(err)
 	}
 	if s.DB != nil {
-		if err := s.DB.SetPublishWhenGreen(request.Id, false, ""); err != nil {
+		if err := s.DB.SetPublishWhenGreen(request.AgentId, false, ""); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 	}

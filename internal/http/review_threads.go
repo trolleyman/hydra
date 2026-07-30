@@ -24,7 +24,7 @@ const threadsTimeout = 20 * time.Second
 // fails hard - an unlinked head yields an empty list, and a forge error yields
 // the last cached threads plus an explanation (docs/review-threads.md).
 func (s *Server) GetReviewThreads(ctx context.Context, request api.GetReviewThreadsRequestObject) (api.GetReviewThreadsResponseObject, error) {
-	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.AgentId)
 	if errResp != nil {
 		return api.GetReviewThreads404JSONResponse(*errResp), nil
 	}
@@ -34,7 +34,7 @@ func (s *Server) GetReviewThreads(ctx context.Context, request api.GetReviewThre
 // CreateReviewComment starts a new review thread on a line of the head's MR, as
 // the user.
 func (s *Server) CreateReviewComment(ctx context.Context, request api.CreateReviewCommentRequestObject) (api.CreateReviewCommentResponseObject, error) {
-	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.AgentId)
 	if errResp != nil {
 		return api.CreateReviewComment404JSONResponse(*errResp), nil
 	}
@@ -60,7 +60,7 @@ func (s *Server) CreateReviewComment(ctx context.Context, request api.CreateRevi
 // ReplyToReviewThread adds a reply to a thread - posted to the forge as the
 // user, or kept local when the request asks for that.
 func (s *Server) ReplyToReviewThread(ctx context.Context, request api.ReplyToReviewThreadRequestObject) (api.ReplyToReviewThreadResponseObject, error) {
-	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.AgentId)
 	if errResp != nil {
 		return api.ReplyToReviewThread404JSONResponse(*errResp), nil
 	}

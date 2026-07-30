@@ -4433,12 +4433,15 @@ type PreviewConfigTomlParams struct {
 	Path string `form:"path" json:"path"`
 }
 
-// ListArchivedAgentsParams defines parameters for ListArchivedAgents.
-type ListArchivedAgentsParams struct {
-	// Limit Maximum number of archived agents to return (page size). Omit or <=0 for all.
+// ListAgentsParams defines parameters for ListAgents.
+type ListAgentsParams struct {
+	// Archived List archived (killed/merged) heads instead of live ones, newest first. Archived entries are read straight from the DB, so they carry no live session, review or test summary.
+	Archived *bool `form:"archived,omitempty" json:"archived,omitempty"`
+
+	// Limit Page size; archived listings only
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Offset Number of archived agents to skip (for pagination).
+	// Offset Page offset; archived listings only
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
@@ -4604,6 +4607,19 @@ type SaveConfigParams struct {
 // SaveConfigParamsScope defines parameters for SaveConfig.
 type SaveConfigParamsScope string
 
+// ListReviewsParams defines parameters for ListReviews.
+type ListReviewsParams struct {
+	// State "open" (default) | "all" | "merged" | "closed".
+	State *string `form:"state,omitempty" json:"state,omitempty"`
+
+	// Author "@me" to list only the authenticated user's own PRs.
+	Author *string `form:"author,omitempty" json:"author,omitempty"`
+
+	// Search Free-text search (forge-native syntax).
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetRepositoryArtifactsParams defines parameters for GetRepositoryArtifacts.
 type GetRepositoryArtifactsParams struct {
 	// Ref Git ref whose config to read (defaults to HEAD)
@@ -4659,19 +4675,6 @@ type GetRepositoryFileParams struct {
 type GetRepositoryTreeParams struct {
 	// Ref Git ref to read the tree from (defaults to HEAD)
 	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
-}
-
-// ListReviewsParams defines parameters for ListReviews.
-type ListReviewsParams struct {
-	// State "open" (default) | "all" | "merged" | "closed".
-	State *string `form:"state,omitempty" json:"state,omitempty"`
-
-	// Author "@me" to list only the authenticated user's own PRs.
-	Author *string `form:"author,omitempty" json:"author,omitempty"`
-
-	// Search Free-text search (forge-native syntax).
-	Search *string `form:"search,omitempty" json:"search,omitempty"`
-	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ResolvePathParams defines parameters for ResolvePath.
@@ -7026,7 +7029,7 @@ type ServerInterface interface {
 	// (GET /.well-known/appspecific/com.chrome.devtools.json)
 	GetDevToolsConfig(w http.ResponseWriter, r *http.Request)
 	// Preview the .hydra/config.toml at a filesystem path for the add-project trust prompt (read-only, does not register the project)
-	// (GET /api/config-toml-preview)
+	// (GET /api/config/preview)
 	PreviewConfigToml(w http.ResponseWriter, r *http.Request, params PreviewConfigTomlParams)
 	// List all known projects
 	// (GET /api/projects)
@@ -7035,151 +7038,151 @@ type ServerInterface interface {
 	// (POST /api/projects)
 	AddProject(w http.ResponseWriter, r *http.Request)
 	// Reorder the project list (the order the project selector shows)
-	// (PUT /api/projects/order)
+	// (PUT /api/projects)
 	ReorderProjects(w http.ResponseWriter, r *http.Request)
 	// Remove a project from Hydra (does not delete files on disk)
 	// (DELETE /api/projects/{project_id})
 	RemoveProject(w http.ResponseWriter, r *http.Request, projectId string)
 	// List all Hydra agents (heads)
 	// (GET /api/projects/{project_id}/agents)
-	ListAgents(w http.ResponseWriter, r *http.Request, projectId string)
+	ListAgents(w http.ResponseWriter, r *http.Request, projectId string, params ListAgentsParams)
 	// Spawn a new Hydra agent
 	// (POST /api/projects/{project_id}/agents)
 	SpawnAgent(w http.ResponseWriter, r *http.Request, projectId string)
-	// List archived (killed/merged) Hydra agents, newest first
-	// (GET /api/projects/{project_id}/agents/archived)
-	ListArchivedAgents(w http.ResponseWriter, r *http.Request, projectId string, params ListArchivedAgentsParams)
 	// Kill a Hydra agent by ID
-	// (DELETE /api/projects/{project_id}/agents/{id})
-	KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (DELETE /api/projects/{project_id}/agents/{agent_id})
+	KillAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Get a specific Hydra agent by ID
-	// (GET /api/projects/{project_id}/agents/{id})
-	GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (GET /api/projects/{project_id}/agents/{agent_id})
+	GetAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Update a Hydra agent's mutable fields (currently its title)
-	// (PATCH /api/projects/{project_id}/agents/{id})
-	UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (PATCH /api/projects/{project_id}/agents/{agent_id})
+	UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// List the agent's pending security-gate approval requests
-	// (GET /api/projects/{project_id}/agents/{id}/approvals)
-	ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/approvals)
+	ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Resolve a pending security-gate approval (allow/deny, optionally remember)
-	// (POST /api/projects/{project_id}/agents/{id}/approvals/{reqid})
-	DecideAgentApproval(w http.ResponseWriter, r *http.Request, projectId string, id string, reqid string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/approvals/{reqid})
+	DecideAgentApproval(w http.ResponseWriter, r *http.Request, projectId string, agentId string, reqid string)
 	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
-	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
-	GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentArtifactsParams)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/artifacts)
+	GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentArtifactsParams)
 	// List commits on an agent's branch (between base branch and agent branch)
-	// (GET /api/projects/{project_id}/agents/{id}/commits)
-	GetAgentCommits(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/commits)
+	GetAgentCommits(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Get the diff for an agent's branch
-	// (GET /api/projects/{project_id}/agents/{id}/diff)
-	GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentDiffParams)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/diff)
+	GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentDiffParams)
 	// Get the list of changed files for an agent's branch
-	// (GET /api/projects/{project_id}/agents/{id}/diff-files)
-	GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentDiffFilesParams)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/diff-files)
+	GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentDiffFilesParams)
 	// Set a head's downstream branch name (the name it is pushed AS)
-	// (PATCH /api/projects/{project_id}/agents/{id}/downstream-branch)
-	SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (PATCH /api/projects/{project_id}/agents/{agent_id}/downstream-branch)
+	SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Generate a title for an agent from its task prompt
-	// (POST /api/projects/{project_id}/agents/{id}/generate-title)
-	GenerateAgentTitle(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/generate-title)
+	GenerateAgentTitle(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Send text input to an agent's terminal stdin
-	// (POST /api/projects/{project_id}/agents/{id}/input)
-	SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/input)
+	SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Merge a Hydra agent's branch into its base branch and, unless close=false, kill it
-	// (POST /api/projects/{project_id}/agents/{id}/merge)
-	MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params MergeAgentParams)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/merge)
+	MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params MergeAgentParams)
 	// Disarm auto-merge for a head
-	// (DELETE /api/projects/{project_id}/agents/{id}/merge-when-green)
-	DisarmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (DELETE /api/projects/{project_id}/agents/{agent_id}/merge/when-green)
+	DisarmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Arm auto-merge - merge this head when its tests settle passing
-	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
-	ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/merge/when-green)
+	ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// List live server previews ([previews.<name>]) for a head
-	// (GET /api/projects/{project_id}/agents/{id}/previews)
-	GetAgentPreviews(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentPreviewsParams)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/previews)
+	GetAgentPreviews(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentPreviewsParams)
 	// Start (or ensure) a live server preview instance
-	// (POST /api/projects/{project_id}/agents/{id}/previews/{name}/start)
-	StartAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params StartAgentPreviewParams)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/previews/{name}/start)
+	StartAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, agentId string, name string, params StartAgentPreviewParams)
 	// Stop a live server preview instance
-	// (POST /api/projects/{project_id}/agents/{id}/previews/{name}/stop)
-	StopAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params StopAgentPreviewParams)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/previews/{name}/stop)
+	StopAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, agentId string, name string, params StopAgentPreviewParams)
 	// Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
-	// (POST /api/projects/{project_id}/agents/{id}/publish)
-	PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params PublishAgentParams)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish)
+	PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params PublishAgentParams)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
-	// (POST /api/projects/{project_id}/agents/{id}/publish-pull)
-	PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
+	PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Push the local head branch to its linked MR's downstream branch (Push to MR)
-	// (POST /api/projects/{project_id}/agents/{id}/publish-push)
-	PushToMr(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/push)
+	PushToMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Disarm publish-when-green for a head
-	// (DELETE /api/projects/{project_id}/agents/{id}/publish-when-green)
-	DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (DELETE /api/projects/{project_id}/agents/{agent_id}/publish/when-green)
+	DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
-	// (POST /api/projects/{project_id}/agents/{id}/publish-when-green)
-	ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string, params ArmPublishWhenGreenParams)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/when-green)
+	ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params ArmPublishWhenGreenParams)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
-	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
-	PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (DELETE /api/projects/{project_id}/agents/{agent_id}/purge)
+	PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Mark an agent as read, clearing its unread-changes flag
-	// (POST /api/projects/{project_id}/agents/{id}/read)
-	MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/read)
+	MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Restart a Hydra agent (kill and respawn with the same prompt)
-	// (POST /api/projects/{project_id}/agents/{id}/restart)
-	RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/restart)
+	RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Restart just the agent process (keeps the worktree, branch and conversation)
-	// (POST /api/projects/{project_id}/agents/{id}/restart-session)
-	RestartAgentSession(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/restart/session)
+	RestartAgentSession(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Resume an archived (killed/merged) agent, restoring its conversation
-	// (POST /api/projects/{project_id}/agents/{id}/resume)
-	ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/resume)
+	ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// This head's Hydra-native review comments
-	// (GET /api/projects/{project_id}/agents/{id}/review/comments)
-	GetReviewComments(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/review/comments)
+	GetReviewComments(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Add a review comment on this head
-	// (POST /api/projects/{project_id}/agents/{id}/review/comments)
-	AddReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments)
+	AddReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Publish this head's draft comments and notify its agent
-	// (POST /api/projects/{project_id}/agents/{id}/review/comments/publish)
-	PublishReviewComments(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments/publish)
+	PublishReviewComments(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Mark review comments as read
-	// (POST /api/projects/{project_id}/agents/{id}/review/comments/read)
-	MarkReviewCommentsRead(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments/read)
+	MarkReviewCommentsRead(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Discard a draft review comment
-	// (DELETE /api/projects/{project_id}/agents/{id}/review/comments/{number})
-	DeleteReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int)
+	// (DELETE /api/projects/{project_id}/agents/{agent_id}/review/comments/{number})
+	DeleteReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string, number int)
 	// Edit a draft review comment
-	// (PATCH /api/projects/{project_id}/agents/{id}/review/comments/{number})
-	UpdateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int)
+	// (PATCH /api/projects/{project_id}/agents/{agent_id}/review/comments/{number})
+	UpdateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string, number int)
 	// Resolve (or reopen) a review comment by its number
-	// (POST /api/projects/{project_id}/agents/{id}/review/comments/{number}/resolve)
-	ResolveReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve)
+	ResolveReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string, number int)
 	// The review threads on this head's MR, for the diff viewer
-	// (GET /api/projects/{project_id}/agents/{id}/review/threads)
-	GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/review/threads)
+	GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Start a new review thread on a line of this head's MR
-	// (POST /api/projects/{project_id}/agents/{id}/review/threads)
-	CreateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/threads)
+	CreateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Reply to a review thread on this head's MR
-	// (POST /api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply)
-	ReplyToReviewThread(w http.ResponseWriter, r *http.Request, projectId string, id string, threadId string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/threads/{thread_id}/reply)
+	ReplyToReviewThread(w http.ResponseWriter, r *http.Request, projectId string, agentId string, threadId string)
 	// Get the test-runner verdict(s) for a head's branch
-	// (GET /api/projects/{project_id}/agents/{id}/tests)
-	GetAgentTests(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentTestsParams)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/tests)
+	GetAgentTests(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentTestsParams)
 	// Mark an agent as unread, raising its unread-changes flag
-	// (POST /api/projects/{project_id}/agents/{id}/unread)
-	MarkAgentUnread(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/unread)
+	MarkAgentUnread(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Update a Hydra agent's branch from its base branch (merge base into head)
-	// (POST /api/projects/{project_id}/agents/{id}/update-from-base)
-	UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/update-from-base)
+	UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Get the merged configuration
 	// (GET /api/projects/{project_id}/config)
 	GetConfig(w http.ResponseWriter, r *http.Request, projectId string, params GetConfigParams)
 	// Save configuration changes
 	// (POST /api/projects/{project_id}/config)
 	SaveConfig(w http.ResponseWriter, r *http.Request, projectId string, params SaveConfigParams)
+	// Resolved [review] config + live forge auth status for a project
+	// (GET /api/projects/{project_id}/config/review)
+	GetReviewConfig(w http.ResponseWriter, r *http.Request, projectId string)
 	// Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
-	// (GET /api/projects/{project_id}/config-toml)
+	// (GET /api/projects/{project_id}/config/toml)
 	GetProjectConfigToml(w http.ResponseWriter, r *http.Request, projectId string)
 	// Hide a project from the project lists (or show it again)
 	// (PUT /api/projects/{project_id}/hidden)
@@ -7187,6 +7190,9 @@ type ServerInterface interface {
 	// Set (or clear) a project's custom icon
 	// (PUT /api/projects/{project_id}/icon)
 	SetProjectIcon(w http.ResponseWriter, r *http.Request, projectId string)
+	// List existing PRs/MRs on the project's forge, for the adoption picker
+	// (GET /api/projects/{project_id}/merge-requests)
+	ListReviews(w http.ResponseWriter, r *http.Request, projectId string, params ListReviewsParams)
 	// List the artifact scripts configured at a ref
 	// (GET /api/projects/{project_id}/repository/artifacts)
 	GetRepositoryArtifacts(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryArtifactsParams)
@@ -7217,12 +7223,6 @@ type ServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(w http.ResponseWriter, r *http.Request, projectId string, params GetRepositoryTreeParams)
-	// Resolved [review] config + live forge auth status for a project
-	// (GET /api/projects/{project_id}/review-config)
-	GetReviewConfig(w http.ResponseWriter, r *http.Request, projectId string)
-	// List existing PRs/MRs on the project's forge, for the adoption picker
-	// (GET /api/projects/{project_id}/reviews)
-	ListReviews(w http.ResponseWriter, r *http.Request, projectId string, params ListReviewsParams)
 	// Get the live status of the project's supervised services
 	// (GET /api/projects/{project_id}/services)
 	GetServices(w http.ResponseWriter, r *http.Request, projectId string)
@@ -7393,8 +7393,35 @@ func (siw *ServerInterfaceWrapper) ListAgents(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAgentsParams
+
+	// ------------- Optional query parameter "archived" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "archived", r.URL.Query(), &params.Archived)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "archived", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "offset", r.URL.Query(), &params.Offset)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListAgents(w, r, projectId)
+		siw.Handler.ListAgents(w, r, projectId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7429,50 +7456,6 @@ func (siw *ServerInterfaceWrapper) SpawnAgent(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
-// ListArchivedAgents operation middleware
-func (siw *ServerInterfaceWrapper) ListArchivedAgents(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "project_id" -------------
-	var projectId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListArchivedAgentsParams
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "offset" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "offset", r.URL.Query(), &params.Offset)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListArchivedAgents(w, r, projectId, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // KillAgent operation middleware
 func (siw *ServerInterfaceWrapper) KillAgent(w http.ResponseWriter, r *http.Request) {
 
@@ -7487,17 +7470,17 @@ func (siw *ServerInterfaceWrapper) KillAgent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.KillAgent(w, r, projectId, id)
+		siw.Handler.KillAgent(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7521,17 +7504,17 @@ func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgent(w, r, projectId, id)
+		siw.Handler.GetAgent(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7555,17 +7538,17 @@ func (siw *ServerInterfaceWrapper) UpdateAgent(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateAgent(w, r, projectId, id)
+		siw.Handler.UpdateAgent(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7589,17 +7572,17 @@ func (siw *ServerInterfaceWrapper) ListAgentApprovals(w http.ResponseWriter, r *
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListAgentApprovals(w, r, projectId, id)
+		siw.Handler.ListAgentApprovals(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7623,12 +7606,12 @@ func (siw *ServerInterfaceWrapper) DecideAgentApproval(w http.ResponseWriter, r 
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -7642,7 +7625,7 @@ func (siw *ServerInterfaceWrapper) DecideAgentApproval(w http.ResponseWriter, r 
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DecideAgentApproval(w, r, projectId, id, reqid)
+		siw.Handler.DecideAgentApproval(w, r, projectId, agentId, reqid)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7666,12 +7649,12 @@ func (siw *ServerInterfaceWrapper) GetAgentArtifacts(w http.ResponseWriter, r *h
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -7719,7 +7702,7 @@ func (siw *ServerInterfaceWrapper) GetAgentArtifacts(w http.ResponseWriter, r *h
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgentArtifacts(w, r, projectId, id, params)
+		siw.Handler.GetAgentArtifacts(w, r, projectId, agentId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7743,17 +7726,17 @@ func (siw *ServerInterfaceWrapper) GetAgentCommits(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgentCommits(w, r, projectId, id)
+		siw.Handler.GetAgentCommits(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7777,12 +7760,12 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -7862,7 +7845,7 @@ func (siw *ServerInterfaceWrapper) GetAgentDiff(w http.ResponseWriter, r *http.R
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgentDiff(w, r, projectId, id, params)
+		siw.Handler.GetAgentDiff(w, r, projectId, agentId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7886,12 +7869,12 @@ func (siw *ServerInterfaceWrapper) GetAgentDiffFiles(w http.ResponseWriter, r *h
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -7923,7 +7906,7 @@ func (siw *ServerInterfaceWrapper) GetAgentDiffFiles(w http.ResponseWriter, r *h
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgentDiffFiles(w, r, projectId, id, params)
+		siw.Handler.GetAgentDiffFiles(w, r, projectId, agentId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7947,17 +7930,17 @@ func (siw *ServerInterfaceWrapper) SetDownstreamBranch(w http.ResponseWriter, r 
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SetDownstreamBranch(w, r, projectId, id)
+		siw.Handler.SetDownstreamBranch(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7981,17 +7964,17 @@ func (siw *ServerInterfaceWrapper) GenerateAgentTitle(w http.ResponseWriter, r *
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GenerateAgentTitle(w, r, projectId, id)
+		siw.Handler.GenerateAgentTitle(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8015,17 +7998,17 @@ func (siw *ServerInterfaceWrapper) SendAgentInput(w http.ResponseWriter, r *http
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SendAgentInput(w, r, projectId, id)
+		siw.Handler.SendAgentInput(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8049,12 +8032,12 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -8078,7 +8061,7 @@ func (siw *ServerInterfaceWrapper) MergeAgent(w http.ResponseWriter, r *http.Req
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.MergeAgent(w, r, projectId, id, params)
+		siw.Handler.MergeAgent(w, r, projectId, agentId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8102,17 +8085,17 @@ func (siw *ServerInterfaceWrapper) DisarmMergeWhenGreen(w http.ResponseWriter, r
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DisarmMergeWhenGreen(w, r, projectId, id)
+		siw.Handler.DisarmMergeWhenGreen(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8136,17 +8119,17 @@ func (siw *ServerInterfaceWrapper) ArmMergeWhenGreen(w http.ResponseWriter, r *h
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ArmMergeWhenGreen(w, r, projectId, id)
+		siw.Handler.ArmMergeWhenGreen(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8170,12 +8153,12 @@ func (siw *ServerInterfaceWrapper) GetAgentPreviews(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -8199,7 +8182,7 @@ func (siw *ServerInterfaceWrapper) GetAgentPreviews(w http.ResponseWriter, r *ht
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgentPreviews(w, r, projectId, id, params)
+		siw.Handler.GetAgentPreviews(w, r, projectId, agentId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8223,12 +8206,12 @@ func (siw *ServerInterfaceWrapper) StartAgentPreview(w http.ResponseWriter, r *h
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -8261,7 +8244,7 @@ func (siw *ServerInterfaceWrapper) StartAgentPreview(w http.ResponseWriter, r *h
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.StartAgentPreview(w, r, projectId, id, name, params)
+		siw.Handler.StartAgentPreview(w, r, projectId, agentId, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8285,12 +8268,12 @@ func (siw *ServerInterfaceWrapper) StopAgentPreview(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -8323,7 +8306,7 @@ func (siw *ServerInterfaceWrapper) StopAgentPreview(w http.ResponseWriter, r *ht
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.StopAgentPreview(w, r, projectId, id, name, params)
+		siw.Handler.StopAgentPreview(w, r, projectId, agentId, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8347,12 +8330,12 @@ func (siw *ServerInterfaceWrapper) PublishAgent(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -8368,7 +8351,7 @@ func (siw *ServerInterfaceWrapper) PublishAgent(w http.ResponseWriter, r *http.R
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PublishAgent(w, r, projectId, id, params)
+		siw.Handler.PublishAgent(w, r, projectId, agentId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8392,17 +8375,17 @@ func (siw *ServerInterfaceWrapper) PullFromMr(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PullFromMr(w, r, projectId, id)
+		siw.Handler.PullFromMr(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8426,17 +8409,17 @@ func (siw *ServerInterfaceWrapper) PushToMr(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PushToMr(w, r, projectId, id)
+		siw.Handler.PushToMr(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8460,17 +8443,17 @@ func (siw *ServerInterfaceWrapper) DisarmPublishWhenGreen(w http.ResponseWriter,
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DisarmPublishWhenGreen(w, r, projectId, id)
+		siw.Handler.DisarmPublishWhenGreen(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8494,12 +8477,12 @@ func (siw *ServerInterfaceWrapper) ArmPublishWhenGreen(w http.ResponseWriter, r 
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -8515,7 +8498,7 @@ func (siw *ServerInterfaceWrapper) ArmPublishWhenGreen(w http.ResponseWriter, r 
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ArmPublishWhenGreen(w, r, projectId, id, params)
+		siw.Handler.ArmPublishWhenGreen(w, r, projectId, agentId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8539,17 +8522,17 @@ func (siw *ServerInterfaceWrapper) PurgeAgent(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PurgeAgent(w, r, projectId, id)
+		siw.Handler.PurgeAgent(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8573,17 +8556,17 @@ func (siw *ServerInterfaceWrapper) MarkAgentRead(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.MarkAgentRead(w, r, projectId, id)
+		siw.Handler.MarkAgentRead(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8607,17 +8590,17 @@ func (siw *ServerInterfaceWrapper) RestartAgent(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.RestartAgent(w, r, projectId, id)
+		siw.Handler.RestartAgent(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8641,17 +8624,17 @@ func (siw *ServerInterfaceWrapper) RestartAgentSession(w http.ResponseWriter, r 
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.RestartAgentSession(w, r, projectId, id)
+		siw.Handler.RestartAgentSession(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8675,17 +8658,17 @@ func (siw *ServerInterfaceWrapper) ResumeAgent(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ResumeAgent(w, r, projectId, id)
+		siw.Handler.ResumeAgent(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8709,17 +8692,17 @@ func (siw *ServerInterfaceWrapper) GetReviewComments(w http.ResponseWriter, r *h
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetReviewComments(w, r, projectId, id)
+		siw.Handler.GetReviewComments(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8743,17 +8726,17 @@ func (siw *ServerInterfaceWrapper) AddReviewComment(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.AddReviewComment(w, r, projectId, id)
+		siw.Handler.AddReviewComment(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8777,17 +8760,17 @@ func (siw *ServerInterfaceWrapper) PublishReviewComments(w http.ResponseWriter, 
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PublishReviewComments(w, r, projectId, id)
+		siw.Handler.PublishReviewComments(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8811,17 +8794,17 @@ func (siw *ServerInterfaceWrapper) MarkReviewCommentsRead(w http.ResponseWriter,
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.MarkReviewCommentsRead(w, r, projectId, id)
+		siw.Handler.MarkReviewCommentsRead(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8845,12 +8828,12 @@ func (siw *ServerInterfaceWrapper) DeleteReviewComment(w http.ResponseWriter, r 
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -8864,7 +8847,7 @@ func (siw *ServerInterfaceWrapper) DeleteReviewComment(w http.ResponseWriter, r 
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteReviewComment(w, r, projectId, id, number)
+		siw.Handler.DeleteReviewComment(w, r, projectId, agentId, number)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8888,12 +8871,12 @@ func (siw *ServerInterfaceWrapper) UpdateReviewComment(w http.ResponseWriter, r 
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -8907,7 +8890,7 @@ func (siw *ServerInterfaceWrapper) UpdateReviewComment(w http.ResponseWriter, r 
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateReviewComment(w, r, projectId, id, number)
+		siw.Handler.UpdateReviewComment(w, r, projectId, agentId, number)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8931,12 +8914,12 @@ func (siw *ServerInterfaceWrapper) ResolveReviewComment(w http.ResponseWriter, r
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -8950,7 +8933,7 @@ func (siw *ServerInterfaceWrapper) ResolveReviewComment(w http.ResponseWriter, r
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ResolveReviewComment(w, r, projectId, id, number)
+		siw.Handler.ResolveReviewComment(w, r, projectId, agentId, number)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8974,17 +8957,17 @@ func (siw *ServerInterfaceWrapper) GetReviewThreads(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetReviewThreads(w, r, projectId, id)
+		siw.Handler.GetReviewThreads(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9008,17 +8991,17 @@ func (siw *ServerInterfaceWrapper) CreateReviewComment(w http.ResponseWriter, r 
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateReviewComment(w, r, projectId, id)
+		siw.Handler.CreateReviewComment(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9042,12 +9025,12 @@ func (siw *ServerInterfaceWrapper) ReplyToReviewThread(w http.ResponseWriter, r 
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -9061,7 +9044,7 @@ func (siw *ServerInterfaceWrapper) ReplyToReviewThread(w http.ResponseWriter, r 
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ReplyToReviewThread(w, r, projectId, id, threadId)
+		siw.Handler.ReplyToReviewThread(w, r, projectId, agentId, threadId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9085,12 +9068,12 @@ func (siw *ServerInterfaceWrapper) GetAgentTests(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
@@ -9122,7 +9105,7 @@ func (siw *ServerInterfaceWrapper) GetAgentTests(w http.ResponseWriter, r *http.
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetAgentTests(w, r, projectId, id, params)
+		siw.Handler.GetAgentTests(w, r, projectId, agentId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9146,17 +9129,17 @@ func (siw *ServerInterfaceWrapper) MarkAgentUnread(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.MarkAgentUnread(w, r, projectId, id)
+		siw.Handler.MarkAgentUnread(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9180,17 +9163,17 @@ func (siw *ServerInterfaceWrapper) UpdateAgentFromBase(w http.ResponseWriter, r 
 		return
 	}
 
-	// ------------- Path parameter "id" -------------
-	var id string
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
 
-	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateAgentFromBase(w, r, projectId, id)
+		siw.Handler.UpdateAgentFromBase(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9272,6 +9255,31 @@ func (siw *ServerInterfaceWrapper) SaveConfig(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetReviewConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetReviewConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReviewConfig(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetProjectConfigToml operation middleware
 func (siw *ServerInterfaceWrapper) GetProjectConfigToml(w http.ResponseWriter, r *http.Request) {
 
@@ -9338,6 +9346,66 @@ func (siw *ServerInterfaceWrapper) SetProjectIcon(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetProjectIcon(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListReviews operation middleware
+func (siw *ServerInterfaceWrapper) ListReviews(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListReviewsParams
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "state", r.URL.Query(), &params.State)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "author" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "author", r.URL.Query(), &params.Author)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "author", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "search", r.URL.Query(), &params.Search)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "search", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReviews(w, r, projectId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9754,91 +9822,6 @@ func (siw *ServerInterfaceWrapper) GetRepositoryTree(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
-// GetReviewConfig operation middleware
-func (siw *ServerInterfaceWrapper) GetReviewConfig(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "project_id" -------------
-	var projectId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetReviewConfig(w, r, projectId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListReviews operation middleware
-func (siw *ServerInterfaceWrapper) ListReviews(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "project_id" -------------
-	var projectId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListReviewsParams
-
-	// ------------- Optional query parameter "state" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "state", r.URL.Query(), &params.State)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "author" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "author", r.URL.Query(), &params.Author)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "author", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "search" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "search", r.URL.Query(), &params.Search)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "search", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListReviews(w, r, projectId, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetServices operation middleware
 func (siw *ServerInterfaceWrapper) GetServices(w http.ResponseWriter, r *http.Request) {
 
@@ -10179,60 +10162,61 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc("GET "+options.BaseURL+"/.well-known/appspecific/com.chrome.devtools.json", wrapper.GetDevToolsConfig)
-	m.HandleFunc("GET "+options.BaseURL+"/api/config-toml-preview", wrapper.PreviewConfigToml)
+	m.HandleFunc("GET "+options.BaseURL+"/api/config/preview", wrapper.PreviewConfigToml)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects", wrapper.ListProjects)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects", wrapper.AddProject)
-	m.HandleFunc("PUT "+options.BaseURL+"/api/projects/order", wrapper.ReorderProjects)
+	m.HandleFunc("PUT "+options.BaseURL+"/api/projects", wrapper.ReorderProjects)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}", wrapper.RemoveProject)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.SpawnAgent)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/archived", wrapper.ListArchivedAgents)
-	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.KillAgent)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.GetAgent)
-	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}", wrapper.UpdateAgent)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/approvals", wrapper.ListAgentApprovals)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/approvals/{reqid}", wrapper.DecideAgentApproval)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/artifacts", wrapper.GetAgentArtifacts)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/commits", wrapper.GetAgentCommits)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff", wrapper.GetAgentDiff)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/diff-files", wrapper.GetAgentDiffFiles)
-	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/downstream-branch", wrapper.SetDownstreamBranch)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/generate-title", wrapper.GenerateAgentTitle)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/input", wrapper.SendAgentInput)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge", wrapper.MergeAgent)
-	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.DisarmMergeWhenGreen)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/merge-when-green", wrapper.ArmMergeWhenGreen)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews", wrapper.GetAgentPreviews)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews/{name}/start", wrapper.StartAgentPreview)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/previews/{name}/stop", wrapper.StopAgentPreview)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/publish", wrapper.PublishAgent)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/publish-pull", wrapper.PullFromMr)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/publish-push", wrapper.PushToMr)
-	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/publish-when-green", wrapper.DisarmPublishWhenGreen)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/publish-when-green", wrapper.ArmPublishWhenGreen)
-	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/purge", wrapper.PurgeAgent)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/read", wrapper.MarkAgentRead)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart", wrapper.RestartAgent)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/restart-session", wrapper.RestartAgentSession)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/resume", wrapper.ResumeAgent)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments", wrapper.GetReviewComments)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments", wrapper.AddReviewComment)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments/publish", wrapper.PublishReviewComments)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments/read", wrapper.MarkReviewCommentsRead)
-	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments/{number}", wrapper.DeleteReviewComment)
-	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments/{number}", wrapper.UpdateReviewComment)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments/{number}/resolve", wrapper.ResolveReviewComment)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/threads", wrapper.GetReviewThreads)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/threads", wrapper.CreateReviewComment)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply", wrapper.ReplyToReviewThread)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/tests", wrapper.GetAgentTests)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/unread", wrapper.MarkAgentUnread)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/update-from-base", wrapper.UpdateAgentFromBase)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}", wrapper.KillAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}", wrapper.GetAgent)
+	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}", wrapper.UpdateAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/approvals", wrapper.ListAgentApprovals)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/approvals/{reqid}", wrapper.DecideAgentApproval)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/artifacts", wrapper.GetAgentArtifacts)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/commits", wrapper.GetAgentCommits)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/diff", wrapper.GetAgentDiff)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/diff-files", wrapper.GetAgentDiffFiles)
+	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/downstream-branch", wrapper.SetDownstreamBranch)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/generate-title", wrapper.GenerateAgentTitle)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/input", wrapper.SendAgentInput)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/merge", wrapper.MergeAgent)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/merge/when-green", wrapper.DisarmMergeWhenGreen)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/merge/when-green", wrapper.ArmMergeWhenGreen)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/previews", wrapper.GetAgentPreviews)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/previews/{name}/start", wrapper.StartAgentPreview)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/previews/{name}/stop", wrapper.StopAgentPreview)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish", wrapper.PublishAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/pull", wrapper.PullFromMr)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/push", wrapper.PushToMr)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/when-green", wrapper.DisarmPublishWhenGreen)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/when-green", wrapper.ArmPublishWhenGreen)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/purge", wrapper.PurgeAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/read", wrapper.MarkAgentRead)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/restart", wrapper.RestartAgent)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/restart/session", wrapper.RestartAgentSession)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/resume", wrapper.ResumeAgent)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments", wrapper.GetReviewComments)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments", wrapper.AddReviewComment)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/publish", wrapper.PublishReviewComments)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/read", wrapper.MarkReviewCommentsRead)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}", wrapper.DeleteReviewComment)
+	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}", wrapper.UpdateReviewComment)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve", wrapper.ResolveReviewComment)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads", wrapper.GetReviewThreads)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads", wrapper.CreateReviewComment)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads/{thread_id}/reply", wrapper.ReplyToReviewThread)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/tests", wrapper.GetAgentTests)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/unread", wrapper.MarkAgentUnread)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/update-from-base", wrapper.UpdateAgentFromBase)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.GetConfig)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/config", wrapper.SaveConfig)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config-toml", wrapper.GetProjectConfigToml)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config/review", wrapper.GetReviewConfig)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/config/toml", wrapper.GetProjectConfigToml)
 	m.HandleFunc("PUT "+options.BaseURL+"/api/projects/{project_id}/hidden", wrapper.SetProjectHidden)
 	m.HandleFunc("PUT "+options.BaseURL+"/api/projects/{project_id}/icon", wrapper.SetProjectIcon)
+	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/merge-requests", wrapper.ListReviews)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts", wrapper.GetRepositoryArtifacts)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/artifacts/{name}", wrapper.GetRepositoryArtifact)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/branches", wrapper.GetRepositoryBranches)
@@ -10243,8 +10227,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/push-status", wrapper.GetRepositoryPushStatus)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/repository/sync", wrapper.SyncRepository)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/repository/tree", wrapper.GetRepositoryTree)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/review-config", wrapper.GetReviewConfig)
-	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/reviews", wrapper.ListReviews)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/services", wrapper.GetServices)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/services/restart", wrapper.RestartServices)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/track-remote", wrapper.EnsureTrackRemote)
@@ -10454,6 +10436,7 @@ func (response RemoveProject500JSONResponse) VisitRemoveProjectResponse(w http.R
 
 type ListAgentsRequestObject struct {
 	ProjectId string `json:"project_id"`
+	Params    ListAgentsParams
 }
 
 type ListAgentsResponseObject interface {
@@ -10541,45 +10524,9 @@ func (response SpawnAgent500JSONResponse) VisitSpawnAgentResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
-type ListArchivedAgentsRequestObject struct {
-	ProjectId string `json:"project_id"`
-	Params    ListArchivedAgentsParams
-}
-
-type ListArchivedAgentsResponseObject interface {
-	VisitListArchivedAgentsResponse(w http.ResponseWriter) error
-}
-
-type ListArchivedAgents200JSONResponse []AgentResponse
-
-func (response ListArchivedAgents200JSONResponse) VisitListArchivedAgentsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ListArchivedAgents404JSONResponse ErrorResponse
-
-func (response ListArchivedAgents404JSONResponse) VisitListArchivedAgentsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ListArchivedAgents500JSONResponse ErrorResponse
-
-func (response ListArchivedAgents500JSONResponse) VisitListArchivedAgentsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
 type KillAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type KillAgentResponseObject interface {
@@ -10623,7 +10570,7 @@ func (response KillAgent500JSONResponse) VisitKillAgentResponse(w http.ResponseW
 
 type GetAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type GetAgentResponseObject interface {
@@ -10659,7 +10606,7 @@ func (response GetAgent500JSONResponse) VisitGetAgentResponse(w http.ResponseWri
 
 type UpdateAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Body      *UpdateAgentJSONRequestBody
 }
 
@@ -10705,7 +10652,7 @@ func (response UpdateAgent500JSONResponse) VisitUpdateAgentResponse(w http.Respo
 
 type ListAgentApprovalsRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type ListAgentApprovalsResponseObject interface {
@@ -10741,7 +10688,7 @@ func (response ListAgentApprovals500JSONResponse) VisitListAgentApprovalsRespons
 
 type DecideAgentApprovalRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Reqid     string `json:"reqid"`
 	Body      *DecideAgentApprovalJSONRequestBody
 }
@@ -10778,7 +10725,7 @@ func (response DecideAgentApproval500JSONResponse) VisitDecideAgentApprovalRespo
 
 type GetAgentArtifactsRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Params    GetAgentArtifactsParams
 }
 
@@ -10815,7 +10762,7 @@ func (response GetAgentArtifacts500JSONResponse) VisitGetAgentArtifactsResponse(
 
 type GetAgentCommitsRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type GetAgentCommitsResponseObject interface {
@@ -10851,7 +10798,7 @@ func (response GetAgentCommits500JSONResponse) VisitGetAgentCommitsResponse(w ht
 
 type GetAgentDiffRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Params    GetAgentDiffParams
 }
 
@@ -10888,7 +10835,7 @@ func (response GetAgentDiff500JSONResponse) VisitGetAgentDiffResponse(w http.Res
 
 type GetAgentDiffFilesRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Params    GetAgentDiffFilesParams
 }
 
@@ -10925,7 +10872,7 @@ func (response GetAgentDiffFiles500JSONResponse) VisitGetAgentDiffFilesResponse(
 
 type SetDownstreamBranchRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Body      *SetDownstreamBranchJSONRequestBody
 }
 
@@ -10962,7 +10909,7 @@ func (response SetDownstreamBranch404JSONResponse) VisitSetDownstreamBranchRespo
 
 type GenerateAgentTitleRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type GenerateAgentTitleResponseObject interface {
@@ -11016,7 +10963,7 @@ func (response GenerateAgentTitle502JSONResponse) VisitGenerateAgentTitleRespons
 
 type SendAgentInputRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Body      *SendAgentInputJSONRequestBody
 }
 
@@ -11052,7 +10999,7 @@ func (response SendAgentInput500JSONResponse) VisitSendAgentInputResponse(w http
 
 type MergeAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Params    MergeAgentParams
 }
 
@@ -11106,7 +11053,7 @@ func (response MergeAgent500JSONResponse) VisitMergeAgentResponse(w http.Respons
 
 type DisarmMergeWhenGreenRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type DisarmMergeWhenGreenResponseObject interface {
@@ -11141,7 +11088,7 @@ func (response DisarmMergeWhenGreen500JSONResponse) VisitDisarmMergeWhenGreenRes
 
 type ArmMergeWhenGreenRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type ArmMergeWhenGreenResponseObject interface {
@@ -11176,7 +11123,7 @@ func (response ArmMergeWhenGreen500JSONResponse) VisitArmMergeWhenGreenResponse(
 
 type GetAgentPreviewsRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Params    GetAgentPreviewsParams
 }
 
@@ -11213,7 +11160,7 @@ func (response GetAgentPreviews500JSONResponse) VisitGetAgentPreviewsResponse(w 
 
 type StartAgentPreviewRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Name      string `json:"name"`
 	Params    StartAgentPreviewParams
 }
@@ -11251,7 +11198,7 @@ func (response StartAgentPreview500JSONResponse) VisitStartAgentPreviewResponse(
 
 type StopAgentPreviewRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Name      string `json:"name"`
 	Params    StopAgentPreviewParams
 }
@@ -11288,7 +11235,7 @@ func (response StopAgentPreview500JSONResponse) VisitStopAgentPreviewResponse(w 
 
 type PublishAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Params    PublishAgentParams
 	Body      *PublishAgentJSONRequestBody
 }
@@ -11344,7 +11291,7 @@ func (response PublishAgent500JSONResponse) VisitPublishAgentResponse(w http.Res
 
 type PullFromMrRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type PullFromMrResponseObject interface {
@@ -11398,7 +11345,7 @@ func (response PullFromMr500JSONResponse) VisitPullFromMrResponse(w http.Respons
 
 type PushToMrRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type PushToMrResponseObject interface {
@@ -11443,7 +11390,7 @@ func (response PushToMr500JSONResponse) VisitPushToMrResponse(w http.ResponseWri
 
 type DisarmPublishWhenGreenRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type DisarmPublishWhenGreenResponseObject interface {
@@ -11478,7 +11425,7 @@ func (response DisarmPublishWhenGreen500JSONResponse) VisitDisarmPublishWhenGree
 
 type ArmPublishWhenGreenRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Params    ArmPublishWhenGreenParams
 }
 
@@ -11523,7 +11470,7 @@ func (response ArmPublishWhenGreen500JSONResponse) VisitArmPublishWhenGreenRespo
 
 type PurgeAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type PurgeAgentResponseObject interface {
@@ -11567,7 +11514,7 @@ func (response PurgeAgent500JSONResponse) VisitPurgeAgentResponse(w http.Respons
 
 type MarkAgentReadRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type MarkAgentReadResponseObject interface {
@@ -11602,7 +11549,7 @@ func (response MarkAgentRead500JSONResponse) VisitMarkAgentReadResponse(w http.R
 
 type RestartAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type RestartAgentResponseObject interface {
@@ -11647,7 +11594,7 @@ func (response RestartAgent500JSONResponse) VisitRestartAgentResponse(w http.Res
 
 type RestartAgentSessionRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type RestartAgentSessionResponseObject interface {
@@ -11691,7 +11638,7 @@ func (response RestartAgentSession500JSONResponse) VisitRestartAgentSessionRespo
 
 type ResumeAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type ResumeAgentResponseObject interface {
@@ -11736,7 +11683,7 @@ func (response ResumeAgent500JSONResponse) VisitResumeAgentResponse(w http.Respo
 
 type GetReviewCommentsRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type GetReviewCommentsResponseObject interface {
@@ -11763,7 +11710,7 @@ func (response GetReviewComments404JSONResponse) VisitGetReviewCommentsResponse(
 
 type AddReviewCommentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Body      *AddReviewCommentJSONRequestBody
 }
 
@@ -11800,7 +11747,7 @@ func (response AddReviewComment404JSONResponse) VisitAddReviewCommentResponse(w 
 
 type PublishReviewCommentsRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Body      *PublishReviewCommentsJSONRequestBody
 }
 
@@ -11837,7 +11784,7 @@ func (response PublishReviewComments404JSONResponse) VisitPublishReviewCommentsR
 
 type MarkReviewCommentsReadRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Body      *MarkReviewCommentsReadJSONRequestBody
 }
 
@@ -11865,7 +11812,7 @@ func (response MarkReviewCommentsRead404JSONResponse) VisitMarkReviewCommentsRea
 
 type DeleteReviewCommentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Number    int    `json:"number"`
 }
 
@@ -11902,7 +11849,7 @@ func (response DeleteReviewComment404JSONResponse) VisitDeleteReviewCommentRespo
 
 type UpdateReviewCommentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Number    int    `json:"number"`
 	Body      *UpdateReviewCommentJSONRequestBody
 }
@@ -11940,7 +11887,7 @@ func (response UpdateReviewComment404JSONResponse) VisitUpdateReviewCommentRespo
 
 type ResolveReviewCommentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Number    int    `json:"number"`
 	Body      *ResolveReviewCommentJSONRequestBody
 }
@@ -11978,7 +11925,7 @@ func (response ResolveReviewComment404JSONResponse) VisitResolveReviewCommentRes
 
 type GetReviewThreadsRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type GetReviewThreadsResponseObject interface {
@@ -12005,7 +11952,7 @@ func (response GetReviewThreads404JSONResponse) VisitGetReviewThreadsResponse(w 
 
 type CreateReviewCommentRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Body      *CreateReviewCommentJSONRequestBody
 }
 
@@ -12042,7 +11989,7 @@ func (response CreateReviewComment404JSONResponse) VisitCreateReviewCommentRespo
 
 type ReplyToReviewThreadRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	ThreadId  string `json:"thread_id"`
 	Body      *ReplyToReviewThreadJSONRequestBody
 }
@@ -12080,7 +12027,7 @@ func (response ReplyToReviewThread404JSONResponse) VisitReplyToReviewThreadRespo
 
 type GetAgentTestsRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 	Params    GetAgentTestsParams
 }
 
@@ -12117,7 +12064,7 @@ func (response GetAgentTests500JSONResponse) VisitGetAgentTestsResponse(w http.R
 
 type MarkAgentUnreadRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type MarkAgentUnreadResponseObject interface {
@@ -12152,7 +12099,7 @@ func (response MarkAgentUnread500JSONResponse) VisitMarkAgentUnreadResponse(w ht
 
 type UpdateAgentFromBaseRequestObject struct {
 	ProjectId string `json:"project_id"`
-	Id        string `json:"id"`
+	AgentId   string `json:"agent_id"`
 }
 
 type UpdateAgentFromBaseResponseObject interface {
@@ -12262,6 +12209,32 @@ type SaveConfig500JSONResponse ErrorResponse
 func (response SaveConfig500JSONResponse) VisitSaveConfigResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetReviewConfigRequestObject struct {
+	ProjectId string `json:"project_id"`
+}
+
+type GetReviewConfigResponseObject interface {
+	VisitGetReviewConfigResponse(w http.ResponseWriter) error
+}
+
+type GetReviewConfig200JSONResponse ReviewConfigResponse
+
+func (response GetReviewConfig200JSONResponse) VisitGetReviewConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetReviewConfig404JSONResponse ErrorResponse
+
+func (response GetReviewConfig404JSONResponse) VisitGetReviewConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -12386,6 +12359,33 @@ type SetProjectIcon500JSONResponse ErrorResponse
 func (response SetProjectIcon500JSONResponse) VisitSetProjectIconResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListReviewsRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Params    ListReviewsParams
+}
+
+type ListReviewsResponseObject interface {
+	VisitListReviewsResponse(w http.ResponseWriter) error
+}
+
+type ListReviews200JSONResponse ListReviewsResponse
+
+func (response ListReviews200JSONResponse) VisitListReviewsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListReviews404JSONResponse ErrorResponse
+
+func (response ListReviews404JSONResponse) VisitListReviewsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -12783,59 +12783,6 @@ func (response GetRepositoryTree500JSONResponse) VisitGetRepositoryTreeResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
-type GetReviewConfigRequestObject struct {
-	ProjectId string `json:"project_id"`
-}
-
-type GetReviewConfigResponseObject interface {
-	VisitGetReviewConfigResponse(w http.ResponseWriter) error
-}
-
-type GetReviewConfig200JSONResponse ReviewConfigResponse
-
-func (response GetReviewConfig200JSONResponse) VisitGetReviewConfigResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type GetReviewConfig404JSONResponse ErrorResponse
-
-func (response GetReviewConfig404JSONResponse) VisitGetReviewConfigResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ListReviewsRequestObject struct {
-	ProjectId string `json:"project_id"`
-	Params    ListReviewsParams
-}
-
-type ListReviewsResponseObject interface {
-	VisitListReviewsResponse(w http.ResponseWriter) error
-}
-
-type ListReviews200JSONResponse ListReviewsResponse
-
-func (response ListReviews200JSONResponse) VisitListReviewsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ListReviews404JSONResponse ErrorResponse
-
-func (response ListReviews404JSONResponse) VisitListReviewsResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
 type GetServicesRequestObject struct {
 	ProjectId string `json:"project_id"`
 }
@@ -13115,7 +13062,7 @@ type StrictServerInterface interface {
 	// (GET /.well-known/appspecific/com.chrome.devtools.json)
 	GetDevToolsConfig(ctx context.Context, request GetDevToolsConfigRequestObject) (GetDevToolsConfigResponseObject, error)
 	// Preview the .hydra/config.toml at a filesystem path for the add-project trust prompt (read-only, does not register the project)
-	// (GET /api/config-toml-preview)
+	// (GET /api/config/preview)
 	PreviewConfigToml(ctx context.Context, request PreviewConfigTomlRequestObject) (PreviewConfigTomlResponseObject, error)
 	// List all known projects
 	// (GET /api/projects)
@@ -13124,7 +13071,7 @@ type StrictServerInterface interface {
 	// (POST /api/projects)
 	AddProject(ctx context.Context, request AddProjectRequestObject) (AddProjectResponseObject, error)
 	// Reorder the project list (the order the project selector shows)
-	// (PUT /api/projects/order)
+	// (PUT /api/projects)
 	ReorderProjects(ctx context.Context, request ReorderProjectsRequestObject) (ReorderProjectsResponseObject, error)
 	// Remove a project from Hydra (does not delete files on disk)
 	// (DELETE /api/projects/{project_id})
@@ -13135,131 +13082,128 @@ type StrictServerInterface interface {
 	// Spawn a new Hydra agent
 	// (POST /api/projects/{project_id}/agents)
 	SpawnAgent(ctx context.Context, request SpawnAgentRequestObject) (SpawnAgentResponseObject, error)
-	// List archived (killed/merged) Hydra agents, newest first
-	// (GET /api/projects/{project_id}/agents/archived)
-	ListArchivedAgents(ctx context.Context, request ListArchivedAgentsRequestObject) (ListArchivedAgentsResponseObject, error)
 	// Kill a Hydra agent by ID
-	// (DELETE /api/projects/{project_id}/agents/{id})
+	// (DELETE /api/projects/{project_id}/agents/{agent_id})
 	KillAgent(ctx context.Context, request KillAgentRequestObject) (KillAgentResponseObject, error)
 	// Get a specific Hydra agent by ID
-	// (GET /api/projects/{project_id}/agents/{id})
+	// (GET /api/projects/{project_id}/agents/{agent_id})
 	GetAgent(ctx context.Context, request GetAgentRequestObject) (GetAgentResponseObject, error)
 	// Update a Hydra agent's mutable fields (currently its title)
-	// (PATCH /api/projects/{project_id}/agents/{id})
+	// (PATCH /api/projects/{project_id}/agents/{agent_id})
 	UpdateAgent(ctx context.Context, request UpdateAgentRequestObject) (UpdateAgentResponseObject, error)
 	// List the agent's pending security-gate approval requests
-	// (GET /api/projects/{project_id}/agents/{id}/approvals)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/approvals)
 	ListAgentApprovals(ctx context.Context, request ListAgentApprovalsRequestObject) (ListAgentApprovalsResponseObject, error)
 	// Resolve a pending security-gate approval (allow/deny, optionally remember)
-	// (POST /api/projects/{project_id}/agents/{id}/approvals/{reqid})
+	// (POST /api/projects/{project_id}/agents/{agent_id}/approvals/{reqid})
 	DecideAgentApproval(ctx context.Context, request DecideAgentApprovalRequestObject) (DecideAgentApprovalResponseObject, error)
 	// Get generated visual artifacts (e.g. screenshots) for both sides of a diff
-	// (GET /api/projects/{project_id}/agents/{id}/artifacts)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/artifacts)
 	GetAgentArtifacts(ctx context.Context, request GetAgentArtifactsRequestObject) (GetAgentArtifactsResponseObject, error)
 	// List commits on an agent's branch (between base branch and agent branch)
-	// (GET /api/projects/{project_id}/agents/{id}/commits)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/commits)
 	GetAgentCommits(ctx context.Context, request GetAgentCommitsRequestObject) (GetAgentCommitsResponseObject, error)
 	// Get the diff for an agent's branch
-	// (GET /api/projects/{project_id}/agents/{id}/diff)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/diff)
 	GetAgentDiff(ctx context.Context, request GetAgentDiffRequestObject) (GetAgentDiffResponseObject, error)
 	// Get the list of changed files for an agent's branch
-	// (GET /api/projects/{project_id}/agents/{id}/diff-files)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/diff-files)
 	GetAgentDiffFiles(ctx context.Context, request GetAgentDiffFilesRequestObject) (GetAgentDiffFilesResponseObject, error)
 	// Set a head's downstream branch name (the name it is pushed AS)
-	// (PATCH /api/projects/{project_id}/agents/{id}/downstream-branch)
+	// (PATCH /api/projects/{project_id}/agents/{agent_id}/downstream-branch)
 	SetDownstreamBranch(ctx context.Context, request SetDownstreamBranchRequestObject) (SetDownstreamBranchResponseObject, error)
 	// Generate a title for an agent from its task prompt
-	// (POST /api/projects/{project_id}/agents/{id}/generate-title)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/generate-title)
 	GenerateAgentTitle(ctx context.Context, request GenerateAgentTitleRequestObject) (GenerateAgentTitleResponseObject, error)
 	// Send text input to an agent's terminal stdin
-	// (POST /api/projects/{project_id}/agents/{id}/input)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/input)
 	SendAgentInput(ctx context.Context, request SendAgentInputRequestObject) (SendAgentInputResponseObject, error)
 	// Merge a Hydra agent's branch into its base branch and, unless close=false, kill it
-	// (POST /api/projects/{project_id}/agents/{id}/merge)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/merge)
 	MergeAgent(ctx context.Context, request MergeAgentRequestObject) (MergeAgentResponseObject, error)
 	// Disarm auto-merge for a head
-	// (DELETE /api/projects/{project_id}/agents/{id}/merge-when-green)
+	// (DELETE /api/projects/{project_id}/agents/{agent_id}/merge/when-green)
 	DisarmMergeWhenGreen(ctx context.Context, request DisarmMergeWhenGreenRequestObject) (DisarmMergeWhenGreenResponseObject, error)
 	// Arm auto-merge - merge this head when its tests settle passing
-	// (POST /api/projects/{project_id}/agents/{id}/merge-when-green)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/merge/when-green)
 	ArmMergeWhenGreen(ctx context.Context, request ArmMergeWhenGreenRequestObject) (ArmMergeWhenGreenResponseObject, error)
 	// List live server previews ([previews.<name>]) for a head
-	// (GET /api/projects/{project_id}/agents/{id}/previews)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/previews)
 	GetAgentPreviews(ctx context.Context, request GetAgentPreviewsRequestObject) (GetAgentPreviewsResponseObject, error)
 	// Start (or ensure) a live server preview instance
-	// (POST /api/projects/{project_id}/agents/{id}/previews/{name}/start)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/previews/{name}/start)
 	StartAgentPreview(ctx context.Context, request StartAgentPreviewRequestObject) (StartAgentPreviewResponseObject, error)
 	// Stop a live server preview instance
-	// (POST /api/projects/{project_id}/agents/{id}/previews/{name}/stop)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/previews/{name}/stop)
 	StopAgentPreview(ctx context.Context, request StopAgentPreviewRequestObject) (StopAgentPreviewResponseObject, error)
 	// Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
-	// (POST /api/projects/{project_id}/agents/{id}/publish)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish)
 	PublishAgent(ctx context.Context, request PublishAgentRequestObject) (PublishAgentResponseObject, error)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
-	// (POST /api/projects/{project_id}/agents/{id}/publish-pull)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
 	PullFromMr(ctx context.Context, request PullFromMrRequestObject) (PullFromMrResponseObject, error)
 	// Push the local head branch to its linked MR's downstream branch (Push to MR)
-	// (POST /api/projects/{project_id}/agents/{id}/publish-push)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/push)
 	PushToMr(ctx context.Context, request PushToMrRequestObject) (PushToMrResponseObject, error)
 	// Disarm publish-when-green for a head
-	// (DELETE /api/projects/{project_id}/agents/{id}/publish-when-green)
+	// (DELETE /api/projects/{project_id}/agents/{agent_id}/publish/when-green)
 	DisarmPublishWhenGreen(ctx context.Context, request DisarmPublishWhenGreenRequestObject) (DisarmPublishWhenGreenResponseObject, error)
 	// Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
-	// (POST /api/projects/{project_id}/agents/{id}/publish-when-green)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/when-green)
 	ArmPublishWhenGreen(ctx context.Context, request ArmPublishWhenGreenRequestObject) (ArmPublishWhenGreenResponseObject, error)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
-	// (DELETE /api/projects/{project_id}/agents/{id}/purge)
+	// (DELETE /api/projects/{project_id}/agents/{agent_id}/purge)
 	PurgeAgent(ctx context.Context, request PurgeAgentRequestObject) (PurgeAgentResponseObject, error)
 	// Mark an agent as read, clearing its unread-changes flag
-	// (POST /api/projects/{project_id}/agents/{id}/read)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/read)
 	MarkAgentRead(ctx context.Context, request MarkAgentReadRequestObject) (MarkAgentReadResponseObject, error)
 	// Restart a Hydra agent (kill and respawn with the same prompt)
-	// (POST /api/projects/{project_id}/agents/{id}/restart)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/restart)
 	RestartAgent(ctx context.Context, request RestartAgentRequestObject) (RestartAgentResponseObject, error)
 	// Restart just the agent process (keeps the worktree, branch and conversation)
-	// (POST /api/projects/{project_id}/agents/{id}/restart-session)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/restart/session)
 	RestartAgentSession(ctx context.Context, request RestartAgentSessionRequestObject) (RestartAgentSessionResponseObject, error)
 	// Resume an archived (killed/merged) agent, restoring its conversation
-	// (POST /api/projects/{project_id}/agents/{id}/resume)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/resume)
 	ResumeAgent(ctx context.Context, request ResumeAgentRequestObject) (ResumeAgentResponseObject, error)
 	// This head's Hydra-native review comments
-	// (GET /api/projects/{project_id}/agents/{id}/review/comments)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/review/comments)
 	GetReviewComments(ctx context.Context, request GetReviewCommentsRequestObject) (GetReviewCommentsResponseObject, error)
 	// Add a review comment on this head
-	// (POST /api/projects/{project_id}/agents/{id}/review/comments)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments)
 	AddReviewComment(ctx context.Context, request AddReviewCommentRequestObject) (AddReviewCommentResponseObject, error)
 	// Publish this head's draft comments and notify its agent
-	// (POST /api/projects/{project_id}/agents/{id}/review/comments/publish)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments/publish)
 	PublishReviewComments(ctx context.Context, request PublishReviewCommentsRequestObject) (PublishReviewCommentsResponseObject, error)
 	// Mark review comments as read
-	// (POST /api/projects/{project_id}/agents/{id}/review/comments/read)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments/read)
 	MarkReviewCommentsRead(ctx context.Context, request MarkReviewCommentsReadRequestObject) (MarkReviewCommentsReadResponseObject, error)
 	// Discard a draft review comment
-	// (DELETE /api/projects/{project_id}/agents/{id}/review/comments/{number})
+	// (DELETE /api/projects/{project_id}/agents/{agent_id}/review/comments/{number})
 	DeleteReviewComment(ctx context.Context, request DeleteReviewCommentRequestObject) (DeleteReviewCommentResponseObject, error)
 	// Edit a draft review comment
-	// (PATCH /api/projects/{project_id}/agents/{id}/review/comments/{number})
+	// (PATCH /api/projects/{project_id}/agents/{agent_id}/review/comments/{number})
 	UpdateReviewComment(ctx context.Context, request UpdateReviewCommentRequestObject) (UpdateReviewCommentResponseObject, error)
 	// Resolve (or reopen) a review comment by its number
-	// (POST /api/projects/{project_id}/agents/{id}/review/comments/{number}/resolve)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/comments/{number}/resolve)
 	ResolveReviewComment(ctx context.Context, request ResolveReviewCommentRequestObject) (ResolveReviewCommentResponseObject, error)
 	// The review threads on this head's MR, for the diff viewer
-	// (GET /api/projects/{project_id}/agents/{id}/review/threads)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/review/threads)
 	GetReviewThreads(ctx context.Context, request GetReviewThreadsRequestObject) (GetReviewThreadsResponseObject, error)
 	// Start a new review thread on a line of this head's MR
-	// (POST /api/projects/{project_id}/agents/{id}/review/threads)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/threads)
 	CreateReviewComment(ctx context.Context, request CreateReviewCommentRequestObject) (CreateReviewCommentResponseObject, error)
 	// Reply to a review thread on this head's MR
-	// (POST /api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/review/threads/{thread_id}/reply)
 	ReplyToReviewThread(ctx context.Context, request ReplyToReviewThreadRequestObject) (ReplyToReviewThreadResponseObject, error)
 	// Get the test-runner verdict(s) for a head's branch
-	// (GET /api/projects/{project_id}/agents/{id}/tests)
+	// (GET /api/projects/{project_id}/agents/{agent_id}/tests)
 	GetAgentTests(ctx context.Context, request GetAgentTestsRequestObject) (GetAgentTestsResponseObject, error)
 	// Mark an agent as unread, raising its unread-changes flag
-	// (POST /api/projects/{project_id}/agents/{id}/unread)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/unread)
 	MarkAgentUnread(ctx context.Context, request MarkAgentUnreadRequestObject) (MarkAgentUnreadResponseObject, error)
 	// Update a Hydra agent's branch from its base branch (merge base into head)
-	// (POST /api/projects/{project_id}/agents/{id}/update-from-base)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/update-from-base)
 	UpdateAgentFromBase(ctx context.Context, request UpdateAgentFromBaseRequestObject) (UpdateAgentFromBaseResponseObject, error)
 	// Get the merged configuration
 	// (GET /api/projects/{project_id}/config)
@@ -13267,8 +13211,11 @@ type StrictServerInterface interface {
 	// Save configuration changes
 	// (POST /api/projects/{project_id}/config)
 	SaveConfig(ctx context.Context, request SaveConfigRequestObject) (SaveConfigResponseObject, error)
+	// Resolved [review] config + live forge auth status for a project
+	// (GET /api/projects/{project_id}/config/review)
+	GetReviewConfig(ctx context.Context, request GetReviewConfigRequestObject) (GetReviewConfigResponseObject, error)
 	// Get the raw .hydra/config.toml content for the trust prompt the UI shows on first open
-	// (GET /api/projects/{project_id}/config-toml)
+	// (GET /api/projects/{project_id}/config/toml)
 	GetProjectConfigToml(ctx context.Context, request GetProjectConfigTomlRequestObject) (GetProjectConfigTomlResponseObject, error)
 	// Hide a project from the project lists (or show it again)
 	// (PUT /api/projects/{project_id}/hidden)
@@ -13276,6 +13223,9 @@ type StrictServerInterface interface {
 	// Set (or clear) a project's custom icon
 	// (PUT /api/projects/{project_id}/icon)
 	SetProjectIcon(ctx context.Context, request SetProjectIconRequestObject) (SetProjectIconResponseObject, error)
+	// List existing PRs/MRs on the project's forge, for the adoption picker
+	// (GET /api/projects/{project_id}/merge-requests)
+	ListReviews(ctx context.Context, request ListReviewsRequestObject) (ListReviewsResponseObject, error)
 	// List the artifact scripts configured at a ref
 	// (GET /api/projects/{project_id}/repository/artifacts)
 	GetRepositoryArtifacts(ctx context.Context, request GetRepositoryArtifactsRequestObject) (GetRepositoryArtifactsResponseObject, error)
@@ -13306,12 +13256,6 @@ type StrictServerInterface interface {
 	// List the files tracked in the project's repository
 	// (GET /api/projects/{project_id}/repository/tree)
 	GetRepositoryTree(ctx context.Context, request GetRepositoryTreeRequestObject) (GetRepositoryTreeResponseObject, error)
-	// Resolved [review] config + live forge auth status for a project
-	// (GET /api/projects/{project_id}/review-config)
-	GetReviewConfig(ctx context.Context, request GetReviewConfigRequestObject) (GetReviewConfigResponseObject, error)
-	// List existing PRs/MRs on the project's forge, for the adoption picker
-	// (GET /api/projects/{project_id}/reviews)
-	ListReviews(ctx context.Context, request ListReviewsRequestObject) (ListReviewsResponseObject, error)
 	// Get the live status of the project's supervised services
 	// (GET /api/projects/{project_id}/services)
 	GetServices(ctx context.Context, request GetServicesRequestObject) (GetServicesResponseObject, error)
@@ -13536,10 +13480,11 @@ func (sh *strictHandler) RemoveProject(w http.ResponseWriter, r *http.Request, p
 }
 
 // ListAgents operation middleware
-func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request, projectId string) {
+func (sh *strictHandler) ListAgents(w http.ResponseWriter, r *http.Request, projectId string, params ListAgentsParams) {
 	var request ListAgentsRequestObject
 
 	request.ProjectId = projectId
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListAgents(ctx, request.(ListAgentsRequestObject))
@@ -13594,39 +13539,12 @@ func (sh *strictHandler) SpawnAgent(w http.ResponseWriter, r *http.Request, proj
 	}
 }
 
-// ListArchivedAgents operation middleware
-func (sh *strictHandler) ListArchivedAgents(w http.ResponseWriter, r *http.Request, projectId string, params ListArchivedAgentsParams) {
-	var request ListArchivedAgentsRequestObject
-
-	request.ProjectId = projectId
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ListArchivedAgents(ctx, request.(ListArchivedAgentsRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ListArchivedAgents")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ListArchivedAgentsResponseObject); ok {
-		if err := validResponse.VisitListArchivedAgentsResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
 // KillAgent operation middleware
-func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request KillAgentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.KillAgent(ctx, request.(KillAgentRequestObject))
@@ -13649,11 +13567,11 @@ func (sh *strictHandler) KillAgent(w http.ResponseWriter, r *http.Request, proje
 }
 
 // GetAgent operation middleware
-func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request GetAgentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetAgent(ctx, request.(GetAgentRequestObject))
@@ -13676,11 +13594,11 @@ func (sh *strictHandler) GetAgent(w http.ResponseWriter, r *http.Request, projec
 }
 
 // UpdateAgent operation middleware
-func (sh *strictHandler) UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request UpdateAgentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	var body UpdateAgentJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -13710,11 +13628,11 @@ func (sh *strictHandler) UpdateAgent(w http.ResponseWriter, r *http.Request, pro
 }
 
 // ListAgentApprovals operation middleware
-func (sh *strictHandler) ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) ListAgentApprovals(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request ListAgentApprovalsRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListAgentApprovals(ctx, request.(ListAgentApprovalsRequestObject))
@@ -13737,11 +13655,11 @@ func (sh *strictHandler) ListAgentApprovals(w http.ResponseWriter, r *http.Reque
 }
 
 // DecideAgentApproval operation middleware
-func (sh *strictHandler) DecideAgentApproval(w http.ResponseWriter, r *http.Request, projectId string, id string, reqid string) {
+func (sh *strictHandler) DecideAgentApproval(w http.ResponseWriter, r *http.Request, projectId string, agentId string, reqid string) {
 	var request DecideAgentApprovalRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Reqid = reqid
 
 	var body DecideAgentApprovalJSONRequestBody
@@ -13772,11 +13690,11 @@ func (sh *strictHandler) DecideAgentApproval(w http.ResponseWriter, r *http.Requ
 }
 
 // GetAgentArtifacts operation middleware
-func (sh *strictHandler) GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentArtifactsParams) {
+func (sh *strictHandler) GetAgentArtifacts(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentArtifactsParams) {
 	var request GetAgentArtifactsRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
@@ -13800,11 +13718,11 @@ func (sh *strictHandler) GetAgentArtifacts(w http.ResponseWriter, r *http.Reques
 }
 
 // GetAgentCommits operation middleware
-func (sh *strictHandler) GetAgentCommits(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) GetAgentCommits(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request GetAgentCommitsRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetAgentCommits(ctx, request.(GetAgentCommitsRequestObject))
@@ -13827,11 +13745,11 @@ func (sh *strictHandler) GetAgentCommits(w http.ResponseWriter, r *http.Request,
 }
 
 // GetAgentDiff operation middleware
-func (sh *strictHandler) GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentDiffParams) {
+func (sh *strictHandler) GetAgentDiff(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentDiffParams) {
 	var request GetAgentDiffRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
@@ -13855,11 +13773,11 @@ func (sh *strictHandler) GetAgentDiff(w http.ResponseWriter, r *http.Request, pr
 }
 
 // GetAgentDiffFiles operation middleware
-func (sh *strictHandler) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentDiffFilesParams) {
+func (sh *strictHandler) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentDiffFilesParams) {
 	var request GetAgentDiffFilesRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
@@ -13883,11 +13801,11 @@ func (sh *strictHandler) GetAgentDiffFiles(w http.ResponseWriter, r *http.Reques
 }
 
 // SetDownstreamBranch operation middleware
-func (sh *strictHandler) SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) SetDownstreamBranch(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request SetDownstreamBranchRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	var body SetDownstreamBranchJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -13917,11 +13835,11 @@ func (sh *strictHandler) SetDownstreamBranch(w http.ResponseWriter, r *http.Requ
 }
 
 // GenerateAgentTitle operation middleware
-func (sh *strictHandler) GenerateAgentTitle(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) GenerateAgentTitle(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request GenerateAgentTitleRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GenerateAgentTitle(ctx, request.(GenerateAgentTitleRequestObject))
@@ -13944,11 +13862,11 @@ func (sh *strictHandler) GenerateAgentTitle(w http.ResponseWriter, r *http.Reque
 }
 
 // SendAgentInput operation middleware
-func (sh *strictHandler) SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) SendAgentInput(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request SendAgentInputRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	var body SendAgentInputJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -13978,11 +13896,11 @@ func (sh *strictHandler) SendAgentInput(w http.ResponseWriter, r *http.Request, 
 }
 
 // MergeAgent operation middleware
-func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params MergeAgentParams) {
+func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params MergeAgentParams) {
 	var request MergeAgentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
@@ -14006,11 +13924,11 @@ func (sh *strictHandler) MergeAgent(w http.ResponseWriter, r *http.Request, proj
 }
 
 // DisarmMergeWhenGreen operation middleware
-func (sh *strictHandler) DisarmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) DisarmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request DisarmMergeWhenGreenRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DisarmMergeWhenGreen(ctx, request.(DisarmMergeWhenGreenRequestObject))
@@ -14033,11 +13951,11 @@ func (sh *strictHandler) DisarmMergeWhenGreen(w http.ResponseWriter, r *http.Req
 }
 
 // ArmMergeWhenGreen operation middleware
-func (sh *strictHandler) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request ArmMergeWhenGreenRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ArmMergeWhenGreen(ctx, request.(ArmMergeWhenGreenRequestObject))
@@ -14060,11 +13978,11 @@ func (sh *strictHandler) ArmMergeWhenGreen(w http.ResponseWriter, r *http.Reques
 }
 
 // GetAgentPreviews operation middleware
-func (sh *strictHandler) GetAgentPreviews(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentPreviewsParams) {
+func (sh *strictHandler) GetAgentPreviews(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentPreviewsParams) {
 	var request GetAgentPreviewsRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
@@ -14088,11 +14006,11 @@ func (sh *strictHandler) GetAgentPreviews(w http.ResponseWriter, r *http.Request
 }
 
 // StartAgentPreview operation middleware
-func (sh *strictHandler) StartAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params StartAgentPreviewParams) {
+func (sh *strictHandler) StartAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, agentId string, name string, params StartAgentPreviewParams) {
 	var request StartAgentPreviewRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Name = name
 	request.Params = params
 
@@ -14117,11 +14035,11 @@ func (sh *strictHandler) StartAgentPreview(w http.ResponseWriter, r *http.Reques
 }
 
 // StopAgentPreview operation middleware
-func (sh *strictHandler) StopAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, id string, name string, params StopAgentPreviewParams) {
+func (sh *strictHandler) StopAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, agentId string, name string, params StopAgentPreviewParams) {
 	var request StopAgentPreviewRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Name = name
 	request.Params = params
 
@@ -14146,11 +14064,11 @@ func (sh *strictHandler) StopAgentPreview(w http.ResponseWriter, r *http.Request
 }
 
 // PublishAgent operation middleware
-func (sh *strictHandler) PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params PublishAgentParams) {
+func (sh *strictHandler) PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params PublishAgentParams) {
 	var request PublishAgentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Params = params
 
 	var body PublishAgentJSONRequestBody
@@ -14181,11 +14099,11 @@ func (sh *strictHandler) PublishAgent(w http.ResponseWriter, r *http.Request, pr
 }
 
 // PullFromMr operation middleware
-func (sh *strictHandler) PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request PullFromMrRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.PullFromMr(ctx, request.(PullFromMrRequestObject))
@@ -14208,11 +14126,11 @@ func (sh *strictHandler) PullFromMr(w http.ResponseWriter, r *http.Request, proj
 }
 
 // PushToMr operation middleware
-func (sh *strictHandler) PushToMr(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) PushToMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request PushToMrRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.PushToMr(ctx, request.(PushToMrRequestObject))
@@ -14235,11 +14153,11 @@ func (sh *strictHandler) PushToMr(w http.ResponseWriter, r *http.Request, projec
 }
 
 // DisarmPublishWhenGreen operation middleware
-func (sh *strictHandler) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request DisarmPublishWhenGreenRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DisarmPublishWhenGreen(ctx, request.(DisarmPublishWhenGreenRequestObject))
@@ -14262,11 +14180,11 @@ func (sh *strictHandler) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.R
 }
 
 // ArmPublishWhenGreen operation middleware
-func (sh *strictHandler) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string, params ArmPublishWhenGreenParams) {
+func (sh *strictHandler) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params ArmPublishWhenGreenParams) {
 	var request ArmPublishWhenGreenRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
@@ -14290,11 +14208,11 @@ func (sh *strictHandler) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Requ
 }
 
 // PurgeAgent operation middleware
-func (sh *strictHandler) PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request PurgeAgentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.PurgeAgent(ctx, request.(PurgeAgentRequestObject))
@@ -14317,11 +14235,11 @@ func (sh *strictHandler) PurgeAgent(w http.ResponseWriter, r *http.Request, proj
 }
 
 // MarkAgentRead operation middleware
-func (sh *strictHandler) MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) MarkAgentRead(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request MarkAgentReadRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.MarkAgentRead(ctx, request.(MarkAgentReadRequestObject))
@@ -14344,11 +14262,11 @@ func (sh *strictHandler) MarkAgentRead(w http.ResponseWriter, r *http.Request, p
 }
 
 // RestartAgent operation middleware
-func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request RestartAgentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RestartAgent(ctx, request.(RestartAgentRequestObject))
@@ -14371,11 +14289,11 @@ func (sh *strictHandler) RestartAgent(w http.ResponseWriter, r *http.Request, pr
 }
 
 // RestartAgentSession operation middleware
-func (sh *strictHandler) RestartAgentSession(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) RestartAgentSession(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request RestartAgentSessionRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.RestartAgentSession(ctx, request.(RestartAgentSessionRequestObject))
@@ -14398,11 +14316,11 @@ func (sh *strictHandler) RestartAgentSession(w http.ResponseWriter, r *http.Requ
 }
 
 // ResumeAgent operation middleware
-func (sh *strictHandler) ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request ResumeAgentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ResumeAgent(ctx, request.(ResumeAgentRequestObject))
@@ -14425,11 +14343,11 @@ func (sh *strictHandler) ResumeAgent(w http.ResponseWriter, r *http.Request, pro
 }
 
 // GetReviewComments operation middleware
-func (sh *strictHandler) GetReviewComments(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) GetReviewComments(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request GetReviewCommentsRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetReviewComments(ctx, request.(GetReviewCommentsRequestObject))
@@ -14452,11 +14370,11 @@ func (sh *strictHandler) GetReviewComments(w http.ResponseWriter, r *http.Reques
 }
 
 // AddReviewComment operation middleware
-func (sh *strictHandler) AddReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) AddReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request AddReviewCommentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	var body AddReviewCommentJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -14486,11 +14404,11 @@ func (sh *strictHandler) AddReviewComment(w http.ResponseWriter, r *http.Request
 }
 
 // PublishReviewComments operation middleware
-func (sh *strictHandler) PublishReviewComments(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) PublishReviewComments(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request PublishReviewCommentsRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	var body PublishReviewCommentsJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -14520,11 +14438,11 @@ func (sh *strictHandler) PublishReviewComments(w http.ResponseWriter, r *http.Re
 }
 
 // MarkReviewCommentsRead operation middleware
-func (sh *strictHandler) MarkReviewCommentsRead(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) MarkReviewCommentsRead(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request MarkReviewCommentsReadRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	var body MarkReviewCommentsReadJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -14554,11 +14472,11 @@ func (sh *strictHandler) MarkReviewCommentsRead(w http.ResponseWriter, r *http.R
 }
 
 // DeleteReviewComment operation middleware
-func (sh *strictHandler) DeleteReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int) {
+func (sh *strictHandler) DeleteReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string, number int) {
 	var request DeleteReviewCommentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Number = number
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
@@ -14582,11 +14500,11 @@ func (sh *strictHandler) DeleteReviewComment(w http.ResponseWriter, r *http.Requ
 }
 
 // UpdateReviewComment operation middleware
-func (sh *strictHandler) UpdateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int) {
+func (sh *strictHandler) UpdateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string, number int) {
 	var request UpdateReviewCommentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Number = number
 
 	var body UpdateReviewCommentJSONRequestBody
@@ -14617,11 +14535,11 @@ func (sh *strictHandler) UpdateReviewComment(w http.ResponseWriter, r *http.Requ
 }
 
 // ResolveReviewComment operation middleware
-func (sh *strictHandler) ResolveReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int) {
+func (sh *strictHandler) ResolveReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string, number int) {
 	var request ResolveReviewCommentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Number = number
 
 	var body ResolveReviewCommentJSONRequestBody
@@ -14652,11 +14570,11 @@ func (sh *strictHandler) ResolveReviewComment(w http.ResponseWriter, r *http.Req
 }
 
 // GetReviewThreads operation middleware
-func (sh *strictHandler) GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request GetReviewThreadsRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.GetReviewThreads(ctx, request.(GetReviewThreadsRequestObject))
@@ -14679,11 +14597,11 @@ func (sh *strictHandler) GetReviewThreads(w http.ResponseWriter, r *http.Request
 }
 
 // CreateReviewComment operation middleware
-func (sh *strictHandler) CreateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) CreateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request CreateReviewCommentRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	var body CreateReviewCommentJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -14713,11 +14631,11 @@ func (sh *strictHandler) CreateReviewComment(w http.ResponseWriter, r *http.Requ
 }
 
 // ReplyToReviewThread operation middleware
-func (sh *strictHandler) ReplyToReviewThread(w http.ResponseWriter, r *http.Request, projectId string, id string, threadId string) {
+func (sh *strictHandler) ReplyToReviewThread(w http.ResponseWriter, r *http.Request, projectId string, agentId string, threadId string) {
 	var request ReplyToReviewThreadRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.ThreadId = threadId
 
 	var body ReplyToReviewThreadJSONRequestBody
@@ -14748,11 +14666,11 @@ func (sh *strictHandler) ReplyToReviewThread(w http.ResponseWriter, r *http.Requ
 }
 
 // GetAgentTests operation middleware
-func (sh *strictHandler) GetAgentTests(w http.ResponseWriter, r *http.Request, projectId string, id string, params GetAgentTestsParams) {
+func (sh *strictHandler) GetAgentTests(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentTestsParams) {
 	var request GetAgentTestsRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
@@ -14776,11 +14694,11 @@ func (sh *strictHandler) GetAgentTests(w http.ResponseWriter, r *http.Request, p
 }
 
 // MarkAgentUnread operation middleware
-func (sh *strictHandler) MarkAgentUnread(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) MarkAgentUnread(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request MarkAgentUnreadRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.MarkAgentUnread(ctx, request.(MarkAgentUnreadRequestObject))
@@ -14803,11 +14721,11 @@ func (sh *strictHandler) MarkAgentUnread(w http.ResponseWriter, r *http.Request,
 }
 
 // UpdateAgentFromBase operation middleware
-func (sh *strictHandler) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (sh *strictHandler) UpdateAgentFromBase(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request UpdateAgentFromBaseRequestObject
 
 	request.ProjectId = projectId
-	request.Id = id
+	request.AgentId = agentId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.UpdateAgentFromBase(ctx, request.(UpdateAgentFromBaseRequestObject))
@@ -14883,6 +14801,32 @@ func (sh *strictHandler) SaveConfig(w http.ResponseWriter, r *http.Request, proj
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SaveConfigResponseObject); ok {
 		if err := validResponse.VisitSaveConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetReviewConfig operation middleware
+func (sh *strictHandler) GetReviewConfig(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request GetReviewConfigRequestObject
+
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetReviewConfig(ctx, request.(GetReviewConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetReviewConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetReviewConfigResponseObject); ok {
+		if err := validResponse.VisitGetReviewConfigResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -14975,6 +14919,33 @@ func (sh *strictHandler) SetProjectIcon(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetProjectIconResponseObject); ok {
 		if err := validResponse.VisitSetProjectIconResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListReviews operation middleware
+func (sh *strictHandler) ListReviews(w http.ResponseWriter, r *http.Request, projectId string, params ListReviewsParams) {
+	var request ListReviewsRequestObject
+
+	request.ProjectId = projectId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListReviews(ctx, request.(ListReviewsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListReviews")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListReviewsResponseObject); ok {
+		if err := validResponse.VisitListReviewsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -15248,59 +15219,6 @@ func (sh *strictHandler) GetRepositoryTree(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRepositoryTreeResponseObject); ok {
 		if err := validResponse.VisitGetRepositoryTreeResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetReviewConfig operation middleware
-func (sh *strictHandler) GetReviewConfig(w http.ResponseWriter, r *http.Request, projectId string) {
-	var request GetReviewConfigRequestObject
-
-	request.ProjectId = projectId
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetReviewConfig(ctx, request.(GetReviewConfigRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetReviewConfig")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetReviewConfigResponseObject); ok {
-		if err := validResponse.VisitGetReviewConfigResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// ListReviews operation middleware
-func (sh *strictHandler) ListReviews(w http.ResponseWriter, r *http.Request, projectId string, params ListReviewsParams) {
-	var request ListReviewsRequestObject
-
-	request.ProjectId = projectId
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ListReviews(ctx, request.(ListReviewsRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ListReviews")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ListReviewsResponseObject); ok {
-		if err := validResponse.VisitListReviewsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

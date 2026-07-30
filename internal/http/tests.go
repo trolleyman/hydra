@@ -166,7 +166,7 @@ func (s *Server) GetAgentTests(ctx context.Context, request api.GetAgentTestsReq
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -627,7 +627,7 @@ func (s *Server) ArmMergeWhenGreen(ctx context.Context, request api.ArmMergeWhen
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.Id)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -660,7 +660,7 @@ func (s *Server) DisarmMergeWhenGreen(ctx context.Context, request api.DisarmMer
 		return nil, errtrace.Wrap(err)
 	}
 	if s.DB != nil {
-		if err := s.DB.SetMergeWhenGreen(request.Id, false, ""); err != nil {
+		if err := s.DB.SetMergeWhenGreen(request.AgentId, false, ""); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 	}

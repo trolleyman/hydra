@@ -3,8 +3,8 @@ import { agentFilePath, pictureKind, uploadName } from './pictureKind'
 
 describe('pictureKind', () => {
   it.each([
-    ['/api/projects/p/artifacts/blob?script=s&key=commit%2Fa&file=x.png', 'artifact'],
-    ['/api/projects/p/agents/a1/files/blob?path=%2Ftmp%2Fshot.png', 'agent-file'],
+    ['/api/projects/p/artifacts/s/commit/a/files/x.png', 'artifact'],
+    ['/api/projects/p/agents/a1/media/blob?path=%2Ftmp%2Fshot.png', 'agent-file'],
     ['/api/projects/p/uploads/blob?name=1699-shot.png', 'upload'],
     ['data:image/png;base64,AAAA', 'other'],
     ['https://example.com/x.png', 'other'],
@@ -27,7 +27,7 @@ describe('pictureKind', () => {
 
 describe('agentFilePath / uploadName', () => {
   it('recovers what the agent would open', () => {
-    expect(agentFilePath('/api/projects/p/agents/a1/files/blob?path=%2Ftmp%2Fshot.png')).toBe('/tmp/shot.png')
+    expect(agentFilePath('/api/projects/p/agents/a1/media/blob?path=%2Ftmp%2Fshot.png')).toBe('/tmp/shot.png')
   })
 
   it('recovers the stored name of an upload', () => {
@@ -38,6 +38,6 @@ describe('agentFilePath / uploadName', () => {
   // artifact as an attachment by asking the wrong question.
   it('refuses to answer for another kind', () => {
     expect(agentFilePath('/api/projects/p/uploads/blob?name=x.png')).toBeNull()
-    expect(uploadName('/api/projects/p/agents/a/files/blob?path=%2Fx.png')).toBeNull()
+    expect(uploadName('/api/projects/p/agents/a/media/blob?path=%2Fx.png')).toBeNull()
   })
 })
