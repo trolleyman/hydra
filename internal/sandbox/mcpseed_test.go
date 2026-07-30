@@ -36,7 +36,7 @@ func TestBuildGeminiSettingsInjectsMCP(t *testing.T) {
 
 func TestBuildCodexConfigMergesAndPreserves(t *testing.T) {
 	existing := []byte("model = \"gpt-5\"\n[some_section]\nkey = \"val\"\n")
-	data, err := BuildCodexConfig(existing, "/opt/hydra")
+	data, err := BuildCodexConfig(existing, "/opt/hydra", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +49,9 @@ func TestBuildCodexConfigMergesAndPreserves(t *testing.T) {
 	}
 	if sec, _ := cfg["some_section"].(map[string]any); sec["key"] != "val" {
 		t.Errorf("existing codex section dropped: %v", cfg["some_section"])
+	}
+	if features, _ := cfg["features"].(map[string]any); features["hooks"] != true {
+		t.Errorf("codex hooks feature not forced on: %v", cfg["features"])
 	}
 	servers, _ := cfg["mcp_servers"].(map[string]any)
 	hydra, _ := servers["hydra"].(map[string]any)
@@ -83,8 +86,43 @@ func TestBuildCodexConfigMergesAndPreserves(t *testing.T) {
 }
 
 func TestBuildCodexConfigRejectsMalformed(t *testing.T) {
-	if _, err := BuildCodexConfig([]byte("this = = not toml"), "/opt/hydra"); err == nil {
+	if _, err := BuildCodexConfig([]byte("this = = not toml"), "/opt/hydra", nil); err == nil {
 		t.Error("malformed host config should error (so the caller skips rather than clobbers)")
+	}
+}
+
+func TestBuildCodexConfigFiltersMCPServers(t *testing.T) {
+	existing := []byte(`
+[mcp_servers.keep]
+command = "keep"
+[mcp_servers.drop]
+command = "drop"
+`)
+	data, err := BuildCodexConfig(existing, "/opt/hydra", []string{"keep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	servers, _ := cfg["mcp_servers"].(map[string]any)
+	if servers["keep"] == nil || servers["hydra"] == nil || servers["drop"] != nil {
+		t.Fatalf("filtered servers = %#v", servers)
+	}
+}
+
+func TestListCodexMCPServers(t *testing.T) {
+	got := ListCodexMCPServers([]byte(`
+[mcp_servers.zed]
+command = "z"
+[mcp_servers.alpha]
+url = "https://example.test/mcp"
+[mcp_servers.hydra]
+command = "/hydra"
+`))
+	if len(got) != 2 || got[0].Name != "alpha" || got[1].Name != "zed" {
+		t.Fatalf("servers = %#v", got)
 	}
 }
 

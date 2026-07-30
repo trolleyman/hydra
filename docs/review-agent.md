@@ -62,9 +62,10 @@ It is a sibling of `<head>@shell`.
 The one thing that genuinely differs from a shell is the argv and the seeding:
 `StartShellSession` hardcodes `/bin/bash` and passes an empty `gate.Policy{}`
 (`heads.go:1034,1054`). A review session wants
-`sandbox.AgentArgv(sandbox.AgentTypeClaude, ...)`, chat-mode framing, and a
-**real** gate policy. That is the new code, and it is the same shape as the
-existing function.
+provider-specific `sandbox.AgentArgv(...)`, chat-mode framing, and a **real**
+gate policy. Claude heads get a Claude reviewer and Codex heads get a Codex
+reviewer. Providers without Hydra structured-chat support retain the original
+Claude reviewer fallback.
 
 ### The slot id: `<head>@review`, not `<head>/<N>`
 
@@ -191,11 +192,10 @@ The proposal says "read-write tree". Agreed on read-write - a read-only tree
 breaks builds, caches, and test runs for no benefit. But it must be the
 reviewer's **own** checkout, not the head's, for two independent reasons:
 
-1. **Transcript collision.** Claude's transcript dir is keyed by *worktree path*
-   (`claudeProjectDir`, `internal/http/chat_ws.go:918`) and resume falls back to
-   an mtime scan over it (`claudestream.LatestSessionID`). A reviewer sharing the
-   head's worktree writes into the same dir the head resumes from, and the head's
-   next `--continue` can latch onto the reviewer's conversation.
+1. **Transcript collision.** Provider conversation state is keyed by *worktree
+   path*. For Claude, `claudeProjectDir` (`internal/http/chat_ws.go:918`) and
+   `claudestream.LatestSessionID` make this explicit. A reviewer sharing the
+   head's worktree could write into the same state the head resumes from.
 2. **Worse: it races the head's edits.** A read-write reviewer in the head's tree
    runs a build, writes a lockfile, clobbers a scratch file - while the head is
    mid-edit. Corrupting the work under review is a much bigger failure than
@@ -381,8 +381,8 @@ it also had a plain defect that the reasoning missed:
 
 > `ChatViewSelector` renders inside `ChatPane`, and `AgentTerminal` only renders
 > `ChatPane` when `chatMode` is true. So a **terminal-mode head could not reach
-> its reviewer at all** - even though the review slot is its own Claude chat
-> session regardless of how the head it is attached to runs. The tab dropdown
+> its reviewer at all** - even though the review slot is its own chat session
+> regardless of how the head it is attached to runs. The tab dropdown
 > sits outside that branch and works for both.
 
 What the tab shape settles:
@@ -818,7 +818,7 @@ Three rules hold it together:
   reviewer's name to address it, which is the same intent as clicking the Review
   tab and should not do less. An agent's comment still never routes, so no agent
   can spawn one. The start is async (a sandbox takes seconds, and a publish should
-  not block on it) and the notice retries briefly, because a just-launched Claude
+  not block on it) and the notice retries briefly, because a just-launched agent
   is not ready for stdin the instant Start returns. The UI says a reviewer was
   addressed - one working in a tab you never opened is otherwise invisible.
 - **The highlighter and the parser share a pattern.**
@@ -888,7 +888,7 @@ same batching principle as the notify-by-id line the agent gets. Not built.
 | Agent -> comment write path | **built** (`reply_to_review_comment` -> `reviewq.OpNote`) |
 | Notification into an agent | **built** (`SendAgentInput`) |
 | Staleness detection | **built** client-side (`hunkHash`, `contextBlock`) |
-| Claude-argv session slot + chat framing + UI entry | **built** |
+| Provider-matched session slot + chat framing + UI entry | **built** (Claude and Codex; Claude fallback for other providers) |
 | Comment store: anchors, draft/published, forge-independent threads | **built** (`internal/reviewstore/comments.go`) |
 | `add_review_comment` / native `get_review_comments` | **built** (`reviewq.OpAddComment` / `OpComments`) |
 | Notify-by-id replacing `buildReviewMessage` | **built** (and deleted it) |
@@ -947,9 +947,9 @@ reports on code that never existed.
 
 Still open on the built slot:
 
-- **Exercise it against a live head.** It has never launched a real Claude in a
-  real checkout (see the caveat at the top). This is the only item here that is
-  actually blocking - everything else is an addition, this is "does it work".
+- **Exercise each provider against a live head.** Claude and Codex both need
+  regular end-to-end coverage in real review checkouts (see the caveat at the
+  top).
 - **Lens-named extra slots** (`<head>@review-security`). The naming leaves room;
   nothing creates them.
 
