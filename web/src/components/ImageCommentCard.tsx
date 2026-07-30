@@ -2,6 +2,7 @@ import { MessageSquare } from 'lucide-react'
 import type { ReviewImageAnchor } from '../api'
 import { anchorPointLabel, artifactBlobUrl } from '../lib/artifactAnchor'
 import { getFileIcon } from '../lib/fileIcons'
+import { Badge } from './Badge'
 import { cropRect } from '../lib/imageCrop'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { useLightboxStore } from '../stores/lightboxStore'
@@ -90,11 +91,27 @@ export function ImageCommentCard({ comment, projectId, onOpen }: {
           coordinate, and it lines up when several are stacked. */}
       <div className="flex items-center gap-1.5 text-2xs text-gray-500 dark:text-gray-400">
         <FileIcon className={`w-3.5 h-3.5 shrink-0 ${fileIconClass}`} />
-        <span className="truncate" title={a.file}>
+        <span className="truncate" title={a.script ? `${a.script} > ${a.file}` : a.file}>
+          {/* The script the picture came from, lowlit ahead of the file the way a
+              directory is - "home.png" alone is ambiguous the moment two artifacts
+              both render one. Not a slash: it is not a path, and writing it as one
+              would invite someone to go looking for that directory. */}
+          {a.script && <span className="text-gray-400 dark:text-gray-500">{a.script} &gt; </span>}
           {directory && <span className="text-gray-400 dark:text-gray-500">{directory}</span>}
           <span>{fileName}</span>
         </span>
-        <span className="shrink-0 font-mono text-gray-400 dark:text-gray-500">@ {anchorPointLabel(a)}</span>
+        {/* Only a RECORDING shows its position here. A still's spot is visible in
+            the picture directly below - repeating it in numbers cost the width
+            that truncated the filename to "home...", which is the one part of the
+            line that says which picture this is. A clip's moment is the thing the
+            picture cannot show, so that one stays. */}
+        {a.t ? (
+          <span className="shrink-0 font-mono text-gray-400 dark:text-gray-500">@ {anchorPointLabel(a)}</span>
+        ) : null}
+        {/* Names what this comment is ABOUT, which is the one thing the row
+            otherwise leaves to inference: its neighbour in this list is anchored
+            to a line of code, and the two are answered in different places. */}
+        <Badge tone="muted" variant="xs" containerClassName="ml-auto shrink-0">artifact</Badge>
       </div>
       {frame ? (
         <button
