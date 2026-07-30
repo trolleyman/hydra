@@ -1,6 +1,16 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot, FileArchive, FileText, File as FileIcon, Film } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot, FileArchive, FileText, File as FileIcon, Film, MessageSquarePlus } from 'lucide-react'
+import { ImagePins, type ImagePin, type PendingPin } from './ImagePins'
+import { HighlightedTextarea } from './HighlightedTextarea'
+import { renderCommentSource } from '../lib/mentionHighlight'
+import { useImageCommentStore } from '../stores/imageCommentStore'
+import {
+  anchorPositionLabel, anchorVersionLabel, artifactRefFromUrl, buildImageAnchor, sameArtifactPicture,
+} from '../lib/artifactAnchor'
+import { ReviewImageAnchor } from '../api'
+import { placePinPopover, type PopoverPlacement } from '../lib/pinPopover'
+import { agentFilePath, pictureKind } from '../lib/pictureKind'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff, LightboxDiffControls } from './LightboxDiff'
 import { LightboxFile, LightboxPdf, LightboxText, LightboxVideo } from './LightboxViewers'
@@ -56,6 +66,15 @@ export interface LightboxItem {
    *  mirroring the diff grid's per-file badge. Omit for plain items with no diff
    *  context (e.g. the repository browser). */
   changeType?: 'added' | 'removed' | 'modified'
+  /** Marks this entry as an ATTACHMENT to something being composed, so a pin on it
+   *  becomes markup on that prompt rather than a stored comment.
+   *
+   *  Stated rather than derived, unlike an artifact's identity. An artifact's
+   *  anchor is read out of its URL precisely so the two cannot disagree - but a
+   *  freshly attached file has no server URL yet, it previews from a local
+   *  `blob:`, and a blob URL says nothing about what it is. The list that holds
+   *  attachments knows they are attachments; that is the honest source. */
+  attachment?: boolean
 }
 
 // A small +/−/• glyph marking whether the artifact was added, removed, or modified
@@ -71,6 +90,14 @@ function ChangeTypeGlyph({ type }: { type: NonNullable<LightboxItem['changeType'
     case 'modified':
       return <SquareDot className={`${cls} text-amber-400`} />
   }
+}
+
+// Whether a key event landed in something being typed into, so the lightbox's
+// single-letter shortcuts leave it alone. The pin composer is the first field the
+// overlay has ever contained; before it, every key belonged to the viewer.
+function isTypingTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false
+  return t.isContentEditable || t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT'
 }
 
 function formatBytes(n: number): string {
@@ -118,6 +145,18 @@ const CHECKER = 'repeating-conic-gradient(#bfbfbf 0% 25%, #f5f5f5 0% 50%) 0 0 / 
 function LightboxChecker({ className }: { className?: string }) {
   return <CheckerLayer className={className} style={{ background: CHECKER }} />
 }
+
+// How far either side of the shown frame a recording's pin still counts as being
+// "here", in seconds. A pin marks a moment, and a clip is usually a few seconds
+// long, so this has to be tight enough that two remarks about different moments
+// do not stack - and loose enough that one does not blink out as the frame the
+// player settles on drifts by a hair.
+const PIN_TIME_WINDOW = 0.75
+
+// Roughly the height of the browser's native video transport. Left uncovered by
+// an armed pin layer so the clip can still be scrubbed - getting to the moment is
+// the first half of pinning one.
+const VIDEO_CONTROLS_H = 44
 
 // The resting opacity of an edge preview (matches the `opacity-40` on it below).
 // A picture flying in from the edge fades up from it, and the one it replaces fades
@@ -267,6 +306,229 @@ export function Lightbox({
   const [abView, setAbView] = useState<'before' | 'after'>('after')
   const [highlight, setHighlight] = useState(false)
 
+  // Review pins on the picture (docs/review-agent.md). The comments and the way to
+  // store one are registered by whatever page opened the lightbox - nothing
+  // registered means no head to comment on, and the whole pin UI is absent.
+  const pinComments = useImageCommentStore((s) => s.comments)
+  const submitPin = useImageCommentStore((s) => s.submit)
+  const quotePin = useImageCommentStore((s) => s.quote)
+  const annotatePin = useImageCommentStore((s) => s.annotate)
+  // Whether a press on the picture places a pin. Off by default and armed
+  // explicitly: the picture is already draggable (pan) and clickable (the
+  // comparator's A/B flip), so an always-armed layer would scatter pins during
+  // ordinary looking-around.
+  const [arming, setArming] = useState(false)
+  const [pending, setPending] = useState<PendingPin | null>(null)
+  const [pinBody, setPinBody] = useState('')
+  const [pinBusy, setPinBusy] = useState(false)
+  // The clip element, so a pin on a recording can record WHICH FRAME it is about.
+  // currentTime is the only place that lives, and it has to be read at the moment
+  // of the click - by the time the remark is typed the clip has moved on.
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  // The still being shown, for the same reason as videoRef: a crop is drawn from
+  // the element the browser has already painted, which is the only thing that can
+  // render every format an artifact might be (an SVG, a video frame).
+  const imgRef = useRef<HTMLImageElement | null>(null)
+  // The moment being SHOWN, which is what decides whether an existing pin belongs
+  // to the frame on screen. Deliberately separate from the moment a pin RECORDS:
+  // one variable doing both meant the filter only ever moved when you dropped a
+  // pin, so a clip opened at 0 hid every remark past the first 0.75s - and the
+  // overlay was not even mounted, making a commented clip look uncommented.
+  const [frameT, setFrameT] = useState(0)
+  // The moment the pending pin was placed at, read from the element at the click
+  // because by the time the remark is typed the clip has moved on.
+  const [pendingT, setPendingT] = useState(0)
+  const [pinError, setPinError] = useState('')
+  // Arming and any half-written pin are dropped when the picture changes: a comment
+  // composed against one image must never land on the next one.
+  const [pinIndex, setPinIndex] = useState(index)
+  if (pinIndex !== index) {
+    setPinIndex(index)
+    setArming(false)
+    setPending(null)
+    setPinBody('')
+    setPinError('')
+    setPendingT(0)
+    setFrameT(0)
+  }
+
+  // Which single picture a pin would be placed on. A comparator shows two at once
+  // (or halves of both), and "which side is this remark about" has no answer there
+  // - so commenting is a SINGLE-SIDE view: arming drops the comparator for the side
+  // currently selected, and the Before/After control picks which. That also means
+  // one code path draws pins, instead of one per comparison mode.
+  const pinnedItem = items[index]
+  // Which side to pin is usually NOT a question, and asking it every time was
+  // noise. It only has an answer worth choosing when both sides exist AND they
+  // differ: an added file is only on the right, a removed one only on the left,
+  // and an unchanged pair is the same pixels either way, so any of those decides
+  // itself. `modified` is exactly that case - an unchanged pair carries no
+  // changeType at all, and the repository browser has no second side to choose.
+  const pinSideAmbiguous = !!(pinnedItem?.diff?.left && pinnedItem?.diff?.right) && pinnedItem?.changeType === 'modified'
+  const pinnedUrl = pinnedItem?.diff
+    ? (pinSideAmbiguous
+        ? (abView === 'before' ? pinnedItem.diff.left : pinnedItem.diff.right)
+        : (pinnedItem.diff.right ?? pinnedItem.diff.left)) ?? pinnedItem.url
+    : pinnedItem?.url
+  const pinnedRef = useMemo(() => artifactRefFromUrl(pinnedUrl), [pinnedUrl])
+  const pinnedSide = pinnedItem?.diff
+    ? (pinSideAmbiguous
+        ? (abView === 'before' ? ReviewImageAnchor.side.LEFT : ReviewImageAnchor.side.RIGHT)
+        : (pinnedItem.diff.right ? ReviewImageAnchor.side.RIGHT : ReviewImageAnchor.side.LEFT))
+    : undefined
+  // The comments pinned to THIS picture, in this version, on this side. A remark
+  // left on the "before" side must not appear over the "after" one - it would be
+  // pointing at pixels it was never about.
+  const pinsHere = useMemo<ImagePin[]>(
+    () => pinComments
+      .filter((c) => sameArtifactPicture(c.image, pinnedRef, pinnedSide))
+      // On a recording, a pin belongs to a moment as much as to a spot: showing
+      // every remark in the clip at once would stack marks from frames that are
+      // not on screen over the one that is. The window is generous enough that a
+      // pin does not blink out while you look at it.
+      .filter((c) => !c.image?.t || Math.abs(c.image.t - frameT) <= PIN_TIME_WINDOW)
+      .map((c) => ({
+        id: c.id,
+        x: c.image?.x ?? 0,
+        y: c.image?.y ?? 0,
+        w: c.image?.w,
+        h: c.image?.h,
+        // A draft has a number but nobody else can cite it yet, so it shows a dot
+        // rather than a handle - the same rule the diff gutter's cards follow.
+        label: c.published ? `#${c.number}` : '',
+        draft: !c.published,
+        resolved: c.resolved,
+      })),
+    [pinComments, pinnedRef, pinnedSide, frameT],
+  )
+  // Only a still picture that is a real artifact can carry a pin: a video has a
+  // time axis this anchor does not model, and an upload or a chat image has no
+  // (script, key, file) identity to record.
+  const pinnedKind = kindOf(pinnedItem)
+  // A recording is pinnable as well as a still: it has the same two spatial axes,
+  // plus a time one the anchor now carries. The other kinds (a PDF, a log, an
+  // .apk) have no picture to point at.
+  // WHERE a remark about this picture goes, decided by what the picture IS (see
+  // lib/pictureKind). An artifact outlives the conversation, so a remark about it
+  // is a durable numbered comment; a picture the agent posted into the chat is
+  // already part of a thread, so a remark is a reply; an attachment has not been
+  // sent yet, so a remark is markup on the prompt being written. One pin UI, three
+  // destinations - and the destination is never guessed from which page is open.
+  const pictureSort = pictureKind(pinnedUrl)
+  // The explicit attachment marker wins: a locally-attached file previews from a
+  // `blob:` URL that classifies as nothing, and it is still an attachment.
+  const isAttachment = pinnedItem?.attachment || pictureSort === 'upload'
+  const pinDest: 'comment' | 'quote' | 'annotate' | null =
+    pictureSort === 'artifact' && submitPin && pinnedRef ? 'comment'
+      : pictureSort === 'agent-file' && quotePin ? 'quote'
+        : isAttachment && annotatePin ? 'annotate'
+          : null
+  const canPin = !!pinDest && (pinnedKind === 'image' || pinnedKind === 'video')
+
+  // The composer opens ON the pin, so the remark is written next to the spot it
+  // is about. That needs the pin's position in SCREEN pixels, which only the pin
+  // layer can give: it is the picture's own box, so measuring it converts the
+  // stored fractions correctly at any zoom or window size.
+  const pinLayerRef = useRef<HTMLDivElement | null>(null)
+  const popoverRef = useRef<HTMLDivElement | null>(null)
+  const [popover, setPopover] = useState<PopoverPlacement | null>(null)
+  const placePopover = useCallback(() => {
+    const layer = pinLayerRef.current
+    const box = popoverRef.current
+    if (!layer || !box || !pending) {
+      setPopover(null)
+      return
+    }
+    const b = layer.getBoundingClientRect()
+    // Anchored to the pin's bottom-right: for a box that is its far corner, so
+    // the composer never covers the region being talked about.
+    const anchor = {
+      x: b.left + (pending.x + (pending.w ?? 0)) * b.width,
+      y: b.top + (pending.y + (pending.h ?? 0)) * b.height,
+    }
+    const r = box.getBoundingClientRect()
+    setPopover(placePinPopover({
+      anchor,
+      size: { w: r.width, h: r.height },
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+    }))
+  }, [pending])
+  // Measured after layout, so the box's real size decides which corner it takes -
+  // guessing the height would flip it wrongly the moment an error line appears.
+  useLayoutEffect(() => { placePopover() }, [placePopover])
+  useEffect(() => {
+    if (!pending) return
+    window.addEventListener('resize', placePopover)
+    return () => window.removeEventListener('resize', placePopover)
+  }, [pending, placePopover])
+
+  // Where the pin being composed sits, in the picture's own pixels when they are
+  // known - the same form the agent is given, so what you are told you marked and
+  // what it is told are the same sentence.
+  const pendingLabel = pending
+    ? anchorPositionLabel({
+        file: '', x: pending.x, y: pending.y, w: pending.w, h: pending.h,
+        natural_w: dims?.w, natural_h: dims?.h,
+        t: pinnedKind === 'video' ? pendingT : undefined,
+      })
+    : ''
+
+  // Store the pin being composed. `publish` is the difference between adding it to
+  // the review you are building and telling the agent about it now - the same two
+  // buttons the diff viewer's line comments offer, and the same meaning.
+  const savePin = useCallback(async (publish: boolean) => {
+    const body = pinBody.trim()
+    if (!pending || !pinDest || !pinnedUrl || !body) return
+    // The two non-store destinations want prose, not an anchor row: what they
+    // produce is text a person reads in a message. Neither stores anything, so
+    // neither needs the crop or the artifact identity.
+    if (pinDest !== 'comment') {
+      const note = {
+        filename: pinnedItem?.filename ?? '',
+        path: agentFilePath(pinnedUrl) ?? undefined,
+        position: pendingLabel,
+        body,
+      }
+      if (pinDest === 'quote') quotePin?.(note)
+      else annotatePin?.(note)
+      setPending(null)
+      setPinBody('')
+      setPinError('')
+      return
+    }
+    if (!submitPin) return
+    const anchor = buildImageAnchor({
+      url: pinnedUrl,
+      x: pending.x,
+      y: pending.y,
+      w: pending.w,
+      h: pending.h,
+      natural: dims,
+      side: pinnedSide,
+      t: pinnedKind === 'video' ? pendingT : undefined,
+    })
+    if (!anchor) {
+      setPinError('This picture has no artifact identity to pin a comment to.')
+      return
+    }
+    setPinBusy(true)
+    setPinError('')
+    try {
+      await submitPin(anchor, body, publish)
+      setPending(null)
+      setPinBody('')
+      // Deliberately STAYS armed. Disarming drops back to the comparator, which
+      // has no pin layer - so the comment you just left vanished the instant you
+      // saved it, which reads as having lost it. Staying put also matches how
+      // reviewing actually goes: several remarks on one screenshot, not one.
+      // Escape or the toolbar toggle is the way out.
+    } catch (e) {
+      setPinError(e instanceof Error ? e.message : 'The comment could not be saved.')
+    } finally {
+      setPinBusy(false)
+    }
+  }, [pending, pinDest, submitPin, quotePin, annotatePin, pinnedUrl, pinnedItem, pendingLabel, pinBody, dims, pinnedSide, pinnedKind, pendingT])
+
   // Steal focus while open, restore it on close. The opener can leave focus in a
   // keyboard-hungry widget - the terminal's hidden xterm textarea is the prime case
   // (e.g. opening a prompt-attachment thumbnail right after typing in the terminal):
@@ -404,13 +666,31 @@ export function Lightbox({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (closingRef.current) return // the exit flight is under way - ignore the lot
-      if (e.key === 'Escape') requestClose()
-      else if (e.key === 'ArrowLeft') prev()
+      // ←/→ move the caret in the pin composer, and `c` is just a letter there. A
+      // textarea inside the overlay is new (nothing else in the lightbox took
+      // typing), so without this the composer would navigate the gallery as you
+      // wrote in it.
+      if (isTypingTarget(e.target)) {
+        if (e.key === 'Escape') { setPending(null); setPinBody('') }
+        return
+      }
+      if (e.key === 'Escape') {
+        // Escape backs out one layer at a time: the half-written pin, then arming,
+        // then the lightbox. Closing the whole overlay on the first press would
+        // throw away a comment someone was part-way through writing.
+        if (pending) { setPending(null); setPinBody('') }
+        else if (arming) setArming(false)
+        else requestClose()
+      } else if (e.key === 'ArrowLeft') prev()
       else if (e.key === 'ArrowRight') next()
+      else if ((e.key === 'c' || e.key === 'C') && !e.metaKey && !e.ctrlKey && !e.altKey && canPin) {
+        setArming((v) => !v)
+        setPending(null)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [prev, next, requestClose])
+  }, [prev, next, requestClose, pending, arming, canPin])
 
   // Whether the current pointer press STARTED on the backdrop itself. Closing on
   // backdrop click must ignore a drag that merely ENDS there - panning a zoomed
@@ -427,11 +707,12 @@ export function Lightbox({
   // The box the shown picture is laid out in - its pixels, taken down by its
   // capture density. See layoutSize.
   const pictureSize = layoutSize(dims, current)
+  const showsPins = canPin && (arming || pinsHere.length > 0)
   // A before/after comparator, and the mode controls that drive it, only exist for
   // the two kinds the artifact pipeline actually compares. A text file or an .apk
   // may still carry a `diff` (its two sides) - the viewer turns that into a pair of
   // download links rather than a comparison.
-  const showsDiff = !!current.diff && isPictorial(currentKind)
+  const showsDiff = !!current.diff && isPictorial(currentKind) && !arming
 
   // On large screens, when there's more than one item, the prev/next entries sit
   // mostly off-screen at the edges with only a sliver (~12%) peeking in - a
@@ -555,15 +836,42 @@ export function Lightbox({
           leaves the backdrop click (and its press bookkeeping) on the root. */}
       <div aria-hidden className={`absolute inset-0 bg-black/70 backdrop-blur-md pointer-events-none ${chromeFade}`} />
 
-      {/* Close button */}
-      <button
-        type="button"
-        onClick={requestClose}
-        aria-label="Close"
-        className={`absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer ${chromeFade}`}
-      >
-        <X className="w-5 h-5" />
-      </button>
+      {/* Top-right controls. Comment sits beside Close because arming is a mode the
+          whole overlay is in, not something belonging to the picture's own chrome. */}
+      <div className={`absolute top-4 right-4 flex items-center gap-2 ${chromeFade}`}>
+        {canPin && (
+          <Tooltip content={arming ? 'Stop placing comments (c)' : 'Comment on a point in this picture (c)'}>
+            <button
+              type="button"
+              onClick={() => { setArming((v) => !v); setPending(null) }}
+              aria-label="Comment on this picture"
+              aria-pressed={arming}
+              className={`relative p-2 rounded-full transition-colors cursor-pointer ${
+                arming ? 'bg-blue-600 text-white hover:bg-blue-500' : 'bg-white/10 text-white/80 hover:bg-white/20 hover:text-white'
+              }`}
+            >
+              <MessageSquarePlus className="w-5 h-5" />
+              {/* How many comments are already on this side. Without it a picture
+                  that HAS remarks looks exactly like one that has none, because
+                  the pins are only drawn while commenting - and there is no badge
+                  on the tile yet either. */}
+              {pinsHere.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 flex items-center justify-center rounded-full bg-white text-gray-900 text-4xs font-semibold tabular-nums">
+                  {pinsHere.length}
+                </span>
+              )}
+            </button>
+          </Tooltip>
+        )}
+        <button
+          type="button"
+          onClick={requestClose}
+          aria-label="Close"
+          className="p-2 rounded-full bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors cursor-pointer"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
 
       {/* Previous file preview (large screens only) - hidden at the start */}
       {hasPrev && sidePreview('prev')}
@@ -625,7 +933,28 @@ export function Lightbox({
               onDims={setDims}
             />
           ) : currentKind === 'video' ? (
-            <LightboxVideo url={current.url} aspect={dims ? dims.w / dims.h : undefined} onDims={setDims} />
+            <LightboxVideo
+              // The pinned SIDE, for the same reason a picture uses it: arming
+              // drops the comparator, and a pin must record the clip on screen.
+              url={pinnedUrl ?? current.url}
+              aspect={dims ? dims.w / dims.h : undefined}
+              onDims={setDims}
+              videoRef={videoRef}
+              paused={arming}
+              onTime={setFrameT}
+              overlay={showsPins ? (
+                <ImagePins
+                  pins={pinsHere}
+                  pending={pending}
+                  armed={arming}
+                  layerRef={pinLayerRef}
+                  // The browser's transport is about this tall; leaving it clear
+                  // keeps "scrub to the moment, then pin it" possible.
+                  controlsInset={VIDEO_CONTROLS_H}
+                  onPlace={(p) => { setPending(p); setPendingT(videoRef.current?.currentTime ?? 0); setPinError('') }}
+                />
+              ) : undefined}
+            />
           ) : currentKind === 'pdf' ? (
             <LightboxPdf url={current.url} />
           ) : currentKind === 'text' ? (
@@ -651,13 +980,20 @@ export function Lightbox({
               maxWidth={hasSiblings ? '80vw' : '90vw'}
               maxHeight="85vh"
               onVerticalSlide={followFrameSlide}
+              // The composer hangs off the pin, and the pin travels with the
+              // picture - so a wheel-zoom over the image has to re-place it or the
+              // box is left pointing at where the pin used to be.
+              onViewChange={placePopover}
             >
               {/* The wrapper hugs the image (shrink-to-fit inside ZoomPan's content
-                  box), so the checkerboard layer behind it lines up with the picture. */}
+                  box), so the checkerboard layer behind it lines up with the picture -
+                  and so the pin layer, which is `absolute inset-0` over this box, puts
+                  a pin at the fraction of the PICTURE it was placed at. */}
               <div className="relative">
                 <LightboxChecker className={chromeFade} />
                 <img
-                  src={current.url}
+                  ref={imgRef}
+                  src={pinnedUrl ?? current.url}
                   alt={current.filename}
                   // The known size, as the picture's own box - at its LOGICAL size
                   // (see layoutSize), which is also what makes a @2x capture land
@@ -680,6 +1016,16 @@ export function Lightbox({
                   // it (a positioned element beats a static one in the same stack).
                   className={`relative max-h-[85vh] ${figureWidth} object-contain block`}
                 />
+                {showsPins && (
+                  <ImagePins
+                    pins={pinsHere}
+                    pending={pending}
+                    armed={arming}
+                    layerRef={pinLayerRef}
+                    // A still has no moment to record - only the clip path reads one.
+                    onPlace={(p) => { setPending(p); setPinError('') }}
+                  />
+                )}
               </div>
             </ZoomPan>
           )}
@@ -737,6 +1083,117 @@ export function Lightbox({
         >
           <ChevronRight className="w-7 h-7" />
         </button>
+      )}
+
+      {/* The pin composer, hanging off the pin itself rather than sitting in a
+          panel elsewhere: the position is part of what is being said, so the
+          sentence belongs next to the spot. Fixed-positioned against the viewport
+          (the placement is computed in client pixels), and hidden for the first
+          frame because the corner it takes depends on measuring its own size. */}
+      {pending && (
+        <div
+          ref={popoverRef}
+          className="fixed z-[102] w-80 rounded-lg border border-white/15 bg-gray-900/95 backdrop-blur-sm shadow-2xl p-3"
+          style={{
+            left: popover?.left ?? 0,
+            top: popover?.top ?? 0,
+            visibility: popover ? 'visible' : 'hidden',
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-2 mb-2 text-3xs text-white/50 font-mono">
+            <span>{pendingLabel}</span>
+            {pinnedRef && <span className="text-white/30">·</span>}
+            {pinnedRef && <span className="truncate">{anchorVersionLabel({ file: pinnedRef.file, key: pinnedRef.key, x: 0, y: 0 })}</span>}
+          </div>
+          {/* Which side the remark is about - asked ONLY when it is a real
+              question. An added file exists on one side, an unchanged pair is the
+              same pixels either way, and asking anyway made a choice out of
+              something already decided. When it IS ambiguous it belongs here
+              rather than over by the picture: it is part of what the comment says,
+              and changing it swaps the picture under the pin so the answer can be
+              checked. */}
+          {pinSideAmbiguous && (
+            <div className="flex items-center gap-1 mb-2">
+              <span className="text-3xs text-white/40 mr-1">About the</span>
+              {(['before', 'after'] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setAbView(v)}
+                  // A toggle group, so which side is selected has to be readable
+                  // as STATE, not only as a colour - the comparator's equivalent
+                  // controls already do this.
+                  aria-pressed={abView === v}
+                  className={`px-2 h-6 rounded text-3xs font-medium transition-colors cursor-pointer ${
+                    abView === v ? 'bg-white/20 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/90'
+                  }`}
+                >
+                  <span className="optical-center">{v === 'before' ? 'Before' : 'After'}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <HighlightedTextarea
+            value={pinBody}
+            autoFocus
+            onChange={(e) => setPinBody(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                void savePin(false)
+              }
+            }}
+            placeholder={pinDest === 'annotate' ? 'What should the agent do here?' : 'What is wrong with this spot?'}
+            // The textarea is absolutely positioned inside the wrapper, so it
+            // cannot size the box - the height belongs on the wrapper, as it
+            // does on the diff viewer's comment box.
+            wrapperClassName="w-full h-20 rounded border border-white/15 bg-black/30 focus-within:ring-1 focus-within:ring-blue-400"
+            textClassName="p-2 text-xs leading-5"
+            textColorClassName="text-gray-100"
+            caretClassName="caret-gray-100"
+            // Mentions decide who the comment wakes - `@review` sends it to the
+            // reviewer instead of the head - so they are painted while it is
+            // typed, exactly as in the line-comment box.
+            renderContent={renderCommentSource}
+          />
+          {pinError && <p className="mt-2 text-2xs text-red-400">{pinError}</p>}
+          <div className="flex items-center justify-end gap-1.5 mt-2">
+            <button
+              type="button"
+              onClick={() => { setPending(null); setPinBody(''); setPinError('') }}
+              className="px-2 h-7 rounded text-2xs text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <span className="optical-center">Cancel</span>
+            </button>
+            {/* The buttons name the DESTINATION, because the destination differs
+                by what the picture is and the difference is not otherwise
+                visible. Only an artifact offers the draft/publish pair - the
+                other two produce text in a composer you then send yourself, so
+                there is nothing to queue and nothing to publish. */}
+            {pinDest === 'comment' && (
+              <button
+                type="button"
+                disabled={pinBusy || !pinBody.trim()}
+                onClick={() => void savePin(true)}
+                className="px-2 h-7 rounded text-2xs text-white/80 bg-white/10 hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                <span className="optical-center">To agent</span>
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={pinBusy || !pinBody.trim()}
+              onClick={() => void savePin(false)}
+              className="px-2 h-7 rounded text-2xs font-medium text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              <span className="optical-center">
+                {pinDest === 'comment' ? 'Add to review' : pinDest === 'quote' ? 'Reply in chat' : 'Add note'}
+              </span>
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Next file preview (large screens only) - hidden at the end */}

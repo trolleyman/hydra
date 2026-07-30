@@ -106,7 +106,7 @@ func (s *Server) notifyLocalNote(ctx context.Context, projectRoot string, head h
 	if number == 0 {
 		where = "a reply on a review thread"
 	}
-	line := fmt.Sprintf("The user left %s. Read it with the get_review_comments tool.", where)
+	line := fmt.Sprintf("The user left %s. Read it with the `mcp__hydra__get_review_comments` tool.", where)
 	m := reviewstore.ParseMentions(body)
 	if m.Reviewer {
 		s.notifyReviewer(projectRoot, head, line)

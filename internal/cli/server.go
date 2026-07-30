@@ -190,6 +190,11 @@ func runSimulationServer() error {
 	// (mirrors the real server's non-OpenAPI routes), so those toggles can be
 	// screenshotted - and so a settled test card's log button is live, as it is
 	// against a real project.
+	// Simulated artifact bytes. The pictures are addressed the way generated ones
+	// are (blob?script=&key=&file=), because that triple is an artifact's identity
+	// and the review pins derive their anchor from it - a data URL is a picture
+	// nothing can be pinned to. See simArtifactBlob.
+	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
 	mux.HandleFunc("/tests/projects/{project_id}/log", server.HandleTestLog)
 
@@ -202,6 +207,15 @@ func runSimulationServer() error {
 	mux.HandleFunc("GET /api/auth/status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"auth_required":false,"authenticated":true}`))
+	})
+
+	// Folder-picker availability (mirrors the real server's non-OpenAPI route).
+	// The sim has no native picker to open, so it answers "no" - the project
+	// dropdown just hides its "Browse..." button. Same reason as the auth route:
+	// without it every project-dropdown open logs a 404.
+	mux.HandleFunc("GET /folder-picker/available", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"available":false}`))
 	})
 
 	registerFrontend(mux)

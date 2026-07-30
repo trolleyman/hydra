@@ -378,7 +378,9 @@ func toolDefs(deps Deps) []map[string]any {
 		defs = append(defs, map[string]any{
 			"name": "get_review_comments",
 			"description": "Read the review comments on YOUR work, with file/line context, ready to act on. Covers both: comments left in Hydra by the user or a reviewer agent (numbered - refer to them as \"#3\" from then on), and, if this head is linked to a merge/pull request, that MR's unresolved discussions read live from the forge. " +
-				"Hydra tells you when comments arrive by NUMBER only, so this is how you read what they say - and you can call it again rounds later to check whether something you were asked about still stands.",
+				"Hydra tells you when comments arrive by NUMBER only, so this is how you read what they say - and you can call it again rounds later to check whether something you were asked about still stands. " +
+				"A comment may be pinned to a POINT ON A PICTURE rather than a line of code - one left on a generated artifact (a screenshot). Those carry the image's path on this machine, the pixel coordinates of the pin, and which commit the picture was rendered from: OPEN THE IMAGE and look at that spot before acting, rather than guessing from the coordinates. " +
+				"When a pin says it was rendered from the uncommitted working tree, git cannot tell you what has changed since - regenerate the artifact and compare instead.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

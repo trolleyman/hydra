@@ -24,6 +24,7 @@ import (
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/preview"
 	"github.com/trolleyman/hydra/internal/projects"
+	"github.com/trolleyman/hydra/internal/reviewstore"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/services"
 	"github.com/trolleyman/hydra/internal/session"
@@ -606,7 +607,16 @@ func runStoragePruner(ctx context.Context, artifactReg *artifacts.Registry, test
 		// first artifact request). Reusing the live managers keeps in-flight
 		// generation tracking intact and skips projects that never generated any.
 		for root, mgr := range artifactReg.Snapshot() {
-			if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes); err != nil {
+			// Entries a review comment points at are held back from both eviction
+			// paths: a pin's whole value is being able to go back and look at what
+			// it points at, and reclaiming that picture on age or size would leave
+			// the comment as coordinates into something nobody can retrieve.
+			pins := reviewstore.PinnedArtifacts(root)
+			keep := make([]artifacts.Pin, 0, len(pins))
+			for _, p := range pins {
+				keep = append(keep, artifacts.Pin{Script: p.Script, Key: p.Key})
+			}
+			if err := mgr.PruneStale(artifacts.DefaultMaxAge, artifacts.DefaultMaxBytes, keep); err != nil {
 				log.Printf("warn: prune artifacts (%s): %v", root, err)
 			}
 		}

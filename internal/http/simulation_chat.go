@@ -589,6 +589,14 @@ var simChatEvents = []simNorm{
 	// back to a wall of terminal text over a boundary nobody needed.
 	simTool("toolu_sim_gitpair", "Bash", simRaw(`{"command":"git diff --stat\ngit stash list","description":"Review the full working diff"}`)),
 	simToolOut("toolu_sim_gitpair", " internal/artifacts/backoff.go  |  15 +++++++\n internal/artifacts/upload.go   |  32 ++++++++------\n internal/http/simulation.go    |   6 ++\n docs/artifacts.md              |   7 +-\n 4 files changed, 52 insertions(+), 12 deletions(-)"),
+	// The "where am I" script, and the one bound that saves it. It has no
+	// separator in it, and it ends on a build command web/src/lib/shellSections
+	// can say nothing at all about - so the only thing standing between the git
+	// report at the top and one undifferentiated wall of terminal text is the
+	// `| tail -2`, which says the build printed two lines and no more. See
+	// ScriptStep.cap.
+	simTool("toolu_sim_gitwhere", "Bash", simRaw(`{"command":"git status --short\ngit log --oneline -3\nmage build 2>&1 | tail -2","description":"Check the worktree, the last few commits and that it still builds"}`)),
+	simToolOut("toolu_sim_gitwhere", " M internal/artifacts/upload.go\n?? scratch/probe.ts\na56e8a7d Merge branch 'main'\nd10b2b2c Stop spending a model turn on a resolved comment\n2672df7c Merge branch 'main'\n--- Done ---\n$ go build ./..."),
 	// Two searches of the same file back to back, with no separator between them
 	// - the second asking a narrower question than the first. Where one's matches
 	// stop and the other's start is not knowable, but it does not need to be:

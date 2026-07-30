@@ -370,6 +370,13 @@ func GetReviewCommentsJson(projectRoot, id string) string {
 	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-comments", id+".json")
 }
 
+// GetReviewCommentsDir returns the directory holding every head's review
+// comments (.hydra/local/review-comments). Scanned to find which artifact cache
+// entries are still referenced by a comment, without needing the head list.
+func GetReviewCommentsDir(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-comments")
+}
+
 // GetReviewReqRootDir returns the parent dir holding every head's review-refresh
 // channel (.hydra/local/review-req). The daemon's review-request watcher scans it
 // to find heads asking for a forge refresh.
