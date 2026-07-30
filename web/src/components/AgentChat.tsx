@@ -2007,13 +2007,23 @@ function Expandable({ open, children, className }: { open: boolean; children: Re
 // of the script. A single line has nothing to disambiguate, so it stays bare.
 function CodePanel({ code, lang }: { code: string; lang: string }) {
   const lineNumbers = useChatCodeLinesStore((s) => s.lineNumbers)
+  const ws = useWhitespaceMarks()
   const html = useMemo(() => highlightHtml(code, lang), [code, lang])
+  // Whitespace marks per line, so `boundary` marks each line's own indent and
+  // trailing run (splitHighlightedLines re-opens a colour that spanned the break).
+  // The numbered path below carries its own marks (GutterCodePanel).
+  const marked = useMemo(
+    () => (html == null || ws === 'off' ? html : splitHighlightedLines(html).map((l) => markWhitespace(l, ws)).join('\n')),
+    [html, ws],
+  )
   if (lineNumbers && code.trimEnd().includes('\n')) return <NumberedCodePanel code={code} lang={lang} />
 
   const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
-  if (html != null) {
-    return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
+  if (marked != null) {
+    return <pre className={cls} dangerouslySetInnerHTML={{ __html: marked }} />
   }
+  const plainMarked = markWhitespaceText(code, ws)
+  if (plainMarked != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: plainMarked }} />
   return <pre className={cls}>{code}</pre>
 }
 

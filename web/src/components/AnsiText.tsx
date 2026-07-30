@@ -1,5 +1,8 @@
 import { useMemo } from 'react'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
+import { splitHighlightedLines } from '../lib/highlightCore'
+import { markWhitespace, markWhitespaceText } from '../lib/whitespaceMarks'
+import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 
 // AnsiText renders captured tool output that may carry ANSI escapes - a test
 // case's failure message, a runner's error text - without ever showing the raw
@@ -16,7 +19,18 @@ import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 // The build log proper does NOT come through here: LogView pipes it into
 // xterm, which interprets ANSI natively.
 export function AnsiText({ text, className }: { text: string; className?: string }) {
+  const ws = useWhitespaceMarks()
   const html = useMemo(() => (hasAnsi(text) ? ansiToHtml(text) : null), [text])
-  if (html != null) return <pre className={className} dangerouslySetInnerHTML={{ __html: html }} />
-  return <pre className={className}>{stripAnsi(text)}</pre>
+  // The whitespace-mark overlay, applied per line so `boundary` marks each line's
+  // own indent and trailing run (splitHighlightedLines re-opens a colour that
+  // spanned the break) - the same treatment OutputPanel gives the chat's output.
+  const marked = useMemo(
+    () => (html == null || ws === 'off' ? html : splitHighlightedLines(html).map((l) => markWhitespace(l, ws)).join('\n')),
+    [html, ws],
+  )
+  if (marked != null) return <pre className={className} dangerouslySetInnerHTML={{ __html: marked }} />
+  const plain = stripAnsi(text)
+  const plainMarked = markWhitespaceText(plain, ws)
+  if (plainMarked != null) return <pre className={className} dangerouslySetInnerHTML={{ __html: plainMarked }} />
+  return <pre className={className}>{plain}</pre>
 }
