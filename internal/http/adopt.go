@@ -172,5 +172,8 @@ func adoptReviewSnapshot(ctx context.Context, provider forge.Provider, projectRo
 			discussions = forge.UnresolvedDiscussions(threads)
 		}
 	}
-	return reviewSnapshot(ref.URL, ref.ID, provider.Name(), ref.TargetBranch, st, discussions)
+	// No head id yet - this seeds the review file as part of spawning onto an
+	// existing PR, so there is no numbering sequence to draw from until it exists.
+	// The watcher numbers these on its first pass.
+	return reviewSnapshot("", "", ref.URL, ref.ID, provider.Name(), ref.TargetBranch, st, discussions)
 }

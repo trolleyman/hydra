@@ -43,12 +43,14 @@ type Deps struct {
 	// review file the MR watcher writes; nil disables the review tools.
 	// See docs/non-local-integration.md.
 	GetReview func() *ReviewFile
-	// ReplyLocal records a LOCAL-ONLY reply on one of this head's review threads:
-	// visible to the user in Hydra's diff viewer, never sent to the forge. Agents
+	// ReplyLocal records a LOCAL-ONLY reply to a review comment, addressed by its
+	// NUMBER - the one sequence covering Hydra's own comments and the forge's
+	// alike, so an agent answers "#7" without needing to know where #7 lives.
+	// Visible to the user in Hydra's diff viewer, never sent to the forge: agents
 	// have no forge credentials by design and Hydra only writes to a PR as an
 	// explicit user action, so this is the whole of an agent's write access to a
 	// review conversation. Nil hides the tool.
-	ReplyLocal func(threadID, body string) (ok bool, message string)
+	ReplyLocal func(number int, body string) (ok bool, message string)
 	// HydraComments reads Hydra's OWN review comments on this head - numbered,
 	// line-anchored, and durable, so an agent can re-read "#3" rounds later
 	// instead of relying on a blob that was pasted into its context and has since
@@ -185,8 +187,13 @@ type ReviewFile struct {
 
 // ReviewComment is one unresolved review thread with file/line context.
 type ReviewComment struct {
-	// ID is the thread handle, which reply_to_review_comment takes.
-	ID     string `json:"id,omitempty"`
+	// ID is the thread handle a local reply attaches to.
+	ID string `json:"id,omitempty"`
+	// Number is this comment's handle in the head's ONE numbering sequence, shared
+	// with Hydra's own comments so an agent can say "#7" and mean exactly one
+	// thing regardless of which side of the fence it was written on. It is also
+	// what reply_to_review_comment takes.
+	Number int    `json:"number,omitempty"`
 	Author string `json:"author,omitempty"`
 	Body   string `json:"body,omitempty"`
 	Path   string `json:"path,omitempty"`
@@ -406,22 +413,23 @@ func toolDefs(deps Deps) []map[string]any {
 				"annotations": map[string]any{"readOnlyHint": true},
 			},
 		)
-		if deps.ReplyLocal != nil {
-			defs = append(defs, map[string]any{
-				"name": "reply_to_review_comment",
-				"description": "Reply to one review discussion on YOUR merge/pull request, for the USER to read in Hydra's diff viewer. " +
-					"The reply is LOCAL ONLY - it is never posted to the forge, so the reviewer will not see it; the user decides what to send on. " +
-					"Use it to say what you changed and why, or to disagree with a comment, next to the thread it answers. Take the thread id from get_review_comments.",
-				"inputSchema": map[string]any{
-					"type":     "object",
-					"required": []string{"thread_id", "body"},
-					"properties": map[string]any{
-						"thread_id": map[string]any{"type": "string", "description": "The discussion's thread id, as given by get_review_comments."},
-						"body":      map[string]any{"type": "string", "description": "Your reply, in markdown."},
-					},
+	}
+	if deps.ReplyLocal != nil {
+		defs = append(defs, map[string]any{
+			"name": "reply_to_review_comment",
+			"description": "Reply to one review comment on YOUR OWN diff, by its number, for the USER to read in Hydra next to the comment it answers. " +
+				"Works for any comment get_review_comments shows you - one left in Hydra or one on your merge/pull request - because they share one numbering. " +
+				"The reply is LOCAL ONLY: it is never posted to the forge, so an outside reviewer will not see it; the user decides what to send on. " +
+				"Use it to say what you changed and why, or to disagree, rather than burying the answer in chat where it is not attached to anything.",
+			"inputSchema": map[string]any{
+				"type":     "object",
+				"required": []string{"number", "body"},
+				"properties": map[string]any{
+					"number": map[string]any{"type": "integer", "description": "The comment's number, as given by get_review_comments (the \"#7\" handle)."},
+					"body":   map[string]any{"type": "string", "description": "Your reply, in markdown."},
 				},
-			})
-		}
+			},
+		})
 	}
 	return defs
 }
@@ -530,16 +538,16 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 			return textResult("reply_to_review_comment is not available in this session.", true)
 		}
 		var args struct {
-			ThreadID string `json:"thread_id"`
-			Body     string `json:"body"`
+			Number int    `json:"number"`
+			Body   string `json:"body"`
 		}
 		_ = json.Unmarshal(p.Arguments, &args)
-		if strings.TrimSpace(args.ThreadID) == "" || strings.TrimSpace(args.Body) == "" {
-			return textResult("reply_to_review_comment needs a non-empty \"thread_id\" and \"body\".", true)
+		if args.Number <= 0 || strings.TrimSpace(args.Body) == "" {
+			return textResult("reply_to_review_comment needs a \"number\" (from get_review_comments) and a non-empty \"body\".", true)
 		}
-		ok, msg := deps.ReplyLocal(args.ThreadID, args.Body)
+		ok, msg := deps.ReplyLocal(args.Number, args.Body)
 		if msg == "" && ok {
-			msg = "Saved as a local note on that discussion. The user can see it in Hydra next to the thread; it was NOT posted to the forge."
+			msg = "Saved. The user can see it in Hydra next to the comment it answers; it was NOT posted to the forge."
 		}
 		return textResult(msg, !ok)
 	default:
@@ -659,7 +667,9 @@ func forgeCommentsText(deps Deps) string {
 		if c.Author != "" {
 			b.WriteString("(@" + c.Author + ") ")
 		}
-		if c.ID != "" {
+		if c.Number > 0 {
+			b.WriteString("[#" + itoa(c.Number) + "]")
+		} else if c.ID != "" {
 			b.WriteString("[thread " + c.ID + "]")
 		}
 		b.WriteString("\n   ")
@@ -667,7 +677,7 @@ func forgeCommentsText(deps Deps) string {
 		b.WriteString("\n")
 	}
 	if deps.ReplyLocal != nil {
-		b.WriteString("\nUse reply_to_review_comment with a thread id to answer one of these for the USER to read in Hydra (local only - it is not posted to the forge).\n")
+		b.WriteString("\nUse reply_to_review_comment with a comment's number to answer one of these for the USER to read in Hydra (local only - it is not posted to the forge).\n")
 	}
 	return b.String()
 }

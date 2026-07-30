@@ -55,6 +55,33 @@ Write them in normal sentence/title case (e.g. "Review controls", not "REVIEW
 CONTROLS"). This covers both capitalised string literals *and* CSS - do not reach
 for `text-transform: uppercase` to get the uppercase look either.
 
+### Test status wording: three layers, three vocabularies
+
+A test status is shown at three different scopes, and each one has its own words.
+This is deliberate - it is how the reader tells which scope they are looking at,
+and it follows GitHub, which does exactly the same thing:
+
+- **A whole run's verdict** (the runner chip in `TestsPanel`) is an **outcome
+  noun**: `success` / `failure` / `error`, plus `running` for an in-flight one.
+  These are GitHub's commit-status `state` values, which our four settled states
+  map onto one-to-one.
+- **A single case** (the case tree, the "group by result" section headings) is a
+  **past participle**: `passed` / `failed` / `skipped`, plus `warnings` as a
+  plural noun. This is what every test runner itself prints - Playwright, pytest,
+  jest, `go test` - and the tree is rendering their output.
+- **Prose** (tooltips, dialogs, config docs) uses **pass as a verb**: "Tests
+  passing - 79 passed", "No passing test verdict for this commit", "merge when
+  tests settle passing". GitHub's own "All checks have passed" is this layer.
+
+Do **not** print a status enum value as UI copy - that is what put `passing` two
+lines above `passed` and made them read as an inconsistency. `TestsPanel`'s
+`STATUS_LABEL` and `TestVerdict`'s `verdictLabel` / `verdictTitle` are the maps;
+add to them instead. The wire values (`tests.Status` in Go, `TestStatus` in
+openapi) stay as they are: `Report.Status` is serialized into the on-disk verdict
+cache, so renaming one silently invalidates every cached verdict, and `errored`
+in particular cannot become `error` (it collides with Go's predeclared `error`
+and makes oapi-codegen prefix the whole enum - see the enum-collision note).
+
 ### Tooltips: two variants, one engine
 
 All tooltips go through `web/src/components/Tooltip.tsx`. There are exactly two

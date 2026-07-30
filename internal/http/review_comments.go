@@ -17,7 +17,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -145,11 +147,76 @@ func (s *Server) notifyComments(ctx context.Context, projectRoot string, head he
 	return &line
 }
 
+// ResolveReviewComment marks a comment dealt with, whichever origin it came from.
+//
+// One endpoint for both because the numbering is one sequence: from the user's
+// side "#7 is handled" is the same action whether #7 was left in Hydra or on the
+// PR, and making them two buttons in one gutter would put the storage layout in
+// front of the person using it.
+func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveReviewCommentRequestObject) (api.ResolveReviewCommentResponseObject, error) {
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	if errResp != nil {
+		return api.ResolveReviewComment404JSONResponse(*errResp), nil
+	}
+	resolved := request.Body.Resolved
+	if _, err := reviewstore.SetResolved(projectRoot, head.ID, request.Number, resolved); err == nil {
+		s.notifyAgentsChanged(projectRoot, false)
+		return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+	} else if !errors.Is(err, reviewstore.ErrNoComment) {
+		return resolveCommentBadRequest(err.Error()), nil
+	}
+	// Not one of ours: the number may name a forge note, in which case what gets
+	// resolved is the THREAD it belongs to - a single note is not a unit anyone
+	// resolves.
+	_, ref, ok := reviewstore.ForgeRef(projectRoot, head.ID, request.Number)
+	if !ok || ref.Thread == "" {
+		return resolveCommentBadRequest("no comment or thread has that number"), nil
+	}
+	if err := reviewstore.SetThreadResolved(projectRoot, head.ID, ref.Thread, resolved, time.Now().Format(time.RFC3339)); err != nil {
+		return resolveCommentBadRequest(err.Error()), nil
+	}
+	s.notifyAgentsChanged(projectRoot, false)
+	return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+}
+
+// MarkReviewCommentsRead records what the user has seen.
+func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkReviewCommentsReadRequestObject) (api.MarkReviewCommentsReadResponseObject, error) {
+	projectRoot, head, errResp := s.reviewThreadHead(ctx, request.ProjectId, request.Id)
+	if errResp != nil {
+		return api.MarkReviewCommentsRead404JSONResponse(*errResp), nil
+	}
+	var numbers []int
+	if request.Body != nil && request.Body.Numbers != nil {
+		numbers = *request.Body.Numbers
+	}
+	if len(numbers) == 0 {
+		// "Mark everything read" covers the forge notes too, which are not in our
+		// store - so it has to come from the numbering, not from the comment list.
+		for _, c := range reviewstore.LoadComments(projectRoot, head.ID) {
+			numbers = append(numbers, c.Number)
+		}
+		numbers = append(numbers, reviewstore.AllNumbers(projectRoot, head.ID)...)
+	}
+	read := request.Body == nil || request.Body.Unread == nil || !*request.Body.Unread
+	if err := reviewstore.MarkRead(projectRoot, head.ID, numbers, read); err != nil {
+		log.Printf("warn: review comments: mark read for %s: %v", head.ID, err)
+	}
+	s.notifyAgentsChanged(projectRoot, false)
+	return api.MarkReviewCommentsRead200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+}
+
 func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCommentsResponse {
 	stored := reviewstore.LoadComments(projectRoot, headID)
+	read := reviewstore.ReadSet(projectRoot, headID)
 	out := api.ReviewCommentsResponse{
 		Comments: make([]api.ReviewComment, 0, len(stored)),
 		Notified: notified,
+	}
+	// Hydra has no accounts, so "you" is whoever git says you are. It is the only
+	// name available for a comment that never went near a forge, and it is the
+	// right one - it is the name your commits already carry.
+	if who := gitConfigVal(projectRoot, "user.name"); who != "" {
+		out.You = &who
 	}
 	for _, c := range stored {
 		ac := api.ReviewComment{
@@ -168,6 +235,11 @@ func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCo
 		setIf(&ac.Context, c.Context, c.Context != "")
 		setIf(&ac.HunkHash, c.HunkHash, c.HunkHash != "")
 		setIf(&ac.PublishedAt, c.PublishedAt, c.PublishedAt != "")
+		setIf(&ac.Resolved, c.Resolved, c.Resolved)
+		setIf(&ac.ResolvedAt, c.ResolvedAt, c.ResolvedAt != "")
+		// A comment you wrote yourself is born read; anything an agent or a
+		// reviewer left is not, which is what the unread dot is for.
+		setIf(&ac.Read, true, read[c.Number] || c.Author == reviewstore.AuthorUser)
 		out.Comments = append(out.Comments, ac)
 	}
 	return out
@@ -209,6 +281,10 @@ func updateCommentBadRequest(detail string) api.UpdateReviewComment400JSONRespon
 
 func deleteCommentBadRequest(detail string) api.DeleteReviewComment400JSONResponse {
 	return api.DeleteReviewComment400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: detail}
+}
+
+func resolveCommentBadRequest(detail string) api.ResolveReviewComment400JSONResponse {
+	return api.ResolveReviewComment400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: detail}
 }
 
 func publishCommentsBadRequest(detail string) api.PublishReviewComments400JSONResponse {

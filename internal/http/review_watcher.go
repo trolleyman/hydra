@@ -13,6 +13,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/mcpserver"
+	"github.com/trolleyman/hydra/internal/reviewstore"
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
 
@@ -134,7 +135,17 @@ func (s *Server) cacheReviewState(projectRoot, headID string, st forge.Status) {
 // server reads from an MR link plus its freshly-polled forge state. Shared
 // by the watcher and the adopt-spawn seed (docs/pr-adoption.md), so both write
 // the same shape.
-func reviewSnapshot(url, id, provider, targetBranch string, st forge.Status, discussions []forge.Discussion) mcpserver.ReviewFile {
+// numberDiscussion assigns a discussion its number from the head's shared
+// sequence, or 0 when there is no head to number against (the adopt-spawn seed
+// runs before the head exists).
+func numberDiscussion(projectRoot, headID string, d forge.Discussion) int {
+	if projectRoot == "" || headID == "" {
+		return 0
+	}
+	return reviewstore.NumberForForgeNote(projectRoot, headID, d.NoteID, d.ID)
+}
+
+func reviewSnapshot(projectRoot, headID, url, id, provider, targetBranch string, st forge.Status, discussions []forge.Discussion) mcpserver.ReviewFile {
 	rf := mcpserver.ReviewFile{
 		Linked:                true,
 		URL:                   url,
@@ -151,7 +162,8 @@ func reviewSnapshot(url, id, provider, targetBranch string, st forge.Status, dis
 	}
 	for _, d := range discussions {
 		rf.Comments = append(rf.Comments, mcpserver.ReviewComment{
-			ID: d.ID, Author: d.Author, Body: d.Body, Path: d.Path, Line: d.Line, URL: d.URL,
+			ID: d.ID, Number: numberDiscussion(projectRoot, headID, d),
+			Author: d.Author, Body: d.Body, Path: d.Path, Line: d.Line, URL: d.URL,
 		})
 	}
 	return rf
@@ -160,7 +172,7 @@ func reviewSnapshot(url, id, provider, targetBranch string, st forge.Status, dis
 // writeReviewFile writes the per-head review snapshot (status + unresolved
 // discussions) the in-sandbox `hydra mcp` server reads. Best-effort.
 func writeReviewFile(projectRoot string, a db.Agent, st forge.Status, discussions []forge.Discussion) {
-	rf := reviewSnapshot(a.ReviewURL, a.ReviewID, a.ReviewProvider, a.ReviewTargetBranch, st, discussions)
+	rf := reviewSnapshot(projectRoot, a.ID, a.ReviewURL, a.ReviewID, a.ReviewProvider, a.ReviewTargetBranch, st, discussions)
 	_ = heads.WriteReviewSnapshot(projectRoot, a.ID, rf)
 }
 

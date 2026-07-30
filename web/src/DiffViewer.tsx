@@ -18,16 +18,21 @@ import {
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Folder, FolderOpen, X, GitMergeConflict, Bot, File, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
+  CircleCheck, Link2, ArrowUp, ArrowDown,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
+import { Avatar } from './components/Avatar'
 import { getFileIcon } from './lib/fileIcons'
+import { copyText } from './lib/clipboard'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
 import { buildRepoSplat } from './lib/repoSplat'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { buildWordRangeMaps, renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS, type WordRange } from './lib/wordDiff'
+import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from './lib/whitespaceMarks'
+import { useWhitespaceMarks } from './lib/whitespacePrefs'
 import { Tooltip } from './components/Tooltip'
 import { CollapseSlide } from './components/CollapseSlide'
 import { ResizeGrip } from './components/ResizeGrip'
@@ -58,7 +63,7 @@ import { useDialogStore } from './stores/dialogStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
-import { addReviewComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, draftsOf, type PendingReviewComment } from './lib/reviewComments'
+import { addReviewComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, draftsOf, type PendingReviewComment } from './lib/reviewComments'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
 import { Markdown } from './lib/MarkdownRenderer'
 import { useCopyFlash } from './lib/useCopyFlash'
@@ -181,11 +186,16 @@ const EMPTY_FILE_THREADS: ReviewThread[] = []
 // One queued comment shown inline beneath its diff line: the authored text rendered
 // as markdown (matching how it lands in the agent chat), with edit + remove. A
 // stale comment (its diff moved since it was queued) gets a warning but still reads.
-function QueuedCommentCard({ comment, stale, onEdit, onRemove }: {
+function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, onCopyLink }: {
   comment: PendingReviewComment
   stale: boolean
+  // Who "you" is on this machine (git's user.name). Hydra has no accounts, so a
+  // comment you wrote is a monogram of this rather than a picture of anyone.
+  you?: string
   onEdit: () => void
   onRemove: () => void
+  onResolve?: (resolved: boolean) => void
+  onCopyLink?: () => void
 }) {
   // A published comment is a record, not a draft: it has left, an agent may
   // already have acted on it, and the server refuses to edit or delete it. So it
@@ -201,14 +211,101 @@ function QueuedCommentCard({ comment, stale, onEdit, onRemove }: {
         : 'border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20'
     }`}>
       <div className="flex items-start gap-2">
-        <MessageSquare className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${sent ? 'text-stone-400 dark:text-stone-500' : 'text-blue-500'}`} />
+        {/* The avatar owns the left column, draft or not: a draft is still YOURS,
+            and a generic speech bubble in the same slot said less. For an agent it
+            is the brand mark; for you a monogram of git's user.name, or a person
+            glyph when git has no name to draw on - "Y" for "You" is an initial
+            that belongs to nobody. */}
+        <Avatar
+          name={mine ? (you ?? '') : comment.author}
+          label={mine ? 'You' : comment.author}
+          agentType={mine ? undefined : 'claude'}
+          className="mt-0.5"
+        />
         <div className="min-w-0 flex-1">
-          {sent && (
-            <div className="mb-0.5 flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
-              <span className="font-mono">#{comment.number}</span>
-              {!mine && <span>{comment.author}</span>}
+          {/* The header row holds everything on that line INCLUDING the buttons -
+              the number used to sit in this column while the controls were a
+              sibling of it, so the two had different line boxes and the number
+              rode ~3px high of the icons beside it. One row, one centre line.
+              h-5 fixes the row to the icon buttons' height so it does not jump
+              when a chip appears. */}
+          <div className="mb-0.5 flex h-5 items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
+              {/* "You" rather than your git name: the name is on the avatar's tip,
+                  and in a list of comments what matters is which ones are yours. */}
+              <span className={mine ? 'text-stone-500 dark:text-stone-400' : ''}>{mine ? 'You' : comment.author}</span>
+              {!sent && (
+                // A draft is the one state worth a chip: it is the difference
+                // between something the agent has been told and something only you
+                // can see, and that is not obvious from the card alone.
+                <span className="rounded bg-blue-100 px-1 text-[10px] font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                  draft
+                </span>
+              )}
+              {comment.resolved && <span className="text-emerald-600 dark:text-emerald-500">resolved</span>}
+              {/* The number sits on the RIGHT, where it reads as a reference rather
+                  than as part of the sentence - the same place the forge threads
+                  put theirs. The unread dot rides on it, so what is new and what to
+                  call it are one glance. */}
+              {/* A draft shows no number. It HAS one - it was allocated when the
+                  comment was written, and publishing does not change it - but until
+                  it is published nobody else can cite it, so putting a handle on it
+                  would invite quoting something the agent cannot look up. */}
+              <span className="ml-auto flex items-center gap-1 shrink-0">
+                {sent && (
+                  <>
+                    {!comment.read && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
+                    <span className="font-mono">#{comment.number}</span>
+                  </>
+                )}
+                {sent ? (
+                  <span className="ml-0.5 flex items-center gap-0.5">
+                    <Tooltip content={comment.resolved ? 'Reopen' : 'Mark resolved'} side="top">
+                      <button
+                        onClick={() => onResolve?.(!comment.resolved)}
+                        aria-label={comment.resolved ? 'Reopen comment' : 'Resolve comment'}
+                        className={`p-1 rounded transition-colors cursor-pointer ${
+                          comment.resolved
+                            ? 'text-emerald-600 dark:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                            : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                        }`}
+                      >
+                        <CircleCheck className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Copy link to this comment" side="top">
+                      <button
+                        onClick={() => onCopyLink?.()}
+                        aria-label="Copy link to this comment"
+                        className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                  </span>
+                ) : (
+                  <span className="ml-0.5 flex items-center gap-0.5">
+                    <Tooltip content="Edit comment" side="top">
+                      <button
+                        onClick={onEdit}
+                        aria-label="Edit comment"
+                        className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Discard comment" side="top">
+                      <button
+                        onClick={onRemove}
+                        aria-label="Discard comment"
+                        className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                  </span>
+                )}
+              </span>
             </div>
-          )}
           <Markdown text={comment.text} className="text-xs text-gray-700 dark:text-gray-200 break-words" />
           {stale && !sent && (
             <div className="mt-1 flex items-start gap-1 text-[11px] text-amber-700 dark:text-amber-300">
@@ -216,26 +313,6 @@ function QueuedCommentCard({ comment, stale, onEdit, onRemove }: {
               <span>The diff around this line changed after this comment was queued; it will still be sent with its original context.</span>
             </div>
           )}
-        </div>
-        <div className={`flex items-center gap-0.5 shrink-0 ${sent ? 'hidden' : ''}`}>
-          <Tooltip content="Edit comment" side="top">
-            <button
-              onClick={onEdit}
-              aria-label="Edit comment"
-              className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-            </button>
-          </Tooltip>
-          <Tooltip content="Remove comment" side="top">
-            <button
-              onClick={onRemove}
-              aria-label="Remove comment"
-              className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </Tooltip>
         </div>
       </div>
     </div>
@@ -401,7 +478,7 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
 // Shared by the unified and side-by-side hunks so both views show inline comments
 // identically. `openNew` drives the new-comment CommentRow; editing an existing
 // comment is tracked here by id.
-function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onComment, onAddToReview, onEditComment, onRemoveComment, lineDraftApi }: {
+function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, you, lineDraftApi }: {
   entries: LineCommentEntry[] | undefined
   path: string
   lineNum: number
@@ -412,6 +489,9 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
   onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
   onEditComment?: (id: string, text: string) => void
   onRemoveComment?: (id: string) => void
+  onResolveComment?: (number: number, resolved: boolean) => void
+  onCopyCommentLink?: (number: number) => void
+  you?: string
   lineDraftApi?: LineDraftApi
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -438,6 +518,9 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
             stale={entry.stale}
             onEdit={() => setEditingId(entry.comment.id)}
             onRemove={() => onRemoveComment?.(entry.comment.id)}
+            onResolve={(r) => onResolveComment?.(entry.comment.number, r)}
+            onCopyLink={() => onCopyCommentLink?.(entry.comment.number)}
+            you={you}
           />
         ),
       )}
@@ -566,14 +649,18 @@ const EMPTY_WORD_RANGES: Map<number, WordRange[]> = new Map()
 
 // codeCellHtml resolves the HTML for a diff line's code cell: the word-diff
 // overlay when this line has changed ranges, else the plain syntax-highlighted
-// HTML. Returns null to signal "render the raw content as a text node" (no
-// highlight, no word ranges) - the safe path that needs no dangerouslySetInnerHTML.
-function codeCellHtml(highlighted: string | undefined, content: string, ranges: WordRange[] | undefined, wordClass: string): string | null {
-  if (ranges && ranges.length) return renderWordDiffHtml(highlighted, content, ranges, wordClass)
-  return highlighted ?? null
+// HTML, with the whitespace marks (lib/whitespaceMarks) laid over whichever it
+// is - last, so neither the highlighter nor the word diff has to know about
+// them. Returns null to signal "render the raw content as a text node" (no
+// highlight, no word ranges, nothing to mark) - the safe path that needs no
+// dangerouslySetInnerHTML.
+function codeCellHtml(highlighted: string | undefined, content: string, ranges: WordRange[] | undefined, wordClass: string, ws: WhitespaceMarks): string | null {
+  const html = ranges && ranges.length ? renderWordDiffHtml(highlighted, content, ranges, wordClass) : highlighted
+  if (html != null) return markWhitespace(html, ws)
+  return markWhitespaceText(content, ws)
 }
 
-const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, lineDraftApi, readOnly, selection, onSelectLine }: {
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, you, lineDraftApi, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   path: string
   highlightedOld: Map<number, string>
@@ -585,6 +672,9 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
   onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
   onEditComment?: (id: string, text: string) => void
   onRemoveComment?: (id: string) => void
+  onResolveComment?: (number: number, resolved: boolean) => void
+  onCopyCommentLink?: (number: number) => void
+  you?: string
   lineDraftApi?: LineDraftApi
   readOnly?: boolean
   selection?: DiffLineSelection | null
@@ -593,6 +683,10 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   // Stable so the memo'd CommentButton on each line skips a re-highlight tick.
   const toggleComment = useCallback((idx: number) => setOpenCommentIdx((cur) => (cur === idx ? null : idx)), [])
+  // Read here rather than threaded down as a prop: the hunks are memo'd on their
+  // props, so a subscription inside is what re-renders them when the setting
+  // changes (and nothing re-highlights - the marks go on the finished HTML).
+  const ws = useWhitespaceMarks()
   return (
     <div>
       {hunk.lines.map((line, idx) => {
@@ -605,7 +699,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
         const wordRanges = isAdd
           ? (line.new_line_num != null ? wordRangesNew.get(line.new_line_num) : undefined)
           : isDel ? (line.old_line_num != null ? wordRangesOld.get(line.old_line_num) : undefined) : undefined
-        const codeHtml = codeCellHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
+        const codeHtml = codeCellHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS, ws)
         const bgClass = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
         const markerClass = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
         const selOld = selectionHas(selection, 'old', line.old_line_num)
@@ -650,6 +744,9 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
                 onAddToReview={onAddToReview}
                 onEditComment={onEditComment}
                 onRemoveComment={onRemoveComment}
+                onResolveComment={onResolveComment}
+                onCopyCommentLink={onCopyCommentLink}
+                you={you}
                 lineDraftApi={lineDraftApi}
               />
             )}
@@ -661,7 +758,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
 })
 
 
-const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, lineDraftApi, readOnly, selection, onSelectLine }: {
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, you, lineDraftApi, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   path: string
   highlightedOld: Map<number, string>
@@ -673,6 +770,9 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
   onAddToReview?: (lineNum: number, isNew: boolean, text: string) => void
   onEditComment?: (id: string, text: string) => void
   onRemoveComment?: (id: string) => void
+  onResolveComment?: (number: number, resolved: boolean) => void
+  onCopyCommentLink?: (number: number) => void
+  you?: string
   lineDraftApi?: LineDraftApi
   readOnly?: boolean
   selection?: DiffLineSelection | null
@@ -680,6 +780,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   const toggleComment = useCallback((idx: number) => setOpenCommentIdx((cur) => (cur === idx ? null : idx)), [])
+  const ws = useWhitespaceMarks()
   const sbsLines = buildSideBySide(hunk.lines)
   return (
     <div>
@@ -690,8 +791,8 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
         // a context line shown on both sides.
         const oldWordRanges = line.oldType === 'deletion' && line.oldLineNum != null ? wordRangesOld.get(line.oldLineNum) : undefined
         const newWordRanges = line.newType === 'addition' && line.newLineNum != null ? wordRangesNew.get(line.newLineNum) : undefined
-        const oldCodeHtml = line.oldContent != null ? codeCellHtml(oldHighlighted, line.oldContent, oldWordRanges, WORD_DEL_CLASS) : null
-        const newCodeHtml = line.newContent != null ? codeCellHtml(newHighlighted, line.newContent, newWordRanges, WORD_ADD_CLASS) : null
+        const oldCodeHtml = line.oldContent != null ? codeCellHtml(oldHighlighted, line.oldContent, oldWordRanges, WORD_DEL_CLASS, ws) : null
+        const newCodeHtml = line.newContent != null ? codeCellHtml(newHighlighted, line.newContent, newWordRanges, WORD_ADD_CLASS, ws) : null
         const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-500/15' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-500/15' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const selOld = selectionHas(selection, 'old', line.oldLineNum)
@@ -747,6 +848,9 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
                 onAddToReview={onAddToReview}
                 onEditComment={onEditComment}
                 onRemoveComment={onRemoveComment}
+                onResolveComment={onResolveComment}
+                onCopyCommentLink={onCopyCommentLink}
+                you={you}
                 lineDraftApi={lineDraftApi}
               />
             )}
@@ -1057,7 +1161,7 @@ function firstFileLine(file: DiffFile): string | undefined {
   return line.content
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, you, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -1081,6 +1185,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   fileThreads?: ReviewThread[]
   onEditComment?: (id: string, text: string) => void
   onRemoveComment?: (id: string) => void
+  onResolveComment?: (number: number, resolved: boolean) => void
+  onCopyCommentLink?: (number: number) => void
+  you?: string
   lineDraftApi?: LineDraftApi
   isCollapsed: boolean
   onToggleCollapse: (path: string) => void
@@ -1439,11 +1546,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     sideBySide
       ? <SideBySideHunk key={key} hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink} you={you}
         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
       : <UnifiedHunk key={key} hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink} you={you}
         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
 
@@ -1680,11 +1787,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                     {sideBySide
                       ? <SideBySideHunk hunk={hunk} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
                         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink} you={you}
                         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                       : <UnifiedHunk hunk={hunk} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
                         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink} you={you}
                         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                     }
                     {isLast && !atEndOfFile && (
@@ -1786,6 +1893,13 @@ function diffContextBlock(path: string, hunk: DiffHunk | undefined, lineNum: num
   })
   const header = hunk.header ? `${hunk.header}\n` : ''
   return `\`\`\`diff\n--- ${path}\n+++ ${path}\n${header}${rows.join('\n')}\n\`\`\`\n`
+}
+
+// A comment's permalink. The number is the whole address - the head is already in
+// the path, and a number is stable and never reused - so this stays short enough
+// to paste into a message and still means one exact thing months later.
+function commentPermalink(projectId: string | null, agentId: string, number: number): string {
+  return `${window.location.origin}/project/${encodeURIComponent(projectId ?? '_')}/agent/${encodeURIComponent(agentId)}?comment=${number}`
 }
 
 function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
@@ -2762,6 +2876,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.inspector === next.inspector &&
   prev.changesLeading === next.changesLeading &&
   prev.leadingInline === next.leadingInline &&
+  prev.focusComment === next.focusComment &&
   prev.agent.id === next.agent.id &&
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
@@ -2774,7 +2889,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
 // layout as the classic single-column page (Changes bar with the base -> head
 // selectors, then tests, previews, artifacts, and the diff itself), just
 // without the top margin - the pane's own padding supplies it.
-function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, externalCommitSelect, inspector, changesLeading, leadingInline }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; externalCommitSelect?: { sha: string; nonce: number } | null; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean }) {
+function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, externalCommitSelect, inspector, changesLeading, leadingInline, focusComment }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; externalCommitSelect?: { sha: string; nonce: number } | null; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean; focusComment?: number }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -3440,6 +3555,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // them. Reloaded when the agent changes (DiffViewerImpl is not remounted per
   // agent - see the memo comparator - so switching agents re-runs this effect).
   const [reviewComments, setReviewComments] = useState<PendingReviewComment[]>([])
+  // Who "you" is on this machine (git's user.name), for the monogram on a comment
+  // you wrote. Hydra has no accounts and hosts no pictures.
+  const [you, setYou] = useState('')
   // Refetch when the agent changes. The store is server-side now, so this starts
   // empty and fills in - which also means a draft written in another browser (or
   // before a reload) is simply there, the thing localStorage could never do.
@@ -3447,7 +3565,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => {
     let cancelled = false
     fetchReviewComments(projectId, agent.id)
-      .then((cs) => { if (!cancelled) setReviewComments(cs) })
+      .then((res) => { if (!cancelled) { setReviewComments(res.comments); setYou(res.you) } })
       .catch((e) => console.error('Failed to load review comments:', e))
     return () => { cancelled = true }
   }, [projectId, agent.id])
@@ -3521,11 +3639,141 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       .catch((e) => console.error('Failed to edit comment:', e))
   }, [projectId, agent.id])
 
+  // Resolve / reopen. The same call whichever origin the number came from - one
+  // sequence means "#7 is handled" is one action, not two buttons that differ by
+  // where the comment happens to be stored. A forge thread resolves LOCALLY (see
+  // the API description); refreshThreads picks the mark up.
+  const refreshThreadsRef = useRef<(() => Promise<void>) | null>(null)
+  const handleResolveComment = useCallback((number: number, resolved: boolean) => {
+    resolveReviewComment(projectId, agent.id, number, resolved)
+      .then((cs) => { setReviewComments(cs); void refreshThreadsRef.current?.() })
+      .catch((e) => console.error('Failed to resolve comment:', e))
+  }, [projectId, agent.id])
+
+  // A permalink is the number and nothing else: the head is already in the path,
+  // and the number is stable and never reused, so the link still means one exact
+  // thing months later.
+  const handleCopyCommentLink = useCallback((number: number) => {
+    void copyText(commentPermalink(projectId, agent.id, number))
+      .then((ok) => showSentToast(ok ? 'Link copied' : 'Could not copy the link'))
+  }, [projectId, agent.id, showSentToast])
+
+  // Mark comments seen. Read state is explicit - nothing becomes read by the
+  // passage of time - so this is called when you actually arrive at one (a
+  // permalink, or a step of the next/previous navigation), not on render.
+  const markRead = useCallback((numbers: number[]) => {
+    if (numbers.length === 0) return
+    markReviewCommentsRead(projectId, agent.id, numbers)
+      .then((cs) => {
+        setReviewComments(cs)
+        // The number may name a FORGE note, whose read flag rides on the threads
+        // response rather than this one - so the dot only clears once they are
+        // re-read. Cheap: the threads fetch is already the diff's normal refresh.
+        void refreshThreadsRef.current?.()
+      })
+      .catch(() => { /* cosmetic; the dot simply stays until the next attempt */ })
+  }, [projectId, agent.id])
+
+  const [threads, setThreads] = useState<ReviewThread[]>([])
+
+  // Every OPEN comment on this diff, in document order (file order, then line),
+  // across both origins - a forge thread and a Hydra comment are the same thing
+  // to someone working through a review, and the numbering already says so.
+  // Resolved ones drop out, which is what makes resolving worth doing: the list
+  // shortens as you deal with it.
+  const openComments = useMemo(() => {
+    // `numbers` is everything arriving at this stop has you read: for a thread
+    // that is the WHOLE conversation, not just its opening comment - you cannot
+    // land on a thread and be shown only half of it, so marking only the anchor
+    // would leave a dot lit on something you have plainly seen.
+    type Stop = { number: number; numbers: number[]; path: string; lineNum: number; isNew: boolean; unread: boolean }
+    const stops: Stop[] = []
+    for (const c of reviewComments) {
+      if (!c.published || c.resolved || c.replyTo > 0) continue
+      const replies = reviewComments.filter((r) => r.replyTo === c.number)
+      stops.push({
+        number: c.number,
+        numbers: [c.number, ...replies.map((r) => r.number)],
+        path: c.path, lineNum: c.lineNum, isNew: c.isNew,
+        unread: !c.read || replies.some((r) => !r.read),
+      })
+    }
+    for (const t of threads) {
+      if (t.resolved) continue
+      const numbers = t.notes.map((n) => n.number).filter((n): n is number => n != null)
+      if (numbers.length === 0) continue
+      stops.push({
+        number: numbers[0], numbers, path: t.path, lineNum: t.line, isNew: true,
+        unread: t.notes.some((n) => n.read === false),
+      })
+    }
+    const order = new Map((diff?.files ?? []).map((f, i) => [f.path, i]))
+    stops.sort((a, b) => (order.get(a.path) ?? 1e9) - (order.get(b.path) ?? 1e9) || a.lineNum - b.lineNum)
+    return stops
+  }, [reviewComments, threads, diff])
+
+  // Where the up/down navigation is standing. Kept as a NUMBER rather than an
+  // index so it survives the list changing under it (resolving the one you are on
+  // shortens the list, which would otherwise silently move you somewhere else).
+  const [atComment, setAtComment] = useState<number | null>(null)
+
+  // How many of the open ones you have not seen. Separate from the open count
+  // because they answer different questions - one is "how much is left", the
+  // other "what arrived while I was elsewhere".
+  const unreadCount = useMemo(() => openComments.filter((c) => c.unread).length, [openComments])
+
+  // Jump to one comment by number - what a permalink and a clicked date both do.
+  // Held in a ref so the thread-actions memo below can call it without depending
+  // on it (see openComment there).
+  const openCommentRef = useRef<((number: number) => void) | null>(null)
+
+  // Step to the next/previous open comment, wrapping at the ends. Marks the one
+  // you land on as read: arriving at a comment is what "seen" means, and it is a
+  // far better signal than a scroll position, which fires for anything that
+  // happens to pass the viewport on the way somewhere else.
+  const stepComment = useCallback((delta: 1 | -1) => {
+    if (openComments.length === 0) return
+    const at = openComments.findIndex((c) => c.number === atComment)
+    const next = openComments[(((at < 0 ? (delta > 0 ? -1 : 0) : at) + delta) % openComments.length + openComments.length) % openComments.length]
+    setAtComment(next.number)
+    if (next.unread) markRead(next.numbers)
+    handleJumpToComment({ path: next.path, lineNum: next.lineNum, isNew: next.isNew } as PendingReviewComment)
+  }, [openComments, atComment, markRead, handleJumpToComment])
+
+  useEffect(() => {
+    openCommentRef.current = (number: number) => {
+      const target = openComments.find((c) => c.number === number)
+        ?? reviewComments.find((c) => c.number === number)
+      setAtComment(number)
+      markRead([number])
+      if (target) handleJumpToComment({ path: target.path, lineNum: target.lineNum, isNew: target.isNew } as PendingReviewComment)
+    }
+  }, [openComments, reviewComments, markRead, handleJumpToComment])
+
+  // `?comment=4`: jump to it once there is a diff to find it in, and mark it read.
+  // Runs on the number rather than on every diff refresh, so a background refresh
+  // does not yank the view back to the anchor after you have scrolled away.
+  const jumpedToRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!focusComment || !diff || jumpedToRef.current === focusComment) return
+    const target = reviewComments.find((c) => c.number === focusComment)
+      ?? openComments.find((c) => c.number === focusComment)
+    if (!target) return
+    jumpedToRef.current = focusComment
+    // Legitimate effect: this fires once per permalink, and the state it sets is
+    // the navigation cursor - so a later "next" steps on from where the link
+    // landed rather than from the top of the file. It cannot move to render; the
+    // jump needs a mounted, laid-out diff to scroll within.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAtComment(focusComment)
+    markRead([focusComment])
+    handleJumpToComment({ path: target.path, lineNum: target.lineNum, isNew: target.isNew } as PendingReviewComment)
+  }, [focusComment, diff, reviewComments, openComments, markRead, handleJumpToComment])
+
   // Forge review threads for this head's MR, fetched when the head is linked. The
   // fetch reads the forge live host-side (~a second), so it runs on mount and
   // after any write rather than on a timer; the daemon's 30s watcher keeps the
   // unresolved COUNT on the chip fresh in the meantime.
-  const [threads, setThreads] = useState<ReviewThread[]>([])
   const linkedMR = !!agent.review?.url
   const refreshThreads = useCallback(async () => {
     if (!projectId || !linkedMR) { setThreads([]); return }
@@ -3537,6 +3785,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       console.error('Failed to load review threads:', e)
     }
   }, [projectId, agent.id, linkedMR])
+  // Published so the resolve handler above can re-read the threads after marking
+  // one, without the two callbacks depending on each other's identity (which
+  // would churn every memo'd file card on each render).
+  useEffect(() => { refreshThreadsRef.current = refreshThreads }, [refreshThreads])
   // Deferred (not called synchronously in the effect) so its setState doesn't
   // cascade during the same render pass - the same pattern as PRPicker's load.
   useEffect(() => {
@@ -3562,6 +3814,20 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         const res = await api.default.createReviewComment(projectId, agent.id, { path, line, body })
         setThreads(res.threads ?? [])
         showSentToast('Comment posted on the pull request')
+      },
+      commentHref: (number) => commentPermalink(projectId, agent.id, number),
+      // Through a ref, not directly: this memo is deliberately identity-stable
+      // (every thread card re-renders when it changes), and the jump depends on
+      // the live comment list and the diff.
+      openComment: (number) => openCommentRef.current?.(number),
+      markUnread: async (number) => {
+        setReviewComments(await markReviewCommentsRead(projectId, agent.id, [number], false))
+        await refreshThreadsRef.current?.()
+      },
+      setResolved: async (number, resolved) => {
+        const cs = await resolveReviewComment(projectId, agent.id, number, resolved)
+        setReviewComments(cs)
+        await refreshThreadsRef.current?.()
       },
       resolveWithAgent: async (thread) => {
         const quoted = thread.notes
@@ -3989,6 +4255,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               fileThreads={threadsByPath.get(diff.files[singleFileIdx].path) ?? EMPTY_FILE_THREADS}
               onEditComment={handleUpdateReviewComment}
               onRemoveComment={removeQueuedComment}
+              onResolveComment={handleResolveComment}
+              onCopyCommentLink={handleCopyCommentLink}
+              you={you}
               lineDraftApi={lineDraftApi}
               onExpand={expandFileDiff}
               isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
@@ -4028,6 +4297,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               fileThreads={threadsByPath.get(f.path) ?? EMPTY_FILE_THREADS}
               onEditComment={handleUpdateReviewComment}
               onRemoveComment={removeQueuedComment}
+              onResolveComment={handleResolveComment}
+              onCopyCommentLink={handleCopyCommentLink}
+              you={you}
               lineDraftApi={lineDraftApi}
               onExpand={expandFileDiff}
               isHidden={hiddenFiles.has(f.path)}
@@ -4167,6 +4439,43 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         <div className="flex items-center gap-2 shrink-0">
           {/* "Submit review" - shown only once the user has queued at least one
               "Add to review" comment for this agent. */}
+          {/* Step through what is still open, in document order, across both
+              origins. The count is the point as much as the arrows: "4 open" is
+              the one number that says how much review is left, and it shrinks as
+              you resolve. The unread part is called out separately because "new
+              since I last looked" and "still to deal with" are different
+              questions. */}
+          {openComments.length > 0 && (
+            <div className="flex items-center gap-0.5 rounded-md border border-stone-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] px-1.5 py-0.5">
+              <MessageSquare className="w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500" />
+              <span className="optical-center text-[11px] tabular-nums text-stone-500 dark:text-stone-400">
+                {openComments.length} open
+              </span>
+              {unreadCount > 0 && (
+                <span className="optical-center text-[11px] tabular-nums text-blue-600 dark:text-blue-400">
+                  · {unreadCount} new
+                </span>
+              )}
+              <Tooltip content="Previous open comment" side="bottom">
+                <button
+                  onClick={() => stepComment(-1)}
+                  aria-label="Previous open comment"
+                  className="ml-0.5 p-0.5 rounded text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer"
+                >
+                  <ArrowUp className="w-3 h-3" />
+                </button>
+              </Tooltip>
+              <Tooltip content="Next open comment" side="bottom">
+                <button
+                  onClick={() => stepComment(1)}
+                  aria-label="Next open comment"
+                  className="p-0.5 rounded text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer"
+                >
+                  <ArrowDown className="w-3 h-3" />
+                </button>
+              </Tooltip>
+            </div>
+          )}
           <ReviewDraftPopover
             comments={queuedComments}
             staleIds={staleReviewIds}

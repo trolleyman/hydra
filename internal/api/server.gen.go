@@ -2138,6 +2138,15 @@ type ListReviewsResponse struct {
 	Reviews  []ReviewRef `json:"reviews"`
 }
 
+// MarkReadBody defines model for MarkReadBody.
+type MarkReadBody struct {
+	// Numbers Numbers to mark. Omitted or empty covers every comment on the head.
+	Numbers *[]int `json:"numbers,omitempty"`
+
+	// Unread Mark them UNread instead - "I have seen this and want to come back to it", which is the only way a comment goes back to being new.
+	Unread *bool `json:"unread,omitempty"`
+}
+
 // McpServer A candidate MCP server discovered in the host/project config.
 type McpServer struct {
 	// Name The server key as it appears under mcpServers.
@@ -2842,6 +2851,11 @@ type RepositoryUncommittedFile struct {
 	Status string `json:"status"`
 }
 
+// ResolveReviewCommentBody defines model for ResolveReviewCommentBody.
+type ResolveReviewCommentBody struct {
+	Resolved bool `json:"resolved"`
+}
+
 // ResolvedPathResponse defines model for ResolvedPathResponse.
 type ResolvedPathResponse struct {
 	// DisplayPath The same path with the server's home directory abbreviated to "~"
@@ -2923,8 +2937,15 @@ type ReviewComment struct {
 	Path        *string `json:"path,omitempty"`
 	PublishedAt *string `json:"published_at,omitempty"`
 
+	// Read The user has seen it. Set only by an explicit mark-read; nothing becomes read by the passage of time.
+	Read *bool `json:"read,omitempty"`
+
 	// ReplyTo The comment this replies to, which is how a thread forms without a separate thread object.
 	ReplyTo *int `json:"reply_to,omitempty"`
+
+	// Resolved Dealt with. A state change, not an edit - the body is untouched and still readable.
+	Resolved   *bool   `json:"resolved,omitempty"`
+	ResolvedAt *string `json:"resolved_at,omitempty"`
 
 	// Status A draft is yours alone - synced across reloads and devices, invisible to every agent tool.
 	Status ReviewCommentStatus `json:"status"`
@@ -2939,6 +2960,9 @@ type ReviewCommentsResponse struct {
 
 	// Notified On a publish, the one line the agent was told. Absent otherwise.
 	Notified *string `json:"notified,omitempty"`
+
+	// You Who "you" is on this machine, from git's user.name. Hydra has no accounts and hosts no pictures, so a comment you wrote is drawn as a monogram of this rather than an avatar. Empty when git has no user.name configured.
+	You *string `json:"you,omitempty"`
 }
 
 // ReviewConfig The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.
@@ -3093,21 +3117,33 @@ type ReviewThread struct {
 	Notes []ReviewThreadNote `json:"notes"`
 
 	// Outdated The anchor line no longer exists in the MR's diff.
-	Outdated *bool   `json:"outdated,omitempty"`
-	Path     string  `json:"path"`
-	Resolved *bool   `json:"resolved,omitempty"`
-	Url      *string `json:"url,omitempty"`
+	Outdated *bool  `json:"outdated,omitempty"`
+	Path     string `json:"path"`
+
+	// Resolved Resolved, by the forge's own flag OR Hydra's local mark (see resolved_locally).
+	Resolved *bool `json:"resolved,omitempty"`
+
+	// ResolvedLocally Resolved in Hydra only - the forge still shows it open, because Hydra never writes a resolve to a PR.
+	ResolvedLocally *bool   `json:"resolved_locally,omitempty"`
+	Url             *string `json:"url,omitempty"`
 }
 
 // ReviewThreadNote One comment in a review thread. Local notes never reach the forge.
 type ReviewThreadNote struct {
-	Author    *string `json:"author,omitempty"`
+	Author *string `json:"author,omitempty"`
+
+	// AvatarUrl The author's picture, hosted by the FORGE. Hydra stores no images and proxies nothing - the browser loads this directly, and a failure falls back to a monogram.
+	AvatarUrl *string `json:"avatar_url,omitempty"`
 	Body      string  `json:"body"`
 	CreatedAt *string `json:"created_at,omitempty"`
 	Id        string  `json:"id"`
 
+	// Number The note's handle in the head's ONE numbering sequence, shared with Hydra's own comments so "fix
+	Number *int `json:"number,omitempty"`
+
 	// Origin "forge" - on the PR for everyone to see; "local_only" - private to this Hydra install (an agent's reply, or a note you kept to yourself). NOTE: spelled local_only, not local, because an oapi-codegen enum value colliding with another enum's (the config scopes) silently re-prefixes BOTH enums' Go constants.
 	Origin ReviewThreadNoteOrigin `json:"origin"`
+	Read   *bool                  `json:"read,omitempty"`
 	Url    *string                `json:"url,omitempty"`
 }
 
@@ -4471,8 +4507,14 @@ type AddReviewCommentJSONRequestBody = NewReviewCommentBody
 // PublishReviewCommentsJSONRequestBody defines body for PublishReviewComments for application/json ContentType.
 type PublishReviewCommentsJSONRequestBody = PublishReviewCommentsBody
 
+// MarkReviewCommentsReadJSONRequestBody defines body for MarkReviewCommentsRead for application/json ContentType.
+type MarkReviewCommentsReadJSONRequestBody = MarkReadBody
+
 // UpdateReviewCommentJSONRequestBody defines body for UpdateReviewComment for application/json ContentType.
 type UpdateReviewCommentJSONRequestBody = UpdateReviewCommentBody
+
+// ResolveReviewCommentJSONRequestBody defines body for ResolveReviewComment for application/json ContentType.
+type ResolveReviewCommentJSONRequestBody = ResolveReviewCommentBody
 
 // CreateReviewCommentJSONRequestBody defines body for CreateReviewComment for application/json ContentType.
 type CreateReviewCommentJSONRequestBody = NewReviewCommentRequest
@@ -6856,12 +6898,18 @@ type ServerInterface interface {
 	// Publish this head's draft comments and notify its agent
 	// (POST /api/projects/{project_id}/agents/{id}/review/comments/publish)
 	PublishReviewComments(w http.ResponseWriter, r *http.Request, projectId string, id string)
+	// Mark review comments as read
+	// (POST /api/projects/{project_id}/agents/{id}/review/comments/read)
+	MarkReviewCommentsRead(w http.ResponseWriter, r *http.Request, projectId string, id string)
 	// Discard a draft review comment
 	// (DELETE /api/projects/{project_id}/agents/{id}/review/comments/{number})
 	DeleteReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int)
 	// Edit a draft review comment
 	// (PATCH /api/projects/{project_id}/agents/{id}/review/comments/{number})
 	UpdateReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int)
+	// Resolve (or reopen) a review comment by its number
+	// (POST /api/projects/{project_id}/agents/{id}/review/comments/{number}/resolve)
+	ResolveReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int)
 	// The review threads on this head's MR, for the diff viewer
 	// (GET /api/projects/{project_id}/agents/{id}/review/threads)
 	GetReviewThreads(w http.ResponseWriter, r *http.Request, projectId string, id string)
@@ -8502,6 +8550,40 @@ func (siw *ServerInterfaceWrapper) PublishReviewComments(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
+// MarkReviewCommentsRead operation middleware
+func (siw *ServerInterfaceWrapper) MarkReviewCommentsRead(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MarkReviewCommentsRead(w, r, projectId, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteReviewComment operation middleware
 func (siw *ServerInterfaceWrapper) DeleteReviewComment(w http.ResponseWriter, r *http.Request) {
 
@@ -8579,6 +8661,49 @@ func (siw *ServerInterfaceWrapper) UpdateReviewComment(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateReviewComment(w, r, projectId, id, number)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResolveReviewComment operation middleware
+func (siw *ServerInterfaceWrapper) ResolveReviewComment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "number" -------------
+	var number int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "number", r.PathValue("number"), &number, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "number", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResolveReviewComment(w, r, projectId, id, number)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9819,8 +9944,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments", wrapper.GetReviewComments)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments", wrapper.AddReviewComment)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments/publish", wrapper.PublishReviewComments)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments/read", wrapper.MarkReviewCommentsRead)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments/{number}", wrapper.DeleteReviewComment)
 	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments/{number}", wrapper.UpdateReviewComment)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/comments/{number}/resolve", wrapper.ResolveReviewComment)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/threads", wrapper.GetReviewThreads)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/threads", wrapper.CreateReviewComment)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{id}/review/threads/{thread_id}/reply", wrapper.ReplyToReviewThread)
@@ -11433,6 +11560,34 @@ func (response PublishReviewComments404JSONResponse) VisitPublishReviewCommentsR
 	return json.NewEncoder(w).Encode(response)
 }
 
+type MarkReviewCommentsReadRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Body      *MarkReviewCommentsReadJSONRequestBody
+}
+
+type MarkReviewCommentsReadResponseObject interface {
+	VisitMarkReviewCommentsReadResponse(w http.ResponseWriter) error
+}
+
+type MarkReviewCommentsRead200JSONResponse ReviewCommentsResponse
+
+func (response MarkReviewCommentsRead200JSONResponse) VisitMarkReviewCommentsReadResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type MarkReviewCommentsRead404JSONResponse ErrorResponse
+
+func (response MarkReviewCommentsRead404JSONResponse) VisitMarkReviewCommentsReadResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type DeleteReviewCommentRequestObject struct {
 	ProjectId string `json:"project_id"`
 	Id        string `json:"id"`
@@ -11502,6 +11657,44 @@ func (response UpdateReviewComment400JSONResponse) VisitUpdateReviewCommentRespo
 type UpdateReviewComment404JSONResponse ErrorResponse
 
 func (response UpdateReviewComment404JSONResponse) VisitUpdateReviewCommentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResolveReviewCommentRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Id        string `json:"id"`
+	Number    int    `json:"number"`
+	Body      *ResolveReviewCommentJSONRequestBody
+}
+
+type ResolveReviewCommentResponseObject interface {
+	VisitResolveReviewCommentResponse(w http.ResponseWriter) error
+}
+
+type ResolveReviewComment200JSONResponse ReviewCommentsResponse
+
+func (response ResolveReviewComment200JSONResponse) VisitResolveReviewCommentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResolveReviewComment400JSONResponse ErrorResponse
+
+func (response ResolveReviewComment400JSONResponse) VisitResolveReviewCommentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ResolveReviewComment404JSONResponse ErrorResponse
+
+func (response ResolveReviewComment404JSONResponse) VisitResolveReviewCommentResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
 
@@ -12737,12 +12930,18 @@ type StrictServerInterface interface {
 	// Publish this head's draft comments and notify its agent
 	// (POST /api/projects/{project_id}/agents/{id}/review/comments/publish)
 	PublishReviewComments(ctx context.Context, request PublishReviewCommentsRequestObject) (PublishReviewCommentsResponseObject, error)
+	// Mark review comments as read
+	// (POST /api/projects/{project_id}/agents/{id}/review/comments/read)
+	MarkReviewCommentsRead(ctx context.Context, request MarkReviewCommentsReadRequestObject) (MarkReviewCommentsReadResponseObject, error)
 	// Discard a draft review comment
 	// (DELETE /api/projects/{project_id}/agents/{id}/review/comments/{number})
 	DeleteReviewComment(ctx context.Context, request DeleteReviewCommentRequestObject) (DeleteReviewCommentResponseObject, error)
 	// Edit a draft review comment
 	// (PATCH /api/projects/{project_id}/agents/{id}/review/comments/{number})
 	UpdateReviewComment(ctx context.Context, request UpdateReviewCommentRequestObject) (UpdateReviewCommentResponseObject, error)
+	// Resolve (or reopen) a review comment by its number
+	// (POST /api/projects/{project_id}/agents/{id}/review/comments/{number}/resolve)
+	ResolveReviewComment(ctx context.Context, request ResolveReviewCommentRequestObject) (ResolveReviewCommentResponseObject, error)
 	// The review threads on this head's MR, for the diff viewer
 	// (GET /api/projects/{project_id}/agents/{id}/review/threads)
 	GetReviewThreads(ctx context.Context, request GetReviewThreadsRequestObject) (GetReviewThreadsResponseObject, error)
@@ -14016,6 +14215,40 @@ func (sh *strictHandler) PublishReviewComments(w http.ResponseWriter, r *http.Re
 	}
 }
 
+// MarkReviewCommentsRead operation middleware
+func (sh *strictHandler) MarkReviewCommentsRead(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	var request MarkReviewCommentsReadRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+
+	var body MarkReviewCommentsReadJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MarkReviewCommentsRead(ctx, request.(MarkReviewCommentsReadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MarkReviewCommentsRead")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MarkReviewCommentsReadResponseObject); ok {
+		if err := validResponse.VisitMarkReviewCommentsReadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // DeleteReviewComment operation middleware
 func (sh *strictHandler) DeleteReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int) {
 	var request DeleteReviewCommentRequestObject
@@ -14072,6 +14305,41 @@ func (sh *strictHandler) UpdateReviewComment(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateReviewCommentResponseObject); ok {
 		if err := validResponse.VisitUpdateReviewCommentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResolveReviewComment operation middleware
+func (sh *strictHandler) ResolveReviewComment(w http.ResponseWriter, r *http.Request, projectId string, id string, number int) {
+	var request ResolveReviewCommentRequestObject
+
+	request.ProjectId = projectId
+	request.Id = id
+	request.Number = number
+
+	var body ResolveReviewCommentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResolveReviewComment(ctx, request.(ResolveReviewCommentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResolveReviewComment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResolveReviewCommentResponseObject); ok {
+		if err := validResponse.VisitResolveReviewCommentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

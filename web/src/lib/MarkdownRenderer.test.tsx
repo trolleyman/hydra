@@ -57,6 +57,44 @@ describe('Markdown', () => {
     expect(container.querySelector('h1')!.className).toContain('text-2xl')
   })
 
+  // What makes a code block a block is the fence, not what is inside it. This
+  // used to be guessed from the content ("no language and no newline means
+  // inline"), which rendered the single commonest shape an agent writes - a
+  // one-line unannotated fence holding a command - as an inline chip.
+  describe('code', () => {
+    const kind = (text: string) => {
+      const { container } = render(<Markdown text={text} />)
+      const code = container.querySelector('code')!
+      return code.hasAttribute('data-md-code-block') ? 'block' : 'inline'
+    }
+
+    it('renders a one-line fence with no language as a block', () => {
+      expect(kind('```\ngit rebase --onto main x y\n```')).toBe('block')
+    })
+
+    it('renders an annotated or multi-line fence as a block', () => {
+      expect(kind('```sh\nnpm run dev\n```')).toBe('block')
+      expect(kind('```\none\ntwo\n```')).toBe('block')
+    })
+
+    it('renders an indented block as a block', () => {
+      expect(kind('    indented code\n')).toBe('block')
+    })
+
+    it('renders a backtick span inside prose as inline', () => {
+      expect(kind('some `inline code` here')).toBe('inline')
+    })
+
+    it('renders a paragraph that is only a backtick span as inline', () => {
+      expect(kind('`git status --short`')).toBe('inline')
+    })
+
+    it('carries the info string on the block for copy-as-markdown', () => {
+      const { container } = render(<Markdown text={'```go\nx := 1\n```'} />)
+      expect(container.querySelector('code')).toHaveAttribute('data-md-lang', 'go')
+    })
+  })
+
   describe('images', () => {
     const ctx = { projectId: 'p1', agentId: 'a1', refStr: 'hydra/a1', filePath: '' }
 
