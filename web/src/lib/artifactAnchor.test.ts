@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { ReviewImageAnchor } from '../api'
 import {
-  anchorPositionLabel, anchorVersionLabel, artifactRefFromUrl, buildImageAnchor, sameArtifactPicture, sideOfUrl,
+  anchorPositionLabel, anchorVersionLabel, artifactRefFromUrl, buildImageAnchor, formatTimecode,
+  sameArtifactPicture, sideOfUrl,
 } from './artifactAnchor'
 
 const BLOB = '/artifacts/projects/p1/blob?script=screenshots&key=commit%2Fabc1234def0567&file=home-dark.png'
@@ -134,5 +135,32 @@ describe('anchorVersionLabel', () => {
 
   it('passes an unrecognised key through rather than inventing a reading', () => {
     expect(anchorVersionLabel({ file: 'f', key: 'weird', x: 0, y: 0 })).toBe('weird')
+  })
+})
+
+// A recording has a time axis as well as two spatial ones, and "34%,71%" of a
+// clip means nothing without the frame it is 34%,71% of.
+describe('video timestamps', () => {
+  it('carries the moment into the anchor and the label', () => {
+    const a = buildImageAnchor({ url: BLOB, x: 0.5, y: 0.5, natural: { w: 800, h: 600 }, t: 12.44 })!
+    expect(a.t).toBe(12.44)
+    expect(anchorPositionLabel(a)).toBe('400,300 px @ 0:12.4')
+  })
+
+  it('leaves the moment out for a still, where it would be meaningless', () => {
+    const a = buildImageAnchor({ url: BLOB, x: 0.5, y: 0.5 })!
+    expect(a.t).toBeUndefined()
+    expect(anchorPositionLabel(a)).not.toContain('@')
+  })
+
+  // Padded to a fixed width so a column of timecodes lines up, and minutes roll
+  // over rather than counting seconds forever. Values are deliberately not exact
+  // .x5 ties: Go's %04.1f and JS's toFixed round those the other way from each
+  // other, and a tenth of a second either way is not worth pinning down.
+  it('formats a moment the way the agent is told it', () => {
+    expect(formatTimecode(0)).toBe('0:00.0')
+    expect(formatTimecode(9.28)).toBe('0:09.3')
+    expect(formatTimecode(75.52)).toBe('1:15.5')
+    expect(formatTimecode(-3)).toBe('0:00.0')
   })
 })

@@ -3366,8 +3366,8 @@ func simReadyChangedSet() api.ArtifactSet {
 				Name:       "loader-animation.webm",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("theme::dark", "viewport::desktop"),
-				LeftUrl:    ptr(simWebM(simVideoBefore)),
-				RightUrl:   ptr(simWebM(simVideoAfter)),
+				LeftUrl:    ptr(simArtifactBlob("screenshots", simKeyLeft, "loader-animation.webm", simWebM(simVideoBefore))),
+				RightUrl:   ptr(simArtifactBlob("screenshots", simKeyRight, "loader-animation.webm", simWebM(simVideoAfter))),
 				Width:      ptr(280), Height: ptr(150),
 				// Video ratio is the share of differing frames; this animation changes
 				// across much of its run, so it stays "modified" at a ~10% threshold.

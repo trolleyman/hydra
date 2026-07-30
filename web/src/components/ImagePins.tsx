@@ -51,7 +51,7 @@ export interface PendingPin {
 // picture, so it means the same thing on a thumbnail and on a 4K screenshot.
 const MIN_BOX = 0.01
 
-export function ImagePins({ pins, pending, armed, onPlace, onSelect, layerRef }: {
+export function ImagePins({ pins, pending, armed, onPlace, onSelect, layerRef, controlsInset }: {
   pins: ImagePin[]
   /** The pin being composed right now, drawn like a placed one but unnumbered. */
   pending?: PendingPin | null
@@ -64,6 +64,13 @@ export function ImagePins({ pins, pending, armed, onPlace, onSelect, layerRef }:
    *  pixels - this element IS the picture's box, so it is the only honest thing
    *  to measure against. The composer anchors to the pin that way. */
   layerRef?: React.MutableRefObject<HTMLDivElement | null>
+  /** Height in px to leave uncovered at the bottom, for a recording's native
+   *  transport. Without it an armed layer swallows the scrubber, and the one
+   *  thing you must do before pinning a moment - get to that moment - becomes
+   *  impossible. The strip is browser chrome, not content, so nothing pinnable
+   *  is lost; the fractions still resolve against the full box, which is what
+   *  `pins` are positioned in. */
+  controlsInset?: number
 }) {
   const scale = useZoomScale()
   const ref = useRef<HTMLDivElement>(null)
@@ -130,14 +137,25 @@ export function ImagePins({ pins, pending, armed, onPlace, onSelect, layerRef }:
         ref.current = el
         if (layerRef) layerRef.current = el
       }}
-      // Inert unless armed, so an unarmed layer cannot swallow a pan or a click on
-      // the picture. Individual markers re-enable their own pointer events below.
-      className={`absolute inset-0 ${armed ? 'cursor-crosshair' : 'pointer-events-none'}`}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={() => setDrag(null)}
+      // The POSITIONING layer, always the picture's full box: every fraction -
+      // stored and live - resolves against it, so a pin cannot shift because some
+      // chrome came or went. Inert in itself; the markers and the capture surface
+      // below opt back in.
+      className="absolute inset-0 pointer-events-none"
     >
+      {/* The CAPTURE surface, which is what may be inset. Separate from the layer
+          above precisely because insetting the measured box would move every pin:
+          shrink what catches the pointer, never what defines the coordinates. */}
+      {armed && (
+        <div
+          className="absolute inset-0 cursor-crosshair pointer-events-auto"
+          style={controlsInset ? { bottom: controlsInset } : undefined}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={() => setDrag(null)}
+        />
+      )}
       {pins.map((p) => (
         <PinMarker key={p.id} pin={p} scale={scale} onSelect={onSelect} />
       ))}

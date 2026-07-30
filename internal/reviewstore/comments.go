@@ -151,6 +151,16 @@ type ImageAnchor struct {
 	NaturalW int `json:"natural_w,omitempty"`
 	NaturalH int `json:"natural_h,omitempty"`
 
+	// T is the moment in a VIDEO artifact the pin was placed at, in seconds from
+	// the start. A recording has a time axis as well as two spatial ones, and
+	// "the button flashes here" is about a frame, not about the whole clip - so a
+	// pin without it would send the reader to hunt through the run. Zero (and
+	// absent) for a still picture, which is why it is a plain float rather than a
+	// pointer: second zero of a clip is the first frame, and a pin there is
+	// indistinguishable from no timestamp only for a still, where the field is
+	// meaningless anyway.
+	T float64 `json:"t,omitempty"`
+
 	Hash string `json:"hash,omitempty"`
 }
 
@@ -181,7 +191,23 @@ func (a ImageAnchor) Pixels() (x, y, w, h int, ok bool) {
 // the spot, and nothing else. Kept short on purpose - NotifyLine's whole reason
 // for existing is that six comments cost one line.
 func (a ImageAnchor) Where() string {
+	if a.T > 0 {
+		return fmt.Sprintf("%s @ %.0f%%,%.0f%% at %s", a.File, a.X*100, a.Y*100, FormatTimecode(a.T))
+	}
 	return fmt.Sprintf("%s @ %.0f%%,%.0f%%", a.File, a.X*100, a.Y*100)
+}
+
+// FormatTimecode renders a moment in a clip as m:ss.t - short enough for a
+// notification line, precise enough to scrub to. Deliberately not h:mm:ss: these
+// are UI recordings of a few seconds, and padding every one of them with an hour
+// field would cost more than the rare long clip saves.
+func FormatTimecode(sec float64) string {
+	if sec < 0 {
+		sec = 0
+	}
+	m := int(sec) / 60
+	s := sec - float64(m*60)
+	return fmt.Sprintf("%d:%04.1f", m, s)
 }
 
 // Position is the precise form, for a reader who has already decided to look:
@@ -535,7 +561,14 @@ func writeImageAnchor(b *strings.Builder, a ImageAnchor, imagePath ImagePathFunc
 	if a.IsBox() {
 		noun = "box"
 	}
-	fmt.Fprintf(b, "%s: %s\n", noun, a.Position())
+	fmt.Fprintf(b, "%s: %s", noun, a.Position())
+	// A recording's timestamp goes on the same line as the position, because
+	// together they ARE the location - "34%,71%" in a clip means nothing without
+	// the moment it is 34%,71% of.
+	if a.T > 0 {
+		fmt.Fprintf(b, ", at %s into the recording", FormatTimecode(a.T))
+	}
+	b.WriteString("\n")
 }
 
 // NotifyLine is the one short line an agent is told when comments are published:

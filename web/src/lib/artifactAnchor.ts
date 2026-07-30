@@ -67,6 +67,8 @@ export function buildImageAnchor(opts: {
   h?: number
   natural?: { w: number; h: number } | null
   side?: ReviewImageAnchor.side
+  /** For a recording, the moment the pin was placed at, in seconds. */
+  t?: number
 }): ReviewImageAnchor | null {
   const ref = artifactRefFromUrl(opts.url)
   if (!ref) return null
@@ -86,6 +88,7 @@ export function buildImageAnchor(opts: {
     anchor.natural_w = opts.natural.w
     anchor.natural_h = opts.natural.h
   }
+  if (opts.t && opts.t > 0) anchor.t = opts.t
   return anchor
 }
 
@@ -119,12 +122,22 @@ export function anchorPixels(a: ReviewImageAnchor): { x: number; y: number; w: n
  *  percentages when they are not. */
 export function anchorPositionLabel(a: ReviewImageAnchor): string {
   const px = anchorPixels(a)
-  if (!px) {
-    return a.w && a.h
-      ? `${pct(a.x)},${pct(a.y)} · ${pct(a.w)} × ${pct(a.h)}`
-      : `${pct(a.x)},${pct(a.y)}`
-  }
-  return px.w && px.h ? `${px.x},${px.y} · ${px.w} × ${px.h} px` : `${px.x},${px.y} px`
+  const where = !px
+    ? (a.w && a.h ? `${pct(a.x)},${pct(a.y)} · ${pct(a.w)} × ${pct(a.h)}` : `${pct(a.x)},${pct(a.y)}`)
+    : (px.w && px.h ? `${px.x},${px.y} · ${px.w} × ${px.h} px` : `${px.x},${px.y} px`)
+  // A moment in a recording is part of the position, not a separate fact:
+  // "34%,71%" of a clip means nothing without the frame it is 34%,71% of.
+  return a.t ? `${where} @ ${formatTimecode(a.t)}` : where
+}
+
+/** A moment in a clip, as m:ss.t - the same form the agent is given. Deliberately
+ *  not h:mm:ss: these are UI recordings of a few seconds, and padding every one
+ *  with an hour field costs more than the rare long clip saves. Mirrors
+ *  reviewstore.FormatTimecode in Go. */
+export function formatTimecode(sec: number): string {
+  const s = Math.max(0, sec)
+  const m = Math.floor(s / 60)
+  return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`
 }
 
 /** Which version of the tree the picture was rendered from, in words that say

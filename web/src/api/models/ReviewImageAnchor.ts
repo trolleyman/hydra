@@ -49,6 +49,11 @@ export type ReviewImageAnchor = {
      */
     natural_h?: number;
     /**
+     * For a VIDEO artifact, the moment the pin was placed at, in seconds from the start. A recording has a time axis as well as two spatial ones, so a position without it sends the reader hunting through the run. Absent for a still.
+     *
+     */
+    't'?: number;
+    /**
      * The file's content hash when the pin was placed - the picture's hunk_hash, so a regenerated artifact is detectable as having moved under the comment.
      */
     hash?: string;

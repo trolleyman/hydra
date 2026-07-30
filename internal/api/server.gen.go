@@ -3120,6 +3120,9 @@ type ReviewImageAnchor struct {
 	// Side Which half of the comparison was pinned.
 	Side *ReviewImageAnchorSide `json:"side,omitempty"`
 
+	// T For a VIDEO artifact, the moment the pin was placed at, in seconds from the start. A recording has a time axis as well as two spatial ones, so a position without it sends the reader hunting through the run. Absent for a still.
+	T *float32 `json:"t,omitempty"`
+
 	// W Box width as a fraction of the image's width. Present with h when a drag placed a box instead of a point.
 	W *float32 `json:"w,omitempty"`
 

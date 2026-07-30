@@ -379,6 +379,7 @@ func imageAnchorFromAPI(in *api.ReviewImageAnchor) (*reviewstore.ImageAnchor, er
 		H:        float64(derefOr(in.H, 0)),
 		NaturalW: derefOr(in.NaturalW, 0),
 		NaturalH: derefOr(in.NaturalH, 0),
+		T:        float64(derefOr(in.T, 0)),
 		Hash:     derefOr(in.Hash, ""),
 	}
 	// A slice, not a map: two bad coordinates should always name the same one
@@ -407,6 +408,7 @@ func imageAnchorToAPI(in *reviewstore.ImageAnchor) *api.ReviewImageAnchor {
 	setIf(&out.H, float32(in.H), in.H > 0)
 	setIf(&out.NaturalW, in.NaturalW, in.NaturalW > 0)
 	setIf(&out.NaturalH, in.NaturalH, in.NaturalH > 0)
+	setIf(&out.T, float32(in.T), in.T > 0)
 	setIf(&out.Hash, in.Hash, in.Hash != "")
 	return out
 }

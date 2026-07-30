@@ -351,3 +351,34 @@ func TestReadStateIsExplicitAndPerNumber(t *testing.T) {
 		t.Errorf("marking unread hit the wrong numbers: %v", ReadSet(root, "h"))
 	}
 }
+
+// A recording has a time axis as well as two spatial ones. Without the moment,
+// "34%,71%" sends the reader hunting through the whole clip for the frame it was
+// 34%,71% of.
+func TestVideoPinCarriesItsMoment(t *testing.T) {
+	a := ImageAnchor{Script: "screenshots", Key: "commit/abc1234", File: "loader.webm", X: 0.5, Y: 0.5, NaturalW: 800, NaturalH: 600, T: 12.44}
+	if got := a.Where(); !strings.Contains(got, "0:12.4") {
+		t.Errorf("Where() = %q, want the moment in it", got)
+	}
+	out := RenderForAgent([]Comment{{Number: 2, Image: &a, Body: "the spinner stalls"}}, true, nil)
+	if !strings.Contains(out, "at 0:12.4 into the recording") {
+		t.Errorf("rendering does not say when:\n%s", out)
+	}
+	// A still has no time axis, so saying "at 0:00.0" would be noise claiming to
+	// be information.
+	still := ImageAnchor{File: "home.png", X: 0.5, Y: 0.5}
+	if got := still.Where(); strings.Contains(got, "0:00") {
+		t.Errorf("Where() = %q, want no timecode on a still", got)
+	}
+}
+
+func TestFormatTimecode(t *testing.T) {
+	for _, tc := range []struct {
+		in   float64
+		want string
+	}{{0, "0:00.0"}, {9.28, "0:09.3"}, {75.52, "1:15.5"}, {-3, "0:00.0"}} {
+		if got := FormatTimecode(tc.in); got != tc.want {
+			t.Errorf("FormatTimecode(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

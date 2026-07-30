@@ -136,6 +136,18 @@ function LightboxChecker({ className }: { className?: string }) {
   return <CheckerLayer className={className} style={{ background: CHECKER }} />
 }
 
+// How far either side of the shown frame a recording's pin still counts as being
+// "here", in seconds. A pin marks a moment, and a clip is usually a few seconds
+// long, so this has to be tight enough that two remarks about different moments
+// do not stack - and loose enough that one does not blink out as the frame the
+// player settles on drifts by a hair.
+const PIN_TIME_WINDOW = 0.75
+
+// Roughly the height of the browser's native video transport. Left uncovered by
+// an armed pin layer so the clip can still be scrubbed - getting to the moment is
+// the first half of pinning one.
+const VIDEO_CONTROLS_H = 44
+
 // The resting opacity of an edge preview (matches the `opacity-40` on it below).
 // A picture flying in from the edge fades up from it, and the one it replaces fades
 // down to it as it flies out there.
@@ -297,6 +309,11 @@ export function Lightbox({
   const [pending, setPending] = useState<PendingPin | null>(null)
   const [pinBody, setPinBody] = useState('')
   const [pinBusy, setPinBusy] = useState(false)
+  // The clip element, so a pin on a recording can record WHICH FRAME it is about.
+  // currentTime is the only place that lives, and it has to be read at the moment
+  // of the click - by the time the remark is typed the clip has moved on.
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [pendingT, setPendingT] = useState(0)
   const [pinError, setPinError] = useState('')
   // Arming and any half-written pin are dropped when the picture changes: a comment
   // composed against one image must never land on the next one.
@@ -339,6 +356,11 @@ export function Lightbox({
   const pinsHere = useMemo<ImagePin[]>(
     () => pinComments
       .filter((c) => sameArtifactPicture(c.image, pinnedRef, pinnedSide))
+      // On a recording, a pin belongs to a moment as much as to a spot: showing
+      // every remark in the clip at once would stack marks from frames that are
+      // not on screen over the one that is. The window is generous enough that a
+      // pin does not blink out while you look at it.
+      .filter((c) => !c.image?.t || Math.abs(c.image.t - pendingT) <= PIN_TIME_WINDOW)
       .map((c) => ({
         id: c.id,
         x: c.image?.x ?? 0,
@@ -351,12 +373,16 @@ export function Lightbox({
         draft: !c.published,
         resolved: c.resolved,
       })),
-    [pinComments, pinnedRef, pinnedSide],
+    [pinComments, pinnedRef, pinnedSide, pendingT],
   )
   // Only a still picture that is a real artifact can carry a pin: a video has a
   // time axis this anchor does not model, and an upload or a chat image has no
   // (script, key, file) identity to record.
-  const canPin = !!submitPin && !!pinnedRef && kindOf(pinnedItem) === 'image'
+  const pinnedKind = kindOf(pinnedItem)
+  // A recording is pinnable as well as a still: it has the same two spatial axes,
+  // plus a time one the anchor now carries. The other kinds (a PDF, a log, an
+  // .apk) have no picture to point at.
+  const canPin = !!submitPin && !!pinnedRef && (pinnedKind === 'image' || pinnedKind === 'video')
 
   // The composer opens ON the pin, so the remark is written next to the spot it
   // is about. That needs the pin's position in SCREEN pixels, which only the pin
@@ -409,6 +435,7 @@ export function Lightbox({
       h: pending.h,
       natural: dims,
       side: pinnedSide,
+      t: pinnedKind === 'video' ? pendingT : undefined,
     })
     if (!anchor) {
       setPinError('This picture has no artifact identity to pin a comment to.')
@@ -430,7 +457,7 @@ export function Lightbox({
     } finally {
       setPinBusy(false)
     }
-  }, [pending, submitPin, pinnedUrl, pinBody, dims, pinnedSide])
+  }, [pending, submitPin, pinnedUrl, pinBody, dims, pinnedSide, pinnedKind, pendingT])
 
   // Steal focus while open, restore it on close. The opener can leave focus in a
   // keyboard-hungry widget - the terminal's hidden xterm textarea is the prime case
@@ -618,6 +645,7 @@ export function Lightbox({
     ? anchorPositionLabel({
         file: '', x: pending.x, y: pending.y, w: pending.w, h: pending.h,
         natural_w: dims?.w, natural_h: dims?.h,
+        t: pinnedKind === 'video' ? pendingT : undefined,
       })
     : ''
   // A before/after comparator, and the mode controls that drive it, only exist for
@@ -845,7 +873,27 @@ export function Lightbox({
               onDims={setDims}
             />
           ) : currentKind === 'video' ? (
-            <LightboxVideo url={current.url} aspect={dims ? dims.w / dims.h : undefined} onDims={setDims} />
+            <LightboxVideo
+              // The pinned SIDE, for the same reason a picture uses it: arming
+              // drops the comparator, and a pin must record the clip on screen.
+              url={pinnedUrl ?? current.url}
+              aspect={dims ? dims.w / dims.h : undefined}
+              onDims={setDims}
+              videoRef={videoRef}
+              paused={arming}
+              overlay={showsPins ? (
+                <ImagePins
+                  pins={pinsHere}
+                  pending={pending}
+                  armed={arming}
+                  layerRef={pinLayerRef}
+                  // The browser's transport is about this tall; leaving it clear
+                  // keeps "scrub to the moment, then pin it" possible.
+                  controlsInset={VIDEO_CONTROLS_H}
+                  onPlace={(p) => { setPending(p); setPendingT(videoRef.current?.currentTime ?? 0); setPinError('') }}
+                />
+              ) : undefined}
+            />
           ) : currentKind === 'pdf' ? (
             <LightboxPdf url={current.url} />
           ) : currentKind === 'text' ? (
@@ -908,7 +956,7 @@ export function Lightbox({
                     pending={pending}
                     armed={arming}
                     layerRef={pinLayerRef}
-                    onPlace={(p) => { setPending(p); setPinError('') }}
+                    onPlace={(p) => { setPending(p); setPendingT(videoRef.current?.currentTime ?? 0); setPinError('') }}
                   />
                 )}
               </div>

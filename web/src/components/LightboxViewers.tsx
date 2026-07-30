@@ -95,7 +95,7 @@ export function DownloadLinks({ url, diff }: { url: string; diff?: { left?: stri
 // LightboxVideo plays a single (non-diff) clip fullscreen with the browser's own
 // transport. A before/after PAIR goes through LightboxDiff instead, which drives
 // both clips off one synced transport - see VideoDiffView.
-export function LightboxVideo({ url, aspect, onDims }: {
+export function LightboxVideo({ url, aspect, onDims, videoRef, overlay, paused }: {
   url: string
   // The clip's aspect ratio when known ahead of load, so the panel lays out at its
   // final shape immediately instead of collapsing to the default 300x150 box and
@@ -104,17 +104,29 @@ export function LightboxVideo({ url, aspect, onDims }: {
   // Reports the clip's natural pixel size once the browser has its metadata - for
   // the lightbox caption, and so the size is known next time (see lib/mediaSize).
   onDims?: (d: { w: number; h: number }) => void
+  // The element itself, so a caller can read the moment being shown - a pin on a
+  // recording is about a FRAME, and currentTime is the only place that lives.
+  videoRef?: React.MutableRefObject<HTMLVideoElement | null>
+  // Drawn over the clip, in its own box: the review pin layer. It has to be a
+  // sibling of the <video> rather than a child (a replaced element has no
+  // renderable children), which is why the panel below became positioned.
+  overlay?: React.ReactNode
+  // Holds the clip still. Pinning a moving frame is meaningless - the moment you
+  // recorded would already have passed by the time you finished typing - so
+  // arming stops playback rather than trying to catch up with it.
+  paused?: boolean
 }) {
   return (
-    <div className={PANEL_CLASS} data-lb-picture>
+    <div className={`${PANEL_CLASS} relative`} data-lb-picture>
       {/* autoPlay + muted + loop mirrors how the grid tiles behave, so opening a
           clip continues rather than restarts the impression of it; controls are
           the browser's because there is only one clip to drive. */}
       <video
+        ref={(el) => { if (videoRef) videoRef.current = el }}
         src={url}
         controls
-        autoPlay
-        loop
+        autoPlay={!paused}
+        loop={!paused}
         muted
         playsInline
         onLoadedMetadata={(e) => {
@@ -127,6 +139,7 @@ export function LightboxVideo({ url, aspect, onDims }: {
         style={{ aspectRatio: aspect }}
         className="block max-w-[90vw] max-h-[85vh]"
       />
+      {overlay}
     </div>
   )
 }
