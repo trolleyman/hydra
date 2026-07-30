@@ -10143,7 +10143,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               Above the box rather than in the placeholder, which vanishes the
               moment you start typing. */}
           {review && (
-            <div className="mb-1.5 flex items-start gap-1.5 px-1 text-[11px] leading-4 text-stone-400 dark:text-stone-500">
+            <div className="mb-1.5 flex items-start gap-1.5 px-1 text-2xs leading-4 text-stone-400 dark:text-stone-500">
               <Eye className="mt-px h-3 w-3 shrink-0" />
               <span>
                 Reviewer - a second agent reading this branch in its own throwaway checkout. It cannot edit
