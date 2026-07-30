@@ -1,5 +1,5 @@
 // formatElapsed renders a live duration compactly, in the two largest units that
-// still say something: "12s", "1m 05s", "2h 05m", "3d 04h". Each step drops the
+// still say something: "12s", "1m 5s", "2h 5m", "3d 4h". Each step drops the
 // unit below - at hours, a ticking seconds field is noise, and it would make the
 // label jitter in width once a minute for no information.
 //
