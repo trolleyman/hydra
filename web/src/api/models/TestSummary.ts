@@ -18,7 +18,7 @@ export type TestSummary = {
     warnings?: number;
     duration_ms?: number | null;
     /**
-     * Latest progress line while status is "running" (e.g. "84/142").
+     * Latest non-streaming runner progress line while status is "running" (e.g. "84/142"). Streaming stdout runners expose their parsed counts instead of raw stdout here.
      */
     progress?: string | null;
     /**
