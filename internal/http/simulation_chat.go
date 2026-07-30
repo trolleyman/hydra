@@ -386,6 +386,35 @@ var simChatEvents = []simNorm{
 	simToolOut("toolu_sim_gitadd2", "Staged: internal/artifacts/upload.go, internal/artifacts/backoff.go, internal/artifacts/upload_test.go (lines 40-58)"),
 	simTool("toolu_sim_gitrebase", "mcp__hydra__git_rebase", simRaw(`{"base":"HEAD~3","plan":[{"commit":"4f2ab19c","action":"reword","message":"Retry uploads with jittered exponential backoff"},{"commit":"9c1d0e77","action":"fixup"},{"commit":"b3e5a210","action":"pick"}]}`)),
 	simToolOut("toolu_sim_gitrebase", "Rebased 3 commits above HEAD~3 on hydra/retry-uploads (now at 7d41c8ba)."),
+	// Hydra's own review comments, read back and answered. The result is the exact
+	// text reviewstore.RenderForAgent writes, which the card parses back into the
+	// comments themselves (lib/reviewCommentsText): the anchor as a file with its
+	// icon and lowlit directory, the handle as a quiet mono "#19", the comparison
+	// as branch pills, and the frozen excerpt with the commented line accented.
+	simTool("toolu_sim_reviewread", "mcp__hydra__get_review_comments", simRaw(`{"numbers":[19,20]}`)),
+	simToolOut("toolu_sim_reviewread", "#19 internal/artifacts/upload.go:118 - user, on main -> latest commit\n"+
+		"```diff\n--- internal/artifacts/upload.go\n+++ internal/artifacts/upload.go\n"+
+		"@@ -112,7 +112,11 @@ func (u *Uploader) Put(ctx context.Context, key string, body io.Reader) error {\n"+
+		" \tfor attempt := 1; attempt <= u.maxAttempts; attempt++ {\n"+
+		" \t\tif err := u.put(ctx, key, body); err == nil {\n"+
+		" \t\t\treturn nil\n"+
+		" \t\t}\n"+
+		"+\t\ttime.Sleep(backoff(attempt))\n"+
+		"# ^ Comment\n"+
+		" \t}\n"+
+		" \treturn u.lastErr\n"+
+		"```\n"+
+		"This sleeps on the LAST attempt too - so a giving-up call waits a full backoff for nothing. Should the loop break before it?\n\n"+
+		"#20 internal/artifacts/upload.go:118 (reply to #19) [resolved] - reviewer, on main -> 4f2ab19c\n"+
+		"Agreed, and the test at `upload_test.go:61` would have caught it if it asserted elapsed time."),
+	simTool("toolu_sim_reviewreply", "mcp__hydra__reply_to_review_comment", simRaw(`{"number":19,"body":`+
+		`"Fixed: the sleep now happens only when another attempt is going to run.\n\n`+
+		"```go\\nif attempt == u.maxAttempts {\\n\\tbreak\\n}\\ntime.Sleep(backoff(attempt))\\n```"+
+		`\n\nThe giving-up path returns as soon as the last attempt fails, and `+"`TestPutGivesUp`"+
+		` now asserts it takes under a millisecond."}`)),
+	simToolOut("toolu_sim_reviewreply", "Saved as #21, threaded under #19. The user can see it in Hydra's diff viewer."),
+	simTool("toolu_sim_reviewadd", "mcp__hydra__add_review_comment", simRaw(`{"path":"internal/artifacts/backoff.go","line":24,"body":"The jitter here is **full** jitter (0..d), not equal jitter (d/2..d). Worth a line saying so - the difference matters when many uploads retry together."}`)),
+	simToolOut("toolu_sim_reviewadd", "Saved as #22 on internal/artifacts/backoff.go:24. The user can see it in Hydra's diff viewer; refer to it by its number from here on."),
 	// A message queued while the turn ran and consumed INTO it. The CLI records
 	// only its queued_command attachment - there is no user event - so the
 	// normalizer turns it into a notice rather than losing it.
