@@ -687,6 +687,19 @@ reads as a reference rather than as part of the sentence - the same place the
 forge threads put theirs. The unread dot rides on it, so what is new and what to
 call it are one glance.
 
+**A draft shows no number and a `draft` chip.** It HAS a number - allocated when
+it was written, and publishing does not change it - but until it is published
+nobody else can cite it, so putting a handle on it would invite quoting something
+the agent cannot look up. The chip is the one state worth calling out: the
+difference between something the agent has been told and something only you can
+see is not otherwise visible on the card.
+
+**Your own comments say "You"**, not your git name. The name is on the avatar's
+tooltip; in a list of comments what matters is which ones are yours. With no git
+`user.name` to draw on the avatar is a person glyph rather than an initial - "Y"
+for "You" is a letter that belongs to nobody and reads as someone whose name
+starts with Y.
+
 ### Permalinks
 
 `?comment=4` on the agent page. The number is the whole address - the head is
@@ -695,6 +708,18 @@ short enough to paste into a message and still means one exact thing months
 later. Landing on one jumps to it and marks it read. The jump keys on the number
 rather than on the diff, so a background refresh cannot yank the view back to the
 anchor after you have scrolled away.
+
+Three ways to get one, because people reach for different ones:
+
+- **The date**, as on a forge. It is a real `<a href>` so copy-link-address and
+  middle-click behave the way a link should, with the click intercepted so an
+  in-app jump does not reload the page.
+- **The `...` menu on ANY note**, not just a thread's first. The thing you most
+  often want from that menu is a link to *that* comment, which a menu on the
+  opening line cannot give you. Thread-wide actions ("Resolve with agent", the
+  thread's forge link) stay on the first note, where they describe the whole
+  conversation.
+- **The link button** on Hydra's own comments.
 
 ### Still open in the comment store
 

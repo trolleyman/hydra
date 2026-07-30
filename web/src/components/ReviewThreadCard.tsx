@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, EllipsisVertical, EyeOff, LoaderCircle, Sparkles } from 'lucide-react'
+import { Check, Copy, EllipsisVertical, EyeOff, Link2, LoaderCircle, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { Tooltip } from './Tooltip'
@@ -28,6 +28,12 @@ export interface ReviewThreadActions {
   // comment takes, because they share one numbering. Local to Hydra; it is never
   // sent to the forge.
   setResolved?: (number: number, resolved: boolean) => Promise<void>
+  // commentHref is the Hydra permalink to ONE comment (`?comment=N`), and
+  // openComment jumps to it in place. Both, because a permalink has two jobs: the
+  // href makes right-click-copy and middle-click work the way a link should, and
+  // the click handler keeps an in-app jump from reloading the page.
+  commentHref?: (number: number) => string
+  openComment?: (number: number) => void
   // draft persists the in-progress reply for a thread, so a card that scrolls out
   // of view (unmounting it) or a reload doesn't lose a half-written reply.
   draft: {
@@ -105,7 +111,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
   const [text, setText] = useState(() => actions.draft.load(thread.id))
   const [replying, setReplying] = useState(() => !!actions.draft.load(thread.id))
   const [busy, setBusy] = useState<'forge' | 'local' | 'agent' | 'resolve' | null>(null)
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const forge = providerLabel(actions.provider)
   // HighlightedTextarea has no autoFocus of its own (it forwards a ref to the
@@ -168,7 +174,26 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                   {n.author || 'someone'}
                 </span>
                 {noteAgo(n.created_at) && (
-                  <span className="text-[10px] text-gray-400">{noteAgo(n.created_at)}</span>
+                  // Clicking the date jumps to the comment, and the date IS the
+                  // permalink - a real href, so copy-link-address and middle-click
+                  // behave, with the click handled in-app so it does not reload the
+                  // page. This is where a forge puts a comment's own link, so it is
+                  // where someone will look for it.
+                  n.number != null && actions.commentHref ? (
+                    <a
+                      href={actions.commentHref(n.number)}
+                      onClick={(e) => {
+                        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+                        e.preventDefault()
+                        actions.openComment?.(n.number!)
+                      }}
+                      className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:underline"
+                    >
+                      {noteAgo(n.created_at)}
+                    </a>
+                  ) : (
+                    <span className="text-[10px] text-gray-400">{noteAgo(n.created_at)}</span>
+                  )
                 )}
                 {/* Fixed-height row so the badge and the menu trigger share a
                     centre line whichever of them renders. */}
@@ -184,54 +209,86 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                     </span>
                   )}
                   <OriginBadge note={n} provider={actions.provider} />
-                  {i === 0 && (
-                    <div className="relative flex items-center">
-                      <Tooltip content="Thread actions" side="top">
+                  {/* Every note gets the menu, not just the first: the thing you
+                      most often want from one is a link to THAT comment, and a
+                      menu on the thread's opening line cannot give you that. The
+                      thread-wide actions stay on the first note, where they
+                      describe the whole conversation. */}
+                  <div className="relative flex items-center">
+                      <Tooltip content={i === 0 ? 'Thread actions' : 'Comment actions'} side="top">
                         <button
                           type="button"
-                          aria-label="Thread actions"
-                          onClick={() => setMenuOpen((o) => !o)}
+                          aria-label={i === 0 ? 'Thread actions' : 'Comment actions'}
+                          onClick={() => setMenuOpen(menuOpen === n.id ? null : n.id)}
                           className="inline-flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-violet-100 dark:hover:bg-violet-900/40 cursor-pointer"
                         >
                           <EllipsisVertical className="w-3.5 h-3.5" />
                         </button>
                       </Tooltip>
-                      {menuOpen && (
+                      {menuOpen === n.id && (
                         <>
                           {/* Click-away layer: a thread card can sit anywhere in a long
                               diff, so the menu closes on any outside click. */}
-                          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+                          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(null)} />
                           <div className="absolute right-0 top-5 z-50 w-56 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg py-1">
-                            <button
-                              type="button"
-                              disabled={busy === 'agent'}
-                              onClick={() => { setMenuOpen(false); void run('agent', () => actions.resolveWithAgent(thread)) }}
-                              className="w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer disabled:opacity-50"
-                            >
-                              <Sparkles className="w-3.5 h-3.5 mt-px shrink-0 text-violet-500" fill="currentColor" />
-                              <span>
-                                <span className="block text-xs text-gray-700 dark:text-gray-200">Resolve with agent</span>
-                                <span className="block text-[10px] text-gray-400 leading-snug">Send this thread to the head and ask it to address the comment.</span>
-                              </span>
-                            </button>
-                            {thread.url && (
+                            {/* This comment's own permalink, first, because it is the
+                                thing you came to this menu for. */}
+                            {n.number != null && actions.commentHref && (
                               <button
                                 type="button"
-                                // The menu closes on click, so the confirmation has to
-                                // live outside it - the shared copy toast (title + the
-                                // URL in a code block), like every other copy action.
-                                onClick={() => { setMenuOpen(false); void copyWithToast(thread.url ?? '', { what: 'link to thread' }) }}
+                                onClick={() => { setMenuOpen(null); void copyWithToast(actions.commentHref!(n.number!), { what: `link to #${n.number}` }) }}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer"
+                              >
+                                <Link2 className="w-3.5 h-3.5 shrink-0 text-gray-400" />
+                                Copy link to #{n.number}
+                              </button>
+                            )}
+                            {n.url && (
+                              <button
+                                type="button"
+                                onClick={() => { setMenuOpen(null); void copyWithToast(n.url ?? '', { what: `link to #${n.number} on ${providerLabel(actions.provider)}` }) }}
                                 className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer"
                               >
                                 <Copy className="w-3.5 h-3.5 shrink-0 text-gray-400" />
-                                Copy link to thread
+                                Copy {providerLabel(actions.provider)} link
                               </button>
+                            )}
+                            {/* Thread-wide actions, only on the opening note - they
+                                describe the whole conversation, not this remark. */}
+                            {i === 0 && (
+                              <>
+                                <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+                                <button
+                                  type="button"
+                                  disabled={busy === 'agent'}
+                                  onClick={() => { setMenuOpen(null); void run('agent', () => actions.resolveWithAgent(thread)) }}
+                                  className="w-full flex items-start gap-2 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer disabled:opacity-50"
+                                >
+                                  <Sparkles className="w-3.5 h-3.5 mt-px shrink-0 text-violet-500" fill="currentColor" />
+                                  <span>
+                                    <span className="block text-xs text-gray-700 dark:text-gray-200">Resolve with agent</span>
+                                    <span className="block text-[10px] text-gray-400 leading-snug">Send this thread to the head and ask it to address the comment.</span>
+                                  </span>
+                                </button>
+                                {thread.url && (
+                                  <button
+                                    type="button"
+                                    // The menu closes on click, so the confirmation has to
+                                    // live outside it - the shared copy toast (title + the
+                                    // URL in a code block), like every other copy action.
+                                    onClick={() => { setMenuOpen(null); void copyWithToast(thread.url ?? '', { what: 'link to thread' }) }}
+                                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer"
+                                  >
+                                    <Copy className="w-3.5 h-3.5 shrink-0 text-gray-400" />
+                                    Copy link to thread
+                                  </button>
+                                )}
+                              </>
                             )}
                           </div>
                         </>
                       )}
                     </div>
-                  )}
                 </span>
               </div>
               <Markdown text={n.body} className="mt-0.5 text-xs text-gray-700 dark:text-gray-200 break-words" />

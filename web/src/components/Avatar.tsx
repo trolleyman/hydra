@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { User } from 'lucide-react'
 import { AgentTypeIcon, type AgentTypeIconName } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 
@@ -19,6 +20,10 @@ import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 //   3. Everyone else, including YOU when there is no forge in the picture, gets a
 //      monogram on a colour derived from the name. Deterministic, so the same
 //      person is the same colour every time, and it works with no network at all.
+//      With no name to draw on - git has no user.name configured - it falls back
+//      to a person glyph rather than inventing an initial: "Y" for "You" is a
+//      letter that belongs to nobody, and reads as someone whose name starts with
+//      Y rather than as you.
 //
 // Rounded square rather than a circle, to match the chips and tiles the rest of
 // the UI is built from - a lone circle in a square-cornered gutter reads as a
@@ -64,13 +69,20 @@ const SIZES: Record<AvatarSize, { box: string; text: string; icon: string }> = {
 
 export function Avatar({
   name,
+  label,
   avatarUrl,
   agentType,
   size = 'sm',
   className = '',
 }: {
-  /** Display name - the monogram and its colour come from this. */
+  /**
+   * Display name - the monogram and its colour come from this. Empty means "we do
+   * not know who this is", which draws a person glyph rather than a made-up
+   * initial.
+   */
   name: string
+  /** What to call it in the tooltip when that differs from `name` (e.g. "You"). */
+  label?: string
   /** A forge-hosted picture, if the forge gave us one. */
   avatarUrl?: string | null
   /**
@@ -82,8 +94,10 @@ export function Avatar({
   size?: AvatarSize
   className?: string
 }) {
+  const shown = label ?? name
   const [imgFailed, setImgFailed] = useState(false)
   const s = SIZES[size]
+  const anonymous = name.trim() === ''
   const base = `inline-flex items-center justify-center shrink-0 overflow-hidden ${s.box} ${className}`
 
   if (agentType) {
@@ -92,8 +106,8 @@ export function Avatar({
     return (
       <span
         className={`${base} bg-stone-100 dark:bg-white/[0.08] ${AGENT_ACCENT[mark]}`}
-        title={name}
-        aria-label={name}
+        title={shown}
+        aria-label={shown}
       >
         <AgentTypeIcon name={mark} className={s.icon} />
       </span>
@@ -104,8 +118,8 @@ export function Avatar({
     return (
       <img
         src={avatarUrl}
-        alt={name}
-        title={name}
+        alt={shown}
+        title={shown}
         onError={() => setImgFailed(true)}
         // referrerPolicy: the forge does not need to be told which Hydra page
         // someone was looking at when their avatar loaded.
@@ -116,8 +130,19 @@ export function Avatar({
     )
   }
 
+  if (anonymous) {
+    return (
+      <span
+        className={`${base} bg-stone-100 text-stone-400 dark:bg-white/[0.08] dark:text-stone-500`}
+        title={shown}
+        aria-label={shown}
+      >
+        <User className={s.icon} />
+      </span>
+    )
+  }
   return (
-    <span className={`${base} ${colourFor(name)} font-medium ${s.text}`} title={name} aria-label={name}>
+    <span className={`${base} ${colourFor(name)} font-medium ${s.text}`} title={shown} aria-label={shown}>
       {monogram(name)}
     </span>
   )

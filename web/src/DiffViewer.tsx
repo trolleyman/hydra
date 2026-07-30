@@ -211,27 +211,46 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
       <div className="flex items-start gap-2">
         {/* The avatar owns the left column, draft or not: a draft is still YOURS,
             and a generic speech bubble in the same slot said less. For an agent it
-            is the brand mark; for you a monogram of git's user.name. */}
+            is the brand mark; for you a monogram of git's user.name, or a person
+            glyph when git has no name to draw on - "Y" for "You" is an initial
+            that belongs to nobody. */}
         <Avatar
-          name={mine ? (you || 'You') : comment.author}
+          name={mine ? (you ?? '') : comment.author}
+          label={mine ? 'You' : comment.author}
           agentType={mine ? undefined : 'claude'}
           className="mt-0.5"
         />
         <div className="min-w-0 flex-1">
-          {sent && (
-            <div className="mb-0.5 flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
-              {!mine && <span>{comment.author}</span>}
+          {/* Always a header line now, draft or not - it is where the author, the
+              state and the number live, and a draft has two of those three. */}
+          <div className="mb-0.5 flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
+              {/* "You" rather than your git name: the name is on the avatar's tip,
+                  and in a list of comments what matters is which ones are yours. */}
+              <span className={mine ? 'text-stone-500 dark:text-stone-400' : ''}>{mine ? 'You' : comment.author}</span>
+              {!sent && (
+                // A draft is the one state worth a chip: it is the difference
+                // between something the agent has been told and something only you
+                // can see, and that is not obvious from the card alone.
+                <span className="rounded bg-blue-100 px-1 text-[10px] font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                  draft
+                </span>
+              )}
               {comment.resolved && <span className="text-emerald-600 dark:text-emerald-500">resolved</span>}
               {/* The number sits on the RIGHT, where it reads as a reference rather
                   than as part of the sentence - the same place the forge threads
                   put theirs. The unread dot rides on it, so what is new and what to
                   call it are one glance. */}
-              <span className="ml-auto flex items-center gap-1 shrink-0">
-                {!comment.read && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
-                <span className="font-mono">#{comment.number}</span>
-              </span>
+              {/* A draft shows no number. It HAS one - it was allocated when the
+                  comment was written, and publishing does not change it - but until
+                  it is published nobody else can cite it, so putting a handle on it
+                  would invite quoting something the agent cannot look up. */}
+              {sent && (
+                <span className="ml-auto flex items-center gap-1 shrink-0">
+                  {!comment.read && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
+                  <span className="font-mono">#{comment.number}</span>
+                </span>
+              )}
             </div>
-          )}
           <Markdown text={comment.text} className="text-xs text-gray-700 dark:text-gray-200 break-words" />
           {stale && !sent && (
             <div className="mt-1 flex items-start gap-1 text-[11px] text-amber-700 dark:text-amber-300">
@@ -1856,6 +1875,13 @@ function diffContextBlock(path: string, hunk: DiffHunk | undefined, lineNum: num
   })
   const header = hunk.header ? `${hunk.header}\n` : ''
   return `\`\`\`diff\n--- ${path}\n+++ ${path}\n${header}${rows.join('\n')}\n\`\`\`\n`
+}
+
+// A comment's permalink. The number is the whole address - the head is already in
+// the path, and a number is stable and never reused - so this stays short enough
+// to paste into a message and still means one exact thing months later.
+function commentPermalink(projectId: string | null, agentId: string, number: number): string {
+  return `${window.location.origin}/project/${encodeURIComponent(projectId ?? '_')}/agent/${encodeURIComponent(agentId)}?comment=${number}`
 }
 
 function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
@@ -3610,8 +3636,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // and the number is stable and never reused, so the link still means one exact
   // thing months later.
   const handleCopyCommentLink = useCallback((number: number) => {
-    const url = `${window.location.origin}/project/${encodeURIComponent(projectId ?? '_')}/agent/${encodeURIComponent(agent.id)}?comment=${number}`
-    void copyText(url).then((ok) => showSentToast(ok ? 'Link copied' : 'Could not copy the link'))
+    void copyText(commentPermalink(projectId, agent.id, number))
+      .then((ok) => showSentToast(ok ? 'Link copied' : 'Could not copy the link'))
   }, [projectId, agent.id, showSentToast])
 
   // Mark comments seen. Read state is explicit - nothing becomes read by the
@@ -3678,6 +3704,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // other "what arrived while I was elsewhere".
   const unreadCount = useMemo(() => openComments.filter((c) => c.unread).length, [openComments])
 
+  // Jump to one comment by number - what a permalink and a clicked date both do.
+  // Held in a ref so the thread-actions memo below can call it without depending
+  // on it (see openComment there).
+  const openCommentRef = useRef<((number: number) => void) | null>(null)
+
   // Step to the next/previous open comment, wrapping at the ends. Marks the one
   // you land on as read: arriving at a comment is what "seen" means, and it is a
   // far better signal than a scroll position, which fires for anything that
@@ -3690,6 +3721,16 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     if (next.unread) markRead(next.numbers)
     handleJumpToComment({ path: next.path, lineNum: next.lineNum, isNew: next.isNew } as PendingReviewComment)
   }, [openComments, atComment, markRead, handleJumpToComment])
+
+  useEffect(() => {
+    openCommentRef.current = (number: number) => {
+      const target = openComments.find((c) => c.number === number)
+        ?? reviewComments.find((c) => c.number === number)
+      setAtComment(number)
+      markRead([number])
+      if (target) handleJumpToComment({ path: target.path, lineNum: target.lineNum, isNew: target.isNew } as PendingReviewComment)
+    }
+  }, [openComments, reviewComments, markRead, handleJumpToComment])
 
   // `?comment=4`: jump to it once there is a diff to find it in, and mark it read.
   // Runs on the number rather than on every diff refresh, so a background refresh
@@ -3756,6 +3797,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         setThreads(res.threads ?? [])
         showSentToast('Comment posted on the pull request')
       },
+      commentHref: (number) => commentPermalink(projectId, agent.id, number),
+      // Through a ref, not directly: this memo is deliberately identity-stable
+      // (every thread card re-renders when it changes), and the jump depends on
+      // the live comment list and the diff.
+      openComment: (number) => openCommentRef.current?.(number),
       setResolved: async (number, resolved) => {
         const cs = await resolveReviewComment(projectId, agent.id, number, resolved)
         setReviewComments(cs)
