@@ -48,6 +48,7 @@ import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { FILE_BANNER, viewLineNumbers } from '../lib/fileViewCommand'
 import { buildOutputSpans } from '../lib/buildOutput'
+import { isJsonOutput } from '../lib/jsonOutput'
 import { diskOutputSpans } from '../lib/diskOutput'
 import { searchSummarySpans } from '../lib/searchSummary'
 import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
@@ -1984,6 +1985,7 @@ function OutputPanel({ text, lang, markers }: { text: string; lang: string; isEr
       if (lang) return highlightHtml(stripAnsi(text), lang)
       return separatorHtml(text, markerKey ? markerKey.split('\n') : [])
         ?? (hasAnsi(text) ? ansiToHtml(text) : null)
+        ?? (isJsonOutput(text) ? highlightHtml(text, 'json') : null)
     },
     [text, lang, markerKey],
   )

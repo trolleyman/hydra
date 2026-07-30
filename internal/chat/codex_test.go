@@ -198,7 +198,7 @@ func TestCodexFileChangeName(t *testing.T) {
 }
 
 func TestNormalizeCodexCommandAsBash(t *testing.T) {
-	got := normalizeCodex([]byte(`{"method":"item/started","params":{"item":{"id":"c1","type":"commandExecution","command":"/usr/bin/bash -lc \\\"pwd\\\"","cwd":"src"}}}`))
+	got := normalizeCodex([]byte(`{"method":"item/started","params":{"item":{"id":"c1","type":"commandExecution","command":"# Inspect the source\npwd","cwd":"src"}}}`))
 	if len(got) != 1 || got[0].eventType() != "tool_started" {
 		t.Fatalf("events = %+v", got)
 	}
@@ -206,12 +206,28 @@ func TestNormalizeCodexCommandAsBash(t *testing.T) {
 	var payload struct {
 		Name  string `json:"name"`
 		Input struct {
-			Command string `json:"command"`
-			CWD     string `json:"cwd"`
+			Command     string `json:"command"`
+			CWD         string `json:"cwd"`
+			Description string `json:"description"`
 		} `json:"input"`
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil || payload.Name != "Bash" || payload.Input.CWD != "src" || payload.Input.Command == "" {
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.Name != "Bash" || payload.Input.CWD != "src" ||
+		payload.Input.Command == "" || payload.Input.Description != "Inspect the source" {
 		t.Fatalf("payload = %s (%v)", raw, err)
+	}
+}
+
+func TestCodexCommandDescription(t *testing.T) {
+	tests := map[string]string{
+		"# Inspect usage\nrg -n usage internal":                            "Inspect usage",
+		`/usr/bin/bash -lc "# Run focused tests` + "\n" + `go test ./..."`: "Run focused tests",
+		"#!/usr/bin/env bash\n# Build\nmage build":                         "",
+		"echo ok\n# This is too late":                                      "",
+	}
+	for command, want := range tests {
+		if got := codexCommandDescription(command); got != want {
+			t.Errorf("codexCommandDescription(%q) = %q, want %q", command, got, want)
+		}
 	}
 }
 
