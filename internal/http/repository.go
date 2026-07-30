@@ -739,7 +739,7 @@ func (s *Server) HandleAgentBlob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if q.Get("worktree") == "true" {
-		head, err := heads.GetHeadByID(r.Context(), s.Sessions, s.DB, projectRoot, r.PathValue("id"))
+		head, err := heads.GetHeadByID(r.Context(), s.Sessions, s.DB, projectRoot, r.PathValue("agent_id"))
 		if err != nil || head == nil || head.Worktree == nil {
 			http.NotFound(w, r)
 			return

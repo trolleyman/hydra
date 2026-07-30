@@ -133,7 +133,7 @@ func sendDiffRefresh(conn *safeConn, headMoved bool) {
 // period (which only covers reloads / transient disconnects).
 // URL pattern: POST /api/projects/{project_id}/agents/{id}/shell/close?shell_id=...&sandboxed=...
 func (s *Server) HandleShellClose(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
+	agentID := r.PathValue("agent_id")
 	if agentID == "" {
 		http.Error(w, "agent ID required", http.StatusBadRequest)
 		return
@@ -154,7 +154,7 @@ func (s *Server) HandleShellClose(w http.ResponseWriter, r *http.Request) {
 // survives, so re-opening the tab resumes it (see heads.KillReviewSession).
 // URL pattern: POST /api/projects/{project_id}/agents/{id}/review/close
 func (s *Server) HandleReviewClose(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("id")
+	agentID := r.PathValue("agent_id")
 	if agentID == "" {
 		http.Error(w, "agent ID required", http.StatusBadRequest)
 		return
@@ -227,7 +227,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 
 	// Extract project ID and agent ID from path params.
 	projectID := r.PathValue("project_id")
-	agentID := r.PathValue("id")
+	agentID := r.PathValue("agent_id")
 
 	log.Printf("terminal ws: projectID: %q, agentID: %q from path %q", projectID, agentID, r.URL.Path)
 

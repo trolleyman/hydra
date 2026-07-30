@@ -123,7 +123,7 @@ func (s *Server) HandleAgentFileBlob(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	headID := r.PathValue("id")
+	headID := r.PathValue("agent_id")
 	head, err := heads.GetHeadByID(r.Context(), s.Sessions, s.DB, projectRoot, headID)
 	if err != nil || head == nil {
 		http.NotFound(w, r)

@@ -33,7 +33,7 @@ import (
 // URL pattern: /ws/projects/{project_id}/agents/{id}/tests
 func (s *Server) HandleTestsWS(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project_id")
-	agentID := r.PathValue("id")
+	agentID := r.PathValue("agent_id")
 	if agentID == "" {
 		http.Error(w, "agent ID required", http.StatusBadRequest)
 		return

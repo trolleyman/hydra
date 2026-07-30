@@ -42,7 +42,7 @@ func metaHasFile(m artifacts.Meta, name string) bool {
 // URL pattern: /ws/projects/{project_id}/agents/{id}/artifacts
 func (s *Server) HandleArtifactsWS(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project_id")
-	agentID := r.PathValue("id")
+	agentID := r.PathValue("agent_id")
 	if agentID == "" {
 		http.Error(w, "agent ID required", http.StatusBadRequest)
 		return

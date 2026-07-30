@@ -5528,7 +5528,7 @@ func handleSimWorkingWS(conn *safeConn) {
 // HandleTerminalWS handles WebSocket connections for simulated agent terminal access.
 func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// Extract agent ID from path: /ws/projects/{project_id}/agents/{id}/terminal
-	agentID := r.PathValue("id")
+	agentID := r.PathValue("agent_id")
 
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -5682,7 +5682,7 @@ const simArtifactStreamInterval = 600 * time.Millisecond
 // ::hydra:artifact:: streaming - and finally keeps the connection open, ignoring
 // client messages, until the peer closes it.
 func (s *SimulationServer) HandleArtifactsWS(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := r.PathValue("agent_id")
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -5790,7 +5790,7 @@ func simStreamedArtifactFiles(id string) []api.ArtifactFile {
 // includes any in-flight runner's live log/progress) then idles until the client
 // closes, so --simulation and the tests-panel screenshot exercise the WS path.
 func (s *SimulationServer) HandleTestsWS(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := r.PathValue("agent_id")
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
