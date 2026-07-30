@@ -454,25 +454,37 @@ func TestShellCwdAdvice(t *testing.T) {
 	const wt = "/repo/.hydra/local/worktrees/head"
 
 	// The whole point: the shell is somewhere other than where the agent assumes.
-	got := ShellCwdAdvice(wt+"/web", wt)
-	if !strings.Contains(got, wt+"/web") {
-		t.Errorf("advice should name the directory the shell is in, got %q", got)
+	after := ShellCwdAdviceAfter(wt+"/web", wt)
+	if !strings.Contains(after, wt+"/web") {
+		t.Errorf("after-advice should name the directory the shell is in, got %q", after)
 	}
-	if !strings.Contains(got, "persistent") {
-		t.Errorf("advice should say the cwd carries into the next call, got %q", got)
+	if !strings.Contains(after, "persistent") {
+		t.Errorf("after-advice should say the cwd carries into the next call, got %q", after)
 	}
-	// At the root there is nothing to correct, and this fires on every Bash call -
-	// so silence there is what keeps it from being noise.
-	if got := ShellCwdAdvice(wt, wt); got != "" {
-		t.Errorf("shell at the worktree root should get no advice, got %q", got)
+	// The before-note is the one that survives a failing call, so it has to stand
+	// on its own - and read as "where you are", not "where you ended up".
+	before := ShellCwdAdviceBefore(wt+"/web", wt)
+	if !strings.Contains(before, wt+"/web") {
+		t.Errorf("before-advice should name the directory the shell is in, got %q", before)
 	}
-	// Fail silent rather than guess: an unseeded HYDRA_WORKTREE or a payload with
-	// no cwd (a non-Claude hook shape) leaves us nothing to compare against.
-	if got := ShellCwdAdvice(wt+"/web", ""); got != "" {
-		t.Errorf("unknown worktree root should get no advice, got %q", got)
+	if before == after {
+		t.Errorf("the two notes ride the same call and must not read as a stuck record: %q", before)
 	}
-	if got := ShellCwdAdvice("", wt); got != "" {
-		t.Errorf("unknown cwd should get no advice, got %q", got)
+	// At the root there is nothing to correct, and these fire on every Bash call -
+	// so silence there is what keeps them from being noise. Fail silent rather than
+	// guess, too: an unseeded HYDRA_WORKTREE or a payload with no cwd (a non-Claude
+	// hook shape) leaves nothing to compare against.
+	for _, tc := range []struct{ name, cwd, root string }{
+		{"at the worktree root", wt, wt},
+		{"unknown worktree root", wt + "/web", ""},
+		{"unknown cwd", "", wt},
+	} {
+		if got := ShellCwdAdviceAfter(tc.cwd, tc.root); got != "" {
+			t.Errorf("%s should get no after-advice, got %q", tc.name, got)
+		}
+		if got := ShellCwdAdviceBefore(tc.cwd, tc.root); got != "" {
+			t.Errorf("%s should get no before-advice, got %q", tc.name, got)
+		}
 	}
 }
 

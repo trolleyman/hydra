@@ -7134,6 +7134,12 @@ components:
         line:
           type: string
           x-go-type-skip-optional-pointer: true
+          # NOT omitempty: a blank line of build output is a real line, and the
+          # union below (what the browser reads) declares `line` required on a
+          # log frame. With omitempty a blank `mage build` line went out as
+          # `{"kind":"log"}`, so the client pushed `undefined` into its log and
+          # crashed the app rendering it.
+          x-omitempty: false
           description: One line of build output.
         error:
           type: string

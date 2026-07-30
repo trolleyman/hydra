@@ -3300,7 +3300,7 @@ type ServerUpdateEvent struct {
 	Kind  ServerUpdateEventKind `json:"kind"`
 
 	// Line One line of build output.
-	Line  string            `json:"line,omitempty"`
+	Line  string            `json:"line"`
 	Phase ServerUpdatePhase `json:"phase,omitempty"`
 }
 
