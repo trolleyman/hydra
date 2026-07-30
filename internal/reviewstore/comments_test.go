@@ -464,3 +464,24 @@ func TestPinnedArtifacts(t *testing.T) {
 		t.Error("an empty project reported pins")
 	}
 }
+
+// A pin's anchor must not be wrapped in a markdown link the way a path:line one
+// is. "home.png @ 34%,71%" as a destination does not parse - a markdown
+// destination cannot contain spaces - so the whole link would render literally,
+// brackets and all. It also points at nothing: there is no file:line for the diff
+// to open, only a spot in a picture.
+func TestNotifyLineDoesNotLinkifyAPin(t *testing.T) {
+	pin := Comment{Number: 7, Image: &ImageAnchor{File: "home.png", X: 0.34, Y: 0.71}}
+	line := NotifyLine([]Comment{pin})
+	if !strings.Contains(line, "#7 home.png @ 34%,71%") {
+		t.Errorf("the pin's location is missing:\n%s", line)
+	}
+	if strings.Contains(line, "](") {
+		t.Errorf("the pin's anchor was linkified, which cannot parse:\n%s", line)
+	}
+	// A line comment in the SAME batch still gets its link - the two forms coexist.
+	both := NotifyLine([]Comment{pin, {Number: 8, Path: "a.go", Line: 12}})
+	if !strings.Contains(both, "#8 [a.go:12](a.go:12)") {
+		t.Errorf("a path anchor lost its link:\n%s", both)
+	}
+}

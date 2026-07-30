@@ -686,10 +686,19 @@ func NotifyLine(comments []Comment) string {
 	}
 	parts := make([]string, 0, len(comments))
 	for _, c := range comments {
-		if anchor := c.Anchor(); anchor != "" {
-			parts = append(parts, fmt.Sprintf("%s [%s](%s)", c.Label(), anchor, anchor))
-		} else {
+		anchor := c.Anchor()
+		switch {
+		case anchor == "":
 			parts = append(parts, c.Label())
+		case c.Image != nil:
+			// A pin's anchor is NOT a link. Its destination would have to be
+			// "home.png @ 34%,71%", and a markdown destination containing spaces
+			// does not parse - the whole link renders literally, brackets and all.
+			// It would also point at nothing: there is no file:line here for the
+			// diff to open, only a spot in a picture.
+			parts = append(parts, fmt.Sprintf("%s %s", c.Label(), anchor))
+		default:
+			parts = append(parts, fmt.Sprintf("%s [%s](%s)", c.Label(), anchor, anchor))
 		}
 	}
 	noun := "comments"
