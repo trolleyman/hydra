@@ -206,6 +206,83 @@ func TestStoreRecoversFromCheckpointLagAndPartialTail(t *testing.T) {
 	}
 }
 
+// The projection is written WHOLE on each checkpoint, so doing it per append
+// cost its size times the event count - measured at ~130MB of rewrites against
+// 77MB of real log across this machine's heads. It is a checkpoint, not the
+// record: what a lagging one loses, Open's replay puts back (see
+// TestStoreRecoversFromCheckpointLagAndPartialTail), and Snapshot reads the
+// in-memory fold, so no client ever sees the lag.
+func TestStoreCoalescesProjectionCheckpoints(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(root, "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Unix(1000, 0)
+	s.now = func() time.Time { return clock }
+	checkpoint := paths.GetChatStateJSONFromProjectRoot(root, "head")
+	through := func() uint64 {
+		data, err := os.ReadFile(checkpoint)
+		if err != nil {
+			return 0
+		}
+		var p Projection
+		if json.Unmarshal(data, &p) != nil {
+			return 0
+		}
+		return p.Through
+	}
+	appendOne := func(model string) {
+		changed := ModelChanged{}
+		changed.Model = model
+		if _, err := s.Append(changed); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	appendOne("first") // lastCheckpoint is zero, so this one writes
+	if got := through(); got != 1 {
+		t.Fatalf("checkpoint through = %d after the first append, want 1", got)
+	}
+	for i := 0; i < 50; i++ {
+		clock = clock.Add(10 * time.Millisecond) // 500ms total, under the interval
+		appendOne("burst")
+	}
+	if got := through(); got != 1 {
+		t.Errorf("checkpoint through = %d during a 500ms burst, want it to stay at 1", got)
+	}
+	// The fold itself is current the whole time - only the file lags.
+	if got := s.Snapshot().Through; got != 51 {
+		t.Errorf("in-memory projection through = %d, want 51", got)
+	}
+
+	clock = clock.Add(checkpointInterval)
+	appendOne("after the interval")
+	if got := through(); got != 52 {
+		t.Errorf("checkpoint through = %d after passing checkpointInterval, want 52", got)
+	}
+
+	// A quiet point puts the lagging fold down without waiting for an append.
+	clock = clock.Add(10 * time.Millisecond)
+	appendOne("lagging")
+	if got := through(); got != 52 {
+		t.Fatalf("checkpoint through = %d, want the append to have been coalesced", got)
+	}
+	s.Checkpoint()
+	if got := through(); got != 53 {
+		t.Errorf("checkpoint through = %d after an explicit Checkpoint, want 53", got)
+	}
+
+	// And a reopen agrees, whatever the file said.
+	reopened, err := Open(root, "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.Snapshot(); got.Through != 53 || got.Model != "lagging" {
+		t.Errorf("reopened projection = %+v", got)
+	}
+}
+
 func TestApplyIsIdempotent(t *testing.T) {
 	p := Projection{Version: ProjectionVersion, Subagents: map[string]SubagentState{}, Queue: map[string]QueuedState{}}
 	ev := Event{Seq: 1, Type: "queued_message", Payload: json.RawMessage(`{"id":"m","status":"queued","content":[]}`)}

@@ -325,6 +325,54 @@ describe('an expanded tool card survives its run becoming a step group', () => {
 // The result used to be dropped on the floor there - scrolling back to an
 // answered AskUserQuestion showed a blank, interactive card with no record of
 // the selection. A shared ToolResultLink carries it forward.
+// The Bash tool runs ONE shell per session, so a bare `bun test` is only
+// legible with the directory it ran in above it. The daemon reads that off the
+// CLI's transcript (internal/chat/shellcwd.go) and sends it as a shell_cwd
+// event; end to end, that has to reach the NEXT command's card.
+describe('a shell_cwd read by the daemon captions the command after it', () => {
+  beforeAll(() => {
+    vi.stubGlobal('WebSocket', RecordingWebSocket)
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    sockets.length = 0
+    localStorage.clear()
+  })
+
+  it('shows the directory the previous command left the shell in', async () => {
+    renderChat()
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => ws.emit({ type: 'replay_done' }))
+
+    let seq = 0
+    const emit = (type: string, payload: unknown) =>
+      act(() => ws.emit({ type: 'chat_event', event: { seq: ++seq, type, timestamp: '', payload } }))
+
+    emit('tool_started', { id: 'toolu_a', name: 'Bash', input: { command: 'cd web && ls' } })
+    emit('tool_completed', { id: 'toolu_a', content: 'dist  src' })
+    emit('shell_cwd', { tool_use_id: 'toolu_a', cwd: '/wt/web' })
+    emit('tool_started', { id: 'toolu_b', name: 'Bash', input: { command: 'bun test' } })
+    emit('tool_completed', { id: 'toolu_b', content: '12 pass' })
+
+    const header = [...document.querySelectorAll('[role="button"][aria-expanded]')].find((el) =>
+      el.textContent?.includes('bun test'),
+    ) as HTMLElement | undefined
+    expect(header).toBeDefined()
+    act(() => header!.click())
+    await waitFor(() => expect(header).toHaveAttribute('aria-expanded', 'true'))
+    // The card's own script, with the tracked directory prepended: without it
+    // the command reads as if it ran where the session started.
+    const card = header!.closest('div')
+    expect(card?.textContent).toContain('cd /wt/web')
+  })
+})
+
 describe('reduceHistoryEvents across page boundaries', () => {
   const QUESTION_INPUT = {
     questions: [
@@ -386,6 +434,36 @@ describe('reduceHistoryEvents across page boundaries', () => {
     )
     expect(items.find((it) => it.kind === 'tool')).toMatchObject({ result: 'done' })
     expect(link.orphans.size).toBe(0)
+  })
+
+  // The daemon reads where a Bash command left the shell off the CLI's own
+  // transcript (internal/chat/shellcwd.go) and appends it as its own event a
+  // moment after the result - so it straddles a page boundary just as a result
+  // does, and it is what anchors every command after it.
+  it('applies a shell_cwd reduced in a newer page to a card built by an older page', () => {
+    const link = newToolResultLink()
+    const newer = reduceHistoryEvents(
+      toProviderEvents({ type: 'shell_cwd', seq: 9, timestamp: '', payload: { tool_use_id: 'toolu_3', cwd: '/wt/web' } } as never),
+      alloc(), undefined, undefined, link,
+    )
+    expect(newer).toHaveLength(0)
+    const older = reduceHistoryEvents(
+      [{ type: 'assistant', message: { id: 'm4', content: [{ type: 'tool_use', id: 'toolu_3', name: 'Bash', input: { command: 'cd web && ls' } }] } }],
+      alloc(), undefined, undefined, link,
+    )
+    expect(older.find((it) => it.kind === 'tool')).toMatchObject({ toolUseId: 'toolu_3', cwdAfter: '/wt/web' })
+  })
+
+  it('applies a shell_cwd to a card built in the same page', () => {
+    const items = reduceHistoryEvents(
+      [
+        { type: 'assistant', message: { id: 'm5', content: [{ type: 'tool_use', id: 'toolu_4', name: 'Bash', input: { command: 'cd web && ls' } }] } },
+        { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_4', content: 'ok' }] } },
+        ...toProviderEvents({ type: 'shell_cwd', seq: 3, timestamp: '', payload: { tool_use_id: 'toolu_4', cwd: '/wt/web' } } as never),
+      ],
+      alloc(),
+    )
+    expect(items.find((it) => it.kind === 'tool')).toMatchObject({ toolUseId: 'toolu_4', result: 'ok', cwdAfter: '/wt/web' })
   })
 
 })

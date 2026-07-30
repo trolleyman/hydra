@@ -19,7 +19,8 @@ func allPayloads() []Payload {
 		ToolStarted{}, ToolCompleted{}, ToolDelta{}, PlanUpdated{}, PlanDelta{},
 		SubagentStarted{}, SubagentUpdated{}, SubagentCompleted{},
 		TurnStarted{}, TurnCompleted{}, TurnFailed{}, TurnInterrupted{}, TurnError{},
-		UsageUpdated{}, MessagesRetracted{}, Notice{}, InteractionRequested{},
+		UsageUpdated{}, MessagesRetracted{}, Notice{}, SessionResumed{}, ShellCwd{},
+		InteractionRequested{},
 		InteractionResolved{}, CommitCreated{}, HeadChanged{}, HeadObserved{},
 		ModelChanged{}, QueuedMessage{}, QueueMessageRemoved{},
 	}

@@ -18,10 +18,24 @@ import type { EditHunk } from './editDiff'
 // rides with the result rather than the call.
 export type OrphanResult = { result: string; isError: boolean; images: string[]; raw?: unknown; editPatch?: EditHunk[] | null }
 
-export type ToolResultLink = { known: Set<string>; orphans: Map<string, OrphanResult> }
+// `cwds` is the same problem for a shell_cwd event (where the daemon read that a
+// Bash command left the shell - internal/chat/shellcwd.go). It arrives as its
+// own event a moment after the result, so it straddles a page boundary just as
+// readily, and it is what anchors every command after it.
+export type ToolResultLink = { known: Set<string>; orphans: Map<string, OrphanResult>; cwds: Map<string, string> }
 
 export function newToolResultLink(): ToolResultLink {
-  return { known: new Set(), orphans: new Map() }
+  return { known: new Set(), orphans: new Map(), cwds: new Map() }
+}
+
+export function stashOrphanCwd(link: ToolResultLink | undefined, toolUseId: string, cwd: string) {
+  if (!link || !toolUseId || !cwd) return
+  link.cwds.set(toolUseId, cwd)
+  while (link.cwds.size > MAX_ORPHAN_RESULTS) {
+    const oldest = link.cwds.keys().next().value
+    if (oldest === undefined) break
+    link.cwds.delete(oldest)
+  }
 }
 
 // Results for cards the reducers deliberately never build (an older TodoWrite,
@@ -49,8 +63,10 @@ export function claimOrphanResult<T extends { kind: string; toolUseId?: string }
 ): T {
   if (!link || (item.kind !== 'tool' && item.kind !== 'question') || !item.toolUseId) return item
   link.known.add(item.toolUseId)
+  const cwd = link.cwds.get(item.toolUseId)
+  if (cwd) link.cwds.delete(item.toolUseId)
   const orphan = link.orphans.get(item.toolUseId)
-  if (!orphan) return item
+  if (!orphan) return cwd ? { ...item, cwdAfter: cwd } : item
   link.orphans.delete(item.toolUseId)
   // A question card carries only the answer text; a tool card also its error
   // flag and any images the result embedded.
@@ -62,5 +78,6 @@ export function claimOrphanResult<T extends { kind: string; toolUseId?: string }
     resultImages: orphan.images.length ? orphan.images : undefined,
     rawResult: orphan.raw,
     editPatch: orphan.editPatch ?? undefined,
+    ...(cwd ? { cwdAfter: cwd } : {}),
   }
 }

@@ -474,15 +474,31 @@ func TailTranscript(path string, maxBytes int64) (lines [][]byte, uuids map[stri
 
 // TranscriptLinesAfter returns complete JSONL records appended at or after a
 // durable byte offset and the next safe offset. A truncated file restarts at 0.
+//
+// Reads only the bytes past the offset. It used to read the whole file and slice
+// it, which was fine for the once-per-attach history import but not for the
+// shell-cwd tail (internal/chat), which reads on every Bash call of a session
+// whose transcript grows into the tens of megabytes.
 func TranscriptLinesAfter(path string, offset int64) ([][]byte, int64, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, offset, errtrace.Wrap(err)
 	}
-	if offset < 0 || offset > int64(len(data)) {
+	defer f.Close()
+	size, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		return nil, offset, errtrace.Wrap(err)
+	}
+	if offset < 0 || offset > size {
 		offset = 0
 	}
-	tail := data[offset:]
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, offset, errtrace.Wrap(err)
+	}
+	tail, err := io.ReadAll(f)
+	if err != nil {
+		return nil, offset, errtrace.Wrap(err)
+	}
 	last := bytes.LastIndexByte(tail, '\n')
 	if last < 0 {
 		return nil, offset, nil
