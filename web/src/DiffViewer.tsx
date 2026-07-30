@@ -8,7 +8,7 @@ import { ensureLanguage } from './lib/prismLazy'
 import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
-import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewThread } from './api'
+import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewImageAnchor, ReviewThread } from './api'
 import { ReviewThreadCard, type ReviewThreadActions } from './components/ReviewThreadCard'
 import { ProviderIcon } from './components/ReviewControls'
 import { providerLabel } from './lib/forgeDisplay'
@@ -65,7 +65,8 @@ import { useToastStore, type ToastType } from './stores/toastStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
-import { addReviewComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, notifiedNumbers, draftsOf, type PendingReviewComment } from './lib/reviewComments'
+import { addReviewComment, addImageComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, notifiedNumbers, draftsOf, type PendingReviewComment } from './lib/reviewComments'
+import { useImageCommentStore } from './stores/imageCommentStore'
 import { commentPermalink, registerCommentJump } from './lib/reviewCommentLink'
 import { CommentLink } from './components/CommentLink'
 import { CommentIdentityContext } from './components/commentIdentity'
@@ -4182,6 +4183,42 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       .catch((e) => console.error('Failed to queue comment:', e))
   }, [agent.id, agent.base_branch, projectId])
 
+  // Pins on artifact pictures (docs/review-agent.md). The lightbox is a global
+  // overlay with no idea which head opened it, so the page that DOES hold the
+  // comments registers the way to read and write one; nothing registered means no
+  // pin UI at all, which is right for a chat image or a spawn attachment.
+  //
+  // Registered from here rather than from ArtifactsPanel because this is where the
+  // comments already live: a second copy in the panel would be a second thing to
+  // keep in sync, and the two would disagree the moment one of them refetched.
+  const registerImageComments = useImageCommentStore((s) => s.register)
+  const submitImageComment = useCallback(async (image: ReviewImageAnchor, text: string, publish: boolean) => {
+    // Resolved at write time, exactly as a line comment's is, so "latest commit"
+    // cannot drift between placing the pin and publishing it.
+    const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
+    const { comments, notified, toReviewer } = await addImageComment(projectId, agent.id, {
+      image, text, diffLabel: `${fromLabel} -> ${toLabel}`, publish,
+    })
+    setReviewComments(comments)
+    // The same three outcomes the line-comment path reports, and for the same
+    // reasons: a pin whose body mentions `@review` wakes the REVIEWER, possibly
+    // starting one in a tab that has never been opened; otherwise the toast names
+    // the number the agent was actually given; and when NOTHING was notified it
+    // says so, because "sent to agent" is a lie when no agent was listening.
+    if (publish) {
+      if (toReviewer) showSentToast('Sent to your reviewer - open the Review tab to see the reply')
+      else if (notified) showSentToast(sentToAgentText(notifiedNumbers(notified), 1))
+      else showSentToast(UNDELIVERED_COMMENT, 'warning')
+    }
+  }, [projectId, agent.id, agent.base_branch, showSentToast])
+  useEffect(() => {
+    registerImageComments({ comments: reviewComments, submit: submitImageComment })
+    // Clears only what THIS component registered. The chat's quote target and the
+    // composer's annotate target live in the same store and are registered by
+    // other components; a blanket clear() here would take them down with it.
+    return () => registerImageComments({ comments: [], submit: null })
+  }, [reviewComments, submitImageComment, registerImageComments])
+
   const removeQueuedComment = useCallback((id: string) => {
     removeReviewComment(projectId, agent.id, Number(id))
       .then(setReviewComments)
@@ -5116,6 +5153,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           )}
           <ReviewDraftPopover
             comments={queuedComments}
+            projectId={projectId}
             staleIds={staleReviewIds}
             submitting={submittingReview}
             onSubmit={submitReview}

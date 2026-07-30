@@ -52,10 +52,14 @@ describe('AttachmentChips', () => {
 describe('attachmentLightboxItems', () => {
   it('lines the entries up with the openable chips and types each one', () => {
     expect(openableAttachments(attachments).map((a) => a.id)).toEqual([1, 2, 3])
+    // Every entry is marked `attachment`, which is what routes a review pin placed
+    // on one to the prompt being composed rather than to the comment store. It has
+    // to be stated here rather than derived from the url: a file attached moments
+    // ago previews from a local `blob:` that says nothing about what it is.
     expect(attachmentLightboxItems(attachments)).toEqual([
-      { url: '/blob?name=signin.png', filename: 'signin.png', size: 2048, kind: 'image' },
-      { url: '/blob?name=build.log', filename: 'build.log', size: 900, kind: 'text' },
-      { url: '/blob?name=app.apk', filename: 'app.apk', size: 10, kind: 'binary' },
+      { url: '/blob?name=signin.png', filename: 'signin.png', size: 2048, kind: 'image', attachment: true },
+      { url: '/blob?name=build.log', filename: 'build.log', size: 900, kind: 'text', attachment: true },
+      { url: '/blob?name=app.apk', filename: 'app.apk', size: 10, kind: 'binary', attachment: true },
     ])
   })
 })

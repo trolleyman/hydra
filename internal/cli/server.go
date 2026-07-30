@@ -190,6 +190,11 @@ func runSimulationServer() error {
 	// (mirrors the real server's non-OpenAPI routes), so those toggles can be
 	// screenshotted - and so a settled test card's log button is live, as it is
 	// against a real project.
+	// Simulated artifact bytes. The pictures are addressed the way generated ones
+	// are (blob?script=&key=&file=), because that triple is an artifact's identity
+	// and the review pins derive their anchor from it - a data URL is a picture
+	// nothing can be pinned to. See simArtifactBlob.
+	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
 	mux.HandleFunc("/tests/projects/{project_id}/log", server.HandleTestLog)
 

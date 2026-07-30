@@ -28,6 +28,9 @@ export interface ParsedReviewComment {
   number: number
   /** Repo-relative path the comment is anchored to, or '' for an unanchored one. */
   path: string
+  /** Set instead of path/line when the comment is pinned to a spot in a PICTURE.
+   *  `position` is already rendered ("34%,71%", with a timecode for a clip). */
+  image?: { file: string; position: string }
   /** Line within that file, or 0 when the anchor names only a file. */
   line: number
   /** The comment this one answers, or 0. */
@@ -50,8 +53,41 @@ export interface ParsedReviewComments {
   trailer: string
 }
 
+// The anchor is captured as ONE lazy run and classified afterwards, rather than
+// being spelled out here. A comment is anchored either to a line of code
+// ("a.go:12") or to a spot in a picture ("home.png @ 34%,71%", with a timecode
+// for a clip) - and the second contains SPACES, which the old `\S+?` could not
+// match. An unrecognised header is not a cosmetic loss: the line stops starting a
+// comment, so its text is swallowed into the body of the card above it.
 const HEADER_RE =
-  /^#(\d+)(?: (\S+?)(?::(\d+))?)?(?: \(reply to #(\d+)\))?( \[resolved\])? - ([^,]+?)(?:, on (.+))?$/
+  /^#(\d+)(?: (.+?))?(?: \(reply to #(\d+)\))?( \[resolved\])? - ([^,]+?)(?:, on (.+))?$/
+
+// "home.png @ 34%,71%" / "loader.webm @ 40%,60% at 0:01.4" - a file, then where
+// in it. The " @ " is what tells the two anchor kinds apart; a path never has one.
+const IMAGE_ANCHOR_RE = /^(\S+) @ (.+)$/
+// "a.go:12", or just "a.go" when the anchor names only a file.
+const PATH_ANCHOR_RE = /^(\S+?)(?::(\d+))?$/
+
+// Splits the captured anchor into whichever of the two kinds it is.
+function parseAnchor(raw: string | undefined): { path: string; line: number; image?: { file: string; position: string } } {
+  if (!raw) return { path: '', line: 0 }
+  const img = IMAGE_ANCHOR_RE.exec(raw)
+  if (img) return { path: '', line: 0, image: { file: img[1], position: img[2] } }
+  const p = PATH_ANCHOR_RE.exec(raw)
+  if (p) return { path: p[1], line: p[2] ? Number(p[2]) : 0 }
+  // Something neither shape covers: keep it as the path rather than dropping it,
+  // so the card still says what the comment was about.
+  return { path: raw, line: 0 }
+}
+
+// Drops the "image:" / "point:" / "box:" lines RenderForAgent writes under a pin.
+// They tell an AGENT where the file is on disk and the spot in pixels; in the chat
+// the header already says where, and an absolute cache path is noise.
+function stripImageDetail(block: string[]): string[] {
+  let i = 0
+  while (i < block.length && /^(image|point|box|close-up of that spot): /.test(block[i])) i++
+  return block.slice(i)
+}
 
 // A header only counts at the start of the text or after a blank line - the
 // separator RenderForAgent puts between comments. Inside a body, a line of the
@@ -103,16 +139,20 @@ export function parseReviewCommentsText(text: string): ParsedReviewComments | nu
     const split = i + 1 === starts.length && preamble !== '' ? splitTrailer(block) : { body: block, trailer: [] }
     trailer = split.trailer
     const { context, rest } = takeContext(split.body)
+    const anchor = parseAnchor(m[2])
     comments.push({
       number: Number(m[1]),
-      path: m[2] ?? '',
-      line: m[3] ? Number(m[3]) : 0,
-      replyTo: m[4] ? Number(m[4]) : 0,
-      resolved: m[5] != null,
-      author: m[6],
-      diff: m[7] ?? '',
+      path: anchor.path,
+      line: anchor.line,
+      image: anchor.image,
+      replyTo: m[3] ? Number(m[3]) : 0,
+      resolved: m[4] != null,
+      author: m[5],
+      diff: m[6] ?? '',
       context,
-      body: rest.join('\n').trim(),
+      // A pin's detail lines are metadata, not something the author wrote, so they
+      // are taken off the body the way the diff excerpt is.
+      body: stripImageDetail(rest).join('\n').trim(),
     })
   })
   return { preamble, comments, trailer: trailer.join('\n').trim() }

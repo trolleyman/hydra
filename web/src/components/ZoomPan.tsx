@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Maximize } from 'lucide-react'
+import { ZoomScaleContext } from '../lib/zoomScale'
 
 // How far past fit you can magnify (8× the fit size). Enough to read individual
 // pixels of a downscaled screenshot without letting the image run away entirely.
@@ -61,7 +62,7 @@ function useMeasure(ref: React.RefObject<HTMLElement | null>) {
 // stay correct; at fit the frame still hugs the content exactly (shadow/rounding
 // unchanged). Without the props the frame stays content-sized (the diff comparator,
 // whose width is externally driven, opts out this way).
-export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxHeight, onVerticalSlide }: {
+export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxHeight, onVerticalSlide, onViewChange }: {
   children: React.ReactNode
   // The image shown inside the minimap (a representative side for a diff pair).
   // Omitted → the minimap shows just the viewport rectangle on a neutral panel.
@@ -81,6 +82,13 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   // Horizontal slide isn't reported - a centred caption doesn't detach vertically from
   // it. Must be a stable identity (useCallback) so it doesn't re-fire every render.
   onVerticalSlide?: (fy: number, transition: string | undefined) => void
+  // Fired whenever the view changes at all - zoom, pan or grow-slide. Anything
+  // anchored to a POINT in the content needs this: the content moves under it,
+  // and a box hanging off a review pin would otherwise stay where the pin used
+  // to be. Distinct from onVerticalSlide, which reports one axis for chrome laid
+  // out BELOW the frame; a pure zoom moves the content without moving that.
+  // Must be a stable identity (useCallback) so it does not re-fire every render.
+  onViewChange?: () => void
 }) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -101,6 +109,10 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
   // instead. 'glide' is a longer ease reserved for go-there jumps (minimap click,
   // Reset view), where a single deliberate move benefits from easing.
   const [transition, setTransition] = useState<'none' | 'glide'>('none')
+  // Tell the caller the content has moved, after it has. A layout effect keyed on
+  // the view itself, so it fires for every kind of change - wheel, pinch, drag,
+  // minimap, reset - without each of those having to remember to report.
+  useLayoutEffect(() => { onViewChange?.() }, [view, onViewChange])
   // Set while a drag actually moved, so the trailing click is swallowed (a pan
   // shouldn't also flip the A/B view or open anything).
   const movedRef = useRef(false)
@@ -479,7 +491,9 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
             transition: transitionCss && `transform ${transitionCss}`,
           }}
         >
-          {children}
+          {/* A primitive value, so the provider only re-renders its consumers when
+              the magnification actually changes - no memo needed. */}
+          <ZoomScaleContext.Provider value={view.scale}>{children}</ZoomScaleContext.Provider>
         </div>
 
       </div>
