@@ -17,6 +17,7 @@ import { rememberMediaSize } from './mediaSize'
 import { IMAGE_REFLOW_MS, markSelfReflow } from './selfReflow'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 import { ansiToHtml, ansiToText, hasAnsi } from './ansi'
+import { renderCommentMentions } from './mentionHighlight'
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
 // rendered-markdown surface (chat messages, the AgentView prompt, README file
@@ -506,15 +507,25 @@ const BREAK_PLUGINS: RemarkPlugins = [remarkGfm, remarkBreaks]
 const REFLOW_PLUGINS: RemarkPlugins = [remarkGfm]
 
 // buildComponents maps markdown elements to the variant's styled React nodes.
-function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
+function mentionChildren(children: ReactNode, enabled: boolean): ReactNode {
+  if (!enabled) return children
+  if (typeof children === 'string') return renderCommentMentions(children)
+  if (Array.isArray(children)) {
+    return children.map((child) => mentionChildren(child, true))
+  }
+  return children
+}
+
+function buildComponents(s: Style, linkCtx?: RepoLinkContext, highlightMentions = false): Components {
+  const prose = (children: ReactNode) => mentionChildren(children, highlightMentions)
   return {
-    h1: ({ children }) => <h1 className={s.h1}>{children}</h1>,
-    h2: ({ children }) => <h2 className={s.h2}>{children}</h2>,
-    h3: ({ children }) => <h3 className={s.h3}>{children}</h3>,
-    h4: ({ children }) => <h4 className={s.h4}>{children}</h4>,
-    h5: ({ children }) => <h5 className={s.h5}>{children}</h5>,
-    h6: ({ children }) => <h6 className={s.h6}>{children}</h6>,
-    p: ({ children }) => <p className={s.p}>{children}</p>,
+    h1: ({ children }) => <h1 className={s.h1}>{prose(children)}</h1>,
+    h2: ({ children }) => <h2 className={s.h2}>{prose(children)}</h2>,
+    h3: ({ children }) => <h3 className={s.h3}>{prose(children)}</h3>,
+    h4: ({ children }) => <h4 className={s.h4}>{prose(children)}</h4>,
+    h5: ({ children }) => <h5 className={s.h5}>{prose(children)}</h5>,
+    h6: ({ children }) => <h6 className={s.h6}>{prose(children)}</h6>,
+    p: ({ children }) => <p className={s.p}>{prose(children)}</p>,
     ul: ({ children, className }) => (
       <ul className={`${s.ul}${className?.includes('contains-task-list') ? ' list-none pl-0' : ''}`}>{children}</ul>
     ),
@@ -522,9 +533,9 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
     li: ({ children }) => <li className={s.li}>{children}</li>,
     blockquote: ({ children }) => <blockquote className={s.blockquote}>{children}</blockquote>,
     hr: () => <hr className={s.hr} />,
-    strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-    em: ({ children }) => <em className="italic">{children}</em>,
-    del: ({ children }) => <del className="line-through opacity-80">{children}</del>,
+    strong: ({ children }) => <strong className="font-semibold">{prose(children)}</strong>,
+    em: ({ children }) => <em className="italic">{prose(children)}</em>,
+    del: ({ children }) => <del className="line-through opacity-80">{prose(children)}</del>,
     a: ({ href, children }) =>
       linkCtx ? (
         <RepoLink href={href} ctx={linkCtx}>{children}</RepoLink>
@@ -561,6 +572,9 @@ export interface MarkdownProps {
   // own behaviour ('chat' yes, 'doc' no); set it false to keep chat styling but
   // reflow paragraphs the way CommonMark (and GitHub) do.
   hardBreaks?: boolean
+  // Paint routing mentions in review comments. Mentions have no meaning on
+  // ordinary Markdown surfaces, so callers opt in explicitly.
+  highlightMentions?: boolean
 }
 
 // Markdown renders read-only markdown for a given surface. Do NOT wrap it in a
@@ -570,10 +584,10 @@ export interface MarkdownProps {
 // memo'd: parsing markdown is not cheap, and a chat transcript can hold hundreds
 // of these. Without memo, typing in the chat composer (a sibling state change)
 // re-parses every rendered message on each keystroke, which is visibly laggy.
-export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className, hardBreaks }: MarkdownProps): ReactNode {
+export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className, hardBreaks, highlightMentions = false }: MarkdownProps): ReactNode {
   const components = useMemo(
-    () => buildComponents(STYLES[variant], linkCtx),
-    [variant, linkCtx],
+    () => buildComponents(STYLES[variant], linkCtx, highlightMentions),
+    [variant, linkCtx, highlightMentions],
   )
   // data-md-root marks the subtree as rendered markdown: copying a selection
   // that touches it re-serializes it back to markdown source (lib/copyMarkdown).

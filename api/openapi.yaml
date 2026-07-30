@@ -4387,7 +4387,11 @@ components:
         progress:
           type: string
           nullable: true
-          description: Latest progress line while status is "running" (e.g. "84/142").
+          description: >-
+            Latest explicit runner progress line while status is "running"
+            (e.g. "Installing dependencies"). Streaming stdout runners expose
+            parsed counts or an explicit `::hydra:progress::` headline here,
+            never raw stdout.
         ref:
           type: string
           nullable: true
@@ -5440,7 +5444,7 @@ components:
         progress:
           type: string
           nullable: true
-          description: "Latest progress line of the in-flight run (from ::hydra:progress:: markers, else latest stdout). Only set while running."
+          description: "Latest structured progress for the in-flight run (from ::hydra:progress:: or parsed test counts). Ordinary stdout is log-only. Only set while running."
         log:
           type: array
           nullable: true

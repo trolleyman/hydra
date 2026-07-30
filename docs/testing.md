@@ -64,6 +64,11 @@ echo "::hydra:test:fail:: auth/rotation.test.ts:48:24 › grace window | expecte
 echo "::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon"
 ```
 
+Use `::hydra:progress:: <text>` for an explicit phase headline while the runner
+is between cases (for example, `::hydra:progress:: Installing dependencies`).
+Hydra shows that headline in compact test status; ordinary stdout remains
+available in the expanded live log but is not used as compact status.
+
 **Durations.** A verb takes an optional `:<ms>` suffix, giving streamed cases the
 timing a JUnit report already carries in its `time` attribute; the panel renders it
 per case. It rides on the *verb* rather than the payload because the payload is user
