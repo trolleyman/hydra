@@ -609,7 +609,7 @@ type AgentConfig struct {
 
 // AgentInputRequest defines model for AgentInputRequest.
 type AgentInputRequest struct {
-	// Origin Why this message exists, when the user did not type it - "review_comments", "review_resolved", "review_unresolved", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. It rides through to the chat event so the transcript can mark an automated turn as such; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+	// Origin Why this message exists, when the user did not type it - "review_comments", "review_resolved", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. It rides through to the chat event so the transcript can mark an automated turn as such; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
 	Origin *string `json:"origin,omitempty"`
 
 	// Text Text to send to the agent's stdin (a newline is appended automatically)
@@ -1611,7 +1611,7 @@ type ChatUserMessagePayload struct {
 	// Id The client-generated id, so a queued bubble reconciles to it.
 	Id string `json:"id,omitempty"`
 
-	// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "review_unresolved", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+	// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
 	Origin string `json:"origin,omitempty"`
 
 	// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
@@ -4305,7 +4305,7 @@ type UserMessageEvent struct {
 		// Id The client-generated id, so a queued bubble reconciles to it.
 		Id string `json:"id,omitempty"`
 
-		// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "review_unresolved", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+		// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
 		Origin string `json:"origin,omitempty"`
 
 		// ParentItemId The tool call this belongs under.

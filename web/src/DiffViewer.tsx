@@ -631,7 +631,7 @@ function commentWindows(lines: number[], total: number): { start: number; end: n
 // The comment cards for one entry - the comment, then its replies, or a forge
 // thread. Shared by the file card and the unanchored list so a comment reads the
 // same wherever it had to be put.
-function OffDiffEntryBody({ entry, you, editingId, setEditingId, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink }: {
+function OffDiffEntryBody({ entry, you, editingId, setEditingId, onEditComment, onRemoveComment, onResolveComment }: {
   entry: OffDiffEntry
   you?: string
   editingId: string | null
@@ -639,7 +639,6 @@ function OffDiffEntryBody({ entry, you, editingId, setEditingId, onEditComment, 
   onEditComment?: (id: string, text: string) => void
   onRemoveComment?: (id: string) => void
   onResolveComment?: (number: number, resolved: boolean) => void
-  onCopyCommentLink?: (number: number) => void
 }) {
   const threadActions = useReviewThreadActions()
   if (entry.kind === 'thread') {
@@ -663,7 +662,6 @@ function OffDiffEntryBody({ entry, you, editingId, setEditingId, onEditComment, 
             onEdit={() => setEditingId(c.id)}
             onRemove={() => onRemoveComment?.(c.id)}
             onResolve={c.replyTo === 0 ? (r) => onResolveComment?.(c.number, r) : undefined}
-            onCopyLink={() => onCopyCommentLink?.(c.number)}
             you={you}
           />
         )
@@ -693,7 +691,7 @@ function OffDiffEntryBody({ entry, you, editingId, setEditingId, onEditComment, 
 // even for a comment written against a different comparison. The cost is that a
 // line can have moved since - hence the "not in this diff" header, and the line
 // numbers being the file's own.
-function OffDiffFileCard({ projectId, gitRef, path, entries, you, openInRepo, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink }: {
+function OffDiffFileCard({ projectId, gitRef, path, entries, you, openInRepo, onEditComment, onRemoveComment, onResolveComment }: {
   projectId: string | null
   /** The ref to read the file at - the head's branch. */
   gitRef?: string | null
@@ -704,7 +702,6 @@ function OffDiffFileCard({ projectId, gitRef, path, entries, you, openInRepo, on
   onEditComment?: (id: string, text: string) => void
   onRemoveComment?: (id: string) => void
   onResolveComment?: (number: number, resolved: boolean) => void
-  onCopyCommentLink?: (number: number) => void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   // The read, TAGGED with the request it answers. Tagging is what lets "still
@@ -801,7 +798,7 @@ function OffDiffFileCard({ projectId, gitRef, path, entries, you, openInRepo, on
               <OffDiffEntryBody
                 entry={e} you={you} editingId={editingId} setEditingId={setEditingId}
                 onEditComment={onEditComment} onRemoveComment={onRemoveComment}
-                onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink}
+                onResolveComment={onResolveComment}
               />
             </div>
           ))}
@@ -816,7 +813,7 @@ function OffDiffFileCard({ projectId, gitRef, path, entries, you, openInRepo, on
           <OffDiffEntryBody
             entry={e} you={you} editingId={editingId} setEditingId={setEditingId}
             onEditComment={onEditComment} onRemoveComment={onRemoveComment}
-            onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink}
+            onResolveComment={onResolveComment}
           />
         </div>
       ))}
@@ -827,7 +824,7 @@ function OffDiffFileCard({ projectId, gitRef, path, entries, you, openInRepo, on
 // The comments that could not be put next to any code at all: no file, or a file
 // with no line. There is nothing to anchor them to, so they go at the end rather
 // than pretending to a position they do not have.
-function UnanchoredComments({ entries, you, resolvedCount, showResolved, onToggleResolved, openInRepo, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink }: {
+function UnanchoredComments({ entries, you, resolvedCount, showResolved, onToggleResolved, openInRepo, onEditComment, onRemoveComment, onResolveComment }: {
   entries: OffDiffEntry[]
   you?: string
   resolvedCount: number
@@ -837,7 +834,6 @@ function UnanchoredComments({ entries, you, resolvedCount, showResolved, onToggl
   onEditComment?: (id: string, text: string) => void
   onRemoveComment?: (id: string) => void
   onResolveComment?: (number: number, resolved: boolean) => void
-  onCopyCommentLink?: (number: number) => void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   if (entries.length === 0 && resolvedCount === 0) return null
@@ -871,7 +867,7 @@ function UnanchoredComments({ entries, you, resolvedCount, showResolved, onToggl
           <OffDiffEntryBody
             entry={e} you={you} editingId={editingId} setEditingId={setEditingId}
             onEditComment={onEditComment} onRemoveComment={onRemoveComment}
-            onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink}
+            onResolveComment={onResolveComment}
           />
         </div>
       ))}
@@ -5158,7 +5154,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           onEditComment={handleUpdateReviewComment}
           onRemoveComment={removeQueuedComment}
           onResolveComment={handleResolveComment}
-          onCopyCommentLink={handleCopyCommentLink}
         />
       ))}
       <UnanchoredComments
@@ -5171,7 +5166,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         onEditComment={handleUpdateReviewComment}
         onRemoveComment={removeQueuedComment}
         onResolveComment={handleResolveComment}
-        onCopyCommentLink={handleCopyCommentLink}
       />
       {dragOverlay}
       {/* Mobile file-picker sheet (item 31). Portalled to document.body so its
