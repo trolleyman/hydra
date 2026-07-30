@@ -13,6 +13,11 @@ export type NewReviewCommentBody = {
     hunk_hash?: string;
     reply_to?: number;
     /**
+     * Absolute paths under the project's .hydra/local/uploads, from the upload endpoint. Anything outside that directory is rejected.
+     *
+     */
+    attachments?: Array<string>;
+    /**
      * Publish immediately instead of storing a draft (the "Comment to agent" one-shot path).
      */
     publish?: boolean;

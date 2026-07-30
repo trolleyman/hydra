@@ -849,6 +849,55 @@ who sent it and why.
 ever sees the text, so it still needs to know Hydra is speaking. The prefix is for
 the model; the marker is for you.
 
+### Attachments: a field, not paths in the body
+
+A comment can carry files - normally a screenshot of the thing being pointed at.
+Attach them with the paperclip in the comment box, or by pasting or dropping onto
+it; they ride on `Comment.Attachments`, a list of absolute paths under the
+project's `.hydra/local/uploads`, and the head reads the files itself because
+that path resolves identically on the host and inside every agent sandbox.
+`RenderForAgent` puts them after the body as "Attachments (read these files):" -
+after, because a picture illustrates a remark rather than replacing it, and the
+paths are something for the model to act on.
+
+The chat composer carries an attachment by appending its path to the prompt text.
+This deliberately does **not** do that, for three reasons, and they are the reason
+the field exists:
+
+- a comment is structured on disk already, so there is somewhere better to put it;
+- a **draft is editable in a textarea** - pasted paths would be sitting in it,
+  and one stray keystroke would break the link;
+- `commentAsMarkdown` and the forge-publish path would otherwise carry a local
+  path to a reader who cannot resolve it.
+
+`reviewstore.CleanAttachments` is the gate: it drops blanks, collapses
+duplicates, resolves symlinks, and requires every survivor to sit *directly*
+inside the uploads dir. Skipping that check would turn a comment into a read
+primitive for anything on the host - the path is both handed to an agent to read
+and served back to the browser as bytes.
+
+Three things worth knowing before touching this:
+
+- **A comment with only an attachment is a real comment.** "Look at this
+  screenshot" is a whole remark, so the empty-draft guard in `PublishDrafts` and
+  the handlers' empty check both test body *and* attachments.
+- **On `UpdateDraft`, nil and empty differ.** nil leaves the attachments alone,
+  so a caller predating the field cannot silently strip them; an empty non-nil
+  list clears them, which is what removing the last chip has to do. The HTTP
+  handler carries the pointer's nil-ness through rather than flattening it.
+- **The forge does not get them.** An upload only exists on this machine, and
+  Hydra does not drive the forges' asset-upload APIs, so the new-comment box says
+  so plainly when the "Comment on GitHub/GitLab" button is also on screen.
+
+Agents can read attachments but cannot write them: `add_review_comment` takes no
+attachments, because an agent's own screenshot lives in its worktree rather than
+in uploads, and copying it across is a bigger decision than this needed.
+
+The composer half is `lib/useAttachmentUploads.ts` - the pick/paste/drop +
+optimistic-chip loop, extracted in its plain form because the chat's copy is
+welded to its undo timeline and the spawn form's to its localStorage draft cache.
+Those two are deliberately left as they are.
+
 ### Still open in the comment store
 
 None of it blocking:

@@ -54,6 +54,13 @@ export interface PendingReviewComment {
   /** The comment this answers, which is how a thread forms without a thread object. */
   replyTo: number
   createdAt: number
+  /**
+   * Absolute paths of files attached to the comment, under the project's uploads
+   * dir. Rendered as chips; the agent is given the paths and reads the files
+   * itself. A field rather than paths in `text` so editing a draft in the textarea
+   * does not put them in front of you - see the schema note in openapi.yaml.
+   */
+  attachments: string[]
 }
 
 // The anchor a new comment carries. `diff` is the comparison it was written
@@ -68,6 +75,7 @@ export interface NewComment {
   toLabel: string
   contextBlock: string
   hunkHash: string
+  attachments: string[]
 }
 
 function toPending(c: ReviewComment): PendingReviewComment {
@@ -89,6 +97,7 @@ function toPending(c: ReviewComment): PendingReviewComment {
     read: !!c.read,
     replyTo: c.reply_to ?? 0,
     createdAt: Date.parse(c.created_at) || 0,
+    attachments: c.attachments ?? [],
   }
 }
 
@@ -136,6 +145,7 @@ export async function addReviewComment(
       diff: `${c.fromLabel} -> ${c.toLabel}`,
       context: c.contextBlock,
       hunk_hash: c.hunkHash,
+      attachments: c.attachments,
     }),
   )
 }
@@ -145,9 +155,11 @@ export async function updateReviewComment(
   agentId: string,
   number: number,
   text: string,
+  // Omitted leaves the draft's attachments untouched; an empty array clears them.
+  attachments?: string[],
 ): Promise<PendingReviewComment[]> {
   if (!projectId) return []
-  return all(await api.default.updateReviewComment(projectId, agentId, number, { body: text }))
+  return all(await api.default.updateReviewComment(projectId, agentId, number, { body: text, attachments }))
 }
 
 export async function removeReviewComment(
@@ -244,6 +256,7 @@ export async function sendReviewComment(
     diff: `${c.fromLabel} -> ${c.toLabel}`,
     context: c.contextBlock,
     hunk_hash: c.hunkHash,
+    attachments: c.attachments,
     publish: true,
   })
   return { comments: all(res), notified: res.notified ?? null, toReviewer: res.notified_reviewer === true }

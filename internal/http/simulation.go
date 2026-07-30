@@ -1343,6 +1343,12 @@ func simSeedComments(id string) []api.ReviewComment {
 			Line:      ptr(45),
 			Diff:      ptr("main -> a1b2c3d"),
 			CreatedAt: "2026-07-28T10:02:00Z", PublishedAt: ptr("2026-07-28T10:05:00Z"), Read: ptr(true),
+			// An attachment on a published comment: the usual case is a screenshot
+			// of the thing being described, so the head can look at what you saw.
+			Attachments: ptr([]string{
+				"/home/you/acme/.hydra/local/uploads/1782072241514128486-error-states.png",
+				"/home/you/acme/.hydra/local/uploads/1782072347433312262-stack-trace.txt",
+			}),
 		},
 		{
 			Number: 2, Status: api.Draft, Author: "user",
@@ -1351,6 +1357,9 @@ func simSeedComments(id string) []api.ReviewComment {
 			Line:      ptr(5),
 			Diff:      ptr("main -> a1b2c3d"),
 			CreatedAt: "2026-07-28T10:09:00Z", Read: ptr(true),
+			Attachments: ptr([]string{
+				"/home/you/acme/.hydra/local/uploads/1782072458377091686-repro.png",
+			}),
 		},
 		// Two comments the DIFF cannot show, which is the normal case rather than
 		// an exotic one: a reviewer's remark about an unchanged caller, and a
@@ -1415,7 +1424,8 @@ func (s *SimulationServer) AddReviewComment(w http.ResponseWriter, r *http.Reque
 		Path: body.Path, Line: body.Line, OldSide: body.OldSide,
 		Commit: body.Commit, Diff: body.Diff, Context: body.Context,
 		HunkHash: body.HunkHash, ReplyTo: body.ReplyTo,
-		CreatedAt: time.Now().Format(time.RFC3339),
+		Attachments: body.Attachments,
+		CreatedAt:   time.Now().Format(time.RFC3339),
 	}
 	if body.Publish != nil && *body.Publish {
 		c.Status = api.Published
@@ -1438,6 +1448,10 @@ func (s *SimulationServer) UpdateReviewComment(w http.ResponseWriter, r *http.Re
 	for i := range simCommentsByHead[id] {
 		if simCommentsByHead[id][i].Number == number && simCommentsByHead[id][i].Status == api.Draft {
 			simCommentsByHead[id][i].Body = body.Body
+			// nil leaves them alone, as on the real server.
+			if body.Attachments != nil {
+				simCommentsByHead[id][i].Attachments = body.Attachments
+			}
 		}
 	}
 	simCommentMu.Unlock()
@@ -3908,6 +3922,50 @@ func (s *SimulationServer) HandleAgentFileBlob(w http.ResponseWriter, r *http.Re
 	}
 	w.Header().Set("Content-Type", "image/png")
 	_, _ = w.Write(png)
+}
+
+// HandleUploadBlob serves the bytes behind an attachment chip. The simulation has
+// no uploads directory, so an image-looking name yields the same placeholder PNG
+// the agent-file endpoint uses and anything else a scrap of text - enough to
+// exercise the chip thumbnails and both of the lightbox's viewers. Without it
+// every attachment chip logged a 404 and rendered as a broken image.
+func (s *SimulationServer) HandleUploadBlob(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if agentImageExts[strings.ToLower(path.Ext(name))] {
+		png, err := base64.StdEncoding.DecodeString(simDiffImageAfterBase64)
+		if err != nil {
+			http.Error(w, "decode error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte("panic: runtime error: invalid memory address\n\tinternal/heads.Get(0x0)\n"))
+}
+
+// HandleUpload accepts a file the user attached and answers with a path shaped
+// like the real endpoint's, so the composer's optimistic chip settles instead of
+// hanging in "uploading...". Nothing is stored - HandleUploadBlob synthesizes the
+// bytes back from the name.
+func (s *SimulationServer) HandleUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := "attachment"
+	if f, header, err := r.FormFile("file"); err == nil {
+		_ = f.Close()
+		if header != nil && header.Filename != "" {
+			name = path.Base(header.Filename)
+		}
+	}
+	stored := fmt.Sprintf("%d-%s", simNow().UnixNano(), name)
+	api.WriteJSON(w, http.StatusOK, map[string]string{
+		"path":     "/home/you/acme/.hydra/local/uploads/" + stored,
+		"filename": stored,
+	})
 }
 
 // HandleAgentBlob serves the simulated repo's raw file bytes for an agent diff.

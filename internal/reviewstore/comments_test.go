@@ -2,8 +2,12 @@ package reviewstore
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 func TestCommentNumbersAreSequentialAndNeverReused(t *testing.T) {
@@ -78,13 +82,13 @@ func TestPublishedCommentsAreImmutable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UpdateDraft(root, "h", c.Number, "edited"); err != nil {
+	if _, err := UpdateDraft(root, "h", c.Number, "edited", nil); err != nil {
 		t.Fatalf("a draft must be editable: %v", err)
 	}
 	if _, err := PublishDrafts(root, "h", []int{c.Number}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UpdateDraft(root, "h", c.Number, "rewritten"); !errors.Is(err, ErrNotDraft) {
+	if _, err := UpdateDraft(root, "h", c.Number, "rewritten", nil); !errors.Is(err, ErrNotDraft) {
 		t.Errorf("editing a published comment returned %v, want ErrNotDraft", err)
 	}
 	if err := DeleteDraft(root, "h", c.Number); !errors.Is(err, ErrNotDraft) {
@@ -323,5 +327,101 @@ func TestReadStateIsExplicitAndPerNumber(t *testing.T) {
 	}
 	if IsRead(root, "h", 3) || !IsRead(root, "h", 5) {
 		t.Errorf("marking unread hit the wrong numbers: %v", ReadSet(root, "h"))
+	}
+}
+
+// uploadPath writes a file into the project's uploads dir and returns its
+// absolute path - what the uploads endpoint hands the browser, and the only kind
+// of path an attachment is allowed to be.
+func uploadPath(t *testing.T, root, name string) string {
+	t.Helper()
+	dir := paths.GetUploadsDirFromProjectRoot(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestAttachmentsMustBeProjectUploads(t *testing.T) {
+	root := t.TempDir()
+	good := uploadPath(t, root, "shot.png")
+
+	c, err := AppendComment(root, "h", Comment{Body: "look", Attachments: []string{good, "  ", good}})
+	if err != nil {
+		t.Fatalf("append with a valid attachment: %v", err)
+	}
+	// Blanks dropped, duplicates collapsed - the chips can't add the same upload
+	// twice, but a hand-made request can.
+	if len(c.Attachments) != 1 || c.Attachments[0] != good {
+		t.Errorf("attachments = %v, want exactly [%s]", c.Attachments, good)
+	}
+
+	// Anything outside the uploads dir is refused: the path is written into a
+	// comment an agent is told to read, and handed back to the browser to serve.
+	for _, bad := range []string{
+		filepath.Join(root, "secret.txt"),
+		filepath.Join(paths.GetUploadsDirFromProjectRoot(root), "..", "secret.txt"),
+		filepath.Join(paths.GetUploadsDirFromProjectRoot(root), "sub", "shot.png"),
+		"/etc/passwd",
+	} {
+		if _, err := AppendComment(root, "h", Comment{Body: "x", Attachments: []string{bad}}); !errors.Is(err, ErrBadAttachment) {
+			t.Errorf("attaching %q returned %v, want ErrBadAttachment", bad, err)
+		}
+	}
+}
+
+func TestUpdateDraftAttachmentsNilKeepsEmptyClears(t *testing.T) {
+	root := t.TempDir()
+	up := uploadPath(t, root, "a.png")
+	c, err := AppendComment(root, "h", Comment{Body: "before", Attachments: []string{up}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// nil leaves them alone, so a caller that predates the field can't strip them.
+	got, err := UpdateDraft(root, "h", c.Number, "edited", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Attachments) != 1 {
+		t.Errorf("nil attachments dropped them: %v", got.Attachments)
+	}
+	// An empty (non-nil) list clears them - what removing the last chip must do.
+	got, err = UpdateDraft(root, "h", c.Number, "edited", []string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Attachments) != 0 {
+		t.Errorf("empty attachments did not clear them: %v", got.Attachments)
+	}
+}
+
+func TestAttachmentOnlyCommentPublishesAndRenders(t *testing.T) {
+	root := t.TempDir()
+	up := uploadPath(t, root, "b.png")
+	// No body at all: "look at this screenshot" is a whole remark.
+	c, err := AppendComment(root, "h", Comment{Path: "a.go", Line: 3, Attachments: []string{up}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := PublishDrafts(root, "h", []int{c.Number})
+	if err != nil || len(published) != 1 {
+		t.Fatalf("publish returned (%v, %v), want one comment", published, err)
+	}
+	// The agent is given the path, because reading the file is the whole point.
+	if got := RenderForAgent(published, false); !strings.Contains(got, up) {
+		t.Errorf("RenderForAgent omitted the attachment path:\n%s", got)
+	}
+
+	// A draft with neither body nor attachment is still not a comment.
+	empty, err := AppendComment(root, "h", Comment{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := PublishDrafts(root, "h", []int{empty.Number}); err != nil || len(got) != 0 {
+		t.Errorf("publishing an empty draft returned (%v, %v), want none", got, err)
 	}
 }

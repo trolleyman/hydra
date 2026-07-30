@@ -2315,14 +2315,16 @@ type NetworkConfigMode string
 
 // NewReviewCommentBody defines model for NewReviewCommentBody.
 type NewReviewCommentBody struct {
-	Body     string  `json:"body"`
-	Commit   *string `json:"commit,omitempty"`
-	Context  *string `json:"context,omitempty"`
-	Diff     *string `json:"diff,omitempty"`
-	HunkHash *string `json:"hunk_hash,omitempty"`
-	Line     *int    `json:"line,omitempty"`
-	OldSide  *bool   `json:"old_side,omitempty"`
-	Path     *string `json:"path,omitempty"`
+	// Attachments Absolute paths under the project's .hydra/local/uploads, from the upload endpoint. Anything outside that directory is rejected.
+	Attachments *[]string `json:"attachments,omitempty"`
+	Body        string    `json:"body"`
+	Commit      *string   `json:"commit,omitempty"`
+	Context     *string   `json:"context,omitempty"`
+	Diff        *string   `json:"diff,omitempty"`
+	HunkHash    *string   `json:"hunk_hash,omitempty"`
+	Line        *int      `json:"line,omitempty"`
+	OldSide     *bool     `json:"old_side,omitempty"`
+	Path        *string   `json:"path,omitempty"`
 
 	// Publish Publish immediately instead of storing a draft (the "Comment to agent" one-shot path).
 	Publish *bool `json:"publish,omitempty"`
@@ -3003,6 +3005,9 @@ type ResourceLimits struct {
 
 // ReviewComment One durable, numbered review comment. The number is the handle everything else uses ("fix #3") - one token for a model, speakable by a person, and never reused.
 type ReviewComment struct {
+	// Attachments Absolute paths of files attached to the comment, under the project's .hydra/local/uploads. A separate field rather than paths pasted into the body because a draft's body is edited in a textarea (raw paths would be in it) and because copy-as-markdown and the forge-publish path must not leak them. The path resolves identically on the host and inside every agent sandbox, so the agent reads the file directly; the browser renders it through the uploads blob endpoint.
+	Attachments *[]string `json:"attachments,omitempty"`
+
 	// Author "user" | "reviewer" | "agent".
 	Author string `json:"author"`
 	Body   string `json:"body"`
@@ -4250,7 +4255,9 @@ type UpdateAgentRequest struct {
 
 // UpdateReviewCommentBody defines model for UpdateReviewCommentBody.
 type UpdateReviewCommentBody struct {
-	Body string `json:"body"`
+	// Attachments Replaces the draft's attachments wholesale, like body. Omitted leaves them untouched, so a caller that predates attachments cannot silently drop them.
+	Attachments *[]string `json:"attachments,omitempty"`
+	Body        string    `json:"body"`
 }
 
 // UsageUpdatedEvent defines model for UsageUpdatedEvent.
