@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
+import { formatBashForDisplay } from '../lib/bashFormat'
+import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
 // paste-markers preference on) a "[filename]" marker in the text. Both mutations
@@ -93,6 +95,25 @@ function renderChat(agentId = `agent-${++agentSeq}`) {
     />,
   )
 }
+
+describe('review checkout path display', () => {
+  const reviewRoot = '/home/callum/code/hydra/.hydra/local/review-checkouts/add-review-comments'
+
+  it('renders files relative to the detached review checkout', () => {
+    expect(trimWorktreePaths(`${reviewRoot}/web/src/AgentChat.tsx`, '/some/head/worktree'))
+      .toBe('web/src/AgentChat.tsx')
+  })
+
+  it('turns the detached checkout itself into the display root', () => {
+    const trimmed = trimWorktreePaths(`cd '${reviewRoot}'\nsed -n '1,20p' web/x.ts`, '/some/head/worktree')
+    expect(formatBashForDisplay(trimmed)).toBe("sed -n '1,20p' web/x.ts")
+  })
+
+  it('names Claude tool-result spill files without its transcript cache path', () => {
+    expect(toolResultName('/home/callum/.claude/projects/-long-slug/session/tool-results/bij43gmi4.txt'))
+      .toBe('bij43gmi4.txt')
+  })
+})
 
 async function connectedComposer(): Promise<HTMLTextAreaElement> {
   const ta = screen.getByRole('textbox') as HTMLTextAreaElement
