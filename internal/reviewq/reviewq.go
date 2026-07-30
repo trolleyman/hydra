@@ -98,6 +98,13 @@ type Request struct {
 	Line    int    `json:"line,omitempty"`
 	ReplyTo int    `json:"reply_to,omitempty"`
 
+	// add_comment: files to attach, at the paths the AGENT sees them (a screenshot
+	// it wrote into its worktree, or into its private /tmp). The daemon resolves
+	// each against the head's readable roots and COPIES it into the project's
+	// uploads dir - the stored comment must not point into a worktree that is
+	// deleted when the head is merged. See Server.addHydraComment.
+	Attachments []string `json:"attachments,omitempty"`
+
 	// resolve_comment. Reopen inverts it - put a resolved comment back on the
 	// list. A bool that defaults to the common case, so the usual call carries
 	// only the numbers.

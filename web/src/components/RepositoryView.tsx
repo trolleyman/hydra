@@ -27,8 +27,8 @@ import { CodePane } from './CodePane'
 import { Tooltip } from './Tooltip'
 import {
   FileDiff, FileRow, ChangeTypeIcon, TreeNodeView, type FileView,
-  type DiffSide,
 } from '../DiffViewer'
+import { selectRow, type DiffSide } from '../lib/diffSelection'
 import { buildFileTree, compactTree as compactDiffTree, getGroupedFiles } from '../lib/fileTree'
 import { scrollCardToTop } from '../lib/diffScroll'
 import { PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES } from '../lib/diffBody'
@@ -1090,25 +1090,23 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // Reset the shift-anchor when the selected diff file changes (its lines are a
   // different file's), mirroring the file view's per-file anchor reset.
   useEffect(() => { diffAnchorRef.current = null }, [selectedDiffPath])
-  const selectDiffLine = useCallback((side: DiffSide, line: number, extend: boolean) => {
-    let start = line
-    let end = line
-    // Extend only along the same side the anchor was set on; a shift+click on the
-    // other column starts a fresh single-line selection there.
-    if (extend && diffAnchorRef.current?.side === side) {
-      const anchor = diffAnchorRef.current.line
-      start = Math.min(anchor, line)
-      end = Math.max(anchor, line)
-    } else {
-      diffAnchorRef.current = { side, line }
-    }
+  // A click reports the ROW (both its numbers), so either gutter addresses the
+  // same line and a shift+click extends along the anchor's side whichever column
+  // it lands in. selectRow holds that rule for the agent diff too.
+  const selectDiffLine = useCallback((oldNum: number | null | undefined, newNum: number | null | undefined, extend: boolean) => {
+    const next = selectRow(
+      diffSelRange ? { side: diffSelRange.side, start: diffSelRange.start, end: diffSelRange.end } : null,
+      diffAnchorRef.current, oldNum, newNum, extend,
+    )
+    if (!next) return
+    if (next.anchor) diffAnchorRef.current = next.anchor
     navigate({
       to: '/project/$projectId/repository/$',
       params: { projectId, _splat: splat },
       search: (prev) => prev,
-      hash: formatDiffLineHash(side, start, end),
+      hash: formatDiffLineHash(next.sel.side, next.sel.start, next.sel.end),
     })
-  }, [navigate, projectId, splat])
+  }, [navigate, projectId, splat, diffSelRange])
 
   // Position the content when the displayed file (or selection) changes: scroll
   // the selection's first row into view if it isn't already visible, otherwise
@@ -1612,6 +1610,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                   <FileDiff
                     key={f.path}
                     file={f}
+                    // The repository browser is read-only - no comment box, so
+                    // nothing here ever attaches or renders a file.
+                    projectId={null}
                     sideBySide={diffSettings.sideBySide}
                     wordHighlight={diffSettings.wordHighlight}
                     isCollapsed={collapsedDiffFiles.has(f.path)}

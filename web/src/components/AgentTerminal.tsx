@@ -940,11 +940,9 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   }
 
   // Unlike the shells, this never adds a second tab: there is one review slot per
-  // head. The menu entry is a toggle rather than an open - the tab has no close
-  // button of its own (it is a durable slot, not a disposable tab), so this is
-  // where hiding it lives. Hiding only detaches this pane: unlike a shell tab it
-  // sends no close, so the reviewer, its checkout and its conversation all stay
-  // and showing it again reattaches to the same session.
+  // head, so opening Review twice focuses the existing tab. The menu entry is a
+  // toggle, and un-ticking it goes through the same closeTab as the tab's own X -
+  // one meaning for "close the reviewer", reachable from either place.
   function toggleReviewTab() {
     setShellMenuOpen(false)
     if (tabs.some(t => t.kind === 'review')) {
@@ -960,13 +958,25 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
     // than letting it idle out the grace period (which exists for reloads /
     // transient disconnects, where the pane unmounts without a real close).
     const tab = tabs.find(t => t.id === id)
+    const pid = projectId ? encodeURIComponent(projectId) : '_'
     if (tab?.kind === 'shell') {
-      const pid = projectId ? encodeURIComponent(projectId) : '_'
       const params = new URLSearchParams({ shell_id: id })
       if (tab.sandboxed === false) params.set('sandboxed', 'false')
       void fetch(`/api/projects/${pid}/agents/${encodeURIComponent(agentId)}/shell/close?${params.toString()}`, {
         method: 'POST',
       }).catch(() => { /* best-effort; the idle reaper is the backstop */ })
+    }
+    // The reviewer is a model session, not a shell: left running it keeps a
+    // sandbox, a supervisor and a second checkout of the whole repo around for a
+    // pane nobody is looking at. So closing the tab ends it - the same verb the
+    // shells use - and reclaims the tree. Its CONVERSATION survives (it is keyed
+    // by the checkout path, which is stable), so re-opening Review resumes the
+    // same review rather than starting a fresh one.
+    if (tab?.kind === 'review') {
+      setReviewStatus('pending')
+      void fetch(`/shells/projects/${pid}/agents/${encodeURIComponent(agentId)}/review/close`, {
+        method: 'POST',
+      }).catch(() => { /* best-effort; the reviewer is idle either way */ })
     }
     setTabs(prev => {
       const newTabs = prev.filter(t => t.id !== id)
@@ -1108,13 +1118,15 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                   )}
                 </span>
               </button>
-              {/* Only a shell carries a close button. The head's own tab is
-                  permanent, and so - visually - is Review: it is one durable
-                  slot per head, not a tab you spin up and discard, and an X
-                  beside it reads as ephemeral. Hiding it is done from the same
-                  dropdown entry that opened it. */}
-              {tab.kind === 'shell' && (
-                <Tooltip content="Close tab" side="bottom">
+              {/* The head's own tab is permanent; everything else opened from the
+                  `+` menu closes here. Review shipped without an X on the grounds
+                  that it is one durable slot rather than a disposable tab - but
+                  with nothing behind the X but a hide, a reviewer you were done
+                  with went on running (and, back when a commit woke it, went on
+                  spending) with no way to stop it. It ends the session now, which
+                  is what the X was always read as meaning. */}
+              {tab.kind !== 'agent' && (
+                <Tooltip content={tab.kind === 'review' ? 'End the review session' : 'Close tab'} side="bottom">
                   <button
                     onClick={() => closeTab(tab.id)}
                     className={`ml-0.5 p-0.5 rounded transition-colors cursor-pointer ${ghostBtn}`}
@@ -1201,8 +1213,8 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                         <span className="block font-medium">Review</span>
                         <span className={`block ${chatActive ? 'text-stone-400 dark:text-stone-500' : 'text-gray-500'}`}>A second agent that reads the diff. Cannot commit.</span>
                       </span>
-                      {/* The tick is the whole close affordance: it marks the tab
-                          as showing, and clicking the entry again hides it. */}
+                      {/* The tick says a reviewer is open; clicking the entry
+                          again ends it, exactly as the tab's X does. */}
                       {reviewTabOpen && (
                         <Check className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${chatActive ? 'text-stone-500 dark:text-stone-400' : 'text-gray-400'}`} />
                       )}

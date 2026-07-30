@@ -284,12 +284,19 @@ describe('a streamed reply settles into the same DOM node', () => {
 
     emit(ws, 'assistant_delta', { message_id: 'msg_1', text: TEXT })
 
-    // The paced reveal walks the text in over a few frames.
+    // The paced reveal walks the text in over a few frames (REVEAL_FLOOR /
+    // REVEAL_RATE in AgentChat.tsx), each one a requestAnimationFrame - which
+    // jsdom services off a timer. Well inside waitFor's default 1s when the box
+    // is idle, and not when it isn't: this is a suite that runs alongside the Go
+    // and Playwright suites on a shared machine, and a starved rAF loop is what
+    // failed here with the two strings identical up to the truncation. The
+    // subject is which DOM NODE survives the swap, so waiting longer for the
+    // reveal costs the test nothing.
     const live = await waitFor(() => {
       const p = document.querySelector('[data-md-root] p')
       expect(p?.textContent).toBe(TEXT)
       return p as HTMLElement
-    })
+    }, { timeout: 15_000 })
 
     // The settled message. Asserted straight after the render it causes, with
     // nothing else awaited in between, so this is the swap itself and not some

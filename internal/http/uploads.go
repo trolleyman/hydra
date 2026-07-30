@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -81,28 +82,82 @@ func (s *Server) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := uniqueUploadName(header.Filename)
-	dest := filepath.Join(dir, name)
-	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	dest, err := writeUpload(dir, header.Filename, file)
 	if err != nil {
-		http.Error(w, "failed to create file", http.StatusInternalServerError)
-		return
-	}
-	if _, err := io.Copy(out, file); err != nil {
-		_ = out.Close()
-		_ = os.Remove(dest)
-		// MaxBytesReader surfaces an oversize body as a copy error.
-		http.Error(w, "failed to write file: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(dest)
-		http.Error(w, "failed to finalize file", http.StatusInternalServerError)
+		// MaxBytesReader surfaces an oversize body as a copy error, so this is a
+		// 400 rather than a 500: the request was too big, not the server broken.
+		http.Error(w, "failed to store upload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(api.UploadResponse{Path: dest, Filename: name})
+	_ = json.NewEncoder(w).Encode(api.UploadResponse{Path: dest, Filename: filepath.Base(dest)})
+}
+
+// writeUpload copies `src` into the uploads dir under a fresh unique name and
+// returns the absolute path it landed at. A partial write is cleaned up rather
+// than left behind as a truncated file that would serve as a corrupt image.
+//
+// Split out of HandleUpload because the browser is no longer the only way a file
+// becomes an upload: an agent can attach one to a review comment, and the daemon
+// copies it in from the head's worktree the same way (see StoreUploadFile).
+func writeUpload(dir, originalName string, src io.Reader) (string, error) {
+	dest := filepath.Join(dir, uniqueUploadName(originalName))
+	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	if _, err := io.Copy(out, src); err != nil {
+		_ = out.Close()
+		_ = os.Remove(dest)
+		return "", errtrace.Wrap(err)
+	}
+	if err := out.Close(); err != nil {
+		_ = os.Remove(dest)
+		return "", errtrace.Wrap(err)
+	}
+	return dest, nil
+}
+
+// StoreUploadFile copies an existing file on disk into the project's uploads dir
+// and returns its new absolute path - how a file an AGENT wrote becomes an
+// attachment. The copy is the point: the agent's own path is inside a worktree
+// that gets deleted when the head is merged or killed, and /tmp is per-head and
+// reclaimed with it, so a comment pointing at either would rot. An upload
+// outlives the head that made it and is addressable by the browser's blob
+// endpoint, which serves by name out of exactly this directory.
+//
+// The caller is responsible for having already confined `srcPath` to somewhere
+// the agent is allowed to read from (resolveAgentFile); this only enforces that
+// the file is regular and within the same size cap as a browser upload.
+func StoreUploadFile(projectRoot, srcPath string) (string, error) {
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	if info.IsDir() || !info.Mode().IsRegular() {
+		return "", errtrace.Wrap(fmt.Errorf("not a regular file"))
+	}
+	if info.Size() > maxUploadBytes {
+		return "", errtrace.Wrap(fmt.Errorf("file is %d bytes, over the %d byte limit", info.Size(), maxUploadBytes))
+	}
+	dir := paths.GetUploadsDirFromProjectRoot(projectRoot)
+	if err := paths.EnsureHydraLocalIgnored(dir); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	in, err := os.Open(srcPath)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	defer in.Close()
+	// Bounded even though the size was just checked - the file could grow between
+	// the stat and the copy, and +1 lets a copy that hits the cap be told apart
+	// from one that merely filled it exactly.
+	dest, err := writeUpload(dir, filepath.Base(srcPath), io.LimitReader(in, maxUploadBytes+1))
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	return dest, nil
 }
 
 // safeUploadName matches the names uniqueUploadName produces (and nothing with a

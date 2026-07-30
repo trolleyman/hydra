@@ -336,16 +336,22 @@ func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) bool
 // The opposite lag (a turn just started but status.json still reads resting)
 // is benign: the CLI accepts a mid-turn stdin message and runs it as the next
 // turn (spike-verified), which is what queueing would have done anyway.
-func (m *ChatQueueManager) Submit(projectRoot, id string, msg QueuedMessage, queued bool) {
+//
+// Reports whether the message landed - held, or written to the CLI. Only the
+// automated senders look: a notice that could not be delivered has somewhere else
+// to retry from, where a person typing sees the pane's own state.
+func (m *ChatQueueManager) Submit(projectRoot, id string, msg QueuedMessage, queued bool) bool {
 	if queued {
 		m.queue(projectRoot, id).Enqueue(msg)
 		m.emit(id, queuedMessage(msg.ID, "queued", msg.Content))
 		m.kickIfResting(projectRoot, id)
-		return
+		return true
 	}
-	if m.writeToStdin(id, msg.Content) {
-		m.emit(id, userMessage(msg.ID, msg.Content, nil, msg.Origin))
+	if !m.writeToStdin(id, msg.Content) {
+		return false
 	}
+	m.emit(id, userMessage(msg.ID, msg.Content, nil, msg.Origin))
+	return true
 }
 
 // SubmitShellResult delivers a chat `!command`'s output to the agent as a user

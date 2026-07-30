@@ -64,6 +64,10 @@ type notifyReason string
 const (
 	reasonReviewComments notifyReason = "review_comments"
 	reasonTestsFailed    notifyReason = "tests_failed"
+	// The reviewer's own: someone typed @review in a comment. A separate tag from
+	// review_comments because it lands in a different transcript and answers a
+	// different "why is this here?" - the reviewer was addressed by name.
+	reasonReviewMention notifyReason = "review_mention"
 )
 
 // autoPrefix marks a message as Hydra's rather than the user's, in the TEXT.

@@ -152,35 +152,13 @@ func TestSyncReviewCheckoutSkipsAMidTurnReviewer(t *testing.T) {
 	}
 }
 
-// The catch-up message has to name the commits when the branch fast-forwarded,
-// and say plainly that history was rewritten when it did not.
-func TestReviewSyncMessage(t *testing.T) {
-	added := []git.CommitInfo{
-		{ShortSHA: "aaaaaaa", Subject: "add the thing"},
-		{ShortSHA: "bbbbbbb", Subject: "fix the thing"},
-	}
-	msg := reviewSyncMessage(added, "0123456789", "abcdef0123")
-	for _, want := range []string{"2 new commits", "aaaaaaa add the thing", "bbbbbbb fix the thing", "abcdef01"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("fast-forward message missing %q:\n%s", want, msg)
+// The reviewer must be told that its tree moves under it in its SYSTEM PROMPT -
+// that line is what replaced the per-commit catch-up message, and dropping it
+// would leave a reviewer quietly trusting reads from an older commit.
+func TestReviewSystemPromptWarnsAboutTheMovingCheckout(t *testing.T) {
+	for _, want := range []string{"moved forward", "re-read"} {
+		if !strings.Contains(reviewSystemPrompt, want) {
+			t.Errorf("review system prompt does not mention %q:\n%s", want, reviewSystemPrompt)
 		}
-	}
-	if strings.Contains(msg, "rebase") {
-		t.Error("a plain fast-forward should not be described as a rewrite")
-	}
-
-	rewritten := reviewSyncMessage(nil, "0123456789", "abcdef0123")
-	if !strings.Contains(rewritten, "rebase") || !strings.Contains(rewritten, "stale") {
-		t.Errorf("rewrite message does not warn the reviewer:\n%s", rewritten)
-	}
-
-	// The cap keeps a hundred-commit catch-up from becoming a hundred lines.
-	many := make([]git.CommitInfo, reviewSyncCommitsCap+5)
-	for i := range many {
-		many[i] = git.CommitInfo{ShortSHA: "sha", Subject: "s"}
-	}
-	capped := reviewSyncMessage(many, "a", "b")
-	if !strings.Contains(capped, "...and 5 more") {
-		t.Errorf("commit list is not capped:\n%s", capped)
 	}
 }

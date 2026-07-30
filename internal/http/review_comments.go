@@ -15,7 +15,6 @@ package http
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -24,6 +23,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/reviewstore"
 )
@@ -46,7 +46,10 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 		return api.AddReviewComment404JSONResponse(*errResp), nil
 	}
 	body := strings.TrimSpace(request.Body.Body)
-	if body == "" {
+	attachments := derefOr(request.Body.Attachments, nil)
+	// A comment carrying only an attachment is a real comment - a screenshot of the
+	// thing being pointed at often says more than a sentence about it would.
+	if body == "" && len(attachments) == 0 {
 		return commentBadRequest("the comment is empty"), nil
 	}
 	image, err := imageAnchorFromAPI(request.Body.Image)
@@ -54,17 +57,18 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 		return commentBadRequest(err.Error()), nil
 	}
 	c := reviewstore.Comment{
-		Body:     body,
-		Author:   reviewstore.AuthorUser,
-		Path:     derefOr(request.Body.Path, ""),
-		Line:     derefOr(request.Body.Line, 0),
-		OldSide:  derefOr(request.Body.OldSide, false),
-		Commit:   derefOr(request.Body.Commit, ""),
-		Diff:     derefOr(request.Body.Diff, ""),
-		Context:  derefOr(request.Body.Context, ""),
-		HunkHash: derefOr(request.Body.HunkHash, ""),
-		ReplyTo:  derefOr(request.Body.ReplyTo, 0),
-		Image:    image,
+		Body:        body,
+		Author:      reviewstore.AuthorUser,
+		Path:        derefOr(request.Body.Path, ""),
+		Line:        derefOr(request.Body.Line, 0),
+		OldSide:     derefOr(request.Body.OldSide, false),
+		Commit:      derefOr(request.Body.Commit, ""),
+		Diff:        derefOr(request.Body.Diff, ""),
+		Context:     derefOr(request.Body.Context, ""),
+		HunkHash:    derefOr(request.Body.HunkHash, ""),
+		ReplyTo:     derefOr(request.Body.ReplyTo, 0),
+		Attachments: attachments,
+		Image:       image,
 	}
 	stored, err := reviewstore.AppendComment(projectRoot, head.ID, c)
 	if err != nil {
@@ -91,10 +95,17 @@ func (s *Server) UpdateReviewComment(ctx context.Context, request api.UpdateRevi
 		return api.UpdateReviewComment404JSONResponse(*errResp), nil
 	}
 	body := strings.TrimSpace(request.Body.Body)
-	if body == "" {
+	attachments := derefOr(request.Body.Attachments, nil)
+	if body == "" && len(attachments) == 0 {
 		return updateCommentBadRequest("the comment is empty"), nil
 	}
-	if _, err := reviewstore.UpdateDraft(projectRoot, head.ID, request.Number, body); err != nil {
+	// nil (the field omitted) leaves the draft's attachments as they were; an empty
+	// list clears them, which is what removing the last chip has to do. So the
+	// pointer's nil-ness is carried through rather than flattened by derefOr above.
+	if request.Body.Attachments != nil && attachments == nil {
+		attachments = []string{}
+	}
+	if _, err := reviewstore.UpdateDraft(projectRoot, head.ID, request.Number, body, attachments); err != nil {
 		return updateCommentBadRequest(commentWriteError(err)), nil
 	}
 	return api.UpdateReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
@@ -196,14 +207,10 @@ func (s *Server) notifyComments(ctx context.Context, projectRoot string, head he
 // durable either way, and the reviewer reads it with get_review_comments the
 // moment it is next opened.
 func (s *Server) notifyReviewer(projectRoot string, head heads.Head, line string) {
-	content, err := json.Marshal([]map[string]any{{"type": "text", "text": autoPrefix + line}})
-	if err != nil {
-		return
-	}
 	slot := heads.ReviewSessionID(head.ID)
 	if s.Sessions.IsLive(slot) {
-		if err := s.Sessions.SendChatUser(slot, content); err != nil {
-			log.Printf("warn: notify reviewer %s: %v", slot, err)
+		if !s.sendReviewerNotice(projectRoot, slot, line) {
+			log.Printf("warn: notify reviewer %s: not delivered", slot)
 		}
 		return
 	}
@@ -217,13 +224,40 @@ func (s *Server) notifyReviewer(projectRoot string, head heads.Head, line string
 		// it has to come up and read its system prompt first. Retry briefly rather
 		// than writing into a pipe nobody is reading yet.
 		for range 20 {
-			if err := s.Sessions.SendChatUser(slot, content); err == nil {
+			if s.sendReviewerNotice(projectRoot, slot, line) {
 				return
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
 		log.Printf("warn: @review started a reviewer for %s but could not deliver the notice", head.ID)
 	}()
+}
+
+// sendReviewerNotice delivers one automated line to a review slot as a user turn,
+// through the same chat queue a typed message goes through.
+//
+// Not a bare SendChatUser, which is what this was and which got two things wrong
+// at once. The queue APPENDS THE CHAT EVENT as it writes, so the bubble lands at
+// the point in the transcript where it was sent; writing straight to stdin left
+// the transcript to learn about the message from the CLI's own echo, which arrives
+// whenever the CLI next takes a turn - so notices sent to an idle reviewer all
+// surfaced in a clump at the bottom, in the wrong order and long after the fact.
+// And the queue carries the ORIGIN, which is what makes the bubble render as
+// Hydra's (the sky-dashed "Sent by Hydra" marker) rather than as something the
+// user typed. The `[Hydra]` text prefix stays for the model, which never sees
+// metadata.
+func (s *Server) sendReviewerNotice(projectRoot, slot, line string) bool {
+	content := claudestream.TextUserContent(autoPrefix + line)
+	if s.ChatQueues == nil {
+		return s.Sessions.SendChatUser(slot, content) == nil
+	}
+	// Never queued: a reviewer mid-turn takes the message at its next step
+	// boundary, and holding it would strand it if that turn is the last one.
+	return s.ChatQueues.Submit(projectRoot, slot, heads.QueuedMessage{
+		ID:      fmt.Sprintf("hydra-input-%d", agentInputSeq.Add(1)),
+		Content: content,
+		Origin:  string(reasonReviewMention),
+	}, false)
 }
 
 // ResolveReviewComment marks a comment dealt with, whichever origin it came from.
@@ -333,6 +367,7 @@ func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCo
 		setIf(&ac.PublishedAt, c.PublishedAt, c.PublishedAt != "")
 		setIf(&ac.Resolved, c.Resolved, c.Resolved)
 		setIf(&ac.ResolvedAt, c.ResolvedAt, c.ResolvedAt != "")
+		setIf(&ac.Attachments, c.Attachments, len(c.Attachments) > 0)
 		// A comment you wrote yourself is born read; anything an agent or a
 		// reviewer left is not, which is what the unread dot is for.
 		setIf(&ac.Read, true, read[c.Number] || c.Author == reviewstore.AuthorUser)

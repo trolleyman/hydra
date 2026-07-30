@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -87,6 +88,24 @@ type Comment struct {
 	// original diff still existing.
 	Context  string `json:"context,omitempty"`
 	HunkHash string `json:"hunk_hash,omitempty"`
+
+	// Attachments are absolute paths of uploaded files that belong to the comment
+	// - a screenshot of the bug being described, a log, a design.
+	//
+	// A field rather than paths appended to Body (which is how the chat composer
+	// carries an attachment) because a comment is structured on disk and a DRAFT's
+	// body is edited in a textarea: pasted paths would be sitting in it, and both
+	// commentAsMarkdown and the forge-publish path would carry a local path to a
+	// reader who cannot resolve it.
+	//
+	// The path is the one the uploads endpoint returned, which resolves the same on
+	// the host and inside every agent sandbox - so RenderForAgent can simply name it
+	// and the agent reads the file itself. CleanAttachments enforces that it points
+	// inside the project's uploads dir.
+	//
+	// Distinct from Image below, which is an ANCHOR - where the comment points -
+	// where these are payload the comment carries. A pinned comment can have both.
+	Attachments []string `json:"attachments,omitempty"`
 
 	// Image pins the comment to a point on a PICTURE instead of a line of a diff.
 	// Set for a comment left on an artifact in the lightbox; nil for every comment
@@ -342,6 +361,11 @@ func FindComment(projectRoot, id string, n int) (Comment, bool) {
 // The number is one past the highest EVER used, not one past the current count,
 // so deleting a draft cannot hand its number to a different comment later.
 func AppendComment(projectRoot, id string, c Comment) (Comment, error) {
+	clean, err := CleanAttachments(projectRoot, c.Attachments)
+	if err != nil {
+		return Comment{}, errtrace.Wrap(err)
+	}
+	c.Attachments = clean
 	all := LoadComments(projectRoot, id)
 	// The sequence is shared with the forge notes (see sidecar.go), so a head has
 	// ONE numbering across every origin and "fix #3" is unambiguous. Raise the
@@ -372,6 +396,60 @@ func AppendComment(projectRoot, id string, c Comment) (Comment, error) {
 	return c, nil
 }
 
+// ErrBadAttachment names a path that is not an upload of this project.
+var ErrBadAttachment = fmt.Errorf("an attachment must be a file uploaded to this project")
+
+// CleanAttachments validates and tidies the paths a caller wants to attach:
+// blanks are dropped, duplicates collapse (keeping first-seen order, which is the
+// order the chips were added), and every survivor must resolve to a file directly
+// inside the project's uploads dir.
+//
+// The check is the point. An attachment path is written into a comment that an
+// agent is told to go and read, and it is handed straight back to the browser,
+// which serves the bytes - so an unchecked path turns a comment into a read
+// primitive for anything on the host. Confining it to the uploads dir also keeps
+// the browser's side honest: the blob endpoint addresses an upload by its
+// basename, so a path from anywhere else could not be rendered anyway.
+func CleanAttachments(projectRoot string, in []string) ([]string, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	dir := paths.GetUploadsDirFromProjectRoot(projectRoot)
+	// Resolve the dir itself once, so a symlinked project root compares equal to
+	// the EvalSymlinks'd paths below rather than failing every attachment.
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	out := make([]string, 0, len(in))
+	seen := make(map[string]bool, len(in))
+	for _, p := range in {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		clean := filepath.Clean(p)
+		// Follow symlinks before comparing: without it, a link planted in the
+		// uploads dir would pass a prefix check while pointing anywhere.
+		if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+			clean = resolved
+		}
+		// Directly inside the uploads dir - not merely under it. Uploads are flat,
+		// so a path with any further separator in it is not one of ours.
+		if filepath.Dir(clean) != dir {
+			return nil, errtrace.Wrap(fmt.Errorf("%w: %s", ErrBadAttachment, p))
+		}
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
 // ErrNotDraft is returned when a caller tries to change a published comment.
 // Published is immutable on purpose: it is what makes a thread an audit log
 // rather than something that can be rewritten after the fact.
@@ -380,8 +458,17 @@ var ErrNotDraft = fmt.Errorf("a published comment cannot be edited or deleted")
 // ErrNoComment is returned for a number that names nothing.
 var ErrNoComment = fmt.Errorf("no such comment")
 
-// UpdateDraft replaces a draft's body. Published comments are refused.
-func UpdateDraft(projectRoot, id string, n int, body string) (Comment, error) {
+// UpdateDraft replaces a draft's body, and its attachments when `attachments` is
+// non-nil. Published comments are refused.
+//
+// nil and empty are deliberately different for the attachments: nil leaves them
+// alone (a caller that predates the field cannot silently strip them), an empty
+// non-nil slice clears them, which is what removing the last chip must do.
+func UpdateDraft(projectRoot, id string, n int, body string, attachments []string) (Comment, error) {
+	clean, err := CleanAttachments(projectRoot, attachments)
+	if err != nil {
+		return Comment{}, errtrace.Wrap(err)
+	}
 	all := LoadComments(projectRoot, id)
 	for i, c := range all {
 		if c.Number != n {
@@ -391,6 +478,9 @@ func UpdateDraft(projectRoot, id string, n int, body string) (Comment, error) {
 			return Comment{}, errtrace.Wrap(ErrNotDraft)
 		}
 		all[i].Body = strings.TrimSpace(body)
+		if attachments != nil {
+			all[i].Attachments = clean
+		}
 		if err := saveComments(projectRoot, id, all); err != nil {
 			return Comment{}, errtrace.Wrap(err)
 		}
@@ -494,8 +584,10 @@ func PublishDrafts(projectRoot, id string, numbers []int) ([]Comment, error) {
 		if !c.IsDraft() || (len(want) > 0 && !want[c.Number]) {
 			continue
 		}
-		if c.Body == "" {
-			continue // an empty draft is not a comment
+		// An empty draft is not a comment - but one carrying only an attachment is:
+		// "look at this screenshot" is a whole remark, and the picture is the body.
+		if c.Body == "" && len(c.Attachments) == 0 {
+			continue
 		}
 		all[i].Status = StatusPublished
 		all[i].PublishedAt = now
@@ -619,6 +711,17 @@ func RenderForAgent(comments []Comment, withContext bool, imagePath ImagePathFun
 		}
 		b.WriteString(c.Body)
 		b.WriteString("\n")
+		// After the body, because an attachment illustrates what was said rather
+		// than replacing it - and because the paths are for the model to ACT on
+		// (read the image, open the log), so they read best as a trailing
+		// instruction rather than as a header the body then talks past.
+		if len(c.Attachments) > 0 {
+			noun := "Attachments"
+			if len(c.Attachments) == 1 {
+				noun = "Attachment"
+			}
+			fmt.Fprintf(&b, "%s (read these files): %s\n", noun, strings.Join(c.Attachments, " "))
+		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

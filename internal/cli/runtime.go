@@ -590,6 +590,7 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	// extend a list. Two of them (/tests/, /project-icon/) were reachable
 	// unauthenticated for exactly that reason.
 	mux.HandleFunc("POST /api/projects/{project_id}/agents/{id}/shell/close", server.HandleShellClose)
+	mux.HandleFunc("POST /api/projects/{project_id}/agents/{id}/review/close", server.HandleReviewClose)
 	mux.HandleFunc("/api/projects/{project_id}/artifacts/blob", server.HandleArtifactBlob)
 	mux.HandleFunc("/api/projects/{project_id}/artifacts/log", server.HandleArtifactLog)
 	mux.HandleFunc("/api/projects/{project_id}/tests/log", server.HandleTestLog)
