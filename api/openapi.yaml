@@ -96,6 +96,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/usage/codex:
+    get:
+      summary: Get cached Codex subscription usage
+      description: >
+        Probes the locally-installed Codex app server for the account's
+        subscription rate-limit windows and returns a cached snapshot. Pass
+        refresh=true to force a fresh probe.
+      operationId: getCodexUsage
+      parameters:
+        - name: refresh
+          in: query
+          required: false
+          description: Bypass the cache and re-probe the CLI.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodexUsageResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/server/restart:
     post:
       summary: Restart the server in place, running the binary already installed
@@ -3301,6 +3330,45 @@ components:
           type: string
           nullable: true
           description: Raw weekly reset text, e.g. "Resets Jan 15, 3:30pm".
+
+    CodexUsageResponse:
+      type: object
+      required: [available]
+      properties:
+        available:
+          type: boolean
+          description: True when a usable usage snapshot was obtained.
+        error:
+          type: string
+          nullable: true
+          description: Why usage is unavailable (CLI missing, unsupported authentication, parse failure, ...).
+        captured_at:
+          type: string
+          format: date-time
+          description: When the snapshot was probed.
+        session_percent_used:
+          type: number
+          format: float
+          nullable: true
+          description: Percent of the primary Codex rate-limit window used (0-100).
+        session_resets_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the primary Codex rate-limit window resets.
+        session_reset_text:
+          type: string
+          nullable: true
+          description: Display label for the primary Codex rate-limit window.
+        weekly_percent_used:
+          type: number
+          format: float
+          nullable: true
+          description: Percent of the secondary Codex rate-limit window used (0-100), when available.
+        weekly_reset_text:
+          type: string
+          nullable: true
+          description: Display label for the secondary Codex rate-limit window.
 
     ProjectInfo:
       type: object

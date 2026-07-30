@@ -39,6 +39,7 @@ import { Toaster } from '../components/Toaster'
 import { NotFound } from '../components/NotFound'
 import { Tooltip } from '../components/Tooltip'
 import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
+import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
 
@@ -247,6 +248,21 @@ function RootLayout() {
   const routeParams = useParams({ strict: false }) as { projectId?: string; agentId?: string }
   const currentProjectId = routeParams.projectId ?? selectedProjectId
   const selectedAgentId = routeParams.agentId
+  const [composerAgentType, setComposerAgentType] = useState<AgentTypeOption>(readDefaultAgentType)
+  const selectedAgentType = useAgentStore((s) => {
+    if (!selectedAgentId) return undefined
+    return (s.agents.find((a) => a.id === selectedAgentId) ?? s.archived.find((a) => a.id === selectedAgentId))?.agent_type
+  })
+  // Keep the last Claude/Codex choice while another agent type is in front.
+  // The ref starts at Claude so the footer has a useful, stable default before
+  // the user has selected either chat provider.
+  const lastUsageAgentType = useRef<'claude' | 'codex'>('claude')
+  if (selectedAgentType === 'claude' || selectedAgentType === 'codex') {
+    lastUsageAgentType.current = selectedAgentType
+  } else if (!selectedAgentId && (composerAgentType === 'claude' || composerAgentType === 'codex')) {
+    lastUsageAgentType.current = composerAgentType
+  }
+  const usageAgentType = lastUsageAgentType.current
   // Narrow slices of the agent store, so the layout re-renders only when one of
   // THESE derived values changes - not on every ~1/s agent refresh. The live
   // agent list itself lives in <AgentSidebarList>, which owns its own
@@ -1094,7 +1110,7 @@ function RootLayout() {
             )}
           </div>
 
-          <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} disabled={!currentProjectId} />
+          <SpawnForm compact projectId={currentProjectId} onSpawned={handleSpawned} onAgentTypeChange={setComposerAgentType} disabled={!currentProjectId} />
 
           <AgentSidebarList
             currentProjectId={currentProjectId}
@@ -1106,7 +1122,7 @@ function RootLayout() {
           />
 
           {/* Sidebar footer - a single row: restart (icon) + uptime on the left,
-              Claude usage + Settings (icon) on the right. The theme switcher now
+              selected usage + Settings (icon) on the right. The theme switcher now
               lives inside Settings, not here.
 
               The two halves are grouped, and only the left one may shrink. The
@@ -1156,7 +1172,7 @@ function RootLayout() {
               </Tooltip>
             )}
             {spawnedAt.current !== null && (
-              // Hidden outright once the Claude usage strip is on screen, rather
+              // Hidden outright once the usage strip is on screen, rather
               // than truncated to "up 2 h...": the two of them do not fit beside
               // the icon buttons in a 264px sidebar, and half a word is worth
               // less than the strip's figures. `group-has-[[data-usage]]` reads
@@ -1180,7 +1196,7 @@ function RootLayout() {
             {/* The right half, as one group: usage strip + settings, neither of
                 which may shrink - see above. */}
             <div className="flex shrink-0 items-center gap-1.5">
-              <ClaudeUsageIndicator />
+              <ClaudeUsageIndicator key={usageAgentType} agentType={usageAgentType} />
             {(() => {
               const settingsActive = /\/settings(\/|$)/.test(location.pathname)
               const cls = settingsActive

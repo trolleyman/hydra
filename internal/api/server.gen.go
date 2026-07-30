@@ -1645,6 +1645,33 @@ type ClaudeUsageResponse struct {
 	WeeklyResetText *string `json:"weekly_reset_text"`
 }
 
+// CodexUsageResponse defines model for CodexUsageResponse.
+type CodexUsageResponse struct {
+	// Available True when a usable usage snapshot was obtained.
+	Available bool `json:"available"`
+
+	// CapturedAt When the snapshot was probed.
+	CapturedAt *time.Time `json:"captured_at,omitempty"`
+
+	// Error Why usage is unavailable (CLI missing, unsupported authentication, parse failure, ...).
+	Error *string `json:"error"`
+
+	// SessionPercentUsed Percent of the primary Codex rate-limit window used (0-100).
+	SessionPercentUsed *float32 `json:"session_percent_used"`
+
+	// SessionResetText Display label for the primary Codex rate-limit window.
+	SessionResetText *string `json:"session_reset_text"`
+
+	// SessionResetsAt When the primary Codex rate-limit window resets.
+	SessionResetsAt *time.Time `json:"session_resets_at"`
+
+	// WeeklyPercentUsed Percent of the secondary Codex rate-limit window used (0-100), when available.
+	WeeklyPercentUsed *float32 `json:"weekly_percent_used"`
+
+	// WeeklyResetText Display label for the secondary Codex rate-limit window.
+	WeeklyResetText *string `json:"weekly_reset_text"`
+}
+
 // CommitCreatedEvent defines model for CommitCreatedEvent.
 type CommitCreatedEvent struct {
 	// Payload A commit the reconciler observed. Sequenced in the same log as the tool output that produced it, so the chip cannot render before its cause.
@@ -4527,6 +4554,12 @@ type GetClaudeUsageParams struct {
 	Refresh *bool `form:"refresh,omitempty" json:"refresh,omitempty"`
 }
 
+// GetCodexUsageParams defines parameters for GetCodexUsage.
+type GetCodexUsageParams struct {
+	// Refresh Bypass the cache and re-probe the CLI.
+	Refresh *bool `form:"refresh,omitempty" json:"refresh,omitempty"`
+}
+
 // AddProjectJSONRequestBody defines body for AddProject for application/json ContentType.
 type AddProjectJSONRequestBody = AddProjectRequest
 
@@ -7083,6 +7116,9 @@ type ServerInterface interface {
 	// Get cached Claude Code subscription usage
 	// (GET /api/usage/claude)
 	GetClaudeUsage(w http.ResponseWriter, r *http.Request, params GetClaudeUsageParams)
+	// Get cached Codex subscription usage
+	// (GET /api/usage/codex)
+	GetCodexUsage(w http.ResponseWriter, r *http.Request, params GetCodexUsageParams)
 	// Health check
 	// (GET /health)
 	CheckHealth(w http.ResponseWriter, r *http.Request)
@@ -9850,6 +9886,33 @@ func (siw *ServerInterfaceWrapper) GetClaudeUsage(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetCodexUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetCodexUsage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetCodexUsageParams
+
+	// ------------- Optional query parameter "refresh" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "refresh", r.URL.Query(), &params.Refresh)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCodexUsage(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CheckHealth operation middleware
 func (siw *ServerInterfaceWrapper) CheckHealth(w http.ResponseWriter, r *http.Request) {
 
@@ -10059,6 +10122,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/server/update", wrapper.UpdateServer)
 	m.HandleFunc("GET "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc("GET "+options.BaseURL+"/api/usage/claude", wrapper.GetClaudeUsage)
+	m.HandleFunc("GET "+options.BaseURL+"/api/usage/codex", wrapper.GetCodexUsage)
 	m.HandleFunc("GET "+options.BaseURL+"/health", wrapper.CheckHealth)
 
 	return m
@@ -12871,6 +12935,32 @@ func (response GetClaudeUsage500JSONResponse) VisitGetClaudeUsageResponse(w http
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetCodexUsageRequestObject struct {
+	Params GetCodexUsageParams
+}
+
+type GetCodexUsageResponseObject interface {
+	VisitGetCodexUsageResponse(w http.ResponseWriter) error
+}
+
+type GetCodexUsage200JSONResponse CodexUsageResponse
+
+func (response GetCodexUsage200JSONResponse) VisitGetCodexUsageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetCodexUsage500JSONResponse ErrorResponse
+
+func (response GetCodexUsage500JSONResponse) VisitGetCodexUsageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type CheckHealthRequestObject struct {
 }
 
@@ -13115,6 +13205,9 @@ type StrictServerInterface interface {
 	// Get cached Claude Code subscription usage
 	// (GET /api/usage/claude)
 	GetClaudeUsage(ctx context.Context, request GetClaudeUsageRequestObject) (GetClaudeUsageResponseObject, error)
+	// Get cached Codex subscription usage
+	// (GET /api/usage/codex)
+	GetCodexUsage(ctx context.Context, request GetCodexUsageRequestObject) (GetCodexUsageResponseObject, error)
 	// Health check
 	// (GET /health)
 	CheckHealth(ctx context.Context, request CheckHealthRequestObject) (CheckHealthResponseObject, error)
@@ -15279,6 +15372,32 @@ func (sh *strictHandler) GetClaudeUsage(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetClaudeUsageResponseObject); ok {
 		if err := validResponse.VisitGetClaudeUsageResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCodexUsage operation middleware
+func (sh *strictHandler) GetCodexUsage(w http.ResponseWriter, r *http.Request, params GetCodexUsageParams) {
+	var request GetCodexUsageRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCodexUsage(ctx, request.(GetCodexUsageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCodexUsage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCodexUsageResponseObject); ok {
+		if err := validResponse.VisitGetCodexUsageResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
