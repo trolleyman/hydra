@@ -75,6 +75,7 @@ import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
 import { WorkSpark } from './WorkSpark'
+import { ShortcutHint } from './Kbd'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
@@ -10193,8 +10194,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     the running turn at its next step (terminal-style
                     steering); otherwise show nothing. */}
                 {canSend && isTurnRunning && (
-                  <span className="optical-center hidden sm:inline text-3xs text-stone-400 dark:text-stone-500 select-none">
-                    Enter to queue
+                  <span className="hidden select-none sm:inline">
+                    <ShortcutHint keys={['Enter']} note="to queue" />
                   </span>
                 )}
                 {/* Context-left chip (item 40): how much of the model's window

@@ -1132,20 +1132,16 @@ function RootLayout() {
               // because the label beside it gives way to the usage strip.
               <Tooltip
                 content={
-                  <>
-                    {restarting
-                      ? 'Restarting...'
-                      : canUpdate
-                        ? 'Rebuild and restart the server'
-                        : 'Restart the server'}
-                    {spawnedAt.current !== null && (
-                      <span className="mt-0.5 block text-gray-500 dark:text-gray-400">
-                        <Uptime spawnedAt={spawnedAt.current} format={formatUptime} />
-                      </span>
-                    )}
-                  </>
+                  restarting
+                    ? 'Restarting...'
+                    : canUpdate
+                      ? 'Rebuild and restart the server'
+                      : 'Restart the server'
                 }
                 shortcut={canUpdate && !restarting ? { keys: ['Alt'], note: 'restart without rebuilding' } : undefined}
+                footnote={
+                  spawnedAt.current !== null ? <Uptime spawnedAt={spawnedAt.current} format={formatUptime} /> : undefined
+                }
               >
                 <button
                   onClick={(e) => handleRestart(canUpdate && !e.altKey ? 'update' : 'restart')}

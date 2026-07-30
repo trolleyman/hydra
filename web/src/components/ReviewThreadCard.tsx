@@ -251,11 +251,11 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                     void run('forge', () => actions.reply(thread.id, text))
                   } else if (e.key === 'Escape') setReplying(false)
                 }}
-                placeholder={`Reply... (Ctrl+Enter to post on ${forge})`}
+                placeholder="Reply..."
                 wrapperClassName="w-full h-16 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus-within:ring-1 focus-within:ring-violet-500"
                 textClassName="p-2 text-xs leading-5"
               />
-              <div className="flex justify-end gap-2 mt-1.5">
+              <div className="flex items-center justify-end gap-2 mt-1.5">
                 <button type="button" onClick={() => { setReplying(false) }} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
                   Cancel
                 </button>
@@ -270,15 +270,19 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                     {busy === 'local' ? 'Saving...' : 'Note in Hydra'}
                   </button>
                 </Tooltip>
-                <button
-                  type="button"
-                  disabled={!text.trim() || busy !== null}
-                  onClick={() => void run('forge', () => actions.reply(thread.id, text))}
-                  className={`${btn} flex items-center gap-1 text-white bg-violet-600 hover:bg-violet-700`}
-                >
-                  <ProviderIcon provider={actions.provider} className="w-3 h-3" />
-                  {busy === 'forge' ? 'Posting...' : `Reply on ${forge}`}
-                </button>
+                {/* Ctrl+Enter fires this one, so the hint rides its tooltip - the
+                    row is already three buttons wide inside a thread card. */}
+                <Tooltip content={`Post the reply on ${forge}.`} shortcut={{ keys: ['Ctrl', 'Enter'] }} side="top">
+                  <button
+                    type="button"
+                    disabled={!text.trim() || busy !== null}
+                    onClick={() => void run('forge', () => actions.reply(thread.id, text))}
+                    className={`${btn} flex items-center gap-1 text-white bg-violet-600 hover:bg-violet-700`}
+                  >
+                    <ProviderIcon provider={actions.provider} className="w-3 h-3" />
+                    {busy === 'forge' ? 'Posting...' : `Reply on ${forge}`}
+                  </button>
+                </Tooltip>
               </div>
             </div>
           )}

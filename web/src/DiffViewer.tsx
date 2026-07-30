@@ -301,11 +301,15 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
     } else if (e.key === 'Escape') onCancel()
   }
 
-  const placeholder = onSave
-    ? 'Edit comment... (Ctrl+Enter to save)'
-    : onAddToReview
-      ? 'Write a comment... (Ctrl+Enter to add to the agent review)'
-      : 'Write a comment... (Ctrl+Enter to submit)'
+  // The placeholder says what the box is FOR; what the keys do rides on the
+  // button row below as keycaps. A placeholder is the one hint that disappears
+  // exactly when it becomes relevant - the moment you start typing - and it
+  // cannot hold a component, so the shortcut was prose in brackets there.
+  const placeholder = onSave ? 'Edit comment...' : 'Write a comment...'
+  // Ctrl+Enter fires whichever button is primary here, so the hint lives on THAT
+  // button's tooltip rather than as a line in the row. The row is three buttons
+  // wide in a pane that can be half the window, and they already wrap.
+  const submitShortcut = { keys: ['Ctrl', 'Enter'] }
 
   const btn = 'px-2 py-1 text-3xs font-medium rounded transition-colors cursor-pointer'
 
@@ -320,18 +324,20 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
         textClassName="p-2 text-xs leading-5"
         placeholder={placeholder}
       />
-      <div className="flex justify-end gap-2 mt-2">
+      <div className="flex items-center justify-end gap-2 mt-2">
         <button onClick={onCancel} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
           Cancel
         </button>
         {onSave ? (
-          <button
-            disabled={!text.trim()}
-            onClick={handleSave}
-            className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
-          >
-            Save
-          </button>
+          <Tooltip content="Save the edit." shortcut={submitShortcut} side="top">
+            <button
+              disabled={!text.trim()}
+              onClick={handleSave}
+              className={`${btn} text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50`}
+            >
+              Save
+            </button>
+          </Tooltip>
         ) : (
           <>
             {onCommentOnPR && (
@@ -346,7 +352,11 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
                 </button>
               </Tooltip>
             )}
-            <Tooltip content="Send this to the agent on its own, right now." side="top">
+            <Tooltip
+              content="Send this to the agent on its own, right now."
+              shortcut={onAddToReview ? undefined : submitShortcut}
+              side="top"
+            >
               <button
                 disabled={!text.trim() || sending}
                 onClick={handleSubmit}
@@ -359,7 +369,11 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
             {onAddToReview && (
               // The primary action: batching several comments and sending them as
               // one review is the usual way to brief a head, so it leads.
-              <Tooltip content="Queue this for the agent - the whole batch is sent when you submit the review, and none of it reaches the pull request." side="top">
+              <Tooltip
+                content="Queue this for the agent - the whole batch is sent when you submit the review, and none of it reaches the pull request."
+                shortcut={submitShortcut}
+                side="top"
+              >
                 <button
                   disabled={!text.trim() || sending}
                   onClick={handleAdd}

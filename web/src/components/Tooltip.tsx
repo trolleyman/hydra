@@ -78,6 +78,14 @@ export interface TooltipProps {
    * of the label.
    */
   shortcut?: { keys: string[]; note?: string }
+  /**
+   * A lowlit line under everything, including the shortcut: state about the
+   * control rather than part of its label (the server's uptime under the
+   * restart button). Last because it is the least of the three - you come to
+   * the tooltip for the label, might come for the shortcut, and read this only
+   * because it is there.
+   */
+  footnote?: React.ReactNode
 }
 
 // One configurable tooltip. The shared core - a portalled, fixed-position box
@@ -97,6 +105,7 @@ export function Tooltip({
   width = 384,
   offset = 0,
   shortcut,
+  footnote,
 }: TooltipProps) {
   const card = variant === 'card'
   const showDelay = delay ?? (card ? 0 : 600)
@@ -428,7 +437,15 @@ export function Tooltip({
           <div
             ref={boxRef}
             role="tooltip"
-            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 border ${inDark ? 'dark' : ''} ${surface} text-gray-700 dark:text-gray-200 text-2xs text-center rounded shadow-lg break-words ${
+            // py-2 once there is more than a label in the box: HALF the arrow
+            // square (ARROW_SIZE / 2 = 5px) sits INSIDE the box, which is more
+            // than a py-1's 4px, so the arrow overlapped whatever ended up
+            // against that edge. Nothing did while the box held one line of
+            // text - the descender space absorbed it - but a keycap has a
+            // border and a drop shadow, and the arrow drew straight over it.
+            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 ${
+              shortcut || footnote ? 'py-2' : 'py-1'
+            } border ${inDark ? 'dark' : ''} ${surface} text-gray-700 dark:text-gray-200 text-2xs text-center rounded shadow-lg break-words ${
               pos.placement === 'top' ? '-translate-y-full' : ''
             }`}
             // width: max-content sizes the box to its text: a fixed-position box
@@ -441,10 +458,11 @@ export function Tooltip({
           >
             {content}
             {shortcut && (
-              <div className="mt-1">
+              <div className="mt-1.5">
                 <ShortcutHint keys={shortcut.keys} note={shortcut.note} />
               </div>
             )}
+            {footnote && <div className="mt-1.5 text-3xs text-gray-500 dark:text-gray-400">{footnote}</div>}
             {arrow(pos.placement)}
           </div>
         ),
