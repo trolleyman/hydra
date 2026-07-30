@@ -39,6 +39,9 @@ func startCodexChatController(reg *session.Registry, store *db.Store, projectRoo
 				log.Printf("warn: mark Codex item activity running for %s: %v", id, err)
 			}
 		},
+		OnStep: func() {
+			reg.ChatStep(id)
+		},
 		OnTurnEnd: func(string) {
 			reg.ChatTurnEnded(id)
 		},

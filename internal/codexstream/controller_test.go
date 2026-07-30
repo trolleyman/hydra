@@ -189,12 +189,55 @@ func TestControllerAutoAcceptsApprovalRequests(t *testing.T) {
 }
 
 func TestControllerItemActivityMarksRunning(t *testing.T) {
-	activity := 0
-	c := New(Options{OnActivity: func() { activity++ }})
+	activity, steps := 0, 0
+	c := New(Options{
+		OnActivity: func() { activity++ },
+		OnStep:     func() { steps++ },
+	})
 	c.OnLine([]byte(`{"method":"item/started","params":{"item":{"id":"a","type":"agentMessage"}}}`))
 	c.OnLine([]byte(`{"method":"item/agentMessage/delta","params":{"delta":"hello"}}`))
+	c.OnLine([]byte(`{"method":"item/completed","params":{"item":{"id":"a","type":"agentMessage","text":"hello"}}}`))
 	if activity != 1 {
 		t.Fatalf("activity callbacks = %d, want 1", activity)
+	}
+	if steps != 1 {
+		t.Fatalf("step callbacks = %d, want 1", steps)
+	}
+}
+
+func TestControllerSteersActiveTurnAndStartsNextTurnWhenIdle(t *testing.T) {
+	var sent []map[string]any
+	c := New(Options{Model: "gpt-test", Send: func(line []byte) error {
+		var value map[string]any
+		_ = json.Unmarshal(line, &value)
+		sent = append(sent, value)
+		return nil
+	}})
+	_ = c.Start()
+	c.OnLine([]byte(`{"id":1,"result":{}}`))
+	c.OnLine([]byte(`{"id":2,"result":{"data":[{"id":"gpt-test","model":"gpt-test","isDefault":true}]}}`))
+	c.OnLine([]byte(`{"id":3,"result":{"thread":{"id":"thr"}}}`))
+	c.OnLine([]byte(`{"method":"turn/started","params":{"turn":{"id":"turn-1"}}}`))
+
+	if err := c.SendText("focus on the test failure"); err != nil {
+		t.Fatal(err)
+	}
+	steer := sent[len(sent)-1]
+	steerParams := steer["params"].(map[string]any)
+	if steer["method"] != "turn/steer" || steerParams["threadId"] != "thr" || steerParams["expectedTurnId"] != "turn-1" {
+		t.Fatalf("active turn send = %+v", steer)
+	}
+	if _, ok := steerParams["model"]; ok {
+		t.Fatalf("turn/steer must not carry turn-level model override: %+v", steerParams)
+	}
+
+	c.OnLine([]byte(`{"method":"turn/completed","params":{"turn":{"id":"turn-1"}}}`))
+	if err := c.SendText("now summarize"); err != nil {
+		t.Fatal(err)
+	}
+	next := sent[len(sent)-1]
+	if next["method"] != "turn/start" {
+		t.Fatalf("idle send = %+v", next)
 	}
 }
 
