@@ -48,6 +48,11 @@ import (
 type QueuedMessage struct {
 	ID      string          `json:"id"`
 	Content json.RawMessage `json:"content"`
+	// Origin is why this message exists when the user did not type it (see
+	// api.ChatUserMessagePayload.origin). Empty for anything typed in the composer.
+	// Carried through the queue so a message that waits for a turn boundary is
+	// still marked as automated when it finally lands.
+	Origin string `json:"origin,omitempty"`
 }
 
 // ChatQueue is one head's queue. All methods are safe for concurrent use.
@@ -339,7 +344,7 @@ func (m *ChatQueueManager) Submit(projectRoot, id string, msg QueuedMessage, que
 		return
 	}
 	if m.writeToStdin(id, msg.Content) {
-		m.emit(id, userMessage(msg.ID, msg.Content, nil))
+		m.emit(id, userMessage(msg.ID, msg.Content, nil, msg.Origin))
 	}
 }
 
@@ -360,7 +365,10 @@ func (m *ChatQueueManager) SubmitShellResult(projectRoot, id, msgID string, cont
 	q.sendMu.Lock()
 	defer q.sendMu.Unlock()
 	if m.writeToStdin(id, content) {
-		m.emit(id, userMessage(msgID, content, shell))
+		// A `!command` result is not typed either, but it is not a Hydra
+		// notification: the user ran the command TO feed the agent, and the card
+		// already says what it was. Origin stays empty so it renders as theirs.
+		m.emit(id, userMessage(msgID, content, shell, ""))
 	}
 }
 
@@ -472,7 +480,7 @@ func (m *ChatQueueManager) drainAll(projectRoot, id string) {
 			return
 		}
 		if m.writeToStdin(id, msg.Content) {
-			m.emit(id, userMessage(msg.ID, msg.Content, nil))
+			m.emit(id, userMessage(msg.ID, msg.Content, nil, msg.Origin))
 		}
 	}
 }
@@ -510,8 +518,8 @@ func queueMessageRemoved(id string) chat.QueueMessageRemoved {
 // userMessage is the durable turn a drained (or directly sent) message becomes.
 // shell is set only for a composer "!command", whose sandboxed result rides
 // along so the chat renders a shell card rather than a bubble.
-func userMessage(id string, content json.RawMessage, shell *api.ChatShellResult) chat.UserMessage {
+func userMessage(id string, content json.RawMessage, shell *api.ChatShellResult, origin string) chat.UserMessage {
 	msg := chat.UserMessage{}
-	msg.Id, msg.Content, msg.Shell = id, content, shell
+	msg.Id, msg.Content, msg.Shell, msg.Origin = id, content, shell, origin
 	return msg
 }

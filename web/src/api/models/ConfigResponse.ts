@@ -42,6 +42,10 @@ export type ConfigResponse = {
      */
     test_prefetch?: boolean | null;
     /**
+     * Whether a test runner settling FAILING wakes the head with a one-line message ([notify] test_failures in config.toml). It only fires while the head is IDLE, so it cannot interrupt a turn or loop, and it is deduped per (runner, commit). The agent pulls the output with get_test_logs. null/absent uses the built-in default (enabled).
+     */
+    notify_test_failures?: boolean | null;
+    /**
      * Max visual-artifact generations that run at once, across foreground (a user viewing a diff) and background (proactive pre-generation) work (artifact_concurrency in config.toml). Generations can be heavy (a full build per ref, RAM-hungry tooling like emulators), so this caps parallelism - lower it for memory-hungry generators. Foreground requests are served before queued background ones; a running generation is never preempted. 0 means unlimited (no cap); null/absent uses the built-in default.
      */
     artifact_concurrency?: number | null;

@@ -58,6 +58,30 @@ export function useNaturalSize(url: string | null): { w: number; h: number } | n
   return size
 }
 
+// useNaturalVideoSize is the <video> twin of useNaturalSize, for a recording an
+// agent embedded in a chat message. A video reports its intrinsic size only once
+// its metadata has arrived, so it is probed off-screen the same way - and lands
+// in the same shared cache, so the lightbox opening the clip already knows how
+// big it is. `preload = 'metadata'` fetches the header rather than the file.
+export function useNaturalVideoSize(url: string | null): { w: number; h: number } | null {
+  const size = useMediaSize(url)
+  useEffect(() => {
+    if (!url || recallMediaSize(url)) return
+    const el = document.createElement('video')
+    el.preload = 'metadata'
+    el.muted = true
+    el.onloadedmetadata = () => rememberMediaSize(url, el.videoWidth, el.videoHeight)
+    el.src = url
+    // Drop the source when the probe goes away: an <img> is garbage-collected on
+    // its own, a <video> holds its network request open (see LightboxDiff).
+    return () => {
+      el.removeAttribute('src')
+      el.load()
+    }
+  }, [url])
+  return size
+}
+
 // logicalSize converts an image's physical pixel size to the size it should be
 // laid out at. Rounded, and never below 1px for a tiny source.
 export function logicalSize(size: { w: number; h: number }, density: number): { w: number; h: number } {

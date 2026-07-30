@@ -736,6 +736,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		NetworkEnforcement: netEnf,
 		GitIsolation:       &gitIso,
 		HasUnreadChanges:   &h.HasUnreadChanges,
+		UnreadComments:     unreadCommentCount(h.ProjectPath, h.ID),
 		Archived:           &archived,
 		EndState:           endState,
 		ArchivedAt:         archivedAt,
@@ -1035,6 +1036,10 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	if cfg.TestConcurrency != nil {
 		n := *cfg.TestConcurrency
 		resp.TestConcurrency = &n
+	}
+	if cfg.Notify != nil && cfg.Notify.TestFailures != nil {
+		b := *cfg.Notify.TestFailures
+		resp.NotifyTestFailures = &b
 	}
 	if cfg.TestPrefetch != nil {
 		b := *cfg.TestPrefetch
@@ -1503,6 +1508,13 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 		b := *request.Body.TestPrefetch
 		newCfg.TestPrefetch = &b
 	}
+	if request.Body.NotifyTestFailures != nil {
+		b := *request.Body.NotifyTestFailures
+		if newCfg.Notify == nil {
+			newCfg.Notify = &config.NotifyConfig{}
+		}
+		newCfg.Notify.TestFailures = &b
+	}
 
 	scope := api.SaveConfigParamsScopeProject
 	if request.Params.Scope != nil {
@@ -1949,7 +1961,7 @@ func (s *Server) GenerateAgentTitle(ctx context.Context, request api.GenerateAge
 		}, nil
 	}
 
-	title, err := heads.GenerateTitle(ctx, projectRoot, head.Prompt)
+	title, err := heads.GenerateTitle(ctx, projectRoot, head.AgentType, head.Prompt)
 	switch {
 	case errors.Is(err, heads.ErrNoPrompt):
 		return api.GenerateAgentTitle400JSONResponse{
@@ -3188,6 +3200,14 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	}
 
 	text := request.Body.Text
+	// A message the user actually typed puts a human back in the loop, which is
+	// what the test-failure streak cap waits for (see tests_notify.go). An
+	// automated message carries an origin and deliberately does NOT reset it -
+	// otherwise Hydra's own notifications would keep renewing their own licence
+	// to send more.
+	if request.Body.Origin == nil || *request.Body.Origin == "" {
+		ResetTestNotifyStreak(head.ID)
+	}
 
 	// Chat-mode heads are driven over the Claude stream-json interface, not an
 	// interactive TUI: their stdin expects JSON user_message lines, so the
@@ -3202,6 +3222,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 		s.ChatQueues.Submit(projectRoot, head.ID, heads.QueuedMessage{
 			ID:      id,
 			Content: claudestream.TextUserContent(text),
+			Origin:  derefOr(request.Body.Origin, ""),
 		}, false)
 		return api.SendAgentInput200Response{}, nil
 	}

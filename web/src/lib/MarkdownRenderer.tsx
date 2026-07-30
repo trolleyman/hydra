@@ -3,14 +3,16 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { useNavigate } from '@tanstack/react-router'
-import { ImageOff } from 'lucide-react'
+import { ImageOff, Maximize2, VideoOff } from 'lucide-react'
 import { highlightCode } from './markdown'
+import { fileKind } from './fileKind'
+import { Tooltip } from '../components/Tooltip'
 import { setMarkdownSource } from './copyMarkdown'
 import { buildRepoSplat } from './repoSplat'
 import { UPLOAD_PATH_RE } from './uploadAttachments'
 import { useLightbox } from '../stores/lightboxStore'
 import { markdownGalleryAt } from './markdownGallery'
-import { densityFromPath, logicalSize, useNaturalSize } from './imageDensity'
+import { densityFromPath, logicalSize, useNaturalSize, useNaturalVideoSize } from './imageDensity'
 import { rememberMediaSize } from './mediaSize'
 import { IMAGE_REFLOW_MS, markSelfReflow } from './selfReflow'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
@@ -127,22 +129,22 @@ function RepoLink({ href, ctx, children }: { href?: string; ctx: RepoLinkContext
   return <a className={LINK_CLASS} href={url} onClick={onClick}>{children}</a>
 }
 
-// --- Images -------------------------------------------------------------------
+// --- Images and video -----------------------------------------------------------
 
-// isDataHref matches the URL forms an <img> can load directly without going
-// through the backend (remote, inline, or an object URL).
+// isDataHref matches the URL forms an <img>/<video> can load directly without
+// going through the backend (remote, inline, or an object URL).
 function isDataHref(src: string): boolean {
   return /^(https?:|data:|blob:)/i.test(src) || src.startsWith('//')
 }
 
-// resolveImageSrc turns a markdown image target into something the browser can
+// resolveMediaSrc turns a markdown image target into something the browser can
 // actually fetch. An agent writes a screenshot to its worktree or to /tmp and
 // then references that path - which means nothing to the browser - so a local
 // path is routed through the agent-files endpoint, which serves it from the
 // head's own filesystem. Falls back to the uploads blob endpoint for a path in
 // the project's uploads dir (the user's own pasted images, which surfaces
 // without a head still show). Returns null when nothing can serve it.
-function resolveImageSrc(src: string, ctx?: RepoLinkContext): string | null {
+function resolveMediaSrc(src: string, ctx?: RepoLinkContext): string | null {
   if (!src) return null
   if (isDataHref(src)) return src
   if (ctx?.agentId) return agentFileUrl(ctx.projectId, ctx.agentId, src)
@@ -152,21 +154,115 @@ function resolveImageSrc(src: string, ctx?: RepoLinkContext): string | null {
   return null
 }
 
+// MediaChip is what a markdown image or video degrades to when nothing can serve
+// it - an unservable path, or a scratch file that has since been reclaimed. A
+// muted chip naming the file, rather than the browser's broken-media box.
+function MediaChip({ src, label, icon: Icon }: { src?: string; label: string; icon: typeof ImageOff }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded border border-gray-300/60 dark:border-gray-500/30 bg-gray-100/70 dark:bg-black/25 px-1.5 py-0.5 align-middle text-[0.85em] text-gray-600 dark:text-gray-400"
+      title={src}
+    >
+      <Icon className="w-3.5 h-3.5 shrink-0 opacity-70" aria-hidden="true" />
+      {label}
+    </span>
+  )
+}
+
+// mediaLabel is what a markdown image/video is called when it has no alt text:
+// its filename, which is the most an unresolvable path can say about itself.
+function mediaLabel(src: string | undefined, alt: string | undefined, fallback: string): string {
+  return alt || (src ? src.split('/').pop() || src : fallback)
+}
+
+// MarkdownVideo renders a markdown image whose target is a RECORDING (.webm,
+// .mp4, ...). An agent demoing a transition, a hover state or a flow has nothing
+// a still can show, and `![alt](clip.webm)` is the syntax it already knows - so
+// the same markdown, the same agent-files endpoint (which answers Range requests
+// through http.ServeContent, hence seeking) and the same @2x logical sizing, with
+// a <video> in place of the <img>.
+//
+// The browser's own controls are kept, which spends the click on the frame: it
+// toggles playback. So the lightbox gets its own affordance instead - an expand
+// button in the corner, revealed on hover - exactly as the artifacts grid's video
+// tiles do (see RepositoryArtifactsView).
+function MarkdownVideo({ src, alt, ctx }: { src?: string; alt?: string; ctx?: RepoLinkContext }) {
+  const openLightbox = useLightbox()
+  const wrapRef = useRef<HTMLSpanElement>(null)
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const url = src ? resolveMediaSrc(src, ctx) : null
+  const label = mediaLabel(src, alt, 'video')
+  const density = densityFromPath(src)
+  const natural = useNaturalVideoSize(url)
+  const logical = natural ? logicalSize(natural, density) : null
+  // Same reflow declaration as an image: a clip's box arrives with its metadata,
+  // a layout or two after it mounts, and a chat pane following a live turn must
+  // read that growth as ours rather than as the reader scrolling away.
+  const logicalW = logical?.w ?? 0
+  const logicalH = logical?.h ?? 0
+  useLayoutEffect(() => {
+    if (logicalW > 0) markSelfReflow(IMAGE_REFLOW_MS)
+  }, [logicalW, logicalH])
+  if (!url || failedSrc === src) return <MediaChip src={src} label={label} icon={VideoOff} />
+  return (
+    // A span, not a div: this sits inside a <p> (markdown images are inline
+    // content), and a block element there is invalid HTML the browser fixes by
+    // splitting the paragraph around it.
+    <span ref={wrapRef} className="relative inline-block group/mdvideo align-bottom">
+      <video
+        src={url}
+        controls
+        playsInline
+        // Metadata only: a transcript can hold several clips and none of them
+        // should pull their whole file down before the reader asks to play one.
+        preload="metadata"
+        width={logical?.w}
+        height={logical?.h}
+        aria-label={label}
+        className="my-1 max-w-full h-auto rounded-md ring-1 ring-gray-200 dark:ring-gray-600/40 block"
+        data-md-src={src}
+        // The alt text VERBATIM, which aria-label is not - that falls back to the
+        // filename when there is none, and copy-as-markdown has to give back
+        // `![](clip.webm)` rather than inventing a caption (lib/copyMarkdown).
+        data-md-alt={alt}
+        onLoadedMetadata={(e) => {
+          markSelfReflow(IMAGE_REFLOW_MS)
+          rememberMediaSize(url, e.currentTarget.videoWidth, e.currentTarget.videoHeight)
+        }}
+        onError={() => setFailedSrc(src ?? null)}
+      />
+      <Tooltip content="Open fullscreen" className="absolute top-2.5 right-1.5">
+        <button
+          type="button"
+          aria-label={`Open ${label} fullscreen`}
+          className="flex items-center justify-center w-7 h-7 rounded-md bg-black/55 text-white/90 opacity-0 group-hover/mdvideo:opacity-100 focus-visible:opacity-100 hover:bg-black/75 transition-opacity cursor-pointer"
+          onClick={() => {
+            const { items, index } = markdownGalleryAt(wrapRef.current)
+            // The wrapper is the flight origin, so the clip flies out of its own
+            // box rather than fading in over it.
+            openLightbox(items, index, wrapRef.current)
+          }}
+        >
+          <Maximize2 className="w-3.5 h-3.5" />
+        </button>
+      </Tooltip>
+    </span>
+  )
+}
+
 // MarkdownImage renders a markdown image. Anything that resolves is shown at its
 // logical size (natural px / the @2x density in its name, capped to the column)
-// and opens in the app-wide lightbox on click - as a gallery of the images in
+// and opens in the app-wide lightbox on click - as a gallery of the media in
 // its own markdown block, so ←/→ walk the pictures of that one message (see
-// lib/markdownGallery). Anything that doesn't resolve - an unservable path, or a
-// scratch file that has since been reclaimed - degrades to a muted chip naming
-// it, rather than the browser's broken-image icon.
+// lib/markdownGallery).
 function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: RepoLinkContext }) {
   const openLightbox = useLightbox()
   // The source that failed to load, rather than a bare flag: a streamed message
   // rewrites the same node's src as more text arrives, and keying the failure to
   // the src means a new one is retried instead of inheriting the old verdict.
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
-  const url = src ? resolveImageSrc(src, ctx) : null
-  const label = alt || (src ? src.split('/').pop() || src : 'image')
+  const url = src ? resolveMediaSrc(src, ctx) : null
+  const label = mediaLabel(src, alt, 'image')
   const density = densityFromPath(src)
   const natural = useNaturalSize(url)
   const logical = natural ? logicalSize(natural, density) : null
@@ -188,17 +284,7 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
   useLayoutEffect(() => {
     if (logicalW > 0) markSelfReflow(IMAGE_REFLOW_MS)
   }, [logicalW, logicalH])
-  if (!url || failedSrc === src) {
-    return (
-      <span
-        className="inline-flex items-center gap-1 rounded border border-gray-300/60 dark:border-gray-500/30 bg-gray-100/70 dark:bg-black/25 px-1.5 py-0.5 align-middle text-[0.85em] text-gray-600 dark:text-gray-400"
-        title={src}
-      >
-        <ImageOff className="w-3.5 h-3.5 shrink-0 opacity-70" aria-hidden="true" />
-        {label}
-      </span>
-    )
-  }
+  if (!url || failedSrc === src) return <MediaChip src={src} label={label} icon={ImageOff} />
   return (
     <img
       src={url}
@@ -241,6 +327,17 @@ function MarkdownImage({ src, alt, ctx }: { src?: string; alt?: string; ctx?: Re
       }}
     />
   )
+}
+
+// MarkdownMedia picks the element a markdown image target gets. By EXTENSION,
+// off the path as authored: markdown has one syntax for embedded media, and the
+// name is all that is known before anything is fetched (the same rule lib/
+// fileKind applies everywhere else, and the same list the agent-files endpoint
+// allows). A data:/blob: URL has no extension and stays an image, which is what
+// every existing caller of those forms emits.
+function MarkdownMedia({ src, alt, ctx }: { src?: string; alt?: string; ctx?: RepoLinkContext }) {
+  if (src && fileKind(src) === 'video') return <MarkdownVideo src={src} alt={alt} ctx={ctx} />
+  return <MarkdownImage src={src} alt={alt} ctx={ctx} />
 }
 
 // --- Per-variant styling ------------------------------------------------------
@@ -424,7 +521,7 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
       ) : (
         <a className={LINK_CLASS} href={href} target="_blank" rel="noreferrer">{children}</a>
       ),
-    img: ({ src, alt }) => <MarkdownImage src={typeof src === 'string' ? src : undefined} alt={alt} ctx={linkCtx} />,
+    img: ({ src, alt }) => <MarkdownMedia src={typeof src === 'string' ? src : undefined} alt={alt} ctx={linkCtx} />,
     table: ({ children }) => (
       <div className={s.tableWrap}>
         <table className={s.table}>{children}</table>

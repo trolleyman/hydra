@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
+import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
@@ -693,6 +693,16 @@ describe('toolRawJson', () => {
 
   it('falls back to input/result for a card Hydra synthesized', () => {
     expect(raw({ input: { description: '2 tasks' }, result: 'Plan updated' })).toEqual({ input: { description: '2 tasks' }, result: 'Plan updated' })
+  })
+})
+
+describe('visibleToolInput', () => {
+  it('keeps normalized fields but hides provider bookkeeping', () => {
+    expect(visibleToolInput({
+      message: 'hello',
+      _raw: { type: 'mcp_tool_call' },
+      _raw_events: [{ type: 'item.started' }],
+    })).toEqual({ message: 'hello' })
   })
 })
 

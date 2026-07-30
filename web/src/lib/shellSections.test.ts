@@ -441,6 +441,27 @@ describe('splitScriptOutput', () => {
     expect(splitScriptOutput(steps('ls dir/\ngrep foo a.go'), 'a.txt\nfoo()')).toBeNull()
   })
 
+  it('does not let EOF-shortened sed ranges swallow a trailing search', () => {
+    const script = [
+      "sed -n '1,260p' web/src/components/A.tsx",
+      "sed -n '1070,1210p' web/src/routes/__root.tsx",
+      'rg -n "UsageIndicator" api internal web/src',
+    ].join(' &&\n')
+    const output = [
+      'export function A() {}',
+      'const root = true',
+      'web/src/components/A.tsx:1:export function A() {}',
+      'internal/http/handlers.go:110:// usage',
+    ].join('\n')
+    expect(splitScriptOutput(steps(script), output)?.map((s) => [s.kind, s.lines])).toEqual([
+      ['plain', ['export function A() {}', 'const root = true']],
+      ['matches', [
+        'web/src/components/A.tsx:1:export function A() {}',
+        'internal/http/handlers.go:110:// usage',
+      ]],
+    ])
+  })
+
   it('falls back to plain text where it cannot tell the producers apart', () => {
     // Two open-ended reads back to back have no boundary between them.
     const sections = splitScriptOutput(steps('cat a.go\ncat b.go'), 'a1\nb1')
@@ -490,6 +511,45 @@ describe('splitScriptOutput', () => {
     const sections = splitScriptOutput(steps(script), output)
     expect(sections?.map((s) => [s.kind, s.lines.length])).toEqual([['matches', 4], ['marker', 1], ['matches', 1]])
     expect(sections?.[0]).toMatchObject({ match: { paths: ['internal/heads/queue.go'] } })
+  })
+
+  it('combines adjacent git reports whose renderer needs no boundary', () => {
+    const script = 'git status --short && git diff --check && git diff -- web/src/DiffViewer.tsx'
+    const output = [
+      ' M web/src/DiffViewer.tsx',
+      'diff --git a/web/src/DiffViewer.tsx b/web/src/DiffViewer.tsx',
+      '--- a/web/src/DiffViewer.tsx',
+      '+++ b/web/src/DiffViewer.tsx',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+    ].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections).toHaveLength(1)
+    expect(sections?.[0]).toMatchObject({ kind: 'git', lines: output.split('\n') })
+  })
+
+  it('splits a trailing search from a run of adjacent git reports', () => {
+    const script = [
+      'git status --short',
+      'git log --oneline -5',
+      'git diff --cached --stat',
+      'rg -n "Codex|Claude" docs/review-agent.md docs/security-audit.md | head -250',
+    ].join(' &&\n')
+    const git = [
+      ' M web/src/DiffViewer.tsx',
+      "c5acb26 Merge branch 'main'",
+      ' web/src/DiffViewer.tsx | 4 ++--',
+    ]
+    const matches = [
+      'docs/security-audit.md:3:Scope: Claude / Gemini / Codex',
+      'docs/review-agent.md:24:Claude agents',
+    ]
+    const sections = splitScriptOutput(steps(script), [...git, ...matches].join('\n'))
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([
+      ['git', git],
+      ['matches', matches],
+    ])
   })
 
   it('will not give one search another one\'s language', () => {

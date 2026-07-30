@@ -450,7 +450,11 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
     // visually orphaned no-op on its own line and makes the script harder, not
     // easier, to scan. Other control chains still split normally.
     const rest = cmd.slice(i + 1).trim()
-    const trivialFallback = ch === '|' && /^(?:true|:)\s*$/.test(rest)
+    // The no-op need not be the end of the whole script. In
+    // `command -v codex || true && codex --help`, it still belongs to the
+    // command immediately before it; the following `&&` gets its own ordinary
+    // break when the scanner reaches it.
+    const trivialFallback = ch === '|' && /^(?:true|:)(?=$|\s*(?:&&|\|\||;|\n))/.test(rest)
     pending = header || trivialFallback ? ' ' : sep()
   }
   return out

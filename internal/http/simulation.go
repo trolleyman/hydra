@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -600,7 +601,12 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			SessionStatus:    "running",
 			CreatedAt:        &createdAt1,
 			HasUnreadChanges: &unread,
-			Prompt:           simAgent1Prompt,
+			// agent-1 is the head with review fixtures on it, and one of them (the
+			// agent's own reply, #6) is unread - so the sidebar badge has something
+			// to show alongside the has_unread_changes dot, which is the pairing
+			// worth being able to look at.
+			UnreadComments: ptr(1),
+			Prompt:         simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:                            finished,
 				Timestamp:                         simNow().Format(time.RFC3339),
@@ -1503,7 +1509,15 @@ func (s *SimulationServer) PublishReviewComments(w http.ResponseWriter, r *http.
 		})
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, simCommentsResponse(id, ptr(simNotifyLine(published))))
+	// Mirror the real routing so the simulation shows both toasts: an @review
+	// comment reports as having gone to the reviewer.
+	resp := simCommentsResponse(id, ptr(simNotifyLine(published)))
+	for _, c := range published {
+		if strings.Contains(strings.ToLower(c.Body), "@review") {
+			resp.NotifiedReviewer = ptr(true)
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, resp)
 }
 
 // simNotifyLine mirrors reviewstore.NotifyLine: handles and locations only, never
@@ -3803,13 +3817,21 @@ func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.R
 	_, _ = w.Write([]byte(content))
 }
 
-// HandleAgentFileBlob serves the picture behind a markdown image an agent
-// embedded in a chat message. The simulation has no head filesystem to resolve
-// against, so any image-looking path yields the same placeholder PNG - enough to
-// exercise the chat renderer's inline-image path (and the "unresolvable path"
-// fallback, for anything that isn't an image).
+// HandleAgentFileBlob serves the media behind a markdown image an agent embedded
+// in a chat message. The simulation has no head filesystem to resolve against, so
+// any image-looking path yields the same placeholder PNG and any video-looking
+// one the embedded demo clip - enough to exercise the chat renderer's inline
+// image/video paths (and the "unresolvable path" fallback, for anything else).
 func (s *SimulationServer) HandleAgentFileBlob(w http.ResponseWriter, r *http.Request) {
-	if !agentImageExts[strings.ToLower(path.Ext(r.URL.Query().Get("path")))] {
+	ext := strings.ToLower(path.Ext(r.URL.Query().Get("path")))
+	if agentVideoExts[ext] {
+		// Through ServeContent, so the player gets Range support and can seek -
+		// the same thing the real endpoint relies on.
+		w.Header().Set("Content-Type", "video/webm")
+		http.ServeContent(w, r, "clip.webm", simNow(), bytes.NewReader(simVideoAfter))
+		return
+	}
+	if !agentImageExts[ext] {
 		http.NotFound(w, r)
 		return
 	}

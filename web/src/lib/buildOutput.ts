@@ -74,6 +74,11 @@ const SUMMARY_PART = /\d+\s+(?:failed|passed|skipped|todo)/gi
 // bare `x` is a variable name far more often than it is a failing test.
 const TICK = /^(\s*)([✓✔√])(\s.*)$/
 const CROSS = /^(\s*)([✗✘×])(\s.*)$/
+// Bash's own execution failures. These often sit between a successful file
+// read and the next search in one tool result, so make the failed command the
+// same red landmark as a compiler's severity instead of leaving the whole line
+// as undifferentiated prose.
+const BASH_FAILURE = /^(\s*(?:\/[\w./+-]+\/)?(?:bash|sh|zsh):\s+line\s+\d+:\s+)([^:]+)(:\s+)(command not found|No such file or directory)(.*)$/i
 
 function severitySpans(message: string): OutputSpan[] {
   const m = SEVERITY.exec(message)
@@ -101,6 +106,17 @@ function locationSpans(indent: string, path: string, line: string, col: string |
 function lineSpans(line: string): OutputSpan[] | null {
   const status = EXIT_STATUS.exec(line)
   if (status) return exitStatusSpans(status)
+
+  const bash = BASH_FAILURE.exec(line)
+  if (bash) {
+    return [
+      { text: bash[1], cls: DIM },
+      { text: bash[2], cls: FAIL },
+      { text: bash[3], cls: DIM },
+      { text: bash[4], cls: FAIL },
+      { text: bash[5], cls: '' },
+    ]
+  }
 
   const colon = COLON_LOC.exec(line)
   if (colon) {

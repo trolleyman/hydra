@@ -1220,6 +1220,11 @@ function searchExtent(step: ScriptStep, slice: string[], lo: number, hi: number,
 interface Distribution {
   parts: string[][]
   pinned: boolean[]
+  // Parts that must render as the plain terminal text they are: a run can be
+  // bounded as a WHOLE while the boundaries inside it stay unknowable, and
+  // saying so is what keeps a self-identifying neighbour (most often a trailing
+  // `rg -n`) from being thrown away along with them.
+  plain: Set<number>
 }
 
 // distribute hands a stretch of output to the producers that ran inside it.
@@ -1237,24 +1242,63 @@ interface Distribution {
 // count - see searchExtent.
 function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySet<ScriptStep>): Distribution | null {
   if (producers.length === 0) return null
-  if (producers.length === 1) return { parts: [slice], pinned: [true] }
+  if (producers.length === 1) return { parts: [slice], pinned: [true], plain: new Set() }
+
+  // Peel a search-shaped suffix before using any file-view limit. A sed range is
+  // an UPPER bound, not an exact count: a range past the end of the file emits
+  // fewer lines, and greedily taking the maximum made a preceding sed claim the
+  // `path:line:` rows of a later rg. Those rows identify themselves, so the one
+  // boundary the output really does carry is kept even when everything before it
+  // has to stay one plain run.
+  const suffix = searchExtent(producers[producers.length - 1], slice, 0, slice.length, 'end')
+  if (suffix != null && suffix < slice.length) {
+    const last = producers.length - 1
+    const before = distribute(producers.slice(0, last), slice.slice(0, -suffix), failed)
+    const parts = producers.map(() => [] as string[])
+    const pinned = producers.map(() => false)
+    const plain = new Set<number>()
+    if (before) {
+      before.parts.forEach((part, i) => { parts[i] = part })
+      before.pinned.forEach((p, i) => { pinned[i] = p })
+      before.plain.forEach((i) => plain.add(i))
+    } else {
+      // Several consecutive reads with no headings between them have no
+      // recoverable boundary at all. Their combined output goes on the first
+      // slot, rendered as the terminal text it is.
+      parts[0] = slice.slice(0, -suffix)
+      plain.add(0)
+    }
+    parts[last] = slice.slice(-suffix)
+    // Every line of a search says which file and line it is; nothing about it is
+    // counted from where the section starts.
+    pinned[last] = true
+    return { parts, pinned, plain }
+  }
+
   const out: string[][] = producers.map(() => [])
   let lo = 0
   let hi = slice.length
 
   const bounds = producers.map((p) => stepLimit(p, failed))
-  // Whether the counts leave no room for a producer to have fallen SHORT of its
+  // Consecutive finite ranges are only separable when they all reached the end
+  // they asked for. If their combined output is SHORTER, at least one stopped at
+  // the end of its file and nothing in the output says which - so assigning each
+  // one its maximum from the left is exactly the false boundary this module
+  // exists not to draw.
+  const capped = bounds.reduce<number | null>((sum, b) => (sum == null || b == null ? null : sum + b), 0)
+  if (capped != null && slice.length < capped) return null
+  // Whether the counts leave no room for a producer to have fallen short of its
   // range: every one of them bounded, and the bounds adding up to exactly what
-  // came back. `sed -n 1,20p f` prints twenty lines or however many f has, and
-  // nothing in the output says which - so when the arithmetic does not settle
-  // it, a peel is the likeliest split rather than the only one.
-  const total = bounds.reduce<number | null>((sum, b) => (sum == null || b == null ? null : sum + b), 0)
+  // came back. Short of that, a `sed -n 1,20p f` prints twenty lines or however
+  // many f has and nothing in the output says which, so the peel below is the
+  // likeliest split rather than the only one.
+  //
   // Which producers' line count the output itself vouches for. Everything the
   // script only bounds from above starts out unvouched-for, and is set below
   // where something settles it: an `echo` whose text was found where it should
   // be, a step a diagnostic says printed nothing, a search whose own `path:`
   // prefixes say how far it reaches.
-  const exact = producers.map(() => total === slice.length)
+  const exact = producers.map(() => capped === slice.length)
 
   // An `echo` whose line is not where it should be printed nothing - it sat
   // behind a `||`, or its trailing blank was trimmed off the end of the output.
@@ -1305,7 +1349,11 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   // A producer's first line is where it says it is only if everything printed
   // before it in this stretch is accounted for exactly. The stretch's own start
   // is pinned: it is the output's, or the separator the marker search matched.
-  return { parts: out, pinned: producers.map((_, i) => exact.every((e, j) => j >= i || e)) }
+  return {
+    parts: out,
+    pinned: producers.map((_, i) => exact.every((e, j) => j >= i || e)),
+    plain: new Set(),
+  }
 }
 
 // splitScriptOutput cuts a command's output into one section per step that
@@ -1359,7 +1407,7 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
       pending = []
       return
     }
-    const { parts, pinned } = split
+    const { parts, pinned, plain } = split
     // The parts partition the slice in order, so walking them keeps each one's
     // offset into the output - which is what pairs it with its raw lines.
     let at = start
@@ -1370,6 +1418,12 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
       const rawPart = rawSlice(from, at)
       const step = producers[i]
       const limit = stepLimit(step, failed)
+      // A run whose internal boundaries are not knowable renders as the terminal
+      // text it is, whatever the steps inside it were.
+      if (plain.has(i)) {
+        sections.push({ kind: 'plain', lines: part, raw: rawPart })
+        return
+      }
       // More lines than the range could have produced (an error, a banner, a
       // marker that did not fire) means this is not what the parse thinks it is.
       if (step.kind === 'view' && (limit == null || part.length <= limit)) {

@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, GitBranch, ChevronDown, Check } from 'lucide-react'
+import { Bot, GitBranch, ChevronDown, Check, LoaderCircle } from 'lucide-react'
 import type { RepositoryBranch } from '../api'
 import { Tooltip } from './Tooltip'
 import { placeMenu } from '../lib/anchorMenu'
@@ -9,6 +9,14 @@ import { placeMenu } from '../lib/anchorMenu'
 // branch names (and anything that isn't a hex SHA) untouched.
 function shortSha(ref: string): string {
   return /^[0-9a-f]{7,40}$/i.test(ref) ? ref.slice(0, 8) : ref
+}
+
+// Agent branches are exactly `hydra/*` (git.IsAgentBranch server-side), which is
+// what the list's `is_agent` flag is computed from. Knowing the rule locally lets
+// the trigger pick the right icon before the list has loaded, so a base branch
+// that is another head doesn't flip from grey branch to purple bot on arrival.
+function looksLikeAgentBranch(name: string): boolean {
+  return name.startsWith('hydra/')
 }
 
 // BranchSelector is a dropdown for picking a branch (or showing a detached
@@ -23,7 +31,11 @@ export const BranchSelector = memo(function BranchSelector({
   triggerIcon: TriggerIcon, triggerActive = false, flexible = false, fitContent = false,
   onOpen,
 }: {
-  branches: RepositoryBranch[]
+  // null means the list hasn't loaded yet: the trigger renders exactly as it
+  // will once it lands (same chrome, same label - the caller knows the selected
+  // branch name without the list), and the menu shows a loading row. Rendering
+  // a flat placeholder instead is what made the control pop in.
+  branches: RepositoryBranch[] | null
   activeRef: string
   isKnownBranch: boolean
   onSelect: (name: string) => void
@@ -116,15 +128,21 @@ export const BranchSelector = memo(function BranchSelector({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
+  const loading = branches === null
+  const list = branches ?? []
+
   // The current (HEAD) branch is surfaced in its own unnamed section at the top,
   // so it's excluded from the agent/other lists below (and their counts).
-  const current = branches.find((b) => b.is_current)
-  const agentBranches = branches.filter((b) => b.is_agent && !b.is_current)
-  const otherBranches = branches.filter((b) => !b.is_agent && !b.is_current)
+  const current = list.find((b) => b.is_current)
+  const agentBranches = list.filter((b) => b.is_agent && !b.is_current)
+  const otherBranches = list.filter((b) => !b.is_agent && !b.is_current)
 
   // The label trigger mirrors the rows: when the selected branch is an agent
-  // branch, show the purple Bot icon instead of the generic branch icon.
-  const activeIsAgent = branches.some((b) => b.name === activeRef && b.is_agent)
+  // branch, show the purple Bot icon instead of the generic branch icon. Before
+  // the list lands the name itself decides (see looksLikeAgentBranch).
+  const activeIsAgent = loading
+    ? looksLikeAgentBranch(activeRef)
+    : list.some((b) => b.name === activeRef && b.is_agent)
 
   const Row = ({ b }: { b: RepositoryBranch }) => (
     <button
@@ -188,7 +206,14 @@ export const BranchSelector = memo(function BranchSelector({
             {activeIsAgent
               ? <Bot className="w-3.5 h-3.5 shrink-0 text-purple-500" />
               : <GitBranch className="w-3.5 h-3.5 shrink-0" />}
-            <span className="truncate font-mono">{isKnownBranch ? activeRef : shortSha(activeRef)}</span>
+            {activeRef ? (
+              <span className="truncate font-mono">{isKnownBranch ? activeRef : shortSha(activeRef)}</span>
+            ) : (
+              // No name to show yet (the repository view learns HEAD's name from
+              // the same request as the list). A neutral bar holds the label's
+              // place so the trigger doesn't resize when it arrives.
+              <span className="w-10 h-2 rounded-full bg-current opacity-15" aria-hidden />
+            )}
             <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-60" />
           </button>
         </Tooltip>
@@ -201,7 +226,13 @@ export const BranchSelector = memo(function BranchSelector({
           className="fixed w-64 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] py-1"
           style={{ left: coords.left, top: coords.top, bottom: coords.bottom }}
         >
-          {!isKnownBranch && activeRef && (
+          {loading && (
+            <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+              <LoaderCircle className="w-3.5 h-3.5 shrink-0 animate-spin" />
+              Loading branches...
+            </div>
+          )}
+          {!loading && !isKnownBranch && activeRef && (
             <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
               <Check className="w-3.5 h-3.5 shrink-0 text-blue-500" />
               <span className="truncate font-mono">{shortSha(activeRef)}</span>

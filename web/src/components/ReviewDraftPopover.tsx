@@ -4,9 +4,14 @@
 // remove and a "diff changed" flag for comments whose anchoring hunk has since
 // moved) plus the button that submits the whole batch to the agent at once.
 //
-// The comments themselves live in localStorage (see lib/reviewDrafts.ts); this
-// component is purely presentational - the parent (DiffViewer) owns the state and
-// the submit/remove actions.
+// The comments are server-side objects (see lib/reviewComments.ts); this component
+// is purely presentational - the parent (DiffViewer) owns the state and the
+// submit/remove actions.
+//
+// Each comment has a checkbox, all ticked by default. Submitting the whole batch
+// is what you almost always want, so it stays one click - but a review often has
+// one comment you are not sure enough about to send yet, and without this the only
+// way to hold it back was to delete it and rewrite it later.
 
 import { useEffect, useRef, useState } from 'react'
 import { MessagesSquare, Trash2, Send, TriangleAlert, X } from 'lucide-react'
@@ -17,13 +22,19 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
   comments: PendingReviewComment[]
   staleIds: Set<string>
   submitting: boolean
-  onSubmit: () => void
+  // Publish these numbers. Empty (never happens - the button disables) would mean
+  // "all", which is the API's own default.
+  onSubmit: (numbers: number[]) => void
   onRemove: (id: string) => void
   // Scroll the diff to a queued comment's line. Provided by the diff viewer;
   // clicking a comment invokes it and closes the popover.
   onJump: (comment: PendingReviewComment) => void
 }) {
   const [open, setOpen] = useState(false)
+  // Held OUT of the selection rather than in it, so a comment queued while the
+  // popover is open is included by default - the common case is "send everything",
+  // and a newly written comment appearing pre-unticked would be a trap.
+  const [heldBack, setHeldBack] = useState<Set<number>>(new Set())
   const wrapRef = useRef<HTMLDivElement>(null)
 
   // Close on outside click / Escape while the popover is open.
@@ -46,6 +57,14 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
   if (comments.length === 0) return null
 
   const staleCount = comments.reduce((n, c) => n + (staleIds.has(c.id) ? 1 : 0), 0)
+  const selected = comments.filter((c) => !heldBack.has(c.number))
+  const toggle = (n: number) =>
+    setHeldBack((prev) => {
+      const next = new Set(prev)
+      if (next.has(n)) next.delete(n)
+      else next.add(n)
+      return next
+    })
 
   return (
     <div ref={wrapRef} className="relative">
@@ -95,6 +114,15 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
               const stale = staleIds.has(c.id)
               return (
                 <div key={c.id} className="group flex items-start gap-2 px-1 hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                  <Tooltip content={heldBack.has(c.number) ? 'Include in this review' : 'Hold this one back'} side="top">
+                    <input
+                      type="checkbox"
+                      checked={!heldBack.has(c.number)}
+                      onChange={() => toggle(c.number)}
+                      aria-label={`Include comment on ${c.path}:${c.lineNum}`}
+                      className="mt-3 ml-1.5 shrink-0 accent-blue-600 cursor-pointer"
+                    />
+                  </Tooltip>
                   {/* No hover tip on the row itself: it wraps the stale-diff
                       warning below, so hovering that icon would stack two
                       bubbles. The row is self-evidently clickable (hover
@@ -137,13 +165,18 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
           </div>
 
           <div className="flex items-center justify-end gap-2 px-3 py-2 border-t border-gray-200 dark:border-gray-700">
+            {heldBack.size > 0 && (
+              <span className="mr-auto text-2xs text-gray-400 dark:text-gray-500">
+                {heldBack.size} held back
+              </span>
+            )}
             <button
-              disabled={submitting}
-              onClick={onSubmit}
+              disabled={submitting || selected.length === 0}
+              onClick={() => onSubmit(selected.map((c) => c.number))}
               className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
             >
               <Send className="w-3.5 h-3.5" />
-              {submitting ? 'Sending...' : `Submit ${comments.length} comment${comments.length === 1 ? '' : 's'}`}
+              {submitting ? 'Sending...' : `Submit ${selected.length} comment${selected.length === 1 ? '' : 's'}`}
             </button>
           </div>
         </div>

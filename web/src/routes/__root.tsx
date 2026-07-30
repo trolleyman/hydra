@@ -53,6 +53,7 @@ import { pruneArtifactPrefs } from '../lib/artifactPrefs'
 import { pruneAgentViewPrefs } from '../lib/agentViewPrefs'
 import { pruneReviewDrafts } from '../lib/reviewDrafts'
 import { pruneAgentCaches } from '../lib/agentCache'
+import { pruneBranchCaches } from '../lib/branchCache'
 import { StorageKeys, readLocal, writeLocal, archivedCollapsedKey } from '../lib/storage'
 import {
   loadProjectView,
@@ -559,6 +560,7 @@ function RootLayout() {
     pruneAgentViewPrefs()
     pruneReviewDrafts()
     pruneAgentCaches()
+    pruneBranchCaches()
     try { localStorage.removeItem('hydra-split-layout') } catch { /* storage unavailable */ }
   }, [])
 
