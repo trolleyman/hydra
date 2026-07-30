@@ -261,19 +261,21 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
                 )}
                 {sent ? (
                   <span className="ml-0.5 flex items-center gap-0.5">
-                    <Tooltip content={comment.resolved ? 'Reopen' : 'Mark resolved'} side="top">
-                      <button
-                        onClick={() => onResolve?.(!comment.resolved)}
-                        aria-label={comment.resolved ? 'Reopen comment' : 'Resolve comment'}
-                        className={`p-1 rounded transition-colors cursor-pointer ${
-                          comment.resolved
-                            ? 'text-emerald-600 dark:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-                            : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-                        }`}
-                      >
-                        <CircleCheck className="w-3.5 h-3.5" />
-                      </button>
-                    </Tooltip>
+                    {onResolve && (
+                      <Tooltip content={comment.resolved ? 'Reopen thread' : 'Mark thread resolved'} side="top">
+                        <button
+                          onClick={() => onResolve(!comment.resolved)}
+                          aria-label={comment.resolved ? 'Reopen thread' : 'Resolve thread'}
+                          className={`p-1 rounded transition-colors cursor-pointer ${
+                            comment.resolved
+                              ? 'text-emerald-600 dark:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                              : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                          }`}
+                        >
+                          <CircleCheck className="w-3.5 h-3.5" />
+                        </button>
+                      </Tooltip>
+                    )}
                     <Tooltip content="Copy link to this comment" side="top">
                       <button
                         onClick={() => onCopyLink?.()}
@@ -537,7 +539,9 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
             stale={entry.stale}
             onEdit={() => setEditingId(entry.comment.id)}
             onRemove={() => onRemoveComment?.(entry.comment.id)}
-            onResolve={(r) => onResolveComment?.(entry.comment.number, r)}
+            onResolve={entry.comment.replyTo === 0
+              ? (r) => onResolveComment?.(entry.comment.number, r)
+              : undefined}
             onCopyLink={() => onCopyCommentLink?.(entry.comment.number)}
             you={you}
           />

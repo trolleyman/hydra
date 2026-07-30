@@ -912,7 +912,7 @@ export class DefaultService {
     }
     /**
      * Resolve (or reopen) a review comment by its number
-     * Marks a comment dealt with. Works on either origin, because the numbering is one sequence: a Hydra comment gets a resolved flag, and a forge comment resolves the THREAD it belongs to. Resolving a forge thread is LOCAL to Hydra and is never sent to the forge - GitHub's resolveReviewThread needs a thread node id Hydra does not fetch, and a resolve that silently worked on GitLab and silently did not on GitHub would be worse than one that is honestly local everywhere. A state change, not an edit, so it is allowed on a published comment.
+     * Marks a comment thread dealt with. Works on either origin, because the numbering is one sequence: a Hydra comment resolves its root comment and every reply, and a forge comment resolves the THREAD it belongs to. Resolving a forge thread is LOCAL to Hydra and is never sent to the forge - GitHub's resolveReviewThread needs a thread node id Hydra does not fetch, and a resolve that silently worked on GitLab and silently did not on GitHub would be worse than one that is honestly local everywhere. A state change, not an edit, so it is allowed on a published comment.
      *
      * @param projectId
      * @param id

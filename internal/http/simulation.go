@@ -1442,8 +1442,29 @@ func (s *SimulationServer) ResolveReviewComment(w http.ResponseWriter, r *http.R
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	simComments(id)
 	simCommentMu.Lock()
+	byNumber := make(map[int]api.ReviewComment, len(simCommentsByHead[id]))
+	for _, c := range simCommentsByHead[id] {
+		byNumber[c.Number] = c
+	}
+	root := number
+	seen := map[int]bool{}
+	for c, ok := byNumber[root]; ok && c.ReplyTo != nil && *c.ReplyTo > 0 && !seen[root]; c, ok = byNumber[root] {
+		seen[root] = true
+		root = *c.ReplyTo
+	}
+	inThread := map[int]bool{root: true}
+	changed := true
+	for changed {
+		changed = false
+		for _, c := range simCommentsByHead[id] {
+			if c.ReplyTo != nil && inThread[*c.ReplyTo] && !inThread[c.Number] {
+				inThread[c.Number] = true
+				changed = true
+			}
+		}
+	}
 	for i := range simCommentsByHead[id] {
-		if simCommentsByHead[id][i].Number == number {
+		if inThread[simCommentsByHead[id][i].Number] {
 			simCommentsByHead[id][i].Resolved = ptr(body.Resolved)
 		}
 	}
