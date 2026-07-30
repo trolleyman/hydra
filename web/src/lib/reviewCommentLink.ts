@@ -16,8 +16,32 @@
 // is what wants to call it. Keyed by head id, so a pane can only ever drive the
 // diff of the head it belongs to.
 
+import { createContext, useContext } from 'react'
+
 export function commentPermalink(projectId: string | null, agentId: string, number: number): string {
   return `${window.location.origin}/project/${encodeURIComponent(projectId ?? '_')}/agent/${encodeURIComponent(agentId)}?comment=${number}`
+}
+
+// Which comment the review cursor is on - the one a permalink, a chat link or the
+// up/down navigator last took you to. The card carrying that number draws itself
+// highlighted, and STAYS highlighted until the cursor moves.
+//
+// It replaces a 1.6s flash on the diff LINE, which was wrong twice over: it drew
+// attention to the code rather than to the remark you had just asked to be taken
+// to, and by the time you had finished reading the line it was gone - so a jump
+// into a file with several comments left you with no way to tell which one you
+// had arrived at. A mark that persists is also what makes "next" legible: you can
+// see where you were standing.
+//
+// By CONTEXT, not a prop, for the same reason ReviewThreadContext is: the cards
+// render inside two memo'd hunk components, and a number threaded through them
+// would re-render every line of every file each time the cursor moved.
+export const CurrentCommentContext = createContext<number | null>(null)
+
+// useIsCurrentComment reports whether this comment is the one the cursor is on.
+// Numbers are never reused, so identity is the whole test.
+export function useIsCurrentComment(number: number): boolean {
+  return useContext(CurrentCommentContext) === number
 }
 
 type Jump = (number: number) => void

@@ -67,7 +67,7 @@ import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
 import { addReviewComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, notifiedNumbers, draftsOf, type PendingReviewComment } from './lib/reviewComments'
-import { commentPermalink, registerCommentJump } from './lib/reviewCommentLink'
+import { commentPermalink, registerCommentJump, CurrentCommentContext, useIsCurrentComment } from './lib/reviewCommentLink'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
 import { renderCommentSource } from './lib/mentionHighlight'
 import { Markdown } from './lib/MarkdownRenderer'
@@ -232,9 +232,16 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
   // you, and has no controls that would lie about what is still possible.
   const sent = comment.published
   const mine = comment.author === 'user'
+  // The review cursor. data-comment-card is what the jump scrolls to, and the
+  // amber inset bar is the "you are here" mark - it stays until the cursor moves,
+  // where the old transient flash on the diff LINE was gone before you had
+  // finished reading (see CurrentCommentContext).
+  const current = useIsCurrentComment(comment.number)
   return (
-    <div className={`border-y px-4 py-2 ${
-      sent
+    <div data-comment-card={comment.number} className={`border-y px-4 py-2 ${
+      current
+        ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]'
+        : sent
         ? 'border-stone-200 dark:border-white/10 bg-stone-50/60 dark:bg-white/[0.03]'
         : 'border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20'
     }`}>
@@ -4028,8 +4035,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   // Jump from a queued review comment to the line it anchors to: reveal the file
   // (select it in single-file view; expand/show it otherwise), then centre the
-  // line and flash it. scrollToDiffLine re-acquires the card and re-measures each
-  // frame, so it copes with the file mounting a beat after these state updates.
+  // line. scrollToDiffLine re-acquires the card and re-measures each frame, so
+  // it copes with the file mounting a beat after these state updates. The comment
+  // card itself marks the arrival, and keeps the mark (CurrentCommentContext).
   //
   // A comment whose file is NOT in the diff has no line to land on, so it lands on
   // its card in the off-diff section instead. That used to be a bare `return`,
@@ -4064,23 +4072,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // no line to scroll to.
     if (collapsedFiles.has(c.path)) toggleFileCollapse(c.path)
     if (hiddenFiles.has(c.path)) handleShowFile(c.path)
+    // Scroll to the LINE, not to the comment card: the line is what mounts the
+    // lazy body, and it is the anchor that exists whether or not the card has
+    // rendered yet. The card sits directly beneath it, so centring the line puts
+    // both on screen - and the card marks ITSELF as the one you arrived at,
+    // permanently, off the cursor (see CurrentCommentContext). That mark replaced
+    // a 1.6s flash on the row, which drew the eye to the code rather than to the
+    // remark, and was gone before you had finished reading it.
     scrollToDiffLine(
       () => fileRefs.current.get(c.path) ?? null,
       c.isNew ? 'new' : 'old',
       c.lineNum,
-      (row) => {
-        const rowEl = row.closest<HTMLElement>('.group') ?? row.parentElement
-        if (!rowEl) return
-        const prevShadow = rowEl.style.boxShadow
-        const prevBg = rowEl.style.backgroundColor
-        rowEl.style.transition = 'box-shadow 0.2s, background-color 0.2s'
-        rowEl.style.boxShadow = 'inset 3px 0 0 0 #f59e0b'
-        rowEl.style.backgroundColor = 'rgba(245, 158, 11, 0.18)'
-        setTimeout(() => {
-          rowEl.style.boxShadow = prevShadow
-          rowEl.style.backgroundColor = prevBg
-        }, 1600)
-      },
     )
   }, [diff, singleFile, collapsedFiles, toggleFileCollapse, hiddenFiles, handleShowFile])
 
@@ -5012,6 +5014,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // In the inspector pane the mt-4 is dropped - the pane's own pt-4 already
     // spaces the bar off the pane top (and -top-4 cancels exactly that padding).
     <ReviewThreadContext.Provider value={threadActions}>
+    {/* Where the review cursor is standing, by the same route and for the same
+        reason as the thread actions above: the comment cards are the far side
+        of two memo'd hunk components, and a cursor threaded through as a prop
+        would re-render every line of every file each time it moved. */}
+    <CurrentCommentContext.Provider value={atComment}>
     <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
@@ -5224,6 +5231,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         document.body,
       )}
     </div>
+    </CurrentCommentContext.Provider>
     </ReviewThreadContext.Provider>
   )
 }
