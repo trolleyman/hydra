@@ -109,7 +109,7 @@ import { claimOrphanResult, newToolResultLink, stashOrphanCwd, stashOrphanResult
 import type { ToolResultLink } from '../lib/toolResultLink'
 import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
-import { markWhitespace } from '../lib/whitespaceMarks'
+import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from '../lib/whitespaceMarks'
 import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommentsText'
 import { CommentLink } from './CommentLink'
@@ -2069,6 +2069,7 @@ function OutputPanel({ text, lang, markers }: { text: string; lang: string; isEr
   // Code output (a Read of a known extension) is stripped of any stray ANSI and
   // syntax highlighted; terminal output (bash) keeps its ANSI colours, rendered
   // to spans. Neither path ever shows raw escape garbage.
+  const ws = useWhitespaceMarks()
   const markerKey = markers?.join('\n') ?? ''
   const html = useMemo(
     () => {
@@ -2079,9 +2080,20 @@ function OutputPanel({ text, lang, markers }: { text: string; lang: string; isEr
     },
     [text, lang, markerKey],
   )
+  // The whitespace-mark overlay, applied per line so `boundary` mode marks each
+  // line's own indent and trailing run - the whole block is one <pre>, so it has
+  // to be split back into lines first (splitHighlightedLines re-opens any colour
+  // that spanned the break).
+  const marked = useMemo(
+    () => (html == null || ws === 'off' ? html : splitHighlightedLines(html).map((l) => markWhitespace(l, ws)).join('\n')),
+    [html, ws],
+  )
   const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
-  if (html != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
-  return <pre className={cls}>{stripAnsi(text) || '(no output)'}</pre>
+  if (marked != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: marked }} />
+  const plain = stripAnsi(text) || '(no output)'
+  const plainMarked = markWhitespaceText(plain, ws)
+  if (plainMarked != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: plainMarked }} />
+  return <pre className={cls}>{plain}</pre>
 }
 
 // SHELL_STREAM_CAP bounds a running card's accumulated live output (chars): a
@@ -2898,8 +2910,25 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
 // It stays ONE panel with one scrollbar - this is still the command's output,
 // read top to bottom - and the gutter column only appears when some line in it
 // actually has a number to show.
+// OutputSpanText renders one pre-coloured piece of a tool's output with the
+// whitespace-mark overlay applied when the browser preference asks for it
+// (lib/whitespaceMarks). A plain text node otherwise, so nothing but the text
+// itself ever lands on the clipboard.
+function OutputSpanText({ cls, text, ws }: { cls: string; text: string; ws: WhitespaceMarks }) {
+  const marked = markWhitespaceText(text, ws)
+  return marked != null
+    ? <span className={cls} dangerouslySetInnerHTML={{ __html: marked }} />
+    : <span className={cls}>{text}</span>
+}
+
 function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
   const rows = useMemo(() => scriptOutputRows(sections), [sections])
+  const ws = useWhitespaceMarks()
+  // The whitespace-mark overlay over each row's already-highlighted code. The
+  // `spans` path (git/disk/build output a tool wrote, not a file it read) is
+  // marked at render (OutputSpanText); the gutter, `path:` prefix and blame
+  // prefix are metadata, so - like the line-number column - they stay unmarked.
+  const marked = useMemo(() => rows.map((r) => (r.html ? markWhitespace(r.html, ws) : r.html)), [rows, ws])
   const gutter = rows.some((r) => r.num !== '')
   return (
     <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
@@ -2926,8 +2955,8 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
               {row.prefixSpans?.map((sp, j) => <span key={j} className={sp.cls}>{sp.text}</span>)}
               {row.prefixSpans && ' '}
               {row.spans
-                ? row.spans.map((s, j) => <span key={j} className={s.cls}>{s.text}</span>)
-                : <span dangerouslySetInnerHTML={{ __html: row.html }} />}
+                ? row.spans.map((s, j) => <OutputSpanText key={j} cls={s.cls} text={s.text} ws={ws} />)
+                : <span dangerouslySetInnerHTML={{ __html: marked[i] }} />}
             </span>
           </Fragment>
         ))}
