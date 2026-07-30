@@ -3167,13 +3167,7 @@ const ToolCard = memo(function ToolCard({
   const rawInput = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
     | Record<string, unknown>
     | null
-	const input = useMemo(() => {
-		if (!rawInput || (!('_raw' in rawInput) && !('_raw_events' in rawInput))) return rawInput
-		const visible = { ...rawInput }
-		delete visible._raw
-		delete visible._raw_events
-		return visible
-	}, [rawInput])
+	const input = useMemo(() => visibleToolInput(rawInput), [rawInput])
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
 	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
   // The host_run MCP tool is the escape hatch's first-class form: its `command`
@@ -3532,7 +3526,7 @@ const ToolCard = memo(function ToolCard({
               ) : gitTool && input && !hideInput ? (
                 <GitToolFields tool={gitTool} input={input} worktree={worktree} />
               ) : hideInput ? null : (
-                <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
+                <CodePanel code={trimWorktreePaths(JSON.stringify(input, null, 2) ?? '', worktree)} lang="json" />
               )}
 				{(renderedResult !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
                 <div>
@@ -3831,6 +3825,15 @@ interface SubagentLinks {
   taskToolByUse: Record<string, ToolItem>
   awaitingChildren: Set<string>
   openSubView: (key: string) => void
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function visibleToolInput(input: Record<string, unknown> | null): Record<string, unknown> | null {
+	if (!input || (!('_raw' in input) && !('_raw_events' in input))) return input
+	const visible = { ...input }
+	delete visible._raw
+	delete visible._raw_events
+	return visible
 }
 
 // shellCwdsFor follows the working directory across a list of chat items, so

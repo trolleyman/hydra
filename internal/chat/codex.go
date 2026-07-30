@@ -413,8 +413,13 @@ func codexToolPayload(item codexItem, completed bool) Payload {
 		name = "View Image"
 		input = map[string]any{"path": item.Path, "_raw": item}
 	case "mcpToolCall":
-		name = "MCP " + item.Server + "::" + item.Tool
-		input = map[string]any{"arguments": item.Arguments, "_raw": item}
+		name = "mcp__" + item.Server + "__" + item.Tool
+		visible := map[string]any{}
+		if json.Unmarshal(item.Arguments, &visible) != nil {
+			visible["arguments"] = item.Arguments
+		}
+		visible["_raw"] = item
+		input = visible
 	}
 	rawInput, _ := json.Marshal(input)
 	rawOutput, _ := json.Marshal(output)

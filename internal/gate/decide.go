@@ -480,6 +480,15 @@ var defaultKnownToolNames = []string{
 	// Worktrees, design, artifacts, reporting, LSP.
 	"EnterWorktree", "ExitWorktree", "DesignSync", "Artifact",
 	"AskUserQuestion", "ReportFindings", "LSP",
+	// Codex local function tools. Bash and apply_patch use dedicated hook aliases;
+	// the rest keep their wire names. These are Hydra/Codex plumbing confined by
+	// the OS sandbox, not unvetted connector tools.
+	"apply_patch", "update_plan", "request_user_input", "view_image",
+	"exec", "exec_command", "write_stdin", "wait",
+	"get_goal", "create_goal", "update_goal", "request_plugin_install",
+	"list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource",
+	"tool_search", "spawn_agent", "send_message", "followup_task",
+	"interrupt_agent", "list_agents", "wait_agent",
 }
 
 var knownBuiltinTools = func() map[string]bool {
