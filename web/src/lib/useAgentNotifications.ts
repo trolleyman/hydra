@@ -117,6 +117,11 @@ export function useAgentNotifications(
   // finished days ago and were simply never read.
   const mountedAt = useRef<number | null>(null)
 
+  // agentId → last-observed unread review-comment count. A comment landing while
+  // you are elsewhere is news in exactly the way a status change is, and it is the
+  // only one of these signals that can arrive from a person rather than an agent.
+  const lastComments = useRef<Map<string, number>>(new Map())
+
   // agentId → last-observed status, for transition detection.
   const lastStatus = useRef<Map<string, string>>(new Map())
   // agentId → last-observed has_unread_changes flag. When it drops true → false
@@ -155,6 +160,38 @@ export function useAgentNotifications(
       useProjectStore.getState().projects.find((p) => p.id === currentProjectId)?.icon,
       currentProjectId,
     )
+
+    // --- 0. new review comments ---
+    // On the INCREASE only: the count also falls (you read one, an agent resolved
+    // one), and a toast for that would be announcing your own action back at you.
+    // Silent for the agent you are looking at - its diff already carries the dot
+    // and the "N new" counter - and on the first observation, which would
+    // otherwise announce every comment left before the page was opened.
+    {
+      const prevComments = lastComments.current
+      const nextComments = new Map<string, number>()
+      const seenBefore = prevComments.size > 0
+      for (const agent of agents) {
+        const n = agent.unread_comments ?? 0
+        nextComments.set(agent.id, n)
+        const was = prevComments.get(agent.id) ?? 0
+        if (!seenBefore || n <= was || agent.id === selectedAgentId) continue
+        const arrived = n - was
+        toast.show({
+          type: 'info',
+          duration: FINISHED_TOAST_MS,
+          ...agentTransitionToast({
+            agentName: agent.title || agent.id,
+            agentId: agent.id,
+            projectId: currentProjectId,
+            status: 'commented',
+            before: 'has',
+            after: `${arrived} new review comment${arrived === 1 ? '' : 's'}`,
+          }),
+        })
+      }
+      lastComments.current = nextComments
+    }
 
     // --- 1. needs_input / finished transition toasts ---
     const prev = lastStatus.current

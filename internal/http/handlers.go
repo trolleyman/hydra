@@ -736,6 +736,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		NetworkEnforcement: netEnf,
 		GitIsolation:       &gitIso,
 		HasUnreadChanges:   &h.HasUnreadChanges,
+		UnreadComments:     unreadCommentCount(h.ProjectPath, h.ID),
 		Archived:           &archived,
 		EndState:           endState,
 		ArchivedAt:         archivedAt,

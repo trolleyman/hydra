@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
@@ -160,6 +161,7 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 	}
 	resolved := request.Body.Resolved
 	if _, err := reviewstore.SetResolved(projectRoot, head.ID, request.Number, resolved); err == nil {
+		s.notifyResolved(projectRoot, *head, request.Number, resolved)
 		s.notifyAgentsChanged(projectRoot, false)
 		return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 	} else if !errors.Is(err, reviewstore.ErrNoComment) {
@@ -175,6 +177,7 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 	if err := reviewstore.SetThreadResolved(projectRoot, head.ID, ref.Thread, resolved, time.Now().Format(time.RFC3339)); err != nil {
 		return resolveCommentBadRequest(err.Error()), nil
 	}
+	s.notifyResolved(projectRoot, *head, request.Number, resolved)
 	s.notifyAgentsChanged(projectRoot, false)
 	return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 }
@@ -203,6 +206,73 @@ func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkRev
 	}
 	s.notifyAgentsChanged(projectRoot, false)
 	return api.MarkReviewCommentsRead200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+}
+
+// resolveNotify batches a burst of resolves into one message per head. Resolving
+// a run of comments is one gesture, and it must not cost one model turn each.
+var resolveNotify = struct {
+	mu      sync.Mutex
+	pending map[string][]int
+	timer   map[string]*time.Timer
+}{pending: map[string][]int{}, timer: map[string]*time.Timer{}}
+
+// resolveNotifyDelay is how long a resolve waits for its neighbours. Long enough
+// to collect a run of clicks, short enough that a single resolve still lands while
+// the turn it is cancelling is plausibly still running.
+const resolveNotifyDelay = 4 * time.Second
+
+// notifyResolved tells a WORKING head that a comment has been dealt with.
+//
+// The gating is the interesting part, and it inverts the rule every other
+// notification here follows. Elsewhere Hydra waits until the head is NOT mid-turn,
+// so it never interrupts. This one only fires BECAUSE it is mid-turn: resolving is
+// otherwise the user's own bookkeeping, and an idle agent picks the change up for
+// free the next time it reads its comments (reviewstore.OpenComments already
+// filters resolved ones out). The single case worth spending a turn on is "you are
+// working on #3 right now and I have just cancelled it" - and reopening is never
+// worth one, because the comment is simply back in the list it reads anyway.
+func (s *Server) notifyResolved(projectRoot string, head heads.Head, number int, resolved bool) {
+	if !resolved || !s.headIsWorking(projectRoot, head.ID) {
+		return
+	}
+	resolveNotify.mu.Lock()
+	defer resolveNotify.mu.Unlock()
+	resolveNotify.pending[head.ID] = append(resolveNotify.pending[head.ID], number)
+	if t := resolveNotify.timer[head.ID]; t != nil {
+		t.Stop()
+	}
+	resolveNotify.timer[head.ID] = time.AfterFunc(resolveNotifyDelay, func() {
+		resolveNotify.mu.Lock()
+		numbers := resolveNotify.pending[head.ID]
+		delete(resolveNotify.pending, head.ID)
+		delete(resolveNotify.timer, head.ID)
+		resolveNotify.mu.Unlock()
+		if len(numbers) == 0 || !s.headIsWorking(projectRoot, head.ID) {
+			return // it finished while we were batching; it will read the list itself
+		}
+		labels := make([]string, 0, len(numbers))
+		for _, n := range numbers {
+			labels = append(labels, fmt.Sprintf("#%d", n))
+		}
+		noun := "comments"
+		if len(labels) == 1 {
+			noun = "comment"
+		}
+		_, _ = s.SendAgentInput(s.BackgroundCtx, api.SendAgentInputRequestObject{
+			ProjectId: projectRoot,
+			Id:        head.ID,
+			Body: &api.SendAgentInputJSONRequestBody{Text: fmt.Sprintf(
+				"Review %s resolved: %s. No further work is needed on %s - stop if you are part-way through.",
+				noun, strings.Join(labels, ", "), map[bool]string{true: "it", false: "them"}[len(labels) == 1])},
+		})
+	})
+}
+
+// headIsWorking reports whether a head is mid-turn, read from the status its own
+// hooks write.
+func (s *Server) headIsWorking(projectRoot, headID string) bool {
+	info := heads.ReadAgentStatus(projectRoot, headID)
+	return info != nil && (info.Status == api.Running || info.Status == api.Starting)
 }
 
 func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCommentsResponse {
@@ -289,4 +359,35 @@ func resolveCommentBadRequest(detail string) api.ResolveReviewComment400JSONResp
 
 func publishCommentsBadRequest(detail string) api.PublishReviewComments400JSONResponse {
 	return api.PublishReviewComments400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: detail}
+}
+
+// unreadCommentCount is how many review comments on a head the user has not seen,
+// for the badge on its card. Nil when there are none, so the field is absent
+// rather than a zero the client has to special-case.
+//
+// It covers BOTH origins - a forge reviewer's remark is as much news as an
+// agent's - which is why it counts from the numbering rather than from the comment
+// store alone. Cheap enough for the agent-list poll: two small reads, and only for
+// heads that have ever been commented on (the sidecar is absent otherwise).
+func unreadCommentCount(projectRoot, headID string) *int {
+	if projectRoot == "" || headID == "" {
+		return nil
+	}
+	read := reviewstore.ReadSet(projectRoot, headID)
+	n := 0
+	for _, c := range reviewstore.PublishedComments(projectRoot, headID) {
+		// Your own comments are never news to you.
+		if c.Author != reviewstore.AuthorUser && !read[c.Number] {
+			n++
+		}
+	}
+	for _, number := range reviewstore.AllNumbers(projectRoot, headID) {
+		if !read[number] {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	return &n
 }

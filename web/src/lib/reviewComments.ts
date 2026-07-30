@@ -165,9 +165,10 @@ export async function removeReviewComment(
 export async function publishReviewComments(
   projectId: string | null,
   agentId: string,
+  numbers: number[] = [],
 ): Promise<{ comments: PendingReviewComment[]; notified: string | null }> {
   if (!projectId) return { comments: [], notified: null }
-  const res = await api.default.publishReviewComments(projectId, agentId, {})
+  const res = await api.default.publishReviewComments(projectId, agentId, { numbers })
   return { comments: all(res), notified: res.notified ?? null }
 }
 

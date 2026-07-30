@@ -18,7 +18,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Folder, FolderOpen, X, GitMergeConflict, Bot, File, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
-  CircleCheck, Link2, ArrowUp, ArrowDown,
+  CircleCheck, Link2, ArrowUp, ArrowDown, MailOpen,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
@@ -3892,12 +3892,12 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // Flush the whole queued batch to the agent as one message, then clear the
   // draft. Each comment carries its own frozen context, so the message is built
   // entirely from the stored data - independent of what the live diff shows now.
-  const submitReview = useCallback(async () => {
-    const count = queuedComments.length
+  const submitReview = useCallback(async (numbers: number[]) => {
+    const count = numbers.length
     if (count === 0 || submittingReview) return
     setSubmittingReview(true)
     try {
-      const { comments } = await publishReviewComments(projectId, agent.id)
+      const { comments } = await publishReviewComments(projectId, agent.id, numbers)
       setReviewComments(comments)
       showSentToast(count === 1 ? 'Review sent to agent' : `Review of ${count} comments sent to agent`)
     } catch (e) {
@@ -3905,7 +3905,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     } finally {
       setSubmittingReview(false)
     }
-  }, [agent.id, projectId, submittingReview, showSentToast, queuedComments.length])
+  }, [agent.id, projectId, submittingReview, showSentToast])
 
   // Which queued comments have gone stale: the diff under them changed since they
   // were added (the anchoring hunk's content hash no longer matches, or the line
@@ -4452,9 +4452,23 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
                 {openComments.length} open
               </span>
               {unreadCount > 0 && (
-                <span className="optical-center text-[11px] tabular-nums text-blue-600 dark:text-blue-400">
-                  · {unreadCount} new
-                </span>
+                <>
+                  <span className="optical-center text-[11px] tabular-nums text-blue-600 dark:text-blue-400">
+                    · {unreadCount} new
+                  </span>
+                  {/* For comments you have read in passing rather than by
+                      navigating to them. Nothing clears read state on its own, so
+                      without this the only way out of "3 new" is to visit each. */}
+                  <Tooltip content="Mark every comment read" side="bottom">
+                    <button
+                      onClick={() => markRead(openComments.flatMap((c) => c.numbers))}
+                      aria-label="Mark every comment read"
+                      className="p-0.5 rounded text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                    >
+                      <MailOpen className="w-3 h-3" />
+                    </button>
+                  </Tooltip>
+                </>
               )}
               <Tooltip content="Previous open comment" side="bottom">
                 <button

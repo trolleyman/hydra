@@ -17,6 +17,13 @@ import type { AgentTypeIconName } from '../components/AgentTypeIcon'
 // on the agent page (agentStatusHelp): what the state means, and what - if
 // anything - it wants from you. Written for someone who has just met the word.
 const AGENT_STATUS: Record<string, { label: string; badge: Tone; dot?: Tone; help?: string }> = {
+  // Not a state a head can be IN - it is an event, used by the toast that
+  // announces review comments arriving. It lives here so that card gets the same
+  // pill and tile treatment as a real transition rather than a bespoke one.
+  commented: {
+    label: 'commented', badge: 'blue',
+    help: 'Someone left review comments on this head.',
+  },
   pending: {
     label: 'pending', badge: 'neutral', dot: 'neutral',
     help: 'Queued. The head exists, but its sandbox has not started yet.',

@@ -5,6 +5,7 @@ import {
   GitMerge,
   GitPullRequestArrow,
   MessageCircleQuestion,
+  MessageSquare,
   RotateCcw,
   TriangleAlert,
   Trash2,
@@ -32,6 +33,9 @@ import { TILE_TONE, TILE_BAR, tileToneForBadge, type TileTone } from './tileTone
 // `GitMerge` is the settled state, "this IS merged". Publishing to a forge is the
 // third case and wears the FORGE's own mark (ProviderIcon), not a lucide one.
 const STATUS_TILE: Record<string, ComponentType<{ className?: string }>> = {
+  // 'commented' is not a status a head can be in - it is a review comment
+  // arriving, which reads as the same kind of event and wants the same card.
+  commented: MessageSquare,
   needs_input: MessageCircleQuestion,
   errored: TriangleAlert,
   finished: CircleCheck,

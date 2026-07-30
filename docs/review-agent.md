@@ -736,15 +736,71 @@ Two UI details that were wrong and are worth remembering:
   number AND the buttons, so they share one centre line - measured at 0.00px
   apart rather than eyeballed.
 
+### Telling a head something: one shape, four rules
+
+The things that could notify a head keep multiplying - published comments, a
+resolve, a forge reviewer, a failing test. They all want the same rules, and the
+rules are worth stating once rather than rediscovering per source:
+
+1. Fire on a **transition**, never on a poll tick.
+2. **Batch.** Resolving five comments is one line, not five model turns.
+3. Respect what the head is **doing** (see below).
+4. Send **one short line** and let the agent pull the detail with the tool it
+   already has. The comment/log is canonical; the message is a pointer.
+
+Rule 3 is not "never interrupt", which is what it looks like at first. It is
+"interrupt only when the interruption is the point", and the two cases pull in
+opposite directions:
+
+- **New information** (comments published, tests failed) waits until the head is
+  NOT mid-turn, so it never lands in the middle of something.
+- **A cancellation** - resolving a comment - only fires BECAUSE it is mid-turn.
+  Otherwise it is silent, and deliberately so: `reviewstore.OpenComments`, the
+  agent's default read, already filters resolved comments out, so an idle agent
+  picks the change up for free the next time it looks. The single case worth
+  spending a turn on is "you are working on #3 right now and I have just
+  cancelled it". Reopening never notifies - the comment is simply back in the
+  list it reads anyway.
+
+Resolve notifications are debounced (`resolveNotifyDelay`) so a run of clicks is
+one message, and re-checked at the end of the debounce: a head that finished while
+you were resolving gets nothing.
+
+### Unread, in the UI
+
+Three surfaces, deliberately different from each other:
+
+- **In the diff** - a dot on the comment's number, and `N open · N new` in the
+  navigator, with `↑ ↓` and a mark-all-read.
+- **On the sidebar card** - a speech bubble with a count, NOT a third dot. The
+  card already carries a needs-input dot and an unread-changes dot; a third would
+  make none of them readable, and this one has to say how many, which a dot
+  cannot.
+- **A toast** when comments land while you are looking at something else, on the
+  INCREASE only - the count also falls when you read one, and announcing that
+  would be telling you about your own action.
+
+`unread_comments` is its own field on the agent rather than folded into
+`has_unread_changes`, because that flag means "the agent finished" and one
+indicator meaning both would be trustworthy for neither.
+
 ### Still open in the comment store
 
 None of it blocking:
 
-- **Drafts publish all-or-nothing in the UI.** The API takes a list of numbers.
-- **No head-level unread badge.** Unread is per comment and visible on the diff;
-  the sidebar card does not yet carry a count (see the note below).
-- **Resolving does not tell the agent.** It is a signal an agent would benefit
-  from - "#3 is dealt with, stop working on it" - and nothing sends it.
+- **`@review` mentions**, routing a comment to the reviewer instead of the head.
+  Decided but unbuilt: no mention keeps today's behaviour (the head is told),
+  `@review` addresses the reviewer, and a mention in an AGENT-authored comment
+  never routes - or one "@review this" becomes a chain nobody asked for.
+- **Test failures do not notify.** Same shape as above: fire on the verdict
+  transition, only when the head is idle, deduped per (runner, commit).
+- **A forge reviewer's comment does not notify either** - the watcher caches the
+  threads and updates the chip, and the agent only finds out if it asks.
+- **An automated message looks like one you typed.** `SendAgentInput` injects a
+  plain user turn, so the chat cannot distinguish "you said this" from "Hydra said
+  this for you" - the `[Hydra]` prefix in the sync message is a workaround, and it
+  is in the text the model reads. The honest test is "did the user type it in the
+  composer", which makes fix-with-agent and resolve-with-agent automated too.
 
 ### Unread, and where it should go next
 

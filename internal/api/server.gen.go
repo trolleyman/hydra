@@ -669,8 +669,11 @@ type AgentResponse struct {
 	Tests *TestSummary `json:"tests,omitempty"`
 
 	// Title Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
-	Title        *string `json:"title,omitempty"`
-	WorktreePath *string `json:"worktree_path"`
+	Title *string `json:"title,omitempty"`
+
+	// UnreadComments How many review comments on this head the user has not seen (docs/review-agent.md). Deliberately its own count rather than folded into has_unread_changes: that flag means "the agent finished", and one indicator meaning both would be trustworthy for neither. Cleared only by explicitly arriving at a comment, never by opening the page.
+	UnreadComments *int    `json:"unread_comments,omitempty"`
+	WorktreePath   *string `json:"worktree_path"`
 }
 
 // AgentStatus The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
