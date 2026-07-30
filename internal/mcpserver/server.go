@@ -344,9 +344,14 @@ func toolDefs(deps Deps) []map[string]any {
 	}
 	if deps.RunTests != nil {
 		defs = append(defs, map[string]any{
-			"name": "run_tests",
-			"description": "Re-run YOUR test runners against your branch's latest commit, discarding the cached verdict - use it after committing a fix, when get_head_status still shows the old result. " +
-				"Runs Hydra's own configured runner, which is the one that gates your merge; that is often NOT reproducible with your own shell command (it runs in a separate checkout, and may need host access or network you do not have). " +
+			// retry_tests, not run_tests: Hydra runs a head's tests ITSELF on every
+			// new commit, so "run my tests" is not a thing an agent ever needs to
+			// ask for - and a tool called run_tests is asked for exactly then,
+			// which is a wasted turn each time. The name has to say that the run
+			// has already happened and this is a second one.
+			"name": "retry_tests",
+			"description": "Re-run test runners that ALREADY RAN, discarding their cached verdict. You almost never need this: Hydra runs your test runners itself on every new commit, so after committing just wait and call get_head_status - do NOT call this to \"run the tests\". " +
+				"What it is for is a verdict you have reason to believe is wrong rather than a failure you have to fix: a flaky failure, or a run that died on something environmental. That matters because the cached verdict is what gates your merge, and you cannot clear it any other way - Hydra's runner executes in a separate checkout with the project's real command, which is often NOT reproducible with your own shell (it may need host access or network you do not have). " +
 				"Returns as soon as the run STARTS, not when it finishes: call get_head_status a little later for the verdict, and do NOT call this again while it runs. " +
 				"COMMIT FIRST - it tests the latest commit, not your working tree.",
 			"inputSchema": map[string]any{
@@ -359,9 +364,13 @@ func toolDefs(deps Deps) []map[string]any {
 	}
 	if deps.RunArtifacts != nil {
 		defs = append(defs, map[string]any{
-			"name": "generate_artifacts",
-			"description": "Regenerate YOUR artifacts (screenshots and other generated outputs) from your branch's latest commit, discarding the cached ones. " +
-				"Useful after a UI change: regenerate, then read the image files get_head_status lists to see what your change actually looks like. " +
+			// retry_artifacts for the same reason as retry_tests: Hydra generates a
+			// head's artifacts itself for each commit, so "generate my artifacts" is
+			// a thing an agent asks for only because the tool is named after it. The
+			// queue can be slow, and slow is what waiting is for.
+			"name": "retry_artifacts",
+			"description": "Re-generate artifacts (screenshots and other generated outputs) that ALREADY GENERATED, discarding the cached ones. You almost never need this: Hydra generates your artifacts itself for each commit, so after committing just wait - the queue can take a while behind other work - and call get_head_status, which lists the image files for you to read. " +
+				"What it is for is a set that FAILED, or cached output you have reason to believe is wrong, rather than one that simply has not been reached yet. " +
 				"Returns as soon as generation STARTS: call get_head_status a little later for the files, and do NOT call this again while it runs. " +
 				"COMMIT FIRST - it builds from the latest commit, not your working tree.",
 			"inputSchema": map[string]any{
@@ -536,9 +545,13 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		}
 		msg, ok := deps.TestLogs(strings.TrimSpace(args.Runner), args.Tail)
 		return textResult(msg, !ok)
-	case "run_tests", "generate_artifacts":
+	// "run_tests" / "generate_artifacts" are the pre-rename names, still accepted:
+	// a tool name is quoted in places Hydra does not control - a user's
+	// mcp_tools_allowed/blocked entry, a project's own docs - and it costs one
+	// word here to keep those working. Only the retry_* names are advertised.
+	case "retry_tests", "run_tests", "retry_artifacts", "generate_artifacts":
 		fn, argKey := deps.RunTests, "runner"
-		if p.Name == "generate_artifacts" {
+		if p.Name == "retry_artifacts" || p.Name == "generate_artifacts" {
 			fn, argKey = deps.RunArtifacts, "name"
 		}
 		if fn == nil {

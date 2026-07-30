@@ -404,7 +404,7 @@ func (s *Server) testLogsText(ctx context.Context, id string, req reviewq.Reques
 }
 
 // runTestsText discards this head's cached verdicts for its branch tip and starts
-// fresh runs, for the run_tests tool. It returns as soon as the work is QUEUED:
+// fresh runs, for the retry_tests tool. It returns as soon as the work is QUEUED:
 // a suite can take minutes, and an agent blocked in a tool call for that long is
 // worse than one that polls get_head_status.
 //
@@ -464,7 +464,7 @@ func (s *Server) runTestsText(ctx context.Context, id string, req reviewq.Reques
 	return reviewq.Result{OK: true, Message: startedText("test runner", started, skipped)}
 }
 
-// runArtifactsText is run_tests' counterpart for [artifacts.<name>] scripts.
+// runArtifactsText is retry_tests' counterpart for [artifacts.<name>] scripts.
 // Server ("preview") scripts are excluded for the same reason get_head_status
 // omits them: they are a live user-facing affordance, not a generated output.
 func (s *Server) runArtifactsText(ctx context.Context, id string, req reviewq.Request) reviewq.Result {
