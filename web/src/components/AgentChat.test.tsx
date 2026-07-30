@@ -662,6 +662,43 @@ describe('ToolSearch tool_reference results', () => {
   })
 })
 
+describe('Codex tool result envelopes', () => {
+  const reduce = (result: unknown) =>
+    reduceHistoryEvents(
+      [
+        {
+          type: 'assistant',
+          message: {
+            id: 'm1',
+            content: [{ type: 'tool_use', id: 'call_1', name: 'mcp__hydra__get_review_comments', input: { numbers: [1] } }],
+          },
+        },
+        {
+          type: 'user',
+          message: { content: [{ type: 'tool_result', tool_use_id: 'call_1', content: result }] },
+        },
+      ],
+      (() => {
+        let id = 0
+        return () => ++id
+      })(),
+    ).find((item) => item.kind === 'tool')
+
+  it('renders the text inside a Codex MCP CallToolResult', () => {
+    const item = reduce({
+      content: [{ type: 'text', text: '#1 internal/tests/types.go:130\nPlease simplify this.' }],
+      isError: false,
+    })
+    expect(item).toMatchObject({
+      result: '#1 internal/tests/types.go:130\nPlease simplify this.',
+    })
+  })
+
+  it('keeps plain command output unchanged', () => {
+    expect(reduce('git status output')).toMatchObject({ result: 'git status output' })
+  })
+})
+
 // The Raw panel used to rebuild {input, result} from what the card kept, so it
 // showed the FLATTENED result and no envelope. It now prints each block inside
 // the ENTRY the CLI recorded it in - so everything written around the block
