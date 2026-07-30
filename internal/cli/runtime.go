@@ -64,6 +64,7 @@ func chatContextResolver(store *db.Store) chat.ContextResolver {
 				Prompt:      agent.Prompt,
 				AgentType:   agent.AgentType,
 				Plan:        agent.Plan,
+				BaseBranch:  agent.BaseBranch,
 			}, true
 		}
 		headID, slot, ok := heads.SplitSlotID(id)
