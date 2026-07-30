@@ -31,7 +31,18 @@ type WorkSparkProps = {
       label's job, via `.optical-center` (see below). */
   className?: string
   still?: boolean
+  /** Which baked-in size to draw at: `default` is the 20px in-row mark, `lg`
+      the 56px hero one the chat's centred loading state uses. A prop rather
+      than a `w-14 h-14` handed in through `className`, because both are
+      same-specificity Tailwind utilities and which of the two won would come
+      down to their order in the generated stylesheet. */
+  size?: keyof typeof SIZE_CLASS
 }
+
+const SIZE_CLASS = {
+  default: 'w-5 h-5',
+  lg: 'w-14 h-14',
+} as const
 
 // Spoke angles, evenly spaced; every other one is drawn shorter and thinner,
 // which reads as a sparkle instead of a snowflake at 14px.
@@ -44,7 +55,7 @@ const INNER_Y = 9.2
 const LONG_Y = 3.3
 const SHORT_Y = 5.7
 
-export function WorkSpark({ className = '', still = false }: WorkSparkProps) {
+export function WorkSpark({ className = '', still = false, size = 'default' }: WorkSparkProps) {
   const accent = agentTypeColor(useContext(ChatAgentTypeContext))
   return (
     <svg
@@ -58,7 +69,7 @@ export function WorkSpark({ className = '', still = false }: WorkSparkProps) {
       // where a fixed px nudge on the mark is tuned to one size and one font
       // (see CLAUDE.md). So: `.optical-center` on every label sat next to one of
       // these, and nothing on the spark.
-      className={`shrink-0 w-5 h-5 ${accent} ${still ? '' : 'work-spark'} ${className}`}
+      className={`shrink-0 ${SIZE_CLASS[size]} ${accent} ${still ? '' : 'work-spark'} ${className}`}
     >
       {SPOKE_ANGLES.map((angle, i) => {
         const long = i % 2 === 0

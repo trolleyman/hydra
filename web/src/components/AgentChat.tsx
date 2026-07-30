@@ -10087,11 +10087,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               </span>
             </div>
           )}
-          {!replayDone && !chatError && items.length === 0 && (
-            <div className="text-xs text-stone-400 dark:text-stone-500 italic py-2">
-              {connected ? 'Loading conversation...' : 'Connecting...'}
-            </div>
-          )}
           {/* Load-older affordance at the very top (item 25). */}
           {replayDone && loadingOlder && (
             <div className="flex items-center justify-center gap-1.5 py-1 text-2xs text-stone-400 dark:text-stone-500 select-none">
@@ -10187,6 +10182,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           )}
           </div>
         </div>
+        {/* Waiting for the transcript: the spark drawn large in the middle of
+            the empty pane, with the label under it. It used to be a line of
+            small italic text in the top-left corner, which read as a stray
+            first message rather than as "the pane is still filling".
+            Positioned over the scroll pane rather than inside it because the
+            content column is a top-anchored flex column with no height of its
+            own while there is nothing in it - there is nothing to centre
+            within. pointer-events-none so it can't swallow a click, and
+            aria-live so a screen reader hears the state change rather than
+            only the (silent) spark. */}
+        {!replayDone && !chatError && items.length === 0 && !viewSub && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 select-none pointer-events-none">
+            <WorkSpark size="lg" />
+            <div aria-live="polite" className="text-xs text-stone-400 dark:text-stone-500">
+              {connected ? 'Loading conversation' : 'Connecting'}
+            </div>
+          </div>
+        )}
         {/* Jump to bottom (item 14): floats above the composer while the user
             is scrolled up, claude.ai style. */}
         {!pinned && replayDone && (
