@@ -158,19 +158,20 @@ export async function addImageComment(
   projectId: string | null,
   agentId: string,
   c: { image: ReviewImageAnchor; text: string; diffLabel?: string; publish?: boolean },
-): Promise<{ comments: PendingReviewComment[]; toReviewer: boolean }> {
-  if (!projectId) return { comments: [], toReviewer: false }
+): Promise<{ comments: PendingReviewComment[]; notified: string | null; toReviewer: boolean }> {
+  if (!projectId) return { comments: [], notified: null, toReviewer: false }
   const res = await api.default.addReviewComment(projectId, agentId, {
     body: c.text,
     image: c.image,
     diff: c.diffLabel,
     publish: c.publish,
   })
-  // Returned rather than dropped, in the same shape sendReviewComment uses: a pin
-  // can address the reviewer too (the composer paints mentions precisely because
-  // `@review` is how you do it), and the caller has to be able to say WHICH agent
-  // it just woke.
-  return { comments: all(res), toReviewer: res.notified_reviewer === true }
+  // The same shape sendReviewComment returns, so a pin can be confirmed the same
+  // way a line comment is: `notified` is the only place the browser learns what
+  // actually went (and that anything did), and `notified_reviewer` says WHICH
+  // agent was woken - a pin can address the reviewer too, which is why the
+  // composer paints mentions at all.
+  return { comments: all(res), notified: res.notified ?? null, toReviewer: res.notified_reviewer === true }
 }
 
 export async function updateReviewComment(
