@@ -784,23 +784,62 @@ Three surfaces, deliberately different from each other:
 `has_unread_changes`, because that flag means "the agent finished" and one
 indicator meaning both would be trustworthy for neither.
 
+### Mentions: who a comment wakes
+
+`@review` addresses the reviewer, `@agent` (or `@head`) the head, naming both
+reaches both - and **no mention means the head**, exactly as it always has.
+That default is what makes the feature free to adopt: every existing gesture keeps
+working, and the reviewer becomes addressable for the first time. The explicit
+`@agent` is redundant with the default and exists anyway, because once two agents
+are on one diff "who am I talking to" is worth saying out loud rather than leaving
+to a rule you have to remember.
+
+Three rules hold it together:
+
+- **An agent's own comment never routes.** Otherwise one "@review this" in a reply
+  becomes a chain of agents summoning each other, which is an unbounded bill and
+  nobody's idea of a review.
+- **`@review` never STARTS a reviewer.** The slot is lazy - opening the tab creates
+  the checkout and the model session - and typing a word should not spawn a
+  sandbox. With no reviewer running the comment is still durable, and it reads it
+  with `get_review_comments` when next opened.
+- **The highlighter and the parser share a pattern.**
+  `web/src/lib/mentionHighlight.tsx` deliberately mirrors
+  `internal/reviewstore/mentions.go`, because a token the box paints and the daemon
+  ignores teaches a rule that is not real. It paints in the comment box and the
+  thread reply box ONLY: a mention means nothing in the chat composer, and
+  highlighting it there would promise a behaviour that does not exist.
+
+A local note on a forge thread routes the same way - it is *your* comment. What
+Hydra deliberately does NOT do is notify because an outside reviewer commented:
+that is the forge's conversation, and an agent woken by every drive-by remark is a
+bill rather than a feature.
+
+### Marking an automated turn
+
+`SendAgentInput` injects a plain user turn, so the chat could not tell "you said
+this" from "Hydra said this for you". `origin` on the user message fixes that, and
+the test for what belongs in it is **"did the user type it in the composer"** -
+not "did Hydra write the words". So Fix with agent and Resolve with agent count as
+automated, even though you meant every word of them.
+
+The bubble keeps the user's shape and side - it speaks for you, and the agent
+answers it as if you had - but takes a cooler tint, a dashed edge and a line saying
+who sent it and why.
+
+**The `[Hydra]` text prefix stays.** Metadata is invisible to an agent, which only
+ever sees the text, so it still needs to know Hydra is speaking. The prefix is for
+the model; the marker is for you.
+
 ### Still open in the comment store
 
 None of it blocking:
 
-- **`@review` mentions**, routing a comment to the reviewer instead of the head.
-  Decided but unbuilt: no mention keeps today's behaviour (the head is told),
-  `@review` addresses the reviewer, and a mention in an AGENT-authored comment
-  never routes - or one "@review this" becomes a chain nobody asked for.
-- **Test failures do not notify.** Same shape as above: fire on the verdict
-  transition, only when the head is idle, deduped per (runner, commit).
-- **A forge reviewer's comment does not notify either** - the watcher caches the
-  threads and updates the chip, and the agent only finds out if it asks.
-- **An automated message looks like one you typed.** `SendAgentInput` injects a
-  plain user turn, so the chat cannot distinguish "you said this" from "Hydra said
-  this for you" - the `[Hydra]` prefix in the sync message is a workaround, and it
-  is in the text the model reads. The honest test is "did the user type it in the
-  composer", which makes fix-with-agent and resolve-with-agent automated too.
+- **A forge reviewer's comment does not notify** - the watcher caches the threads
+  and updates the chip, and the agent only finds out if it asks. Deliberate for
+  now (see above), but the shape is there if it is ever wanted.
+- **`resolve_review_thread` as an agent tool**, and the conflict-of-interest
+  question it raises: an agent resolving the comments about its own work.
 
 ### Unread, and where it should go next
 

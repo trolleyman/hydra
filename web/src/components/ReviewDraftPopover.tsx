@@ -166,7 +166,7 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
 
           <div className="flex items-center justify-end gap-2 px-3 py-2 border-t border-gray-200 dark:border-gray-700">
             {heldBack.size > 0 && (
-              <span className="mr-auto text-[11px] text-gray-400 dark:text-gray-500">
+              <span className="mr-auto text-2xs text-gray-400 dark:text-gray-500">
                 {heldBack.size} held back
               </span>
             )}

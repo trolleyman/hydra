@@ -5326,7 +5326,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
           line, which says who really sent it and why. */}
       {auto && (
         <Tooltip content={auto.why} side="top">
-          <span className="flex items-center gap-1 text-[10px] text-stone-400 dark:text-stone-500 cursor-help">
+          <span className="flex items-center gap-1 text-3xs text-stone-400 dark:text-stone-500 cursor-help">
             <Zap className="w-2.5 h-2.5" />
             <span className="optical-center">{auto.label}</span>
           </span>
@@ -9798,7 +9798,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return (
           <div className="flex items-center gap-2.5 select-none" aria-label="Agent resumed">
             <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
-            <span className="optical-center text-[11px] text-stone-400 dark:text-stone-500">Resumed</span>
+            <span className="optical-center text-2xs text-stone-400 dark:text-stone-500">Resumed</span>
             <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
           </div>
         )

@@ -95,7 +95,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           <span
             aria-label={`${agent.unread_comments} unread review comment${agent.unread_comments === 1 ? '' : 's'}`}
             title={`${agent.unread_comments} unread review comment${agent.unread_comments === 1 ? '' : 's'}`}
-            className="ml-auto shrink-0 inline-flex items-center gap-0.5 rounded bg-blue-100 px-1 text-[10px] font-medium tabular-nums text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+            className="ml-auto shrink-0 inline-flex items-center gap-0.5 rounded bg-blue-100 px-1 text-3xs font-medium tabular-nums text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
           >
             <MessageSquare className="w-2.5 h-2.5" />
             {agent.unread_comments}
