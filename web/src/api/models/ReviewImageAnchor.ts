@@ -49,6 +49,15 @@ export type ReviewImageAnchor = {
      */
     natural_h?: number;
     /**
+     * WRITE ONLY. A PNG data URL of the close-up around the pin, taken in the browser when the pin was placed - the picture analogue of a line comment's frozen diff block. Stored as a file beside the comment and served back as crop_url; it is never echoed here, because a response carrying a base64 image per comment would dwarf everything else in it.
+     *
+     */
+    crop?: string;
+    /**
+     * READ ONLY. Where to fetch the stored close-up. Absent when the comment has none.
+     */
+    crop_url?: string;
+    /**
      * For a VIDEO artifact, the moment the pin was placed at, in seconds from the start. A recording has a time axis as well as two spatial ones, so a position without it sends the reader hunting through the run. Absent for a still.
      *
      */

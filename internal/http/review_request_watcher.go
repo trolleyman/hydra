@@ -240,7 +240,7 @@ func (s *Server) hydraCommentsText(projectRoot, id string, r reviewq.Request) re
 	// Full context only for a narrowed read. "Show me everything" should stay
 	// cheap enough to call habitually; a diff block per comment would make an
 	// unfiltered read on a long review the most expensive tool in the session.
-	return reviewq.Result{OK: true, Message: reviewstore.RenderForAgent(all, len(r.Numbers) > 0, s.artifactImagePath(projectRoot))}
+	return reviewq.Result{OK: true, Message: reviewstore.RenderForAgent(all, len(r.Numbers) > 0, s.artifactImagePath(projectRoot, owner))}
 }
 
 // artifactImagePath resolves a comment's image anchor back to the picture it was
@@ -253,19 +253,22 @@ func (s *Server) hydraCommentsText(projectRoot, id string, r reviewq.Request) re
 // from a browser like any other client input. A file that no longer exists (the
 // artifact cache was cleared, or it has been regenerated under a new key) returns
 // "", which renders the anchor without a path rather than a path that 404s.
-func (s *Server) artifactImagePath(projectRoot string) reviewstore.ImagePathFunc {
-	return func(a reviewstore.ImageAnchor) string {
-		if s.Artifacts == nil || a.Script == "" || a.Key == "" || a.File == "" {
-			return ""
+func (s *Server) artifactImagePath(projectRoot, headID string) reviewstore.ImagePathFunc {
+	return func(c reviewstore.Comment) (string, string) {
+		a := c.Image
+		picture := ""
+		if a != nil && s.Artifacts != nil && a.Script != "" && a.Key != "" && a.File != "" {
+			if path, _, err := s.Artifacts.Manager(projectRoot).BlobPath(a.Script, a.Key, a.File); err == nil {
+				if _, err := os.Stat(path); err == nil {
+					picture = path
+				}
+			}
 		}
-		path, _, err := s.Artifacts.Manager(projectRoot).BlobPath(a.Script, a.Key, a.File)
-		if err != nil {
-			return ""
+		crop := paths.GetReviewCropPath(projectRoot, headID, c.Number)
+		if _, err := os.Stat(crop); err != nil {
+			crop = ""
 		}
-		if _, err := os.Stat(path); err != nil {
-			return ""
-		}
-		return path
+		return picture, crop
 	}
 }
 

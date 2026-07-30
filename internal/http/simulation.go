@@ -1403,6 +1403,15 @@ func (s *SimulationServer) AddReviewComment(w http.ResponseWriter, r *http.Reque
 		c.Status = api.Published
 		c.PublishedAt = ptr(c.CreatedAt)
 	}
+	// The daemon writes the crop to disk and hands back a URL; the simulation has
+	// no disk, so it echoes the posted data URL back in crop_url's place. Both are
+	// just "a URL an <img> can load", which is all the card needs.
+	if c.Image != nil && c.Image.Crop != nil {
+		img := *c.Image
+		img.CropUrl = img.Crop
+		img.Crop = nil
+		c.Image = &img
+	}
 	simCommentsByHead[id] = append(simCommentsByHead[id], c)
 	simCommentMu.Unlock()
 	var notified *string

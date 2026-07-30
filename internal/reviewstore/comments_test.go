@@ -187,8 +187,8 @@ func TestImageAnchorRendersPixelsAndFindsThePicture(t *testing.T) {
 		t.Errorf("Position() = %q, want the pixels and the image size", got)
 	}
 	c := Comment{Number: 9, Author: AuthorUser, Body: "this is 3px low", Image: &a}
-	out := RenderForAgent([]Comment{c}, true, func(ImageAnchor) string { return "/tmp/out/home-dark.png" })
-	for _, want := range []string{"#9 home-dark.png @ 34%,71%", "/tmp/out/home-dark.png", "right side of the screenshots artifact", "abc1234def05", "point: 514,697 px"} {
+	out := RenderForAgent([]Comment{c}, true, func(Comment) (string, string) { return "/tmp/out/home-dark.png", "/tmp/crops/9.png" })
+	for _, want := range []string{"#9 home-dark.png @ 34%,71%", "/tmp/out/home-dark.png", "right side of the screenshots artifact", "abc1234def05", "point: 514,697 px", "close-up of that spot: /tmp/crops/9.png"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendering missing %q:\n%s", want, out)
 		}

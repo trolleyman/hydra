@@ -476,13 +476,17 @@ func saveComments(projectRoot, id string, all []Comment) error {
 	return errtrace.Wrap(writeJSON(paths.GetReviewCommentsJson(projectRoot, id), data))
 }
 
-// ImagePathFunc resolves an image anchor to the picture's absolute path on this
-// machine, or "" when it cannot be located (the artifact cache was cleared, say).
+// ImagePathFunc resolves an image comment to two absolute paths on this machine:
+// the full picture it was pinned on, and the frozen close-up of what the pin
+// points at. Either may be "" when it cannot be located - the artifact cache was
+// cleared, or the comment predates crops.
 //
-// It is a parameter rather than something this package works out for itself so
-// that reviewstore stays a leaf: the layout it would need to know belongs to
-// internal/artifacts, and the caller that renders for an agent already has both.
-type ImagePathFunc func(ImageAnchor) string
+// It takes the whole Comment rather than just the anchor because the crop is
+// keyed by the comment's NUMBER, not by anything in the anchor. And it is a
+// parameter rather than something this package works out for itself so that
+// reviewstore stays a leaf: the layout belongs to internal/artifacts and
+// internal/paths, and the caller that renders for an agent already has both.
+type ImagePathFunc func(Comment) (picture, crop string)
 
 // RenderForAgent formats comments the way an agent reads them from a tool: the
 // handle, where it points, who wrote it, the body, and the frozen diff context.
@@ -519,7 +523,7 @@ func RenderForAgent(comments []Comment, withContext bool, imagePath ImagePathFun
 		// and without them the comment says only which picture it was about, which
 		// is the thing the anchor exists to improve on.
 		if c.Image != nil {
-			writeImageAnchor(&b, *c.Image, imagePath)
+			writeImageAnchor(&b, c, imagePath)
 		}
 		if withContext && c.Context != "" {
 			b.WriteString(c.Context)
@@ -533,14 +537,18 @@ func RenderForAgent(comments []Comment, withContext bool, imagePath ImagePathFun
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// writeImageAnchor renders the two detail lines under an image comment: where the
-// picture is, and where in it the pin was placed.
-func writeImageAnchor(b *strings.Builder, a ImageAnchor, imagePath ImagePathFunc) {
+// writeImageAnchor renders the detail lines under an image comment: where the
+// picture is, where in it the pin was placed, and the close-up of that spot.
+func writeImageAnchor(b *strings.Builder, c Comment, imagePath ImagePathFunc) {
+	a := *c.Image
 	where := a.File
+	var crop string
 	if imagePath != nil {
-		if p := imagePath(a); p != "" {
-			where = p
+		picture, cr := imagePath(c)
+		if picture != "" {
+			where = picture
 		}
+		crop = cr
 	}
 	b.WriteString("image: ")
 	b.WriteString(where)
@@ -569,6 +577,13 @@ func writeImageAnchor(b *strings.Builder, a ImageAnchor, imagePath ImagePathFunc
 		fmt.Fprintf(b, ", at %s into the recording", FormatTimecode(a.T))
 	}
 	b.WriteString("\n")
+	// The close-up is named SECOND and described as the cheaper read, because it
+	// is: it shows the spot alone, at a few KB, where the full picture is a whole
+	// screenshot the pin is one dot in. An agent that opens only one should open
+	// this one.
+	if crop != "" {
+		fmt.Fprintf(b, "close-up of that spot: %s\n", crop)
+	}
 }
 
 // NotifyLine is the one short line an agent is told when comments are published:

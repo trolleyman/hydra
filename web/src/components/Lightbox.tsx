@@ -10,6 +10,7 @@ import {
 } from '../lib/artifactAnchor'
 import { ReviewImageAnchor } from '../api'
 import { placePinPopover, type PopoverPlacement } from '../lib/pinPopover'
+import { captureCrop } from '../lib/imageCrop'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff, LightboxDiffControls } from './LightboxDiff'
 import { LightboxFile, LightboxPdf, LightboxText, LightboxVideo } from './LightboxViewers'
@@ -313,6 +314,10 @@ export function Lightbox({
   // currentTime is the only place that lives, and it has to be read at the moment
   // of the click - by the time the remark is typed the clip has moved on.
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  // The still being shown, for the same reason as videoRef: a crop is drawn from
+  // the element the browser has already painted, which is the only thing that can
+  // render every format an artifact might be (an SVG, a video frame).
+  const imgRef = useRef<HTMLImageElement | null>(null)
   const [pendingT, setPendingT] = useState(0)
   const [pinError, setPinError] = useState('')
   // Arming and any half-written pin are dropped when the picture changes: a comment
@@ -441,6 +446,12 @@ export function Lightbox({
       setPinError('This picture has no artifact identity to pin a comment to.')
       return
     }
+    // Frozen here, while the picture is still on screen and at this exact frame.
+    // An artifact is regenerated on every commit, so a comment that kept only
+    // coordinates stops being readable as soon as the picture moves under it.
+    const el = pinnedKind === 'video' ? videoRef.current : imgRef.current
+    const crop = el && dims ? captureCrop({ el, naturalW: dims.w, naturalH: dims.h }, pending) : null
+    if (crop) anchor.crop = crop
     setPinBusy(true)
     setPinError('')
     try {
@@ -927,6 +938,7 @@ export function Lightbox({
               <div className="relative">
                 <LightboxChecker className={chromeFade} />
                 <img
+                  ref={imgRef}
                   src={pinnedUrl ?? current.url}
                   alt={current.filename}
                   // The known size, as the picture's own box - at its LOGICAL size

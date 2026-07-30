@@ -18,6 +18,7 @@ import { MessagesSquare, Trash2, Send, TriangleAlert, X } from 'lucide-react'
 import type { PendingReviewComment } from '../lib/reviewComments'
 import { Tooltip } from './Tooltip'
 import { getFileIcon } from '../lib/fileIcons'
+import { ImageCommentCard } from './ImageCommentCard'
 
 export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, onRemove, onJump }: {
   comments: PendingReviewComment[]
@@ -112,6 +113,35 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
 
           <div className="max-h-72 overflow-y-auto py-1">
             {comments.map((c) => {
+              // A pin on a picture has no path or line to show, so the row that
+              // renders those would draw a file icon with an empty name beside it.
+              // It gets the card instead - which is the point of storing the crop:
+              // the remark is legible here without going to the picture first.
+              if (c.image) {
+                return (
+                  <div key={c.id} className="group flex items-start gap-2 px-1">
+                    <Tooltip content={heldBack.has(c.number) ? 'Include in this review' : 'Hold this one back'} side="top">
+                      <input
+                        type="checkbox"
+                        checked={!heldBack.has(c.number)}
+                        onChange={() => toggle(c.number)}
+                        aria-label={`Include comment on ${c.image.file}`}
+                        className="mt-4 ml-1.5 shrink-0 accent-blue-600 cursor-pointer"
+                      />
+                    </Tooltip>
+                    <div className="min-w-0 flex-1 py-1">
+                      <ImageCommentCard comment={c} />
+                    </div>
+                    <button
+                      onClick={() => onRemove(c.id)}
+                      aria-label="Discard this comment"
+                      className="mt-4 mr-1 shrink-0 p-1 rounded text-gray-400 opacity-0 group-hover:opacity-100 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )
+              }
               const stale = staleIds.has(c.id)
               const slash = c.path.lastIndexOf('/')
               const directory = slash >= 0 ? c.path.slice(0, slash + 1) : ''

@@ -570,6 +570,10 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	mux.HandleFunc("/ws/server/update", server.HandleServerUpdateWS)
 	mux.HandleFunc("POST /shells/projects/{project_id}/agents/{id}/close", server.HandleShellClose)
 	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
+
+	// A review comment's frozen close-up (see saveCommentCrop). Outside the
+	// OpenAPI mux because it returns raw PNG bytes, like the other blob routes.
+	mux.HandleFunc("/review-crops/projects/{project_id}/agents/{id}/blob", server.HandleReviewCropBlob)
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
 	mux.HandleFunc("/tests/projects/{project_id}/log", server.HandleTestLog)
 	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
