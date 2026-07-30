@@ -48,6 +48,7 @@ describe('langFromPath', () => {
     expect(langFromPath('a/b/server.go')).toBe('go')
     expect(langFromPath('deploy.sh')).toBe('bash')
     expect(langFromPath('config.toml')).toBe('ini')
+    expect(langFromPath('build.gradle.kts')).toBe('kotlin')
     // A log has a grammar of its own, and it is eager - the chat highlights on
     // the spot, so a lazily-loaded one would render plain here.
     expect(langFromPath('watch.log')).toBe('log')
