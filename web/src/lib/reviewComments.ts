@@ -252,9 +252,9 @@ export async function sendReviewComment(
   projectId: string | null,
   agentId: string,
   c: NewComment,
-): Promise<void> {
-  if (!projectId) return
-  await api.default.addReviewComment(projectId, agentId, {
+): Promise<{ comments: PendingReviewComment[]; notified: string | null; toReviewer: boolean }> {
+  if (!projectId) return { comments: [], notified: null, toReviewer: false }
+  const res = await api.default.addReviewComment(projectId, agentId, {
     body: c.text,
     path: c.path,
     line: c.lineNum,
@@ -264,4 +264,5 @@ export async function sendReviewComment(
     hunk_hash: c.hunkHash,
     publish: true,
   })
+  return { comments: all(res), notified: res.notified ?? null, toReviewer: res.notified_reviewer === true }
 }

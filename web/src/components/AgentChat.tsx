@@ -42,6 +42,7 @@ import { SiGit } from '@icons-pack/react-simple-icons'
 import { AgentStatus, type ChatEventUnion, type ChatFrame } from '../api'
 import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../lib/chatEvents'
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
+import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
@@ -1000,16 +1001,6 @@ function decodeEntities(text: string): string {
     .replace(/&amp;/g, '&')
 }
 
-// trimWorktreePaths rewrites absolute paths under the head's worktree to
-// worktree-relative ones for display - tool summaries and expanded inputs are
-// dominated by long /home/.../worktrees/<id>/ prefixes otherwise. The Raw
-// view keeps the untouched JSON.
-function trimWorktreePaths(text: string, worktree: string | null): string {
-  if (!worktree) return text
-  const prefix = worktree.endsWith('/') ? worktree : worktree + '/'
-  return text.split(prefix).join('').split(worktree).join('.')
-}
-
 // Input fields that hold PROSE (a sentence the agent wrote), rendered in the
 // sans font on the card header rather than monospace - a ScheduleWakeup prompt
 // or an Agent brief isn't code.
@@ -1095,6 +1086,13 @@ function summarizeToolInput(input: unknown, name = ''): { text: string; prose: b
   if (typeof input !== 'object') return { text: String(input), prose: false }
   const obj = input as Record<string, unknown>
   if (Object.keys(obj).filter((key) => !key.startsWith('_')).length === 0) return { text: '', prose: false }
+  if (name === 'mcp__hydra__get_review_comments' && Array.isArray(obj.numbers)) {
+    const numbers = obj.numbers.filter((number): number is number => typeof number === 'number')
+    return {
+      text: numbers.length > 0 ? `#${numbers.join(', #')}` : 'All published comments',
+      prose: true,
+    }
+  }
   if (name === 'ToolSearch' && typeof obj.query === 'string') return summarizeToolSearchQuery(obj.query)
   const gitTool = /^mcp__hydra__(git_.+)$/.exec(name)
   if (gitTool) {
@@ -1266,6 +1264,7 @@ function mcpToolLabel(name: string): string {
 }
 
 function displayToolName(name: string): string {
+  if (name === 'mcp__hydra__get_review_comments') return 'Review comments'
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
   if (mcp) return (mcp[1] === 'hydra' ? GIT_TOOL_LABELS[mcp[2]] : '') || `MCP ${mcpToolLabel(name)}`
   return ({ SendMessage: 'Send Message', ResumeAgent: 'Resume Agent', CloseAgent: 'Close Agent', UpdatePlan: 'Update Plan' } as Record<string, string>)[name] ?? name
@@ -1315,6 +1314,8 @@ function parseToolResult(content: unknown): { text: string; images: string[] } {
     if (Array.isArray(c)) return c.map(collect).filter(Boolean).join('\n')
     if (c && typeof c === 'object') {
       const b = c as ClaudeContentBlock & {
+        content?: unknown
+        result?: unknown
         source?: { type?: string; media_type?: string; data?: string; url?: string }
         tool_name?: string
       }
@@ -1329,6 +1330,13 @@ function parseToolResult(content: unknown): { text: string; images: string[] } {
         return ''
       }
       if (typeof b.text === 'string') return b.text
+      // Codex keeps an MCP call's CallToolResult envelope intact:
+      // `{ content: [{ type: "text", text: "..." }] }`. Claude hands us the
+      // inner content array directly. Walk the two provider-neutral envelope
+      // fields after the block cases above so both render the same useful text
+      // instead of Codex showing "(no output)" while Raw holds the answer.
+      if (b.content !== undefined) return collect(b.content)
+      if (b.result !== undefined) return collect(b.result)
     }
     return ''
   }
@@ -3115,6 +3123,7 @@ const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   mcp__hydra__git_merge_continue: GitMark,//GitMerge,
   mcp__hydra__git_merge_abort: GitMark,//GitMerge,
   mcp__hydra__git_stash: GitMark,//Archive,
+  mcp__hydra__get_review_comments: MessageSquare,
 }
 
 function LowlitPath({ path }: { path: string }) {
@@ -3299,6 +3308,7 @@ const ToolCard = memo(function ToolCard({
   const isRead = item.name === 'Read'
   const readPath = isRead && typeof input?.file_path === 'string' ? (input.file_path as string) : ''
   const mem = isRead ? memoryName(readPath) : null
+  const toolResult = isRead ? toolResultName(readPath) : null
   // The bare git_* name for a Hydra git tool ('' for anything else).
   const gitTool = /^mcp__hydra__(git_.+)$/.exec(item.name)?.[1] ?? ''
   // A single-file git_add's subject is a file, so it gets the same lowlit-path
@@ -3342,6 +3352,7 @@ const ToolCard = memo(function ToolCard({
   const isFileChanges = Array.isArray(input?.changes)
   const isGlob = item.name === 'Glob' && typeof input?.pattern === 'string'
   const isWebFetch = item.name === 'WebFetch' && typeof input?.url === 'string'
+  const isReviewComments = item.name === 'mcp__hydra__get_review_comments'
 
   // SendMessage: a note to another agent, so the card reads as who it went to +
   // what was said, and its JSON reply becomes a sentence (items: rich message
@@ -3362,6 +3373,8 @@ const ToolCard = memo(function ToolCard({
     : []
   const summary = mem
     ? `memory ${mem}`
+    : toolResult
+      ? `tool result ${toolResult}`
     : isWebSearch
       ? (typeof input?.query === 'string' && input.query.trim() ? input.query : 'Preparing search…')
     : isFileChanges
@@ -3372,7 +3385,7 @@ const ToolCard = memo(function ToolCard({
   // description / task subject / prose input field (a ScheduleWakeup prompt)
   // are prose (sans) already.
   const isPathSummary =
-    !isBash && !mem && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string')
+    !isBash && !mem && !toolResult && !!input && (isFileChanges || gitAddPaths.length > 0 || typeof input.file_path === 'string' || typeof input.path === 'string')
   const summaryPaths = isFileChanges
       ? changedPaths
       : gitAddPaths.length > 0
@@ -3380,7 +3393,7 @@ const ToolCard = memo(function ToolCard({
         : isPathSummary
           ? [collapseHome(trimWorktreePaths(String(input?.file_path ?? input?.path ?? ''), worktree))]
           : []
-  const summaryMono = !mem && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
+  const summaryMono = !mem && !toolResult && !isPathSummary && !isTaskTool && !isWebFetch && !isWebSearch && !(isBash && description) && !summarized.prose
   // The Input panel is redundant for a plain Read (item 1) - everything it holds
   // is already in the header - and for a tool with no arguments at all (an empty
   // `{}` input, e.g. EnterPlanMode), where a `{}` panel is pure noise. Bash shows
@@ -3389,7 +3402,9 @@ const ToolCard = memo(function ToolCard({
   // A single-file git_add is the same case as a plain Read: its header already
   // carries the path and the line ranges, so the panel would only repeat them.
   const gitAddSimple = gitTool === 'git_add' && gitAddPaths.length === 1
-  const hideInput = simpleRead || emptyInput || gitAddSimple
+  // The requested numbers are already in the header. Repeating them as JSON
+  // makes the useful review text start a panel lower for no extra information.
+  const hideInput = simpleRead || emptyInput || gitAddSimple || isReviewComments
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
   const hasInput = isBash || !hideInput
@@ -3612,6 +3627,8 @@ const ToolCard = memo(function ToolCard({
                           ? <WebSearchOutput text={renderedResult} />
                         : isWebFetch && !item.isError
                           ? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
+                        : isReviewComments && !item.isError
+                          ? <div className={`${PANEL_CLASS} px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200`}><Markdown text={renderedResult} /></div>
                         : scriptSections
                           ? <ScriptOutputPanel sections={scriptSections} />
                         : isRead && !item.isError
@@ -6475,7 +6492,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // it (item 20).
   const lastScrollRef = useRef({ top: 0, pinned: true })
 
-  const status = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
+  const headStatus = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
+  // A review slot has no db.Agent row, so its lifecycle comes from this pane's
+  // socket. Using the owning head's status here made a finished reviewer offer
+  // to queue messages whenever the head itself was still working.
+  const [reviewStatus, setReviewStatus] = useState<string>(AgentStatus.PENDING)
+  const status = review ? reviewStatus : headStatus
   const isTurnRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   // Whether this agent still had unread changes when it was opened - the cue to
   // land on the top of its last message instead of pinned to the bottom (see
@@ -6575,7 +6597,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // frame without re-running the reducer effect.
   const smoothStream = useChatStreamStore((s) => s.smooth)
 
-  const onStatusUpdateRef = useRef(onStatusUpdate)
+  const onStatusUpdateRef = useRef<(status: string) => void>(() => {})
   const onDiffRefreshRef = useRef(onDiffRefresh)
   // The current head status, read from inside the WS reducer closure (which is
   // pinned to its own render) to decide at replay_done whether a still-"working"
@@ -6590,7 +6612,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const questionMayBeLiveRef = useRef(false)
   const smoothStreamRef = useRef(smoothStream)
   useEffect(() => {
-    onStatusUpdateRef.current = onStatusUpdate
+    onStatusUpdateRef.current = (nextStatus) => {
+      if (review) setReviewStatus(nextStatus)
+      onStatusUpdate?.(nextStatus)
+    }
     onDiffRefreshRef.current = onDiffRefresh
     isTurnRunningRef.current = isTurnRunning
     questionMayBeLiveRef.current = isTurnRunning || status === AgentStatus.NEEDS_INPUT
@@ -9330,7 +9355,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // It starts a turn; nudge the status optimistically (like the terminal's
       // Enter handling), unless the agent is answering our question.
       if (status !== AgentStatus.NEEDS_INPUT) {
-        useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
+        // A reviewer's status is socket-local; never mark the owning head as
+        // running just because somebody asked the reviewer a follow-up.
+        if (!review) useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
         onStatusUpdateRef.current?.(AgentStatus.RUNNING)
       }
     }

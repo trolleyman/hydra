@@ -3,6 +3,7 @@
 package nshost
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -149,5 +150,21 @@ func TestSpawnPipes(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("child did not exit after stdin EOF")
+	}
+}
+
+func TestLinePrefixWriter(t *testing.T) {
+	var out bytes.Buffer
+	w := &linePrefixWriter{dst: &out, prefix: []byte("[codex:head-1] "), lineStart: true}
+
+	for _, chunk := range []string{"first", " line\nsecond\n", "third", " line"} {
+		if _, err := w.Write([]byte(chunk)); err != nil {
+			t.Fatalf("write %q: %v", chunk, err)
+		}
+	}
+
+	want := "[codex:head-1] first line\n[codex:head-1] second\n[codex:head-1] third line"
+	if got := out.String(); got != want {
+		t.Fatalf("prefixed stderr = %q, want %q", got, want)
 	}
 }
