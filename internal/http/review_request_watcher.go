@@ -164,7 +164,7 @@ func (s *Server) recordLocalNote(projectRoot, id string, r reviewq.Request) revi
 	owner, author := commentOwner(id)
 	target := r.ReplyTo
 	if target <= 0 {
-		return reviewq.Result{Message: "No comment number was given, so the reply had nothing to attach to. Take the number from get_review_comments."}
+		return reviewq.Result{Message: "No comment number was given, so the reply had nothing to attach to. Take the number from mcp__hydra__get_review_comments."}
 	}
 
 	// One of Hydra's own comments: reply in kind, threaded under it.
@@ -185,7 +185,7 @@ func (s *Server) recordLocalNote(projectRoot, id string, r reviewq.Request) revi
 	_, ref, ok := reviewstore.ForgeRef(projectRoot, owner, target)
 	if !ok || ref.Thread == "" {
 		return reviewq.Result{Message: fmt.Sprintf(
-			"No comment on this head has the number %d. Call get_review_comments to see what is there.", target)}
+			"No comment on this head has the number %d. Call mcp__hydra__get_review_comments to see what is there.", target)}
 	}
 	if _, err := reviewstore.AppendNote(projectRoot, owner, reviewstore.LocalNote{
 		ThreadID: ref.Thread, Author: author, Body: r.Body,
@@ -233,7 +233,7 @@ func (s *Server) hydraCommentsText(projectRoot, id string, r reviewq.Request) re
 			}
 		}
 		if len(picked) == 0 {
-			return reviewq.Result{OK: false, Message: "No published comment matches those numbers. Call get_review_comments with no arguments to see what is there."}
+			return reviewq.Result{OK: false, Message: "No published comment matches those numbers. Call mcp__hydra__get_review_comments with no arguments to see what is there."}
 		}
 		all = picked
 	}

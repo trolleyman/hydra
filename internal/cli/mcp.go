@@ -347,7 +347,7 @@ func runFromMCP(op reviewq.Op, target string) (string, bool) {
 	if !ok {
 		// Ambiguous on purpose: the request may well have been picked up, so the
 		// agent must check rather than fire it again.
-		return "Hydra did not confirm in time, so the run may or may not have started. Call get_head_status to see, rather than asking again.", false
+		return "Hydra did not confirm in time, so the run may or may not have started. Call mcp__hydra__get_head_status to see, rather than asking again.", false
 	}
 	return res.Message, res.OK
 }
@@ -420,7 +420,7 @@ func requestMCPAccess(agentType, name string) (bool, string) {
 		}
 	}
 	if !inCatalog {
-		return false, fmt.Sprintf("%q is not a host-configured MCP server. Call list_available_mcp_servers to see what you can request.", name)
+		return false, fmt.Sprintf("%q is not a host-configured MCP server. Call mcp__hydra__list_available_mcp_servers to see what you can request.", name)
 	}
 
 	dir := os.Getenv(gate.EnvApprovalDir)

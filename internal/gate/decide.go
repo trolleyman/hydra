@@ -172,9 +172,9 @@ func GitReadonlyAdvice(cmd, output string) string {
 		"add":         "git_add",
 		"reset":       "git_reset",
 		"revert":      "git_revert",
-		"rebase":      "git_rebase (or git_rebase_continue / git_rebase_abort)",
+		"rebase":      "git_rebase (or mcp__hydra__git_rebase_continue / mcp__hydra__git_rebase_abort)",
 		"cherry-pick": "git_cherry_pick",
-		"merge":       "git_merge (or git_merge_continue / git_merge_abort)",
+		"merge":       "git_merge (or mcp__hydra__git_merge_continue / mcp__hydra__git_merge_abort)",
 		"stash":       "git_stash",
 	}[sub]
 	return fmt.Sprintf("%s Use the mcp__hydra__%s tool instead of `git %s` - it runs the operation on your own branch, host-side.", why, tool, sub)
