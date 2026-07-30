@@ -27,6 +27,42 @@ func TestReviewSessionIDIsASlot(t *testing.T) {
 	}
 }
 
+func TestReviewAgentTypeFollowsChatCapableHeadProvider(t *testing.T) {
+	tests := []struct {
+		head sandbox.AgentType
+		want sandbox.AgentType
+	}{
+		{sandbox.AgentTypeClaude, sandbox.AgentTypeClaude},
+		{sandbox.AgentTypeCodex, sandbox.AgentTypeCodex},
+		{sandbox.AgentTypeGemini, sandbox.AgentTypeClaude},
+		{sandbox.AgentTypeCopilot, sandbox.AgentTypeClaude},
+		{sandbox.AgentTypeBash, sandbox.AgentTypeClaude},
+	}
+	for _, tt := range tests {
+		if got := reviewAgentType(Head{AgentType: tt.head}); got != tt.want {
+			t.Errorf("reviewAgentType(%q) = %q, want %q", tt.head, got, tt.want)
+		}
+	}
+}
+
+func TestCodexReviewConversationIDPersistsAcrossRestarts(t *testing.T) {
+	root := t.TempDir()
+	id := ReviewSessionID("h1")
+	if got := readCodexSlotConversationID(root, id); got != "" {
+		t.Fatalf("missing conversation ID = %q, want empty", got)
+	}
+	if err := writeCodexSlotConversationID(root, id, "thread-123"); err != nil {
+		t.Fatalf("write conversation ID: %v", err)
+	}
+	if got := readCodexSlotConversationID(root, id); got != "thread-123" {
+		t.Fatalf("conversation ID = %q, want %q", got, "thread-123")
+	}
+	removeCodexSlotConversationID(root, id)
+	if got := readCodexSlotConversationID(root, id); got != "" {
+		t.Fatalf("conversation ID after purge = %q, want empty", got)
+	}
+}
+
 // The reviewer's whole purpose is that it cannot write to the repo. The MCP
 // block list is one of the two enforcement layers (the other is
 // GitIsolationReadonly at the OS level), so it must cover every host-mediated git

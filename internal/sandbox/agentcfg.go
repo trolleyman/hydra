@@ -562,10 +562,10 @@ func BuildCopilotHooks(hydraBin string) ([]byte, error) {
 	return data, nil
 }
 
-// BuildCodexHooks merges Hydra's lifecycle observer into the user's Codex
-// hooks.json. Matching groups are appended because Codex runs every match and
-// Hydra's observer should not replace personal hooks.
-func BuildCodexHooks(existing []byte, hydraBin string) ([]byte, error) {
+// BuildCodexHooks merges Hydra's lifecycle observer and decision gate into the
+// user's Codex hooks.json. Matching groups are appended because Codex runs every
+// match and Hydra's hooks should not replace personal hooks.
+func BuildCodexHooks(existing []byte, hydraBin string, gateEnabled bool) ([]byte, error) {
 	type hooksFile struct {
 		Description string                       `json:"description,omitempty"`
 		Hooks       map[string][]json.RawMessage `json:"hooks"`
@@ -589,6 +589,15 @@ func BuildCodexHooks(existing []byte, hydraBin string) ([]byte, error) {
 	} {
 		file.Hooks[event] = append(file.Hooks[event], json.RawMessage(group))
 	}
+	if gateEnabled {
+		gateGroup, err := json.Marshal(matcherGroup{Hooks: []hookHandler{{Type: "command", Command: GateCommand(hydraBin, "codex")}}})
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		for _, event := range []string{"PreToolUse", "PostToolUse"} {
+			file.Hooks[event] = append(file.Hooks[event], json.RawMessage(gateGroup))
+		}
+	}
 	data, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal codex hooks: %w", err))
@@ -596,10 +605,10 @@ func BuildCodexHooks(existing []byte, hydraBin string) ([]byte, error) {
 	return data, nil
 }
 
-// BuildCodexConfig merges the Hydra control MCP server into the user's Codex
-// config.toml (`[mcp_servers.hydra]`), preserving everything else (model, auth,
-// etc.). Codex reads MCP servers from ~/.codex/config.toml. A malformed host
-// config is a hard error so the caller can skip seeding rather than clobber it.
+// BuildCodexConfig filters the user's Codex MCP servers to keep, injects Hydra's
+// control server, and preserves every non-MCP setting (model, auth, etc.).
+// Codex reads MCP servers from ~/.codex/config.toml. A malformed host config is
+// a hard error so the caller can skip seeding rather than clobber it.
 var codexHydraMCPEnvVars = []string{
 	"HYDRA_HEAD_ID",
 	"HYDRA_AGENT_TYPE",
@@ -615,16 +624,31 @@ var codexHydraMCPEnvVars = []string{
 	"HYDRA_MCP_CATALOG_PATH",
 }
 
-func BuildCodexConfig(existing []byte, hydraBin string) ([]byte, error) {
+func BuildCodexConfig(existing []byte, hydraBin string, keep []string) ([]byte, error) {
 	cfg := map[string]interface{}{}
 	if len(existing) > 0 {
 		if err := toml.Unmarshal(existing, &cfg); err != nil {
 			return nil, errtrace.Wrap(fmt.Errorf("unmarshal codex config: %w", err))
 		}
 	}
+	features, _ := cfg["features"].(map[string]interface{})
+	if features == nil {
+		features = map[string]interface{}{}
+	}
+	features["hooks"] = true
+	cfg["features"] = features
 	servers, _ := cfg["mcp_servers"].(map[string]interface{})
 	if servers == nil {
 		servers = map[string]interface{}{}
+	}
+	allowed := make(map[string]bool, len(keep))
+	for _, name := range keep {
+		allowed[name] = true
+	}
+	for name := range servers {
+		if !allowed[name] {
+			delete(servers, name)
+		}
 	}
 	name, command, args := HydraMCPServer(hydraBin, "codex")
 	servers[name] = map[string]interface{}{
@@ -639,6 +663,28 @@ func BuildCodexConfig(existing []byte, hydraBin string) ([]byte, error) {
 		return nil, errtrace.Wrap(fmt.Errorf("marshal codex config: %w", err))
 	}
 	return data, nil
+}
+
+// ListCodexMCPServers enumerates the MCP server names in a Codex config.toml.
+// It reads the unfiltered host config so the Hydra control server can offer
+// servers that are not yet allowed for approval.
+func ListCodexMCPServers(data []byte) []MCPServer {
+	if len(data) == 0 {
+		return nil
+	}
+	var cfg map[string]interface{}
+	if toml.Unmarshal(data, &cfg) != nil {
+		return nil
+	}
+	servers, _ := cfg["mcp_servers"].(map[string]interface{})
+	out := make([]MCPServer, 0, len(servers))
+	for name := range servers {
+		if name != "" && name != gate.HydraControlServer {
+			out = append(out, MCPServer{Name: name, Source: "user"})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // AgentArgv returns the command line to run inside the sandbox for the given

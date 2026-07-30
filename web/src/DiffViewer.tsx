@@ -2175,6 +2175,14 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
           }}
           onMouseEnter={cancelHide}
           onMouseLeave={scheduleHide}
+          // The box is portalled outside the commit selector's DOM subtree.
+          // Without this, the selector's document-level outside-click handler
+          // closes the menu on mouse-down, unmounting the card before a click or
+          // text selection inside it can begin.
+          onMouseDown={(e) => {
+            e.stopPropagation()
+            cancelHide()
+          }}
         >
           {content}
         </div>,
@@ -2906,7 +2914,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
       onSecondary: async () => {
         await runWithToast(
           () => api.default.sendAgentInput(projectId ?? '', agent.id, {
-            text: `Update this branch from its base by merging the local ${baseBranch} branch in (do not git fetch first), resolving any conflicts that arise.`,
+            text: `Update this branch from its base by merging the local \`${baseBranch}\` branch in (do not git fetch first), resolving any conflicts that arise.`,
             origin: 'fix_conflicts',
           }),
           { errorPrefix: 'Failed to send update request to agent' },

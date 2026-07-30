@@ -388,8 +388,9 @@ function ScopeGlyph({ scopeKind }: { scopeKind?: ScopeKind }) {
 function RowSegments({ segs, isDir, expanded, fileLine, pathMissing }: { segs: Seg[]; isDir: boolean; expanded: boolean; fileLine?: number | null; pathMissing?: boolean }) {
   const pathSegs = segs.filter((s) => s.kind === 'path')
   const scopeSegs = segs.filter((s) => s.kind === 'scope')
-  const pieces: { icon: ReactNode; text: string; textClass: string; suffix?: ReactNode }[] = []
+  const pieces: { icon: ReactNode; text: ReactNode; textClass: string; mono?: boolean; suffix?: ReactNode }[] = []
   if (pathSegs.length > 0) {
+    const path = pathSegs.map((s) => s.label).join('/')
     const icon = isDir
       ? (expanded ? <FolderOpen className="w-3.5 h-3.5 text-blue-500 shrink-0" /> : <Folder className="w-3.5 h-3.5 text-blue-500 shrink-0" />)
       : <FileGlyph name={filenameOf(pathSegs[pathSegs.length - 1].label)} />
@@ -401,10 +402,17 @@ function RowSegments({ segs, isDir, expanded, fileLine, pathMissing }: { segs: S
       : fileLine != null && fileLine > 0
         ? <span className="font-mono text-3xs text-gray-400 dark:text-gray-500 shrink-0">:{fileLine}</span>
         : undefined
-    pieces.push({ icon, text: pathSegs.map((s) => s.label).join('/'), textClass: 'text-gray-700 dark:text-gray-300', suffix })
+    pieces.push({
+      icon,
+      // The tree geometry already communicates hierarchy, so both compacted
+      // folder chains and file paths stay at one emphasis level here.
+      text: path,
+      textClass: 'text-gray-700 dark:text-gray-300',
+      suffix,
+    })
   }
   for (const s of scopeSegs) {
-    pieces.push({ icon: <ScopeGlyph scopeKind={s.scopeKind} />, text: s.label, textClass: 'italic text-gray-500 dark:text-gray-400' })
+    pieces.push({ icon: <ScopeGlyph scopeKind={s.scopeKind} />, text: s.label, textClass: 'italic text-gray-500 dark:text-gray-400', mono: true })
   }
   return (
     <span className="flex items-center gap-1.5 min-w-0">
@@ -412,7 +420,7 @@ function RowSegments({ segs, isDir, expanded, fileLine, pathMissing }: { segs: S
         <Fragment key={i}>
           {i > 0 ? <span className="shrink-0 text-xs text-gray-300 dark:text-gray-600">›</span> : null}
           {p.icon}
-          <span className={`font-mono text-xs truncate min-w-0 ${p.textClass}`}>{p.text}</span>
+          <span className={`text-xs truncate min-w-0 ${p.mono ? 'font-mono' : ''} ${p.textClass}`}>{p.text}</span>
           {p.suffix}
         </Fragment>
       ))}
@@ -475,7 +483,15 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo, onFix
         </span>
         {showLocation && loc ? (
           <span className="inline-flex items-center gap-1 min-w-0 shrink-1">
-            <span className="font-mono text-3xs text-gray-400 dark:text-gray-500 truncate">{loc}</span>
+            <FileGlyph name={filenameOf(c.path ?? '')} />
+            <span className="text-3xs text-gray-600 dark:text-gray-400 truncate">
+              {c.path}
+            </span>
+            {c.line != null && c.line > 0 ? (
+              <span className="font-mono text-3xs text-gray-400 dark:text-gray-500 shrink-0">
+                :{c.line}{c.col != null && c.col > 0 ? `:${c.col}` : ''}
+              </span>
+            ) : null}
             {/* Scope-mode rows have no path piece to carry the marker, so it hangs
                 off the file:line secondary here. */}
             {c.path_missing ? <MissingFileMarker /> : null}
@@ -594,7 +610,12 @@ function NodeChildren({ node, depth, connect = false, isExpanded, onToggle, useS
   // status first so failures surface above passing siblings. Subtrees and
   // cases the filter fully hid don't render (their counts survive in the
   // ancestors' badges).
-  const children = [...node.children.values()].filter((c) => c.visTotal > 0).sort((a, b) => a.label.localeCompare(b.label))
+  const children = [...node.children.values()]
+    .filter((c) => c.visTotal > 0)
+    .sort((a, b) => {
+      const dirOrder = Number(nodeIsDir(b)) - Number(nodeIsDir(a))
+      return dirOrder || a.label.localeCompare(b.label)
+    })
   // React keys must be assigned in the STABLE visCases order, before the
   // status sort below: a post-sort index suffix changed a row's key whenever a
   // streamed status update reordered the list, remounting rows mid-reorder

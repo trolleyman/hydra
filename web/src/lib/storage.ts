@@ -79,6 +79,11 @@ export const StorageKeys = {
   // block, and a mark typed over a selection wraps it. Absent/'1' = on (the default). See
   // lib/composerPrefs.ts + lib/autoPair.ts.
   autoPair: 'hydra-auto-pair',
+  // '1' when the user has turned ON the browser's own spellchecker in Hydra's
+  // text boxes (the composers, the review comment boxes, the commit message, the
+  // question card's free-text answers). Absent = off, the default. See
+  // lib/composerPrefs.ts.
+  spellcheck: 'hydra-spellcheck',
   // 'off' when the user has turned OFF smooth (paced) streaming of chat-mode agent
   // text. Default (absent) = on: incoming token bursts are revealed at a steady
   // per-frame rate so the text reads as continuous typing rather than landing in

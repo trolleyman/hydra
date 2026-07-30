@@ -48,6 +48,7 @@ import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { FILE_BANNER, viewLineNumbers } from '../lib/fileViewCommand'
 import { buildOutputSpans } from '../lib/buildOutput'
+import { isJsonOutput } from '../lib/jsonOutput'
 import { diskOutputSpans } from '../lib/diskOutput'
 import { searchSummarySpans } from '../lib/searchSummary'
 import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
@@ -63,7 +64,7 @@ import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
-import { useAutoPairStore, usePasteMarkersStore } from '../lib/composerPrefs'
+import { useAutoPairStore, usePasteMarkersStore, useSpellcheckStore } from '../lib/composerPrefs'
 import { fenceEnterEdit } from '../lib/autoPair'
 import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
@@ -86,6 +87,7 @@ import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentL
 // highlighted by, item 3) now lives in lib/fileKind, beside the file-type
 // classifier, so the lightbox's text viewer highlights by the same table.
 import { langFromPath } from '../lib/fileKind'
+import { getFileIcon } from '../lib/fileIcons'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
@@ -1984,6 +1986,7 @@ function OutputPanel({ text, lang, markers }: { text: string; lang: string; isEr
       if (lang) return highlightHtml(stripAnsi(text), lang)
       return separatorHtml(text, markerKey ? markerKey.split('\n') : [])
         ?? (hasAnsi(text) ? ansiToHtml(text) : null)
+        ?? (isJsonOutput(text) ? highlightHtml(text, 'json') : null)
     },
     [text, lang, markerKey],
   )
@@ -2146,12 +2149,19 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
         const diff = typeof change.diff === 'string' ? change.diff : ''
         const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
+        const slash = path.lastIndexOf('/')
+        const directory = slash >= 0 ? path.slice(0, slash + 1) : ''
+        const fileName = slash >= 0 ? path.slice(slash + 1) : path
+        const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName)
         return (
           <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
             {showFileHeaders && (
               <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
-                <FileText className="h-3 w-3 shrink-0 text-blue-500" />
-                <span className="min-w-0 truncate font-medium text-stone-700 dark:text-stone-200">{path}</span>
+                <FileIcon className={`h-3.5 w-3.5 shrink-0 ${fileIconClass}`} />
+                <span className="min-w-0 truncate font-medium">
+                  {directory && <span className="text-stone-400 dark:text-stone-500">{directory}</span>}
+                  <span className="text-stone-700 dark:text-stone-200">{fileName}</span>
+                </span>
                 <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
               </div>
             )}
@@ -3167,13 +3177,7 @@ const ToolCard = memo(function ToolCard({
   const rawInput = (typeof item.input === 'object' && item.input !== null ? item.input : null) as
     | Record<string, unknown>
     | null
-	const input = useMemo(() => {
-		if (!rawInput || (!('_raw' in rawInput) && !('_raw_events' in rawInput))) return rawInput
-		const visible = { ...rawInput }
-		delete visible._raw
-		delete visible._raw_events
-		return visible
-	}, [rawInput])
+	const input = useMemo(() => visibleToolInput(rawInput), [rawInput])
   const command = typeof input?.command === 'string' ? (input.command as string) : ''
 	const commandCwd = typeof input?.cwd === 'string' ? input.cwd : ''
   // The host_run MCP tool is the escape hatch's first-class form: its `command`
@@ -3532,7 +3536,7 @@ const ToolCard = memo(function ToolCard({
               ) : gitTool && input && !hideInput ? (
                 <GitToolFields tool={gitTool} input={input} worktree={worktree} />
               ) : hideInput ? null : (
-                <CodePanel code={trimWorktreePaths(JSON.stringify(item.input, null, 2) ?? '', worktree)} lang="json" />
+                <CodePanel code={trimWorktreePaths(JSON.stringify(input, null, 2) ?? '', worktree)} lang="json" />
               )}
 				{(renderedResult !== undefined || (item.resultImages && item.resultImages.length > 0)) && (
                 <div>
@@ -3831,6 +3835,15 @@ interface SubagentLinks {
   taskToolByUse: Record<string, ToolItem>
   awaitingChildren: Set<string>
   openSubView: (key: string) => void
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function visibleToolInput(input: Record<string, unknown> | null): Record<string, unknown> | null {
+	if (!input || (!('_raw' in input) && !('_raw_events' in input))) return input
+	const visible = { ...input }
+	delete visible._raw
+	delete visible._raw_events
+	return visible
 }
 
 // shellCwdsFor follows the working directory across a list of chat items, so
@@ -4855,6 +4868,12 @@ export function QuestionCard({
   // is simply gone.
   const [submitted, setSubmitted] = useState(false)
   const [sent, setSent] = useState(false)
+  // The free-text boxes below are plain textareas rather than
+  // HighlightedTextareas, so they follow the same spellcheck preference by hand
+  // (see lib/composerPrefs) - an answer typed here is the same kind of text as
+  // one typed in the composer, and the two reading differently was the point of
+  // the setting.
+  const spellcheck = useSpellcheckStore((s) => s.enabled)
   // `submitted` stops counting the moment the card is known expired: that is
   // the daemon reporting it never delivered the answer (question_expired), so
   // the optimistic "Answered" was a lie and the card unlocks for the message
@@ -5063,6 +5082,7 @@ export function QuestionCard({
           </span>
           <textarea
             rows={1}
+            spellCheck={spellcheck}
             autoFocus={value === '' && !answered}
             value={value}
             onClick={(e) => e.stopPropagation()}
@@ -5207,6 +5227,7 @@ export function QuestionCard({
                     </span>
                     <textarea
                       rows={1}
+                      spellCheck={spellcheck}
                       value={showOther[qi]}
                       onChange={(e) => {
                         const v = e.target.value

@@ -53,11 +53,19 @@ function at(dir: string, file: string, name: string): TestCase {
   return { name, status: 'passed' as TestCaseStatus, path: `web/src/${dir}/${file}` }
 }
 
+function pathRow(path: string): HTMLElement {
+  const row = screen.getByTitle(`Copy ${path}`).closest<HTMLElement>('[role="button"]')
+  if (!row) throw new Error(`No tree row for ${path}`)
+  return row
+}
+
 // Shaped so nothing collapses away under us: two cases per file (or hoistedCase
 // folds the chain into one leaf row) and two files under `components` (or
 // compact() merges it into "components/Chat.test.tsx"). `lib` deliberately has
 // only the one file, so it DOES merge - the level counting below expects it.
 const DEEP: TestCase[] = [
+  { name: 'loads api', status: 'passed', path: 'web/src/api.test.ts' },
+  { name: 'handles api errors', status: 'passed', path: 'web/src/api.test.ts' },
   at('components', 'Chat.test.tsx', 'renders'),
   at('components', 'Chat.test.tsx', 'scrolls'),
   at('components', 'Diff.test.tsx', 'diffs'),
@@ -76,14 +84,20 @@ describe('CaseTree defaultExpanded', () => {
   it('opens one level per click when defaultExpanded is off', () => {
     render(<CaseTree cases={DEEP} visible={DEEP} useScope={false} defaultExpanded={false} />)
     // Only the root row is on screen; nothing below it is even mounted.
-    expect(screen.getByText('web/src')).toBeTruthy()
+    expect(pathRow('web/src')).toBeTruthy()
     expect(screen.queryByText('components')).toBeNull()
     expect(screen.queryByText('renders')).toBeNull()
 
     // One click reveals its children - and stops there.
-    fireEvent.click(screen.getByText('web/src'))
-    expect(screen.getByText('components')).toBeTruthy()
-    expect(screen.getByText('lib/paths.test.ts')).toBeTruthy()
+    fireEvent.click(pathRow('web/src'))
+    const components = screen.getByText('components')
+    const alphabeticallyEarlierFile = pathRow('web/src/api.test.ts')
+    expect(components).toBeTruthy()
+    expect(alphabeticallyEarlierFile).toBeTruthy()
+    // Directory nodes sort before file nodes even when the file's label would
+    // otherwise come first alphabetically.
+    expect(components.compareDocumentPosition(alphabeticallyEarlierFile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(pathRow('web/src/lib/paths.test.ts')).toBeTruthy()
     expect(screen.queryByText('Chat.test.tsx')).toBeNull()
 
     // The next level down behaves the same way.
@@ -112,7 +126,7 @@ describe('CaseTree defaultExpanded', () => {
       />
     )
     const { rerender, unmount } = render(tree())
-    fireEvent.click(screen.getByText('web/src'))
+    fireEvent.click(pathRow('web/src'))
     rerender(tree())
     expect(screen.getByText('components')).toBeTruthy()
 

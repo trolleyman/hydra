@@ -75,6 +75,13 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- Try not to bother the user with requests unless necessary.\n" +
 	"- If there are any design decisions made without user input, document them in each commit."
 
+// Codex does not have Claude's Bash `description` input field. A leading shell
+// comment gives its command-execution item the same durable human label without
+// changing what the shell does; internal/chat/codex.go reads it back into the
+// provider-neutral tool input that the shared Bash card already renders.
+const codexBashDescriptionPrompt = "## Bash tool descriptions\n" +
+	"- Start each non-trivial shell command with a concise comment describing its purpose, on its own first line: `# Inspect the usage handlers`. Hydra shows that comment as the Bash tool card description.\n"
+
 // DefaultResumePrompt is the message Hydra types into an agent that was
 // actively working when the daemon restarted, so it resumes its task rather
 // than idling after its conversation is restored. Agents that were waiting on
@@ -1143,6 +1150,9 @@ func LoadInternalDefaults() Config {
 // <branch> and <base-branch> placeholders are substituted later by the caller.
 func BuildFinalPrePrompt(cfg Config, agentType string) string {
 	parts := []string{DefaultPrePrompt}
+	if agentType == string(sandbox.AgentTypeCodex) {
+		parts = append(parts, codexBashDescriptionPrompt)
+	}
 	if cfg.Defaults.PrePrompt != nil && *cfg.Defaults.PrePrompt != "" {
 		parts = append(parts, *cfg.Defaults.PrePrompt)
 	}
