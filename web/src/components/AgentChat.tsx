@@ -6475,7 +6475,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // it (item 20).
   const lastScrollRef = useRef({ top: 0, pinned: true })
 
-  const status = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
+  const headStatus = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
+  // A review slot has no db.Agent row, so its lifecycle comes from this pane's
+  // socket. Using the owning head's status here made a finished reviewer offer
+  // to queue messages whenever the head itself was still working.
+  const [reviewStatus, setReviewStatus] = useState<string>(AgentStatus.PENDING)
+  const status = review ? reviewStatus : headStatus
   const isTurnRunning = status === AgentStatus.RUNNING || status === AgentStatus.STARTING
   // Whether this agent still had unread changes when it was opened - the cue to
   // land on the top of its last message instead of pinned to the bottom (see
@@ -6575,7 +6580,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // frame without re-running the reducer effect.
   const smoothStream = useChatStreamStore((s) => s.smooth)
 
-  const onStatusUpdateRef = useRef(onStatusUpdate)
+  const onStatusUpdateRef = useRef<(status: string) => void>(() => {})
   const onDiffRefreshRef = useRef(onDiffRefresh)
   // The current head status, read from inside the WS reducer closure (which is
   // pinned to its own render) to decide at replay_done whether a still-"working"
@@ -6590,7 +6595,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const questionMayBeLiveRef = useRef(false)
   const smoothStreamRef = useRef(smoothStream)
   useEffect(() => {
-    onStatusUpdateRef.current = onStatusUpdate
+    onStatusUpdateRef.current = (nextStatus) => {
+      if (review) setReviewStatus(nextStatus)
+      onStatusUpdate?.(nextStatus)
+    }
     onDiffRefreshRef.current = onDiffRefresh
     isTurnRunningRef.current = isTurnRunning
     questionMayBeLiveRef.current = isTurnRunning || status === AgentStatus.NEEDS_INPUT
@@ -9330,7 +9338,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // It starts a turn; nudge the status optimistically (like the terminal's
       // Enter handling), unless the agent is answering our question.
       if (status !== AgentStatus.NEEDS_INPUT) {
-        useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
+        // A reviewer's status is socket-local; never mark the owning head as
+        // running just because somebody asked the reviewer a follow-up.
+        if (!review) useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
         onStatusUpdateRef.current?.(AgentStatus.RUNNING)
       }
     }

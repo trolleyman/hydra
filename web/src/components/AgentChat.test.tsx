@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
+import { AgentStatus, type AgentResponse } from '../api'
+import { useAgentStore } from '../stores/agentStore'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
 // paste-markers preference on) a "[filename]" marker in the text. Both mutations
@@ -99,6 +101,51 @@ async function connectedComposer(): Promise<HTMLTextAreaElement> {
   await waitFor(() => expect(ta).not.toBeDisabled())
   return ta
 }
+
+describe('review composer status', () => {
+  beforeAll(() => {
+    vi.stubGlobal('WebSocket', RecordingWebSocket)
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    sockets.length = 0
+    localStorage.clear()
+    useAgentStore.setState({ agents: [] })
+  })
+
+  it('offers Send when the reviewer finishes even if the owning head is running', async () => {
+    const agentId = `agent-${++agentSeq}`
+    useAgentStore.setState({
+      agents: [{ id: agentId, agent_status: { status: AgentStatus.RUNNING } } as AgentResponse],
+    })
+    render(
+      <ChatPane
+        agentId={agentId}
+        projectId="proj"
+        active
+        reconnectAttempt={0}
+        onStatusUpdate={vi.fn()}
+        onDiffRefresh={vi.fn()}
+        onSelectCommit={vi.fn()}
+        review
+      />,
+    )
+    const ta = await connectedComposer()
+    fireEvent.change(ta, { target: { value: 'one more question' } })
+
+    act(() => sockets[0].emit({ type: 'status', status: AgentStatus.RUNNING }))
+    await screen.findByRole('button', { name: 'Queue message' })
+
+    act(() => sockets[0].emit({ type: 'status', status: AgentStatus.FINISHED }))
+    await screen.findByRole('button', { name: 'Send message' })
+    expect(useAgentStore.getState().agents[0].agent_status?.status).toBe(AgentStatus.RUNNING)
+  })
+})
 
 describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
   beforeAll(() => {
