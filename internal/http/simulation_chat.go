@@ -227,6 +227,27 @@ func simCommit(sha, shortSHA, subject, ts string) simNorm {
 	}}.at(ts)
 }
 
+// simBaseUpdate is the chip for an update-from-base that FAST-FORWARDED. The
+// branch had nothing of its own to merge, so it now sits on main's own tip -
+// and that commit's subject names whatever IT merged, some other head. The chip
+// is therefore labelled from merged_ref, the ref that actually came in
+// ("Merged main - 3 commits"), and expands to the commits it brought with it.
+// See chat.appendAbsorbedBase.
+func simBaseUpdate(ts string) simNorm {
+	return simNorm{typ: "commit_created", payload: map[string]any{
+		"sha": "5ca1ab1e0123456789abcdef0123456789abcdef", "short_sha": "5ca1ab1",
+		"subject":     "Merge branch 'hydra/tighten-the-upload-timeout'",
+		"author_name": "Agent Claude", "author_email": "claude@hydra.ai",
+		"timestamp": ts,
+		"is_merge":  true, "merged_ref": "main", "merged_count": 3,
+		"merged_commits": []map[string]any{
+			{"sha": "aa11bb22cc33dd44ee55ff6677889900aabbccdd", "short_sha": "aa11bb2", "subject": "Tighten the upload timeout to 30s"},
+			{"sha": "bb22cc33dd44ee55ff6677889900aabbccddeeff", "short_sha": "bb22cc3", "subject": "Name the retry budget in the config docs"},
+			{"sha": "cc33dd44ee55ff6677889900aabbccddeeff0011", "short_sha": "cc33dd4", "subject": "Merge branch 'hydra/tighten-the-upload-timeout'"},
+		},
+	}}.at(ts)
+}
+
 // simRetracted is the safety-retry eviction: a classifier flagged a turn, so
 // the CLI retracts the blocks it already streamed and retries on a fallback
 // model. The client must evict those message ids or the flagged text lingers.
@@ -655,6 +676,8 @@ var simChatEvents = []simNorm{
 	simTurnDone(simRaw(`{"input_tokens":312,"output_tokens":1526,"cache_read_input_tokens":21400,"cache_creation_input_tokens":1800}`), 0.2145),
 	// This commit lands after that turn's footer, before the closing mini-turn.
 	simCommit("beefcafe0123456789abcdef0123456789abcdef", "beefcaf", "Cover the giving-up path with a test", "2026-07-09T18:05:30.000Z"),
+	// ... and then the branch took main in, by fast-forward.
+	simBaseUpdate("2026-07-09T18:05:40.000Z"),
 	// A standalone reply that is mostly an ordered list - exercises the block
 	// markdown renderer's <ol> styling (list-decimal, pl-5) so the demo proves
 	// 1./2./3. indent with hanging wrapped lines, and a trailing unordered list

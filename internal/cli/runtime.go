@@ -64,6 +64,7 @@ func chatContextResolver(store *db.Store) chat.ContextResolver {
 				Prompt:      agent.Prompt,
 				AgentType:   agent.AgentType,
 				Plan:        agent.Plan,
+				BaseBranch:  agent.BaseBranch,
 			}, true
 		}
 		headID, slot, ok := heads.SplitSlotID(id)
@@ -278,6 +279,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 			log.Printf("warn: persist resume marker for %s: %v", id, err)
 		}
 	})
+	// A killed or merged head's chat log has just been deleted from disk; the
+	// manager is still holding all of it in memory (see chat.Manager.Forget).
+	heads.SetOnStateRemoved(chatEvents.Forget)
 	reg.SetOnChatPlanChange(func(id, planJSON string) {
 		if cur := reg.ChatPlanJSON(id); cur != "" {
 			planJSON = cur

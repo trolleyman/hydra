@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Bot, GitBranch, ChevronDown, Check, LoaderCircle } from 'lucide-react'
 import type { RepositoryBranch } from '../api'
 import { Tooltip } from './Tooltip'
+import { placeMenu } from '../lib/anchorMenu'
 
 // shortSha collapses a full/long commit SHA to a readable prefix, leaving
 // branch names (and anything that isn't a hex SHA) untouched.
@@ -75,11 +76,14 @@ export const BranchSelector = memo(function BranchSelector({
     const el = ref.current
     if (!el) return
     const rect = el.getBoundingClientRect()
-    const padding = 8
-    let left = rect.left
-    if (left + MENU_WIDTH > window.innerWidth - padding) {
-      left = Math.max(padding, window.innerWidth - MENU_WIDTH - padding)
-    }
+    // Opens rightward from the trigger, flipping to open leftward when there
+    // isn't room - rather than sliding sideways off both trigger edges.
+    const { left } = placeMenu({
+      triggerLeft: rect.left,
+      triggerRight: rect.right,
+      width: MENU_WIDTH,
+      viewportWidth: window.innerWidth,
+    })
     const spaceBelow = window.innerHeight - rect.bottom
     // Flip above when there isn't room below but there is above.
     if (spaceBelow < MENU_MAX_HEIGHT && rect.top > spaceBelow) {

@@ -6,6 +6,7 @@ import { Badge } from './Badge'
 import { Tooltip } from './Tooltip'
 import { ProviderIcon } from './ReviewControls'
 import { formatError } from '../api/format_error'
+import { placeMenu } from '../lib/anchorMenu'
 
 // prStateTone maps a normalized PR state to a Badge tone (mirrors MRStateChip).
 function prStateTone(state: string): 'green' | 'yellow' | 'violet' | 'neutral' {
@@ -30,8 +31,9 @@ const MENU_MAX_HEIGHT = 352 // max-h-[22rem]
 // opens a list of the project's open PRs/MRs (from GET .../reviews) so one can be
 // adopted as a head. It lives inside the spawn-options popover, whose panel is
 // narrower than this menu, so the menu is fixed-positioned and anchored to the
-// trigger (right-aligned, flipping above when there is no room below - the
-// compact spawn box sits at the bottom of the sidebar). On selection it calls
+// trigger (opening rightward out of the sidebar - see placeMenu - and flipping
+// above when there is no room below, since the compact spawn box sits at the
+// bottom of the sidebar). On selection it calls
 // onSelect with the chosen ReviewRef; the parent owns the "adopting" chip + spawn
 // wiring (docs/pr-adoption.md).
 export function PRPicker({
@@ -53,8 +55,13 @@ export function PRPicker({
   const place = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect()
     if (!r) return
-    // Right-align the wide menu to the trigger, clamped into the viewport.
-    const left = Math.min(Math.max(8, r.right - MENU_WIDTH), Math.max(8, window.innerWidth - MENU_WIDTH - 8))
+    // Open rightward from the trigger, flipping only if the menu won't fit.
+    const { left } = placeMenu({
+      triggerLeft: r.left,
+      triggerRight: r.right,
+      width: MENU_WIDTH,
+      viewportWidth: window.innerWidth,
+    })
     const below = window.innerHeight - r.bottom
     if (below < MENU_MAX_HEIGHT + 8 && r.top > below) {
       setCoords({ left, bottom: window.innerHeight - r.top + 4 })
