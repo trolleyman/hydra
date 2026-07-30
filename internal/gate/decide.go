@@ -180,6 +180,51 @@ func GitReadonlyAdvice(cmd, output string) string {
 	return fmt.Sprintf("%s Use the mcp__hydra__%s tool instead of `git %s` - it runs the operation on your own branch, host-side.", why, tool, sub)
 }
 
+// Claude's Bash tool runs ONE shell per session, and its cwd is hidden state: the
+// tool result carries stdout and nothing else, so a `cd web` in one call is
+// invisible by the next one and the model keeps re-prefixing `cd web &&` until it
+// fails with "No such file or directory". Prompting a model to track hidden state
+// across a long context does not hold; re-stating the state on every call does.
+//
+// The value is the hook payload's own `cwd`. Measured on CLI 2.1.220: PreToolUse
+// carries the cwd BEFORE the command, PostToolUse the cwd AFTER it - and the
+// after-value already accounts for the cases where the shell DISCARDS a `cd` (a
+// non-zero exit, or a cd out of the starting tree), so it can never report a
+// directory the next command will not start in.
+//
+// Both ends are used, because neither alone covers the ground:
+//
+//   - The after-note is what actually prevents the bug. A `cd web && ...` that
+//     succeeded is the thing that moved the shell, and the model is told the moment
+//     it happens - before it composes the next command.
+//   - The before-note exists because Claude DELIVERS additionalContext from
+//     PreToolUse and PostToolUse but silently DROPS it from PostToolUseFailure
+//     (measured: the hook runs and emits, the model never sees it). Without it, a
+//     shell sitting outside the root goes unmentioned for every failing call.
+//
+// Both stay silent at the root: that is the state the model already assumes, and a
+// note on every call would be noise. The pre-prompt states that silence means the
+// root, which is what makes the absence informative rather than ambiguous.
+func shellCwdOffRoot(cwd, worktree string) bool {
+	return cwd != "" && worktree != "" && cwd != worktree
+}
+
+// ShellCwdAdviceAfter reports where a command left the shell (PostToolUse).
+func ShellCwdAdviceAfter(cwd, worktree string) string {
+	if !shellCwdOffRoot(cwd, worktree) {
+		return ""
+	}
+	return fmt.Sprintf("Shell cwd is now %s (not the worktree root). Your Bash shell is persistent, so the next command starts there too - do not prefix it with a relative `cd`.", cwd)
+}
+
+// ShellCwdAdviceBefore reports where the shell already is (PreToolUse).
+func ShellCwdAdviceBefore(cwd, worktree string) string {
+	if !shellCwdOffRoot(cwd, worktree) {
+		return ""
+	}
+	return fmt.Sprintf("Shell cwd is %s (not the worktree root) - your persistent Bash shell is still where an earlier command left it, and this command runs there.", cwd)
+}
+
 // heredocStartRe matches the start of a heredoc and captures its delimiter word
 // (tolerating <<- and a quoted delimiter). RE2 has no backreferences, so the
 // closing delimiter is matched line-by-line in stripCommitHeredocs.

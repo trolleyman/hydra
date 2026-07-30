@@ -76,6 +76,24 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- Try not to bother the user with requests unless necessary.\n" +
 	"- If there are any design decisions made without user input, document them in each commit."
 
+// Claude's Bash tool runs ONE persistent shell per session, so a `cd` in one call
+// is still in effect in the next one - hidden state the tool result never reports,
+// which is why an agent re-prefixes `cd web && ...` onto every command and hits
+// "cd: web: No such file or directory" on the second one. The rules below are
+// deliberately state-FREE (absolute or no cd at all): "remember you already cd'd"
+// is exactly the thing a model cannot do reliably over a long context. The
+// remembering is handled instead by gate.ShellCwdAdvice, which restates the cwd on
+// every Bash result that did not end at the worktree root - the third bullet is
+// what makes its silence mean something.
+//
+// Claude-only: Codex passes an explicit cwd per command rather than keeping a
+// shell, and the advice hook is wired for Claude alone.
+const claudeShellCwdPrompt = "## The Bash shell's working directory\n" +
+	"- Your Bash tool runs ONE persistent shell: a `cd` in one call is STILL IN EFFECT in the next call, so chaining `cd web && ...` onto each command works once and then fails.\n" +
+	"- Therefore never `cd` to a RELATIVE path. Either pass the path to the command instead (`rg pat web/src`, `npm --prefix web run lint`, `node web/scripts/x.ts`), or `cd` to an ABSOLUTE one (`cd /abs/path/to/worktree/web && ...`) - which lands in the same place no matter where the shell already is.\n" +
+	"- You do not have to track where the shell is: whenever it is NOT at your worktree root, a `Shell cwd is ...` note rides on the Bash call telling you where it is. No note means the shell is at the worktree root.\n" +
+	"- The shell keeps a `cd` only when the whole command exits 0, and it refuses to stay outside the directory it started in, so `cd` is not a reliable way to move - passing paths to commands is.\n"
+
 // Codex does not have Claude's Bash `description` input field. A leading shell
 // comment gives its command-execution item the same durable human label without
 // changing what the shell does; internal/chat/codex.go reads it back into the
@@ -1217,6 +1235,9 @@ func BuildFinalPrePrompt(cfg Config, agentType string) string {
 	parts := []string{DefaultPrePrompt}
 	if agentType == string(sandbox.AgentTypeCodex) {
 		parts = append(parts, codexBashDescriptionPrompt)
+	}
+	if agentType == string(sandbox.AgentTypeClaude) {
+		parts = append(parts, claudeShellCwdPrompt)
 	}
 	if cfg.Defaults.PrePrompt != nil && *cfg.Defaults.PrePrompt != "" {
 		parts = append(parts, *cfg.Defaults.PrePrompt)

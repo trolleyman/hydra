@@ -450,6 +450,44 @@ func TestGitReadonlyAdvice(t *testing.T) {
 	}
 }
 
+func TestShellCwdAdvice(t *testing.T) {
+	const wt = "/repo/.hydra/local/worktrees/head"
+
+	// The whole point: the shell is somewhere other than where the agent assumes.
+	after := ShellCwdAdviceAfter(wt+"/web", wt)
+	if !strings.Contains(after, wt+"/web") {
+		t.Errorf("after-advice should name the directory the shell is in, got %q", after)
+	}
+	if !strings.Contains(after, "persistent") {
+		t.Errorf("after-advice should say the cwd carries into the next call, got %q", after)
+	}
+	// The before-note is the one that survives a failing call, so it has to stand
+	// on its own - and read as "where you are", not "where you ended up".
+	before := ShellCwdAdviceBefore(wt+"/web", wt)
+	if !strings.Contains(before, wt+"/web") {
+		t.Errorf("before-advice should name the directory the shell is in, got %q", before)
+	}
+	if before == after {
+		t.Errorf("the two notes ride the same call and must not read as a stuck record: %q", before)
+	}
+	// At the root there is nothing to correct, and these fire on every Bash call -
+	// so silence there is what keeps them from being noise. Fail silent rather than
+	// guess, too: an unseeded HYDRA_WORKTREE or a payload with no cwd (a non-Claude
+	// hook shape) leaves nothing to compare against.
+	for _, tc := range []struct{ name, cwd, root string }{
+		{"at the worktree root", wt, wt},
+		{"unknown worktree root", wt + "/web", ""},
+		{"unknown cwd", "", wt},
+	} {
+		if got := ShellCwdAdviceAfter(tc.cwd, tc.root); got != "" {
+			t.Errorf("%s should get no after-advice, got %q", tc.name, got)
+		}
+		if got := ShellCwdAdviceBefore(tc.cwd, tc.root); got != "" {
+			t.Errorf("%s should get no before-advice, got %q", tc.name, got)
+		}
+	}
+}
+
 // A raw `git merge` that hit the read-only .git is pointed at the merge tools,
 // so the agent's next move is the sanctioned one rather than another retry.
 func TestGitReadonlyAdviceNamesMergeTool(t *testing.T) {

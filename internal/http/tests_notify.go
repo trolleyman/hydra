@@ -132,9 +132,9 @@ func (s *Server) notifyFailingTestsOnce(ctx context.Context, projectRoot string)
 				continue
 			}
 			headID, name, failed := head.ID, r.Name, rep.Failed
-			testNotifyBatcher.add(head.ID, fmt.Sprintf("%s (%s)", name, plural(failed, "failure", "failures")), func(items []string) {
+			testNotifyBatcher.add(head.ID, fmt.Sprintf("`%s` (%s)", name, plural(failed, "failure", "failures")), func(items []string) {
 				s.notifyHead(s.BackgroundCtx, projectRoot, headID, notifyIdle, reasonTestsFailed, fmt.Sprintf(
-					"Tests are failing on your branch: %s. Use the get_test_logs tool for the output, fix what is broken, and commit.",
+					"Tests are failing on your branch: %s. Use the `mcp__hydra__get_test_logs` tool for the output, fix what is broken, and commit.",
 					strings.Join(items, ", ")))
 			})
 			log.Printf("tests: %s went red for %s (%s)", name, headID, rep.Key)

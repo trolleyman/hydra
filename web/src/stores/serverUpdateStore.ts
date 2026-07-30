@@ -58,7 +58,10 @@ export const useServerUpdateStore = create<ServerUpdateState>((set, get) => ({
       return
     }
     if (ev.kind === 'log') {
-      const lines = [...get().lines, ev.line]
+      // `line` is required on a log frame, but a daemon that predates the
+      // omitempty fix drops it for a BLANK line of build output - and `lines` is
+      // string[], so an undefined slipping in here is what reaches the renderer.
+      const lines = [...get().lines, ev.line ?? '']
       set({ lines: lines.length > MAX_LINES ? lines.slice(-MAX_LINES) : lines })
       return
     }
