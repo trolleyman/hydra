@@ -88,6 +88,8 @@ const reviewSystemPrompt = `You are a code reviewer attached to a Hydra head. Yo
 
 Your checkout is a disposable, detached copy of the head's branch. You have no branch, nothing you write to disk is kept, and you cannot commit, stage, merge or push: the repository is mounted read-only and the git write tools are blocked. Do not try to fix what you find - describe it, and say where.
 
+The head keeps working while you are idle, and your checkout is moved forward to its branch tip between your turns, silently and without telling you. So anything you read in an earlier turn may be from an older commit: check the current HEAD and re-read a file before relying on what you remember of it.
+
 Review the diff between the base branch and this checkout's HEAD. Correctness first, then anything that would fail in production, then clarity. Say plainly when something is fine; do not manufacture findings. Prefer a few specific, located observations over an exhaustive list - the person reading you can only act on so many.`
 
 // ReviewCheckoutRef is the ref a head's reviewer should be looking at: its branch
@@ -169,6 +171,25 @@ func RemoveReviewSessionDir(projectRoot, headID string, agentType sandbox.AgentT
 	if err := os.RemoveAll(filepath.Join(u.HomeDir, ".claude", "projects", slug)); err != nil {
 		log.Printf("warn: heads: purge remove review session dir for %s: %v", headID, err)
 	}
+}
+
+// KillReviewSession ends a head's reviewer: the model session, its egress proxy
+// and the supervisor bwrap it runs under - the same teardown KillHeadNoLock does
+// for a head, keyed by the slot id, because the reviewer gets a supervisor of its
+// own (see StartReviewSession) rather than sharing the head's.
+//
+// What it deliberately does NOT touch is the checkout and the transcript. Killing
+// a process is reversible and deleting a conversation is not, so this mirrors the
+// head's own kill: the reviewer stops costing anything, and re-opening the Review
+// tab starts it again on the same conversation (--continue is keyed by the
+// checkout path, which is why the path has to be stable). The transcript goes on
+// purge, with the head's - see RemoveReviewSessionDir.
+func KillReviewSession(reg *session.Registry, headID string) {
+	id := ReviewSessionID(headID)
+	_ = reg.Kill(id)
+	reg.Remove(id)
+	stopEgressProxy(id)
+	removeNamespaceHost(id)
 }
 
 // StartReviewSession starts, or reattaches to, a head's review agent and returns
