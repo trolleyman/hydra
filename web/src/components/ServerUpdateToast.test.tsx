@@ -18,6 +18,16 @@ afterEach(() => {
 const spinners = (c: HTMLElement) => c.querySelectorAll('.animate-spin').length
 
 describe('ServerUpdateToast', () => {
+  it('always shows build output without a hide/show control', () => {
+    const store = useServerUpdateStore.getState()
+    store.begin({ restartOnly: false })
+    store.apply({ kind: 'log', line: 'Building Hydra' })
+
+    const { container, queryByRole } = render(<ServerUpdateToast />)
+    expect(queryByRole('button', { name: /build log/i })).toBeNull()
+    expect(container.querySelector('.xterm')).not.toBeNull()
+  })
+
   it('keeps spinning while the server restarts', () => {
     const store = useServerUpdateStore.getState()
     store.begin({ restartOnly: false })

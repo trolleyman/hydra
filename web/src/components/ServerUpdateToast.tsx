@@ -1,5 +1,5 @@
 import { useContext, useMemo } from 'react'
-import { AlertTriangle, ChevronDown, ChevronRight, Loader2, RotateCw } from 'lucide-react'
+import { AlertTriangle, Loader2, RotateCw } from 'lucide-react'
 import { ToastDismissContext } from '../stores/toastStore'
 import { PHASE_LABEL, useServerUpdateStore } from '../stores/serverUpdateStore'
 import { LogView } from './ArtifactLogView'
@@ -10,13 +10,8 @@ import { ArtifactLogLine } from '../api'
 // taking props, so the toast is shown once and then follows the stream on its
 // own - the store is the only thing re-rendering as several hundred build lines
 // arrive.
-//
-// The log is collapsed by default (a rebuild is normally something you want to
-// know is happening, not something you want to read) and opens itself on
-// failure, which is the case you do have to read.
 export function ServerUpdateToast() {
-  const { running, phase, lines, error, outcome, restartOnly, expanded, setExpanded } =
-    useServerUpdateStore()
+  const { running, phase, lines, error, outcome, restartOnly } = useServerUpdateStore()
   const dismiss = useContext(ToastDismissContext)
 
   // The build log is real terminal output - `mage` colours its command echoes and
@@ -82,23 +77,9 @@ export function ServerUpdateToast() {
       )}
 
       {lines.length > 0 && (
-        <>
-          <button
-            type="button"
-            onClick={() => setExpanded(!expanded)}
-            className="mt-1.5 flex items-center gap-1 text-2xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 cursor-pointer"
-          >
-            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-            <span className="optical-center">
-              {expanded ? 'Hide' : 'Show'} build log ({lines.length} line{lines.length === 1 ? '' : 's'})
-            </span>
-          </button>
-          {expanded && (
-            <div className="mt-1.5">
-              <LogView log={logLines} emptyText="Waiting for output..." failed={failed} />
-            </div>
-          )}
-        </>
+        <div className="mt-1.5">
+          <LogView log={logLines} emptyText="Waiting for output..." failed={failed} />
+        </div>
       )}
 
       {failed && (
