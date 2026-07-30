@@ -13,8 +13,16 @@ const AGENT = '/project/sim-project/agent/agent-1'
 // The artifact set cards default to collapsed and only appear once the artifacts
 // WS/poll snapshot has populated the panel, so wait for the named header button
 // then click it to expand. Mirrors the screenshot harness's showArtifacts step.
+//
+// Scoped to [data-artifacts-panel], and that is load-bearing rather than tidiness:
+// a set is named after what it renders, so "components" ALSO matches the
+// `web/src/components` folder row in the diff file tree further down the page.
+// Unscoped, `.first()` resolves at click time to whichever of the two has mounted
+// - the tree arrives on a REST fetch, the cards on the WS snapshot, so which one
+// wins is a race, not a fixed order. Losing it clicked a diff folder open and left
+// the assertions looking for log boxes in a card nobody had expanded.
 function setCard(page: import('@playwright/test').Page, name: string) {
-  return page.locator('button', { hasText: name }).first()
+  return page.locator('[data-artifacts-panel] button', { hasText: name }).first()
 }
 
 test('the screenshots card expands to show the image diff renderers', async ({ page }) => {

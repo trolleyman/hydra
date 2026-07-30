@@ -88,6 +88,8 @@ const reviewSystemPrompt = `You are a code reviewer attached to a Hydra head. Yo
 
 Your checkout is a disposable, detached copy of the head's branch. You have no branch, nothing you write to disk is kept, and you cannot commit, stage, merge or push: the repository is mounted read-only and the git write tools are blocked. Do not try to fix what you find - describe it, and say where.
 
+The head keeps working while you are idle, and your checkout is moved forward to its branch tip between your turns, silently and without telling you. So anything you read in an earlier turn may be from an older commit: check the current HEAD and re-read a file before relying on what you remember of it.
+
 Review the diff between the base branch and this checkout's HEAD. Correctness first, then anything that would fail in production, then clarity. Say plainly when something is fine; do not manufacture findings. Prefer a few specific, located observations over an exhaustive list - the person reading you can only act on so many.`
 
 // ReviewCheckoutRef is the ref a head's reviewer should be looking at: its branch
@@ -169,6 +171,36 @@ func RemoveReviewSessionDir(projectRoot, headID string, agentType sandbox.AgentT
 	if err := os.RemoveAll(filepath.Join(u.HomeDir, ".claude", "projects", slug)); err != nil {
 		log.Printf("warn: heads: purge remove review session dir for %s: %v", headID, err)
 	}
+}
+
+// KillReviewSession ends a head's reviewer: the model session, its egress proxy,
+// the supervisor bwrap it runs under, and its checkout - the same teardown
+// KillHeadNoLock does for a head, keyed by the slot id, because the reviewer gets
+// a supervisor of its own (see StartReviewSession) rather than sharing the head's.
+//
+// The CONVERSATION survives, and that split is the point: killing a process and
+// reclaiming a working tree are reversible, deleting a conversation is not. It
+// works because neither provider keeps its history inside the tree - Claude's
+// transcript lives in ~/.claude/projects/<slug of the checkout PATH>, Codex's
+// thread id in .hydra/local/cache - and the path is derived from (projectRoot,
+// headID), so the tree EnsureReviewCheckout recreates on the next open lands on
+// the same slug and --continue picks the conversation straight back up. Removing
+// the checkout is what makes closing the tab worth something on disk (a full
+// second working copy of the repo), and it also drops the head out of the review
+// sync loop, which skips any head with no checkout.
+//
+// The transcript itself goes on purge, with the head's - see
+// RemoveReviewSessionDir.
+func KillReviewSession(reg *session.Registry, projectRoot, headID string) {
+	id := ReviewSessionID(headID)
+	_ = reg.Kill(id)
+	reg.Remove(id)
+	stopEgressProxy(id)
+	removeNamespaceHost(id)
+	// After the supervisor is gone: it has the tree bind-mounted, and pulling a
+	// worktree out from under a live bwrap is how you get a half-removed tree that
+	// `worktree add` then refuses to reclaim.
+	RemoveReviewCheckout(projectRoot, headID)
 }
 
 // StartReviewSession starts, or reattaches to, a head's review agent and returns

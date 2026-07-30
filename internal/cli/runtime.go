@@ -579,6 +579,7 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	mux.HandleFunc("/ws/projects/{project_id}/events", server.HandleEventsWS)
 	mux.HandleFunc("/ws/server/update", server.HandleServerUpdateWS)
 	mux.HandleFunc("POST /shells/projects/{project_id}/agents/{id}/close", server.HandleShellClose)
+	mux.HandleFunc("POST /shells/projects/{project_id}/agents/{id}/review/close", server.HandleReviewClose)
 	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
 	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
 	mux.HandleFunc("/tests/projects/{project_id}/log", server.HandleTestLog)

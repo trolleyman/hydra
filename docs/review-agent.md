@@ -312,8 +312,9 @@ The per-commit precision belongs one level down, in the **comment anchors**
 
 Practically: when the head commits, sync the reviewer's checkout forward
 (`git checkout --force <new tip>` - what the slot pool already does) between
-turns, and tell the reviewer the tip moved. Never mid-turn. The reset button is
-killing the slot, exactly like closing a shell tab.
+turns, and say nothing to the reviewer (see the next section - telling it was
+built, and cost too much). Never mid-turn. The reset button is closing the tab,
+which now really does end the session, exactly like closing a shell tab.
 
 Name it so extra slots are possible later without a migration -
 `<head>-review`, leaving room for `<head>-review-security` - mirroring how
@@ -336,6 +337,19 @@ turn.** Never conflate them.
   existing review stale (the tip moved past what the comments were written
   against - `hunk_hash` already detects this per comment), and let the next pass
   be triggered deliberately.
+
+  **This was then built the other way round, and reverted.** `reviewsync.go`
+  shipped sending the reviewer a catch-up message on every sync - batched per
+  tick, capped at 20 subjects, and closing with "you do not need to re-review the
+  whole branch". The batching and the wording were both beside the point: a live
+  reviewer got a model turn per commit batch anyway, which is the flood this
+  section predicted, and a transcript of six identical `[Hydra] The head has
+  committed` bubbles is what it looks like from the other end. The sync is silent
+  again. What replaced the message is one line in `reviewSystemPrompt` - your
+  checkout moves under you between turns, so re-read before relying on what you
+  read earlier - which costs nothing per commit and is true whether or not
+  anyone is watching. If an automatic pass is ever wanted, hang it on `finished`,
+  as below.
 
 If an automatic pass is wanted, hang it on the **`finished` transition**, not on
 commits - the hook machinery already distinguishes main-agent completion from
@@ -415,13 +429,39 @@ Decisions inside that shape:
   is an explicit field-by-field projection, so a field the writer sets but the
   loader does not name is written and never read - which is exactly what the
   first version of this did, making the tab vanish on every agent switch.
-- **Not closable from the tab**, unlike a shell. It first shipped with a close X
-  and that was wrong twice over: it reads as a disposable tab when the thing
-  behind it is one durable slot per head, and the X is the wrong verb anyway -
-  it does not end the session (there is no `/close` for a reviewer), it only
-  detaches this pane. The `+` menu's Review entry is a **toggle** instead,
-  ticked while the tab is showing. Hiding leaves the reviewer, its checkout and
-  its conversation alone, so showing it again reattaches mid-thought.
+- **Closable from the tab, and closing it ends the session.** This went back and
+  forth. It first shipped with a close X, which was removed on the grounds that
+  an X reads as disposable when the thing behind it is one durable slot per head,
+  and that the X was the wrong verb anyway - there was no `/close` for a
+  reviewer, so it only detached the pane. The second half of that was the real
+  defect, and the fix was to make the verb true rather than to take the button
+  away: with only a hide, a reviewer you were finished with kept its sandbox, its
+  supervisor and its model session for a pane nobody was looking at, and there
+  was no way to stop it short of killing the head.
+
+  So there is a `/close` now (`POST .../review/close` ->
+  `heads.KillReviewSession`), and both affordances - the tab's X and un-ticking
+  the `+` menu entry - go through it. It ends the process **and removes the
+  checkout**; the CONVERSATION survives. That is the split worth keeping:
+  killing a process and reclaiming a working tree are reversible, deleting a
+  conversation is not, and the transcript goes on purge
+  (`RemoveReviewSessionDir`), with the head's.
+
+  Dropping the tree is only safe because neither provider keeps its history
+  inside it - Claude's transcript is `~/.claude/projects/<slug of the checkout
+  PATH>`, Codex's thread id is a file in `.hydra/local/cache` - and the path is
+  derived from `(projectRoot, headID)`. So `EnsureReviewCheckout` rebuilds the
+  same path on the next open and `--continue` picks the review back up. This is
+  the same stable-path requirement that ruled out a pooled checkout, arrived at
+  from a third direction: a close that moved the path would silently be a reset.
+  It also drops the head out of the sync loop, which skips any head with no
+  checkout.
+
+  The reviewer is also the one slot that needs a kill of its own rather than the
+  `KillMatching(SlotPrefix)` sweep: it runs in a different tree, so it has its
+  own namespace-host supervisor and its own egress proxy, both keyed by the slot
+  id. The sweep killed the agent and left those two behind - `KillHeadNoLock`
+  calls `KillReviewSession` now for the same reason.
 
 Still open: a **status dot on the tab** (mid-turn, or stale because the tip
 moved), and telling the user in the *composer* what this agent cannot do.
@@ -1032,8 +1072,18 @@ Still open on the built slot:
   nothing creates them.
 
 Done since this list was written: the status dot on the Review tab and the
-composer note (`AgentTerminal.tsx`, `AgentChat.tsx`), and syncing the checkout
-forward as the head commits (`internal/heads/reviewsync.go`).
+composer note (`AgentTerminal.tsx`, `AgentChat.tsx`), syncing the checkout
+forward - silently - as the head commits (`internal/heads/reviewsync.go`), and
+ending the session from the tab (`heads.KillReviewSession`).
+
+One rule for anything that grows a new way to message the reviewer: send it
+through `ChatQueues.Submit` with an **origin**, never `reg.SendChatUser`. The
+queue appends the chat event as it writes, so the bubble lands where it was sent
+and carries the "Sent by Hydra" marker; a bare stdin write leaves the transcript
+to learn about the message from the CLI's echo, which arrives whenever the CLI
+next takes a turn - so notices to an idle reviewer surfaced in a clump at the
+bottom, styled as if the user had typed them. `notifyReviewer` (the `@review`
+mention) was the last one doing that.
 
 ## Deliberately not
 
@@ -1043,7 +1093,9 @@ forward as the head commits (`internal/heads/reviewsync.go`).
 - **A pooled checkout for the reviewer.** Recycled paths mean a new transcript on
   every re-acquire, i.e. a reviewer that forgets everything.
 - **Waking the reviewer on every commit.** Sync its tree silently; a model turn
-  per commit is a flood of near-duplicate comments and a real bill.
+  per commit is a flood of near-duplicate comments and a real bill. Built once,
+  batched and capped, and it was still both of those - see "What wakes the
+  reviewer". The reviewer learns that its tree moves from its system prompt.
 - **Making Hydra the source of truth for forge comments.** It cannot be - people
   comment, edit and delete on the forge directly. Own the numbering, not the
   content.

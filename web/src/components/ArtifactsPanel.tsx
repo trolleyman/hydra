@@ -1597,7 +1597,13 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
     // Publish the measured filter-bar height so card headers can dock flush beneath
     // it (the Changes-bar height arrives via --sticky-changes-h from DiffViewer).
     <LiveLogProvider value={liveLog}>
-    <div className="mb-4" style={{ '--sticky-section-h': `${filterBarH}px` } as CSSProperties}>
+    {/* data-artifacts-panel scopes a test/harness locator to this panel. An
+        artifact set is named after what it renders, so "components" also matches a
+        folder row in the diff file tree below - and a page-wide `button:has-text`
+        picks whichever of the two has mounted, which is a race (the tree comes
+        from a REST fetch, the cards from the WS snapshot) rather than a fixed
+        order. See web/e2e/artifacts.spec.ts. */}
+    <div data-artifacts-panel className="mb-4" style={{ '--sticky-section-h': `${filterBarH}px` } as CSSProperties}>
       {/* Reserve the filter bar's height (its segmented controls / chips are
           taller than the bare title) so the header stays the same height whether
           or not tags are present - the filter loading in must not jump the layout. */}
