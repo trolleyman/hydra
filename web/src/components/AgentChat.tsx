@@ -18,6 +18,7 @@ import {
   Globe,
   History,
   Info,
+  Link2,
   ListChecks,
   ListEnd,
   ListPlus,
@@ -109,6 +110,7 @@ import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordD
 import { markWhitespace } from '../lib/whitespaceMarks'
 import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommentsText'
+import { commentPermalink, jumpToReviewComment } from '../lib/reviewCommentLink'
 import { BranchPill } from './BranchPill'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
@@ -2216,14 +2218,62 @@ function WebSearchOutput({ text }: { text: string }) {
 // render it (ReviewThreadCard): mono, quiet, and never wrapped. It is a
 // reference you quote back ("fix #3"), not part of the sentence, so it should
 // look the same wherever it appears.
+//
+// It is also the comment's permalink, so reading about a comment in the chat and
+// going to look at it are one click apart. A real <a href> - so copy-link-address
+// and middle-click behave - whose plain click is handled in-app: the diff is on
+// this very page, and navigating to `?comment=N` would push a history entry to
+// scroll it, then do nothing at all the second time you clicked the same link.
+// Without a mounted diff for this head (a sub-agent view), the href is followed
+// and the page honours the number on load.
+function CommentLink({ number, className, children }: { number: number; className: string; children: ReactNode }) {
+  const ctx = useContext(AgentFileContext)
+  if (!ctx) return <span className={className}>{children}</span>
+  return (
+    <Tooltip content={`Go to #${number} in the diff`} side="top">
+      <a
+        href={commentPermalink(ctx.projectId, ctx.agentId, number)}
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+          if (jumpToReviewComment(ctx.agentId, number)) e.preventDefault()
+        }}
+        className={className}
+      >
+        {children}
+      </a>
+    </Tooltip>
+  )
+}
+
+// The handle as a card carries it: on the right, with the link mark that says it
+// goes somewhere.
 function CommentRef({ number }: { number: number }) {
-  return <span className="shrink-0 font-mono text-stone-400 dark:text-stone-500">#{number}</span>
+  return (
+    <CommentLink
+      number={number}
+      className="shrink-0 inline-flex items-center gap-1 rounded px-1 -mx-1 py-px font-mono text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:text-stone-500 dark:hover:bg-white/[0.06] dark:hover:text-stone-300 transition-colors"
+    >
+      <Link2 className="h-3 w-3" />
+      #{number}
+    </CommentLink>
+  )
+}
+
+// The handle inside a sentence ("In reply to #19"). No mark - the sentence
+// already says what it is, and an icon mid-phrase reads as punctuation.
+function CommentMention({ number }: { number: number }) {
+  return (
+    <CommentLink number={number} className="font-mono rounded hover:text-stone-700 hover:underline dark:hover:text-stone-200 transition-colors">
+      #{number}
+    </CommentLink>
+  )
 }
 
 // A sentence that names comments by number ("Saved as #20, threaded under #19."),
-// with the handles in mono so they read as the same references the cards carry.
+// with each handle a link to the comment it names - the same reference the cards
+// carry, and the shortest path from "it was saved" to looking at it.
 function CommentRefText({ text }: { text: string }) {
-  return <>{text.split(/(#\d+)/).map((part, i) => (/^#\d+$/.test(part) ? <span key={i} className="font-mono">{part}</span> : <Fragment key={i}>{part}</Fragment>))}</>
+  return <>{text.split(/(#\d+)/).map((part, i) => (/^#\d+$/.test(part) ? <CommentMention key={i} number={Number(part.slice(1))} /> : <Fragment key={i}>{part}</Fragment>))}</>
 }
 
 // A comparison label as a pill, matching how a branch is written anywhere else
@@ -2369,7 +2419,7 @@ function ReviewCommentCard({
       {meta && (
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-2.5 pt-1.5 text-3xs text-stone-400 dark:text-stone-500">
           {author && author !== 'user' && <span className="text-stone-500 dark:text-stone-400">{author}</span>}
-          {replyTo ? <span>reply to <span className="font-mono">#{replyTo}</span></span> : null}
+          {replyTo ? <span>reply to <CommentMention number={replyTo} /></span> : null}
           {resolved ? <span className="rounded bg-stone-100 px-1 py-px text-stone-500 dark:bg-white/[0.06] dark:text-stone-400">resolved</span> : null}
           {diff && <span className="inline-flex items-baseline gap-1">on <DiffLabel label={fromLabel} />{toLabel && <><span aria-hidden>-&gt;</span><DiffLabel label={toLabel} /></>}</span>}
         </div>
@@ -2418,7 +2468,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
               {...c}
               path={sameAnchor ? undefined : c.path}
               replyTo={sameAnchor ? undefined : c.replyTo}
-              subject={sameAnchor ? <>In reply to <span className="font-mono">#{c.replyTo}</span></> : undefined}
+              subject={sameAnchor ? <>In reply to <CommentMention number={c.replyTo} /></> : undefined}
             />
           </div>
         )
@@ -3899,7 +3949,7 @@ const ToolCard = memo(function ToolCard({
                   path={typeof input?.path === 'string' ? input.path : undefined}
                   line={typeof input?.line === 'number' ? input.line : undefined}
                   replyTo={typeof input?.reply_to === 'number' ? input.reply_to : undefined}
-                  subject={replyTarget ? <>In reply to <span className="font-mono">#{replyTarget}</span></> : undefined}
+                  subject={replyTarget ? <>In reply to <CommentMention number={replyTarget} /></> : undefined}
                   body={reviewCommentBody}
                 />
               ) : isSendMessage && input ? (
