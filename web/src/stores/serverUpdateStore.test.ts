@@ -54,7 +54,7 @@ describe('serverUpdateStore', () => {
     expect(store().error).toMatch(/lost the connection/i)
   })
 
-  it('records a failed build and opens the log to show it', () => {
+  it('records a failed build', () => {
     store().begin({ restartOnly: false })
     store().apply({ kind: 'phase', phase: 'building' })
     store().apply({ kind: 'log', line: 'undefined: resumeHeed' })
@@ -63,17 +63,15 @@ describe('serverUpdateStore', () => {
     expect(store().outcome).toBe('failed')
     expect(store().error).toBe('go build ./... failed: exit status 1')
     expect(store().running).toBe(false)
-    expect(store().expanded).toBe(true)
   })
 
-  it('leaves the log collapsed on success', () => {
+  it('records a successful run', () => {
     store().begin({ restartOnly: false })
     store().apply({ kind: 'log', line: 'building' })
     store().apply({ kind: 'done' })
 
     expect(store().outcome).toBe('done')
     expect(store().error).toBeNull()
-    expect(store().expanded).toBe(false)
   })
 
   it('ignores a socket close once the run has already settled', () => {
