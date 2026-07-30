@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { ShortcutHint } from './Kbd'
 
 type Placement = 'top' | 'bottom'
 
@@ -64,6 +65,27 @@ export interface TooltipProps {
   /** Extra gap (px) between the trigger and the box, on top of the base 8px -
    *  e.g. to clear a neighbouring control the box would otherwise sit against. */
   offset?: number
+  /**
+   * A keyboard shortcut for this control, rendered as keycaps on their own line
+   * under the label and lowlit (see ShortcutHint). `note` is what the keys do
+   * when that differs from the control's main action - a modifier variant, e.g.
+   * Alt on the restart button.
+   *
+   * A prop rather than something a caller composes into `content`, so that every
+   * shortcut in the UI lands in the same place, at the same size, in the same
+   * component. It used to be prose in brackets - "(Alt: restart without
+   * rebuilding)" - which read as part of the sentence and wrapped in the middle
+   * of the label.
+   */
+  shortcut?: { keys: string[]; note?: string }
+  /**
+   * A lowlit line under everything, including the shortcut: state about the
+   * control rather than part of its label (the server's uptime under the
+   * restart button). Last because it is the least of the three - you come to
+   * the tooltip for the label, might come for the shortcut, and read this only
+   * because it is there.
+   */
+  footnote?: React.ReactNode
 }
 
 // One configurable tooltip. The shared core - a portalled, fixed-position box
@@ -82,6 +104,8 @@ export function Tooltip({
   title,
   width = 384,
   offset = 0,
+  shortcut,
+  footnote,
 }: TooltipProps) {
   const card = variant === 'card'
   const showDelay = delay ?? (card ? 0 : 600)
@@ -386,7 +410,7 @@ export function Tooltip({
           >
             <div
               role="tooltip"
-              className={`relative flex flex-col p-3 ${surface} border text-gray-800 dark:text-gray-100 text-[11px] rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100`}
+              className={`relative flex flex-col p-3 ${surface} border text-gray-800 dark:text-gray-100 text-2xs rounded-lg shadow-xl animate-in fade-in zoom-in-95 duration-100`}
               // Cap to the viewport (minus the 16px clamp pad each side) so the
               // fixed `width` can't spill off-screen on narrow/phone viewports where
               // it exceeds the screen. computePos clamps by the box's REAL
@@ -413,7 +437,15 @@ export function Tooltip({
           <div
             ref={boxRef}
             role="tooltip"
-            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 py-1 border ${inDark ? 'dark' : ''} ${surface} text-gray-700 dark:text-gray-200 text-[11px] text-center rounded shadow-lg break-words ${
+            // py-2 once there is more than a label in the box: HALF the arrow
+            // square (ARROW_SIZE / 2 = 5px) sits INSIDE the box, which is more
+            // than a py-1's 4px, so the arrow overlapped whatever ended up
+            // against that edge. Nothing did while the box held one line of
+            // text - the descender space absorbed it - but a keycap has a
+            // border and a drop shadow, and the arrow drew straight over it.
+            className={`fixed z-[9999] -translate-x-1/2 pointer-events-none px-2 ${
+              shortcut || footnote ? 'py-2' : 'py-1'
+            } border ${inDark ? 'dark' : ''} ${surface} text-gray-700 dark:text-gray-200 text-2xs text-center rounded shadow-lg break-words ${
               pos.placement === 'top' ? '-translate-y-full' : ''
             }`}
             // width: max-content sizes the box to its text: a fixed-position box
@@ -425,6 +457,12 @@ export function Tooltip({
             style={{ top: pos.top, left: pos.left, width: 'max-content', maxWidth: 'min(320px, calc(100vw - 1rem))' }}
           >
             {content}
+            {shortcut && (
+              <div className="mt-1.5">
+                <ShortcutHint keys={shortcut.keys} note={shortcut.note} />
+              </div>
+            )}
+            {footnote && <div className="mt-1.5 text-3xs text-gray-500 dark:text-gray-400">{footnote}</div>}
             {arrow(pos.placement)}
           </div>
         ),

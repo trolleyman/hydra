@@ -53,6 +53,9 @@ type worker struct {
 	// message. Keep its durable deltas until the turn boundary so an interrupt
 	// can settle the partial reply into one replayable assistant_message.
 	codexAssistantDeltas map[string]string
+	// Bash calls whose recorded working directory has not been read off the
+	// transcript yet - see shellcwd.go.
+	pendingBash map[string]struct{}
 }
 
 type codexSpawn struct {
@@ -209,6 +212,16 @@ func (w *worker) run(id string) {
 			}
 			if kind == "tool_completed" || kind == "turn_completed" || kind == "turn_failed" {
 				w.reconcileCommits(id, causalItemID(spec.payload))
+			}
+			// Read the shell's directory off the transcript for the call that
+			// just finished, and for whatever the one starting now has left
+			// outstanding (see shellcwd.go).
+			if kind == "tool_started" {
+				w.noteBashCall(spec)
+				w.syncShellCwds()
+			}
+			if kind == "tool_completed" {
+				w.syncShellCwds()
 			}
 		}
 	}
@@ -508,6 +521,11 @@ func (m *Manager) Flush(id string) error {
 	done := make(chan struct{})
 	w.in <- observedLine{done: done}
 	<-done
+	// A quiet point - the queue is empty and a client is usually about to attach.
+	// Appends only checkpoint the projection every so often (see
+	// checkpointInterval), so put the current fold down while nothing is racing
+	// it, and Open has less to replay if the daemon dies mid-conversation.
+	w.store.Checkpoint()
 	return nil
 }
 

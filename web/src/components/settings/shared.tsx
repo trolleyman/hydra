@@ -36,7 +36,7 @@ export function SettingsSaveAction({
             onClick={onSave}
             disabled={saving}
             aria-label="Save settings"
-            className={`shrink-0 h-8 inline-flex items-center justify-center gap-1.5 px-3 rounded-lg text-[13px] font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`shrink-0 h-8 inline-flex items-center justify-center gap-1.5 px-3 rounded-lg text-sm font-semibold transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               dirty
                 ? 'bg-blue-600 hover:bg-blue-500 text-white border border-blue-700/30 shadow-sm'
                 : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'

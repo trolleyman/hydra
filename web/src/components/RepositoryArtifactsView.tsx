@@ -69,7 +69,7 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
         {!url ? (
           <div className="select-none flex flex-col items-center justify-center gap-1 w-full h-32 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500">
             <ImageOff className="w-5 h-5" />
-            <span className="text-[11px] font-medium">No file</span>
+            <span className="text-2xs font-medium">No file</span>
           </div>
         ) : isCard ? (
           // A file with no inline preview - a package (an .apk, a .zip), a PDF or
@@ -91,7 +91,7 @@ function MediaCell({ file, gallery }: { file: RepositoryArtifactFile; gallery: L
             {/* optical-center: the label reads high against the icon otherwise.
                 The row's height comes from the w-6 icon, so the trim can't
                 shorten it. */}
-            <span className="optical-center min-w-0 flex-1 text-[11px] text-gray-400 dark:text-gray-500">
+            <span className="optical-center min-w-0 flex-1 text-2xs text-gray-400 dark:text-gray-500">
               {file.size != null ? formatBytes(file.size) : isPdfArtifact(file.name) ? 'PDF' : isTextArtifact(file.name) ? 'text' : 'download'}
             </span>
             <Tooltip content="Download">
@@ -180,7 +180,7 @@ function PersistedLog({ url }: { url: string }) {
       <button
         // Clear a prior fetch error on reopen so a retry starts clean.
         onClick={() => { if (!open) setErr(null); setOpen((o) => !o) }}
-        className="text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
+        className="text-2xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
       >
         {open ? 'Hide' : 'Show'} build log
       </button>
@@ -371,7 +371,7 @@ export function RepositoryArtifactsView({
             <span>Generation failed</span>
           </div>
           {data.error && (
-            <pre className="whitespace-pre-wrap break-words rounded-md border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-2 font-mono text-[11px] text-red-700 dark:text-red-300">{data.error}</pre>
+            <pre className="whitespace-pre-wrap break-words rounded-md border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-2 font-mono text-2xs text-red-700 dark:text-red-300">{data.error}</pre>
           )}
           {data.log_url && <PersistedLog url={data.log_url} />}
         </div>

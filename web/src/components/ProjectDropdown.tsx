@@ -647,7 +647,7 @@ export const ProjectDropdown = memo(function ProjectDropdown({
                   {browsing ? 'Waiting for folder...' : 'Browse...'}
                 </button>
                 {addError && (
-                  <p className="text-[10px] text-red-500 px-3 pb-1 leading-snug">{addError}</p>
+                  <p className="text-3xs text-red-500 px-3 pb-1 leading-snug">{addError}</p>
                 )}
               </>
             )}
@@ -675,13 +675,13 @@ export const ProjectDropdown = memo(function ProjectDropdown({
                     typed, so "~/x" and relative paths make it obvious which
                     folder is about to be opened before the trust prompt. */}
                 {resolved?.input === newPath.trim() && resolved.result.path !== newPath.trim() && (
-                  <p className="text-[10px] font-mono text-gray-500 dark:text-gray-400 mt-1 leading-snug break-all">{resolved.result.path}</p>
+                  <p className="text-3xs font-mono text-gray-500 dark:text-gray-400 mt-1 leading-snug break-all">{resolved.result.path}</p>
                 )}
                 {resolved?.input === newPath.trim() && pathHint(resolved.result) && (
-                  <p className="text-[10px] text-amber-600 dark:text-amber-500 mt-0.5 leading-snug">{pathHint(resolved.result)}</p>
+                  <p className="text-3xs text-amber-600 dark:text-amber-500 mt-0.5 leading-snug">{pathHint(resolved.result)}</p>
                 )}
                 {addError && (
-                  <p className="text-[10px] text-red-500 mt-1 leading-snug">{addError}</p>
+                  <p className="text-3xs text-red-500 mt-1 leading-snug">{addError}</p>
                 )}
                 <div className="flex gap-2 mt-2">
                   <button
@@ -723,13 +723,13 @@ export const ProjectDropdown = memo(function ProjectDropdown({
           {/* In edit mode the footer explains the mode instead of the switch
               shortcut - notably that removing a project is not destructive. */}
           {editing ? (
-            <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 leading-snug">
+            <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-3xs text-gray-400 dark:text-gray-500 leading-snug">
               {canReorder ? (finePointer ? 'Drag a project to reorder it. ' : 'Use the arrows to reorder. ') : ''}
               The eye hides a project from this list and the Ctrl+` switcher; removing takes it off this
               list entirely - either way your files stay put.
             </div>
           ) : projects.length > 1 && finePointer && (
-            <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-[10px] text-gray-400 dark:text-gray-500 font-mono">
+            <div className="px-3 py-1.5 border-t border-gray-100 dark:border-gray-700 text-3xs text-gray-400 dark:text-gray-500 font-mono">
               {SWITCH_PROJECT_HINT}
             </div>
           )}

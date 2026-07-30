@@ -75,7 +75,7 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
         >
           <MessagesSquare className="w-3.5 h-3.5" />
           <span>Submit review</span>
-          <span className="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-white/25 text-[10px] tabular-nums leading-none">
+          <span className="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-white/25 text-3xs tabular-nums leading-none">
             {comments.length}
           </span>
           {staleCount > 0 && (
@@ -100,7 +100,7 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
           </div>
 
           {staleCount > 0 && (
-            <div className="flex items-start gap-1.5 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/50">
+            <div className="flex items-start gap-1.5 px-3 py-2 text-2xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/50">
               <TriangleAlert className="w-3.5 h-3.5 shrink-0 mt-px" />
               <span>
                 {staleCount === 1 ? 'One comment was' : `${staleCount} comments were`} written against a diff that
@@ -134,7 +134,7 @@ export function ReviewDraftPopover({ comments, staleIds, submitting, onSubmit, o
                       aria-label="Jump to this line in the diff"
                       className="min-w-0 w-full text-left px-2 py-2 rounded cursor-pointer"
                     >
-                      <div className="flex items-center gap-1.5 text-[11px] font-mono text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      <div className="flex items-center gap-1.5 text-2xs font-mono text-gray-500 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                         <span className="truncate" title={c.path}>{c.path}</span>
                         <span className="shrink-0 text-gray-400 dark:text-gray-500">:{c.lineNum}</span>
                         {stale && (

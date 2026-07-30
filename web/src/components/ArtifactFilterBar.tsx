@@ -23,13 +23,13 @@ export function TagBadge({ tag }: { tag: string }) {
   const scoped = parseScopedTag(tag)
   if (scoped) {
     return (
-      <span className="inline-flex items-center text-[10px] rounded overflow-hidden border border-gray-200 dark:border-gray-600">
+      <span className="inline-flex items-center text-3xs rounded overflow-hidden border border-gray-200 dark:border-gray-600">
         <span className="px-1 py-0.5 bg-gray-100 dark:bg-gray-700/70 text-gray-500 dark:text-gray-400">{scoped.cat}</span>
         <span className="px-1 py-0.5 bg-gray-200/70 dark:bg-gray-600/60 text-gray-700 dark:text-gray-200 font-medium">{scoped.val}</span>
       </span>
     )
   }
-  return <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">{tag}</span>
+  return <span className="text-3xs px-1.5 py-0.5 rounded font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">{tag}</span>
 }
 
 // Stable empty default so `defaultOff`'s fallback isn't a fresh array each render.
@@ -145,7 +145,7 @@ export function TagScopeFilter({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${
+        className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-2xs font-medium transition-colors cursor-pointer ${
           open || changedCount > 0 || highlight
             ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
             : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
@@ -153,7 +153,7 @@ export function TagScopeFilter({
       >
         <span className="lowercase">{label}</span>
         {changedCount > 0 && (
-          <span className="inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-blue-500 text-white text-[10px] font-semibold leading-none">{changedCount}</span>
+          <span className="inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-blue-500 text-white text-3xs font-semibold leading-none">{changedCount}</span>
         )}
         <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -166,7 +166,7 @@ export function TagScopeFilter({
         >
           {/* Fixed header: "all" left, "clear" right. Always present (regardless
               of selection) so toggling values never grows/shrinks the menu. */}
-          <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-100 dark:border-gray-700/60 text-[11px] font-medium">
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-100 dark:border-gray-700/60 text-2xs font-medium">
             <button
               onClick={onAll}
               className={`cursor-pointer ${allOn ? 'text-blue-600 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'}`}
@@ -191,12 +191,12 @@ export function TagScopeFilter({
                 {counts?.[v] != null && (
                   // How many items carry this value under the current filters,
                   // ignoring this scope itself.
-                  <span className="ml-auto shrink-0 tabular-nums text-[10px] text-gray-400 dark:text-gray-500">{counts[v]}</span>
+                  <span className="ml-auto shrink-0 tabular-nums text-3xs text-gray-400 dark:text-gray-500">{counts[v]}</span>
                 )}
               </label>
             ))}
           </div>
-          <div className="px-3 py-1 border-t border-gray-100 dark:border-gray-700/60 text-[10px] text-gray-400 dark:text-gray-500">shift-click to isolate</div>
+          <div className="px-3 py-1 border-t border-gray-100 dark:border-gray-700/60 text-3xs text-gray-400 dark:text-gray-500">shift-click to isolate</div>
           {footer}
         </div>,
         document.body,
@@ -215,8 +215,8 @@ function ChangeThresholdControl({ value, onChange }: { value: number; onChange: 
     // stopPropagation so dragging the slider near the menu edge never closes it.
     <div className="px-3 py-2 border-t border-gray-100 dark:border-gray-700/60" onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">% changed threshold</span>
-        <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">{value}%</span>
+        <span className="text-2xs font-medium text-gray-600 dark:text-gray-300">% changed threshold</span>
+        <span className="text-2xs tabular-nums text-gray-500 dark:text-gray-400">{value}%</span>
       </div>
       <input
         type="range"
@@ -227,7 +227,7 @@ function ChangeThresholdControl({ value, onChange }: { value: number; onChange: 
         onChange={(e) => onChange(clampChangeThreshold(e.target.valueAsNumber))}
         className="w-full accent-blue-500 cursor-pointer"
       />
-      <div className="mt-1 text-[10px] leading-snug text-gray-400 dark:text-gray-500">
+      <div className="mt-1 text-3xs leading-snug text-gray-400 dark:text-gray-500">
         A modified file counts as identical until at least this share of its pixels (or video frames) differ.
       </div>
     </div>
@@ -359,7 +359,7 @@ function ArtifactFilterBarImpl({
           placeholder="search"
           aria-label="Search artifacts by name or tag"
           style={{ pointerEvents: searchExpanded ? 'auto' : 'none' }}
-          className={`h-7 w-full pl-7 pr-6 bg-transparent text-[11px] text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none transition-opacity duration-150 ${searchExpanded ? 'opacity-100' : 'opacity-0'}`}
+          className={`h-7 w-full pl-7 pr-6 bg-transparent text-2xs text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none transition-opacity duration-150 ${searchExpanded ? 'opacity-100' : 'opacity-0'}`}
         />
         {search && (
           // The absolute placement moves to the tooltip wrapper: it is the element
@@ -383,7 +383,7 @@ function ArtifactFilterBarImpl({
         <Tooltip content="Reset filters">
           <button
             onClick={() => onFilterChange(defaultTagFilter())}
-            className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+            className="flex items-center gap-1 h-7 px-2.5 rounded-md border text-2xs font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
           >
             <FunnelX className="w-3 h-3" />
             <span className="lowercase">reset</span>

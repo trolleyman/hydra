@@ -189,7 +189,7 @@ function Bool({ label, value, effective, onChange }: { label: string; value: boo
           </button>
         </Tooltip>
       ) : (
-        <span className="text-[11px] text-gray-400 dark:text-gray-500">inherited</span>
+        <span className="text-2xs text-gray-400 dark:text-gray-500">inherited</span>
       )}
     </div>
   )

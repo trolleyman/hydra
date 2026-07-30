@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -67,6 +68,10 @@ type Store struct {
 	subscribers    map[chan Event]struct{}
 	// lastSync is when the log was last flushed to the device; see syncInterval.
 	lastSync time.Time
+	// lastCheckpoint is when the projection was last written; see
+	// checkpointInterval. checkpointDue marks a fold not yet on disk.
+	lastCheckpoint time.Time
+	checkpointDue  bool
 }
 
 // syncInterval is the most often an append will fsync the event log.
@@ -86,6 +91,36 @@ type Store struct {
 // reconstructible from the provider's own transcript, which importClaudeHistory
 // replays and AppendSource dedups.
 const syncInterval = 2 * time.Second
+
+// checkpointInterval is the most often an append will rewrite the projection.
+//
+// The projection is written WHOLE - marshal, write, rename - and that used to
+// happen on every append, so its cost was its own size multiplied by the event
+// count, and it grew with the head. Measured across this machine's seven chat
+// heads: ~130MB rewritten against 77MB of actual log, and for the busiest head
+// 100MB of rewrites against a 26MB log. (An upper bound - the file grew to that
+// size over the run - but the same order either way, and the wrong way round.)
+//
+// Lagging it is safe because the projection is a CHECKPOINT, not the record.
+// `Through` says how far it was folded; Open replays the events past that mark
+// (see TestStoreRecoversFromCheckpointLagAndPartialTail, which is exactly this
+// case), and Snapshot serves the IN-MEMORY fold, so nothing a client is shown
+// can be stale - only the file, and only until the next event or the next Open.
+//
+// Thirty seconds, not the log's two: the events are spread thinly enough that
+// the interval buys much more here than it does for fsyncs. Rewrite volume
+// across those heads, by interval:
+//
+//	per append  139MB      10s   15MB (11%)
+//	2s           45MB      30s    6MB ( 4%)
+//	5s           25MB      60s    3MB ( 2%)
+//
+// What a longer interval costs is replay on an unclean restart, and that is
+// almost nothing: load() reads and unmarshals the WHOLE log either way, so the
+// lag adds only the in-memory apply() over the events past the mark - at most 68
+// of them for a 30s window, measured over the busiest stretch of every head
+// here. Flush checkpoints at each attach on top of that.
+const checkpointInterval = 30 * time.Second
 
 func Open(projectRoot, id string) (*Store, error) {
 	s := &Store{
@@ -174,15 +209,20 @@ func (s *Store) ImportOffset(source string) int64 {
 	return s.projection.Imports[source]
 }
 
+// SetImportOffset records how far a source file has been read. Checkpointed on
+// the same terms as a fold: losing the last interval's worth costs a re-read of
+// lines the readers already treat as idempotent (AppendSource dedups them), not
+// a wrong timeline.
 func (s *Store) SetImportOffset(source string, offset int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.projection.Imports[source] = offset
-	return errtrace.Wrap(s.persistProjection())
+	return errtrace.Wrap(s.checkpoint(false))
 }
 
 // Append durably writes an event, applies it to the current projection, then
-// atomically checkpoints that projection. A crash between the first two writes
+// checkpoints that projection (at most once per checkpointInterval - see
+// checkpoint). A crash between the first two writes
 // is repaired by replaying events after Projection.Through on Open.
 func (s *Store) Append(payload Payload) (Event, error) {
 	ev, _, err := s.AppendSource("", payload)
@@ -245,7 +285,7 @@ func (s *Store) AppendSource(sourceID string, payload Payload) (ev Event, append
 		s.sourceIDs[sourceID] = ev.Seq
 	}
 	apply(&s.projection, ev)
-	if err := s.persistProjection(); err != nil {
+	if err := s.checkpoint(false); err != nil {
 		return Event{}, false, errtrace.Wrap(err)
 	}
 	for ch := range s.subscribers {
@@ -257,6 +297,34 @@ func (s *Store) AppendSource(sourceID string, payload Payload) (ev Event, append
 		}
 	}
 	return ev, true, nil
+}
+
+// Checkpoint writes the projection now, whatever the interval says. For a quiet
+// point where the cost does not land on a busy append path.
+func (s *Store) Checkpoint() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.checkpointDue {
+		return
+	}
+	if err := s.checkpoint(true); err != nil {
+		log.Printf("warn: chat store: checkpoint %s: %v", s.projectionPath, err)
+	}
+}
+
+// checkpoint writes the projection, at most once per checkpointInterval unless
+// forced. The caller must hold the lock. A fold that misses its turn is not
+// lost: it stays marked until a later append (or a forced write) puts it down,
+// and until then Open's replay is what recovers it.
+func (s *Store) checkpoint(force bool) error {
+	s.checkpointDue = true
+	if now := s.now(); force || now.Sub(s.lastCheckpoint) >= checkpointInterval {
+		if err := s.persistProjection(); err != nil {
+			return errtrace.Wrap(err)
+		}
+		s.lastCheckpoint, s.checkpointDue = now, false
+	}
+	return nil
 }
 
 func (s *Store) persistProjection() error {

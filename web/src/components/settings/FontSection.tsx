@@ -1,18 +1,18 @@
 import { Minus, Plus } from 'lucide-react'
-import { useFontChoice, useFontSizeStep, useOptionalFontSizePx } from '../../lib/fontPrefs'
+import { useFontChoice, useFontSizePx, useFontSizeStep } from '../../lib/fontPrefs'
 import {
   FONT_ROLES,
   FONT_ROLE_SPEC,
-  MAX_FONT_STEP,
+  maxFontStep,
   MIN_FONT_STEP,
   fontOptionsFor,
   fontSizePx,
-  hasFontSize,
   type FontRole,
   type FontSizeRole,
 } from '../../lib/fonts'
 import { Tooltip } from '../Tooltip'
 import { SettingSection } from './shared'
+import { ResetPrefsButton } from './ResetPrefsButton'
 
 // Fonts - client-only, global preferences (localStorage, like Theme) for the
 // four typefaces the app uses: the interface, chat-mode agent prose, code/diffs,
@@ -59,7 +59,7 @@ function SizeStepper({ role, fontId }: { role: FontSizeRole; fontId: string }) {
       <button
         type="button"
         aria-label={label}
-        disabled={delta < 0 ? step <= MIN_FONT_STEP : step >= MAX_FONT_STEP}
+        disabled={delta < 0 ? step <= MIN_FONT_STEP : step >= maxFontStep(role)}
         onClick={() => setStep(step + delta)}
         className={stepBtnClass}
       >
@@ -87,7 +87,7 @@ function FontRow({ role }: { role: FontRole }) {
   // <select> whose value matches none of its options (React warns, and the box
   // renders blank).
   const selected = options.find((o) => o.id === font) ?? options.find((o) => o.id === spec.defaultId)!
-  const samplePx = useOptionalFontSizePx(role, selected.id)
+  const samplePx = useFontSizePx(role)
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <label className="w-[4.5rem] shrink-0 text-sm text-gray-600 dark:text-gray-300" htmlFor={`font-${role}`}>
@@ -105,28 +105,33 @@ function FontRow({ role }: { role: FontRole }) {
           </option>
         ))}
       </select>
-      {/* A fixed slot rather than a conditional child, so the samples of all
-          four rows still start at the same x when Interface - the one role with
-          no size control - leaves it empty. */}
+      {/* A fixed slot, so every row's sample starts at the same x whatever width
+          its stepper's number happens to be. */}
       <div className="flex w-[6.75rem] shrink-0 items-center">
-        {hasFontSize(role) && <SizeStepper role={role} fontId={selected.id} />}
+        <SizeStepper role={role} fontId={selected.id} />
       </div>
       {/* Inline style, not a class: this has to render the OPTION's own stack
           and size, which is a different thing from the applied --app-font-*
           variables (and the terminal role has no CSS surface at all - xterm
           takes a string). Sizing the sample is the point of the stepper being
           on this row: you see the size you are choosing, in the font you are
-          choosing, before you leave Settings. */}
+          choosing, before you leave Settings.
+
+          Narrow (a phone, or the settings pane in a small window) it takes the
+          line UNDER the controls - the slot the note has on a wide screen - and
+          the note gives way. Beside the stepper there is only room for a few
+          truncated words of it, and a sample you can't read is the one part of
+          this row that has no purpose; the note is a sentence you read once. */}
       <span
-        className="min-w-0 flex-1 truncate text-gray-500 dark:text-gray-400"
-        style={{ fontFamily: selected.stack, fontSize: `${samplePx ?? 13}px` }}
+        className="w-full min-w-0 truncate pl-[5.25rem] text-gray-500 dark:text-gray-400 sm:w-auto sm:flex-1 sm:pl-0"
+        style={{ fontFamily: selected.stack, fontSize: `${samplePx}px` }}
       >
         {SAMPLE[role]}
       </span>
       {/* Second line: what the chosen font is good for. Sits under the select,
           past the label gutter, and is the one part of the row that changes as
-          you scrub through the list. */}
-      <span className="w-full pl-[5.25rem] text-xs text-gray-400 dark:text-gray-500">{selected.note}</span>
+          you scrub through the list. Hidden narrow, where the sample has it. */}
+      <span className="hidden w-full pl-[5.25rem] text-xs text-gray-400 dark:text-gray-500 sm:block">{selected.note}</span>
     </div>
   )
 }
@@ -135,7 +140,10 @@ export function FontSection() {
   return (
     <SettingSection
       title="Fonts"
-      description="Typefaces for the interface, chat prose, code blocks and diffs, and the terminal panes. Chat, Code and Terminal also take a size, which moves that surface's text - chat prose and its headings, the diff and repository views, the terminal grid - a pixel at a time. The interface has no size here: use your browser's zoom, which scales its spacing to match. Saved in this browser only. Changing the terminal font or size re-measures its grid, so a running agent sees a resize."
+      // Eight knobs in one section - four families and four sizes - is enough to
+      // want to undo on its own, without also resetting your theme.
+      action={<ResetPrefsButton group="fonts" what="fonts" size="sm" />}
+      description="Typefaces for the interface, chat prose, code blocks and diffs, and the terminal panes. Each also takes a size, which moves that surface's text a pixel at a time - the whole shell for Interface, chat prose and its headings for Chat, the diff and repository views for Code, the grid for Terminal. Interface moves type only, so rows and spacing stay put; for bigger everything, use your browser's zoom. Saved in this browser only. Changing the terminal font or size re-measures its grid, so a running agent sees a resize."
     >
       <div className="flex flex-col gap-3">
         {FONT_ROLES.map((role) => (

@@ -166,7 +166,7 @@ export function SettingsPopover({
 // The tiny group label inside a settings popover.
 export function SettingsGroupLabel({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <p className={`text-[10px] font-semibold text-gray-500 dark:text-gray-400 tracking-wide ${className}`}>
+    <p className={`text-3xs font-semibold text-gray-500 dark:text-gray-400 tracking-wide ${className}`}>
       {children}
     </p>
   )
@@ -292,7 +292,7 @@ export function SettingsSelect({
               <span className="w-3.5 shrink-0 pt-0.5">{o.id === value && <Check className="w-3.5 h-3.5 text-blue-500" />}</span>
               <span className="min-w-0 flex-1">
                 <span className="block text-xs text-gray-700 dark:text-gray-200">{o.label}</span>
-                {o.desc && <span className="block text-[10px] text-gray-400 dark:text-gray-500 leading-snug break-words">{o.desc}</span>}
+                {o.desc && <span className="block text-3xs text-gray-400 dark:text-gray-500 leading-snug break-words">{o.desc}</span>}
               </span>
             </button>
           ))}

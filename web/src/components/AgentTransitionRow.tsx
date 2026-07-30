@@ -34,7 +34,7 @@ export function AgentTransitionRow({ agentName, agentId, projectId, status, befo
           items-center: Badge's text-only variant is a plain span, and BranchPill
           is an inline-block (see the note there) - a flex container would expose
           no baseline at all and this would silently do nothing for the pill. */}
-      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400">
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
         {/* Trimmed like the title above: with items-baseline the row's height is
             max-above-baseline + max-below-baseline, and an untrimmed 13px run
             contributes descender slack the eye doesn't weigh - which is what

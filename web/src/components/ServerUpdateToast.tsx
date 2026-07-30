@@ -70,13 +70,13 @@ export function ServerUpdateToast() {
       )}
 
       {!failed && !restartOnly && running && (
-        <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+        <p className="mt-1 text-2xs text-gray-500 dark:text-gray-400">
           The server keeps running until the build succeeds.
         </p>
       )}
 
       {failed && (
-        <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+        <p className="mt-1 text-2xs text-gray-500 dark:text-gray-400">
           Nothing was changed - the server is still running the previous build.
         </p>
       )}
@@ -86,7 +86,7 @@ export function ServerUpdateToast() {
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
-            className="mt-1.5 flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 cursor-pointer"
+            className="mt-1.5 flex items-center gap-1 text-2xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 cursor-pointer"
           >
             {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
             <span className="optical-center">
@@ -105,7 +105,7 @@ export function ServerUpdateToast() {
         <button
           type="button"
           onClick={dismiss}
-          className="mt-2 rounded px-2 py-1 text-[11px] font-medium bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 cursor-pointer"
+          className="mt-2 rounded px-2 py-1 text-2xs font-medium bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 cursor-pointer"
         >
           Dismiss
         </button>

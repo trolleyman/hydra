@@ -111,7 +111,7 @@ export const Dialog: React.FC = () => {
           onCancel={handleCancel}
         >
           {details?.note ? (
-            <p className="text-[12.5px] leading-snug text-amber-700 dark:text-amber-400">{withBranchPills(details.note)}</p>
+            <p className="text-xs leading-snug text-amber-700 dark:text-amber-400">{withBranchPills(details.note)}</p>
           ) : null}
         </RichConfirmPanel>
       ) : variant === 'updateBase' ? (
@@ -138,7 +138,7 @@ export const Dialog: React.FC = () => {
           {/* The URL in full, laid out like the approval card's fetch preview -
               same mono box, same lowlight - because it asks the same question,
               and the two should not need to be read differently. */}
-          <div className="px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-[#232b3a] font-mono text-[12px] break-all text-gray-600 dark:text-[#8b94a6]">
+          <div className="px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-[#232b3a] font-mono text-xs break-all text-gray-600 dark:text-[#8b94a6]">
             <UrlText url={details?.url ?? ''} />
           </div>
         </RichConfirmPanel>
@@ -250,10 +250,10 @@ function RichConfirmPanel({
             {/* Branch names arrive backticked from the call site and render as
                 inline mono pills - the same convention the toasts use, so a
                 branch reads as a branch wherever it is named. */}
-            <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
+            <h3 id="dialog-title" className="text-base font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
               {withBranchPills(title)}
             </h3>
-            <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(description)}</p>
+            <p className="text-xs leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(description)}</p>
           </div>
         </div>
         {children}
@@ -312,10 +312,10 @@ function SendPromptPanel({
             <Sparkles className="w-5 h-5" />
           </DialogIconTile>
           <div className="flex flex-col gap-1 min-w-0 pt-0.5">
-            <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
+            <h3 id="dialog-title" className="text-base font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
               {withBranchPills(title)}
             </h3>
-            <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(description)}</p>
+            <p className="text-xs leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(description)}</p>
           </div>
         </div>
         <div>
@@ -329,7 +329,7 @@ function SendPromptPanel({
               as a code block - the surrounding prose just reads as prose. */}
           <Markdown
             text={details?.prompt ?? ''}
-            className="max-h-[45vh] overflow-auto px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-[#232b3a] text-[13px] text-gray-700 dark:text-[#8b94a6]"
+            className="max-h-[45vh] overflow-auto px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-[#232b3a] text-sm text-gray-700 dark:text-[#8b94a6]"
           />
         </div>
       </div>
@@ -415,10 +415,10 @@ function MergeGatePanel({
             {spinner ? <LoaderCircle className="w-5 h-5 animate-spin" /> : <TriangleAlert className="w-5 h-5" />}
           </DialogIconTile>
           <div className="flex flex-col gap-1 min-w-0 pt-0.5">
-            <h3 id="dialog-title" className="text-[16px] font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
+            <h3 id="dialog-title" className="text-base font-bold leading-tight text-gray-900 dark:text-[#eef1f6]">
               {withBranchPills(title)}
             </h3>
-            <p className="text-[12.5px] leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(description)}</p>
+            <p className="text-xs leading-snug text-gray-500 dark:text-[#8b94a6]">{withBranchPills(description)}</p>
           </div>
         </div>
         <BranchChip
@@ -426,13 +426,13 @@ function MergeGatePanel({
           to={details?.toBranch || '-'}
           arrowClass="text-amber-600 dark:text-amber-400"
           right={
-            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${chip.cls}`}>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs font-medium ${chip.cls}`}>
               {spinner && <LoaderCircle className="w-3 h-3 animate-spin" />}
               {chip.label}
             </span>
           }
         />
-        <p className="text-[11.5px] leading-snug text-gray-400 dark:text-gray-500">{gateHelp}</p>
+        <p className="text-2xs leading-snug text-gray-400 dark:text-gray-500">{gateHelp}</p>
       </div>
       <div className="flex justify-end gap-2.5 px-5 py-3.5 border-t border-gray-100 dark:border-[#232b3a] bg-gray-50 dark:bg-[#0f141d]">
         <DialogCancelButton onClick={onCancel}>Cancel</DialogCancelButton>

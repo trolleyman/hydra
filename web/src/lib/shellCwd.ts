@@ -7,11 +7,19 @@
 // so the chat has to reconstruct it: start at the worktree, apply the `cd`s each
 // command performs, and hand every card the directory its command started in.
 //
-// Where the CLI records the directory itself, that wins: Claude writes a `cwd`
-// on every transcript entry, and the one on a tool RESULT is exactly where the
-// shell was left (the daemon relays it - internal/chat/claude.go). The walk
-// below is the fallback for what that does not cover: live stdout lines on CLI
-// versions that omit the field, and the first command of a conversation.
+// Where the directory is RECORDED, that wins, and this walk is only the
+// fallback. Claude writes a `cwd` on every transcript entry - the one on a tool
+// RESULT is exactly where the shell was left - and the daemon reads it back off
+// that file as a shell_cwd event (internal/chat/shellcwd.go), because the stdout
+// the chat is built from carries none of it. What is left for the walk: logs
+// recorded before that existed, the first command of a conversation, and any
+// provider with no transcript to read.
+//
+// The walk cannot replace it, either, and not only because parsing shell is
+// guesswork: history is PAGED, so the walk restarts at the worktree part-way
+// through a session and would caption a command that really ran in web/ as
+// running at the root. A recorded directory travels with its own event and does
+// not care which page it lands in.
 //
 // It is deliberately a KNOWN-or-nothing tracker. Anything it cannot resolve - a
 // `cd $DIR`, a `cd -`, a bare `cd` (which goes to $HOME, a path the browser does
@@ -138,18 +146,33 @@ export interface ShellStep {
   // one at all (Codex does). Authoritative: it beats anything tracked.
   cwd?: string
   // The directory recorded on this command's RESULT, i.e. where the shell was
-  // left afterwards (Claude writes it on every transcript entry - see
-  // internal/chat/claude.go). Ground truth, so it replaces whatever the walk
-  // below worked out, and the next command inherits it. Absent on live stdout
-  // from some CLI versions, which is what the walk is for.
+  // left afterwards - read off the provider's transcript by the daemon and
+  // delivered as a shell_cwd event (internal/chat/shellcwd.go). Ground truth, so
+  // it replaces whatever the walk below worked out, and the next command
+  // inherits it. Absent for logs recorded before that existed, which is what the
+  // walk is for.
   cwdAfter?: string
   // The command's output, read only to spot a `cd` that failed.
   output?: string
   // The command exited non-zero (or never ran at all - denied, timed out): its
   // directory is never captured, so none of its `cd`s outlive it.
   failed?: boolean
+  // No result ever came back: the turn was interrupted, or the agent process
+  // stopped mid-command and was resumed. How far down the script the shell got
+  // is unknowable, and a resume starts a NEW shell back at the worktree, so
+  // neither the directory the command was in nor the one its `cd`s asked for
+  // survives it. Without this the walk applies the whole script anyway: the
+  // trailing `cd web` of a command killed during its `sleep` moved the tracked
+  // directory into web/ while the real shell restarted at the worktree, and
+  // every command after it was captioned one level too deep (`cd web/web`).
+  unfinished?: boolean
   // A backgrounded command runs in its own shell, so its `cd`s do not outlive it.
   background?: boolean
+  // The agent process was replaced before this command (Hydra's session_resumed
+  // marker - the daemon knows, and nothing in the provider's stream says so).
+  // The shell went with it, so this command runs in a brand new one at the
+  // worktree, whatever the commands before it did.
+  shellRestarted?: boolean
 }
 
 // trackShellCwds returns, per step id, the absolute directory that step's
@@ -160,6 +183,10 @@ export function trackShellCwds(steps: ShellStep[], worktree: string | null): Map
   const root = worktree ? normalize(worktree) : null
   let current: string | null = root
   for (const step of steps) {
+    // A new process means a new shell, back where the session's first command
+    // began - so the resume re-anchors the walk (and undoes an unknown left by
+    // whatever the old process was killed in the middle of).
+    if (step.shellRestarted) current = root
     const reported = step.cwd && step.cwd !== '.' ? normalize(step.cwd) : ''
     const entry = reported || current
     out.set(step.id, entry)
@@ -170,6 +197,13 @@ export function trackShellCwds(steps: ShellStep[], worktree: string | null): Map
       continue
     }
     if (step.background) continue
+    // A command that never came back says nothing about where it left the shell
+    // (see `unfinished`), so the directory goes unknown until something
+    // re-anchors it - an absolute `cd`, or a provider that reports its own cwd.
+    if (step.unfinished) {
+      current = null
+      continue
+    }
     // A command that did not finish successfully never had its directory
     // captured, so it moved nothing - not even the `cd` that succeeded before
     // the failure. `cd web && bun test` with failing tests leaves the shell

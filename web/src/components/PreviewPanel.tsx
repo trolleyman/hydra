@@ -58,7 +58,7 @@ function StateChip({ state }: { state: PreviewStatus['state'] }) {
     error: { dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400', label: 'failed' },
   }[state]
   return (
-    <span className={`flex items-center gap-1.5 text-[11px] ${CHIP_LEADING} ${skin.text}`}>
+    <span className={`flex items-center gap-1.5 text-2xs ${CHIP_LEADING} ${skin.text}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${skin.dot}`} />
       {skin.label}
     </span>
@@ -232,7 +232,7 @@ function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, ref
           <p>The card body shows the captured build log; a running preview keeps its port, so bookmarks within one session stay valid.</p>
         </InfoTooltip>
         {startingCount > 0 && (
-          <span className={`flex items-center gap-1.5 text-[11px] ${CHIP_LEADING} font-normal text-gray-400 dark:text-gray-500`}>
+          <span className={`flex items-center gap-1.5 text-2xs ${CHIP_LEADING} font-normal text-gray-400 dark:text-gray-500`}>
             <LoaderCircle className="w-3 h-3 animate-spin" />
             Starting
           </span>
@@ -280,7 +280,7 @@ function PreviewCard({ preview: p, onOpen, onStart, onStop, onRestart }: {
       icon={<MonitorPlay className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />}
       name={p.name}
       status={
-        <span className={`flex items-center gap-2 min-w-0 text-[11px] ${CHIP_LEADING}`}>
+        <span className={`flex items-center gap-2 min-w-0 text-2xs ${CHIP_LEADING}`}>
           <StateChip state={p.state} />
           <span className="text-gray-400 dark:text-gray-500">{p.version}</span>
           {p.state === 'starting' && p.progress && (
@@ -340,7 +340,7 @@ function PreviewCard({ preview: p, onOpen, onStart, onStop, onRestart }: {
                 href={p.url}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+                className="flex items-center gap-1 h-6 px-2 rounded-md border text-2xs font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
               >
                 <ExternalLink className="w-3 h-3" />
                 Open
@@ -350,7 +350,7 @@ function PreviewCard({ preview: p, onOpen, onStart, onStop, onRestart }: {
             <Tooltip content="Start the preview and open it in a new tab">
               <button
                 onClick={onOpen}
-                className="flex items-center gap-1 h-6 px-2 rounded-md border text-[11px] font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+                className="flex items-center gap-1 h-6 px-2 rounded-md border text-2xs font-medium cursor-pointer transition-colors bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
               >
                 <ExternalLink className="w-3 h-3" />
                 Open

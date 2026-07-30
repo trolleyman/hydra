@@ -498,7 +498,7 @@ export function ZoomPan({ children, minimapSrc, className, style, maxWidth, maxH
           <button
             type="button"
             onClick={reset}
-            className="flex items-center gap-1 px-2 py-1 rounded bg-black/55 text-white/85 text-[10px] font-medium tracking-wide hover:bg-black/75 transition-colors cursor-pointer"
+            className="flex items-center gap-1 px-2 py-1 rounded bg-black/55 text-white/85 text-3xs font-medium tracking-wide hover:bg-black/75 transition-colors cursor-pointer"
           >
             <Maximize className="w-3 h-3" />
             Reset view ({view.scale.toFixed(1)}×)

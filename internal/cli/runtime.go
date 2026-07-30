@@ -268,6 +268,15 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		if len(retracted) > 0 {
 			log.Printf("chat %s: retracted %d block(s) from an interrupted turn the CLI never committed", id, len(retracted))
 		}
+		// Mark the break itself, after the retraction so it lands where the old
+		// process actually stopped. The client draws it as a rule across the
+		// conversation, and reads it as "everything that process owned is gone" -
+		// see chat.SessionResumed.
+		resumed := chat.SessionResumed{}
+		resumed.Worktree = worktree
+		if _, err := chatEvents.Append(id, resumed); err != nil {
+			log.Printf("warn: persist resume marker for %s: %v", id, err)
+		}
 	})
 	reg.SetOnChatPlanChange(func(id, planJSON string) {
 		if cur := reg.ChatPlanJSON(id); cur != "" {

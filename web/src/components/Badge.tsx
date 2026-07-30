@@ -38,7 +38,7 @@ export type Tone =
 type BadgeVariant = 'xs' | 'sm' | 'pill'
 
 const VARIANT_CLASS: Record<BadgeVariant, string> = {
-  xs: 'inline-flex items-center box-border h-[18px] text-[10px] leading-none px-1 rounded',
+  xs: 'inline-flex items-center box-border h-[18px] text-3xs leading-none px-1 rounded',
   sm: 'text-xs px-2 py-0.5 rounded',
   pill: 'text-xs px-2.5 py-0.5 rounded-full',
 }

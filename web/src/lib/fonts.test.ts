@@ -16,7 +16,7 @@ import {
   fontOptionsFor,
   fontSizePx,
   fontStackFor,
-  hasFontSize,
+  UI_MAX_FONT_STEP,
   isValidFontFor,
 } from './fonts'
 import { loadFont, loadFontSize } from './fontPrefs'
@@ -153,10 +153,19 @@ describe('loadFont', () => {
 })
 
 describe('font size', () => {
-  it('only offers a size for the roles that have a lever to pull', () => {
-    expect(FONT_SIZE_ROLES).toEqual(['chat', 'code', 'terminal'])
-    expect(hasFontSize('ui')).toBe(false)
-    for (const role of FONT_SIZE_ROLES) expect(hasFontSize(role)).toBe(true)
+  it('offers a size for every role', () => {
+    expect(FONT_SIZE_ROLES).toEqual(['ui', 'chat', 'code', 'terminal'])
+  })
+
+  // Interface type grows inside rows whose heights are fixed in px (h-7/h-8), so
+  // it stops a step short of the roles that own their own line box.
+  it('caps the interface step below the others', () => {
+    expect(UI_MAX_FONT_STEP).toBeLessThan(MAX_FONT_STEP)
+    expect(clampFontStep(99, 'ui')).toBe(UI_MAX_FONT_STEP)
+    expect(clampFontStep(99, 'chat')).toBe(MAX_FONT_STEP)
+    expect(fontSizePx('ui', 99)).toBe(FONT_BASE_PX.ui + UI_MAX_FONT_STEP)
+    // The floor is shared.
+    expect(clampFontStep(-99, 'ui')).toBe(MIN_FONT_STEP)
   })
 
   it('clamps a step to the offered range and rounds it to whole pixels', () => {

@@ -30,7 +30,7 @@ function MRSidebarMarker({ review }: { review: NonNullable<AgentResponse['review
   return (
     <span
       title={title}
-      className={`shrink-0 inline-flex items-center gap-0.5 text-[10px] tabular-nums ${
+      className={`shrink-0 inline-flex items-center gap-0.5 text-3xs tabular-nums ${
         ahead > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'
       }`}
     >
@@ -166,7 +166,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
         // tall whichever font the activity uses. The activity span carries `truncate`
         // (+ `min-w-0` so it can shrink inside the flex row) for the horizontal
         // ellipsis; the timestamp is `shrink-0` so it always stays fully visible.
-        <div className="mt-0.5 ml-4 h-4 flex items-center gap-2 overflow-hidden text-[11px] text-gray-400 dark:text-gray-500">
+        <div className="mt-0.5 ml-4 h-4 flex items-center gap-2 overflow-hidden text-2xs text-gray-400 dark:text-gray-500">
           <span className="min-w-0 flex-1 truncate">
             {!archived && agent.agent_status
               ? renderMarkdown(agentStatusDetail(agent), { dollarCommand: true, singleLine: true })
@@ -180,14 +180,14 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
               this renders once per sidebar row, see CLAUDE.md. */}
           {archived && agent.archived_at ? (
             <span
-              className="shrink-0 text-[10px] text-gray-300 dark:text-gray-600 tabular-nums"
+              className="shrink-0 text-3xs text-gray-300 dark:text-gray-600 tabular-nums"
               title={`${archivedEndStateBadge(agent.end_state).label} ${new Date(agent.archived_at * 1000).toLocaleString()}`}
             >
               <RelativeTime createdAt={agent.archived_at} />
             </span>
           ) : agent.created_at ? (
             <span
-              className="shrink-0 text-[10px] text-gray-300 dark:text-gray-600 tabular-nums"
+              className="shrink-0 text-3xs text-gray-300 dark:text-gray-600 tabular-nums"
               title={`created ${new Date(agent.created_at * 1000).toLocaleString()}`}
             >
               <RelativeTime createdAt={agent.created_at} />

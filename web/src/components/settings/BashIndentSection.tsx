@@ -43,7 +43,7 @@ export function BashIndentSection() {
             </button>
           ))}
         </div>
-        <pre className="flex-1 min-w-[16rem] overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 font-mono text-[11px] leading-[1.5] text-gray-600 dark:text-gray-300">
+        <pre className="flex-1 min-w-[16rem] overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 font-mono text-2xs leading-[1.5] text-gray-600 dark:text-gray-300">
           {formatBashForDisplay(SAMPLE, '', active)}
         </pre>
       </div>

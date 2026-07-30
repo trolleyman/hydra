@@ -257,7 +257,7 @@ function NoVideo({ className, style }: { className?: string; style?: React.CSSPr
   return (
     <div style={style} className={`${className ?? ''} select-none flex flex-col items-center justify-center gap-1 bg-gray-50 dark:bg-gray-800/50 text-gray-400 dark:text-gray-500`}>
       <VideoOff className="w-5 h-5" />
-      <span className="text-[11px] font-medium">No video</span>
+      <span className="text-2xs font-medium">No video</span>
     </div>
   )
 }
@@ -293,7 +293,7 @@ function VideoCell({ url, attach, label, aspect, open, disableOpen }: {
 }) {
   return (
     <div className="flex-1 min-w-0">
-      <div className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
+      <div className="text-3xs font-semibold tracking-wide text-gray-400 dark:text-gray-500 mb-1">{label}</div>
       {url ? (
         // A plain click opens the clip in the fullscreen lightbox (like an image
         // cell); a middle click opens the raw .webm in a new browser tab. The frame
@@ -418,7 +418,7 @@ function VideoAB({ controller, left, right, aspect, open, disableOpen }: {
             className="ml-auto"
           >
             <label
-              className={`flex items-center gap-1 text-[10px] font-medium tracking-wide select-none ${
+              className={`flex items-center gap-1 text-3xs font-medium tracking-wide select-none ${
                 canDiff ? 'cursor-pointer text-gray-500 dark:text-gray-400' : 'opacity-40 cursor-not-allowed text-gray-400 dark:text-gray-500'
               }`}
             >
@@ -566,9 +566,9 @@ function VideoOnion({ controller, left, right, aspect, open, disableOpen }: {
       {/* data-no-tile-drag: this opacity slider owns its own horizontal drag, so the
           masonry tile's drag-to-resize must not hijack it (see startBodyResize). */}
       <div data-no-tile-drag className="flex items-center gap-2 mt-1">
-        <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">Before</span>
+        <span className="text-3xs font-semibold tracking-wide text-gray-400 dark:text-gray-500">Before</span>
         <input type="range" min={0} max={100} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} className="flex-1 accent-blue-500 cursor-pointer" />
-        <span className="text-[10px] font-semibold tracking-wide text-gray-400 dark:text-gray-500">After</span>
+        <span className="text-3xs font-semibold tracking-wide text-gray-400 dark:text-gray-500">After</span>
       </div>
     </div>
   )
@@ -610,7 +610,7 @@ function VideoTransport({ controller }: { controller: Controller }) {
           <StepForward className="w-3.5 h-3.5" />
         </button>
       </Tooltip>
-      <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400 w-9 text-right">{formatTime(currentTime)}</span>
+      <span className="text-3xs tabular-nums text-gray-500 dark:text-gray-400 w-9 text-right">{formatTime(currentTime)}</span>
       <input
         type="range"
         min={0}
@@ -622,7 +622,7 @@ function VideoTransport({ controller }: { controller: Controller }) {
         onPointerUp={endScrub}
         className="flex-1 min-w-[80px] accent-blue-500 cursor-pointer"
       />
-      <span className="text-[10px] tabular-nums text-gray-400 dark:text-gray-500 w-9">{formatTime(duration)}</span>
+      <span className="text-3xs tabular-nums text-gray-400 dark:text-gray-500 w-9">{formatTime(duration)}</span>
       <Tooltip content="Loop">
         <button onClick={() => setLoop((l) => !l)} className={`${iconBtn} ${loop ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800' : ''}`} aria-label="Loop">
           <Repeat className="w-3.5 h-3.5" />
@@ -633,7 +633,7 @@ function VideoTransport({ controller }: { controller: Controller }) {
           value={rate}
           onChange={(e) => setRate(Number(e.target.value))}
           aria-label="Playback speed"
-          className="h-7 text-[11px] rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer px-1"
+          className="h-7 text-2xs rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 cursor-pointer px-1"
         >
           {RATES.map((r) => <option key={r} value={r}>{r}×</option>)}
         </select>

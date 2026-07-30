@@ -660,11 +660,15 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 		{
 			// Deeply-nested refactor - exercises the diff tree's VS Code-style
 			// "compact folders" rendering (see GetAgentDiff for agent-3).
-			Id:            "agent-3",
-			Title:         ptr("Refactor auth into nested packages"),
-			AgentType:     "claude",
-			BaseBranch:    "main",
-			BranchName:    ptr("hydra/feat-3"),
+			Id:         "agent-3",
+			Title:      ptr("Refactor auth into nested packages"),
+			AgentType:  "claude",
+			BaseBranch: "main",
+			BranchName: ptr("hydra/feat-3"),
+			// A worktree path, so the merge-conflict panel's "Resolving locally"
+			// script shows a real `cd` target rather than its <worktree-path>
+			// placeholder (the merge-conflict-dialog screenshot captures it).
+			WorktreePath:  ptr("/repo/.hydra/local/worktrees/feat-3"),
 			SessionPid:    1003,
 			SessionStatus: "running",
 			CreatedAt:     &createdAt3,

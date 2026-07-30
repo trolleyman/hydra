@@ -19,7 +19,7 @@ import { useChatBashIndentStore, useChatCodeLinesStore } from '../lib/chatPrefs'
 
 // A small pill: a tinted kind/verb label.
 const Badge: React.FC<{ text: string; tone: BadgeTone }> = ({ text, tone }) => (
-  <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wider ${BADGE_TONES[tone]}`}>
+  <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-3xs font-bold tracking-wider ${BADGE_TONES[tone]}`}>
     {text}
   </span>
 )
@@ -39,7 +39,7 @@ const BADGE_TONES: Record<BadgeTone, string> = {
 
 // A monospace chip for a server / host / command reference embedded in the body.
 const Chip: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <span className="inline-flex items-center rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 px-1.5 py-0.5 font-mono text-[12px] text-gray-700 dark:text-gray-200">
+  <span className="inline-flex items-center rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 px-1.5 py-0.5 font-mono text-xs text-gray-700 dark:text-gray-200">
     {children}
   </span>
 )
@@ -193,14 +193,14 @@ const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
   const bashIndent = useChatBashIndentStore((s) => s.indent)
   if (data.kind === 'mcp_tool') {
     return (
-      <pre className="max-h-56 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+      <pre className="max-h-56 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 px-3 py-2 font-mono text-2xs leading-relaxed whitespace-pre-wrap break-all">
         {data.argsPreview ? <JsonPreview raw={data.argsPreview} /> : <span className="text-gray-400 dark:text-gray-500">(no arguments)</span>}
       </pre>
     )
   }
   if (data.kind === 'webfetch' && data.url) {
     return (
-      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 px-3 py-2 font-mono text-[12px] break-all text-gray-600 dark:text-gray-300">
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 px-3 py-2 font-mono text-xs break-all text-gray-600 dark:text-gray-300">
         <UrlText url={stripScheme(data.url)} />
       </div>
     )
@@ -229,7 +229,7 @@ const Preview: React.FC<{ data: ApprovalToastData }> = ({ data }) => {
 }
 
 const COMMAND_BOX =
-  'max-h-56 overflow-auto rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50/50 dark:bg-red-500/5 px-3 py-2 font-mono text-[10.5px] leading-[1.5] whitespace-pre-wrap break-all text-gray-800 dark:text-gray-100'
+  'max-h-56 overflow-auto rounded-lg border border-red-200 dark:border-red-500/30 bg-red-50/50 dark:bg-red-500/5 px-3 py-2 font-mono text-3xs leading-[1.5] whitespace-pre-wrap break-all text-gray-800 dark:text-gray-100'
 
 // CommandLines renders a multi-step command with a 1..N gutter. These boxes wrap
 // rather than scroll sideways, so without the numbers a long line that wraps
@@ -268,7 +268,7 @@ function highlightBash(code: string): string | null {
 
 // A muted caption line with a leading icon.
 const Caption: React.FC<{ icon: React.ReactNode; children: React.ReactNode }> = ({ icon, children }) => (
-  <div className="flex items-start gap-1.5 text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+  <div className="flex items-start gap-1.5 text-2xs text-gray-500 dark:text-gray-400 leading-snug">
     <span className="mt-px shrink-0 text-gray-400 dark:text-gray-500">{icon}</span>
     <span>{children}</span>
   </div>
@@ -359,7 +359,7 @@ export const ApprovalCard: React.FC<{
             Hydra's own prose - it is the agent talking, and an agent can be
             wrong or lying, so it must never read as the system vouching for it. */}
         {data.description && (
-          <blockquote className="mt-2.5 border-l-2 border-gray-300 dark:border-gray-600 pl-2.5 text-[12px] leading-relaxed whitespace-pre-wrap text-gray-600 dark:text-gray-300">
+          <blockquote className="mt-2.5 border-l-2 border-gray-300 dark:border-gray-600 pl-2.5 text-xs leading-relaxed whitespace-pre-wrap text-gray-600 dark:text-gray-300">
             {data.description}
           </blockquote>
         )}
