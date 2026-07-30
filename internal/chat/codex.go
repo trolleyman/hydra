@@ -396,7 +396,11 @@ func codexToolPayload(item codexItem, completed bool) Payload {
 	switch item.Type {
 	case "commandExecution", "command_execution":
 		name = "Bash"
-		input = map[string]any{"command": item.Command, "cwd": item.CWD, "_raw": item}
+		commandInput := map[string]any{"command": item.Command, "cwd": item.CWD, "_raw": item}
+		if description := codexCommandDescription(item.Command); description != "" {
+			commandInput["description"] = description
+		}
+		input = commandInput
 	case "fileChange", "file_change":
 		name = codexFileChangeName(item.Changes)
 		input = map[string]any{"changes": item.Changes, "_raw": item}
@@ -413,8 +417,13 @@ func codexToolPayload(item codexItem, completed bool) Payload {
 		name = "View Image"
 		input = map[string]any{"path": item.Path, "_raw": item}
 	case "mcpToolCall":
-		name = "MCP " + item.Server + "::" + item.Tool
-		input = map[string]any{"arguments": item.Arguments, "_raw": item}
+		name = "mcp__" + item.Server + "__" + item.Tool
+		visible := map[string]any{}
+		if json.Unmarshal(item.Arguments, &visible) != nil {
+			visible["arguments"] = item.Arguments
+		}
+		visible["_raw"] = item
+		input = visible
 	}
 	rawInput, _ := json.Marshal(input)
 	rawOutput, _ := json.Marshal(output)
@@ -429,6 +438,31 @@ func codexToolPayload(item codexItem, completed bool) Payload {
 	call.Id, call.Name, call.Input = item.ID, name, rawInput
 	call.Output, call.Status = rawOutput, item.Status
 	return call
+}
+
+// codexCommandDescription reads the convention Hydra puts in Codex's standing
+// instructions: a concise `# description` on the first line of a shell script.
+// The command itself is preserved byte-for-byte in the event for display, Raw
+// view and auditability; this only adds the semantic field Claude supplies
+// natively.
+func codexCommandDescription(command string) string {
+	script := strings.TrimSpace(command)
+	for _, launcher := range []string{"bash -lc ", "bash -c ", "/bin/bash -lc ", "/bin/bash -c ", "/usr/bin/bash -lc ", "/usr/bin/bash -c "} {
+		if !strings.HasPrefix(script, launcher) {
+			continue
+		}
+		script = strings.TrimSpace(strings.TrimPrefix(script, launcher))
+		if len(script) >= 2 && (script[0] == '\'' || script[0] == '"') && script[len(script)-1] == script[0] {
+			script = script[1 : len(script)-1]
+		}
+		break
+	}
+	first, _, _ := strings.Cut(script, "\n")
+	first = strings.TrimSpace(first)
+	if !strings.HasPrefix(first, "#") || strings.HasPrefix(first, "#!") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(first, "#"))
 }
 
 func codexFileChangeName(changes json.RawMessage) string {
