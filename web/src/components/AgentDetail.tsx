@@ -11,6 +11,7 @@ import { BranchSelector } from './BranchSelector'
 import { BranchTag } from './BranchTag'
 import { TrackBranchButton } from './TrackBranchButton'
 import { copyBranchName } from '../lib/branch'
+import { fetchBranches, peekBranches } from '../lib/branchCache'
 import { SeparatedRow } from './SeparatedRow'
 import { AgentTopBarContent, type AgentTopBarAction, type AgentTopBarMenuItem } from './AgentTopBar'
 import { TopBarPortal } from './TopBarPortal'
@@ -697,20 +698,25 @@ const AgentMetaRow = memo(function AgentMetaRow({
           update-from-base merges in and what the diff compares against, but
           does not rebase commits. */}
       <span className="shrink-0 text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1">
-        {branches !== null && !savingBase ? (
+        {!savingBase ? (
+          // Rendered as a dropdown from the first frame, including while the
+          // branch list is still loading: the base branch's NAME is on the agent
+          // already, so there is nothing to wait for visually (see BranchSelector's
+          // `branches: null` state, which keeps the same chrome and shows a
+          // loading row if you open it before the list lands).
           <BranchSelector
             // An agent can't be its own base, so drop its own branch from
             // the options (the backend lists every branch agent-agnostically).
-            branches={branches.filter((b) => b.name !== agent.branch_name)}
+            branches={branches?.filter((b) => b.name !== agent.branch_name) ?? null}
             activeRef={agent.base_branch || ''}
-            isKnownBranch={branches.some((b) => b.name === agent.base_branch)}
+            isKnownBranch={!!branches?.some((b) => b.name === agent.base_branch)}
             onSelect={(name) => onSaveBase(name)}
             onOpen={() => onRefreshBranches()}
             title="Change base branch (metadata only - does not rebase commits)"
           />
         ) : (
           <span className="flex items-center gap-1.5 px-2.5 py-1.5">
-            {savingBase && <LoaderCircle className="w-3 h-3 animate-spin" />}
+            <LoaderCircle className="w-3 h-3 animate-spin" />
             {agent.base_branch || '-'}
           </span>
         )}
@@ -842,7 +848,11 @@ export function AgentDetail({
   const [generatingTitle, setGeneratingTitle] = useState(false)
   const [savingBase, setSavingBase] = useState(false)
   const [savingChatMode, setSavingChatMode] = useState(false)
-  const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
+  // Seeded from the shared cache so a revisit renders a populated dropdown with
+  // no network wait at all; null only on a cold first load of the project.
+  const [branches, setBranches] = useState<RepositoryBranch[] | null>(
+    () => peekBranches(projectId)?.branches ?? null,
+  )
   const updateAgentInStore = useAgentStore((s) => s.updateAgent)
   const navigate = useNavigate()
   const [diffRefreshTrigger, setDiffRefreshTrigger] = useState(0)
@@ -1011,7 +1021,7 @@ export function AgentDetail({
   const refreshBranches = useCallback(async () => {
     if (!projectId) return
     try {
-      const r = await api.default.getRepositoryBranches(projectId)
+      const r = await fetchBranches(projectId)
       setBranches(r.branches)
     } catch {
       // Keep any previously-cached list on failure; only seed an empty list so
@@ -1027,7 +1037,8 @@ export function AgentDetail({
   const [branchesProject, setBranchesProject] = useState(projectId)
   if (branchesProject !== projectId) {
     setBranchesProject(projectId)
-    setBranches(null)
+    // The new project's cached list if we have one, else null (loading).
+    setBranches(peekBranches(projectId)?.branches ?? null)
   }
   useEffect(() => {
     // Legitimate load-on-mount/project-change: refreshBranches only sets state after
@@ -1767,7 +1778,10 @@ export function AgentDetail({
   // so it is fresh at that moment, not at click time.
   async function respondToReview() {
     await runWithToast(
-      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: "Fetch your MR's unresolved review comments with the hydra MCP tools (get_review_comments) and address them, then commit." }),
+      () => api.default.sendAgentInput(projectId ?? '', agent.id, {
+        text: "Fetch your MR's unresolved review comments with the hydra MCP tools (get_review_comments) and address them, then commit.",
+        origin: 'review_comments',
+      }),
       { success: 'Asked the agent to address review comments', errorPrefix: 'Failed to send' },
     )
   }

@@ -35,6 +35,7 @@ import {
   SquareTerminal,
   TriangleAlert,
   Wrench,
+  Zap,
   X,
 } from 'lucide-react'
 import { SiGit } from '@icons-pack/react-simple-icons'
@@ -148,7 +149,7 @@ interface MergedCommit { sha: string; shortSha: string; subject: string }
 // mergeFieldsFromPayload pulls the merge annotation off a commit_created payload
 // (see chat.annotateMerge). Absent on ordinary commits and on merges recorded
 // before the annotation existed - both render as a plain commit chip.
-function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitChipItem, 'isMerge' | 'mergedCount' | 'merged'> {
+function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitChipItem, 'isMerge' | 'mergedCount' | 'merged' | 'mergedRef'> {
   if (payload.is_merge !== true) return {}
   const raw = Array.isArray(payload.merged_commits) ? payload.merged_commits : []
   const merged: MergedCommit[] = []
@@ -164,14 +165,20 @@ function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitCh
     })
   }
   const mergedCount = typeof payload.merged_count === 'number' ? payload.merged_count : merged.length
-  return { isMerge: true, mergedCount, merged }
+  const mergedRef = typeof payload.merged_ref === 'string' ? payload.merged_ref : undefined
+  return { isMerge: true, mergedCount, merged, mergedRef }
 }
 
-// mergeChipLabel renders "Merged <ref> - N commits", extracting the merged ref
-// name from a standard git merge subject and falling back to the raw subject.
-function mergeChipLabel(subject: string, count: number): string {
+// mergeChipLabel renders "Merged <ref> - N commits". The ref is whatever the
+// reconciler named (merged_ref, set when the head absorbed its base by
+// fast-forward and the commit's own subject therefore names a DIFFERENT branch -
+// see the openapi field), else the one in a standard git merge subject, else the
+// raw subject.
+// eslint-disable-next-line react-refresh/only-export-components
+export function mergeChipLabel(subject: string, count: number, mergedRef?: string): string {
   const m = subject.match(/^Merge (?:remote-tracking )?branch '([^']+)'/)
   const n = `${count} commit${count === 1 ? '' : 's'}`
+  if (mergedRef) return `Merged ${mergedRef} - ${n}`
   return m ? `Merged ${m[1]} - ${n}` : `${subject} - ${n}`
 }
 
@@ -192,7 +199,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
   const [expanded, setExpanded] = useState(false)
   const clickable = !!onSelectCommit
   const count = item.mergedCount ?? item.merged?.length ?? 0
-  const label = mergeChipLabel(item.subject, count)
+  const label = mergeChipLabel(item.subject, count, item.mergedRef)
   const shown = item.merged?.length ?? 0
   return (
     <div className="flex max-w-full flex-col items-center gap-1">
@@ -244,7 +251,7 @@ type ChatItem =
   // suppresses the fade/slide entrance for a message that takes the place of a
   // queued bubble already on screen (item 21) - it was visible, so re-animating
   // it as it settles reads as a flicker.
-  | { kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean }
+  | { kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean; origin?: string }
   // A slash command echoed back by the CLI (<command-name>/<command-args>).
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
@@ -326,7 +333,7 @@ type ChatItem =
   // `seq` is the source event's log sequence - the tie-break when two commits
   // share a `ts`, so the chip list has one total order no matter what order the
   // pages that produced it arrived in.
-  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[] }
+  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[]; mergedRef?: string }
 
 // A sub-agent (Claude Task tool) run, assembled from its sidechain events.
 // Keyed by agentId in the `subagents` map (a live line that carries only a
@@ -539,6 +546,10 @@ interface ProviderEvent {
   // SKILL.md body. The reducer routes these out of the normal chat flow (a
   // collapsed meta card / a skill card) instead of rendering them as a user turn.
   isMeta?: boolean
+  // Why a user turn exists when the user did not type it (review_comments,
+  // tests_failed, fix_conflicts, ...). Carried from the durable event so the
+  // bubble can be marked as automated - see AUTOMATED_ORIGIN.
+  origin?: string
   // A <task-notification> bookkeeping record (a background sub-agent finishing,
   // a background command completing) arrives as a notice carrying its XML here.
   // handleProviderEvent settles the sub off it (see handleTaskNotification).
@@ -767,7 +778,9 @@ export function toProviderEvents(ev: ChatEventUnion, showEmptyReasoning = false)
         }]
       }
       const text = contentText(p.content)
-      return text.trim() ? [{ ...base, type: 'user', message: { content: p.content as ClaudeContentBlock[] | string } }] : []
+      // origin rides along so the bubble can say Hydra sent it (see
+      // AUTOMATED_ORIGIN). Absent for anything typed in the composer.
+      return text.trim() ? [{ ...base, type: 'user', origin: p.origin || undefined, message: { content: p.content as ClaudeContentBlock[] | string } }] : []
     }
     case 'context_message':
       return [{ ...providerBase(ev, ev.payload), type: 'user', isMeta: true, message: { content: ev.payload.content as ClaudeContentBlock[] | string } }]
@@ -1708,6 +1721,49 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
 // preserves typed newlines.
 const USER_BUBBLE_CLASS =
   'max-w-[85%] rounded-2xl rounded-br-md bg-[#f0eee6] dark:bg-[#31302c] px-3.5 py-2 break-words'
+
+// A turn the user did NOT type. Same shape and side as their bubble - it speaks
+// for them, and the agent answers it as if they had - but a cooler tint and a
+// dashed edge, so a transcript scanned quickly still reads "you said this" for
+// everything that is plain.
+const AUTOMATED_BUBBLE_CLASS =
+  'max-w-[85%] rounded-2xl rounded-br-md border border-dashed border-sky-300/70 dark:border-sky-500/30 bg-sky-50/70 dark:bg-sky-950/25 px-3.5 py-2 break-words'
+
+// What each origin means, in the words the user needs. The KEY is the machine tag
+// the daemon sends (internal/http/notify.go, and the one-click callers in the diff
+// viewer); the label is short enough to sit above a bubble and the tip says what
+// caused it, because "why is this here?" is the only question this marker exists
+// to answer.
+//
+// The test for belonging here is not "did Hydra write the words" but "did the user
+// type it in the composer" - which is why a one-click Fix with agent counts, even
+// though the user meant every word of it.
+const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
+  review_comments: {
+    label: 'Sent by Hydra',
+    why: 'Sent automatically when review comments were published, so the agent knows to read them. It fetches the bodies itself with get_review_comments.',
+  },
+  review_resolved: {
+    label: 'Sent by Hydra',
+    why: 'Sent automatically when you resolved a review comment while the agent was working, so it stops on something you have already dealt with.',
+  },
+  tests_failed: {
+    label: 'Sent by Hydra',
+    why: 'Sent automatically when a test runner went red while the agent was idle. Turn it off with [notify] test_failures = false.',
+  },
+  fix_conflicts: {
+    label: 'Sent from a button',
+    why: 'You pressed a button rather than typing this - Hydra wrote the wording and sent it on your behalf.',
+  },
+  review_thread: {
+    label: 'Sent from a button',
+    why: 'You sent a review thread to the agent - Hydra quoted it and wrote the request on your behalf.',
+  },
+  unknown: {
+    label: 'Sent by Hydra',
+    why: 'Hydra sent this on your behalf rather than you typing it.',
+  },
+}
 
 // Quiet code/output panels inside tool cards.
 const PANEL_CLASS =
@@ -5242,10 +5298,16 @@ const ChatUserMessage = memo(function ChatUserMessage({
   text,
   sending,
   dimmed,
+  origin,
   projectId,
 }: {
   text: string
   sending?: boolean
+  // Why this turn exists when the user did not type it. The chat could not tell
+  // "you said this" from "Hydra said this for you" - both arrive as a user turn -
+  // which mattered most for the ones that ARE actions you took, one click at a
+  // time: Fix with agent, Resolve with agent. See AUTOMATED_ORIGIN.
+  origin?: string
   // dimmed renders the muted (opacity-75) bubble without the "Sending..." row -
   // used for a queued message pinned under the transcript, so it shows the same
   // image thumbnails / chips as a finalized turn instead of raw upload paths.
@@ -5261,12 +5323,25 @@ const ChatUserMessage = memo(function ChatUserMessage({
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
+  const auto = origin ? AUTOMATED_ORIGIN[origin] ?? AUTOMATED_ORIGIN.unknown : null
   return (
     <div className="flex flex-col items-end gap-1">
+      {/* An automated turn is still YOUR side of the conversation - it acts on
+          your behalf and the agent answers it as if you had spoken - so it keeps
+          the user bubble's shape and side. What changes is the tint and this
+          line, which says who really sent it and why. */}
+      {auto && (
+        <Tooltip content={auto.why} side="top">
+          <span className="flex items-center gap-1 text-3xs text-stone-400 dark:text-stone-500 cursor-help">
+            <Zap className="w-2.5 h-2.5" />
+            <span className="optical-center">{auto.label}</span>
+          </span>
+        </Tooltip>
+      )}
       {/* Copying out of a bubble is handled by the transcript's copy-as-markdown
           handler (copyTranscriptAsMarkdown), which also trims the trailing
           newlines the browser adds for the bubble's block padding. */}
-      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
+      <div className={`${auto ? AUTOMATED_BUBBLE_CLASS : USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
         {body && <Markdown text={body} />}
         {attachments.length > 0 && (
           <AttachmentChips
@@ -6242,6 +6317,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // texts still awaiting their CLI echo, so a late echo is deduped rather than
   // rendered a second time.
   const optimisticIdRef = useRef(-1)
+  // takeOptimisticId allocates that id and stamps it with the time, exactly as
+  // the reducer's push does for an event-borne item. An optimistic row is
+  // appended straight to `items` instead of going through push, and an UNSTAMPED
+  // row is one mergedItems can never flush a commit chip before (it only flushes
+  // when it meets an item stamped later) - so every chip newer than the last
+  // stamped item slid BELOW the new bubble, and a message sent after a run of
+  // commits appeared above them until a reload put it back underneath.
+  const takeOptimisticId = () => {
+    const id = optimisticIdRef.current--
+    itemTsRef.current.set(id, Date.now())
+    return id
+  }
   const optimisticTextsRef = useRef<{ clientId: string; text: string }[]>([])
   // Client ids of "!command" cards shown optimistically as "running": when the
   // daemon's result event (a user_message carrying `shell`) arrives it settles
@@ -7336,7 +7423,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (rawText: string, ts?: number | null, isMeta?: boolean, clientId = '') => {
+    const routeUserText = (rawText: string, ts?: number | null, isMeta?: boolean, clientId = '', origin = '') => {
       // Machine-injected context (a Skill's SKILL.md body, the resume nudge) rides
       // in a `user` envelope but was never typed - route it to a skill/meta card
       // off the isMeta flag rather than the content-sniffing below. It doesn't
@@ -7467,7 +7554,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
-      push({ kind: 'user', text, noEntrance: fromQueue })
+      push({ kind: 'user', text, noEntrance: fromQueue, origin: origin || undefined })
     }
 
     const handleProviderEvent = (ev: ProviderEvent) => {
@@ -7606,13 +7693,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           const content = ev.message?.content
           const userTs = parseEventTs(ev)
           if (typeof content === 'string') {
-            if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '')
+            if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '', ev.origin)
             return
           }
           const editPatch = eventEditPatch(ev, content ?? [])
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text?.trim()) {
-              routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '')
+              routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '', ev.origin)
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block, providerEntry(ev)), editPatch, ev.cwd)
@@ -9194,7 +9281,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // A message that goes straight through appears immediately, in-flow, above
       // the thinking/response it triggers (item 26); the CLI's echo (which can
       // arrive after that response) is deduped by optimisticTextsRef.
-      setItems((prev) => [...prev, { kind: 'user', id: optimisticIdRef.current--, text, sending: true }])
+      // Allocated OUTSIDE the updater: React may run an updater more than once
+      // (StrictMode does, in dev), and an id/stamp taken in there would be too.
+      const optId = takeOptimisticId()
+      setItems((prev) => [...prev, { kind: 'user', id: optId, text, sending: true }])
       optimisticTextsRef.current.push({ clientId, text })
       // It starts a turn; nudge the status optimistically (like the terminal's
       // Enter handling), unless the agent is answering our question.
@@ -9219,7 +9309,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const clientId = randomId()
     ws.send(JSON.stringify({ type: 'shell_command', id: clientId, command }))
     optimisticShellRef.current.add(clientId)
-    setItems((prev) => [...prev, { kind: 'shellCmd', id: optimisticIdRef.current--, clientId, command, output: '', running: true }])
+    const optId = takeOptimisticId()
+    setItems((prev) => [...prev, { kind: 'shellCmd', id: optId, clientId, command, output: '', running: true }])
     return true
   }
 
@@ -9348,7 +9439,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // /model change to the transcript but not always to the live stream, so it
     // would otherwise not appear until a reload. The CLI's real echo, when it
     // arrives, supersedes this (routeUserText).
-    const optId = optimisticIdRef.current--
+    const optId = takeOptimisticId()
     optimisticModelIdRef.current = optId
     setItems((prev) => [...prev, { kind: 'cmdout', id: optId, text: `Set model to ${id}` }])
     pinnedRef.current = true
@@ -9597,7 +9688,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function renderChatItem(item: ChatItem, shellCwd: string | null = null): ReactNode {
     switch (item.kind) {
       case 'user':
-        return <ChatUserMessage text={item.text} sending={item.sending} projectId={projectId} />
+        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} projectId={projectId} />
       case 'command': {
         const name = item.name.startsWith('/') ? item.name : '/' + item.name
         return (
@@ -10087,11 +10178,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               </span>
             </div>
           )}
-          {!replayDone && !chatError && items.length === 0 && (
-            <div className="text-xs text-stone-400 dark:text-stone-500 italic py-2">
-              {connected ? 'Loading conversation...' : 'Connecting...'}
-            </div>
-          )}
           {/* Load-older affordance at the very top (item 25). */}
           {replayDone && loadingOlder && (
             <div className="flex items-center justify-center gap-1.5 py-1 text-2xs text-stone-400 dark:text-stone-500 select-none">
@@ -10187,6 +10273,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           )}
           </div>
         </div>
+        {/* Waiting for the transcript: the spark drawn large in the middle of
+            the empty pane, with the label under it. It used to be a line of
+            small italic text in the top-left corner, which read as a stray
+            first message rather than as "the pane is still filling".
+            Positioned over the scroll pane rather than inside it because the
+            content column is a top-anchored flex column with no height of its
+            own while there is nothing in it - there is nothing to centre
+            within. pointer-events-none so it can't swallow a click, and
+            aria-live so a screen reader hears the state change rather than
+            only the (silent) spark. */}
+        {!replayDone && !chatError && items.length === 0 && !viewSub && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 select-none pointer-events-none">
+            <WorkSpark size="lg" />
+            <div aria-live="polite" className="text-xs text-stone-400 dark:text-stone-500">
+              {connected ? 'Loading conversation' : 'Connecting'}
+            </div>
+          </div>
+        )}
         {/* Jump to bottom (item 14): floats above the composer while the user
             is scrolled up, claude.ai style. */}
         {!pinned && replayDone && (

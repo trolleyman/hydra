@@ -609,6 +609,9 @@ type AgentConfig struct {
 
 // AgentInputRequest defines model for AgentInputRequest.
 type AgentInputRequest struct {
+	// Origin Why this message exists, when the user did not type it - "review_comments", "review_resolved", "tests_failed", "fix_conflicts", "review_thread". Absent for anything typed in the composer. It rides through to the chat event so the transcript can mark an automated turn as such; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+	Origin *string `json:"origin,omitempty"`
+
 	// Text Text to send to the agent's stdin (a newline is appended automatically)
 	Text string `json:"text"`
 }
@@ -679,8 +682,11 @@ type AgentResponse struct {
 	Tests *TestSummary `json:"tests,omitempty"`
 
 	// Title Mutable, user-facing display name. May be empty before it is seeded; clients should fall back to id.
-	Title        *string `json:"title,omitempty"`
-	WorktreePath *string `json:"worktree_path"`
+	Title *string `json:"title,omitempty"`
+
+	// UnreadComments How many review comments on this head the user has not seen (docs/review-agent.md). Deliberately its own count rather than folded into has_unread_changes: that flag means "the agent finished", and one indicator meaning both would be trustworthy for neither. Cleared only by explicitly arriving at a comment, never by opening the page.
+	UnreadComments *int    `json:"unread_comments,omitempty"`
+	WorktreePath   *string `json:"worktree_path"`
 }
 
 // AgentStatus The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
@@ -1134,10 +1140,13 @@ type ChatCommitCreatedPayload struct {
 	IsMerge       bool               `json:"is_merge,omitempty"`
 	MergedCommits []ChatMergedCommit `json:"merged_commits,omitempty"`
 	MergedCount   int                `json:"merged_count,omitempty"`
-	Sha           string             `json:"sha,omitempty"`
-	ShortSha      string             `json:"short_sha,omitempty"`
-	Subject       string             `json:"subject,omitempty"`
-	Timestamp     string             `json:"timestamp,omitempty"`
+
+	// MergedRef The ref this merge brought in, when the reconciler knows it rather than having to read it out of the commit subject. Set when the head absorbed its base by FAST-FORWARD (update-from-base with nothing of its own to merge): the branch then sits on the base's own tip, whose subject names whatever that commit merged - another head - so the chip must be labelled from the ref that was pulled in, not from it.
+	MergedRef string `json:"merged_ref,omitempty"`
+	Sha       string `json:"sha,omitempty"`
+	ShortSha  string `json:"short_sha,omitempty"`
+	Subject   string `json:"subject,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // ChatContentStreamPayload A provider content-boundary hint; a state signal, not a card.
@@ -1599,6 +1608,9 @@ type ChatUserMessagePayload struct {
 	// Id The client-generated id, so a queued bubble reconciles to it.
 	Id string `json:"id,omitempty"`
 
+	// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "tests_failed", "fix_conflicts", "review_thread". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+	Origin string `json:"origin,omitempty"`
+
 	// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
 	Shell *ChatShellResult `json:"shell,omitempty"`
 }
@@ -1699,6 +1711,9 @@ type ConfigResponse struct {
 
 	// McpServers Read-only: candidate MCP servers discovered in the host ~/.claude.json and project .mcp.json, for populating the mcp_allowed picker. Ignored on save.
 	McpServers *[]McpServer `json:"mcp_servers"`
+
+	// NotifyTestFailures Whether a test runner settling FAILING wakes the head with a one-line message ([notify] test_failures in config.toml). It only fires while the head is IDLE, so it cannot interrupt a turn or loop, and it is deduped per (runner, commit). The agent pulls the output with get_test_logs. null/absent uses the built-in default (enabled).
+	NotifyTestFailures *bool `json:"notify_test_failures"`
 
 	// Previews Per-project live-server scripts, each proxied on demand as a clickable preview of the head's app ([previews.<name>] in config.toml). A config still spelling one as an [artifacts.<name>] with type = "server" is upgraded on read, so it appears here and not under artifacts.
 	Previews *[]PreviewScript `json:"previews"`
@@ -2973,6 +2988,9 @@ type ReviewCommentsResponse struct {
 	// Notified On a publish, the one line the agent was told. Absent otherwise.
 	Notified *string `json:"notified,omitempty"`
 
+	// NotifiedReviewer On a publish, true when at least one comment named @review, so the head's reviewer was told (and started, if it was not already running). The UI says so, because a reviewer working in a tab you have not opened is otherwise invisible.
+	NotifiedReviewer *bool `json:"notified_reviewer,omitempty"`
+
 	// You Who "you" is on this machine, from git's user.name. Hydra has no accounts and hosts no pictures, so a comment you wrote is drawn as a monogram of this rather than an avatar. Empty when git has no user.name configured.
 	You *string `json:"you,omitempty"`
 }
@@ -4221,6 +4239,9 @@ type UserMessageEvent struct {
 
 		// Id The client-generated id, so a queued bubble reconciles to it.
 		Id string `json:"id,omitempty"`
+
+		// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "tests_failed", "fix_conflicts", "review_thread". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+		Origin string `json:"origin,omitempty"`
 
 		// ParentItemId The tool call this belongs under.
 		ParentItemId string `json:"parent_item_id,omitempty"`

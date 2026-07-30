@@ -60,6 +60,10 @@ export type AgentResponse = {
      */
     has_unread_changes?: boolean;
     /**
+     * How many review comments on this head the user has not seen (docs/review-agent.md). Deliberately its own count rather than folded into has_unread_changes: that flag means "the agent finished", and one indicator meaning both would be trustworthy for neither. Cleared only by explicitly arriving at a comment, never by opening the page.
+     */
+    unread_comments?: number;
+    /**
      * True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only - they have no live session or worktree.
      */
     archived?: boolean;

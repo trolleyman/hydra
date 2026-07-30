@@ -15,6 +15,7 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -69,7 +70,9 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 		if err != nil {
 			return commentBadRequest(fmt.Sprintf("the comment was saved but could not be published: %v", err)), nil
 		}
-		resp = commentsResponse(projectRoot, head.ID, s.notifyComments(ctx, projectRoot, *head, published))
+		notified, toReviewer := s.notifyComments(ctx, projectRoot, *head, published)
+		resp = commentsResponse(projectRoot, head.ID, notified)
+		resp.NotifiedReviewer = ptr(toReviewer)
 	}
 	s.notifyAgentsChanged(projectRoot, false)
 	return api.AddReviewComment200JSONResponse(resp), nil
@@ -120,31 +123,101 @@ func (s *Server) PublishReviewComments(ctx context.Context, request api.PublishR
 	if len(published) == 0 {
 		return publishCommentsBadRequest("there is nothing to publish"), nil
 	}
-	notified := s.notifyComments(ctx, projectRoot, *head, published)
+	notified, toReviewer := s.notifyComments(ctx, projectRoot, *head, published)
 	s.notifyAgentsChanged(projectRoot, false)
-	return api.PublishReviewComments200JSONResponse(commentsResponse(projectRoot, head.ID, notified)), nil
+	resp := commentsResponse(projectRoot, head.ID, notified)
+	resp.NotifiedReviewer = ptr(toReviewer)
+	return api.PublishReviewComments200JSONResponse(resp), nil
 }
 
-// notifyComments tells the head's agent that comments landed, and returns the
-// line it was told (empty when there was no one to tell).
+// notifyComments tells whoever a batch of published comments was addressed to,
+// and returns the line the HEAD was told (empty when it was not told anything).
 //
-// Batched by construction: "Submit review" with six comments is one notification,
-// not six. A head with no live session is not an error - the comments are durable,
-// so the agent can read them whenever it next runs; losing the nudge is not losing
-// the comment, which is the whole reason this stopped being an injected blob.
-func (s *Server) notifyComments(ctx context.Context, projectRoot string, head heads.Head, published []reviewstore.Comment) *string {
-	line := reviewstore.NotifyLine(published)
+// Addressed to whom is the mention system (reviewstore.Mentions): no mention means
+// the head, as it always has; `@review` sends it to the reviewer instead; naming
+// both sends it to both. So one "Submit review" can produce two messages - one per
+// audience - and never more, because each is batched over its own recipients.
+//
+// notifyAlways for the head: this is something the user just did on purpose and
+// expects to land, and a chat head steers a mid-turn message in at its next step
+// boundary rather than having it corrupt the turn. Waiting for idle here would
+// mean commenting on a working agent did nothing until it stopped.
+func (s *Server) notifyComments(ctx context.Context, projectRoot string, head heads.Head, published []reviewstore.Comment) (*string, bool) {
+	var forHead, forReviewer []reviewstore.Comment
+	for _, c := range published {
+		// An agent's own comment never routes. Without this rule one "@review this"
+		// in a reply becomes a chain of agents summoning each other, which is an
+		// unbounded bill and nobody's idea of a review.
+		if c.Author != reviewstore.AuthorUser {
+			continue
+		}
+		m := reviewstore.ParseMentions(c.Body)
+		if m.Head {
+			forHead = append(forHead, c)
+		}
+		if m.Reviewer {
+			forReviewer = append(forReviewer, c)
+		}
+	}
+	toReviewer := false
+	if line := reviewstore.NotifyLine(forReviewer); line != "" {
+		s.notifyReviewer(projectRoot, head, line)
+		toReviewer = true
+	}
+	line := reviewstore.NotifyLine(forHead)
 	if line == "" {
-		return nil
+		return nil, toReviewer
 	}
-	if _, err := s.SendAgentInput(ctx, api.SendAgentInputRequestObject{
-		ProjectId: projectRoot,
-		Id:        head.ID,
-		Body:      &api.SendAgentInputJSONRequestBody{Text: line},
-	}); err != nil {
-		return nil
+	if !s.notifyHead(ctx, projectRoot, head.ID, notifyAlways, reasonReviewComments, line) {
+		return nil, toReviewer
 	}
-	return &line
+	return &line, toReviewer
+}
+
+// notifyReviewer delivers a line to the head's review slot, STARTING one if it is
+// not already running.
+//
+// Starting it was the open question, and the answer turned on what a mention
+// actually is. An accidental spawn would be indefensible - a slot costs a
+// checkout, a sandbox and a model session - but `@review` is not an accident: it
+// is a person typing the reviewer's name to address it, which is the same
+// intent as clicking the Review tab and should not do less. (An AGENT's comment
+// still never routes, so no agent can spawn one by writing the word.)
+//
+// The start is asynchronous. Spawning a sandbox takes seconds and the caller is
+// answering an HTTP request, so the publish returns immediately and the message
+// follows when the session is up. A failure is logged and dropped: the comment is
+// durable either way, and the reviewer reads it with get_review_comments the
+// moment it is next opened.
+func (s *Server) notifyReviewer(projectRoot string, head heads.Head, line string) {
+	content, err := json.Marshal([]map[string]any{{"type": "text", "text": autoPrefix + line}})
+	if err != nil {
+		return
+	}
+	slot := heads.ReviewSessionID(head.ID)
+	if s.Sessions.IsLive(slot) {
+		if err := s.Sessions.SendChatUser(slot, content); err != nil {
+			log.Printf("warn: notify reviewer %s: %v", slot, err)
+		}
+		return
+	}
+	go func() {
+		rows, cols := heads.LoadResumeSize(s.DB, projectRoot, head.ID)
+		if _, err := heads.StartReviewSession(s.Sessions, projectRoot, head, rows, cols); err != nil {
+			log.Printf("warn: @review could not start a reviewer for %s: %v", head.ID, err)
+			return
+		}
+		// A just-started Claude is not ready for stdin the instant Start returns;
+		// it has to come up and read its system prompt first. Retry briefly rather
+		// than writing into a pipe nobody is reading yet.
+		for range 20 {
+			if err := s.Sessions.SendChatUser(slot, content); err == nil {
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		log.Printf("warn: @review started a reviewer for %s but could not deliver the notice", head.ID)
+	}()
 }
 
 // ResolveReviewComment marks a comment dealt with, whichever origin it came from.
@@ -160,6 +233,7 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 	}
 	resolved := request.Body.Resolved
 	if _, err := reviewstore.SetResolved(projectRoot, head.ID, request.Number, resolved); err == nil {
+		s.notifyResolved(projectRoot, *head, request.Number, resolved)
 		s.notifyAgentsChanged(projectRoot, false)
 		return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 	} else if !errors.Is(err, reviewstore.ErrNoComment) {
@@ -175,6 +249,7 @@ func (s *Server) ResolveReviewComment(ctx context.Context, request api.ResolveRe
 	if err := reviewstore.SetThreadResolved(projectRoot, head.ID, ref.Thread, resolved, time.Now().Format(time.RFC3339)); err != nil {
 		return resolveCommentBadRequest(err.Error()), nil
 	}
+	s.notifyResolved(projectRoot, *head, request.Number, resolved)
 	s.notifyAgentsChanged(projectRoot, false)
 	return api.ResolveReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 }
@@ -203,6 +278,34 @@ func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkRev
 	}
 	s.notifyAgentsChanged(projectRoot, false)
 	return api.MarkReviewCommentsRead200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
+}
+
+// resolveBatcher collects a run of resolves so clicking through five costs one
+// message. Long enough to catch a burst, short enough that a single resolve still
+// lands while the turn it is cancelling is plausibly still running.
+var resolveBatcher = newNotifyBatcher(4 * time.Second)
+
+// notifyResolved tells a WORKING head that a comment has been dealt with.
+//
+// notifyWorking, not notifyIdle, and that is the whole point: resolving is
+// otherwise the user's own bookkeeping, and an idle agent picks the change up for
+// free next time it reads its comments (reviewstore.OpenComments already filters
+// resolved ones out). The single case worth spending a turn on is "you are working
+// on #3 right now and I have just cancelled it". Reopening never notifies - the
+// comment is simply back in the list it reads anyway.
+func (s *Server) notifyResolved(projectRoot string, head heads.Head, number int, resolved bool) {
+	if !resolved || !s.headIsWorking(projectRoot, head.ID) {
+		return
+	}
+	resolveBatcher.add(head.ID, fmt.Sprintf("#%d", number), func(items []string) {
+		it := "them"
+		if len(items) == 1 {
+			it = "it"
+		}
+		s.notifyHead(s.BackgroundCtx, projectRoot, head.ID, notifyWorking, reasonReviewResolved, fmt.Sprintf(
+			"Review %s resolved: %s. No further work is needed on %s - stop if you are part-way through.",
+			map[bool]string{true: "comment", false: "comments"}[len(items) == 1], strings.Join(items, ", "), it))
+	})
 }
 
 func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCommentsResponse {
@@ -289,4 +392,35 @@ func resolveCommentBadRequest(detail string) api.ResolveReviewComment400JSONResp
 
 func publishCommentsBadRequest(detail string) api.PublishReviewComments400JSONResponse {
 	return api.PublishReviewComments400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: detail}
+}
+
+// unreadCommentCount is how many review comments on a head the user has not seen,
+// for the badge on its card. Nil when there are none, so the field is absent
+// rather than a zero the client has to special-case.
+//
+// It covers BOTH origins - a forge reviewer's remark is as much news as an
+// agent's - which is why it counts from the numbering rather than from the comment
+// store alone. Cheap enough for the agent-list poll: two small reads, and only for
+// heads that have ever been commented on (the sidecar is absent otherwise).
+func unreadCommentCount(projectRoot, headID string) *int {
+	if projectRoot == "" || headID == "" {
+		return nil
+	}
+	read := reviewstore.ReadSet(projectRoot, headID)
+	n := 0
+	for _, c := range reviewstore.PublishedComments(projectRoot, headID) {
+		// Your own comments are never news to you.
+		if c.Author != reviewstore.AuthorUser && !read[c.Number] {
+			n++
+		}
+	}
+	for _, number := range reviewstore.AllNumbers(projectRoot, headID) {
+		if !read[number] {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	return &n
 }

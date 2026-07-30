@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { Clock, GitPullRequest } from 'lucide-react'
+import { Clock, GitPullRequest, MessageSquare } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
@@ -85,6 +85,22 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           className={`w-2 h-2 rounded-full shrink-0 ${archived ? 'bg-gray-300 dark:bg-gray-600' : `${agentDotClass(agent)} ${agentDotAnimate(agent)}`}`}
         />
         <span className={`font-medium text-sm truncate ${archived ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>{agent.title || agent.id}</span>
+        {/* Unread review comments: a speech bubble with a count, NOT a third dot.
+            The card already carries a needs-input dot and an unread-changes dot,
+            and a third would make none of them readable - this one also has to say
+            HOW MANY, which a dot cannot. It sits before them because it is the
+            narrower claim ("someone said something") and they are the louder ones.
+            Cleared only by arriving at a comment, never by opening the page. */}
+        {!archived && !!agent.unread_comments && (
+          <span
+            aria-label={`${agent.unread_comments} unread review comment${agent.unread_comments === 1 ? '' : 's'}`}
+            title={`${agent.unread_comments} unread review comment${agent.unread_comments === 1 ? '' : 's'}`}
+            className="ml-auto shrink-0 inline-flex items-center gap-0.5 rounded bg-blue-100 px-1 text-3xs font-medium tabular-nums text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+          >
+            <MessageSquare className="w-2.5 h-2.5" />
+            {agent.unread_comments}
+          </span>
+        )}
         {!archived && agent.agent_status?.status === 'needs_input' ? (
           // Needs-input marker: a red sibling of the blue unread dot, pinned to
           // the right of the title line. Driven by the live status rather than
@@ -93,7 +109,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           // over the blue dot since "needs you now" is the stronger signal.
           <span
             aria-label="needs your input"
-            className="ml-auto shrink-0 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-red-500/25"
+            className={`${agent.unread_comments ? 'ml-1' : 'ml-auto'} shrink-0 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-red-500/25`}
           />
         ) : agent.has_unread_changes && !archived ? (
           // Unread-changes marker, pinned to the right of the title line so it
@@ -101,7 +117,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           // agent settles into finished (or reaches needs_input), cleared when it's opened.
           <span
             aria-label="unread changes"
-            className="ml-auto shrink-0 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25"
+            className={`${agent.unread_comments ? 'ml-1' : 'ml-auto'} shrink-0 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25`}
           />
         ) : null}
       </div>

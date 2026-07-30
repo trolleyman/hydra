@@ -3668,6 +3668,13 @@ components:
         has_unread_changes:
           type: boolean
           description: True if the agent has changes the user has not yet looked at (set on a running→waiting/finished transition, cleared when the agent is opened).
+        unread_comments:
+          type: integer
+          description: >-
+            How many review comments on this head the user has not seen (docs/review-agent.md).
+            Deliberately its own count rather than folded into has_unread_changes: that flag means
+            "the agent finished", and one indicator meaning both would be trustworthy for neither.
+            Cleared only by explicitly arriving at a comment, never by opening the page.
         archived:
           type: boolean
           description: True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only - they have no live session or worktree.
@@ -3837,6 +3844,12 @@ components:
         notified:
           type: string
           description: On a publish, the one line the agent was told. Absent otherwise.
+        notified_reviewer:
+          type: boolean
+          description: >-
+            On a publish, true when at least one comment named @review, so the head's
+            reviewer was told (and started, if it was not already running). The UI says so,
+            because a reviewer working in a tab you have not opened is otherwise invisible.
         you:
           type: string
           description: >
@@ -4706,6 +4719,14 @@ components:
         text:
           type: string
           description: Text to send to the agent's stdin (a newline is appended automatically)
+        origin:
+          type: string
+          description: >-
+            Why this message exists, when the user did not type it - "review_comments",
+            "review_resolved", "tests_failed", "fix_conflicts", "review_thread". Absent
+            for anything typed in the composer. It rides through to the chat event so the
+            transcript can mark an automated turn as such; the agent sees only the text,
+            which is why those messages also carry a "[Hydra]" prefix.
 
     ApprovalRequest:
       type: object
@@ -5381,6 +5402,15 @@ components:
             config.toml). When false, tests run only on open / at merge;
             foreground runs and test_concurrency still apply. null/absent uses
             the built-in default (enabled).
+        notify_test_failures:
+          type: boolean
+          nullable: true
+          description: >-
+            Whether a test runner settling FAILING wakes the head with a one-line message
+            ([notify] test_failures in config.toml). It only fires while the head is IDLE, so
+            it cannot interrupt a turn or loop, and it is deduped per (runner, commit). The
+            agent pulls the output with get_test_logs. null/absent uses the built-in default
+            (enabled).
         artifact_concurrency:
           type: integer
           nullable: true
@@ -6152,6 +6182,16 @@ components:
           description: Content blocks, or a bare string for a provider command echo.
         shell:
           $ref: '#/components/schemas/ChatShellResult'
+        origin:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            Why this turn exists, when the user did not type it - "review_comments",
+            "review_resolved", "tests_failed", "fix_conflicts", "review_thread". Absent for
+            anything typed in the composer. The test is not "did Hydra write the words" but
+            "did the user type it", so a one-click action like Fix with agent counts as
+            automated too. Drives the chat's automated-turn marker; the agent sees only the
+            text, which is why those messages also carry a "[Hydra]" prefix.
 
     ChatUserMessageEchoedPayload:
       type: object
@@ -6527,6 +6567,16 @@ components:
         merged_count:
           type: integer
           x-go-type-skip-optional-pointer: true
+        merged_ref:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The ref this merge brought in, when the reconciler knows it rather
+            than having to read it out of the commit subject. Set when the head
+            absorbed its base by FAST-FORWARD (update-from-base with nothing of
+            its own to merge): the branch then sits on the base's own tip, whose
+            subject names whatever that commit merged - another head - so the
+            chip must be labelled from the ref that was pulled in, not from it.
         merged_commits:
           type: array
           items:

@@ -64,6 +64,7 @@ func chatContextResolver(store *db.Store) chat.ContextResolver {
 				Prompt:      agent.Prompt,
 				AgentType:   agent.AgentType,
 				Plan:        agent.Plan,
+				BaseBranch:  agent.BaseBranch,
 			}, true
 		}
 		headID, slot, ok := heads.SplitSlotID(id)
@@ -278,6 +279,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 			log.Printf("warn: persist resume marker for %s: %v", id, err)
 		}
 	})
+	// A killed or merged head's chat log has just been deleted from disk; the
+	// manager is still holding all of it in memory (see chat.Manager.Forget).
+	heads.SetOnStateRemoved(chatEvents.Forget)
 	reg.SetOnChatPlanChange(func(id, planJSON string) {
 		if cur := reg.ChatPlanJSON(id); cur != "" {
 			planJSON = cur
@@ -445,6 +449,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// Likewise re-run heads' test suites in the background when their verdict goes
 	// stale (a new commit landed), so the verdict is fresh before it's looked at.
 	go server.RunTestPrefetcher(ctx, roots)
+	// Tell an IDLE head when its suite goes red, so a finished head does not sit
+	// believing it is done (docs/review-agent.md; [notify] test_failures).
+	go server.RunTestFailureNotifier(ctx, roots)
 	// Watch heads with auto-merge armed and merge them once their tests pass.
 	go server.RunAutoMergeWatcher(ctx)
 	// Poll MR-linked heads: refresh cached MR state, detect remote merges (fetch +

@@ -601,7 +601,12 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			SessionStatus:    "running",
 			CreatedAt:        &createdAt1,
 			HasUnreadChanges: &unread,
-			Prompt:           simAgent1Prompt,
+			// agent-1 is the head with review fixtures on it, and one of them (the
+			// agent's own reply, #6) is unread - so the sidebar badge has something
+			// to show alongside the has_unread_changes dot, which is the pairing
+			// worth being able to look at.
+			UnreadComments: ptr(1),
+			Prompt:         simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:                            finished,
 				Timestamp:                         simNow().Format(time.RFC3339),
@@ -1504,7 +1509,15 @@ func (s *SimulationServer) PublishReviewComments(w http.ResponseWriter, r *http.
 		})
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, simCommentsResponse(id, ptr(simNotifyLine(published))))
+	// Mirror the real routing so the simulation shows both toasts: an @review
+	// comment reports as having gone to the reviewer.
+	resp := simCommentsResponse(id, ptr(simNotifyLine(published)))
+	for _, c := range published {
+		if strings.Contains(strings.ToLower(c.Body), "@review") {
+			resp.NotifiedReviewer = ptr(true)
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, resp)
 }
 
 // simNotifyLine mirrors reviewstore.NotifyLine: handles and locations only, never
