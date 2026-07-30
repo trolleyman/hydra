@@ -235,6 +235,10 @@ export const SpawnForm = memo(function SpawnForm({
   // agents on top of one another. `branches` is null until the list loads.
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(null)
   const [baseBranch, setBaseBranch] = useState('')
+  // The branch `baseBranch` was seeded with (the project's current branch). Kept
+  // so the options cog can tell "still on the default" from "stacked on another
+  // branch", and so Reset can put it back.
+  const [defaultBranch, setDefaultBranch] = useState('')
   // When set, the spawn adopts an existing PR/MR instead of branching from a base
   // branch: the worktree is based on the PR head and the head is pre-linked to the
   // MR (docs/pr-adoption.md). The base-branch picker is hidden while adopting.
@@ -334,12 +338,17 @@ export const SpawnForm = memo(function SpawnForm({
     if (!projectId) {
       setBranches(null)
       setBaseBranch('')
+      setDefaultBranch('')
       return
     }
     try {
       const res = await api.default.getRepositoryBranches(projectId)
       if (branchReqProjectRef.current !== projectId) return
       setBranches(res.branches)
+      // The default follows the project's current branch on every refresh (it
+      // can move under us), but the user's pick is only overwritten on the
+      // initial load for a project.
+      setDefaultBranch(res.current || res.branches[0]?.name || '')
       if (defaultSelection) setBaseBranch(res.current || res.branches[0]?.name || '')
     } catch {
       if (branchReqProjectRef.current === projectId && defaultSelection) setBranches(null)
@@ -851,6 +860,17 @@ export const SpawnForm = memo(function SpawnForm({
     return <PRPicker projectId={projectId} onSelect={setAdopt} />
   }
 
+  // Put every control in the options popover back to its default: no PR adopted,
+  // the project's current branch as the base, chat mode (which is what a user who
+  // has never touched the toggle gets), and the project's git-isolation policy.
+  // Resetting the run mode also re-persists it, like any other pick of it does.
+  function resetSpawnOptions() {
+    setAdopt(null)
+    setBaseBranch(defaultBranch)
+    setChatMode(true)
+    setGitIsolation('')
+  }
+
   // Both spawn layouts collapse the per-spawn options into a single settings cog,
   // styled like the per-section options popovers elsewhere. Ordered widest-effect
   // first: the PR to adopt (which decides the base branch for you), the base
@@ -862,6 +882,22 @@ export const SpawnForm = memo(function SpawnForm({
     // While adopting a PR the base branch is the PR's target, chosen server-side,
     // so the base-branch section is suppressed (mirrors renderAdoptControl).
     const showBranch = !!branches && branches.length > 0 && !isBuiltinProject && !adopt
+    // What is set to something other than its default, in the popover's own
+    // order. Everything in here is invisible once the panel closes, so the cog
+    // wears the "on" look and this list becomes its tooltip - a spawn that
+    // stacks on another branch, or unlocks .git, should never be a surprise.
+    // Run mode counts even though the choice is remembered across spawns: it is
+    // the one remembered pick with no representation outside this panel (the
+    // agent and model both show on the picker trigger beside it).
+    const nonDefaults: string[] = []
+    if (adopt) nonDefaults.push(`Pull request: #${adopt.id}`)
+    if (showBranch && baseBranch && defaultBranch && baseBranch !== defaultBranch) {
+      nonDefaults.push(`Base branch: ${baseBranch}`)
+    }
+    if (showChat && !chatMode) nonDefaults.push('Run mode: terminal')
+    if (gitIsolation) {
+      nonDefaults.push(`Git isolation: ${GIT_ISOLATION_OPTS.find((o) => o.id === gitIsolation)?.label ?? gitIsolation}`)
+    }
     // A two-option segmented control: a chat-mode head opens the web chat view,
     // otherwise the head runs in a terminal. `chatMode === false` selects the
     // terminal segment.
@@ -870,7 +906,21 @@ export const SpawnForm = memo(function SpawnForm({
         ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
         : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`
     return (
-      <SettingsPopover label="Spawn options" width={260} align="left" fitContent>
+      <SettingsPopover
+        label="Spawn options"
+        width={260}
+        align="left"
+        fitContent
+        active={nonDefaults.length > 0}
+        tooltip={nonDefaults.length > 0 ? (
+          <span className="block text-left">
+            <span className="block font-semibold">Spawn options</span>
+            {nonDefaults.map((d) => <span key={d} className="block">{d}</span>)}
+          </span>
+        ) : undefined}
+        onReset={nonDefaults.length > 0 ? resetSpawnOptions : undefined}
+        resetLabel="Reset spawn options to their defaults"
+      >
         {adoptControl && (
           <>
             <SettingsGroupLabel className="mb-1.5">Pull request</SettingsGroupLabel>

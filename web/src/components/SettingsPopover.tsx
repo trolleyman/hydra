@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Settings2, ChevronDown, Check } from 'lucide-react'
+import { Settings2, ChevronDown, Check, RotateCcw } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 
 // A small per-section settings popover: a cog button that opens an anchored
@@ -21,6 +21,10 @@ export function SettingsPopover({
   fitContent = false,
   icon,
   chevron = false,
+  active = false,
+  tooltip,
+  onReset,
+  resetLabel = 'Reset to defaults',
   onOpen,
   children,
 }: {
@@ -30,6 +34,18 @@ export function SettingsPopover({
   icon?: ReactNode
   // Show a down-chevron after the icon, signalling the button opens a menu.
   chevron?: boolean
+  // The panel holds at least one non-default choice. The trigger then keeps the
+  // "on" look (and a dot) while CLOSED, so a setting made in here can't be
+  // forgotten just because the panel that holds it is shut.
+  active?: boolean
+  // Tooltip for the trigger, when it should say more than `label` - typically
+  // what is non-default while `active`. `label` stays the accessible name.
+  tooltip?: ReactNode
+  // When given, a small reset button sits in the panel's top-right corner.
+  // Render it only when there IS something to reset (it pairs with `active`),
+  // so the panel carries no dead control in the common case.
+  onReset?: () => void
+  resetLabel?: string
   // Fired when the popover transitions to open (e.g. to lazily set up state the
   // panel shows). Not fired on close.
   onOpen?: () => void
@@ -130,7 +146,7 @@ export function SettingsPopover({
 
   return (
     <div ref={anchorRef} className="relative inline-flex">
-      <Tooltip content={label}>
+      <Tooltip content={tooltip ?? label}>
         <button
           // Explicitly type="button": this cog renders inside SpawnForm's
           // <form>, where a bare <button> defaults to type="submit" - opening
@@ -140,21 +156,48 @@ export function SettingsPopover({
           aria-label={label}
           aria-haspopup="true"
           aria-expanded={open}
-          className={`flex items-center justify-center h-7 rounded-md border transition-colors cursor-pointer ${chevron ? 'gap-0.5 px-1.5' : 'w-7'} ${open
+          className={`relative flex items-center justify-center h-7 rounded-md border transition-colors cursor-pointer ${chevron ? 'gap-0.5 px-1.5' : 'w-7'} ${open
             ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-            : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+            : active
+              ? 'text-blue-600 dark:text-blue-300 bg-white dark:bg-gray-700 border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30'
+              : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
             }`}
         >
           {icon ?? <Settings2 className="w-3.5 h-3.5" />}
           {chevron && <ChevronDown className="w-3 h-3 opacity-70" />}
+          {/* The dot carries the state on its own, so it reads at a glance and
+              survives the trigger's blue tint being lost to a hover/open style.
+              Ringed in the card's own background so it reads as a badge sitting
+              on the button's corner rather than a smudge on its border. */}
+          {active && (
+            <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-blue-500 ring-2 ring-white dark:ring-gray-800" />
+          )}
         </button>
       </Tooltip>
       {open && pos && createPortal(
         <div
           ref={measureRef}
           style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: fitContent ? 'max-content' : pos.width, maxWidth: pos.width }}
-          className="z-[100] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3"
+          className="relative z-[100] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3"
         >
+          {/* Absolute, so it costs the stacked controls no vertical room: the
+              panel's first row is a short group label, which it sits beside. */}
+          {onReset && (
+            // The absolute positioning goes on the Tooltip's wrapper, not the
+            // button: an in-flow (if empty) inline wrapper at the top of the
+            // panel would open a line box's worth of blank space above the
+            // first group label.
+            <Tooltip content={resetLabel} className="absolute top-1.5 right-1.5">
+              <button
+                type="button"
+                onClick={onReset}
+                aria-label={resetLabel}
+                className="flex items-center justify-center w-6 h-6 rounded-md text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+          )}
           {children}
         </div>,
         document.body,
