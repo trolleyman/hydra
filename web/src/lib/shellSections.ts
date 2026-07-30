@@ -7,11 +7,12 @@
 // came from, and often which line of that file.
 //
 // This module reads that structure back out. It splits the script into steps,
-// takes the constant `echo`s as anchors, finds those anchor lines in the output,
-// and hands the lines between them to the one command that printed them. The
-// chat card then renders each section as what it is: a file's own lines with a
-// line-number gutter and its language's highlighting, a grep's matches with the
-// file line numbers it printed, a git report in git's own colours (lib/
+// takes constant line-printers (`echo`, `printf '%s\n' '...'`) as anchors, finds
+// those anchor lines in the output, and hands the lines between them to the one
+// command that printed them. The chat card then renders each section as what it
+// is: a file's own lines with a line-number gutter and its language's
+// highlighting, a grep's matches with the file line numbers it printed, a git
+// report in git's own colours (lib/
 // gitOutput), and the separators as the strings they are.
 //
 // The neighbouring lib/fileViewCommand answers one question for it - "is this
@@ -55,12 +56,12 @@ export interface MatchesView {
 }
 
 export type ScriptStep =
-  // A constant `echo`: prints a known string, so it anchors the output.
+  // A constant line-printer: prints a known string, so it anchors the output.
   | { kind: 'marker'; text: string }
-  // A constant `echo` whose text is too short to search the output for - most
-  // often the bare `echo` agents put between their greps to space the output
-  // out. It anchors nothing, but it still prints a known number of known lines,
-  // which is enough to keep it from costing its neighbours their attribution.
+  // A constant line-printer whose text is too short to search the output for -
+  // most often the bare `echo` agents put between their greps to space the
+  // output out. It anchors nothing, but it still prints a known number of known
+  // lines, which is enough to keep it from costing its neighbours attribution.
   | { kind: 'echo'; text: string }
   // A contiguous slice of one file (`sed -n 40,110p f`, `head -50 f`, `cat f`).
   | { kind: 'view'; view: FileView }
@@ -529,18 +530,32 @@ const GREP_ARG_LETTERS = new Set(['e', 'f', 'm', 'A', 'B', 'C', 'd', 'g', 't', '
 // no step claiming them.
 const GREP_INLINE_NUM = /^-([A-Za-z]*)(\d+)$/
 
-// parseEcho returns the text a bare `echo` prints, or null when the step is not
-// one whose output is known in advance. Flags are refused: `-n` drops the
-// trailing newline (so the next command continues on the same line) and `-e`
-// expands escapes - either makes the printed text something other than this.
+// parseConstantLine returns the text a simple line-printer prints, or null when
+// the step is not one whose output is known in advance.
 //
 // A bare `echo` prints one empty line, so it returns '' - not null. Whether the
 // text is long enough to SEARCH for is a separate question, asked in classify.
-function parseEcho(words: Word[]): string | null {
-  if (words[0].text !== 'echo' || words[0].quoted) return null
-  const args = words.slice(1)
-  if (args.some((w) => w.dynamic || /^-[neE]+$/.test(w.text))) return null
-  return args.map((w) => w.text).join(' ')
+//
+// Codex commonly uses `printf '%s\n' '--- heading ---'` instead. That exact
+// form is equivalent: one static format, one static value, one known output
+// line. Other printf forms are deliberately refused - an extra value repeats
+// the format, and any other format can transform the value or change its line
+// count.
+function parseConstantLine(words: Word[]): string | null {
+  const name = words[0]
+  if (name.quoted) return null
+  if (name.text === 'echo') {
+    const args = words.slice(1)
+    // Flags are refused: `-n` drops the trailing newline and `-e` expands
+    // escapes, either of which makes the printed text something else.
+    if (args.some((w) => w.dynamic || /^-[neE]+$/.test(w.text))) return null
+    return args.map((w) => w.text).join(' ')
+  }
+  if (name.text === 'printf' && words.length === 3) {
+    const [, format, value] = words
+    if (!format.dynamic && format.text === '%s\\n' && !value.dynamic) return value.text
+  }
+  return null
 }
 
 interface ParsedGrep extends MatchesView {
@@ -890,7 +905,7 @@ function classify(p: Pipeline): ScriptStep {
 
   const unknown: ScriptStep = { kind: 'unknown', command: p.raw }
 
-  const echo = parseEcho(cmd.words)
+  const echo = parseConstantLine(cmd.words)
   if (echo !== null && !trimmedFrom && !filtered && !sliced) {
     return echo.trim().length >= MIN_MARKER_LEN ? { kind: 'marker', text: echo } : { kind: 'echo', text: echo }
   }
@@ -1359,8 +1374,9 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
 // splitScriptOutput cuts a command's output into one section per step that
 // printed it. Null when nothing came back worth sectioning.
 //
-// The `echo`s are the anchors: each one's text is looked for in what is left of
-// the output, and the lines before it belong to whatever ran in between. An
+// The constant line-printers are the anchors: each one's text is looked for in
+// what is left of the output, and the lines before it belong to whatever ran in
+// between. An
 // anchor that never appears is skipped rather than fatal - a separator behind a
 // `||` only prints when the command before it failed, and an agent writes those
 // constantly - so a missing one costs a section its highlighting, not the split.
