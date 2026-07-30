@@ -106,6 +106,26 @@ func (m *Manager) store(id string) (*Store, error) {
 	return s, nil
 }
 
+// Forget drops what a head's chat store holds in memory, after its files have
+// been deleted (wired to heads.SetOnStateRemoved). The store keeps the whole
+// event log resident to page from, and nothing else would ever tell it the log
+// it is holding no longer exists - so a killed head went on costing tens of
+// megabytes for the life of the daemon.
+//
+// The worker itself stays. Its goroutine is a few KB against the log's tens of
+// megabytes, and taking it out would mean either racing a straggler line onto a
+// closed channel or letting a later one open a SECOND worker for the same id,
+// with two stores appending to one file. A store reset to empty is exactly a
+// fresh one, which is also what an id taken over by a forced respawn wants.
+func (m *Manager) Forget(id string) {
+	m.mu.Lock()
+	w := m.workers[id]
+	m.mu.Unlock()
+	if w != nil {
+		w.store.Discard()
+	}
+}
+
 func (m *Manager) worker(id string) (*worker, error) {
 	if _, err := m.store(id); err != nil {
 		return nil, errtrace.Wrap(err)
@@ -253,10 +273,7 @@ func (w *worker) isEchoedQueuedCommand(spec eventSpec) bool {
 	if text == "" {
 		return false
 	}
-	for _, event := range w.store.Events() {
-		if event.Type != "user_message" {
-			continue
-		}
+	for _, event := range w.store.EventsOfType("user_message") {
 		var payload struct {
 			Content json.RawMessage `json:"content"`
 		}
@@ -287,7 +304,10 @@ func (w *worker) reconcileClaudeUserEcho(spec eventSpec, provider string) bool {
 	// Copies already in the log that came from the transcript rather than from
 	// Hydra - see the re-import case below.
 	fromTranscript := 0
-	for _, event := range w.store.Events() {
+	// Only the two kinds below can pair, and the timeline is mostly tool output -
+	// scanning it whole meant copying and then parsing tens of megabytes of it per
+	// user turn to read a few hundred bytes (see Store.EventsOfType).
+	for _, event := range w.store.EventsOfType("user_message", "user_message_echoed") {
 		var payload struct {
 			Content json.RawMessage `json:"content"`
 		}

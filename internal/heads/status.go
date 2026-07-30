@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"braces.dev/errtrace"
@@ -88,6 +89,23 @@ func WriteAgentStatus(projectDir, id string, status *api.AgentStatusInfo) error 
 	return errtrace.Wrap(os.WriteFile(path, data, 0644))
 }
 
+// onStateRemoved is notified with the id whose per-head state has just been
+// deleted, so anything holding the same state in memory can drop it. The
+// daemon's chat manager is the one that matters: it keeps a head's whole event
+// log resident (that is what lets it page without touching the disk), and
+// deleting the file underneath it tells it nothing.
+var (
+	stateRemovedMu sync.RWMutex
+	onStateRemoved func(id string)
+)
+
+// SetOnStateRemoved registers that hook. Set once at daemon startup.
+func SetOnStateRemoved(fn func(id string)) {
+	stateRemovedMu.Lock()
+	defer stateRemovedMu.Unlock()
+	onStateRemoved = fn
+}
+
 // RemoveAgentStatusFiles removes a head's per-type state files: the status JSON,
 // status log, build log, review file, sub-agents dir, approvals dir (parked
 // requests + session host grants, which must not leak to a future head reusing
@@ -113,4 +131,10 @@ func RemoveAgentStatusFiles(projectRoot, id string) {
 	removeState("chat queue", paths.GetChatQueueJsonFromProjectRoot(projectRoot, id))
 	removeState("chat events", paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id))
 	removeState("chat state", paths.GetChatStateJSONFromProjectRoot(projectRoot, id))
+	stateRemovedMu.RLock()
+	notify := onStateRemoved
+	stateRemovedMu.RUnlock()
+	if notify != nil {
+		notify(id)
+	}
 }

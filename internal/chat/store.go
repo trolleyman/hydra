@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -203,6 +204,30 @@ func (s *Store) load() error {
 	return nil
 }
 
+// Discard drops everything this store holds in memory, for a head whose files
+// have just been deleted (heads.RemoveAgentStatusFiles). The store keeps the
+// WHOLE event log resident - that is what lets Before() page without touching
+// the disk - so a killed head went on costing its log's worth of memory for the
+// life of the daemon, tens of megabytes of tool output nothing could ever ask
+// for again.
+//
+// It resets rather than closing: an id can be taken over by a forced respawn,
+// and a store reset to empty is exactly a freshly opened one over a deleted
+// file. Appending after this recreates the log, which is what that head wants.
+func (s *Store) Discard() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = nil
+	s.sourceIDs = map[string]uint64{}
+	s.projection = Projection{
+		Version:   ProjectionVersion,
+		Subagents: map[string]SubagentState{},
+		Queue:     map[string]QueuedState{},
+		Imports:   map[string]int64{},
+	}
+	s.lastCheckpoint, s.checkpointDue = time.Time{}, false
+}
+
 func (s *Store) ImportOffset(source string) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -365,6 +390,28 @@ func (s *Store) HasType(eventType string) bool {
 		}
 	}
 	return false
+}
+
+// EventsOfType returns detached copies of the events of the given types, and
+// nothing else.
+//
+// Use this over Events() for anything that scans for a particular kind. A chat
+// head's timeline is overwhelmingly tool OUTPUT - measured across this machine's
+// logs, tool_completed is 81-88% of the bytes, ~21KB an event - so a scan that
+// copies the whole thing to read a handful of user messages copies tens of
+// megabytes, and then parses every byte of it too.
+func (s *Store) EventsOfType(types ...string) []Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Event
+	for _, event := range s.events {
+		if !slices.Contains(types, event.Type) {
+			continue
+		}
+		event.Payload = append(json.RawMessage(nil), event.Payload...)
+		out = append(out, event)
+	}
+	return out
 }
 
 // Events returns a detached copy of the durable timeline. Manager-side

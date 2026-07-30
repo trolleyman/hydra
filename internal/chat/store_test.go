@@ -283,6 +283,104 @@ func TestStoreCoalescesProjectionCheckpoints(t *testing.T) {
 	}
 }
 
+// A store holds its head's whole event log to page from, so a killed head went
+// on costing that memory for the life of the daemon - its files deleted, its log
+// still resident. Discard resets it to exactly a freshly opened store, which is
+// also what an id taken over by a forced respawn needs.
+func TestStoreDiscardReleasesTheLogAndStaysUsable(t *testing.T) {
+	root := t.TempDir()
+	s, err := Open(root, "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []string{"first", "second"} {
+		changed := ModelChanged{}
+		changed.Model = model
+		if _, _, err := s.AppendSource("model:"+model, changed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(s.Events()); got != 2 {
+		t.Fatalf("events = %d, want 2", got)
+	}
+
+	// What kill does: the files go, then the store is told.
+	for _, p := range []string{
+		paths.GetChatEventsJSONLFromProjectRoot(root, "head"),
+		paths.GetChatStateJSONFromProjectRoot(root, "head"),
+	} {
+		if err := os.Remove(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Discard()
+
+	if got := len(s.Events()); got != 0 {
+		t.Errorf("events after Discard = %d, want the log released", got)
+	}
+	if got := s.Snapshot(); got.Through != 0 || got.Model != "" {
+		t.Errorf("projection after Discard = %+v, want an empty one", got)
+	}
+	// The dedup index is per event and outlives the events themselves, so it has
+	// to go too - it is a fifth of what a long head holds. (Asserted directly: a
+	// stale entry is harmless to CORRECTNESS, since the lookup that follows it
+	// searches an empty log and appends anyway, so only the memory shows it.)
+	if got := len(s.sourceIDs); got != 0 {
+		t.Errorf("source ids after Discard = %d, want the index released", got)
+	}
+	// The same source id must not be deduped against the log that is gone.
+	changed := ModelChanged{}
+	changed.Model = "first"
+	ev, appended, err := s.AppendSource("model:first", changed)
+	if err != nil || !appended || ev.Seq != 1 {
+		t.Fatalf("append after Discard = (%+v, %v, %v), want a fresh seq 1", ev, appended, err)
+	}
+	if _, err := os.Stat(paths.GetChatEventsJSONLFromProjectRoot(root, "head")); err != nil {
+		t.Errorf("append after Discard did not recreate the log: %v", err)
+	}
+}
+
+// The timeline is overwhelmingly tool OUTPUT (81-88% of the bytes, measured), so
+// a scan for the handful of user messages must not copy - and then parse - all
+// of it. This is the shape reconcileClaudeUserEcho runs on every user turn.
+func TestStoreEventsOfTypeReturnsOnlyWhatWasAsked(t *testing.T) {
+	s, err := Open(t.TempDir(), "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := UserMessage{}
+	msg.Id, msg.Content = "u1", json.RawMessage(`[{"type":"text","text":"hi"}]`)
+	if _, err := s.Append(msg); err != nil {
+		t.Fatal(err)
+	}
+	tool := ToolCompleted{}
+	tool.Id, tool.Output = "t1", json.RawMessage(`"a megabyte of output"`)
+	if _, err := s.Append(tool); err != nil {
+		t.Fatal(err)
+	}
+	echo := UserMessageEchoed{}
+	echo.UserSeq, echo.Content = 1, msg.Content
+	if _, err := s.Append(echo); err != nil {
+		t.Fatal(err)
+	}
+
+	got := s.EventsOfType("user_message", "user_message_echoed")
+	if len(got) != 2 || got[0].Type != "user_message" || got[1].Type != "user_message_echoed" {
+		t.Fatalf("EventsOfType = %+v", got)
+	}
+	if len(s.EventsOfType("user_message")) != 1 {
+		t.Errorf("EventsOfType(user_message) = %+v", s.EventsOfType("user_message"))
+	}
+	if got := s.EventsOfType("nothing_of_the_sort"); got != nil {
+		t.Errorf("EventsOfType(unknown) = %+v, want none", got)
+	}
+	// Detached: mutating what a caller was handed cannot reach the store.
+	got[0].Payload[0] = 'X'
+	if again := s.EventsOfType("user_message"); again[0].Payload[0] == 'X' {
+		t.Error("EventsOfType handed out the store's own payload")
+	}
+}
+
 func TestApplyIsIdempotent(t *testing.T) {
 	p := Projection{Version: ProjectionVersion, Subagents: map[string]SubagentState{}, Queue: map[string]QueuedState{}}
 	ev := Event{Seq: 1, Type: "queued_message", Payload: json.RawMessage(`{"id":"m","status":"queued","content":[]}`)}
