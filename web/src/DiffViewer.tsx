@@ -2993,6 +2993,20 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.agent.review?.provider === next.agent.review?.provider &&
   prev.agent.agent_status?.status === next.agent.agent_status?.status)
 
+// diffMetaKey is everything a diff response says APART from its files: the refs,
+// the behind count, the conflict and uncommitted-change summaries - what the
+// header chips are drawn from. Those can change while the files do not (merging
+// the base in leaves the diff against that base identical and takes behind_count
+// to 0), so a silent refresh that finds no file change still has to look at
+// this. Stringify is fine here in a way it is not for the files (see
+// lib/diffSig): what is left is a handful of scalars and two commit records.
+// eslint-disable-next-line react-refresh/only-export-components
+export function diffMetaKey(d: DiffResponse): string {
+  const meta: Record<string, unknown> = { ...d }
+  delete meta.files
+  return JSON.stringify(meta)
+}
+
 // inspector: renders in the new two-pane layout's right pane. Same stacked
 // layout as the classic single-column page (Changes bar with the base -> head
 // selectors, then tests, previews, artifacts, and the diff itself), just
@@ -3406,7 +3420,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // keyed against, and that state survives the refresh).
   const applySilentDiff = useCallback((d: DiffResponse, contexts: Map<string, number>, promoted: Set<string>) => {
     const { files, changed } = reconcileFiles(d.files)
-    if (!changed) return
+    if (!changed) {
+      // Identical FILES, but the rest of the response can still have moved - and
+      // merging the base in is exactly that case: the diff against the base is
+      // unchanged by definition, while behind_count drops to 0. Returning here
+      // kept the whole stale response, so after an update-from-base the "N
+      // behind" chip and its button sat there until the page was reloaded.
+      // The previous files array is kept as-is, so nothing below the header
+      // re-renders (which is what this early-out is for - see issue #34).
+      setDiff((prev) => (prev && diffMetaKey(prev) !== diffMetaKey(d) ? { ...d, files: prev.files } : prev))
+      return
+    }
     setDiff({ ...d, files })
     applyHiddenFiles(files)
     for (const path of promoted) {

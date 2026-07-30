@@ -485,11 +485,22 @@ func claudeProjectDir(worktree string) string {
 // - its conversation, its queue and its pending questions are all its own, and
 // keying any of them by the head would replay the head's transcript into the
 // review pane.
+// catchUpChatEvents brings a session's durable log fully up to date before it is
+// snapshotted: first any commit that landed while nobody was ingesting the head's
+// output (a merge run from the CLI or a host shell, an update-from-base a dead
+// daemon never saw), then the ingest queue itself. Reconciling ahead of the
+// snapshot is what makes such a commit replay in place rather than arrive as a
+// live event after replay_done.
+func (s *Server) catchUpChatEvents(sessionID string) error {
+	s.ChatEvents.ReconcileCommits(sessionID, "")
+	return errtrace.Wrap(s.ChatEvents.Flush(sessionID))
+}
+
 func (s *Server) pumpChatOutput(conn *safeConn, att *session.Attachment, projectRoot, sessionID, worktree string) {
 	var events <-chan chat.Event
 	if s.ChatEvents == nil {
 		sendChatError(conn, sessionID, "chat events unavailable", errors.New("no chat event manager"))
-	} else if err := s.ChatEvents.Flush(sessionID); err != nil {
+	} else if err := s.catchUpChatEvents(sessionID); err != nil {
 		sendChatError(conn, sessionID, "flush chat events", err)
 	} else if snapshot, live, cancel, err := s.ChatEvents.Watch(sessionID); err != nil {
 		sendChatError(conn, sessionID, "watch chat events", err)
