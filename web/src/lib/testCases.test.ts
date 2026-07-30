@@ -17,8 +17,9 @@ describe('buildFixTestMessage', () => {
       message: 'want 3, got 4\n',
     }))
     expect(msg).toContain('The `go` test runner reports a failure.')
-    expect(msg).toContain('Test: TestRotation > rotates the key')
-    expect(msg).toContain('Location: internal/auth/rotation_test.go:42')
+    // Name in inline code; location as a markdown link (href carries the :line).
+    expect(msg).toContain('Test: `TestRotation > rotates the key`')
+    expect(msg).toContain('Location: [internal/auth/rotation_test.go:42](internal/auth/rotation_test.go:42)')
     // Fenced verbatim, with the runner's trailing newline trimmed off the fence.
     expect(msg).toContain('Output:\n```\nwant 3, got 4\n```')
   })
@@ -32,6 +33,6 @@ describe('buildFixTestMessage', () => {
     const msg = buildFixTestMessage('go', caseOf({}))
     expect(msg).not.toContain('Location:')
     expect(msg).not.toContain('Output:')
-    expect(msg).toContain('Test: does a thing')
+    expect(msg).toContain('Test: `does a thing`')
   })
 })
