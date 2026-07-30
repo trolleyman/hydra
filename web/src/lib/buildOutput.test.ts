@@ -102,6 +102,15 @@ describe('buildOutputSpans', () => {
     ])
   })
 
+  it('colours the command and verdict in a shell execution failure', () => {
+    expect(spans('/usr/bin/bash: line 1: codex: command not found')).toEqual([
+      [
+        ['/usr/bin/bash: line 1: ', 'dim'], ['codex', 'fail'],
+        [': ', 'dim'], ['command not found', 'fail'],
+      ],
+    ])
+  })
+
   it('leaves a sentence that opens with a verdict word alone', () => {
     // `ok` in go test's output is a COLUMN, padded out to the package name; in
     // prose it is the first word of a sentence.
