@@ -74,12 +74,82 @@ export function enterEdit(value: string, selStart: number, selEnd: number): Text
   }
 }
 
-// applyEdit writes an edit into a CONTROLLED textarea: it sets the value through
-// the native setter and dispatches an `input` event, which is what makes React
-// see it as a real user edit and run the consumer's onChange (a plain
-// `ta.value = x` assignment is invisible to React). The caret is placed before
-// the dispatch so handlers that read selectionStart (e.g. the composers' undo
-// snapshots) capture the right position.
+// The smallest contiguous [start, end) range of `old` that has to be replaced to
+// turn it into `next`, plus the text to put there - a common-prefix /
+// common-suffix trim. Every edit in this file and in autoPair.ts is one local
+// change (insert a pair, wrap a selection, delete two characters, open a fence),
+// so a single range always covers it; when the change really is two insertions
+// at once ("sel" -> "(sel)") the range simply spans both.
+//
+// Boundaries are snapped off a surrogate pair so a replacement can never consist
+// of half an astral character: two different emoji share a high surrogate, and a
+// naive code-unit trim would insert the lone low surrogate of the new one.
+export function minimalReplacement(old: string, next: string): { start: number; end: number; text: string } {
+  const max = Math.min(old.length, next.length)
+  let start = 0
+  while (start < max && old.charCodeAt(start) === next.charCodeAt(start)) start++
+  if (start > 0 && isHighSurrogate(old.charCodeAt(start - 1))) start--
+  let suffix = 0
+  while (suffix < max - start && old.charCodeAt(old.length - 1 - suffix) === next.charCodeAt(next.length - 1 - suffix))
+    suffix++
+  if (suffix > 0 && isLowSurrogate(old.charCodeAt(old.length - suffix))) suffix--
+  return { start, end: old.length - suffix, text: next.slice(start, next.length - suffix) }
+}
+
+const isHighSurrogate = (c: number) => c >= 0xd800 && c <= 0xdbff
+const isLowSurrogate = (c: number) => c >= 0xdc00 && c <= 0xdfff
+
+// Apply the edit the way a keystroke would: select the range that actually
+// changed and let the browser's own editing pipeline replace it. Returns false
+// when that route isn't available (no execCommand - jsdom; the textarea isn't
+// focused, which the command requires) or didn't land, so the caller can fall
+// back to assigning the whole value.
+//
+// Worth the trouble because a wholesale `value = ...` assignment is not an edit
+// as far as the browser is concerned: it replaces the field's whole text node,
+// which throws away the spellcheck markers hanging off it. The browser then
+// re-marks lazily, around the caret first, so words further up lose their
+// squiggle until something makes it look again - which is what made the same
+// sentence come back underlined differently from one screenshot to the next.
+// Replacing only the range that changed leaves the markers on everything else
+// alone. (Only visible when the Spellcheck browser setting is on; it is off by
+// default - see lib/composerPrefs.)
+//
+// NOT for the undo stack, which was the other suspect: measured in Chromium,
+// Ctrl+Z after an auto-paired "(" steps back over just the pair either way, so
+// the assignment was not clearing it.
+//
+// execCommand is deprecated in name but this is the one job it still has no
+// replacement for: `setRangeText` and a value assignment are both "the page
+// changed the text", not "the user edited it".
+function editInPlace(ta: HTMLTextAreaElement, next: string): boolean {
+  if (typeof document === 'undefined' || typeof document.execCommand !== 'function') return false
+  if (document.activeElement !== ta) return false
+  const { start, end, text } = minimalReplacement(ta.value, next)
+  ta.setSelectionRange(start, end)
+  try {
+    // An empty replacement is a deletion; insertText('') is a no-op in Chrome.
+    if (!(text === '' ? document.execCommand('delete') : document.execCommand('insertText', false, text))) return false
+  } catch {
+    return false
+  }
+  return ta.value === next
+}
+
+// applyEdit writes an edit into a CONTROLLED textarea, so that React sees it as
+// a real user edit and runs the consumer's onChange. Preferred route is
+// editInPlace, which asks the browser to make the edit and therefore keeps the
+// native undo stack and the spellcheck markers; the fallback sets the value
+// through the native setter (a plain `ta.value = x` assignment is invisible to
+// React) and dispatches an `input` event itself.
+//
+// The two differ in one visible way. On the fallback the caret is placed BEFORE
+// the dispatch, so a handler reading selectionStart during onChange (the
+// composers snapshot it for undo) sees where the caret ends up; the browser
+// fires its own `input` mid-command, with the caret at the end of what it
+// inserted, so an auto-pair step snapshots the caret after the pair rather than
+// inside it. That only decides where the caret lands if you later undo BACK onto
+// that step - the live caret is set right afterwards either way.
 export function applyEdit(ta: HTMLTextAreaElement, edit: TextareaEdit) {
   const end = edit.caretEnd ?? edit.caret
   // A pure caret move (auto-pairing stepping over a closer it already inserted):
@@ -88,11 +158,15 @@ export function applyEdit(ta: HTMLTextAreaElement, edit: TextareaEdit) {
     ta.setSelectionRange(edit.caret, end)
     return
   }
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-  if (setter) setter.call(ta, edit.value)
-  else ta.value = edit.value
-  ta.setSelectionRange(edit.caret, end)
-  ta.dispatchEvent(new Event('input', { bubbles: true }))
+  if (editInPlace(ta, edit.value)) {
+    ta.setSelectionRange(edit.caret, end)
+  } else {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    if (setter) setter.call(ta, edit.value)
+    else ta.value = edit.value
+    ta.setSelectionRange(edit.caret, end)
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+  }
   // React re-renders with the same value, so the DOM node is left alone and the
   // caret survives - but re-assert it on the next frame in case a consumer
   // normalises the text on the way through (which would rewrite value and drop
