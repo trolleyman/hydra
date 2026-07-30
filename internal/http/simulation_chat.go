@@ -629,6 +629,12 @@ var simChatEvents = []simNorm{
 	// the two are one message, so left/right step between them and stop there
 	// (see lib/markdownGallery).
 	simSay("msg_sim_shot", "I drove the built app to check it renders:\n\n![The popover, before](/tmp/hydra-sim/popover-before@2x.png)\n\n![The popover, rendered](/tmp/hydra-sim/popover@2x.png)\n\nNo console errors."),
+	// The same markdown syntax pointing at a RECORDING rather than a still: the
+	// renderer picks a <video> over an <img> off the extension and the same
+	// agent-files endpoint serves it (see MarkdownRenderer.MarkdownMedia /
+	// HandleAgentFileBlob). A still can't show a transition, so this is how an
+	// agent demos one.
+	simSay("msg_sim_clip", "And the transition itself, recorded while the popover opens:\n\n![The popover opening](/tmp/hydra-sim/popover-open.webm)\n\nIt settles in about 200ms."),
 	// A background Bash command plus its completion notification. The CLI writes
 	// that notification twice (a queue-operation record and an attachment); only
 	// the attachment carries a uuid, so both survive normalization and the client

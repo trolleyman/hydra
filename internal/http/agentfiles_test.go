@@ -1,9 +1,11 @@
 package http
 
 import (
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/paths"
@@ -104,6 +106,14 @@ func TestResolveAgentFile(t *testing.T) {
 		}
 	})
 
+	t.Run("a recording resolves like a screenshot", func(t *testing.T) {
+		clip := filepath.Join(tmpDir, "demo.webm")
+		writeFile(t, clip)
+		if got := resolveAgentFile(root, worktree, tmpDir, "/tmp/demo.webm"); got != clip {
+			t.Fatalf("got %q, want %q", got, clip)
+		}
+	})
+
 	t.Run("without a private tmp dir the real /tmp is allowed", func(t *testing.T) {
 		// An unsandboxed head genuinely writes to the host /tmp.
 		real := filepath.Join(os.TempDir(), "hydra-agentfiles-test.png")
@@ -117,4 +127,38 @@ func TestResolveAgentFile(t *testing.T) {
 			t.Fatalf("got %q, want no match", got)
 		}
 	})
+}
+
+// The endpoint serves what the chat renderer can show - stills and the video
+// formats a browser plays - and nothing else, however legitimately the head
+// could name it.
+func TestAgentServableExt(t *testing.T) {
+	for _, name := range []string{"/tmp/shot.png", "a/b/logo.SVG", "clip.webm", "/tmp/demo.MP4", "rec.mov"} {
+		if !agentServableExt(name) {
+			t.Errorf("%q: want servable", name)
+		}
+	}
+	for _, name := range []string{"/etc/passwd", "notes.md", "secret.env", "archive.zip", "clip.webm.txt", "noext"} {
+		if agentServableExt(name) {
+			t.Errorf("%q: want not servable", name)
+		}
+	}
+}
+
+// A .webm has no entry in Go's built-in mime table, so without the pin in
+// extContentTypes it would be served as whatever the host's /etc/mime.types
+// happens to say - and under nosniff, anything but video/webm means a player
+// that refuses to play.
+func TestVideoContentTypePinned(t *testing.T) {
+	for name, want := range map[string]string{
+		"clip.webm": "video/webm",
+		"clip.mp4":  "video/mp4",
+		"clip.mov":  "video/quicktime",
+	} {
+		w := httptest.NewRecorder()
+		setBlobFileHeaders(w, strings.NewReader("not really a video"), name)
+		if got := w.Header().Get("Content-Type"); got != want {
+			t.Errorf("%s: got %q, want %q", name, got, want)
+		}
+	}
 }

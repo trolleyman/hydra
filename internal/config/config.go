@@ -1165,7 +1165,14 @@ func RunModeLine(chatMode bool) string {
 			"Capture screenshots at 2x device scale and name them `<name>@2x.png` - " +
 			"the chat lays an image out at its logical size (pixels / the @Nx in its " +
 			"name), so a 2x capture is the same size as a 1x one but stays sharp on " +
-			"a HiDPI display, where a 1x image is blown up and looks blurry.\n"
+			"a HiDPI display, where a 1x image is blown up and looks blurry. VIDEO " +
+			"works the same way and through the same syntax: point a markdown image " +
+			"at a .webm/.mp4 (`![the popover opening](/tmp/demo.webm)`) and it renders " +
+			"as an inline player with controls, so a transition, an animation or a " +
+			"short flow that a still cannot show can be demoed by recording it (e.g. " +
+			"Playwright's `recordVideo`, or ffmpeg). The @Nx naming applies to a clip " +
+			"too. Keep clips short and prefer .webm - it is the format that plays " +
+			"everywhere without a codec question.\n"
 	}
 	return "- Run mode: terminal. You are attached to an interactive terminal (PTY) " +
 		"session.\n"

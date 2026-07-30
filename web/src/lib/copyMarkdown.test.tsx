@@ -116,6 +116,29 @@ describe('selectionToMarkdown', () => {
     )
   })
 
+  // A rendered markdown video is a <video>, and every other <video> in the app
+  // is chrome the copy deliberately steps over - so this pins that the markdown
+  // one comes back as the image link it was written as, alt and all.
+  //
+  // The DOM is built by hand rather than rendered: jsdom implements no media
+  // loading (it doesn't even have load()), so a real <MarkdownVideo> errors on
+  // mount and degrades to its unresolvable-file chip, which is not the shape
+  // under test here.
+  it('restores a video as the image link it was written as', () => {
+    const host = document.createElement('div')
+    host.setAttribute('data-md-root', '')
+    host.innerHTML =
+      '<p>intro line</p>'
+      + '<p><span><video data-md-src="/tmp/demo.webm" data-md-alt="the popover"'
+      + ' aria-label="the popover" src="/blob?path=demo.webm"></video></span></p>'
+      + '<p>closing line</p>'
+    document.body.appendChild(host)
+    expect(copyBetween(host, { text: 'intro line', offset: 6 }, { text: 'closing line', offset: 7 })).toBe(
+      'line\n\n![the popover](/tmp/demo.webm)\n\nclosing',
+    )
+    host.remove()
+  })
+
   it('copies raw code when the selection stays inside a code block', () => {
     const { container } = render(<Markdown text={'```js\nconst a = 1\nconst b = 2\n```'} />)
     const code = container.querySelector('[data-md-code-block]')!

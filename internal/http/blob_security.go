@@ -29,16 +29,27 @@ import (
 var scriptableTypes = []string{"text/html", "application/xhtml+xml", "image/svg+xml", "text/xml", "application/xml"}
 
 // extContentTypes pins the types http.DetectContentType gets wrong or won't
-// commit to for files the UI renders as images. SVG is the one that matters: Go
-// sniffs it as text/xml (or text/plain), and Go's mime table doesn't reliably
-// map it either - which browsers used to paper over by sniffing it back to an
-// image inside an <img>. nosniff takes that away, so the type has to be right at
-// the source.
+// commit to for files the UI renders as images or video. SVG is the one that
+// matters: Go sniffs it as text/xml (or text/plain), and Go's mime table doesn't
+// reliably map it either - which browsers used to paper over by sniffing it back
+// to an image inside an <img>. nosniff takes that away, so the type has to be
+// right at the source.
+//
+// The video types are pinned for the same reason from the other direction: Go's
+// built-in mime table has no entry for them at all, so the answer would come from
+// the host's /etc/mime.types - present on one machine and missing on the next -
+// and a .webm served as application/octet-stream under nosniff simply will not
+// play.
 var extContentTypes = map[string]string{
 	".svg":  "image/svg+xml",
 	".avif": "image/avif",
 	".ico":  "image/x-icon",
 	".bmp":  "image/bmp",
+	".webm": "video/webm",
+	".mp4":  "video/mp4",
+	".m4v":  "video/x-m4v",
+	".mov":  "video/quicktime",
+	".ogv":  "video/ogg",
 }
 
 // setBlobSecurityHeaders locks down a raw-bytes response of a known type.
