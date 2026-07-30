@@ -987,8 +987,9 @@ export const pages: {
   // The redesigned merge-conflict panel: agent-3's diff carries the
   // merge_conflict flag (simulation.go GetAgentDiff), so the Changes toolbar
   // shows a red "N conflict" button; clicking it opens the rich panel - red
-  // icon tile + title/subtitle, an uppercase "Conflicting files" chip and the
-  // dark "Resolving locally" command block, with Dismiss / Fix-with-agent in
+  // icon tile + title/subtitle, a "Conflicting files" list whose directories are
+  // lowlit (the diff's PathName) and a "Resolving locally" CodePane carrying the
+  // bash-highlighted resolution script, with Dismiss / Fix-with-agent in
   // the shared dialog-button styling. scrollTo brings the toolbar into view for
   // the click; the panel itself is a fixed, centered overlay.
   { name: 'merge-conflict-dialog', path: '/project/sim-project/agent/agent-3', viewportOnly: true, scrollTo: 'Changes', click: 'button:has-text("conflict")' },

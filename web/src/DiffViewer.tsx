@@ -16,7 +16,7 @@ import { ReviewThreadContext, useReviewThreadActions } from './lib/reviewThreadC
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Folder, FolderOpen, X, GitMergeConflict, Bot, File, FileDiff as FileDiffIcon, Files as FilesIcon,
+  Folder, FolderOpen, X, GitMergeConflict, Bot, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   CircleCheck, Link2, ArrowUp, ArrowDown,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
+import { CodePane } from './components/CodePane'
 import { Avatar } from './components/Avatar'
 import { getFileIcon } from './lib/fileIcons'
 import { copyText } from './lib/clipboard'
@@ -2617,6 +2618,21 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const count = n || '?'
   const plural = n !== 1
   const worktreePath = agent.worktree_path ?? '<worktree-path>'
+  const resolveScript = [
+    "# Navigate to the agent's worktree",
+    `cd ${worktreePath}`,
+    '',
+    '# Merge the base branch (triggers conflict markers)',
+    `git merge ${baseBranch}`,
+    '',
+    '# Edit conflicting files, then stage and commit',
+    // `git add -A` rather than a `<resolved-files>` placeholder: after a merge
+    // you resolve every conflicted file before committing anyway, so naming
+    // them adds nothing but a token to hand-edit - and the whole point of this
+    // block is that you can paste it and have it run.
+    'git add -A',
+    'git commit',
+  ].join('\n')
 
   return (
     <>
@@ -2675,12 +2691,21 @@ function MergeConflictButton({ diff, agent, projectId }: {
                   <div>
                     <DialogSectionLabel>Conflicting files</DialogSectionLabel>
                     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 divide-y divide-gray-100 dark:divide-gray-700/50 max-h-40 overflow-y-auto">
-                      {conflictFiles.map((f) => (
-                        <div key={f} className="flex items-center gap-2.5 px-3.5 py-2.5">
-                          <File className="w-4 h-4 shrink-0 text-red-500 dark:text-red-400" />
-                          <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{f}</span>
-                        </div>
-                      ))}
+                      {/* A row reads exactly like a row of the diff's file list:
+                          the shared per-filetype icon (getFileIcon) rather than
+                          a generic red page - the panel around it already says
+                          "conflict", so colouring the icon red only hid which
+                          KIND of file each one is - and PathName's lowlit
+                          directories with the filename in normal text. */}
+                      {conflictFiles.map((f) => {
+                        const { Icon, className } = getFileIcon(f.split('/').pop() ?? f)
+                        return (
+                          <div key={f} className="flex items-center gap-2.5 px-3.5 py-2.5">
+                            <Icon className={`w-4 h-4 shrink-0 ${className}`} />
+                            <span className="text-sm truncate min-w-0" title={f}><PathName path={f} /></span>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -2688,14 +2713,15 @@ function MergeConflictButton({ diff, agent, projectId }: {
                 {/* Resolution instructions */}
                 <div>
                   <DialogSectionLabel>Resolving locally</DialogSectionLabel>
-                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4 space-y-1.5 text-[13px] font-mono leading-relaxed">
-                    <p className="text-gray-500 dark:text-gray-400"># Navigate to the agent's worktree</p>
-                    <p className="text-green-600 dark:text-green-400 break-all">cd {worktreePath}</p>
-                    <p className="text-gray-500 dark:text-gray-400 pt-2"># Merge the base branch (triggers conflict markers)</p>
-                    <p className="text-green-600 dark:text-green-400">git merge {baseBranch}</p>
-                    <p className="text-gray-500 dark:text-gray-400 pt-2"># Edit conflicting files, then stage and commit</p>
-                    <p className="text-green-600 dark:text-green-400">git add {'<resolved-files>'}</p>
-                    <p className="text-green-600 dark:text-green-400">git commit</p>
+                  {/* The script goes through CodePane - the app's one
+                      syntax-highlighted code surface - so it reads as bash
+                      here exactly as it does in the repository browser and the
+                      lightbox, rather than as hand-coloured paragraphs. wrap,
+                      because a long worktree path must stay readable in a
+                      dialog that can't scroll sideways; the gutter numbers are
+                      select-none, so copying still yields a runnable script. */}
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden py-1.5">
+                    <CodePane content={resolveScript} lang="bash" wrap />
                   </div>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-2.5 leading-snug">
                     The worktree at <span className="font-mono">{worktreePath}</span> is isolated - changes only affect this agent's branch.
