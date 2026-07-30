@@ -500,6 +500,58 @@ body {
 .dark .token.inserted { background-color: rgba(34, 197, 94, 0.15); }
 .dark .token.deleted { background-color: rgba(239, 68, 68, 0.15); }
 
+/* Whitespace marks (Settings -> Browser -> Whitespace; lib/whitespaceMarks wraps
+   the runs). The character itself is untouched inside the span - the mark is a
+   background / pseudo-element, neither of which lands on the clipboard, so a
+   copied diff is still code and not a field of dots. Nothing here takes part in
+   layout either, so a marked line wraps exactly where it did before. */
+.ws-space,
+.ws-tab {
+  --ws-mark: rgba(0, 0, 0, 0.28);
+}
+.dark .ws-space,
+.dark .ws-tab {
+  --ws-mark: rgba(255, 255, 255, 0.3);
+}
+
+/* One dot per space, from a background tiled at 1ch - the advance width of the
+   monospace cell each space occupies - so a run of any length needs one span
+   rather than one per character. The soft outer stop is anti-aliasing: a hard
+   edge at this size renders as a lumpy square. */
+.ws-space {
+  background-image: radial-gradient(circle, var(--ws-mark) 0 0.075em, transparent 0.095em);
+  background-size: 1ch 100%;
+  background-position: 0 50%;
+  background-repeat: repeat-x;
+}
+
+/* One arrow per tab, drawn across the tab's own (variable) width: a rule plus a
+   rotated corner for the head. Absolutely positioned, so a narrow tab at a tab
+   stop simply draws a shorter arrow instead of pushing the line around. */
+.ws-tab {
+  position: relative;
+}
+.ws-tab::before {
+  content: '';
+  position: absolute;
+  left: 0.18em;
+  right: 0.5em;
+  top: 50%;
+  border-top: 1px solid var(--ws-mark);
+}
+.ws-tab::after {
+  content: '';
+  position: absolute;
+  right: 0.42em;
+  top: 50%;
+  width: 0.3em;
+  height: 0.3em;
+  border-top: 1px solid var(--ws-mark);
+  border-right: 1px solid var(--ws-mark);
+  /* Rotating about its own centre keeps the head on the rule the ::before drew. */
+  transform: translateY(-50%) rotate(45deg);
+}
+
 /* On Linux the OS-native scrollbar carries increment/decrement arrow buttons,
    and `color-scheme` paints it dark. Inside short boxes (e.g. the build-log
    view) those stepper buttons crowd the thumb and look broken — and they aren't

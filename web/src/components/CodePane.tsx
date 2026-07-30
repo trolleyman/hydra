@@ -16,6 +16,8 @@ import { canHighlight, highlightLines } from '../lib/highlightCore'
 import { inRange, type LineRange } from '../lib/lineRange'
 import { CODE_TEXT } from '../lib/diffMetrics'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
+import { markWhitespace } from '../lib/whitespaceMarks'
+import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 import type { EditRow } from '../lib/editDiff'
 
 // Above this, highlighting is skipped and the text renders plain. Prism runs
@@ -62,11 +64,20 @@ export function CodePane({ content, lang, wrap, className, highlightRange, onSel
   }, [lang])
 
   const hasGrammar = canHighlight(lang)
-  const lines = useMemo(
+  const highlighted = useMemo(
     () => splitHighlighted(content, lang),
     // hasGrammar: re-run once a lazily-loaded grammar lands.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [content, lang, hasGrammar],
+  )
+  // The whitespace marks go on the finished HTML, in their own memo: selecting a
+  // line re-renders this pane, and a whole file is too many lines to re-walk for
+  // it. Off (the default) is the identity, so an untouched browser pays one
+  // reference copy.
+  const ws = useWhitespaceMarks()
+  const lines = useMemo(
+    () => (ws === 'off' ? highlighted : highlighted.map((l) => markWhitespace(l, ws))),
+    [highlighted, ws],
   )
 
   const gutterWidth = `${Math.max(2, String(lines.length).length)}ch`
@@ -158,6 +169,7 @@ export function DiffPane({ rows, lang, wrap, className }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, lang, hasGrammar])
 
+  const ws = useWhitespaceMarks()
   const width = Math.max(2, ...rows.map((r) => String(r.newNum ?? r.oldNum ?? '').length))
   const numStyle = { width: `calc(${width}ch + 1rem)` }
 
@@ -175,9 +187,10 @@ export function DiffPane({ rows, lang, wrap, className }: {
         const isDel = row.type === 'del'
         const bg = isAdd ? 'bg-green-50 dark:bg-green-500/10' : isDel ? 'bg-red-50 dark:bg-red-500/10' : ''
         const numBg = isAdd ? 'bg-green-100/70 dark:bg-green-500/15' : isDel ? 'bg-red-100/70 dark:bg-red-500/15' : 'bg-white dark:bg-gray-900'
-        const code = row.ranges?.length
+        // Whitespace marks last, over the word diff as well as the highlighting.
+        const code = markWhitespace(row.ranges?.length
           ? renderWordDiffHtml(html[i], row.content, row.ranges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
-          : html[i]
+          : html[i], ws)
         // The two number columns are one sticky unit, so they stay put together
         // when an unwrapped long line scrolls the pane sideways.
         return (

@@ -101,6 +101,8 @@ import { claimOrphanResult, newToolResultLink, stashOrphanResult } from '../lib/
 import type { ToolResultLink } from '../lib/toolResultLink'
 import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
+import { markWhitespace } from '../lib/whitespaceMarks'
+import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -2110,7 +2112,11 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
     }
     return out
   }, [diff, kind])
-  const highlighted = useMemo(() => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext'), [rows, lang])
+  const ws = useWhitespaceMarks()
+  const highlighted = useMemo(
+    () => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext').map((l) => markWhitespace(l, ws)),
+    [rows, lang, ws],
+  )
   return (
     <div className="bg-white dark:bg-[#20201e] font-mono text-[11px] leading-4">
       {rows.map((row, i) => (
@@ -2130,7 +2136,11 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
 // constructs colourise correctly) and is split back into per-line HTML
 // (highlightLines, which falls back to escaped plain lines for an unknown lang).
 function GutterCodePanel({ nums, code, lang }: { nums: string[]; code: string[]; lang: string }) {
-  const lines = useMemo(() => highlightLines(code.join('\n'), lang || 'plaintext'), [code, lang])
+  const ws = useWhitespaceMarks()
+  const lines = useMemo(
+    () => highlightLines(code.join('\n'), lang || 'plaintext').map((l) => markWhitespace(l, ws)),
+    [code, lang, ws],
+  )
   return (
     <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
       {/* data-copy-code / data-copy-line: the rows are grid cells, not block
@@ -2493,6 +2503,7 @@ const EDIT_NUM_CLASS = 'min-h-4 select-none text-right pr-1.5 text-stone-400 dar
 function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: string; newStr: string; lang: string; replaceAll?: boolean; hunks?: EditHunk[] | null }) {
   const rows = useMemo(() => buildEditRows(oldStr, newStr, hunks), [oldStr, newStr, hunks])
   const numbered = useMemo(() => hasLineNumbers(rows), [rows])
+  const ws = useWhitespaceMarks()
   // Each side is highlighted as ONE run of code, not line by line, so a
   // multi-line construct (a block comment, a template string) colourises
   // correctly - and each side is reassembled whole (context lines belong to
@@ -2534,9 +2545,10 @@ function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: st
             const bg = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
             const marker = isAdd ? '+' : isDel ? '-' : ' '
             const markerCls = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-stone-300 dark:text-stone-700'
-            const code = row.ranges?.length
+            // Whitespace marks last, over the word diff as well as the highlighting.
+            const code = markWhitespace(row.ranges?.length
               ? renderWordDiffHtml(html[i], row.content, row.ranges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
-              : html[i]
+              : html[i], ws)
             return (
               <Fragment key={i}>
                 {numbered && (
