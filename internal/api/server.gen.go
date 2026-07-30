@@ -3664,7 +3664,7 @@ type TestRunResult struct {
 	Name   string `json:"name"`
 	Passed *int   `json:"passed,omitempty"`
 
-	// Progress Latest progress line of the in-flight run (from ::hydra:progress:: markers, else latest stdout). Only set while running.
+	// Progress Latest structured progress for the in-flight run (from ::hydra:progress:: or parsed test counts). Ordinary stdout is log-only. Only set while running.
 	Progress *string `json:"progress"`
 
 	// Queued The run's 1-based place in the runner queue while it waits for a slot; absent or 0 once it is actually running. Test concurrency defaults to 1, so a project with several runners commonly has some of them queued rather than running.

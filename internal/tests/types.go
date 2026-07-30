@@ -126,10 +126,9 @@ type Report struct {
 	UpdatedAt  int64      `json:"updated_at"`
 
 	// Transient (in-flight only; never written to report.json).
-	Progress         string    `json:"-"`
-	ProgressExplicit bool      `json:"-"`
-	StartedAt        int64     `json:"-"`
-	Log              []LogLine `json:"-"`
+	Progress  string    `json:"-"`
+	StartedAt int64     `json:"-"`
+	Log       []LogLine `json:"-"`
 	// TotalEstimated marks a running snapshot whose Total is a denominator
 	// *estimate* carried over from a prior run (the runner declared no
 	// ::hydra:test:total::), so the UI can render it as approximate. Only ever

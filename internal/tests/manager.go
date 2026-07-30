@@ -52,8 +52,8 @@ const (
 )
 
 // ProgressMarker prefixes a stdout line a test command emits to set the live
-// progress header explicitly (e.g. `echo "::hydra:progress:: 84/142"`). Until the
-// first marker, the latest stdout line is used. Matches artifacts.ProgressMarker.
+// progress header explicitly (e.g. `echo "::hydra:progress:: 84/142"`). Ordinary
+// stdout is log-only. Matches artifacts.ProgressMarker.
 const ProgressMarker = artifacts.ProgressMarker
 
 // Manager owns test generation, caching, locking, and live-progress for a
@@ -76,21 +76,16 @@ type Manager struct {
 	// Same wiring discipline as onSettle.
 	onProgress func(projectRoot string)
 
-	mu       sync.Mutex
-	gens     map[string]struct{}
-	progress map[string]string
-	// progressExplicit distinguishes a deliberate ::hydra:progress:: headline
-	// from the latest-stdout fallback. Compact head chips may show the former,
-	// but raw terminal output is only useful in the expanded Tests panel.
-	progressExplicit map[string]bool
-	startedAt        map[string]int64
-	logs             map[string][]LogLine
-	markerSeen       map[string]bool
-	live             map[string]*liveRun
-	cancel           map[string]context.CancelFunc
-	fgWant           map[string]bool
-	subs             map[int]chan Event
-	nextSub          int
+	mu        sync.Mutex
+	gens      map[string]struct{}
+	progress  map[string]string
+	startedAt map[string]int64
+	logs      map[string][]LogLine
+	live      map[string]*liveRun
+	cancel    map[string]context.CancelFunc
+	fgWant    map[string]bool
+	subs      map[int]chan Event
+	nextSub   int
 
 	sched *sched.Scheduler
 	pool  *checkout.Pool
@@ -104,18 +99,16 @@ func NewManager(projectRoot string) *Manager {
 		concurrency = cfg.ResolveTestConcurrency()
 	}
 	m := &Manager{
-		projectRoot:      projectRoot,
-		gens:             map[string]struct{}{},
-		progress:         map[string]string{},
-		progressExplicit: map[string]bool{},
-		startedAt:        map[string]int64{},
-		logs:             map[string][]LogLine{},
-		markerSeen:       map[string]bool{},
-		live:             map[string]*liveRun{},
-		cancel:           map[string]context.CancelFunc{},
-		fgWant:           map[string]bool{},
-		subs:             map[int]chan Event{},
-		sched:            sched.New(concurrency),
+		projectRoot: projectRoot,
+		gens:        map[string]struct{}{},
+		progress:    map[string]string{},
+		startedAt:   map[string]int64{},
+		logs:        map[string][]LogLine{},
+		live:        map[string]*liveRun{},
+		cancel:      map[string]context.CancelFunc{},
+		fgWant:      map[string]bool{},
+		subs:        map[int]chan Event{},
+		sched:       sched.New(concurrency),
 	}
 	m.pool = checkout.NewPool(projectRoot, m.slotsDir(), checkout.SlotsForConcurrency(concurrency))
 	_ = paths.EnsureHydraLocalIgnored(m.root())
@@ -297,7 +290,7 @@ func (m *Manager) Peek(runner string, v Version) (Report, bool, error) {
 	dir := m.entryDir(runner, key)
 	m.mu.Lock()
 	if _, inFlight := m.gens[dir]; inFlight {
-		rep := Report{Runner: runner, Key: key, Status: StatusRunning, StartedAt: m.startedAt[dir], Progress: m.progress[dir], ProgressExplicit: m.progressExplicit[dir], Queued: m.sched.QueuePosition(dir)}
+		rep := Report{Runner: runner, Key: key, Status: StatusRunning, StartedAt: m.startedAt[dir], Progress: m.progress[dir], Queued: m.sched.QueuePosition(dir)}
 		m.fillRunningLocked(dir, &rep)
 		m.mu.Unlock()
 		return rep, true, nil
@@ -416,7 +409,7 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 		if fg {
 			m.fgWant[dir] = true
 		}
-		rep := Report{Runner: spec.Name, Key: key, Ref: ref, Status: StatusRunning, Progress: m.progress[dir], ProgressExplicit: m.progressExplicit[dir], StartedAt: m.startedAt[dir], Log: append([]LogLine(nil), m.logs[dir]...), Queued: m.sched.QueuePosition(dir)}
+		rep := Report{Runner: spec.Name, Key: key, Ref: ref, Status: StatusRunning, Progress: m.progress[dir], StartedAt: m.startedAt[dir], Log: append([]LogLine(nil), m.logs[dir]...), Queued: m.sched.QueuePosition(dir)}
 		m.fillRunningLocked(dir, &rep)
 		m.mu.Unlock()
 		if fg {
@@ -465,10 +458,8 @@ func (m *Manager) get(spec config.TestScript, v Version, fg bool) (Report, error
 		delete(m.live, dir)
 		delete(m.gens, dir)
 		delete(m.progress, dir)
-		delete(m.progressExplicit, dir)
 		delete(m.startedAt, dir)
 		delete(m.logs, dir)
-		delete(m.markerSeen, dir)
 		delete(m.cancel, dir)
 		delete(m.fgWant, dir)
 		m.broadcastLocked(Event{Dir: dir, Kind: "settled"})
@@ -651,12 +642,7 @@ func (m *Manager) appendLog(dir, text, stream string, isMarker bool) {
 		m.logs[dir] = m.logs[dir][over:]
 	}
 	m.broadcastLocked(Event{Dir: dir, Kind: "log", Line: line})
-	switch {
-	case isMarker:
-		m.markerSeen[dir] = true
-		m.progressExplicit[dir] = true
-		m.setProgressLocked(dir, text)
-	case stream == StreamStdout && !m.markerSeen[dir]:
+	if isMarker {
 		m.setProgressLocked(dir, text)
 	}
 }
@@ -722,9 +708,8 @@ func (m *Manager) appendTestCase(dir string, tc TestCase) {
 	default:
 		lr.passed++
 	}
-	// Test markers are more specific than plain stdout lines, so they own the
-	// progress header (like an explicit ::hydra:progress:: marker would).
-	m.markerSeen[dir] = true
+	// Parsed test counts become the structured progress header, like an explicit
+	// ::hydra:progress:: marker.
 	m.setProgressLocked(dir, lr.progressText())
 	if len(lr.pending) >= caseFlushMax {
 		m.flushCountsLocked(dir)
@@ -751,16 +736,14 @@ func (m *Manager) setTestTotal(dir string, total int) {
 	}
 	lr.total = total
 	lr.totalEstimated = false // a real declared total supersedes any seeded estimate
-	m.markerSeen[dir] = true
 	m.setProgressLocked(dir, lr.progressText())
 }
 
 // seedEstimatedTotal seeds an in-flight streaming run's denominator with an
 // estimate carried over from a prior run (see fallbackTotal), giving an
 // un-instrumented run a determinate progress bar until - and unless - the runner
-// declares its own ::hydra:test:total::. It never sets markerSeen (this isn't a
-// real marker) and never overrides an already-set total, and marks the value
-// estimated so the UI can render it as approximate.
+// declares its own ::hydra:test:total::. It never overrides an already-set total,
+// and marks the value estimated so the UI can render it as approximate.
 func (m *Manager) seedEstimatedTotal(dir string, total int) {
 	if total <= 0 {
 		return

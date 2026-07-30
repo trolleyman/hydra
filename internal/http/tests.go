@@ -391,14 +391,9 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 		switch rep.Status {
 		case hydratests.StatusRunning:
 			anyRunning = true
-			// A streaming runner's fallback progress is simply its latest stdout
-			// line. That is useful inside the expanded Tests panel beside the
-			// live log, but it is noisy and sometimes terminal-oriented
-			// ("[2K transforming...") in the compact head chip. Its parsed case
-			// counts already provide meaningful compact progress once markers
-			// arrive. Preserve a deliberate ::hydra:progress:: headline while
-			// keeping raw stdout out of the summary.
-			if (!r.IsStreaming() || rep.ProgressExplicit) && rep.Progress != "" {
+			// Progress is always structured: an explicit ::hydra:progress::
+			// headline or parsed case counts. Ordinary stdout is log-only.
+			if rep.Progress != "" {
 				progress = rep.Progress
 			}
 		case hydratests.StatusFailing:
