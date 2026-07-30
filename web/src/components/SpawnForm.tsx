@@ -9,6 +9,7 @@ import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal, Git
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
+import { Kbd } from './Kbd'
 import { Lightbox } from './Lightbox'
 import { AttachmentChips } from './AttachmentChips'
 import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
@@ -156,8 +157,8 @@ const AgentModelPicker = memo(function AgentModelPicker({
   return (
     // `flex` so the Tooltip's inline-flex wrapper is a flex item here and can't
     // add baseline/descender space under the trigger.
-    <div ref={ref} className="relative flex min-w-0 flex-1">
-      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}`} className="min-w-0 flex-1">
+    <div ref={ref} className="relative flex shrink-0">
+      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}`} className="shrink-0">
         <button
           ref={btnRef}
           type="button"
@@ -165,7 +166,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           // Measure the trigger before opening so the fixed-position menu lands in
           // the right spot on its first paint; scroll/resize keep it pinned after.
           onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-          className={`flex min-w-0 max-w-full items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'min-w-[100px] pr-1.5' : 'w-7 justify-center'} ${trigger} ${
+          className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : 'w-7 justify-center'} ${trigger} ${
             open
               ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
               : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -174,7 +175,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
             <AgentTypeIcon name={active.id} className={iconCls} />
           </span>
-          {label && <span className="min-w-0 truncate text-3xs font-medium text-gray-600 dark:text-gray-300">{label}</span>}
+          {label && <span className="max-w-[4rem] truncate text-3xs font-medium text-gray-600 dark:text-gray-300">{label}</span>}
         </button>
       </Tooltip>
       {open && coords && (
@@ -1069,7 +1070,7 @@ export const SpawnForm = memo(function SpawnForm({
     }
   }
 
-  const submitHint = isMac ? '⌘↵ to spawn' : 'Ctrl+Enter to spawn'
+  const submitKeys = isMac ? ['⌘', '↵'] : ['Ctrl', 'Enter']
 
   // Shared across both layout variants. The index can fall out of range if an
   // image is removed while open, so clamp it and close when there are none left.
@@ -1206,7 +1207,10 @@ export const SpawnForm = memo(function SpawnForm({
                   {renderSpawnSettings()}
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
-                  <span className="hidden sm:inline text-xs text-gray-400 dark:text-gray-500">{submitHint}</span>
+                  <span className="hidden sm:inline-flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+                    {submitKeys.map((k, i) => <Kbd key={i} size="sm">{k}</Kbd>)}
+                    <span className="optical-center">to spawn</span>
+                  </span>
                   <button
                     type="submit"
                     disabled={!canSubmit || loading}

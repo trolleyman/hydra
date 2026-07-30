@@ -109,7 +109,7 @@ import { claimOrphanResult, newToolResultLink, stashOrphanCwd, stashOrphanResult
 import type { ToolResultLink } from '../lib/toolResultLink'
 import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
-import { markWhitespace } from '../lib/whitespaceMarks'
+import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from '../lib/whitespaceMarks'
 import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommentsText'
 import { CommentLink } from './CommentLink'
@@ -1108,10 +1108,10 @@ function summarizeToolInput(input: unknown, name = ''): { text: string; prose: b
     const tail = typeof obj.tail === 'number' ? `last ${obj.tail} lines` : ''
     return { text: [runner, tail].filter(Boolean).join(' - '), prose: true }
   }
-  if (name === 'mcp__hydra__run_tests') {
+  if (name === 'mcp__hydra__retry_tests' || name === 'mcp__hydra__run_tests') {
     return { text: typeof obj.runner === 'string' && obj.runner ? obj.runner : 'All runners', prose: true }
   }
-  if (name === 'mcp__hydra__generate_artifacts') {
+  if (name === 'mcp__hydra__retry_artifacts' || name === 'mcp__hydra__generate_artifacts') {
     return { text: typeof obj.name === 'string' && obj.name ? obj.name : 'All artifact sets', prose: true }
   }
   if (name === 'mcp__hydra__request_mcp_server') {
@@ -1295,8 +1295,10 @@ function gitToolHeading(tool: string, input: Record<string, unknown> | null): st
 const HYDRA_TOOL_LABELS: Record<string, string> = {
   get_head_status: 'Check status',
   get_test_logs: 'Test logs',
-  run_tests: 'Run tests',
-  generate_artifacts: 'Generate artifacts',
+  retry_tests: 'Retry tests',
+  run_tests: 'Retry tests',
+  retry_artifacts: 'Retry artifacts',
+  generate_artifacts: 'Retry artifacts',
   get_review_comments: 'Review comments',
   add_review_comment: 'Add review comment',
   get_review_status: 'Review status',
@@ -1308,7 +1310,9 @@ const HYDRA_TOOL_LABELS: Record<string, string> = {
 
 const HYDRA_SUMMARY_ONLY_TOOLS = new Set([
   'mcp__hydra__get_test_logs',
+  'mcp__hydra__retry_tests',
   'mcp__hydra__run_tests',
+  'mcp__hydra__retry_artifacts',
   'mcp__hydra__generate_artifacts',
   'mcp__hydra__request_mcp_server',
   'mcp__hydra__reply_to_review_comment',
@@ -2007,13 +2011,23 @@ function Expandable({ open, children, className }: { open: boolean; children: Re
 // of the script. A single line has nothing to disambiguate, so it stays bare.
 function CodePanel({ code, lang }: { code: string; lang: string }) {
   const lineNumbers = useChatCodeLinesStore((s) => s.lineNumbers)
+  const ws = useWhitespaceMarks()
   const html = useMemo(() => highlightHtml(code, lang), [code, lang])
+  // Whitespace marks per line, so `boundary` marks each line's own indent and
+  // trailing run (splitHighlightedLines re-opens a colour that spanned the break).
+  // The numbered path below carries its own marks (GutterCodePanel).
+  const marked = useMemo(
+    () => (html == null || ws === 'off' ? html : splitHighlightedLines(html).map((l) => markWhitespace(l, ws)).join('\n')),
+    [html, ws],
+  )
   if (lineNumbers && code.trimEnd().includes('\n')) return <NumberedCodePanel code={code} lang={lang} />
 
   const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
-  if (html != null) {
-    return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
+  if (marked != null) {
+    return <pre className={cls} dangerouslySetInnerHTML={{ __html: marked }} />
   }
+  const plainMarked = markWhitespaceText(code, ws)
+  if (plainMarked != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: plainMarked }} />
   return <pre className={cls}>{code}</pre>
 }
 
@@ -2069,6 +2083,7 @@ function OutputPanel({ text, lang, markers }: { text: string; lang: string; isEr
   // Code output (a Read of a known extension) is stripped of any stray ANSI and
   // syntax highlighted; terminal output (bash) keeps its ANSI colours, rendered
   // to spans. Neither path ever shows raw escape garbage.
+  const ws = useWhitespaceMarks()
   const markerKey = markers?.join('\n') ?? ''
   const html = useMemo(
     () => {
@@ -2079,9 +2094,20 @@ function OutputPanel({ text, lang, markers }: { text: string; lang: string; isEr
     },
     [text, lang, markerKey],
   )
+  // The whitespace-mark overlay, applied per line so `boundary` mode marks each
+  // line's own indent and trailing run - the whole block is one <pre>, so it has
+  // to be split back into lines first (splitHighlightedLines re-opens any colour
+  // that spanned the break).
+  const marked = useMemo(
+    () => (html == null || ws === 'off' ? html : splitHighlightedLines(html).map((l) => markWhitespace(l, ws)).join('\n')),
+    [html, ws],
+  )
   const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-600 dark:text-stone-300`
-  if (html != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: html }} />
-  return <pre className={cls}>{stripAnsi(text) || '(no output)'}</pre>
+  if (marked != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: marked }} />
+  const plain = stripAnsi(text) || '(no output)'
+  const plainMarked = markWhitespaceText(plain, ws)
+  if (plainMarked != null) return <pre className={cls} dangerouslySetInnerHTML={{ __html: plainMarked }} />
+  return <pre className={cls}>{plain}</pre>
 }
 
 // SHELL_STREAM_CAP bounds a running card's accumulated live output (chars): a
@@ -2898,8 +2924,25 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
 // It stays ONE panel with one scrollbar - this is still the command's output,
 // read top to bottom - and the gutter column only appears when some line in it
 // actually has a number to show.
+// OutputSpanText renders one pre-coloured piece of a tool's output with the
+// whitespace-mark overlay applied when the browser preference asks for it
+// (lib/whitespaceMarks). A plain text node otherwise, so nothing but the text
+// itself ever lands on the clipboard.
+function OutputSpanText({ cls, text, ws }: { cls: string; text: string; ws: WhitespaceMarks }) {
+  const marked = markWhitespaceText(text, ws)
+  return marked != null
+    ? <span className={cls} dangerouslySetInnerHTML={{ __html: marked }} />
+    : <span className={cls}>{text}</span>
+}
+
 function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
   const rows = useMemo(() => scriptOutputRows(sections), [sections])
+  const ws = useWhitespaceMarks()
+  // The whitespace-mark overlay over each row's already-highlighted code. The
+  // `spans` path (git/disk/build output a tool wrote, not a file it read) is
+  // marked at render (OutputSpanText); the gutter, `path:` prefix and blame
+  // prefix are metadata, so - like the line-number column - they stay unmarked.
+  const marked = useMemo(() => rows.map((r) => (r.html ? markWhitespace(r.html, ws) : r.html)), [rows, ws])
   const gutter = rows.some((r) => r.num !== '')
   return (
     <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
@@ -2926,8 +2969,8 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
               {row.prefixSpans?.map((sp, j) => <span key={j} className={sp.cls}>{sp.text}</span>)}
               {row.prefixSpans && ' '}
               {row.spans
-                ? row.spans.map((s, j) => <span key={j} className={s.cls}>{s.text}</span>)
-                : <span dangerouslySetInnerHTML={{ __html: row.html }} />}
+                ? row.spans.map((s, j) => <OutputSpanText key={j} cls={s.cls} text={s.text} ws={ws} />)
+                : <span dangerouslySetInnerHTML={{ __html: marked[i] }} />}
             </span>
           </Fragment>
         ))}
@@ -3461,7 +3504,12 @@ const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   mcp__hydra__git_stash: GitMark,//Archive,
   mcp__hydra__get_head_status: ClipboardList,
   mcp__hydra__get_test_logs: FileText,
+  mcp__hydra__retry_tests: Zap,
+  // Pre-rename name (retry_tests). Every one of these maps keeps both: a
+  // transcript is durable, so a conversation from before the rename still
+  // carries run_tests calls that must not fall back to the raw tool name.
   mcp__hydra__run_tests: Zap,
+  mcp__hydra__retry_artifacts: Sparkles,
   mcp__hydra__generate_artifacts: Sparkles,
   mcp__hydra__get_review_comments: MessageSquare,
   mcp__hydra__add_review_comment: MessageSquare,
