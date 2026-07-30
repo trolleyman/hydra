@@ -107,17 +107,20 @@ const syncInterval = 2 * time.Second
 // case), and Snapshot serves the IN-MEMORY fold, so nothing a client is shown
 // can be stale - only the file, and only until the next event or the next Open.
 //
-// Ten seconds rather than the log's two, because the same measurement says the
-// events are spread thinly enough that the interval matters more than it does
-// for fsyncs (rewrite volume across those heads, by interval):
+// Thirty seconds, not the log's two: the events are spread thinly enough that
+// the interval buys much more here than it does for fsyncs. Rewrite volume
+// across those heads, by interval:
 //
 //	per append  139MB      10s   15MB (11%)
 //	2s           45MB      30s    6MB ( 4%)
 //	5s           25MB      60s    3MB ( 2%)
 //
-// Past ten it is diminishing returns against a longer replay on an unclean
-// restart, and Flush checkpoints at every attach regardless.
-const checkpointInterval = 10 * time.Second
+// What a longer interval costs is replay on an unclean restart, and that is
+// almost nothing: load() reads and unmarshals the WHOLE log either way, so the
+// lag adds only the in-memory apply() over the events past the mark - at most 68
+// of them for a 30s window, measured over the busiest stretch of every head
+// here. Flush checkpoints at each attach on top of that.
+const checkpointInterval = 30 * time.Second
 
 func Open(projectRoot, id string) (*Store, error) {
 	s := &Store{
