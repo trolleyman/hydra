@@ -184,14 +184,34 @@ export async function resolveReviewComment(
   return all(await api.default.resolveReviewComment(projectId, agentId, number, { resolved }))
 }
 
-// Record that the user has seen these numbers (empty = all of them).
+// Record that the user has seen these numbers (empty = all of them), or put them
+// back to unread - "seen it, come back to it", the only way a comment becomes new
+// again.
 export async function markReviewCommentsRead(
   projectId: string | null,
   agentId: string,
   numbers: number[],
+  read = true,
 ): Promise<PendingReviewComment[]> {
   if (!projectId) return []
-  return all(await api.default.markReviewCommentsRead(projectId, agentId, { numbers }))
+  return all(await api.default.markReviewCommentsRead(projectId, agentId, { numbers, unread: !read }))
+}
+
+// The comment as markdown, for pasting somewhere else: a quoted body under a link
+// back to where it was said. The location is the point - a review remark without
+// its file and line is an opinion about nothing.
+export function commentAsMarkdown(opts: {
+  number: number
+  author: string
+  body: string
+  path?: string
+  line?: number
+  href?: string
+}): string {
+  const where = opts.path ? `${opts.path}${opts.line ? `:${opts.line}` : ''}` : ''
+  const head = opts.href ? `[#${opts.number}](${opts.href})` : `#${opts.number}`
+  const parts = [head, opts.author, where].filter(Boolean)
+  return `${parts.join(' - ')}\n\n${opts.body.trim().split('\n').map((l) => `> ${l}`).join('\n')}\n`
 }
 
 // The one-shot "Comment to agent" path: store and publish in a single call, so a

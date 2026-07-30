@@ -231,12 +231,18 @@ func ReadSet(projectRoot, id string) map[int]bool {
 	return out
 }
 
-// MarkRead records that the user has seen these numbers. Idempotent, and it is
-// the ONLY way a comment becomes read: nothing is read by the passage of time.
-func MarkRead(projectRoot, id string, numbers []int) error {
+// MarkRead records that the user has seen these numbers, or - with read=false -
+// puts them back to unread, which is how you say "seen it, come back to it".
+// Idempotent, and it is the ONLY way read state changes: nothing is read by the
+// passage of time.
+func MarkRead(projectRoot, id string, numbers []int, read bool) error {
 	_, err := update(projectRoot, id, func(sc *sidecar) struct{} {
 		for _, n := range numbers {
-			sc.Read[fmt.Sprint(n)] = true
+			if read {
+				sc.Read[fmt.Sprint(n)] = true
+			} else {
+				delete(sc.Read, fmt.Sprint(n))
+			}
 		}
 		return struct{}{}
 	})

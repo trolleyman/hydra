@@ -197,7 +197,8 @@ func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkRev
 		}
 		numbers = append(numbers, reviewstore.AllNumbers(projectRoot, head.ID)...)
 	}
-	if err := reviewstore.MarkRead(projectRoot, head.ID, numbers); err != nil {
+	read := request.Body == nil || request.Body.Unread == nil || !*request.Body.Unread
+	if err := reviewstore.MarkRead(projectRoot, head.ID, numbers, read); err != nil {
 		log.Printf("warn: review comments: mark read for %s: %v", head.ID, err)
 	}
 	s.notifyAgentsChanged(projectRoot, false)

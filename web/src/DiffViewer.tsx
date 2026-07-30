@@ -18,7 +18,7 @@ import {
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Folder, FolderOpen, X, GitMergeConflict, Bot, File, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
-  CheckCheck, Link2, ArrowUp, ArrowDown,
+  CircleCheck, Link2, ArrowUp, ArrowDown,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
@@ -221,9 +221,13 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
           className="mt-0.5"
         />
         <div className="min-w-0 flex-1">
-          {/* Always a header line now, draft or not - it is where the author, the
-              state and the number live, and a draft has two of those three. */}
-          <div className="mb-0.5 flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
+          {/* The header row holds everything on that line INCLUDING the buttons -
+              the number used to sit in this column while the controls were a
+              sibling of it, so the two had different line boxes and the number
+              rode ~3px high of the icons beside it. One row, one centre line.
+              h-5 fixes the row to the icon buttons' height so it does not jump
+              when a chip appears. */}
+          <div className="mb-0.5 flex h-5 items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
               {/* "You" rather than your git name: the name is on the avatar's tip,
                   and in a list of comments what matters is which ones are yours. */}
               <span className={mine ? 'text-stone-500 dark:text-stone-400' : ''}>{mine ? 'You' : comment.author}</span>
@@ -244,12 +248,61 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
                   comment was written, and publishing does not change it - but until
                   it is published nobody else can cite it, so putting a handle on it
                   would invite quoting something the agent cannot look up. */}
-              {sent && (
-                <span className="ml-auto flex items-center gap-1 shrink-0">
-                  {!comment.read && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
-                  <span className="font-mono">#{comment.number}</span>
-                </span>
-              )}
+              <span className="ml-auto flex items-center gap-1 shrink-0">
+                {sent && (
+                  <>
+                    {!comment.read && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
+                    <span className="font-mono">#{comment.number}</span>
+                  </>
+                )}
+                {sent ? (
+                  <span className="ml-0.5 flex items-center gap-0.5">
+                    <Tooltip content={comment.resolved ? 'Reopen' : 'Mark resolved'} side="top">
+                      <button
+                        onClick={() => onResolve?.(!comment.resolved)}
+                        aria-label={comment.resolved ? 'Reopen comment' : 'Resolve comment'}
+                        className={`p-1 rounded transition-colors cursor-pointer ${
+                          comment.resolved
+                            ? 'text-emerald-600 dark:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                            : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                        }`}
+                      >
+                        <CircleCheck className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Copy link to this comment" side="top">
+                      <button
+                        onClick={() => onCopyLink?.()}
+                        aria-label="Copy link to this comment"
+                        className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                  </span>
+                ) : (
+                  <span className="ml-0.5 flex items-center gap-0.5">
+                    <Tooltip content="Edit comment" side="top">
+                      <button
+                        onClick={onEdit}
+                        aria-label="Edit comment"
+                        className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                    <Tooltip content="Discard comment" side="top">
+                      <button
+                        onClick={onRemove}
+                        aria-label="Discard comment"
+                        className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                  </span>
+                )}
+              </span>
             </div>
           <Markdown text={comment.text} className="text-xs text-gray-700 dark:text-gray-200 break-words" />
           {stale && !sent && (
@@ -258,52 +311,6 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
               <span>The diff around this line changed after this comment was queued; it will still be sent with its original context.</span>
             </div>
           )}
-        </div>
-        {sent && (
-          <div className="flex items-center gap-0.5 shrink-0">
-            <Tooltip content={comment.resolved ? 'Reopen' : 'Resolve'} side="top">
-              <button
-                onClick={() => onResolve?.(!comment.resolved)}
-                aria-label={comment.resolved ? 'Reopen comment' : 'Resolve comment'}
-                className={`p-1 rounded transition-colors cursor-pointer ${
-                  comment.resolved
-                    ? 'text-emerald-600 dark:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-                    : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-                }`}
-              >
-                <CheckCheck className="w-3.5 h-3.5" />
-              </button>
-            </Tooltip>
-            <Tooltip content="Copy link to this comment" side="top">
-              <button
-                onClick={() => onCopyLink?.()}
-                aria-label="Copy link to this comment"
-                className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
-              >
-                <Link2 className="w-3.5 h-3.5" />
-              </button>
-            </Tooltip>
-          </div>
-        )}
-        <div className={`flex items-center gap-0.5 shrink-0 ${sent ? 'hidden' : ''}`}>
-          <Tooltip content="Edit comment" side="top">
-            <button
-              onClick={onEdit}
-              aria-label="Edit comment"
-              className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-            </button>
-          </Tooltip>
-          <Tooltip content="Remove comment" side="top">
-            <button
-              onClick={onRemove}
-              aria-label="Remove comment"
-              className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </Tooltip>
         </div>
       </div>
     </div>
@@ -3802,6 +3809,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // (every thread card re-renders when it changes), and the jump depends on
       // the live comment list and the diff.
       openComment: (number) => openCommentRef.current?.(number),
+      markUnread: async (number) => {
+        setReviewComments(await markReviewCommentsRead(projectId, agent.id, [number], false))
+        await refreshThreadsRef.current?.()
+      },
       setResolved: async (number, resolved) => {
         const cs = await resolveReviewComment(projectId, agent.id, number, resolved)
         setReviewComments(cs)

@@ -1448,11 +1448,12 @@ func (s *SimulationServer) MarkReviewCommentsRead(w http.ResponseWriter, r *http
 			want[n] = true
 		}
 	}
+	read := body.Unread == nil || !*body.Unread
 	simComments(id)
 	simCommentMu.Lock()
 	for i := range simCommentsByHead[id] {
 		if len(want) == 0 || want[simCommentsByHead[id][i].Number] {
-			simCommentsByHead[id][i].Read = ptr(true)
+			simCommentsByHead[id][i].Read = ptr(read)
 		}
 	}
 	simCommentMu.Unlock()
@@ -1462,7 +1463,7 @@ func (s *SimulationServer) MarkReviewCommentsRead(w http.ResponseWriter, r *http
 		for j := range simThreadsByHead[id][i].Notes {
 			n := &simThreadsByHead[id][i].Notes[j]
 			if n.Number != nil && (len(want) == 0 || want[*n.Number]) {
-				n.Read = ptr(true)
+				n.Read = ptr(read)
 			}
 		}
 	}

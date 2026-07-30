@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, EllipsisVertical, EyeOff, Link2, LoaderCircle, Sparkles } from 'lucide-react'
+import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, LoaderCircle, Mail, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { Tooltip } from './Tooltip'
@@ -9,6 +9,7 @@ import { formatStartedAgo } from '../lib/agentDisplay'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { copyWithToast } from '../lib/copyToast'
 import { Avatar } from './Avatar'
+import { commentAsMarkdown } from '../lib/reviewComments'
 
 // The actions a thread card can perform, supplied by the diff viewer through
 // context (see reviewThreadContext) so the memo'd hunks between them never need
@@ -34,6 +35,9 @@ export interface ReviewThreadActions {
   // the click handler keeps an in-app jump from reloading the page.
   commentHref?: (number: number) => string
   openComment?: (number: number) => void
+  // Put a comment back to unread, so you can come back to it. The only way a
+  // comment becomes new again - nothing does it on a timer.
+  markUnread?: (number: number) => Promise<void>
   // draft persists the in-progress reply for a thread, so a card that scrolls out
   // of view (unmounting it) or a reload doesn't lose a half-written reply.
   draft: {
@@ -241,6 +245,33 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                               >
                                 <Link2 className="w-3.5 h-3.5 shrink-0 text-gray-400" />
                                 Copy link to #{n.number}
+                              </button>
+                            )}
+                            {n.number != null && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setMenuOpen(null)
+                                  void copyWithToast(commentAsMarkdown({
+                                    number: n.number!, author: n.author || 'someone', body: n.body,
+                                    path: thread.path, line: thread.line,
+                                    href: actions.commentHref?.(n.number!),
+                                  }), { what: `#${n.number} as markdown` })
+                                }}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer"
+                              >
+                                <FileText className="w-3.5 h-3.5 shrink-0 text-gray-400" />
+                                Copy as markdown
+                              </button>
+                            )}
+                            {n.number != null && n.read !== false && actions.markUnread && (
+                              <button
+                                type="button"
+                                onClick={() => { setMenuOpen(null); void actions.markUnread!(n.number!) }}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/60 cursor-pointer"
+                              >
+                                <Mail className="w-3.5 h-3.5 shrink-0 text-gray-400" />
+                                Mark unread
                               </button>
                             )}
                             {n.url && (

@@ -2129,8 +2129,11 @@ type ListReviewsResponse struct {
 
 // MarkReadBody defines model for MarkReadBody.
 type MarkReadBody struct {
-	// Numbers Numbers to mark read. Omitted or empty marks every comment on the head.
+	// Numbers Numbers to mark. Omitted or empty covers every comment on the head.
 	Numbers *[]int `json:"numbers,omitempty"`
+
+	// Unread Mark them UNread instead - "I have seen this and want to come back to it", which is the only way a comment goes back to being new.
+	Unread *bool `json:"unread,omitempty"`
 }
 
 // McpServer A candidate MCP server discovered in the host/project config.

@@ -716,10 +716,25 @@ Three ways to get one, because people reach for different ones:
   in-app jump does not reload the page.
 - **The `...` menu on ANY note**, not just a thread's first. The thing you most
   often want from that menu is a link to *that* comment, which a menu on the
-  opening line cannot give you. Thread-wide actions ("Resolve with agent", the
+  opening line cannot give you. It also carries **Copy as markdown** (the body
+  quoted under a link back, with its file and line - a review remark without its
+  location is an opinion about nothing) and **Mark unread**, which is the only way
+  a comment becomes new again. Thread-wide actions ("Resolve with agent", the
   thread's forge link) stay on the first note, where they describe the whole
   conversation.
 - **The link button** on Hydra's own comments.
+
+Two UI details that were wrong and are worth remembering:
+
+- **The resolve control was a double tick** (`CheckCheck`). In every messaging app
+  that means "read", which is precisely the wrong thing to say next to an unread
+  dot. It is a `CircleCheck` now - "mark this done" rather than "seen".
+- **The number rode ~3px high of the buttons beside it.** It sat in the body
+  column while the controls were a sibling of that column, so the two had
+  different line boxes and no amount of alignment on the parent could fix it (the
+  Flexbox 8.3 trap in CLAUDE.md, in miniature). The header row now holds the
+  number AND the buttons, so they share one centre line - measured at 0.00px
+  apart rather than eyeballed.
 
 ### Still open in the comment store
 

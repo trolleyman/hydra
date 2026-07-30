@@ -268,16 +268,24 @@ func TestReadStateIsExplicitAndPerNumber(t *testing.T) {
 	if IsRead(root, "h", 3) {
 		t.Fatal("a comment nobody has seen reads as read")
 	}
-	if err := MarkRead(root, "h", []int{3, 5}); err != nil {
+	if err := MarkRead(root, "h", []int{3, 5}, true); err != nil {
 		t.Fatal(err)
 	}
 	if !IsRead(root, "h", 3) || !IsRead(root, "h", 5) || IsRead(root, "h", 4) {
 		t.Errorf("read set is wrong: %v", ReadSet(root, "h"))
 	}
-	if err := MarkRead(root, "h", []int{3}); err != nil {
+	if err := MarkRead(root, "h", []int{3}, true); err != nil {
 		t.Fatalf("marking read twice must be idempotent: %v", err)
 	}
 	if got := ReadSet(root, "h"); len(got) != 2 {
 		t.Errorf("read set has %d entries, want 2", len(got))
+	}
+	// And back again - "seen it, come back to it" is the only way a comment
+	// becomes new again.
+	if err := MarkRead(root, "h", []int{3}, false); err != nil {
+		t.Fatal(err)
+	}
+	if IsRead(root, "h", 3) || !IsRead(root, "h", 5) {
+		t.Errorf("marking unread hit the wrong numbers: %v", ReadSet(root, "h"))
 	}
 }

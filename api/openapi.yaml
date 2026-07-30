@@ -3912,7 +3912,10 @@ components:
           type: array
           items:
             type: integer
-          description: Numbers to mark read. Omitted or empty marks every comment on the head.
+          description: Numbers to mark. Omitted or empty covers every comment on the head.
+        unread:
+          type: boolean
+          description: Mark them UNread instead - "I have seen this and want to come back to it", which is the only way a comment goes back to being new.
 
     NewReviewCommentBody:
       type: object
