@@ -9434,8 +9434,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // markdown, so a default copy drops the asterisks, fences, bullets and table
   // pipes the agent (or the user) actually wrote. selectionToMarkdown walks the
   // selected DOM and re-serializes it; the chat's non-markdown chrome (tool
-  // cards, diffs) still comes out as plain text, as before. Selecting inside a
-  // single code block yields the raw code, not a fenced block.
+  // cards, diffs) still comes out as plain text, as before. A selection that
+  // covers only code - a fenced block, an inline span - yields the bare code,
+  // so triple-clicking a command gives something you can paste into a shell
+  // rather than a fenced block.
   function copyTranscriptAsMarkdown(event: ClipboardEvent<HTMLDivElement>) {
     const md = selectionToMarkdown(window.getSelection())
     if (!md) return
