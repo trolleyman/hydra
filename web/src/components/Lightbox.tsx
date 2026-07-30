@@ -315,12 +315,23 @@ export function Lightbox({
   // currently selected, and the Before/After control picks which. That also means
   // one code path draws pins, instead of one per comparison mode.
   const pinnedItem = items[index]
+  // Which side to pin is usually NOT a question, and asking it every time was
+  // noise. It only has an answer worth choosing when both sides exist AND they
+  // differ: an added file is only on the right, a removed one only on the left,
+  // and an unchanged pair is the same pixels either way, so any of those decides
+  // itself. `modified` is exactly that case - an unchanged pair carries no
+  // changeType at all, and the repository browser has no second side to choose.
+  const pinSideAmbiguous = !!(pinnedItem?.diff?.left && pinnedItem?.diff?.right) && pinnedItem?.changeType === 'modified'
   const pinnedUrl = pinnedItem?.diff
-    ? (abView === 'before' ? pinnedItem.diff.left : pinnedItem.diff.right) ?? pinnedItem.url
+    ? (pinSideAmbiguous
+        ? (abView === 'before' ? pinnedItem.diff.left : pinnedItem.diff.right)
+        : (pinnedItem.diff.right ?? pinnedItem.diff.left)) ?? pinnedItem.url
     : pinnedItem?.url
   const pinnedRef = useMemo(() => artifactRefFromUrl(pinnedUrl), [pinnedUrl])
   const pinnedSide = pinnedItem?.diff
-    ? (abView === 'before' ? ReviewImageAnchor.side.LEFT : ReviewImageAnchor.side.RIGHT)
+    ? (pinSideAmbiguous
+        ? (abView === 'before' ? ReviewImageAnchor.side.LEFT : ReviewImageAnchor.side.RIGHT)
+        : (pinnedItem.diff.right ? ReviewImageAnchor.side.RIGHT : ReviewImageAnchor.side.LEFT))
     : undefined
   // The comments pinned to THIS picture, in this version, on this side. A remark
   // left on the "before" side must not appear over the "after" one - it would be
@@ -600,20 +611,6 @@ export function Lightbox({
   // capture density. See layoutSize.
   const pictureSize = layoutSize(dims, current)
   const showsPins = canPin && (arming || pinsHere.length > 0)
-  // The composer needs room, and the figure caps at 90vh: without giving the
-  // picture a lower ceiling while arming, the two together overflow it and - since
-  // the media wrapper is `min-h-0` and so free to shrink below its content - the
-  // picture keeps PAINTING at its old height, straight over the panel. Shrinking
-  // the picture is the honest fix; letting it overlap hid the Before/After switch
-  // entirely.
-  //
-  // `w-auto` rides along, and is not optional: the picture carries width/height
-  // ATTRIBUTES (that is what reserves its box before it loads), so a max-height
-  // that actually binds shrinks the height while the width stays put - and
-  // `object-contain` then letterboxes the picture inside its own box, painting
-  // checkerboard down both sides. Letting the width follow the height keeps the
-  // ratio, and the attributes still supply it.
-  const mediaMaxH = arming ? 'max-h-[72vh] w-auto' : 'max-h-[85vh]'
   // Where the pin being composed sits, in the picture's own pixels when they are
   // known - the same form the agent is given, so what you are told you marked and
   // what it is told are the same sentence.
@@ -872,7 +869,7 @@ export function Lightbox({
               // than the full-width wrapper it is centred in.
               className={`${LIGHTBOX_MEDIA_CLASS} rounded-lg shadow-2xl ${shadowFade}`}
               maxWidth={hasSiblings ? '80vw' : '90vw'}
-              maxHeight={arming ? '72vh' : '85vh'}
+              maxHeight="85vh"
               onVerticalSlide={followFrameSlide}
             >
               {/* The wrapper hugs the image (shrink-to-fit inside ZoomPan's content
@@ -903,7 +900,7 @@ export function Lightbox({
                   draggable={false}
                   // relative so the picture paints ABOVE the checkerboard layer behind
                   // it (a positioned element beats a static one in the same stack).
-                  className={`relative ${mediaMaxH} ${figureWidth} object-contain block`}
+                  className={`relative max-h-[85vh] ${figureWidth} object-contain block`}
                 />
                 {showsPins && (
                   <ImagePins
@@ -933,45 +930,6 @@ export function Lightbox({
               onHighlightChange={setHighlight}
               canDiff={!!current.diff.left && !!current.diff.right}
             />
-          </div>
-        )}
-        {/* The pin composer, in the same slot the diff controls occupy - one row of
-            chrome under the picture, never both, since arming replaces the
-            comparator with the single side being pinned.
-
-            ONE dark panel carries all of it, rather than letting the hint and the
-            side switch sit on whatever happens to be behind them: they were
-            white-on-white the moment a light screenshot's own background ended up
-            under them. The backdrop is dark, but the PICTURE need not be, and this
-            row lands right at its edge. */}
-        {arming && (
-          <div
-            className={`w-full max-w-xl rounded-lg border border-white/15 bg-gray-900/90 p-3 ${chromeFade}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Which side is being pinned. Only meaningful for a comparison; a
-                single-sided picture has no side to choose and shows none. */}
-            {current.diff && current.diff.left && current.diff.right && (
-              <div className="flex items-center justify-center gap-1 mb-2">
-                {(['before', 'after'] as const).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => { setAbView(v); setPending(null) }}
-                    className={`px-2.5 h-7 rounded text-2xs font-medium transition-colors cursor-pointer ${
-                      abView === v ? 'bg-white/20 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/90'
-                    }`}
-                  >
-                    <span className="optical-center">{v === 'before' ? 'Before' : 'After'}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <p className="text-center text-2xs text-white/60">
-              {pending
-                ? 'Write the remark in the box beside the pin.'
-                : 'Click a point on the picture, or drag a box around what you mean.'}
-            </p>
           </div>
         )}
         <figcaption ref={captionRef} className={`flex items-center gap-2 text-xs font-mono ${chromeFade}`}>
@@ -1034,6 +992,30 @@ export function Lightbox({
             {pinnedRef && <span className="text-white/30">·</span>}
             {pinnedRef && <span className="truncate">{anchorVersionLabel({ file: pinnedRef.file, key: pinnedRef.key, x: 0, y: 0 })}</span>}
           </div>
+          {/* Which side the remark is about - asked ONLY when it is a real
+              question. An added file exists on one side, an unchanged pair is the
+              same pixels either way, and asking anyway made a choice out of
+              something already decided. When it IS ambiguous it belongs here
+              rather than over by the picture: it is part of what the comment says,
+              and changing it swaps the picture under the pin so the answer can be
+              checked. */}
+          {pinSideAmbiguous && (
+            <div className="flex items-center gap-1 mb-2">
+              <span className="text-3xs text-white/40 mr-1">About the</span>
+              {(['before', 'after'] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setAbView(v)}
+                  className={`px-2 h-6 rounded text-3xs font-medium transition-colors cursor-pointer ${
+                    abView === v ? 'bg-white/20 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/90'
+                  }`}
+                >
+                  <span className="optical-center">{v === 'before' ? 'Before' : 'After'}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <HighlightedTextarea
             value={pinBody}
             autoFocus
