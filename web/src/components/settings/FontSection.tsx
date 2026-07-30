@@ -36,8 +36,15 @@ const SAMPLE: Record<FontRole, string> = {
   terminal: '$ git log --oneline | head -3',
 }
 
+// Both controls on a font row state the same height rather than each arriving at
+// its own from padding + line-height. They were 35px (the select: 15px text,
+// py-1.5, a border) and 30px (the stepper: two h-6 buttons in a py-0.5 box) - a
+// 5px difference that reads as a mistake, because two bordered boxes side by
+// side are being compared to each other, not to the text in them.
+const CONTROL_H = 'h-9'
+
 const selectClass =
-  'w-52 shrink-0 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white ' +
+  `w-52 shrink-0 ${CONTROL_H} px-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white ` +
   'dark:bg-gray-900 text-sm text-gray-800 dark:text-gray-100 cursor-pointer ' +
   'focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all'
 
@@ -68,7 +75,7 @@ function SizeStepper({ role, fontId }: { role: FontSizeRole; fontId: string }) {
     </Tooltip>
   )
   return (
-    <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-1 py-0.5">
+    <div className={`flex shrink-0 items-center gap-0.5 ${CONTROL_H} rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-1`}>
       {btn(-1, `Smaller ${FONT_ROLE_SPEC[role].label.toLowerCase()} text`, Minus)}
       {/* tabular-nums so the row doesn't shift as the number changes width, and
           a fixed box so 9 px and 17 px sit in the same place. */}
