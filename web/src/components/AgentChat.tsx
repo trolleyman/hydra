@@ -3760,6 +3760,10 @@ function shellCwdsFor(items: ChatItem[], worktree: string | null): Map<string, s
       output: it.result ?? it.runningOutput,
       cwdAfter: it.cwdAfter,
       failed: it.isError === true,
+      // No result: either still running (the last step, which nothing follows)
+      // or a call the turn ended without - interrupted, or the agent stopped
+      // mid-command and resumed into a fresh shell (see lib/shellCwd).
+      unfinished: it.result === undefined,
       background: input.run_in_background === true,
     })
   }

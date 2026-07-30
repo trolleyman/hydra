@@ -148,6 +148,15 @@ export interface ShellStep {
   // The command exited non-zero (or never ran at all - denied, timed out): its
   // directory is never captured, so none of its `cd`s outlive it.
   failed?: boolean
+  // No result ever came back: the turn was interrupted, or the agent process
+  // stopped mid-command and was resumed. How far down the script the shell got
+  // is unknowable, and a resume starts a NEW shell back at the worktree, so
+  // neither the directory the command was in nor the one its `cd`s asked for
+  // survives it. Without this the walk applies the whole script anyway: the
+  // trailing `cd web` of a command killed during its `sleep` moved the tracked
+  // directory into web/ while the real shell restarted at the worktree, and
+  // every command after it was captioned one level too deep (`cd web/web`).
+  unfinished?: boolean
   // A backgrounded command runs in its own shell, so its `cd`s do not outlive it.
   background?: boolean
 }
@@ -170,6 +179,13 @@ export function trackShellCwds(steps: ShellStep[], worktree: string | null): Map
       continue
     }
     if (step.background) continue
+    // A command that never came back says nothing about where it left the shell
+    // (see `unfinished`), so the directory goes unknown until something
+    // re-anchors it - an absolute `cd`, or a provider that reports its own cwd.
+    if (step.unfinished) {
+      current = null
+      continue
+    }
     // A command that did not finish successfully never had its directory
     // captured, so it moved nothing - not even the `cd` that succeeded before
     // the failure. `cd web && bun test` with failing tests leaves the shell

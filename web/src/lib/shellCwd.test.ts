@@ -100,6 +100,21 @@ describe('trackShellCwds', () => {
     expect(track(['cd web', { command: 'ls', cwd: '/elsewhere' } as ShellStep, 'ls'])).toEqual([WT, '/elsewhere', '/elsewhere'])
   })
 
+  // A call the turn ended without a result for: the script may have stopped
+  // anywhere in it, and a resumed agent gets a fresh shell at the worktree.
+  // Guessing here is what captioned a whole run of later commands `cd web/web`.
+  it('gives up after a command that never came back', () => {
+    expect(
+      track([
+        'cd web',
+        { command: 'sleep 25; curl localhost:1234 && cd src', unfinished: true } as ShellStep,
+        'ls',
+        `cd ${WT}/web`,
+        'ls',
+      ]),
+    ).toEqual([WT, `${WT}/web`, null, null, `${WT}/web`])
+  })
+
   it('does not follow a backgrounded shell', () => {
     expect(track([{ command: 'cd web && sleep 100', background: true } as ShellStep, 'ls'])).toEqual([WT, WT])
   })
