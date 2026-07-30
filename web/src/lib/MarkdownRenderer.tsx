@@ -16,6 +16,7 @@ import { densityFromPath, logicalSize, useNaturalSize, useNaturalVideoSize } fro
 import { rememberMediaSize } from './mediaSize'
 import { IMAGE_REFLOW_MS, markSelfReflow } from './selfReflow'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
+import { ansiToHtml, ansiToText, hasAnsi } from './ansi'
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
 // rendered-markdown surface (chat messages, the AgentView prompt, README file
@@ -468,7 +469,16 @@ function MarkdownCode({ s, className, children }: { s: Style; className?: string
   if (!block) return <code className={s.codeInline}>{children}</code>
   const text = String(children ?? '').replace(/\n$/, '')
   const lang = /language-([\w-]+)/.exec(className || '')?.[1] ?? ''
-  const html = highlightCode(text, lang)
+  // Captured command/test output is commonly fenced into a prompt or chat
+  // message with its terminal colours intact. An untyped output block keeps
+  // those colours. When the author supplied a fence language, preserve the more
+  // informative syntax highlighting and remove terminal control bytes before
+  // feeding the text to the grammar - one coloured WARN must not disable
+  // highlighting for the entire block.
+  const ansi = hasAnsi(text)
+  const html = ansi && !lang
+    ? ansiToHtml(text)
+    : highlightCode(ansi ? ansiToText(text) : text, lang)
   // No highlighter root class: the `.token` spans carry their own colours,
   // while a root class would also pull in a theme's white bg.
   if (html != null) {

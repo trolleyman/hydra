@@ -101,6 +101,29 @@ describe('Markdown', () => {
       const { container } = render(<Markdown text={'```go\nx := 1\n```'} />)
       expect(container.querySelector('code')).toHaveAttribute('data-md-lang', 'go')
     })
+
+    it('renders ANSI colours in fenced output without exposing escape codes', () => {
+      const esc = '\x1b'
+      const { container } = render(
+        <Markdown text={`\`\`\`\n${esc}[31mfailed${esc}[0m plain\n\`\`\``} />,
+      )
+      const code = container.querySelector('code')!
+      expect(code).toHaveTextContent('failed plain')
+      expect(code.textContent).not.toContain('[31m')
+      expect(code.querySelector('.ansi-red')).toHaveTextContent('failed')
+    })
+
+    it('keeps syntax highlighting when a language-tagged fence contains ANSI', () => {
+      const esc = '\x1b'
+      const { container } = render(
+        <Markdown text={`\`\`\`html\n${esc}[32m<tag>${esc}[0m\n\`\`\``} />,
+      )
+      const code = container.querySelector('code')!
+      expect(code).toHaveTextContent('<tag>')
+      expect(code.textContent).not.toContain('[32m')
+      expect(code.querySelector('.token')).not.toBeNull()
+      expect(code.querySelector('.ansi-green')).toBeNull()
+    })
   })
 
   describe('images', () => {

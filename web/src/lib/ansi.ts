@@ -142,6 +142,14 @@ function collapseCr(input: string): string {
     .join('\n')
 }
 
+// ansiToText is the plain-text counterpart to ansiToHtml: resolve terminal
+// rewrites as well as removing escape sequences. Syntax highlighters use this
+// when captured terminal output also has a fence language - feeding them the
+// raw ESC bytes can derail the grammar for the rest of the block.
+export function ansiToText(input: string): string {
+  return stripAnsi(collapseCr(input))
+}
+
 // ansiToHtml converts SGR colour/style escapes to <span> HTML (palette classes
 // styled per-theme in index.css, 8-bit/24-bit colours as inline styles), turns
 // OSC 8 hyperlinks into <a> tags, and strips every other control sequence. Text
