@@ -123,13 +123,14 @@ export function ClaudeUsageIndicator({ agentType }: { agentType: 'claude' | 'cod
       <div className="font-semibold">{agentType === 'codex' ? 'Codex' : 'Claude'} usage</div>
       {session != null && (
         <div>
-          {data.session_reset_text ?? 'Session'}: {Math.round(session)}% left
+          Session: {Math.round(session)}% left
           {data.session_reset_text && agentType === 'claude' ? ` · ${withoutTimezone(data.session_reset_text)}` : ''}
         </div>
       )}
       {weekly != null && (
         <div>
-          {data.weekly_reset_text ?? 'This week'}: {Math.round(weekly)}% left
+          Week: {Math.round(weekly)}% left
+          {data.weekly_reset_text && agentType === 'claude' ? ` · ${withoutTimezone(data.weekly_reset_text)}` : ''}
         </div>
       )}
       {data.error && <div className="text-amber-400">{data.error}</div>}

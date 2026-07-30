@@ -64,6 +64,10 @@ export type AgentResponse = {
      */
     unread_comments?: number;
     /**
+     * How many review comments on this head are still unresolved - the size of the review that is left, across both origins (Hydra's own comments and the MR's discussions, which share one numbering). A different question from unread_comments: a comment you have read is still work, and a comment you left yourself was never unread but is certainly outstanding. Absent when there are none.
+     */
+    open_comments?: number;
+    /**
      * True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only - they have no live session or worktree.
      */
     archived?: boolean;

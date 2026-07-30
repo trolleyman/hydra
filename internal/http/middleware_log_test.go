@@ -1,7 +1,6 @@
 package http
 
 import (
-	"braces.dev/errtrace"
 	"bytes"
 	"log"
 	"net/http"
@@ -10,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"braces.dev/errtrace"
 )
 
 // captureLog swaps the standard logger's output for a buffer and restores it.

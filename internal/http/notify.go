@@ -18,12 +18,17 @@ package http
 //     to them. Six comments cost one line, not six excerpts, and a line survives a
 //     compaction that a pasted blob does not.
 //
-// Rule 3 reads like "never interrupt", and that is wrong. It is "interrupt only
-// when the interruption is the point", and the two cases pull opposite ways:
-// new information waits until the head is idle so it never lands mid-thought,
-// while a CANCELLATION is worth sending only because the head is mid-turn - if it
-// is idle it will pick the change up from the store the next time it looks, for
-// free.
+// Rule 3 reads like "never interrupt", and that is nearly right: new information
+// waits until the head is idle so it never lands mid-thought, while something the
+// user just did on purpose goes now and joins the running turn.
+//
+// There used to be a third mode, notifyWorking - send ONLY while the head is
+// busy, for a cancellation ("stop, #3 is dealt with"). It had exactly one caller,
+// the review-resolve notice, and it is gone: the commonest resolver turned out to
+// be the head itself, so the notice was a message an agent had just caused itself
+// to receive, telling it to stop doing what it had already finished (see
+// review_comments.go). Re-add the mode if a real cancellation source ever turns
+// up; do not re-add it for bookkeeping the agent can read from the store.
 
 import (
 	"context"
@@ -49,10 +54,6 @@ const (
 	// notifyIdle: new information the head did not ask for (a test went red).
 	// Waits until it is not mid-turn, so it never interrupts.
 	notifyIdle
-	// notifyWorking: a cancellation ("stop, that is dealt with"). Only worth a
-	// model turn while the head is actually working - an idle head reads the new
-	// state from the store for nothing.
-	notifyWorking
 )
 
 // notifyReason is the machine tag that rides with a notice to the UI, so the chat
@@ -61,10 +62,8 @@ const (
 type notifyReason string
 
 const (
-	reasonReviewComments   notifyReason = "review_comments"
-	reasonReviewResolved   notifyReason = "review_resolved"
-	reasonReviewUnresolved notifyReason = "review_unresolved"
-	reasonTestsFailed      notifyReason = "tests_failed"
+	reasonReviewComments notifyReason = "review_comments"
+	reasonTestsFailed    notifyReason = "tests_failed"
 )
 
 // autoPrefix marks a message as Hydra's rather than the user's, in the TEXT.
@@ -83,7 +82,7 @@ func (s *Server) notifyHead(ctx context.Context, projectRoot, headID string, whe
 		return false
 	}
 	working := s.headIsWorking(projectRoot, headID)
-	if (when == notifyIdle && working) || (when == notifyWorking && !working) {
+	if when == notifyIdle && working {
 		return false
 	}
 	// By ROOT, not by project id: this is the one place every automated notice

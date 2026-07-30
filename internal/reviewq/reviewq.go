@@ -60,6 +60,11 @@ const (
 	// It is published on write - an agent has no drafts, since a draft exists so a
 	// person can think before speaking.
 	OpAddComment Op = "add_comment"
+	// OpResolveComment marks review comments dealt with (or puts them back),
+	// addressed by the same numbering everything else uses. An agent that has just
+	// acted on #3 is the one thing that knows #3 is done; leaving that solely to
+	// the user means a list that only ever grows while the work is finished.
+	OpResolveComment Op = "resolve_comment"
 	// OpHeadStatus returns a rendered summary of this head's own tests, artifacts
 	// and services. Read-only: it never starts a test run or a generation.
 	OpHeadStatus Op = "head_status"
@@ -85,12 +90,18 @@ type Request struct {
 	ThreadID string `json:"thread_id,omitempty"`
 	Body     string `json:"body,omitempty"`
 
-	// comments / add_comment. Numbers selects specific comments to read (empty =
-	// all); Path/Line/ReplyTo anchor a new one.
+	// comments / add_comment / resolve_comment. Numbers selects specific comments
+	// to read or resolve (empty = all, for a read); Path/Line/ReplyTo anchor a new
+	// one.
 	Numbers []int  `json:"numbers,omitempty"`
 	Path    string `json:"path,omitempty"`
 	Line    int    `json:"line,omitempty"`
 	ReplyTo int    `json:"reply_to,omitempty"`
+
+	// resolve_comment. Reopen inverts it - put a resolved comment back on the
+	// list. A bool that defaults to the common case, so the usual call carries
+	// only the numbers.
+	Reopen bool `json:"reopen,omitempty"`
 
 	// test_logs / run_tests / run_artifacts. Runner names one test runner or one
 	// artifact script; empty means all of them.

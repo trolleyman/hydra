@@ -1817,9 +1817,13 @@ const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
     label: 'Sent by Hydra',
     why: 'Sent automatically when review comments were published, so the agent knows to read them. It fetches the bodies itself with get_review_comments.',
   },
+  // Nothing sends this any more - resolving a comment no longer costs a model
+  // turn (see internal/http/review_comments.go). It stays because a transcript
+  // written before that still carries the origin, and an entry missing from this
+  // map renders the turn as if the user had typed it.
   review_resolved: {
     label: 'Sent by Hydra',
-    why: 'Sent automatically when you resolved a review comment while the agent was working, so it stops on something you have already dealt with.',
+    why: 'Sent automatically when a review comment was resolved while the agent was working. Hydra no longer sends these: a resolved comment simply drops off the list the agent reads.',
   },
   review_unresolved: {
     label: 'Sent by Hydra',

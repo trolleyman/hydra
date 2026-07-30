@@ -69,6 +69,7 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	if os.Getenv("HYDRA_REVIEW_REQ_DIR") != "" {
 		deps.HydraComments = hydraCommentsFromMCP
 		deps.AddComment = addReviewCommentFromMCP
+		deps.ResolveComments = resolveReviewCommentsFromMCP
 		// Replying is no longer gated on a forge link: a number can name one of
 		// Hydra's own comments, which exist with or without an MR.
 		deps.ReplyLocal = replyLocalToReviewThread
@@ -298,6 +299,20 @@ func addReviewCommentFromMCP(path string, line, replyTo int, body string) (strin
 	})
 	if !ok {
 		return "Hydra did not confirm the comment in time, so it may not have been saved. Ask the user to check the daemon.", false
+	}
+	return res.Message, res.OK
+}
+
+// resolveReviewCommentsFromMCP backs resolve_review_comments. Like every other
+// write to the comment store, the store is host-side, so this is a round trip.
+func resolveReviewCommentsFromMCP(numbers []int, reopen bool) (string, bool) {
+	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
+	if dir == "" {
+		return "Resolving review comments is not available in this session.", false
+	}
+	res, ok := reviewRoundTrip(dir, reviewq.Request{Op: reviewq.OpResolveComment, Numbers: numbers, Reopen: reopen})
+	if !ok {
+		return "Hydra did not confirm in time, so those comments may still be open. Check with get_review_comments.", false
 	}
 	return res.Message, res.OK
 }

@@ -621,7 +621,11 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			// to show alongside the has_unread_changes dot, which is the pairing
 			// worth being able to look at.
 			UnreadComments: ptr(1),
-			Prompt:         simAgent1Prompt,
+			// ...and more of them are merely UNRESOLVED, which is the count the
+			// badge shows. The two disagreeing is the whole reason both exist, so
+			// the fixture makes them disagree.
+			OpenComments: ptr(4),
+			Prompt:       simAgent1Prompt,
 			AgentStatus: &api.AgentStatusInfo{
 				Status:                            finished,
 				Timestamp:                         simNow().Format(time.RFC3339),
@@ -1347,6 +1351,24 @@ func simSeedComments(id string) []api.ReviewComment {
 			Line:      ptr(5),
 			Diff:      ptr("main -> a1b2c3d"),
 			CreatedAt: "2026-07-28T10:09:00Z", Read: ptr(true),
+		},
+		// Two comments the DIFF cannot show, which is the normal case rather than
+		// an exotic one: a reviewer's remark about an unchanged caller, and a
+		// comment about the head as a whole (add_review_comment's path is
+		// optional). Both are here so the off-diff section is exercised by the
+		// simulation - it is otherwise invisible, and invisible is the exact bug
+		// it exists to fix.
+		{
+			Number: 9, Status: api.Published, Author: "reviewer",
+			Body:      "This reads under the lock but `Set` above takes it again on the same goroutine in one caller - not in this diff, but it deadlocks with the change you made to the schema loader.",
+			Path:      ptr("internal/store/store.go"),
+			Line:      ptr(16),
+			CreatedAt: "2026-07-28T11:14:00Z", PublishedAt: ptr("2026-07-28T11:14:00Z"),
+		},
+		{
+			Number: 10, Status: api.Published, Author: "reviewer",
+			Body:      "Overall this reads well. The schema split is the right call; my only real worry is the migration ordering.",
+			CreatedAt: "2026-07-28T11:16:00Z", PublishedAt: ptr("2026-07-28T11:16:00Z"),
 		},
 	}
 }
@@ -3484,9 +3506,17 @@ var simRepoFiles = map[string]string{
 		"// New returns the demo HTTP handler.\nfunc New() http.Handler {\n" +
 		"\tmux := http.NewServeMux()\n\tmux.HandleFunc(\"/\", func(w http.ResponseWriter, r *http.Request) {\n" +
 		"\t\tw.Write([]byte(\"hello from hydra-demo\"))\n\t})\n\treturn mux\n}\n",
-	"internal/store/store.go": "package store\n\n// Store is an in-memory key/value store.\n" +
-		"type Store struct {\n\tdata map[string]string\n}\n\n" +
-		"func New() *Store {\n\treturn &Store{data: map[string]string{}}\n}\n",
+	// Long enough that a review comment on Get has real lines either side of it:
+	// this file is NOT in any agent's diff, and comment #9 below is anchored to
+	// it, which is what exercises the off-diff file card (it reads the file at the
+	// head's branch and shows the lines around the comment).
+	"internal/store/store.go": "package store\n\nimport \"sync\"\n\n// Store is an in-memory key/value store.\n" +
+		"type Store struct {\n\tmu   sync.Mutex\n\tdata map[string]string\n}\n\n" +
+		"func New() *Store {\n\treturn &Store{data: map[string]string{}}\n}\n\n" +
+		"// Get returns the value for a key, or the empty string.\n" +
+		"func (s *Store) Get(key string) string {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\treturn s.data[key]\n}\n\n" +
+		"// Set stores a value.\nfunc (s *Store) Set(key, value string) {\n" +
+		"\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\ts.data[key] = value\n}\n",
 	"web/src/App.tsx": "export function App() {\n  return <h1>Hydra Demo</h1>\n}\n",
 	"web/src/components/Button.tsx": "export function Button({ label }: { label: string }) {\n" +
 		"  return <button className=\"btn\">{label}</button>\n}\n",
