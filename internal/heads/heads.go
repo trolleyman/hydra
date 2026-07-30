@@ -1816,7 +1816,8 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 		// its own normalized chat log / queue, which are filed under the SLOT id
 		// rather than the head's.
 		RemoveReviewCheckout(head.ProjectPath, head.ID)
-		RemoveReviewSessionDir(head.ProjectPath, head.ID)
+		RemoveReviewSessionDir(head.ProjectPath, head.ID, reviewAgentType(head))
+		removeCodexSlotConversationID(head.ProjectPath, ReviewSessionID(head.ID))
 		RemoveAgentStatusFiles(head.ProjectPath, ReviewSessionID(head.ID))
 	}
 

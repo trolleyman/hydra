@@ -5,8 +5,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	toml "github.com/pelletier/go-toml/v2"
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
@@ -93,6 +95,84 @@ func TestSeedHeadStrictMCPConfig(t *testing.T) {
 	if srv := readMCPServer(t, bind.Source, gate.HydraControlServer); srv["command"] != SandboxHydraBinPath {
 		t.Errorf("control server = %+v, want command %q", srv, SandboxHydraBinPath)
 	}
+}
+
+func TestSeedHeadCodexGateAndFilteredMCP(t *testing.T) {
+	projectRoot, home := t.TempDir(), t.TempDir()
+	worktree := filepath.Join(projectRoot, "wt", "codex-head")
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hostConfig := []byte(`
+[mcp_servers.keep]
+command = "keep"
+[mcp_servers.drop]
+command = "drop"
+`)
+	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), hostConfig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := seedHead(projectRoot, "codex-head", sandbox.AgentTypeCodex, worktree, home, "", gate.Policy{
+		GateEnabled: true,
+		MCPAllowed:  []string{"keep"},
+	}, sandbox.GitIsolationReadonly)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	configTarget := path.Join(home, ".codex", "config.toml")
+	configSource := bindSource(t, res, configTarget)
+	var cfg map[string]any
+	data, err := os.ReadFile(configSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	servers, _ := cfg["mcp_servers"].(map[string]any)
+	if servers["keep"] == nil || servers["hydra"] == nil || servers["drop"] != nil {
+		t.Fatalf("filtered Codex servers = %#v", servers)
+	}
+
+	hooksSource := bindSource(t, res, path.Join(home, ".codex", "hooks.json"))
+	hooks, err := os.ReadFile(hooksSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(hooks), "gate codex") {
+		t.Fatalf("Codex gate missing from hooks: %s", hooks)
+	}
+	if bind := bindForTarget(res, configTarget); bind == nil || !bind.ReadOnly {
+		t.Fatalf("Codex config bind must be read-only: %+v", bind)
+	}
+	if bind := bindForTarget(res, path.Join(home, ".codex", "hooks.json")); bind == nil || !bind.ReadOnly {
+		t.Fatalf("Codex hooks bind must be read-only: %+v", bind)
+	}
+	if !envHasPrefix(res.Env, gate.EnvPolicyPath+"=") || !envHasPrefix(res.Env, gate.EnvApprovalDir+"=") {
+		t.Fatalf("Codex gate environment missing: %v", res.Env)
+	}
+}
+
+func bindForTarget(res *seedResult, target string) *sandbox.Bind {
+	for i := range res.Binds {
+		if res.Binds[i].Target == target {
+			return &res.Binds[i]
+		}
+	}
+	return nil
+}
+
+func envHasPrefix(env []string, prefix string) bool {
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // readMCPServer reads one server's definition out of an mcpServers document.

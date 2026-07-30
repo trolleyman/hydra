@@ -13,10 +13,10 @@ package heads
 // Three properties are load-bearing, and they are one decision seen from three
 // angles:
 //
-//   - Its OWN checkout, never the head's worktree. A Claude transcript dir is
-//     keyed by working directory, so sharing the head's tree would let the head's
-//     resume latch onto the reviewer's conversation - and a read-write reviewer
-//     racing the head's in-flight edits could corrupt the very work under review.
+//   - Its OWN checkout, never the head's worktree. Provider conversation state
+//     is keyed by working directory, so sharing the head's tree could let the
+//     head resume the reviewer's conversation - and a read-write reviewer racing
+//     the head's in-flight edits could corrupt the very work under review.
 //   - That checkout is PERSISTENT, not a checkout.Pool slot: a recycled path
 //     means a new transcript on every re-acquire.
 //   - It cannot write to git, enforced twice: git_isolation=readonly makes the
@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"time"
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/config"
@@ -47,6 +48,16 @@ const ReviewSlot = "review"
 // ReviewSessionID is the registry session ID for a head's review slot,
 // "<head>@review". See SlotSep for why the separator matters.
 func ReviewSessionID(headID string) string { return SlotSessionID(headID, ReviewSlot) }
+
+// reviewAgentType follows the provider of the head being reviewed whenever that
+// provider supports Hydra's structured chat mode. Review predates chat support
+// outside Claude, so non-chat providers retain the existing Claude fallback.
+func reviewAgentType(head Head) sandbox.AgentType {
+	if head.AgentType == sandbox.AgentTypeCodex {
+		return sandbox.AgentTypeCodex
+	}
+	return sandbox.AgentTypeClaude
+}
 
 // reviewBlockedTools names the host-mediated git MCP tools denied to a review
 // session, as "<server>__<tool>" (the gate's MCP naming, checked in gate.Decide
@@ -138,12 +149,15 @@ func RemoveReviewCheckout(projectRoot, headID string) {
 // RemoveReviewSessionDir deletes the reviewer's Claude transcript directory on
 // purge. removeClaudeSessionDir does not cover it: that recomputes the slug from
 // the HEAD's worktree path, and the reviewer's conversation is keyed by its own
-// checkout path instead. Note it is unconditional on the head's agent type - the
-// reviewer is Claude even when the head it reviews is not.
+// checkout path instead. Codex keeps its session history in a shared store that
+// cannot safely be removed by checkout path, so its purge is a no-op here.
 //
 // Purge-only, mirroring the head's own transcript: a kill archives the head and
 // keeps its conversation recoverable, so the reviewer's should survive too.
-func RemoveReviewSessionDir(projectRoot, headID string) {
+func RemoveReviewSessionDir(projectRoot, headID string, agentType sandbox.AgentType) {
+	if agentType != sandbox.AgentTypeClaude {
+		return
+	}
 	u, err := user.Current()
 	if err != nil || u.HomeDir == "" {
 		return
@@ -159,8 +173,8 @@ func RemoveReviewSessionDir(projectRoot, headID string) {
 
 // StartReviewSession starts, or reattaches to, a head's review agent and returns
 // its session ID. It mirrors StartShellSession, differing in the four ways that
-// make it a reviewer rather than a shell: Claude argv in chat mode, a real gate
-// policy with the git tools blocked, read-only git isolation, and its own
+// make it a reviewer rather than a shell: provider argv in chat mode, a real
+// gate policy with the git tools blocked, read-only git isolation, and its own
 // persistent checkout instead of the head's worktree.
 //
 // Deliberately NOT spawned as a sibling in the head's namespace supervisor the
@@ -171,6 +185,7 @@ func RemoveReviewSessionDir(projectRoot, headID string) {
 // produces one.
 func StartReviewSession(reg *session.Registry, projectRoot string, head Head, rows, cols uint16) (string, error) {
 	id := ReviewSessionID(head.ID)
+	agentType := reviewAgentType(head)
 	if reg.IsLive(id) {
 		return id, nil
 	}
@@ -204,24 +219,24 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 	home := currentUser.HomeDir
 	env := agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
-	env = append(env, headContextEnv(head.ID, sandbox.AgentTypeClaude, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
+	env = append(env, headContextEnv(head.ID, agentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
 	cfg, _ := config.Load(projectRoot)
-	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(sandbox.AgentTypeClaude))
+	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(agentType))
 
 	// Read-only git, with no host-mediated way around it. resolveGitIsolation is
 	// deliberately bypassed: it falls back to "off" when an agent type lacks the
 	// git tools, so a head is never left unable to commit - exactly the wrong
 	// default here, where being unable to commit is the entire point.
-	policy := resolveGatePolicy(cfg, string(sandbox.AgentTypeClaude))
+	policy := resolveGatePolicy(cfg, string(agentType))
 	policy.MCPToolsBlocked = append(append([]string(nil), policy.MCPToolsBlocked...), reviewBlockedTools...)
 
-	seed, err := seedHead(projectRoot, id, sandbox.AgentTypeClaude, worktreePath, home, reviewSystemPrompt, policy, sandbox.GitIsolationReadonly)
+	seed, err := seedHead(projectRoot, id, agentType, worktreePath, home, reviewSystemPrompt, policy, sandbox.GitIsolationReadonly)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(sandbox.AgentTypeClaude, false, reviewSystemPrompt, "", "", true, "", "")
+	argv, err := sandbox.AgentArgv(agentType, false, reviewSystemPrompt, "", "", true, "", seed.MCPConfigPath)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -229,10 +244,10 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 	// Its own egress boundary, keyed by the review session id, with approval
 	// prompts routed to the head's card (head.ID) so they surface where the user
 	// is actually looking.
-	egressEnv, egressWrap := startEgressKeyed(projectRoot, id, head.ID, sandbox.AgentTypeClaude, &net)
+	egressEnv, egressWrap := startEgressKeyed(projectRoot, id, head.ID, agentType, &net)
 
 	sb := sandbox.Options{
-		AgentType:     sandbox.AgentTypeClaude,
+		AgentType:     agentType,
 		WorktreePath:  worktreePath,
 		GitCommonDir:  commonDirForSandbox(projectRoot, sandbox.GitIsolationReadonly),
 		GitIsolation:  sandbox.GitIsolationReadonly,
@@ -251,8 +266,15 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		StdioPipes:    true,
 	}
 
-	if _, err := startAgentSession(reg, projectRoot, id, sandbox.AgentTypeClaude, worktreePath, rows, cols, sb); err != nil {
+	if _, err := startAgentSession(reg, projectRoot, id, agentType, worktreePath, rows, cols, sb); err != nil {
 		return "", errtrace.Wrap(err)
+	}
+	if agentType == sandbox.AgentTypeCodex {
+		conversationID := readCodexSlotConversationID(projectRoot, id)
+		if err := startCodexChatController(reg, nil, projectRoot, id, worktreePath, "", conversationID, ""); err != nil {
+			StopSessionAndWait(reg, id, 5*time.Second)
+			return "", errtrace.Wrap(err)
+		}
 	}
 	return id, nil
 }

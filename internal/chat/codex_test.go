@@ -89,6 +89,23 @@ func TestNormalizeCodexRichItems(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexMCPUsesCanonicalNameAndArguments(t *testing.T) {
+	got := normalizeCodex([]byte(`{"method":"item/completed","params":{"item":{"id":"m1","type":"mcpToolCall","server":"hydra","tool":"git_commit","arguments":{"message":"fix it","paths":["a.go"]},"status":"completed","result":{"content":[]}}}}`))
+	if len(got) != 1 {
+		t.Fatalf("events = %+v", got)
+	}
+	name, input := toolNameAndInput(got[0].payload)
+	if name != "mcp__hydra__git_commit" {
+		t.Fatalf("name = %q", name)
+	}
+	if input["message"] != "fix it" {
+		t.Errorf("input = %#v", input)
+	}
+	if _, ok := input["_raw"]; !ok {
+		t.Errorf("native Codex item missing from raw input: %#v", input)
+	}
+}
+
 func TestNormalizeCodexCollabProjectsSubagent(t *testing.T) {
 	got := normalizeCodex([]byte(`{"method":"item/started","params":{"item":{"id":"a1","type":"collabAgentToolCall","tool":"spawn_agent","status":"inProgress","senderThreadId":"root","newThreadId":"child","prompt":"inspect"}}}`))
 	if len(got) != 2 || got[0].eventType() != "tool_started" || got[1].eventType() != "subagent_started" {
