@@ -69,6 +69,13 @@ export interface TooltipProps {
    * either way.
    */
   width?: number
+  /**
+   * Card only: whether clicking the trigger latches the card open (default true).
+   * Pass false when the trigger's click does something of its own - the click
+   * then dismisses the card instead of leaving it stranded over whatever the
+   * click navigated to.
+   */
+  pin?: boolean
   /** Extra gap (px) between the trigger and the box, on top of the base 8px -
    *  e.g. to clear a neighbouring control the box would otherwise sit against. */
   offset?: number
@@ -89,6 +96,7 @@ export function Tooltip({
   variant = 'hint',
   title,
   width,
+  pin = true,
   offset = 0,
 }: TooltipProps) {
   const card = variant === 'card'
@@ -262,13 +270,20 @@ export function Tooltip({
 
   const handleClick = useCallback(() => {
     if (!card) return
+    // The trigger's own click is the action (pin={false}): get out of its way.
+    // Pinning here would leave the card sitting over whatever that click just
+    // scrolled to or opened, with the pointer already elsewhere.
+    if (!pin) {
+      hide()
+      return
+    }
     // Tap-to-open on touch (where there is no hover), click-to-pin on desktop.
     if (visible && pinned) hide()
     else {
       setPinned(true)
       if (!visible) show()
     }
-  }, [card, visible, pinned, hide, show])
+  }, [card, pin, visible, pinned, hide, show])
 
   // show()'s computePos runs before the box is in the DOM, so it can't measure
   // the real height to pick a side. Re-run once now that it's rendered (synchronous

@@ -2496,13 +2496,10 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
 // purely about keeping the hover box a readable size.
 const UNCOMMITTED_TOOLTIP_FILES = 10
 
-// The hint's default 320px cap leaves ~283px for a path, which is about 50
-// characters at the tooltip's 11px - so a normal-looking path
-// ("web/src/components/agent/UncommittedChangesPanel.tsx") wrapped onto two
-// lines. This repo's tracked paths run 43 characters at p90 and 54 at the
-// longest, and 420px clears ~65, so wrapping becomes the exception it should be
-// rather than the common case. The box still sizes to its content, so a tooltip
-// listing only short paths stays narrow.
+// Wider than the card's 384px default, because the content is paths rather than
+// prose: this repo's tracked paths run 43 characters at p90 and 54 at the longest
+// (measured over git ls-files), and 420px clears ~65 at the card's 11px, so
+// wrapping stays the exception rather than the common case.
 const UNCOMMITTED_TOOLTIP_WIDTH = 420
 
 // A path too long for the tooltip has to wrap somewhere. Left to itself the
@@ -2582,11 +2579,23 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
   }
 
   return (
-    // text-left because the hint tooltip centres its content by default - fine for
-    // a one-line label, but it makes a file list ragged on both sides.
-    <Tooltip className="shrink-0" width={UNCOMMITTED_TOOLTIP_WIDTH} content={
-      <div className="text-left">
-        <p className="font-semibold mb-1">Uncommitted changes</p>
+    // A card, not a hint: this is a list you are meant to READ (which files are
+    // dirty), not a label for an unlabelled control, and the hint's compact
+    // px-2 py-1 had a two-group file list pressed against its edges. The card
+    // brings the roomier padding, the heading with a divider under it, and a box
+    // the pointer can enter - so a long list is scrollable and a tap can hold it
+    // open on a touch device.
+    <Tooltip
+      className="shrink-0"
+      variant="card"
+      title="Uncommitted changes"
+      width={UNCOMMITTED_TOOLTIP_WIDTH}
+      // The chip's click jumps to the uncommitted section, so the card must not
+      // latch open on it - it would land squarely over the diff you just jumped
+      // to. The click dismisses it instead.
+      pin={false}
+      content={
+      <div>
         {groups.map((g) => (
           <div key={g.heading} className="mt-1 first:mt-0">
             <p className="text-gray-600 dark:text-gray-300">{g.heading}</p>
@@ -2623,9 +2632,10 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
             )}
           </div>
         ))}
-        <p className="text-gray-400 dark:text-gray-500 mt-1 text-[10px]">Click to view uncommitted changes</p>
+        <p className="text-gray-400 dark:text-gray-500 mt-1.5 text-[10px]">Click to view uncommitted changes</p>
       </div>
-    }>
+      }
+    >
       <button
         onClick={onJumpToUncommitted}
         className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors cursor-pointer"
