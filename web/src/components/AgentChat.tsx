@@ -1058,8 +1058,9 @@ function summarizeGitInput(tool: string, obj: Record<string, unknown>): { text: 
 
 // summarizeToolSearchQuery renders a ToolSearch query as the thing it looks up.
 // The `select:a,b` form is an exact list of tool names, and the wire spelling of
-// an MCP one (`mcp__hydra__git_commit`) is transport detail - it reads as
-// "hydra::git_commit", the same namespace::tool shape the card heading uses.
+// an MCP one (`mcp__hydra__git_commit`) is transport detail. First-party Hydra
+// tools read as native actions ("git commit"); third-party tools retain their
+// server namespace ("github::get_issue").
 //
 // `prose` here means "not monospace" (see summaryMono at the call site), and the
 // rule is simply whether the text was REWRITTEN for a human. Tool labels have
@@ -1092,6 +1093,29 @@ function summarizeToolInput(input: unknown, name = ''): { text: string; prose: b
       text: numbers.length > 0 ? `#${numbers.join(', #')}` : 'All published comments',
       prose: true,
     }
+  }
+  if (name === 'mcp__hydra__get_test_logs') {
+    const runner = typeof obj.runner === 'string' ? obj.runner : ''
+    const tail = typeof obj.tail === 'number' ? `last ${obj.tail} lines` : ''
+    return { text: [runner, tail].filter(Boolean).join(' - '), prose: true }
+  }
+  if (name === 'mcp__hydra__run_tests') {
+    return { text: typeof obj.runner === 'string' && obj.runner ? obj.runner : 'All runners', prose: true }
+  }
+  if (name === 'mcp__hydra__generate_artifacts') {
+    return { text: typeof obj.name === 'string' && obj.name ? obj.name : 'All artifact sets', prose: true }
+  }
+  if (name === 'mcp__hydra__request_mcp_server') {
+    return { text: typeof obj.name === 'string' ? obj.name : '', prose: true }
+  }
+  if (name === 'mcp__hydra__reply_to_review_comment') {
+    return { text: typeof obj.number === 'number' ? `#${obj.number}` : '', prose: true }
+  }
+  if (name === 'mcp__hydra__add_review_comment') {
+    const path = typeof obj.path === 'string' ? obj.path : ''
+    const line = typeof obj.line === 'number' ? `:${obj.line}` : ''
+    const reply = typeof obj.reply_to === 'number' ? `Reply to #${obj.reply_to}` : ''
+    return { text: reply || `${path}${line}`, prose: reply !== '' }
   }
   if (name === 'ToolSearch' && typeof obj.query === 'string') return summarizeToolSearchQuery(obj.query)
   const gitTool = /^mcp__hydra__(git_.+)$/.exec(name)
@@ -1255,18 +1279,51 @@ function gitToolHeading(tool: string, input: Record<string, unknown> | null): st
   return label
 }
 
-// mcpToolLabel spells an MCP tool as "server::tool" - the wire name's `mcp__`
-// prefix and `__` separators are protocol noise. Anything that isn't an MCP
-// name is returned unchanged.
+// Hydra's MCP server is built into the product: its protocol namespace is no
+// more useful in the UI than "internal API" would be. Name those tools as native
+// actions. Third-party MCP tools stay namespaced because their server identity
+// is meaningful (and can distinguish otherwise identical tool names).
+const HYDRA_TOOL_LABELS: Record<string, string> = {
+  get_head_status: 'Check status',
+  get_test_logs: 'Test logs',
+  run_tests: 'Run tests',
+  generate_artifacts: 'Generate artifacts',
+  get_review_comments: 'Review comments',
+  add_review_comment: 'Add review comment',
+  get_review_status: 'Review status',
+  reply_to_review_comment: 'Reply to review comment',
+  list_available_mcp_servers: 'Available integrations',
+  request_mcp_server: 'Connect integration',
+  host_run: 'Host run',
+}
+
+const HYDRA_SUMMARY_ONLY_TOOLS = new Set([
+  'mcp__hydra__get_test_logs',
+  'mcp__hydra__run_tests',
+  'mcp__hydra__generate_artifacts',
+  'mcp__hydra__request_mcp_server',
+  'mcp__hydra__reply_to_review_comment',
+  'mcp__hydra__add_review_comment',
+])
+
+function humanizeToolName(name: string): string {
+  return name
+    .split('_')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
 function mcpToolLabel(name: string): string {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
-  return mcp ? `${mcp[1]}::${mcp[2]}` : name
+  if (!mcp) return name
+  if (mcp[1] === 'hydra') return GIT_TOOL_LABELS[mcp[2]] || HYDRA_TOOL_LABELS[mcp[2]] || humanizeToolName(mcp[2])
+  return `${mcp[1]}::${mcp[2]}`
 }
 
 function displayToolName(name: string): string {
-  if (name === 'mcp__hydra__get_review_comments') return 'Review comments'
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name)
-  if (mcp) return (mcp[1] === 'hydra' ? GIT_TOOL_LABELS[mcp[2]] : '') || `MCP ${mcpToolLabel(name)}`
+  if (mcp) return mcp[1] === 'hydra' ? mcpToolLabel(name) : `MCP ${mcpToolLabel(name)}`
   return ({ SendMessage: 'Send Message', ResumeAgent: 'Resume Agent', CloseAgent: 'Close Agent', UpdatePlan: 'Update Plan' } as Record<string, string>)[name] ?? name
 }
 
@@ -3123,7 +3180,16 @@ const TOOL_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   mcp__hydra__git_merge_continue: GitMark,//GitMerge,
   mcp__hydra__git_merge_abort: GitMark,//GitMerge,
   mcp__hydra__git_stash: GitMark,//Archive,
+  mcp__hydra__get_head_status: ClipboardList,
+  mcp__hydra__get_test_logs: FileText,
+  mcp__hydra__run_tests: Zap,
+  mcp__hydra__generate_artifacts: Sparkles,
   mcp__hydra__get_review_comments: MessageSquare,
+  mcp__hydra__add_review_comment: MessageSquare,
+  mcp__hydra__get_review_status: GitMerge,
+  mcp__hydra__reply_to_review_comment: MessageSquare,
+  mcp__hydra__list_available_mcp_servers: Globe,
+  mcp__hydra__request_mcp_server: Plus,
 }
 
 function LowlitPath({ path }: { path: string }) {
@@ -3348,6 +3414,8 @@ const ToolCard = memo(function ToolCard({
     ? readLineInfo(input)
     : gitAddLines.length > 0
       ? `lines ${gitAddLines.join(', ')}`
+      : item.name === 'mcp__hydra__add_review_comment' && typeof input?.line === 'number'
+        ? `line ${input.line}`
       : ''
   const simpleRead =
     isRead && input != null && Object.keys(input).every((k) => k === 'file_path' || k === 'offset' || k === 'limit')
@@ -3373,6 +3441,18 @@ const ToolCard = memo(function ToolCard({
   const isGlob = item.name === 'Glob' && typeof input?.pattern === 'string'
   const isWebFetch = item.name === 'WebFetch' && typeof input?.url === 'string'
   const isReviewComments = item.name === 'mcp__hydra__get_review_comments'
+  const isReviewCommentWrite =
+    item.name === 'mcp__hydra__add_review_comment' ||
+    item.name === 'mcp__hydra__reply_to_review_comment'
+  const reviewCommentBody =
+    isReviewCommentWrite && typeof input?.body === 'string'
+      ? input.body
+      : ''
+  // These first-party tools have compact arguments fully represented by their
+  // heading and summary. Repeating them as JSON makes a native action look like
+  // protocol plumbing. Review writes are the exception in spirit, not layout:
+  // their long body still renders below, but as Markdown rather than JSON.
+  const nativeHydraSummaryOnly = HYDRA_SUMMARY_ONLY_TOOLS.has(item.name)
 
   // SendMessage: a note to another agent, so the card reads as who it went to +
   // what was said, and its JSON reply becomes a sentence (items: rich message
@@ -3424,7 +3504,7 @@ const ToolCard = memo(function ToolCard({
   const gitAddSimple = gitTool === 'git_add' && gitAddPaths.length === 1
   // The requested numbers are already in the header. Repeating them as JSON
   // makes the useful review text start a panel lower for no extra information.
-  const hideInput = simpleRead || emptyInput || gitAddSimple || isReviewComments || isViewImage
+  const hideInput = simpleRead || emptyInput || gitAddSimple || isReviewComments || isViewImage || nativeHydraSummaryOnly
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
   const hasInput = isBash || !hideInput
@@ -3578,6 +3658,10 @@ const ToolCard = memo(function ToolCard({
                   replaceAll={input!.replace_all === true}
                   hunks={editHunks}
                 />
+              ) : reviewCommentBody ? (
+                <div className={`${PANEL_CLASS} px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200`}>
+                  <Markdown text={reviewCommentBody} />
+                </div>
               ) : isSendMessage && input ? (
                 <SendMessageFields
                   input={input}
