@@ -210,6 +210,7 @@ describe('Codex bash display', () => {
   it.each([
     ['command -v bun || true', 'command -v bun || true'],
     ['test -e optional.conf || :', 'test -e optional.conf || :'],
+    ['command -v codex || true && codex --help', 'command -v codex || true &&\ncodex --help'],
     ['command -v bun || echo missing', 'command -v bun ||\necho missing'],
   ])('formats conventional fallbacks in %s', (command, expected) => {
     expect(formatBashForDisplay(command)).toBe(expected)
