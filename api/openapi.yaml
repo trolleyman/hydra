@@ -3844,6 +3844,12 @@ components:
         notified:
           type: string
           description: On a publish, the one line the agent was told. Absent otherwise.
+        notified_reviewer:
+          type: boolean
+          description: >-
+            On a publish, true when at least one comment named @review, so the head's
+            reviewer was told (and started, if it was not already running). The UI says so,
+            because a reviewer working in a tab you have not opened is otherwise invisible.
         you:
           type: string
           description: >

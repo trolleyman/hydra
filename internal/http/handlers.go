@@ -3192,6 +3192,14 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 	}
 
 	text := request.Body.Text
+	// A message the user actually typed puts a human back in the loop, which is
+	// what the test-failure streak cap waits for (see tests_notify.go). An
+	// automated message carries an origin and deliberately does NOT reset it -
+	// otherwise Hydra's own notifications would keep renewing their own licence
+	// to send more.
+	if request.Body.Origin == nil || *request.Body.Origin == "" {
+		ResetTestNotifyStreak(head.ID)
+	}
 
 	// Chat-mode heads are driven over the Claude stream-json interface, not an
 	// interactive TUI: their stdin expects JSON user_message lines, so the

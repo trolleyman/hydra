@@ -766,6 +766,18 @@ Resolve notifications are debounced (`resolveNotifyDelay`) so a run of clicks is
 one message, and re-checked at the end of the debounce: a head that finished while
 you were resolving gets nothing.
 
+**And one of them has to give up.** Test failures are the case where the four
+rules are not enough: dedup is per (runner, commit), and the notify -> fix ->
+commit -> still red -> notify cycle produces a NEW commit each time, so every
+report is genuinely new news and nothing bounds it. `testNotifyMaxStreak` does -
+after three consecutive reports with no human in between, Hydra stops talking. The
+head is not cut off (it can read its own status whenever it likes); Hydra has just
+stopped paying to repeat something it has said three times. The streak resets when
+the suite goes green, or when the USER types something - a message Hydra sent
+itself deliberately does not reset it, or its notifications would keep renewing
+their own licence to send more. Same "no chains without a human" rule the mentions
+follow.
+
 ### Unread, in the UI
 
 Three surfaces, deliberately different from each other:
@@ -799,10 +811,16 @@ Three rules hold it together:
 - **An agent's own comment never routes.** Otherwise one "@review this" in a reply
   becomes a chain of agents summoning each other, which is an unbounded bill and
   nobody's idea of a review.
-- **`@review` never STARTS a reviewer.** The slot is lazy - opening the tab creates
-  the checkout and the model session - and typing a word should not spawn a
-  sandbox. With no reviewer running the comment is still durable, and it reads it
-  with `get_review_comments` when next opened.
+- **`@review` DOES start a reviewer.** This went the other way first, on the
+  grounds that a slot costs a checkout, a sandbox and a model session and typing a
+  word should not spend that. The reasoning was wrong about what a mention is: an
+  accidental spawn would be indefensible, but `@review` is a person typing the
+  reviewer's name to address it, which is the same intent as clicking the Review
+  tab and should not do less. An agent's comment still never routes, so no agent
+  can spawn one. The start is async (a sandbox takes seconds, and a publish should
+  not block on it) and the notice retries briefly, because a just-launched Claude
+  is not ready for stdin the instant Start returns. The UI says a reviewer was
+  addressed - one working in a tab you never opened is otherwise invisible.
 - **The highlighter and the parser share a pattern.**
   `web/src/lib/mentionHighlight.tsx` deliberately mirrors
   `internal/reviewstore/mentions.go`, because a token the box paints and the daemon

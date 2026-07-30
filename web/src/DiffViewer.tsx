@@ -4011,9 +4011,16 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     if (count === 0 || submittingReview) return
     setSubmittingReview(true)
     try {
-      const { comments } = await publishReviewComments(projectId, agent.id, numbers)
+      const { comments, toReviewer } = await publishReviewComments(projectId, agent.id, numbers)
       setReviewComments(comments)
-      showSentToast(count === 1 ? 'Review sent to agent' : `Review of ${count} comments sent to agent`)
+      // Say when it went to the REVIEWER, and where to find it: an @review comment
+      // may have just started a reviewer in a tab you have not opened, which is
+      // otherwise entirely invisible.
+      showSentToast(
+        toReviewer
+          ? 'Sent to your reviewer - open the Review tab to see the reply'
+          : count === 1 ? 'Review sent to agent' : `Review of ${count} comments sent to agent`,
+      )
     } catch (e) {
       console.error('Failed to submit review:', e)
     } finally {

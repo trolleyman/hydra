@@ -17,6 +17,16 @@ package http
 //     the same news, and the same news twice is noise. A NEW commit that is still
 //     red does notify again, which is right: "still broken after that change" is
 //     a different fact from "broken".
+//   - And it gives up. Dedup alone does NOT bound the notify -> fix -> commit ->
+//     still red -> notify cycle, because every attempt is a new commit and so
+//     genuinely new news. What bounds it is a streak cap: after
+//     testNotifyMaxStreak consecutive reports with no human in between, Hydra
+//     stops talking. The head is not stuck - it can still read its own status
+//     whenever it likes - Hydra has just stopped paying to tell it something it
+//     has now heard three times and not fixed. The streak resets when the suite
+//     goes green (the agent got there) or when the USER types something (a human
+//     is back in the loop), which is the same "no chains without a human" rule
+//     the mention system follows.
 //   - The message is one line naming the runner and the count. The agent pulls
 //     the failures with get_test_logs, which it already has - a failure costs a
 //     turn, not a transcript full of log.
@@ -45,14 +55,22 @@ const testNotifyInterval = 20 * time.Second
 // four.
 const testNotifyBatchDelay = 5 * time.Second
 
+// testNotifyMaxStreak is how many times in a row Hydra will report a failure to a
+// head that nobody else has spoken to. Three is a judgement call, not a
+// derivation: one is too few to be useful (the first fix attempt often works),
+// and by the fourth identical report it is clear the agent cannot get there from
+// here and a person needs to look.
+const testNotifyMaxStreak = 3
+
 // testNotifySeen remembers what has already been reported, keyed
-// head -> "runner@commit". Memory-only: a daemon restart re-notifying a still-red
-// suite once is a far smaller cost than persisting this, and the head being idle
-// is still required.
+// head -> "runner@commit", plus the consecutive-report streak. Memory-only: a
+// daemon restart re-notifying a still-red suite once is a far smaller cost than
+// persisting this, and the head being idle is still required.
 var testNotifySeen = struct {
 	sync.Mutex
-	m map[string]map[string]bool
-}{m: map[string]map[string]bool{}}
+	m      map[string]map[string]bool
+	streak map[string]int
+}{m: map[string]map[string]bool{}, streak: map[string]int{}}
 
 var testNotifyBatcher = newNotifyBatcher(testNotifyBatchDelay)
 
@@ -98,7 +116,16 @@ func (s *Server) notifyFailingTestsOnce(ctx context.Context, projectRoot string)
 		v := hydratests.Version{Ref: *head.Branch}
 		for _, r := range s.testRunnersFor(projectRoot, v, cfg) {
 			rep, ok, err := mgr.Peek(r.Name, v)
-			if err != nil || !ok || rep.Status != hydratests.StatusFailing {
+			if err != nil || !ok {
+				continue
+			}
+			if rep.Status == hydratests.StatusPassing {
+				// It got there. Whatever the agent did worked, so the next failure
+				// starts a fresh conversation rather than inheriting a spent streak.
+				ResetTestNotifyStreak(head.ID)
+				continue
+			}
+			if rep.Status != hydratests.StatusFailing {
 				continue
 			}
 			if !markTestNotified(head.ID, r.Name, rep.Key) {
@@ -116,8 +143,13 @@ func (s *Server) notifyFailingTestsOnce(ctx context.Context, projectRoot string)
 }
 
 // markTestNotified records a (runner, commit) as reported and reports whether it
-// is new. The key includes the report's cache key, which is the commit - so a
-// re-run of the same tip is silent and a new commit that is still red is not.
+// should be sent. Two gates: the key includes the report's cache key, which is the
+// commit - so a re-run of the same tip is silent and a new commit that is still red
+// is not - and the streak cap, which is what actually bounds the fix-fail-fix
+// cycle, since every attempt in that cycle carries a new key.
+//
+// The dedup entry is recorded even when the streak has run out, so re-checking the
+// same verdict does not keep re-testing the cap.
 func markTestNotified(headID, runner, key string) bool {
 	testNotifySeen.Lock()
 	defer testNotifySeen.Unlock()
@@ -131,7 +163,20 @@ func markTestNotified(headID, runner, key string) bool {
 		return false
 	}
 	seen[k] = true
+	if testNotifySeen.streak[headID] >= testNotifyMaxStreak {
+		return false
+	}
+	testNotifySeen.streak[headID]++
 	return true
+}
+
+// ResetTestNotifyStreak puts a head back to a full allowance. Called when its
+// suite goes green, and when the USER types something to it - a human in the loop
+// is the thing the cap exists to wait for.
+func ResetTestNotifyStreak(headID string) {
+	testNotifySeen.Lock()
+	defer testNotifySeen.Unlock()
+	delete(testNotifySeen.streak, headID)
 }
 
 // ForgetTestNotifications drops a head's dedup entries, so a purged-and-respawned
@@ -140,4 +185,5 @@ func ForgetTestNotifications(headID string) {
 	testNotifySeen.Lock()
 	defer testNotifySeen.Unlock()
 	delete(testNotifySeen.m, headID)
+	delete(testNotifySeen.streak, headID)
 }
