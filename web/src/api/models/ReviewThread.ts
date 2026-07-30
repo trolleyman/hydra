@@ -16,7 +16,14 @@ export type ReviewThread = {
      * NEW-side line the thread anchors to (0 when the forge reports none).
      */
     line: number;
+    /**
+     * Resolved, by the forge's own flag OR Hydra's local mark (see resolved_locally).
+     */
     resolved?: boolean;
+    /**
+     * Resolved in Hydra only - the forge still shows it open, because Hydra never writes a resolve to a PR.
+     */
+    resolved_locally?: boolean;
     /**
      * The anchor line no longer exists in the MR's diff.
      */

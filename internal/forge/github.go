@@ -239,7 +239,7 @@ func (p *githubProvider) Merge(ctx context.Context, repoDir, _ string, id string
 // ghThreadsQuery pulls the PR's review threads with their comments. Thread
 // resolution is GraphQL-only on GitHub (see ghViewFields), and fetching the
 // comments in the same query keeps a thread render to ONE round trip.
-const ghThreadsQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated path line originalLine comments(first:100){nodes{databaseId body url createdAt author{login}}}}}}}}`
+const ghThreadsQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated path line originalLine comments(first:100){nodes{databaseId body url createdAt author{login avatarUrl}}}}}}}}`
 
 // ghThreadsResp is the shape of ghThreadsQuery's response.
 type ghThreadsResp struct {
@@ -261,6 +261,10 @@ type ghThreadsResp struct {
 								CreatedAt  string `json:"createdAt"`
 								Author     struct {
 									Login string `json:"login"`
+									// The forge already hosts these, so Hydra never has to:
+									// the browser renders the URL directly, and a fetch that
+									// fails just falls back to a monogram.
+									AvatarURL string `json:"avatarUrl"`
 								} `json:"author"`
 							} `json:"nodes"`
 						} `json:"comments"`
@@ -307,6 +311,7 @@ func (p *githubProvider) Threads(ctx context.Context, repoDir, _ string, id stri
 			t.Notes = append(t.Notes, Note{
 				ID:        strconv.Itoa(c.DatabaseID),
 				Author:    c.Author.Login,
+				AvatarURL: c.Author.AvatarURL,
 				Body:      c.Body,
 				URL:       c.URL,
 				CreatedAt: c.CreatedAt,

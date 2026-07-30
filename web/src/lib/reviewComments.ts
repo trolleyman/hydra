@@ -47,6 +47,12 @@ export interface PendingReviewComment {
   /** "user" | "reviewer" | "agent" - shown on a published comment that isn't yours. */
   author: string
   published: boolean
+  /** Dealt with. A published comment that is resolved drops out of the open list. */
+  resolved: boolean
+  /** Seen by the user. Set only by an explicit mark-read. */
+  read: boolean
+  /** The comment this answers, which is how a thread forms without a thread object. */
+  replyTo: number
   createdAt: number
 }
 
@@ -79,6 +85,9 @@ function toPending(c: ReviewComment): PendingReviewComment {
     hunkHash: c.hunk_hash ?? '',
     author: c.author,
     published: c.status === 'published',
+    resolved: !!c.resolved,
+    read: !!c.read,
+    replyTo: c.reply_to ?? 0,
     createdAt: Date.parse(c.created_at) || 0,
   }
 }
@@ -91,14 +100,25 @@ function all(res: { comments: ReviewComment[] }): PendingReviewComment[] {
   return res.comments.map(toPending)
 }
 
+// Who "you" is on this machine, from git's user.name. Hydra has no accounts and
+// hosts no pictures, so a comment you wrote is drawn as a monogram of this. The
+// server sends it with every comments response, so it needs no fetch of its own.
+export function youFrom(res: { you?: string }): string {
+  return res.you ?? ''
+}
+
 /** The unpublished subset: what "Submit review" would send. */
 export function draftsOf(comments: PendingReviewComment[]): PendingReviewComment[] {
   return comments.filter((c) => !c.published)
 }
 
-export async function fetchReviewComments(projectId: string | null, agentId: string): Promise<PendingReviewComment[]> {
-  if (!projectId) return []
-  return all(await api.default.getReviewComments(projectId, agentId))
+export async function fetchReviewComments(
+  projectId: string | null,
+  agentId: string,
+): Promise<{ comments: PendingReviewComment[]; you: string }> {
+  if (!projectId) return { comments: [], you: '' }
+  const res = await api.default.getReviewComments(projectId, agentId)
+  return { comments: all(res), you: youFrom(res) }
 }
 
 export async function addReviewComment(
@@ -149,6 +169,49 @@ export async function publishReviewComments(
   if (!projectId) return { comments: [], notified: null }
   const res = await api.default.publishReviewComments(projectId, agentId, {})
   return { comments: all(res), notified: res.notified ?? null }
+}
+
+// Resolve (or reopen) a comment by number. Works for a forge comment too - the
+// numbering is one sequence, so from here it is the same call - and resolving a
+// forge thread is local to Hydra (see the API description).
+export async function resolveReviewComment(
+  projectId: string | null,
+  agentId: string,
+  number: number,
+  resolved: boolean,
+): Promise<PendingReviewComment[]> {
+  if (!projectId) return []
+  return all(await api.default.resolveReviewComment(projectId, agentId, number, { resolved }))
+}
+
+// Record that the user has seen these numbers (empty = all of them), or put them
+// back to unread - "seen it, come back to it", the only way a comment becomes new
+// again.
+export async function markReviewCommentsRead(
+  projectId: string | null,
+  agentId: string,
+  numbers: number[],
+  read = true,
+): Promise<PendingReviewComment[]> {
+  if (!projectId) return []
+  return all(await api.default.markReviewCommentsRead(projectId, agentId, { numbers, unread: !read }))
+}
+
+// The comment as markdown, for pasting somewhere else: a quoted body under a link
+// back to where it was said. The location is the point - a review remark without
+// its file and line is an opinion about nothing.
+export function commentAsMarkdown(opts: {
+  number: number
+  author: string
+  body: string
+  path?: string
+  line?: number
+  href?: string
+}): string {
+  const where = opts.path ? `${opts.path}${opts.line ? `:${opts.line}` : ''}` : ''
+  const head = opts.href ? `[#${opts.number}](${opts.href})` : `#${opts.number}`
+  const parts = [head, opts.author, where].filter(Boolean)
+  return `${parts.join(' - ')}\n\n${opts.body.trim().split('\n').map((l) => `> ${l}`).join('\n')}\n`
 }
 
 // The one-shot "Comment to agent" path: store and publish in a single call, so a

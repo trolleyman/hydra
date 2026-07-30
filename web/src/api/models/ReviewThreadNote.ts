@@ -7,6 +7,15 @@
  */
 export type ReviewThreadNote = {
     id: string;
+    /**
+     * The note's handle in the head's ONE numbering sequence, shared with Hydra's own comments so "fix
+     */
+    number?: number;
+    read?: boolean;
+    /**
+     * The author's picture, hosted by the FORGE. Hydra stores no images and proxies nothing - the browser loads this directly, and a failure falls back to a monogram.
+     */
+    avatar_url?: string;
     author?: string;
     body: string;
     url?: string;

@@ -90,6 +90,11 @@ export const StorageKeys = {
   // a wrapped long line apart from a genuinely new one. Client-only, global
   // (localStorage, like Theme). See lib/chatPrefs.
   chatCodeLineNumbers: 'hydra-chat-code-line-numbers',
+  // Which whitespace the code surfaces (diff viewer, repository browser, the
+  // chat's file cards) draw a mark on: 'boundary' (the indent and any trailing
+  // spaces) or 'all'. Absent = off, the default. Client-only, global
+  // (localStorage, like Theme). See lib/whitespacePrefs + lib/whitespaceMarks.
+  codeWhitespace: 'hydra-code-whitespace',
   // Spaces the shell-command formatter indents a block body by when it lays a
   // one-line for/while/if/case out over several lines - in the chat transcript
   // and on the security approval card. A bare number ('0' = flush left); absent

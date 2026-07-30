@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
+import { createFileRoute, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { LoaderCircle } from 'lucide-react'
 import { useAgentStore } from '../../stores/agentStore'
 import { useProjectStore } from '../../stores/projectStore'
@@ -7,12 +7,21 @@ import { api } from '../../stores/apiClient'
 import { AgentDetail } from '../../components/AgentDetail'
 import { resetProjectView } from '../../lib/projectView'
 
+// `?comment=4` is a permalink to one review comment (docs/review-agent.md). The
+// number is the whole address: it is stable, never reused, and the head is
+// already in the path, so a link is short enough to paste into a message and
+// still mean one exact thing months later.
 export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
   component: AgentPage,
+  validateSearch: (search: Record<string, unknown>): { comment?: number } => {
+    const raw = Number(search.comment)
+    return Number.isInteger(raw) && raw > 0 ? { comment: raw } : {}
+  },
 })
 
 function AgentPage() {
   const { projectId, agentId } = useParams({ from: '/project/$projectId/agent/$agentId' })
+  const { comment: focusComment } = useSearch({ from: '/project/$projectId/agent/$agentId' })
   // Per-field selectors (not a whole-store subscription): the store refreshes
   // near-constantly while an agent works, and a whole-store subscribe would
   // re-render this page - and the whole AgentDetail subtree - on every one.
@@ -167,6 +176,7 @@ function AgentPage() {
       onKilled={handleKilled}
       onUnselect={handleUnselect}
       onRefresh={handleRefresh}
+      focusComment={focusComment}
     />
   )
 }
