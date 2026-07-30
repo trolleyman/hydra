@@ -66,6 +66,12 @@ type worker struct {
 	// Bash calls whose recorded working directory has not been read off the
 	// transcript yet - see shellcwd.go.
 	pendingBash map[string]struct{}
+	// Counts of assistant blocks that existed before the current Codex
+	// thread/read history batch began. Codex gives those recovered items
+	// synthetic ids, so content + occurrence is the only identity shared with
+	// the same blocks previously observed live.
+	codexHistoryAssistant map[string]int
+	readingCodexHistory   bool
 }
 
 type codexSpawn struct {
@@ -217,7 +223,14 @@ func (w *worker) run(id string) {
 			specs = normalizeClaude(item.line)
 		case "claude_history":
 			specs = normalizeClaudeHistory(item.line)
-		case "codex":
+		case "codex", "codex_history":
+			if item.provider == "codex_history" && !w.readingCodexHistory {
+				w.codexHistoryAssistant = w.assistantBlockCounts()
+				w.readingCodexHistory = true
+			} else if item.provider == "codex" {
+				w.readingCodexHistory = false
+				w.codexHistoryAssistant = nil
+			}
 			specs = normalizeCodex(item.line)
 			if spawn, ok := codexSpawnFromLine(item.line); ok {
 				w.codexSpawns = append(w.codexSpawns, spawn)
@@ -260,6 +273,9 @@ func (w *worker) run(id string) {
 			if (item.provider == "claude" || item.provider == "claude_history") && kind == "user_message" && w.reconcileClaudeUserEcho(spec, item.provider) {
 				continue
 			}
+			if item.provider == "codex_history" && w.isReplayedCodexAssistantBlock(spec) {
+				continue
+			}
 			if (item.provider == "claude" || item.provider == "claude_history") && kind == "notice" && w.isEchoedQueuedCommand(spec) {
 				continue
 			}
@@ -281,6 +297,49 @@ func (w *worker) run(id string) {
 			}
 		}
 	}
+}
+
+func assistantBlockKey(eventType, text string) string {
+	return eventType + "\x00" + text
+}
+
+func (w *worker) assistantBlockCounts() map[string]int {
+	counts := map[string]int{}
+	for _, eventType := range []string{"assistant_message", "reasoning_completed"} {
+		for _, event := range w.store.EventsOfType(eventType) {
+			var payload struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(event.Payload, &payload) == nil {
+				counts[assistantBlockKey(eventType, payload.Text)]++
+			}
+		}
+	}
+	return counts
+}
+
+// isReplayedCodexAssistantBlock folds the history returned by thread/read into
+// the assistant blocks Hydra already observed live. Codex assigns synthetic
+// ids such as "item-2" to recovered messages, so AppendSource cannot match them
+// to their original "msg_..." ids. Match content one-to-one against a snapshot
+// taken before the history batch: this removes replay copies without collapsing
+// two genuinely identical messages that both exist only in recovered history.
+func (w *worker) isReplayedCodexAssistantBlock(spec eventSpec) bool {
+	var text, eventType string
+	switch payload := spec.payload.(type) {
+	case *AssistantMessage:
+		text, eventType = payload.Text, "assistant_message"
+	case *ReasoningCompleted:
+		text, eventType = payload.Text, "reasoning_completed"
+	default:
+		return false
+	}
+	key := assistantBlockKey(eventType, text)
+	if w.codexHistoryAssistant[key] == 0 {
+		return false
+	}
+	w.codexHistoryAssistant[key]--
+	return true
 }
 
 // isEchoedQueuedCommand reports whether this notice is just a second copy of a

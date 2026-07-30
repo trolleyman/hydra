@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../stores/apiClient'
 import { useServerData } from '../lib/useServerData'
 import { Tooltip } from './Tooltip'
-import type { ClaudeUsageResponse } from '../api'
+import type { ClaudeUsageResponse, CodexUsageResponse } from '../api'
 
 // Behind this endpoint is a real Claude CLI launched under a PTY, so the polling
 // here is deliberately slack: the server serves a cached snapshot for ~10 minutes
@@ -30,13 +30,21 @@ function fmtCountdown(ms: number): string {
   return '<1m'
 }
 
-// usedColor tints a percent-used value: calmer when there's headroom, hotter as
-// the limit is approached.
-function usedColor(used: number | null | undefined): string {
-  if (used == null) return 'text-gray-400 dark:text-gray-500'
-  if (used >= 90) return 'text-red-600 dark:text-red-400'
-  if (used >= 75) return 'text-amber-600 dark:text-amber-400'
-  return 'text-gray-600 dark:text-gray-300'
+// remainingColor tints remaining capacity: calmer when there's headroom, hotter
+// as the limit approaches.
+function remainingColor(remaining: number | null | undefined): string {
+	if (remaining == null) return 'text-gray-400 dark:text-gray-500'
+	if (remaining <= 10) return 'text-red-600 dark:text-red-400'
+	if (remaining <= 25) return 'text-amber-600 dark:text-amber-400'
+	return 'text-gray-600 dark:text-gray-300'
+}
+
+function remaining(used: number | null | undefined): number | null {
+	return used == null ? null : Math.max(0, Math.min(100, 100 - used))
+}
+
+function withoutTimezone(text: string): string {
+	return text.replace(/\s+\([A-Za-z_]+\/[A-Za-z_]+\)\s*$/, '')
 }
 
 // One usage column: a small grey label over its value (e.g. "reset" / "2h 15m"),
@@ -50,21 +58,20 @@ function UsageStat({ label, value, valueClass }: { label: string; value: string;
   )
 }
 
-// ClaudeUsageIndicator shows Claude Code subscription usage in the sidebar
-// footer as three stacked columns: time until the next session ("4 hour") reset,
-// the session limit % used, and the weekly limit % used. It polls in the
-// background and re-probes on click. It renders nothing when usage can't be
-// determined (no subscription, CLI missing, non-localhost, etc.), so it stays
-// out of the way when not applicable.
-export function ClaudeUsageIndicator() {
+// UsageIndicator shows the selected chat provider's subscription usage in the
+// sidebar footer. It only supports Claude and Codex: other agent types retain
+// the last relevant provider so the footer does not flicker away while browsing.
+export function ClaudeUsageIndicator({ agentType }: { agentType: 'claude' | 'codex' }) {
   // Current wall-clock time, refreshed by the countdown ticker below. Held in
   // state (rather than reading Date.now() during render) so render stays pure.
   const [now, setNow] = useState(() => Date.now())
   // Background poll (force=false → uses the server's ~30s cache); a click forces
   // a fresh re-probe. Transient errors keep the last good snapshot (no resetOnError).
-  const { data, refetch: fetchUsage, loading } = useServerData<ClaudeUsageResponse | null, boolean>(
-    'claude-usage',
-    (_key, force) => api.default.getClaudeUsage(force ? true : undefined),
+  const { data, refetch: fetchUsage, loading } = useServerData<ClaudeUsageResponse | CodexUsageResponse | null, boolean>(
+    `${agentType}-usage`,
+    (_key, force) => agentType === 'codex'
+      ? api.default.getCodexUsage(force ? true : undefined)
+      : api.default.getClaudeUsage(force ? true : undefined),
     { intervalMs: POLL_MS, initial: null },
   )
 
@@ -97,33 +104,32 @@ export function ClaudeUsageIndicator() {
   }, [fetchUsage, resetsAt])
 
   if (!data) return null
-  const session = data.session_percent_used
-  const weekly = data.weekly_percent_used
+  const session = remaining(data.session_percent_used)
+  const weekly = remaining(data.weekly_percent_used)
   // Probe ran but yielded no quota (e.g. API-billing account, CLI missing).
   if (!data.available && session == null && weekly == null) return null
 
   const rawReset = !Number.isNaN(resetsAt)
     ? fmtCountdown(resetsAt - now)
-    : (data.session_reset_text ?? null)
+    : (agentType === 'claude' ? (data.session_reset_text ?? null) : null)
   // Strip the leading "Resets [in] ..." so only the value sits under the "reset"
   // label (the live countdown path is already bare; this normalizes the text
   // fallback, which the CLI writes either as a countdown - "Resets in 2h 15m" -
   // or as a wall clock time, "Resets 3:10pm (Europe/London)").
-  const countdown = rawReset ? rawReset.replace(/^resets?\s+(in\s+)?/i, '') : null
+  const countdown = rawReset ? withoutTimezone(rawReset.replace(/^resets?\s+(in\s+)?/i, '')) : null
 
   const tip = (
     <div className="text-xs leading-relaxed">
-      <div className="font-semibold">{data.account_tier ?? 'Claude'} usage</div>
+      <div className="font-semibold">{agentType === 'codex' ? 'Codex' : 'Claude'} usage</div>
       {session != null && (
         <div>
-          Session (4h): {Math.round(session)}% used
-          {data.session_reset_text ? ` · ${data.session_reset_text}` : ''}
+          {data.session_reset_text ?? 'Session'}: {Math.round(session)}% left
+          {data.session_reset_text && agentType === 'claude' ? ` · ${withoutTimezone(data.session_reset_text)}` : ''}
         </div>
       )}
       {weekly != null && (
         <div>
-          This week: {Math.round(weekly)}% used
-          {data.weekly_reset_text ? ` · ${data.weekly_reset_text}` : ''}
+          {data.weekly_reset_text ?? 'This week'}: {Math.round(weekly)}% left
         </div>
       )}
       {data.error && <div className="text-amber-400">{data.error}</div>}
@@ -141,7 +147,7 @@ export function ClaudeUsageIndicator() {
       <button
         onClick={() => fetchUsage(true)}
         disabled={loading}
-        aria-label="Claude usage"
+        aria-label={`${agentType === 'codex' ? 'Codex' : 'Claude'} usage`}
         // The marker the sidebar footer's `group-has-[[data-usage]]` looks for:
         // this component renders nothing at all when usage can't be determined,
         // so its presence in the DOM is the honest answer to "is the strip
@@ -151,8 +157,8 @@ export function ClaudeUsageIndicator() {
         className="flex min-w-0 items-start gap-1.5 text-xs px-1 py-0.5 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-60"
       >
         {countdown && <UsageStat label="reset" value={countdown} />}
-        {session != null && <UsageStat label="4h" value={`${Math.round(session)}%`} valueClass={usedColor(session)} />}
-        {weekly != null && <UsageStat label="wk" value={`${Math.round(weekly)}%`} valueClass={usedColor(weekly)} />}
+        {session != null && <UsageStat label={agentType === 'codex' ? (data.session_reset_text ?? 'limit') : '4h'} value={`${Math.round(session)}%`} valueClass={remainingColor(session)} />}
+        {weekly != null && <UsageStat label={agentType === 'codex' ? (data.weekly_reset_text ?? 'week') : 'wk'} value={`${Math.round(weekly)}%`} valueClass={remainingColor(weekly)} />}
       </button>
     </Tooltip>
   )

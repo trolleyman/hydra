@@ -484,12 +484,13 @@ gate. Verify Claude reads a read-only `settings.json` cleanly.
 - Round-trip integration test: write request → write decision → assert hook
   output; and the timeout-defaults-to-deny path.
 
-### Step 8 — Scope & sequencing
+### Step 8 - Scope & sequencing
 
-- **Claude-first.** Gemini (`BeforeTool`) and Copilot (`preToolUse`) hooks exist
-  but their deny semantics need their own verification; Codex has no hook we wire.
-  Until then, non-Claude agents get **config-level** MCP stripping (Step 3 applies
-  to their config files too) but **not** the runtime gate — call this out.
+- **Claude and Codex.** Both providers now receive the runtime gate through
+  `PreToolUse`, and both have their user-level MCP configuration filtered before
+  launch. Gemini (`BeforeTool`) and Copilot (`preToolUse`) hooks exist, but their
+  deny semantics still need their own verification. Until then, those providers
+  do not receive the runtime gate.
 - **Milestones:**
   - **M1 (no UI, highest value):** Steps 1–3 + 6. Pre-launch MCP stripping +
     deny-only gate (policy-file writes, cred reads, non-allow-listed MCP, global
@@ -505,5 +506,6 @@ gate. Verify Claude reads a read-only `settings.json` cleanly.
 
 *Note: the original audit was a recommendation document only. The three "Should
 change" recommendations (gate, MCP allow-list + approval UI, filtering egress
-proxy) have since been implemented for Claude — see the implementation-status
-callout under "Recommendations" above and the commit history.*
+proxy) have since been implemented for Claude, with the gate and MCP filtering
+also implemented for Codex - see the implementation-status callout under
+"Recommendations" above and the commit history.*
