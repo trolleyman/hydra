@@ -232,10 +232,14 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
   // depth the line it starts actually sits at (a line opening with `done` has
   // already dropped a level by the time the break is written).
   let pending = ''
-  // The open blocks, innermost last: a `do`/`then` body, a `case` whose patterns
-  // are being listed, or one `pattern)` arm of a case. Every entry is exactly one
-  // indent level, so the stack's depth IS the indent depth.
-  const stack: ('block' | 'case' | 'branch')[] = []
+  // An authored newline not yet written out, because the line it starts was left
+  // flush left inside an open block and takes the block's indent - which is only
+  // known once we see what the line turns out to be (see the '\n' branch).
+  let held = false
+  // The open blocks, innermost last: a `do`/`then` body, a `{ ... }` group, a
+  // `case` whose patterns are being listed, or one `pattern)` arm of a case. Every
+  // entry is exactly one indent level, so the stack's depth IS the indent depth.
+  const stack: ('block' | 'case' | 'branch' | 'brace')[] = []
   // Unclosed `(` outside quotes, so the `)` that ends a case pattern can be told
   // apart from one closing `$( )` / `( )` / `(( ))`.
   let parens = 0
@@ -254,10 +258,13 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
   let inOpener = false
 
   const emit = (text: string) => {
-    if (pending) {
+    if (held) {
+      out += '\n' + pad.repeat(stack.length)
+      held = false
+    } else if (pending) {
       out += pending === '\n' ? '\n' + pad.repeat(stack.length) : pending
-      pending = ''
     }
+    pending = ''
     out += text
   }
   // The separator to put before the next step. A `(...)` subshell (or a `$( )`
@@ -271,10 +278,10 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
   // Whether a break is already there - the output ends with one, or one is
   // pending - so a keyword that opens its own line does not add a blank one when
   // the script was written across lines to begin with.
-  const broken = () => pending === '\n' || (pending === '' && /\n[ \t]*$/.test(out))
+  const broken = () => held || pending === '\n' || (pending === '' && /\n[ \t]*$/.test(out))
   // Start the body of a block that the keyword at i just opened, skipping the
   // spaces the break makes trailing.
-  const openBody = (i: number, kind: 'block' | 'case') => {
+  const openBody = (i: number, kind: 'block' | 'case' | 'brace') => {
     stack.push(kind)
     header = ''
     pending = sep()
@@ -324,9 +331,20 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
 
     // A newline the author wrote is the break itself: it satisfies any pending
     // one, and the indentation of the line it starts is theirs to choose.
+    //
+    // Theirs unless they chose none: a line left flush left inside an open block
+    // takes the block's indent, which is what makes the `{ a\nb\n}` an agent
+    // writes read as a group rather than as three unrelated lines. Held rather
+    // than written, so the depth is the one the line turns out to sit at - a
+    // closing `}` has dropped a level by the time the break is flushed.
     if (ch === '\n') {
+      // The line a previous held newline started turned out to be empty, so it
+      // gets no indent - trailing whitespace is not indentation.
+      if (held) { out += '\n'; held = false }
       pending = ''
-      out += ch
+      const rest = cmd.slice(i + 1)
+      if (stack.length > 0 && rest !== '' && !/^[ \t\n]/.test(rest)) held = true
+      else out += ch
       commandStart = true
       continue
     }
@@ -356,6 +374,25 @@ export function splitBashChains(cmd: string, indent: number = DEFAULT_BASH_INDEN
       commandStart = false
       if (keyword in BLOCK_HEADER) header = BLOCK_HEADER[keyword]
       if (BLOCK_OPEN.has(keyword)) i = openBody(i, 'block')
+      continue
+    }
+
+    // A brace GROUP is a block like any other. `{ a; b; }` is how an agent hangs
+    // a run of steps off one `cd`, or redirects the lot at once, and with the
+    // brace left inline the first step's head hid behind it and the rest sat flush
+    // against the `cd`. Command position and a separator after the brace are
+    // exactly what bash needs to read a group, which is also what keeps a `${x}`
+    // and a `{a,b}` brace expansion out of this.
+    if (ch === '{' && commandStart && /[\s;&|]/.test(cmd[i + 1] ?? ' ')) {
+      emit(ch)
+      i = openBody(i, 'brace')
+      continue
+    }
+    if (ch === '}' && commandStart && stack[stack.length - 1] === 'brace') {
+      stack.pop()
+      if (out && !broken()) pending = sep()
+      emit(ch)
+      commandStart = false
       continue
     }
 

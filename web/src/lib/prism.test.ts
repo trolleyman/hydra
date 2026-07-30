@@ -14,6 +14,9 @@ describe('getLanguage', () => {
     expect(getLanguage('lib.rs')).toBe('rust')
     expect(getLanguage('app.py')).toBe('python')
     expect(getLanguage('config.toml')).toBe('toml')
+    // A log is the commonest thing a Bash card reads out, and Prism has a
+    // grammar for one: the timestamp, the level and the paths in the message.
+    expect(getLanguage('watch.log')).toBe('log')
   })
 
   it('maps the JSX-bearing extensions to the JSX grammars, not the plain ones', () => {
@@ -112,7 +115,7 @@ describe('shebangLanguage', () => {
 
 describe('eager Prism grammars', () => {
   it('bundles lua and other common languages up front', () => {
-    for (const lang of ['lua', 'typescript', 'tsx', 'go', 'python', 'rust', 'bash', 'json', 'yaml']) {
+    for (const lang of ['lua', 'typescript', 'tsx', 'go', 'python', 'rust', 'bash', 'json', 'yaml', 'log']) {
       expect(hasLanguage(lang), lang).toBe(true)
     }
   })

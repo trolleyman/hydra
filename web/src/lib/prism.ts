@@ -48,6 +48,7 @@ import json from 'refractor/json'
 import jsx from 'refractor/jsx'
 import kotlin from 'refractor/kotlin'
 import less from 'refractor/less'
+import log from 'refractor/log'
 import lua from 'refractor/lua'
 import makefile from 'refractor/makefile'
 import markdown from 'refractor/markdown'
@@ -78,7 +79,7 @@ import yaml from 'refractor/yaml'
 const EAGER = [
   clike, markup, css, javascript, // the roots the rest extend
   bash, c, cpp, csharp, dart, diff, docker, elixir, erlang, go, graphql, groovy,
-  haskell, ini, java, json, jsx, kotlin, less, lua, makefile, markdown, nginx,
+  haskell, ini, java, json, jsx, kotlin, less, log, lua, makefile, markdown, nginx,
   nix, objectivec, perl, php, powershell, protobuf, python, r, ruby, rust, scala,
   scss, sql, swift, toml, tsx, typescript, vim, yaml,
 ]

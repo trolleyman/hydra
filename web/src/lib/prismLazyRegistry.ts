@@ -142,7 +142,6 @@ export const LAZY_LANGUAGES: Record<string, () => Promise<{ default: Syntax }>> 
   lisp: () => import("refractor/lisp"),
   livescript: () => import("refractor/livescript"),
   llvm: () => import("refractor/llvm"),
-  log: () => import("refractor/log"),
   lolcode: () => import("refractor/lolcode"),
   magma: () => import("refractor/magma"),
   mata: () => import("refractor/mata"),

@@ -48,6 +48,12 @@ const EXT_LANG_MAP: Record<string, string> = {
   sql: 'sql', graphql: 'graphql', gql: 'graphql', proto: 'protobuf',
   // Markup / docs
   md: 'markdown', markdown: 'markdown', tex: 'latex', latex: 'latex',
+  // Logs. Prism's `log` grammar marks the parts of a line that are furniture -
+  // the timestamp, the level, the paths and numbers in the message - which is
+  // most of what makes a wall of a build or watch log readable. Eager (prism.ts),
+  // because the commonest place one turns up is a chat card, and the chat
+  // highlights synchronously.
+  log: 'log',
   // Native / GPU / other
   m: 'objectivec', mm: 'objectivec', glsl: 'glsl', vert: 'glsl', frag: 'glsl',
   f: 'fortran', f90: 'fortran', f95: 'fortran', vim: 'vim', pp: 'puppet',

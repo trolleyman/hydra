@@ -33,10 +33,19 @@ const FAIL = 'text-red-600 dark:text-red-400'
 const WARN = 'text-amber-600 dark:text-amber-400'
 const LOC = 'text-sky-700 dark:text-sky-400'
 
-// The harness's own line above a failed command's output, and the only part of
-// that output no command wrote. Anchored at both ends: it is that line or it is
-// a sentence about exit codes.
-const EXIT_STATUS = /^(Exit code )(\d+)$/
+// The harness's own lines, which no command printed: the status above a failed
+// command's output, and the note that stands in for the output when there was
+// none. Anchored at both ends - it is that line, or it is a sentence about exit
+// codes.
+//
+// Exported for lib/shellSections, which lifts them out of the attribution before
+// splitting an output up. A `(Bash completed with no output)` handed to the file
+// a step had read came back with `with` coloured as a JavaScript keyword.
+export const EXIT_STATUS = /^(Exit code )(\d+)$/
+export const NO_OUTPUT = /^\((?:[^()]*\b)?no output\)$/i
+// The Bash tool's note that it put the shell back where it started, which it
+// writes after the command's own output (see lib/shellCwd).
+export const CWD_RESET = /^Shell cwd was reset to \S+$/
 
 // `path/to/file.go:12:5: message`, `path/to/file.ts:12: message`. The path must
 // carry an extension and the line a number, which is what keeps a URL, a
@@ -207,6 +216,9 @@ const FAILURE = /\b(no such|not found|cannot|can't|could not|couldn't|unable|den
 export function diagnosticSpans(line: string): OutputSpan[] {
   const status = EXIT_STATUS.exec(line)
   if (status) return exitStatusSpans(status)
+  // The harness saying there was nothing, or saying where it left the shell:
+  // furniture, all of it.
+  if (NO_OUTPUT.test(line) || CWD_RESET.test(line)) return [{ text: line, cls: DIM }]
   const m = DIAG.exec(line)
   // Not a shape this knows: rendered as it arrived rather than guessed at.
   if (!m) return [{ text: line, cls: '' }]

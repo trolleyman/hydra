@@ -34,6 +34,7 @@
 // nothing, which is what stops a step that died from being handed the next one's
 // lines. See diagnosticLines / failedSteps.
 import { hasAnsi, stripAnsi } from './ansi'
+import { CWD_RESET, EXIT_STATUS, NO_OUTPUT } from './buildOutput'
 import type { DiskTool } from './diskOutput'
 import type { SearchSummary } from './searchSummary'
 import {
@@ -156,6 +157,12 @@ interface Pipeline {
 
 // Characters that end an unquoted word.
 const WORD_END = /[\s;|&<>()]/
+
+// What has to follow a `{ ... }`/`( ... )` group for the group to be a step of
+// the script in its own right rather than something being done to as a whole:
+// the end of the script, or an operator that separates steps. A `|`, a `>` or a
+// `&` there belongs to the group, not to the last command inside it.
+const STEP_END = /^[ \t]*(?:$|[;\n]|&&|\|\|)/
 
 // closingDouble returns the index of the `"` that closes the one at `at`, or -1
 // when the string is unterminated. A backslash escapes the next character.
@@ -381,12 +388,34 @@ function lexPipelines(script: string): Pipeline[] | null {
       i++
       continue
     }
-    // A group runs commands this module is not going to describe, but it is ONE
-    // producer's worth of output, so it is stepped over as a single opaque word
-    // rather than costing the whole script its parse.
     if (ch === '(' || (ch === '{' && WORD_END.test(script[i + 1] ?? ' '))) {
       const end = skipGroup(script, i)
       if (end === -1) return null
+      // A group that stands on its own as a step of the script prints exactly
+      // what the commands inside it print, in that order - so its CONTENTS are
+      // the steps, and the `echo` heading an agent wrapped up in one is an anchor
+      // like any other. (Agents write `cd x && { a; echo ===; b; }` constantly,
+      // to hang a run of steps off one `cd`; read as one opaque word, the group
+      // cost every step in it its attribution.)
+      //
+      // Only when nothing is done to the group as a WHOLE: a `|` after it filters
+      // the lot, a `>` redirects the lot, and either makes the group one producer
+      // again. What follows has to be the end of the script or something that
+      // separates steps.
+      const inner = words.length === 0 && cmds.length === 0 && STEP_END.test(script.slice(end))
+        ? lexPipelines(script.slice(i + 1, end - 1))
+        : null
+      if (inner) {
+        pipelines.push(...inner)
+        i = end
+        lastEnd = i
+        pipeStart = i
+        cmdStart = i
+        continue
+      }
+      // Otherwise it is ONE producer's worth of output that this module is not
+      // going to describe, stepped over as a single opaque word rather than
+      // costing the whole script its parse.
       words.push({ text: script.slice(i, end), dynamic: true, quoted: false, quotedStart: false })
       i = end
       lastEnd = i
@@ -996,10 +1025,6 @@ const DIAGNOSTIC = /^((?:[\w.+-]*\/)*([\w.+-]+))(?:: line \d+)?: \S/
 // them, and everything it says is about the script rather than about a file.
 const SHELL = /^-?(?:bash|sh|dash|zsh|ksh|fish)$/
 
-// The harness's own status line, above the output of a command that failed. Only
-// ever the first line, which is where the tool result puts it.
-const EXIT_STATUS = /^Exit code \d+$/
-
 // stepTools collects the commands a script ran, by name, for the gate above.
 // Every step carries the text it was parsed from, so this reads the name at the
 // head of each `|`-separated piece of it - a diagnostic can come from any command
@@ -1031,7 +1056,12 @@ function diagnosticLines(lines: string[], steps: ScriptStep[]): boolean[] {
   )
   return lines.map((line, i) => {
     if (printed.has(line.trimEnd())) return false
-    if (i === 0 && EXIT_STATUS.test(line)) return true
+    // The harness's own notes (lib/buildOutput), each only where the tool result
+    // puts it: the exit status above a failed command's output, the line that
+    // stands in for output when there was none, and - after everything the
+    // command printed - the note that the shell was put back where it started.
+    if (i === 0 && (EXIT_STATUS.test(line) || (lines.length === 1 && NO_OUTPUT.test(line)))) return true
+    if (i === lines.length - 1 && CWD_RESET.test(line)) return true
     const name = DIAGNOSTIC.exec(line)?.[2]
     return name != null && (tools.has(name) || SHELL.test(name))
   })
@@ -1083,36 +1113,69 @@ function echoLines(step: ScriptStep): string[] | null {
   return step.kind === 'echo' ? step.text.split('\n') : null
 }
 
-// mergeSearches collapses a run of searches with nothing between them into one
-// producer. Where one grep's matches stop and the next one's start is not
-// knowable - but a search's rendering does not depend on it. Every line already
-// says which file it came from (its own `path:` prefix, or the single file the
-// searches all named), and that is all the gutter and the highlighting read. Two
-// greps back to back are what an agent writes when the second one asks a
-// narrower question than the first, and calling that pair unattributable cost
-// BOTH of them their line numbers over a boundary neither renderer wanted.
+// mergeStep is the ONE producer a neighbouring pair makes when the boundary
+// between them is not knowable and no renderer wants it anyway - or null when the
+// pair has to stay two.
+//
+// This is the difference between output whose every line stands on its own and
+// output that is a stretch of a file. Two greps back to back are what an agent
+// writes when the second asks a narrower question than the first, and every line
+// either of them printed already says which file it came from (its own `path:`
+// prefix, or the single file they named) - which is all the gutter and the
+// highlighting read. The same holds for two git reports (lib/gitOutput reads the
+// shape off the LINE - a status is a status wherever it was printed), for two
+// measurements by the same tool, and for two searches summarising the same way.
+// A file view is the opposite case: its lines are numbered from where the
+// section starts, so merging two would number the second file's lines as the
+// first one's.
 //
 // A search whose files this module could not enumerate (a glob, a variable)
 // makes the merged path list unknown rather than contributing nothing: guessing
 // the other's file for its lines would highlight them as the wrong language.
-//
-// `failed` is the set of steps that printed nothing (see failedSteps), keyed by
-// identity - so the merged step has to be entered into it, and only when BOTH
-// searches died: one of them still printing its matches is a producer.
-function mergeSearches(steps: ScriptStep[], failed: Set<ScriptStep>): ScriptStep[] {
-  const out: ScriptStep[] = []
-  for (const step of steps) {
-    const prev = out[out.length - 1]
-    if (step.kind !== 'matches' || prev?.kind !== 'matches') { out.push(step); continue }
+function mergeStep(prev: ScriptStep, step: ScriptStep): ScriptStep | null {
+  if (prev.kind === 'matches' && step.kind === 'matches') {
     const known = prev.match.paths.length > 0 && step.match.paths.length > 0
-    const merged: ScriptStep = {
+    return {
       kind: 'matches',
-      command: `${prev.command}; ${step.command}`,
+      command: joinCommands(prev.command, step.command),
       match: {
         paths: known ? [...new Set([...prev.match.paths, ...step.match.paths])] : [],
         numbered: prev.match.numbered && step.match.numbered,
       },
     }
+  }
+  if (prev.kind === 'git' && step.kind === 'git') {
+    return { kind: 'git', command: joinCommands(prev.command, step.command) }
+  }
+  // The tool is what says how to read a line of a listing, and the summary kind
+  // what a number on one means, so those have to agree.
+  if (prev.kind === 'disk' && step.kind === 'disk' && prev.tool === step.tool) {
+    return { kind: 'disk', tool: prev.tool, command: joinCommands(prev.command, step.command) }
+  }
+  if (prev.kind === 'summary' && step.kind === 'summary' && prev.summary === step.summary) {
+    return { kind: 'summary', summary: prev.summary, command: joinCommands(prev.command, step.command) }
+  }
+  return null
+}
+
+function joinCommands(prev: string, next: string): string {
+  return `${prev}; ${next}`
+}
+
+// mergeProducers collapses each such run into one producer. Calling a pair like
+// that unattributable cost BOTH of them their rendering over a boundary neither
+// of them needed - a `git diff --stat` followed by a `git stash list` that found
+// nothing had no boundary to find at all, and the diffstat lost git's colours.
+//
+// `failed` is the set of steps that printed nothing (see failedSteps), keyed by
+// identity - so the merged step has to be entered into it, and only when BOTH
+// halves died: one of them still printing something is a producer.
+function mergeProducers(steps: ScriptStep[], failed: Set<ScriptStep>): ScriptStep[] {
+  const out: ScriptStep[] = []
+  for (const step of steps) {
+    const prev = out[out.length - 1]
+    const merged = prev ? mergeStep(prev, step) : null
+    if (!merged) { out.push(step); continue }
     if (failed.has(prev) && failed.has(step)) failed.add(merged)
     out[out.length - 1] = merged
   }
@@ -1289,7 +1352,7 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
     const start = pos
     pos = end
     if (slice.length === 0) { pending = []; return }
-    const producers = mergeSearches(pending, failed)
+    const producers = mergeProducers(pending, failed)
     const split = distribute(producers, slice, failed)
     if (!split) {
       sections.push({ kind: 'plain', lines: slice, raw: rawSlice(start, end) })
@@ -1463,6 +1526,15 @@ function namesOneFile(paths: string[]): boolean {
   return paths.length === 1 && /\.[^./]+$/.test(paths[0].split('/').pop() ?? '')
 }
 
+// A time of day at the head of a line, which is what a log puts there.
+//
+// `15:13:42 STALL: io full` splits into a `15:` path and a `13:` number as
+// readily as a real `path:12:` prefix does, and comes out as line 13 of a file
+// called 15 - so a line that opens with a clock carries no prefix. Only asked
+// when the search did NOT ask for numbers: a `-n` says the leading number IS the
+// line's, and `12:15:13:42 done` is then line 12 of a log, not a clock.
+const CLOCK = /^\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d+)?\b/
+
 // parseMatchLines reads the prefixes off a search's output. The SHAPE is taken
 // from the lines themselves rather than from the flags, because the same tool
 // prints different ones (`rg` numbers its output for a terminal and not for a
@@ -1480,24 +1552,43 @@ function namesOneFile(paths: string[]): boolean {
 // So a majority carrying EITHER is enough, and each line is then asked which of
 // the two it is - a bare `12:` cannot be read as a path prefix and a
 // `path:12:` cannot be read as a bare one, so there is nothing to confuse.
-export function parseMatchLines(lines: string[], paths: string[]): MatchLine[] {
+export function parseMatchLines(lines: string[], paths: string[], asked = true): MatchLine[] {
   const bare = (text: string): MatchLine => ({ path: '', num: '', text, separator: false })
   const body = lines.filter((l) => l.trim() !== '--' && l !== '')
   const majority = (test: (line: string) => boolean) =>
     body.length > 0 && body.filter(test).length > body.length / 2
 
-  const numbered = majority((l) => NUMBERED.test(l) || PATH_NUMBERED.test(l))
+  // A search that named ONE file prints no `path:` in front of anything, so a
+  // line that looks like it carries one is carrying its own text: `12:15:13:42
+  // done` is line 12 of a log, not line 15 of a file called 12. Same reasoning
+  // as namesOneFile's, which the bare `path:` shape below already follows.
+  const named = (line: string) => {
+    if (namesOneFile(paths)) return null
+    const m = PATH_NUMBERED.exec(line)
+    // A path of nothing but digits is a line number that met another one.
+    return m && !/^\d+$/.test(m[1]) ? m : null
+  }
+  // `asked` is whether the search asked for line numbers (`-n`). It did not
+  // settle the shape - rg numbers its output for a terminal and not for a pipe,
+  // so the lines are still what is read - but it settles how far to trust a
+  // number found there: unasked-for, a leading `15:13:42` is a clock far more
+  // often than it is line 13 of a file called 15.
+  const numberedLine = (l: string) => (asked || !CLOCK.test(l)) && (NUMBERED.test(l) || named(l) !== null)
+  const numbered = majority(numberedLine)
   const pathOnly = !numbered && !namesOneFile(paths) && majority((l) => PATH_ONLY.test(l))
   if (!numbered && !pathOnly) return lines.map(bare)
 
   return lines.map((line) => {
     if (line.trim() === '--') return { path: '', num: '', text: line, separator: true }
+    if (numbered && !numberedLine(line)) return bare(line)
     if (numbered) {
-      // PATH_NUMBERED's second group is the separator it matched, not content.
-      const p = PATH_NUMBERED.exec(line)
-      if (p) return { path: p[1], num: p[3], text: p[4], separator: false }
+      // A bare number cannot be read as a path prefix and a `path:12:` cannot be
+      // read as a bare one, so there is nothing to choose between here.
       const n = NUMBERED.exec(line)
-      return n ? { path: '', num: n[1], text: n[2], separator: false } : bare(line)
+      if (n) return { path: '', num: n[1], text: n[2], separator: false }
+      // PATH_NUMBERED's second group is the separator it matched, not content.
+      const p = named(line)
+      return p ? { path: p[1], num: p[3], text: p[4], separator: false } : bare(line)
     }
     const m = PATH_ONLY.exec(line)
     return m ? { path: m[1], num: '', text: m[2], separator: false } : bare(line)

@@ -2286,7 +2286,7 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
     }))
     run = []
   }
-  for (const line of parseMatchLines(section.lines, section.match.paths)) {
+  for (const line of parseMatchLines(section.lines, section.match.paths, section.match.numbered)) {
     if (line.separator) {
       flush()
       rows.push({ num: '', html: '', tone: 'plain' })

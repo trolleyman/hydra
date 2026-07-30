@@ -164,6 +164,23 @@ describe('Codex bash display', () => {
     expect(formatBashForDisplay('for i in 1; do echo $i; done', '', indent)).toBe(expected)
   })
 
+  it('lays a brace group out as the block it is', () => {
+    // How an agent hangs a run of steps off one `cd`. With the brace left inline
+    // the first step's head hid behind it and the rest sat flush against the cd.
+    expect(formatBashForDisplay('cd web && { a; b; }')).toBe('cd web &&\n{\n    a\n    b\n}')
+    // The lines an author already wrote keep their breaks; the indent is the
+    // block's, because they left none of their own.
+    expect(formatBashForDisplay('cd x &&\n{ grep -E "S" watch.log | tail -12\necho "=== captures ==="\nls -d stall-*\n}')).toBe(
+      'cd x &&\n{\n    grep -E "S" watch.log | tail -12\n    echo "=== captures ==="\n    ls -d stall-*\n}',
+    )
+    // An author's own indentation still wins - it is not added to.
+    expect(formatBashForDisplay('{ a\n  b\n}')).toBe('{\n    a\n  b\n}')
+    // A `${x}` and a `{a,b}` expansion are words, not groups.
+    expect(formatBashForDisplay('echo "${HOME}" && echo {a,b}')).toBe('echo "${HOME}" &&\necho {a,b}')
+    // The pipe belongs to the group, so it stays on the line the `}` closes.
+    expect(formatBashForDisplay('{ a; b; } | head -5')).toBe('{\n    a\n    b\n} | head -5')
+  })
+
   it('lays a for loop out over its own indented lines', () => {
     expect(formatBashForDisplay('cd /path && for i in 1 2 3; do echo $i; done')).toBe(
       'cd /path &&\nfor i in 1 2 3; do\n    echo $i\ndone',

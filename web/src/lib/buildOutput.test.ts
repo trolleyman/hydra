@@ -171,4 +171,9 @@ describe('diagnosticSpans', () => {
     expect(of('Exit code 127')).toEqual([['Exit code ', 'dim'], ['127', 'fail']])
     expect(of('something else entirely')).toEqual([['something else entirely', '']])
   })
+
+  it('lowlights the harness note that stands in for output', () => {
+    expect(of('(Bash completed with no output)')).toEqual([['(Bash completed with no output)', 'dim']])
+    expect(of('(no output)')).toEqual([['(no output)', 'dim']])
+  })
 })
