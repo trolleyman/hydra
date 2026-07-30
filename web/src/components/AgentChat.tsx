@@ -3208,6 +3208,7 @@ const ToolCard = memo(function ToolCard({
     item.name === 'View Image' && typeof rawInput?.path === 'string'
       ? rawInput.path
       : ''
+  const isViewImage = viewImagePath !== ''
   // Claude returns image blocks in the tool result. Codex's imageView instead
   // returns only the path it viewed, so turn that into the same result-image
   // model and let the shared thumbnail/lightbox UI handle both providers.
@@ -3423,7 +3424,7 @@ const ToolCard = memo(function ToolCard({
   const gitAddSimple = gitTool === 'git_add' && gitAddPaths.length === 1
   // The requested numbers are already in the header. Repeating them as JSON
   // makes the useful review text start a panel lower for no extra information.
-  const hideInput = simpleRead || emptyInput || gitAddSimple || isReviewComments
+  const hideInput = simpleRead || emptyInput || gitAddSimple || isReviewComments || isViewImage
   // Whether an input/command panel renders above the output. When it doesn't
   // (a plain Read), the "Output" header is redundant and dropped (item 32).
   const hasInput = isBash || !hideInput
