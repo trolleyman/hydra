@@ -2496,6 +2496,15 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
 // purely about keeping the hover box a readable size.
 const UNCOMMITTED_TOOLTIP_FILES = 10
 
+// The hint's default 320px cap leaves ~283px for a path, which is about 50
+// characters at the tooltip's 11px - so a normal-looking path
+// ("web/src/components/agent/UncommittedChangesPanel.tsx") wrapped onto two
+// lines. This repo's tracked paths run 43 characters at p90 and 54 at the
+// longest, and 420px clears ~65, so wrapping becomes the exception it should be
+// rather than the common case. The box still sizes to its content, so a tooltip
+// listing only short paths stays narrow.
+const UNCOMMITTED_TOOLTIP_WIDTH = 420
+
 // A path too long for the tooltip has to wrap somewhere. Left to itself the
 // browser breaks mid-filename ("UncommittedChangesPane" / "l.tsx"); a <wbr> after
 // each separator gives it directory boundaries to prefer instead, and the
@@ -2575,7 +2584,7 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
   return (
     // text-left because the hint tooltip centres its content by default - fine for
     // a one-line label, but it makes a file list ragged on both sides.
-    <Tooltip className="shrink-0" content={
+    <Tooltip className="shrink-0" width={UNCOMMITTED_TOOLTIP_WIDTH} content={
       <div className="text-left">
         <p className="font-semibold mb-1">Uncommitted changes</p>
         {groups.map((g) => (
