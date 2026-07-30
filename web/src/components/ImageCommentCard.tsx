@@ -1,4 +1,4 @@
-import { MessageSquare } from 'lucide-react'
+import { ChevronRight, MessageSquare } from 'lucide-react'
 import type { ReviewImageAnchor } from '../api'
 import { anchorPointLabel, artifactBlobUrl } from '../lib/artifactAnchor'
 import { getFileIcon } from '../lib/fileIcons'
@@ -91,12 +91,23 @@ export function ImageCommentCard({ comment, projectId, onOpen }: {
           coordinate, and it lines up when several are stacked. */}
       <div className="flex items-center gap-1.5 text-2xs text-gray-500 dark:text-gray-400">
         <FileIcon className={`w-3.5 h-3.5 shrink-0 ${fileIconClass}`} />
-        <span className="truncate" title={a.script ? `${a.script} > ${a.file}` : a.file}>
-          {/* The script the picture came from, lowlit ahead of the file the way a
-              directory is - "home.png" alone is ambiguous the moment two artifacts
-              both render one. Not a slash: it is not a path, and writing it as one
-              would invite someone to go looking for that directory. */}
-          {a.script && <span className="text-gray-400 dark:text-gray-500">{a.script} &gt; </span>}
+        {/* The script the picture came from, lowlit ahead of the file - "home.png"
+            alone is ambiguous the moment two artifacts both render one. Separated
+            by the chevron the rest of the UI uses rather than a literal ">" (which
+            read as a shell prompt) or a "/" (which is not what this is, and would
+            invite someone to go looking for that directory).
+
+            Its own span rather than one truncating run with the filename, so the
+            two shrink independently: the SCRIPT gives way first, since the
+            filename is the part that says which picture this is. Capped at half
+            the row so a long script name cannot crowd it out either. */}
+        {a.script && (
+          <>
+            <span className="truncate max-w-[50%] text-gray-400 dark:text-gray-500" title={a.script}>{a.script}</span>
+            <ChevronRight className="w-3 h-3 shrink-0 text-gray-300 dark:text-gray-600" />
+          </>
+        )}
+        <span className="truncate" title={a.file}>
           {directory && <span className="text-gray-400 dark:text-gray-500">{directory}</span>}
           <span>{fileName}</span>
         </span>
