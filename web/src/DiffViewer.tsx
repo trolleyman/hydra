@@ -47,7 +47,7 @@ import {
 } from './lib/diffMetrics'
 import { useFontSizePx, useFontStack } from './lib/fontPrefs'
 import {
-  buildSideBySide, buildSegments, bodyShape, computeGap, trailingContext, isContiguous, isChangeLine,
+  buildSideBySide, buildSegments, bodyShape, computeGap, leadingGap, trailingGap, atFileEnd, isContiguous, isChangeLine,
   hunkContext, regionAfterHunk, LEAD_REGION_ID, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, PROMOTED_MAX_LINES, PROMOTED_MAX_CHANGES,
   type RenderSeg, type RevealMap,
 } from './lib/diffBody'
@@ -2125,7 +2125,12 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                 const prevHunk = isFirst ? null : file.hunks[i - 1]
                 const gapSize = prevHunk ? computeGap(prevHunk, hunk) : 0
                 const atTopOfFile = isFirst && hunk.new_start <= 1 && hunk.old_start <= 1
-                const atEndOfFile = isLast && trailingContext(hunk) < currentContext
+                const atEndOfFile = isLast && atFileEnd(hunk, file.total_lines, currentContext)
+                // What each edge expander hides. The leading run is measured from
+                // the first hunk's start line; the trailing one needs the file's
+                // length (total_lines), and stays null - a bare chevron - without it.
+                const leadGap = isFirst ? leadingGap(hunk) : 0
+                const tailGap = isLast ? trailingGap(hunk, file.total_lines) : null
                 // The gap above this hunk is the unchanged run that starts just
                 // after the previous hunk's last change; the run below the last
                 // hunk starts the same way. The file's leading run is line 1.
@@ -2142,6 +2147,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                             </button>
                           </Tooltip>
                         </div>
+                        {leadGap > 0 && (
+                          <GapCount hidden={leadGap} onClick={() => windowedExpand(LEAD_REGION_ID, { bot: CTX + leadGap }, currentContext + leadGap)} />
+                        )}
                         <HunkContextLabel label={contextLabels.get(hunk.header)} />
                       </div>
                     )}
@@ -2182,6 +2190,9 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                             </button>
                           </Tooltip>
                         </div>
+                        {tailGap != null && tailGap > 0 && (
+                          <GapCount hidden={tailGap} onClick={() => windowedExpand(tailRegion, { top: CTX + tailGap }, currentContext + tailGap)} />
+                        )}
                       </div>
                     )}
                   </Fragment>
@@ -3622,7 +3633,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         if (!prev) return prev
         const nextFiles = prev.files.map((f) => {
           if (f.path === path) {
-            return { ...f, hunks: updated?.hunks ?? [], expanded: promoted }
+            // total_lines rides along: a declined promotion still came back with
+            // the file's length, and it's what the trailing expander counts with.
+            return { ...f, hunks: updated?.hunks ?? [], expanded: promoted, total_lines: updated?.total_lines ?? f.total_lines }
           }
           return f
         })

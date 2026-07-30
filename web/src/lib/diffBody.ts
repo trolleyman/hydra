@@ -60,17 +60,48 @@ export function buildSideBySide(hunkLines: DiffHunk['lines']): SideBySideLine[] 
   return result
 }
 
-// Computes the number of lines hidden between two adjacent hunks.
-export function computeGap(prevHunk: DiffHunk, nextHunk: DiffHunk): number {
+// The line number a hunk's last line sits on, and the one its first line starts
+// on, both counted on the new side - falling back to the old side when the hunk
+// has no new side at all (a deletion). Unchanged lines carry the same number on
+// both sides, and every gap is measured from unchanged ground, so which side
+// answers only matters for that all-deletions case.
+function lastLineNum(hunk: DiffHunk): number {
   let lastNewLine = 0
   let lastOldLine = 0
-  for (const l of prevHunk.lines) {
+  for (const l of hunk.lines) {
     if (l.new_line_num != null) lastNewLine = l.new_line_num
     if (l.old_line_num != null) lastOldLine = l.old_line_num
   }
-  const lastLine = lastNewLine > 0 ? lastNewLine : lastOldLine
-  const nextStart = nextHunk.new_start > 0 ? nextHunk.new_start : nextHunk.old_start
-  return Math.max(0, nextStart - lastLine - 1)
+  return lastNewLine > 0 ? lastNewLine : lastOldLine
+}
+
+const startLineNum = (hunk: DiffHunk) => (hunk.new_start > 0 ? hunk.new_start : hunk.old_start)
+
+// Computes the number of lines hidden between two adjacent hunks.
+export function computeGap(prevHunk: DiffHunk, nextHunk: DiffHunk): number {
+  return Math.max(0, startLineNum(nextHunk) - lastLineNum(prevHunk) - 1)
+}
+
+// The three counts below are the windowed (`-U3`) path's answer to "how many
+// lines is this expander hiding?" - the number the whole-content model reads
+// straight off its line list (buildSegments' `hidden`) and a fragmented file has
+// to work out from line numbers instead.
+//
+// leadingGap is free: the first hunk states the line it starts on, so everything
+// before it is hidden.
+export function leadingGap(hunk: DiffHunk): number {
+  return Math.max(0, startLineNum(hunk) - 1)
+}
+
+// trailingGap is the one that needs help. Nothing in a windowed diff says where
+// the file ENDS, so it takes the file's total_lines - which the server fills in
+// from the full read it already does - and returns null when that is absent, the
+// signal to render the expander as a bare chevron with no count. Null and 0 are
+// therefore quite different answers: 0 means the last hunk provably reaches EOF
+// and the expander should not be there at all.
+export function trailingGap(hunk: DiffHunk, totalLines: number | undefined): number | null {
+  if (!totalLines) return null
+  return Math.max(0, totalLines - lastLineNum(hunk))
 }
 
 // trailingContext counts the unchanged context lines at the very end of a hunk,
@@ -87,6 +118,16 @@ export function trailingContext(hunk: DiffHunk): number {
     break
   }
   return count
+}
+
+// atFileEnd reports whether the last hunk already reaches EOF, so there is
+// nothing below it to expand into and no expander to draw. total_lines settles
+// it exactly; without one it falls back to trailingContext's inference, which is
+// right whenever the file has more trailing context than the last hunk shows and
+// wrong (an extra chevron that expands to nothing) when it has exactly as much.
+export function atFileEnd(hunk: DiffHunk, totalLines: number | undefined, currentContext: number): boolean {
+  const tail = trailingGap(hunk, totalLines)
+  return tail != null ? tail === 0 : trailingContext(hunk) < currentContext
 }
 
 // Default surrounding-context lines shown around each change (mirrors the git
@@ -317,13 +358,15 @@ export function bodyShape(file: DiffFile, sideBySide: boolean, isHidden: boolean
       const isFirst = i === 0
       const isLast = i === hunks.length - 1
       const atTopOfFile = isFirst && hunk.new_start <= 1 && hunk.old_start <= 1
-      const atEndOfFile = isLast && trailingContext(hunk) < currentContext
+      const atEndOfFile = isLast && atFileEnd(hunk, file.total_lines, currentContext)
       const gap = isFirst ? 0 : computeGap(hunks[i - 1], hunk)
-      // The windowed-hunk path's edge expanders are a bare chevron - no count.
-      if (isFirst && !atTopOfFile) expanders.push({ buttons: 1, hidden: null })
+      // The windowed path's leading expander counts what it hides from the hunk's
+      // own start line; the trailing one can only do so when the file's length
+      // came with the diff, and is a bare chevron (hidden: null) otherwise.
+      if (isFirst && !atTopOfFile) expanders.push({ buttons: 1, hidden: leadingGap(hunk) || null })
       if (!isFirst && gap > 0) expanders.push({ buttons: 2, hidden: gap })
       runs.push(hunk.lines)
-      if (isLast && !atEndOfFile) expanders.push({ buttons: 1, hidden: null })
+      if (isLast && !atEndOfFile) expanders.push({ buttons: 1, hidden: trailingGap(hunk, file.total_lines) })
     })
   }
 

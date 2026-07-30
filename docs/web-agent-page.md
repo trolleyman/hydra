@@ -50,6 +50,16 @@ and `web/src/DiffViewer.tsx`):
   regions) and record the reveal before the fetch lands. Only a file too big even
   for the promotion cap keeps the old `-U<wider>` re-fetch, whose context is a
   property of the whole file and so widens every hunk in it, not the gap clicked.
+  A windowed file's expanders still say **how much** they hide: the gaps between
+  hunks are bracketed by two hunk headers (`computeGap`), the run above the first
+  hunk is measured from its start line (`leadingGap`), and the run below the last
+  one comes from `total_lines` on the wire - the file's length, which the server
+  fills in from the full read `getFullContextDiff` already does, so it costs no
+  extra work and is simply absent for a file that read never covered. Without it
+  `trailingGap` returns null and that expander falls back to a bare chevron;
+  with it, `atFileEnd` also drops the expander outright when the last hunk
+  provably ends at EOF (the old `trailingContext < currentContext` guess couldn't
+  tell that from a file with more below, and drew a chevron expanding to nothing).
 - Lazy file bodies + **measured placeholders**: a file card's body stays an empty
   placeholder until the card first scrolls near the viewport (`near`, a one-way
   IntersectionObserver latch in `FileDiff`). The placeholder's height is not
