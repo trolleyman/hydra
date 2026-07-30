@@ -32,13 +32,44 @@ interface ImageCommentState {
   // own state, and threading it through the lightbox would give two places that
   // could disagree about which comparison is on screen.
   submit: ((anchor: ReviewImageAnchor, body: string, publish: boolean) => Promise<void>) | null
-  register: (p: { comments: PendingReviewComment[]; submit: ImageCommentState['submit'] }) => void
+  /** Where a remark about a picture the AGENT posted into the chat goes. The chat
+   *  is already the thread, so this is a reply - it lands in the composer for you
+   *  to send, rather than becoming a second numbered conversation about one of the
+   *  chat's own messages. Null on a page with no composer. */
+  quote: ((note: PinNote) => void) | null
+  /** Where a remark about an ATTACHMENT goes. There is nothing to comment on yet -
+   *  no head at spawn time, no message yet in chat - so this is markup on the
+   *  prompt being written, recorded against the attachment and serialized when it
+   *  is finally sent. Null when nothing is being composed. */
+  annotate: ((note: PinNote) => void) | null
+  register: (p: Partial<Pick<ImageCommentState, 'comments' | 'submit' | 'quote' | 'annotate'>>) => void
   clear: () => void
+}
+
+/** A remark about a spot in a picture, in the form the two non-store destinations
+ *  take it: they want prose, not an anchor row, because what they produce is text
+ *  a person will read in a message. */
+export interface PinNote {
+  /** What the picture is called, for the reader. */
+  filename: string
+  /** Where the agent can open it, when that is a real path (a chat image). */
+  path?: string
+  /** The position, already rendered ("514,697 px", with the timecode for a clip). */
+  position: string
+  /** What was said. */
+  body: string
 }
 
 export const useImageCommentStore = create<ImageCommentState>((set) => ({
   comments: [],
   submit: null,
-  register: ({ comments, submit }) => set({ comments, submit }),
-  clear: () => set({ comments: [], submit: null }),
+  quote: null,
+  annotate: null,
+  // A PARTIAL merge, because the three destinations are registered by different
+  // components: the diff viewer knows how to store a review comment, the chat
+  // knows how to quote into its composer, and whatever is holding attachments
+  // knows how to annotate one. A whole-state register would have each of them
+  // clearing the others.
+  register: (p) => set(p),
+  clear: () => set({ comments: [], submit: null, quote: null, annotate: null }),
 }))

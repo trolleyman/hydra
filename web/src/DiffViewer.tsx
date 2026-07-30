@@ -3865,7 +3865,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // comments already live: a second copy in the panel would be a second thing to
   // keep in sync, and the two would disagree the moment one of them refetched.
   const registerImageComments = useImageCommentStore((s) => s.register)
-  const clearImageComments = useImageCommentStore((s) => s.clear)
   const submitImageComment = useCallback(async (image: ReviewImageAnchor, text: string, publish: boolean) => {
     // Resolved at write time, exactly as a line comment's is, so "latest commit"
     // cannot drift between placing the pin and publishing it.
@@ -3887,8 +3886,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [projectId, agent.id, agent.base_branch, showSentToast])
   useEffect(() => {
     registerImageComments({ comments: reviewComments, submit: submitImageComment })
-    return () => clearImageComments()
-  }, [reviewComments, submitImageComment, registerImageComments, clearImageComments])
+    // Clears only what THIS component registered. The chat's quote target and the
+    // composer's annotate target live in the same store and are registered by
+    // other components; a blanket clear() here would take them down with it.
+    return () => registerImageComments({ comments: [], submit: null })
+  }, [reviewComments, submitImageComment, registerImageComments])
 
   const removeQueuedComment = useCallback((id: string) => {
     removeReviewComment(projectId, agent.id, Number(id))

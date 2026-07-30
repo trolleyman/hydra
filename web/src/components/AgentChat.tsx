@@ -84,6 +84,8 @@ import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
 import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
+import { appendToComposer, formatAnnotation, formatQuote } from '../lib/pinNote'
+import { useImageCommentStore } from '../stores/imageCommentStore'
 // langFromPath (the extension -> Prism language map a Read tool's output is
 // highlighted by, item 3) now lives in lib/fileKind, beside the file-type
 // classifier, so the lightbox's text viewer highlights by the same table.
@@ -9241,6 +9243,29 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
   const canSend = connected && !uploading && (!!input.trim() || readyAttachments.length > 0)
+
+  // A pin placed on a picture in the lightbox, arriving as text for this
+  // composer. Two kinds reach here and they are NOT the same thing: a remark
+  // about a picture the agent posted is a reply (the chat is already the thread,
+  // so a second numbered conversation about one of its own messages would split
+  // the discussion in two), and a remark about an attachment is an instruction
+  // about a file this message is carrying. Both land in the box for you to send -
+  // neither is stored, because there is nothing durable to attach them to.
+  const registerPinTargets = useImageCommentStore((st) => st.register)
+  const addToComposer = useCallback((text: string) => {
+    commit((prev) => {
+      const next = appendToComposer(prev.prompt, text)
+      return makeSnapshot(next, prev.attachments, next.length, next.length)
+    }, false)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [commit])
+  useEffect(() => {
+    registerPinTargets({
+      quote: (note) => addToComposer(formatQuote(note)),
+      annotate: (note) => addToComposer(formatAnnotation(note)),
+    })
+    return () => registerPinTargets({ quote: null, annotate: null })
+  }, [registerPinTargets, addToComposer])
 
   // --- Composer: slash commands ----------------------------------------------
 

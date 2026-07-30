@@ -10,6 +10,7 @@ import {
 } from '../lib/artifactAnchor'
 import { ReviewImageAnchor } from '../api'
 import { placePinPopover, type PopoverPlacement } from '../lib/pinPopover'
+import { agentFilePath, pictureKind } from '../lib/pictureKind'
 import { captureCrop } from '../lib/imageCrop'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff, LightboxDiffControls } from './LightboxDiff'
@@ -66,6 +67,15 @@ export interface LightboxItem {
    *  mirroring the diff grid's per-file badge. Omit for plain items with no diff
    *  context (e.g. the repository browser). */
   changeType?: 'added' | 'removed' | 'modified'
+  /** Marks this entry as an ATTACHMENT to something being composed, so a pin on it
+   *  becomes markup on that prompt rather than a stored comment.
+   *
+   *  Stated rather than derived, unlike an artifact's identity. An artifact's
+   *  anchor is read out of its URL precisely so the two cannot disagree - but a
+   *  freshly attached file has no server URL yet, it previews from a local
+   *  `blob:`, and a blob URL says nothing about what it is. The list that holds
+   *  attachments knows they are attachments; that is the honest source. */
+  attachment?: boolean
 }
 
 // A small +/−/• glyph marking whether the artifact was added, removed, or modified
@@ -302,6 +312,8 @@ export function Lightbox({
   // registered means no head to comment on, and the whole pin UI is absent.
   const pinComments = useImageCommentStore((s) => s.comments)
   const submitPin = useImageCommentStore((s) => s.submit)
+  const quotePin = useImageCommentStore((s) => s.quote)
+  const annotatePin = useImageCommentStore((s) => s.annotate)
   // Whether a press on the picture places a pin. Off by default and armed
   // explicitly: the picture is already draggable (pan) and clickable (the
   // comparator's A/B flip), so an always-armed layer would scatter pins during
@@ -397,7 +409,22 @@ export function Lightbox({
   // A recording is pinnable as well as a still: it has the same two spatial axes,
   // plus a time one the anchor now carries. The other kinds (a PDF, a log, an
   // .apk) have no picture to point at.
-  const canPin = !!submitPin && !!pinnedRef && (pinnedKind === 'image' || pinnedKind === 'video')
+  // WHERE a remark about this picture goes, decided by what the picture IS (see
+  // lib/pictureKind). An artifact outlives the conversation, so a remark about it
+  // is a durable numbered comment; a picture the agent posted into the chat is
+  // already part of a thread, so a remark is a reply; an attachment has not been
+  // sent yet, so a remark is markup on the prompt being written. One pin UI, three
+  // destinations - and the destination is never guessed from which page is open.
+  const pictureSort = pictureKind(pinnedUrl)
+  // The explicit attachment marker wins: a locally-attached file previews from a
+  // `blob:` URL that classifies as nothing, and it is still an attachment.
+  const isAttachment = pinnedItem?.attachment || pictureSort === 'upload'
+  const pinDest: 'comment' | 'quote' | 'annotate' | null =
+    pictureSort === 'artifact' && submitPin && pinnedRef ? 'comment'
+      : pictureSort === 'agent-file' && quotePin ? 'quote'
+        : isAttachment && annotatePin ? 'annotate'
+          : null
+  const canPin = !!pinDest && (pinnedKind === 'image' || pinnedKind === 'video')
 
   // The composer opens ON the pin, so the remark is written next to the spot it
   // is about. That needs the pin's position in SCREEN pixels, which only the pin
@@ -436,12 +463,41 @@ export function Lightbox({
     return () => window.removeEventListener('resize', placePopover)
   }, [pending, placePopover])
 
+  // Where the pin being composed sits, in the picture's own pixels when they are
+  // known - the same form the agent is given, so what you are told you marked and
+  // what it is told are the same sentence.
+  const pendingLabel = pending
+    ? anchorPositionLabel({
+        file: '', x: pending.x, y: pending.y, w: pending.w, h: pending.h,
+        natural_w: dims?.w, natural_h: dims?.h,
+        t: pinnedKind === 'video' ? pendingT : undefined,
+      })
+    : ''
+
   // Store the pin being composed. `publish` is the difference between adding it to
   // the review you are building and telling the agent about it now - the same two
   // buttons the diff viewer's line comments offer, and the same meaning.
   const savePin = useCallback(async (publish: boolean) => {
     const body = pinBody.trim()
-    if (!pending || !submitPin || !pinnedUrl || !body) return
+    if (!pending || !pinDest || !pinnedUrl || !body) return
+    // The two non-store destinations want prose, not an anchor row: what they
+    // produce is text a person reads in a message. Neither stores anything, so
+    // neither needs the crop or the artifact identity.
+    if (pinDest !== 'comment') {
+      const note = {
+        filename: pinnedItem?.filename ?? '',
+        path: agentFilePath(pinnedUrl) ?? undefined,
+        position: pendingLabel,
+        body,
+      }
+      if (pinDest === 'quote') quotePin?.(note)
+      else annotatePin?.(note)
+      setPending(null)
+      setPinBody('')
+      setPinError('')
+      return
+    }
+    if (!submitPin) return
     const anchor = buildImageAnchor({
       url: pinnedUrl,
       x: pending.x,
@@ -478,7 +534,7 @@ export function Lightbox({
     } finally {
       setPinBusy(false)
     }
-  }, [pending, submitPin, pinnedUrl, pinBody, dims, pinnedSide, pinnedKind, pendingT])
+  }, [pending, pinDest, submitPin, quotePin, annotatePin, pinnedUrl, pinnedItem, pendingLabel, pinBody, dims, pinnedSide, pinnedKind, pendingT])
 
   // Steal focus while open, restore it on close. The opener can leave focus in a
   // keyboard-hungry widget - the terminal's hidden xterm textarea is the prime case
@@ -659,16 +715,6 @@ export function Lightbox({
   // capture density. See layoutSize.
   const pictureSize = layoutSize(dims, current)
   const showsPins = canPin && (arming || pinsHere.length > 0)
-  // Where the pin being composed sits, in the picture's own pixels when they are
-  // known - the same form the agent is given, so what you are told you marked and
-  // what it is told are the same sentence.
-  const pendingLabel = pending
-    ? anchorPositionLabel({
-        file: '', x: pending.x, y: pending.y, w: pending.w, h: pending.h,
-        natural_w: dims?.w, natural_h: dims?.h,
-        t: pinnedKind === 'video' ? pendingT : undefined,
-      })
-    : ''
   // A before/after comparator, and the mode controls that drive it, only exist for
   // the two kinds the artifact pipeline actually compares. A text file or an .apk
   // may still carry a `diff` (its two sides) - the viewer turns that into a pair of
@@ -1106,7 +1152,7 @@ export function Lightbox({
                 void savePin(false)
               }
             }}
-            placeholder="What is wrong with this spot?"
+            placeholder={pinDest === 'annotate' ? 'What should the agent do here?' : 'What is wrong with this spot?'}
             // The textarea is absolutely positioned inside the wrapper, so it
             // cannot size the box - the height belongs on the wrapper, as it
             // does on the diff viewer's comment box.
@@ -1128,21 +1174,30 @@ export function Lightbox({
             >
               <span className="optical-center">Cancel</span>
             </button>
-            <button
-              type="button"
-              disabled={pinBusy || !pinBody.trim()}
-              onClick={() => void savePin(true)}
-              className="px-2 h-7 rounded text-2xs text-white/80 bg-white/10 hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-            >
-              <span className="optical-center">To agent</span>
-            </button>
+            {/* The buttons name the DESTINATION, because the destination differs
+                by what the picture is and the difference is not otherwise
+                visible. Only an artifact offers the draft/publish pair - the
+                other two produce text in a composer you then send yourself, so
+                there is nothing to queue and nothing to publish. */}
+            {pinDest === 'comment' && (
+              <button
+                type="button"
+                disabled={pinBusy || !pinBody.trim()}
+                onClick={() => void savePin(true)}
+                className="px-2 h-7 rounded text-2xs text-white/80 bg-white/10 hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              >
+                <span className="optical-center">To agent</span>
+              </button>
+            )}
             <button
               type="button"
               disabled={pinBusy || !pinBody.trim()}
               onClick={() => void savePin(false)}
               className="px-2 h-7 rounded text-2xs font-medium text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
-              <span className="optical-center">Add to review</span>
+              <span className="optical-center">
+                {pinDest === 'comment' ? 'Add to review' : pinDest === 'quote' ? 'Reply in chat' : 'Add note'}
+              </span>
             </button>
           </div>
         </div>
