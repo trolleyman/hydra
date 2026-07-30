@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -3889,13 +3890,21 @@ func (s *SimulationServer) HandleRepositoryBlob(w http.ResponseWriter, r *http.R
 	_, _ = w.Write([]byte(content))
 }
 
-// HandleAgentFileBlob serves the picture behind a markdown image an agent
-// embedded in a chat message. The simulation has no head filesystem to resolve
-// against, so any image-looking path yields the same placeholder PNG - enough to
-// exercise the chat renderer's inline-image path (and the "unresolvable path"
-// fallback, for anything that isn't an image).
+// HandleAgentFileBlob serves the media behind a markdown image an agent embedded
+// in a chat message. The simulation has no head filesystem to resolve against, so
+// any image-looking path yields the same placeholder PNG and any video-looking
+// one the embedded demo clip - enough to exercise the chat renderer's inline
+// image/video paths (and the "unresolvable path" fallback, for anything else).
 func (s *SimulationServer) HandleAgentFileBlob(w http.ResponseWriter, r *http.Request) {
-	if !agentImageExts[strings.ToLower(path.Ext(r.URL.Query().Get("path")))] {
+	ext := strings.ToLower(path.Ext(r.URL.Query().Get("path")))
+	if agentVideoExts[ext] {
+		// Through ServeContent, so the player gets Range support and can seek -
+		// the same thing the real endpoint relies on.
+		w.Header().Set("Content-Type", "video/webm")
+		http.ServeContent(w, r, "clip.webm", simNow(), bytes.NewReader(simVideoAfter))
+		return
+	}
+	if !agentImageExts[ext] {
 		http.NotFound(w, r)
 		return
 	}

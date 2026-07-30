@@ -747,7 +747,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		if bgCtx == nil {
 			bgCtx = context.Background()
 		}
-		generateTitleAsync(bgCtx, store, projectRoot, opts.ID, opts.Prompt, opts.OnTitleChange)
+		generateTitleAsync(bgCtx, store, projectRoot, opts.ID, opts.AgentType, opts.Prompt, opts.OnTitleChange)
 	}
 
 	return &Head{
@@ -1816,7 +1816,8 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 		// its own normalized chat log / queue, which are filed under the SLOT id
 		// rather than the head's.
 		RemoveReviewCheckout(head.ProjectPath, head.ID)
-		RemoveReviewSessionDir(head.ProjectPath, head.ID)
+		RemoveReviewSessionDir(head.ProjectPath, head.ID, reviewAgentType(head))
+		removeCodexSlotConversationID(head.ProjectPath, ReviewSessionID(head.ID))
 		RemoveAgentStatusFiles(head.ProjectPath, ReviewSessionID(head.ID))
 	}
 

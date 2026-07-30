@@ -118,6 +118,9 @@ func TestDecide(t *testing.T) {
 		{"known builtin grep allowed", "Grep", map[string]any{"pattern": "x"}, Allow},
 		{"known builtin task allowed", "Task", map[string]any{"prompt": "x"}, Allow},
 		{"known builtin todowrite allowed", "TodoWrite", map[string]any{"todos": nil}, Allow},
+		{"codex apply patch allowed", "apply_patch", map[string]any{"command": "*** Begin Patch"}, Allow},
+		{"codex update plan allowed", "update_plan", map[string]any{"plan": nil}, Allow},
+		{"codex collaboration allowed", "spawn_agent", map[string]any{"prompt": "x"}, Allow},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

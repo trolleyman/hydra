@@ -66,6 +66,24 @@ describe('markdownGalleryAt', () => {
     expect(g.index).toBe(0)
   })
 
+  // A clip is opened from the wrapper around it (its own frame is spoken for by
+  // the player's controls), and belongs in the same strip as the message's
+  // stills - a report that mixes a screenshot with a recording is one report.
+  it('includes videos, opened from their wrapper', () => {
+    document.body.innerHTML = `
+      <div data-md-root="">
+        <img data-md-src="/tmp/shot.png" src="/blob?path=shot.png" alt="shot">
+        <span class="wrap"><video data-md-src="/tmp/demo@2x.webm" src="/blob?path=demo@2x.webm" aria-label="the popover"></video></span>
+      </div>
+    `
+    const wrap = document.querySelector('.wrap')!
+    const g = markdownGalleryAt(wrap)
+    expect(g.items.map((i) => i.filename)).toEqual(['shot', 'the popover'])
+    expect(g.items.map((i) => i.kind)).toEqual(['image', 'video'])
+    expect(g.items[1].dpi).toBe(2)
+    expect(g.index).toBe(1)
+  })
+
   it('falls back to the clicked image alone outside a markdown block', () => {
     document.body.innerHTML = '<img data-md-src="/tmp/loose.png" src="/blob?path=loose.png" alt="loose">'
     const loose = document.querySelector('img') as HTMLImageElement

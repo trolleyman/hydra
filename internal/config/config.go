@@ -75,6 +75,13 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- Try not to bother the user with requests unless necessary.\n" +
 	"- If there are any design decisions made without user input, document them in each commit."
 
+// Codex does not have Claude's Bash `description` input field. A leading shell
+// comment gives its command-execution item the same durable human label without
+// changing what the shell does; internal/chat/codex.go reads it back into the
+// provider-neutral tool input that the shared Bash card already renders.
+const codexBashDescriptionPrompt = "## Bash tool descriptions\n" +
+	"- Start each non-trivial shell command with a concise comment describing its purpose, on its own first line: `# Inspect the usage handlers`. Hydra shows that comment as the Bash tool card description.\n"
+
 // DefaultResumePrompt is the message Hydra types into an agent that was
 // actively working when the daemon restarted, so it resumes its task rather
 // than idling after its conversation is restored. Agents that were waiting on
@@ -1143,6 +1150,9 @@ func LoadInternalDefaults() Config {
 // <branch> and <base-branch> placeholders are substituted later by the caller.
 func BuildFinalPrePrompt(cfg Config, agentType string) string {
 	parts := []string{DefaultPrePrompt}
+	if agentType == string(sandbox.AgentTypeCodex) {
+		parts = append(parts, codexBashDescriptionPrompt)
+	}
 	if cfg.Defaults.PrePrompt != nil && *cfg.Defaults.PrePrompt != "" {
 		parts = append(parts, *cfg.Defaults.PrePrompt)
 	}
@@ -1171,7 +1181,14 @@ func RunModeLine(chatMode bool) string {
 			"Capture screenshots at 2x device scale and name them `<name>@2x.png` - " +
 			"the chat lays an image out at its logical size (pixels / the @Nx in its " +
 			"name), so a 2x capture is the same size as a 1x one but stays sharp on " +
-			"a HiDPI display, where a 1x image is blown up and looks blurry.\n"
+			"a HiDPI display, where a 1x image is blown up and looks blurry. VIDEO " +
+			"works the same way and through the same syntax: point a markdown image " +
+			"at a .webm/.mp4 (`![the popover opening](/tmp/demo.webm)`) and it renders " +
+			"as an inline player with controls, so a transition, an animation or a " +
+			"short flow that a still cannot show can be demoed by recording it (e.g. " +
+			"Playwright's `recordVideo`, or ffmpeg). The @Nx naming applies to a clip " +
+			"too. Keep clips short and prefer .webm - it is the format that plays " +
+			"everywhere without a codec question.\n"
 	}
 	return "- Run mode: terminal. You are attached to an interactive terminal (PTY) " +
 		"session.\n"

@@ -1,6 +1,14 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, vi } from 'vitest'
 import { render } from '@testing-library/react'
 import { Markdown } from './MarkdownRenderer'
+
+// jsdom implements no media loading: the off-screen size probe behind a markdown
+// video (lib/imageDensity's useNaturalVideoSize) drops its source on cleanup, and
+// the load() that follows only logs "Not implemented" into the run. Same stub the
+// other video tests use (see VideoDiffView.test.tsx).
+beforeAll(() => {
+  window.HTMLMediaElement.prototype.load = vi.fn()
+})
 
 describe('Markdown', () => {
   it('keeps the start number of an ordered list (8. stays 8., not 1.)', () => {
@@ -128,6 +136,42 @@ describe('Markdown', () => {
       const { container } = render(<Markdown text="![a shot](/tmp/shot.png)" />)
       expect(container.querySelector('img')).toBeNull()
       expect(container.textContent).toContain('a shot')
+    })
+  })
+
+  // The same `![alt](path)` syntax, pointed at a recording: an agent demoing a
+  // transition has nothing a still can show, so the renderer picks the element
+  // off the extension and serves it through the same endpoint.
+  describe('video', () => {
+    const ctx = { projectId: 'p1', agentId: 'a1', refStr: 'hydra/a1', filePath: '' }
+
+    it('renders a markdown image whose target is a clip as a player', () => {
+      const { container } = render(<Markdown text="![the popover](/tmp/demo.webm)" linkCtx={ctx} />)
+      expect(container.querySelector('img')).toBeNull()
+      const video = container.querySelector('video')!
+      expect(video).toHaveAttribute(
+        'src',
+        '/agent-files/projects/p1/agents/a1/blob?path=%2Ftmp%2Fdemo.webm',
+      )
+      // Controls, so the frame is playable where it sits...
+      expect(video).toHaveAttribute('controls')
+      // ...and metadata-only, so a transcript of clips doesn't download them all.
+      expect(video).toHaveAttribute('preload', 'metadata')
+      // The authored path and alt, for copy-as-markdown and the gallery.
+      expect(video).toHaveAttribute('data-md-src', '/tmp/demo.webm')
+      expect(video).toHaveAttribute('data-md-alt', 'the popover')
+    })
+
+    it('still renders a still image as an image', () => {
+      const { container } = render(<Markdown text="![shot](/tmp/shot.png)" linkCtx={ctx} />)
+      expect(container.querySelector('video')).toBeNull()
+      expect(container.querySelector('img')).not.toBeNull()
+    })
+
+    it('degrades an unservable clip to a labelled chip', () => {
+      const { container } = render(<Markdown text="![a clip](/tmp/demo.webm)" />)
+      expect(container.querySelector('video')).toBeNull()
+      expect(container.textContent).toContain('a clip')
     })
   })
 })
