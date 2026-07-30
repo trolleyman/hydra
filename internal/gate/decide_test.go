@@ -450,6 +450,32 @@ func TestGitReadonlyAdvice(t *testing.T) {
 	}
 }
 
+func TestShellCwdAdvice(t *testing.T) {
+	const wt = "/repo/.hydra/local/worktrees/head"
+
+	// The whole point: the shell is somewhere other than where the agent assumes.
+	got := ShellCwdAdvice(wt+"/web", wt)
+	if !strings.Contains(got, wt+"/web") {
+		t.Errorf("advice should name the directory the shell is in, got %q", got)
+	}
+	if !strings.Contains(got, "persistent") {
+		t.Errorf("advice should say the cwd carries into the next call, got %q", got)
+	}
+	// At the root there is nothing to correct, and this fires on every Bash call -
+	// so silence there is what keeps it from being noise.
+	if got := ShellCwdAdvice(wt, wt); got != "" {
+		t.Errorf("shell at the worktree root should get no advice, got %q", got)
+	}
+	// Fail silent rather than guess: an unseeded HYDRA_WORKTREE or a payload with
+	// no cwd (a non-Claude hook shape) leaves us nothing to compare against.
+	if got := ShellCwdAdvice(wt+"/web", ""); got != "" {
+		t.Errorf("unknown worktree root should get no advice, got %q", got)
+	}
+	if got := ShellCwdAdvice("", wt); got != "" {
+		t.Errorf("unknown cwd should get no advice, got %q", got)
+	}
+}
+
 // A raw `git merge` that hit the read-only .git is pointed at the merge tools,
 // so the agent's next move is the sanctioned one rather than another retry.
 func TestGitReadonlyAdviceNamesMergeTool(t *testing.T) {
