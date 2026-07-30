@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/trolleyman/hydra/internal/gate"
 )
@@ -25,6 +26,46 @@ func seedPolicy(t *testing.T) {
 		t.Fatalf("write policy: %v", err)
 	}
 	t.Setenv(gate.EnvPolicyPath, path)
+}
+
+// preAdviceFor runs the gate over a PreToolUse payload for an allowed command and
+// returns the additionalContext it attached (empty when it stayed silent).
+func preAdviceFor(t *testing.T, toolName, cwd string) string {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       toolName,
+		"tool_input":      map[string]any{"command": "rg pat src"},
+		"cwd":             cwd,
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	var out bytes.Buffer
+	if err := runGate("claude", bytes.NewReader(raw), &out); err != nil {
+		t.Fatalf("runGate: %v", err)
+	}
+	if out.Len() == 0 {
+		return ""
+	}
+	var got struct {
+		HookSpecificOutput struct {
+			HookEventName      string `json:"hookEventName"`
+			AdditionalContext  string `json:"additionalContext"`
+			PermissionDecision string `json:"permissionDecision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal hook output %q: %v", out.String(), err)
+	}
+	if name := got.HookSpecificOutput.HookEventName; name != "PreToolUse" {
+		t.Fatalf("hook output should be a PreToolUse one, got %q", name)
+	}
+	// An advice-only response must not carry a decision - the call is allowed.
+	if d := got.HookSpecificOutput.PermissionDecision; d != "" {
+		t.Fatalf("advice should not decide the call, got permissionDecision %q", d)
+	}
+	return got.HookSpecificOutput.AdditionalContext
 }
 
 // postAdviceFor runs the gate over a PostToolUse payload and returns the
@@ -64,44 +105,6 @@ func TestGatePreAdviceReportsShellCwd(t *testing.T) {
 	const wt = "/repo/.hydra/local/worktrees/head"
 	t.Setenv(gate.EnvWorktree, wt)
 	seedPolicy(t)
-
-	preAdviceFor := func(t *testing.T, toolName, cwd string) string {
-		t.Helper()
-		raw, err := json.Marshal(map[string]any{
-			"hook_event_name": "PreToolUse",
-			"tool_name":       toolName,
-			"tool_input":      map[string]any{"command": "rg pat src"},
-			"cwd":             cwd,
-		})
-		if err != nil {
-			t.Fatalf("marshal payload: %v", err)
-		}
-		var out bytes.Buffer
-		if err := runGate("claude", bytes.NewReader(raw), &out); err != nil {
-			t.Fatalf("runGate: %v", err)
-		}
-		if out.Len() == 0 {
-			return ""
-		}
-		var got struct {
-			HookSpecificOutput struct {
-				HookEventName      string `json:"hookEventName"`
-				AdditionalContext  string `json:"additionalContext"`
-				PermissionDecision string `json:"permissionDecision"`
-			} `json:"hookSpecificOutput"`
-		}
-		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-			t.Fatalf("unmarshal hook output %q: %v", out.String(), err)
-		}
-		if name := got.HookSpecificOutput.HookEventName; name != "PreToolUse" {
-			t.Fatalf("hook output should be a PreToolUse one, got %q", name)
-		}
-		// An advice-only response must not carry a decision - the call is allowed.
-		if d := got.HookSpecificOutput.PermissionDecision; d != "" {
-			t.Fatalf("advice should not decide the call, got permissionDecision %q", d)
-		}
-		return got.HookSpecificOutput.AdditionalContext
-	}
 
 	if advice := preAdviceFor(t, "Bash", wt+"/web"); !strings.Contains(advice, wt+"/web") {
 		t.Errorf("advice should name where the shell already is, got %q", advice)
@@ -152,18 +155,115 @@ func TestGatePostAdviceReportsShellCwd(t *testing.T) {
 	}
 }
 
-// Two advices can apply to one call, and they must not evict each other. This
-// uses the PostToolUseFailure shape because that is where a read-only git write
-// lands - the gate still has to compose both, even though Claude drops the
-// context from that event (see emitPostAdvice's KNOWN GAP note).
+// The read-only .git explanation is produced on the one event Claude drops
+// (PostToolUseFailure), so it has to be held and re-delivered on the next
+// PreToolUse. Without this the pointer at the mcp__hydra__git_* tools was written
+// into the void for every uncovered git write - `git tag`, `git worktree add` -
+// since those fail, and failing is what makes the context disappear.
+func TestGateDefersDroppedAdviceToNextCall(t *testing.T) {
+	const wt = "/repo/.hydra/local/worktrees/head"
+	t.Setenv(gate.EnvWorktree, wt)
+	t.Setenv(gate.EnvApprovalDir, t.TempDir())
+	seedPolicy(t)
+
+	// A failing git write: nothing is emitted now, because nothing would arrive.
+	// Note the payload shape - a failure carries a bare `error` string and NO
+	// tool_response, which is the field the advice used to look in.
+	if advice := postAdviceFor(t, map[string]any{
+		"hook_event_name": "PostToolUseFailure",
+		"tool_name":       "Bash",
+		"tool_input":      map[string]any{"command": "git tag v1"},
+		"error":           "Exit code 128\nfatal: cannot lock ref 'refs/tags/v1': Unable to create '/repo/.git/refs/tags/v1.lock': Read-only file system",
+		"is_interrupt":    false,
+		"cwd":             wt,
+	}); advice != "" {
+		t.Fatalf("a dropped event should emit nothing, got %q", advice)
+	}
+
+	// It arrives on the next call instead - and on ANY tool, not just Bash, since
+	// it is about a call that already happened.
+	advice := preAdviceFor(t, "Read", wt)
+	if !strings.Contains(advice, "mcp__hydra__git_") {
+		t.Fatalf("deferred git advice should arrive on the next call, got %q", advice)
+	}
+	if !strings.Contains(advice, "previous") {
+		t.Errorf("deferred advice should say it is about an earlier call, got %q", advice)
+	}
+	// And only once.
+	if advice := preAdviceFor(t, "Read", wt); advice != "" {
+		t.Errorf("deferred advice should be delivered once, got %q", advice)
+	}
+}
+
+// A call the USER interrupted was not refused by anything, so there is nothing to
+// explain - and its partial output can contain arbitrary text.
+func TestGateIgnoresInterruptedCalls(t *testing.T) {
+	const wt = "/repo/.hydra/local/worktrees/head"
+	t.Setenv(gate.EnvWorktree, wt)
+	t.Setenv(gate.EnvApprovalDir, t.TempDir())
+	seedPolicy(t)
+
+	if advice := postAdviceFor(t, map[string]any{
+		"hook_event_name": "PostToolUseFailure",
+		"tool_name":       "Bash",
+		"tool_input":      map[string]any{"command": "git tag v1"},
+		"error":           "fatal: cannot lock ref: Read-only file system",
+		"is_interrupt":    true,
+		"cwd":             wt,
+	}); advice != "" {
+		t.Fatalf("an interrupted call should emit nothing, got %q", advice)
+	}
+	if advice := preAdviceFor(t, "Read", wt); advice != "" {
+		t.Errorf("an interrupted call should queue nothing either, got %q", advice)
+	}
+}
+
+// A deny swallows its own output, so taking the queue there would lose the note
+// for good. It has to survive until a call that actually emits.
+func TestGateDeferredAdviceSurvivesADeny(t *testing.T) {
+	const wt = "/repo/.hydra/local/worktrees/head"
+	t.Setenv(gate.EnvWorktree, wt)
+	t.Setenv(gate.EnvApprovalDir, t.TempDir())
+	seedPolicy(t)
+
+	if err := gate.QueueAdvice(os.Getenv(gate.EnvApprovalDir), "", "About your previous Bash call: held note", time.Now()); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	// `git commit` is redirected to the git tools, i.e. denied at PreToolUse.
+	raw, err := json.Marshal(map[string]any{
+		"hook_event_name": "PreToolUse",
+		"tool_name":       "Bash",
+		"tool_input":      map[string]any{"command": "git commit -m x"},
+		"cwd":             wt,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out bytes.Buffer
+	if err := runGate("claude", bytes.NewReader(raw), &out); err != nil {
+		t.Fatalf("runGate: %v", err)
+	}
+	if !strings.Contains(out.String(), "deny") {
+		t.Fatalf("expected the git commit redirect to deny, got %q", out.String())
+	}
+
+	if advice := preAdviceFor(t, "Bash", wt); !strings.Contains(advice, "held note") {
+		t.Errorf("advice should survive a deny and land on the next allowed call, got %q", advice)
+	}
+}
+
+// Two advices can apply to one call, and they must not evict each other. A git
+// write whose failure did not set the script's exit status (here, piped into
+// something that succeeded) is the case where both are live at once.
 func TestGatePostAdviceCombinesGitAndCwd(t *testing.T) {
 	const wt = "/repo/.hydra/local/worktrees/head"
 	t.Setenv(gate.EnvWorktree, wt)
 
 	advice := postAdviceFor(t, map[string]any{
-		"hook_event_name": "PostToolUseFailure",
+		"hook_event_name": "PostToolUse",
 		"tool_name":       "Bash",
-		"tool_input":      map[string]any{"command": "git commit -m x"},
+		"tool_input":      map[string]any{"command": "git commit -m x | tail -3"},
 		"tool_response":   map[string]any{"stderr": "error: Unable to create '/repo/.git/index.lock': Read-only file system"},
 		"cwd":             wt + "/web",
 	})
