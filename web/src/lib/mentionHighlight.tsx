@@ -25,6 +25,28 @@ const TINT: Record<string, string> = {
   '@reviewer': 'text-violet-600 dark:text-violet-400',
 }
 
+// renderCommentMentions paints mentions in already-rendered comment prose. It
+// deliberately changes colour only: the source backdrop and textarea must keep
+// identical glyph widths, so changing weight here makes the caret and following
+// text drift sideways.
+export function renderCommentMentions(text: string): ReactNode {
+  const out: ReactNode[] = []
+  let last = 0
+  let key = 0
+  for (const m of text.matchAll(MENTION_RE)) {
+    const at = (m.index ?? 0) + m[1].length
+    if (at > last) out.push(text.slice(last, at))
+    out.push(
+      <span key={key++} className={TINT[m[2].toLowerCase()] ?? ''} data-review-mention="">
+        {m[2]}
+      </span>,
+    )
+    last = at + m[2].length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out.length === 0 ? text : out
+}
+
 // renderCommentSource is HighlightedTextarea's backdrop for a review comment: the
 // usual markdown source rendering, with mentions tinted on top.
 //
@@ -39,7 +61,7 @@ export function renderCommentSource(text: string): ReactNode {
     const at = (m.index ?? 0) + m[1].length
     if (at > last) out.push(<span key={key++}>{renderMarkdownSource(text.slice(last, at))}</span>)
     out.push(
-      <span key={key++} className={`${TINT[m[2].toLowerCase()] ?? ''} font-medium`}>
+      <span key={key++} className={TINT[m[2].toLowerCase()] ?? ''}>
         {m[2]}
       </span>,
     )

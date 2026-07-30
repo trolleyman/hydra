@@ -340,7 +340,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                     </div>
                 </span>
               </div>
-              <Markdown text={n.body} className="mt-0.5 text-xs text-gray-700 dark:text-gray-200 break-words" />
+              <Markdown text={n.body} highlightMentions className="mt-0.5 text-xs text-gray-700 dark:text-gray-200 break-words" />
               </div>
             </div>
           ))}
