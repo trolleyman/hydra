@@ -598,9 +598,13 @@ describe('compareCommitChips', () => {
 // human: a select: list is rendered as labels nobody typed, so it reads as prose,
 // while any query we pass through untouched stays verbatim in mono.
 describe('summarizeToolSearchQuery', () => {
-  it('renders a select: lookup as the bare tool names, MCP ones namespaced', () => {
-    expect(summarizeToolSearchQuery('select:mcp__hydra__git_commit')).toEqual({ text: 'hydra::git_commit', prose: true })
-    expect(summarizeToolSearchQuery('select:Read, mcp__hydra__git_add')).toEqual({ text: 'Read, hydra::git_add', prose: true })
+  it('renders first-party tools as native actions and third-party MCP tools namespaced', () => {
+    expect(summarizeToolSearchQuery('select:mcp__hydra__git_commit')).toEqual({ text: 'git commit', prose: true })
+    expect(summarizeToolSearchQuery('select:Read, mcp__hydra__git_add')).toEqual({ text: 'Read, git add', prose: true })
+    expect(summarizeToolSearchQuery('select:mcp__hydra__reply_to_review_comment, mcp__github__get_issue')).toEqual({
+      text: 'Reply to review comment, github::get_issue',
+      prose: true,
+    })
   })
 
   it('leaves a keyword search alone, verbatim and mono', () => {
@@ -633,7 +637,7 @@ describe('ToolSearch tool_reference results', () => {
     ).find((it) => it.kind === 'tool')
 
   it('names the single tool it loaded', () => {
-    expect(search([{ type: 'tool_reference', tool_name: 'mcp__hydra__git_commit' }])).toMatchObject({ result: 'Loaded hydra::git_commit' })
+    expect(search([{ type: 'tool_reference', tool_name: 'mcp__hydra__git_commit' }])).toMatchObject({ result: 'Loaded git commit' })
   })
 
   it('counts and lists several', () => {
@@ -641,7 +645,7 @@ describe('ToolSearch tool_reference results', () => {
       { type: 'tool_reference', tool_name: 'mcp__hydra__git_add' },
       { type: 'tool_reference', tool_name: 'Read' },
     ])
-    expect(item).toMatchObject({ result: 'Loaded 2 tools: hydra::git_add, Read' })
+    expect(item).toMatchObject({ result: 'Loaded 2 tools: git add, Read' })
   })
 
   it('keeps the provider blocks for the Raw panel', () => {
