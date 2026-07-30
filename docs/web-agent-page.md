@@ -73,6 +73,28 @@ and `web/src/DiffViewer.tsx`):
   carry the chosen size rather than a literal `text-xs` - see
   `CODE_TEXT`/`CODE_LEADING` in `diffMetrics` and the size note in
   `web/src/lib/fonts.ts`.
+- **When a prediction is wrong anyway, the correction must not be visible.** The
+  prediction is exact for a plain file body but not for everything in one -
+  `bodyShape` does not model inline review-comment rows, so a file carrying a
+  thread mounts taller than its placeholder (79px for one thread, in the sim).
+  Two things in `FileDiff` keep that from moving the page under the reader, and
+  both are easy to undo by accident:
+  - The wrapper's `transition-[height]` is the collapse/expand glide, and the
+    correction lands on that same height. Left to animate it turned a one-frame
+    reflow into 200ms of the diff sliding - so the layout effect on `wrapperH`
+    cancels the transition (set `none`, read `offsetHeight`, restore) whenever
+    the height changed with no `bodyOpen` toggle behind it. It has to be
+    cancelled *after* the fact like this: arming or disarming the class in the
+    same commit as the height change does not reach Chrome in time (arming it
+    only for the toggle made collapse snap instead of glide - measured).
+  - The same effect adds the delta to `scrollTop` when the card is wholly above
+    the viewport, because `InspectorPane` turns the browser's own scroll
+    anchoring off (`[overflow-anchor:none]`) and nothing else puts the view
+    back. It checks `overflowAnchor` first: the archived view's
+    `[data-main-scroll]` still anchors, and correcting twice moves the view by
+    double. This is also what keeps the **sticky file headers** attached - a
+    header whose card slides out from under it goes on being painted where it
+    was, so it reads as detached from its own card until the next scroll.
 - Copying out of the chat yields **markdown source**, not the flattened rendered
   text: the transcript's scroll container owns an `onCopy`
   (`copyTranscriptAsMarkdown` in `AgentChat.tsx`) that hands the selection to
