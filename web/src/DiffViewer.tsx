@@ -31,6 +31,7 @@ import { copyText } from './lib/clipboard'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
 import { buildRepoSplat } from './lib/repoSplat'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
+import { formatLineHash } from './lib/lineRange'
 import { buildWordRangeMaps, renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS, type WordRange } from './lib/wordDiff'
 import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from './lib/whitespaceMarks'
 import { useWhitespaceMarks } from './lib/whitespacePrefs'
@@ -65,7 +66,7 @@ import { useToastStore, type ToastType } from './stores/toastStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
-import { addReviewComment, addImageComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, draftsOf, type PendingReviewComment } from './lib/reviewComments'
+import { addReviewComment, addImageComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, notifiedNumbers, draftsOf, type PendingReviewComment } from './lib/reviewComments'
 import { useImageCommentStore } from './stores/imageCommentStore'
 import { commentPermalink, registerCommentJump } from './lib/reviewCommentLink'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
@@ -176,6 +177,21 @@ export interface LineDraftApi {
 // point: "sent to agent" over a stopped head is the message that made a whole
 // class of silently-undelivered notices look like they had landed.
 const UNDELIVERED_COMMENT = 'Saved, but the agent is not running - it will not see this until you start it'
+
+// What a delivered comment / review says, named by number: "Comment #3 sent to
+// agent". The number is the handle everything downstream uses - it is how you ask
+// "is #3 fixed?" two turns later, and how the agent refers back to it - so the
+// confirmation is the natural place to learn it. `count` is the fallback for the
+// case where the server sent a line we could not read numbers out of.
+//
+// Past four, numbers stop being a handle you can hold and become a wall, so the
+// count takes over.
+function sentToAgentText(numbers: number[], count: number): string {
+  if (numbers.length === 1) return `Comment #${numbers[0]} sent to agent`
+  if (numbers.length > 1 && numbers.length <= 4) return `Comments ${numbers.map((n) => `#${n}`).join(', ')} sent to agent`
+  const n = numbers.length || count
+  return n === 1 ? 'Review sent to agent' : `Review of ${n} comments sent to agent`
+}
 
 // A per-line index of queued review comments, keyed by `${side}:${lineNum}` (side
 // = 'new'|'old', matching how a comment's isNew resolves to a diff line). Each
@@ -582,6 +598,291 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
         />
       )}
     </>
+  )
+}
+
+// ── Comments with nowhere to land ─────────────────────────────────────────────
+
+// One off-diff stop: a comment (with its replies) or a forge thread whose file is
+// not among the changed files of the current comparison.
+type OffDiffEntry =
+  | { kind: 'comment'; key: string; number: number; path: string; lineNum: number; resolved: boolean; comment: PendingReviewComment; replies: PendingReviewComment[] }
+  | { kind: 'thread'; key: string; number: number; path: string; lineNum: number; resolved: boolean; thread: ReviewThread }
+
+// How many lines either side of a commented line the off-diff card shows. Three,
+// the same as a diff hunk's default context - enough to see what the line is part
+// of, not so much that a file card becomes the file.
+const OFFDIFF_CONTEXT = 3
+
+// commentWindows turns a set of commented lines into the windows to render, in
+// file order, merging any that would overlap into one. Two comments four lines
+// apart are one passage of code, and rendering it twice with the same lines in it
+// reads as a bug rather than as two comments.
+function commentWindows(lines: number[], total: number): { start: number; end: number; lines: number[] }[] {
+  const sorted = [...new Set(lines)].filter((n) => n > 0).sort((a, b) => a - b)
+  const out: { start: number; end: number; lines: number[] }[] = []
+  for (const ln of sorted) {
+    const start = Math.max(1, ln - OFFDIFF_CONTEXT)
+    const end = Math.min(total, ln + OFFDIFF_CONTEXT)
+    const last = out[out.length - 1]
+    if (last && start <= last.end + 1) {
+      last.end = Math.max(last.end, end)
+      last.lines.push(ln)
+    } else {
+      out.push({ start, end, lines: [ln] })
+    }
+  }
+  return out
+}
+
+// The comment cards for one entry - the comment, then its replies, or a forge
+// thread. Shared by the file card and the unanchored list so a comment reads the
+// same wherever it had to be put.
+function OffDiffEntryBody({ entry, you, editingId, setEditingId, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink }: {
+  entry: OffDiffEntry
+  you?: string
+  editingId: string | null
+  setEditingId: (id: string | null) => void
+  onEditComment?: (id: string, text: string) => void
+  onRemoveComment?: (id: string) => void
+  onResolveComment?: (number: number, resolved: boolean) => void
+  onCopyCommentLink?: (number: number) => void
+}) {
+  const threadActions = useReviewThreadActions()
+  if (entry.kind === 'thread') {
+    return threadActions ? <ReviewThreadCard thread={entry.thread} actions={threadActions} /> : null
+  }
+  return (
+    <>
+      {[entry.comment, ...entry.replies].map((c) => (
+        editingId === c.id ? (
+          <CommentRow
+            key={c.id}
+            initialText={c.text}
+            onSave={(t) => { onEditComment?.(c.id, t); setEditingId(null) }}
+            onCancel={() => setEditingId(null)}
+          />
+        ) : (
+          <QueuedCommentCard
+            key={c.id}
+            comment={c}
+            stale={false}
+            onEdit={() => setEditingId(c.id)}
+            onRemove={() => onRemoveComment?.(c.id)}
+            onResolve={c.replyTo === 0 ? (r) => onResolveComment?.(c.number, r) : undefined}
+            onCopyLink={() => onCopyCommentLink?.(c.number)}
+            you={you}
+          />
+        )
+      ))}
+    </>
+  )
+}
+
+// One commented file that has NO changes in the current comparison, rendered as
+// a file card of its own: the lines around each comment, read from the file at
+// the head's branch, with the comment underneath.
+//
+// A comment is anchored to a file and a line, and the gutter renders it under
+// that line - which silently requires the file to BE in the diff. It often is
+// not: an agent's add_review_comment takes any repo-relative path (a reviewer
+// remarking on an unchanged caller is the normal case, not an edge one), and
+// changing the comparison moves a file out of the diff under a comment already
+// written against it.
+//
+// Those comments were not merely hidden, they were counted - they rode in the
+// "N open" navigator and the arrows stepped onto them, where the jump found no
+// file card and returned. So this is what makes that count true.
+//
+// It shows the file as it is NOW rather than the diff context frozen with the
+// comment, which is the deliberate trade: the comment is about code that did not
+// change, so "as it is now" is the thing you would go and read, and it is right
+// even for a comment written against a different comparison. The cost is that a
+// line can have moved since - hence the "not in this diff" header, and the line
+// numbers being the file's own.
+function OffDiffFileCard({ projectId, gitRef, path, entries, you, openInRepo, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink }: {
+  projectId: string | null
+  /** The ref to read the file at - the head's branch. */
+  gitRef?: string | null
+  path: string
+  entries: OffDiffEntry[]
+  you?: string
+  openInRepo?: (path: string) => LinkProps
+  onEditComment?: (id: string, text: string) => void
+  onRemoveComment?: (id: string) => void
+  onResolveComment?: (number: number, resolved: boolean) => void
+  onCopyCommentLink?: (number: number) => void
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  // The read, TAGGED with the request it answers. Tagging is what lets "still
+  // loading" be derived during render (`read` is null until the tag matches)
+  // instead of being reset by a synchronous setState in the effect, which is a
+  // cascading render for a value nobody has looked at yet.
+  const reqKey = `${projectId ?? ''}\0${gitRef ?? ''}\0${path}`
+  const [state, setState] = useState<{ key: string; content: string; note: string } | null>(null)
+  const read = state?.key === reqKey ? state : null
+  const canRead = !!projectId && !!gitRef
+
+  useEffect(() => {
+    if (!canRead) return
+    let cancelled = false
+    const done = (content: string, note: string) => { if (!cancelled) setState({ key: reqKey, content, note }) }
+    api.default.getRepositoryFile(projectId, path, gitRef)
+      .then((res) => {
+        if (res.binary) return done('', 'This file is binary, so there is nothing to show around the line.')
+        // A truncated read still shows the lines it did get; a comment past the
+        // end of them is called out by its own window below.
+        done(res.content ?? '', res.truncated ? 'This file was too large to read in full.' : '')
+      })
+      // The honest reading of a failure here: the comment outlived the file.
+      .catch(() => done('', 'This file is not in the branch any more - it may have been deleted or renamed since the comment was left.'))
+    return () => { cancelled = true }
+  }, [canRead, projectId, gitRef, path, reqKey])
+
+  const content = canRead ? read?.content ?? null : ''
+  const note = canRead ? read?.note ?? '' : 'There is no branch to read this file from.'
+  const lines = useMemo(() => (content ? content.split('\n') : []), [content])
+  const lang = useMemo(() => getLanguage(path), [path])
+  const windows = useMemo(
+    () => commentWindows(entries.map((e) => e.lineNum), lines.length),
+    [entries, lines.length],
+  )
+  // Anything the windows could not place: a line past the end of the file as it
+  // stands now. Shown after them rather than dropped.
+  const placed = new Set(windows.flatMap((w) => w.lines))
+  const unplaced = entries.filter((e) => !placed.has(e.lineNum))
+
+  return (
+    <div className="border border-gray-200 dark:border-gray-700 rounded-lg mb-4 overflow-hidden bg-white dark:bg-gray-800 shadow-sm">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 text-xs">
+        <MessageSquare className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
+        <span className="min-w-0 truncate" title={path}><PathName path={path} /></span>
+        {/* Not a change badge: this file has no changes, which is exactly why it
+            is here. It says why the card exists at all. */}
+        <span className="shrink-0 rounded bg-amber-100 px-1.5 py-px text-3xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+          not in this diff
+        </span>
+        <span className="text-2xs text-gray-400 dark:text-gray-500">{entries.length}</span>
+        {openInRepo && <span className="ml-auto"><RepoOpenButton target={openInRepo(path)} /></span>}
+      </div>
+
+      {content === null ? (
+        <div className="flex items-center gap-2 px-3 py-3 text-2xs text-gray-400 dark:text-gray-500">
+          <LoaderCircle className="w-3 h-3 animate-spin" /> Reading the file...
+        </div>
+      ) : note ? (
+        <div className="px-3 py-2 text-2xs text-gray-500 dark:text-gray-400">{note}</div>
+      ) : null}
+
+      {windows.map((w) => (
+        <div key={w.start}>
+          {/* The window's own range, in the file's numbers, linking into the
+              repository browser at the first commented line in it. */}
+          <div className="px-3 py-1 bg-gray-50/70 dark:bg-white/[0.02] border-y border-gray-100 dark:border-gray-700/60 text-3xs font-mono text-gray-400 dark:text-gray-500">
+            {openInRepo ? (
+              <Link
+                {...openInRepo(path)}
+                hash={formatLineHash(w.lines[0], w.lines[0])}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors"
+              >
+                lines {w.start}-{w.end}
+              </Link>
+            ) : (
+              <>lines {w.start}-{w.end}</>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <CodePane
+              content={lines.slice(w.start - 1, w.end).join('\n')}
+              lang={lang}
+              wrap={false}
+              startLine={w.start}
+              highlightRange={{ start: w.lines[0], end: w.lines[w.lines.length - 1] }}
+              className="py-1"
+            />
+          </div>
+          {entries.filter((e) => w.lines.includes(e.lineNum)).map((e) => (
+            <div key={e.key} data-offdiff-comment={e.number}>
+              <OffDiffEntryBody
+                entry={e} you={you} editingId={editingId} setEditingId={setEditingId}
+                onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+                onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink}
+              />
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {unplaced.map((e) => (
+        <div key={e.key} data-offdiff-comment={e.number}>
+          <div className="px-3 py-1 bg-gray-50/70 dark:bg-white/[0.02] border-y border-gray-100 dark:border-gray-700/60 text-3xs font-mono text-gray-400 dark:text-gray-500">
+            line {e.lineNum}{lines.length > 0 && e.lineNum > lines.length ? ` - past the end of the file, which is now ${lines.length} lines` : ''}
+          </div>
+          <OffDiffEntryBody
+            entry={e} you={you} editingId={editingId} setEditingId={setEditingId}
+            onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+            onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// The comments that could not be put next to any code at all: no file, or a file
+// with no line. There is nothing to anchor them to, so they go at the end rather
+// than pretending to a position they do not have.
+function UnanchoredComments({ entries, you, resolvedCount, showResolved, onToggleResolved, openInRepo, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink }: {
+  entries: OffDiffEntry[]
+  you?: string
+  resolvedCount: number
+  showResolved: boolean
+  onToggleResolved: () => void
+  openInRepo?: (path: string) => LinkProps
+  onEditComment?: (id: string, text: string) => void
+  onRemoveComment?: (id: string) => void
+  onResolveComment?: (number: number, resolved: boolean) => void
+  onCopyCommentLink?: (number: number) => void
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  if (entries.length === 0 && resolvedCount === 0) return null
+  return (
+    <div className="mt-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+        <MessageSquare className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
+        <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-300 optical-center">Comments without a line</h3>
+        <InfoTooltip title="Comments without a line" width={440}>
+          <p>Review comments that name no file, or a file but no line - so there is no code to sit them next to. An agent can leave one deliberately: <strong>add_review_comment</strong>'s path and line are both optional, and a remark about the change as a whole belongs to no single line.</p>
+          <p>They still count towards the open total and the up/down arrows step onto them, so they are listed here rather than dropped.</p>
+        </InfoTooltip>
+        <span className="text-2xs font-normal text-gray-400 dark:text-gray-500">{entries.length}</span>
+        {resolvedCount > 0 && (
+          <button
+            onClick={onToggleResolved}
+            className="ml-auto text-2xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
+          >
+            {showResolved ? 'Hide resolved' : `Show ${resolvedCount} resolved`}
+          </button>
+        )}
+      </div>
+      {entries.map((e) => (
+        <div key={e.key} data-offdiff-comment={e.number}>
+          {e.path && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50/60 dark:bg-white/[0.02] border-b border-gray-100 dark:border-gray-700/60 text-2xs">
+              <span className="min-w-0 truncate" title={e.path}><PathName path={e.path} /></span>
+              {openInRepo && <RepoOpenButton target={openInRepo(e.path)} />}
+            </div>
+          )}
+          <OffDiffEntryBody
+            entry={e} you={you} editingId={editingId} setEditingId={setEditingId}
+            onEditComment={onEditComment} onRemoveComment={onRemoveComment}
+            onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink}
+          />
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -3730,11 +4031,31 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // (select it in single-file view; expand/show it otherwise), then centre the
   // line and flash it. scrollToDiffLine re-acquires the card and re-measures each
   // frame, so it copes with the file mounting a beat after these state updates.
-  // No-op for a comment whose file has dropped out of the current comparison.
-  const handleJumpToComment = useCallback((c: PendingReviewComment) => {
+  //
+  // A comment whose file is NOT in the diff has no line to land on, so it lands on
+  // its card in the off-diff section instead. That used to be a bare `return`,
+  // which is what made the up/down navigator step onto stops where nothing
+  // happened. Structural param, not PendingReviewComment: the internal callers
+  // build a stop out of a comment OR a forge thread, and only these four fields
+  // are ever read.
+  const [showResolvedOffDiff, setShowResolvedOffDiff] = useState(false)
+  const handleJumpToComment = useCallback((c: { number: number; path: string; lineNum: number; isNew: boolean }) => {
     if (!diff) return
     const idx = diff.files.findIndex((f) => f.path === c.path)
-    if (idx < 0) return
+    if (idx < 0) {
+      const find = () => document.querySelector<HTMLElement>(`[data-offdiff-comment="${c.number}"]`)
+      const card = find()
+      if (card) {
+        card.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      } else {
+        // Not on screen: the only way an off-diff comment is missing its card is
+        // that it is resolved and the section is hiding those. A permalink to a
+        // resolved comment has to land, so reveal them and scroll once it mounts.
+        setShowResolvedOffDiff(true)
+        requestAnimationFrame(() => find()?.scrollIntoView({ block: 'center', behavior: 'smooth' }))
+      }
+      return
+    }
     // In one-file-at-a-time view, switch to the commented file first (only its
     // card is mounted). scrollToDiffLine re-acquires the card each frame, so it
     // waits for the swapped-in card to mount.
@@ -3840,7 +4161,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // the published comment appears under its diff line without a reload.
       setReviewComments(comments)
       if (toReviewer) showSentToast('Sent to your reviewer - open the Review tab to see the reply')
-      else if (notified) showSentToast('Comment sent to agent')
+      else if (notified) showSentToast(sentToAgentText(notifiedNumbers(notified), 1))
       else showSentToast(UNDELIVERED_COMMENT, 'warning')
     } catch (e) {
       console.error('Failed to send comment:', e)
@@ -3877,19 +4198,19 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // Resolved at write time, exactly as a line comment's is, so "latest commit"
     // cannot drift between placing the pin and publishing it.
     const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
-    const { comments, toReviewer } = await addImageComment(projectId, agent.id, {
+    const { comments, notified, toReviewer } = await addImageComment(projectId, agent.id, {
       image, text, diffLabel: `${fromLabel} -> ${toLabel}`, publish,
     })
     setReviewComments(comments)
-    // Same wording as the line-comment path, and for the same reason: a pin whose
-    // body mentions `@review` wakes the REVIEWER, possibly starting one in a tab
-    // that has never been opened, which is otherwise entirely invisible.
+    // The same three outcomes the line-comment path reports, and for the same
+    // reasons: a pin whose body mentions `@review` wakes the REVIEWER, possibly
+    // starting one in a tab that has never been opened; otherwise the toast names
+    // the number the agent was actually given; and when NOTHING was notified it
+    // says so, because "sent to agent" is a lie when no agent was listening.
     if (publish) {
-      showSentToast(
-        toReviewer
-          ? 'Sent to your reviewer - open the Review tab to see the reply'
-          : 'Comment sent to agent',
-      )
+      if (toReviewer) showSentToast('Sent to your reviewer - open the Review tab to see the reply')
+      else if (notified) showSentToast(sentToAgentText(notifiedNumbers(notified), 1))
+      else showSentToast(UNDELIVERED_COMMENT, 'warning')
     }
   }, [projectId, agent.id, agent.base_branch, showSentToast])
   useEffect(() => {
@@ -3987,6 +4308,62 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     return stops
   }, [reviewComments, threads, diff])
 
+  // The comments the diff has no line for: their file is not among the changed
+  // files of the current comparison (a path-less comment is here too - '' is
+  // never a file path). See OffDiffFileCard for why they are shown rather than
+  // dropped.
+  //
+  // Everything is included, drafts as well as published: a draft goes off-diff
+  // the moment you change the comparison under it, and one you cannot see is one
+  // you cannot discard. Resolved entries are counted separately - they are the
+  // ones that pile up, and they are behind a toggle rather than gone, because a
+  // permalink to a resolved comment still has to land somewhere.
+  const offDiff = useMemo(() => {
+    const empty = { entries: [] as OffDiffEntry[], resolvedCount: 0 }
+    if (!diff) return empty
+    const inDiff = new Set(diff.files.map((f) => f.path))
+    const all: OffDiffEntry[] = []
+    for (const c of reviewComments) {
+      if (c.replyTo > 0 || inDiff.has(c.path)) continue
+      all.push({
+        kind: 'comment', key: `c:${c.number}`, number: c.number,
+        path: c.path, lineNum: c.lineNum, resolved: c.resolved,
+        comment: c,
+        // A reply is shown under the comment it answers, never on its own - the
+        // same shape the gutter renders, so a thread reads identically here.
+        replies: reviewComments.filter((r) => r.replyTo === c.number),
+      })
+    }
+    for (const t of threads) {
+      if (inDiff.has(t.path)) continue
+      const number = t.notes.map((n) => n.number).find((n): n is number => n != null)
+      if (number == null) continue
+      all.push({ kind: 'thread', key: `t:${t.id}`, number, path: t.path, lineNum: t.line, resolved: !!t.resolved, thread: t })
+    }
+    all.sort((a, b) => a.path.localeCompare(b.path) || a.lineNum - b.lineNum || a.number - b.number)
+    return { entries: all, resolvedCount: all.filter((e) => e.resolved).length }
+  }, [diff, reviewComments, threads])
+  // Split by whether there is anywhere to PUT it. A comment with a file and a
+  // line gets a file card showing that line; one with neither has nothing to sit
+  // beside, so it goes to a list at the end rather than pretending to a position
+  // it does not have.
+  const { offDiffFiles, unanchored } = useMemo(() => {
+    const visible = showResolvedOffDiff ? offDiff.entries : offDiff.entries.filter((e) => !e.resolved)
+    const byPath = new Map<string, OffDiffEntry[]>()
+    const loose: OffDiffEntry[] = []
+    for (const e of visible) {
+      if (!e.path || e.lineNum <= 0) { loose.push(e); continue }
+      const arr = byPath.get(e.path)
+      if (arr) arr.push(e); else byPath.set(e.path, [e])
+    }
+    return { offDiffFiles: [...byPath].map(([path, entries]) => ({ path, entries })), unanchored: loose }
+  }, [offDiff, showResolvedOffDiff])
+  // The toggle only belongs where there is something hidden BEHIND it. Resolved
+  // entries that would be file cards simply do not render one, so the count the
+  // unanchored list offers to reveal is all of them - it is the one control, and
+  // revealing brings the file cards back too.
+  const resolvedOffDiffCount = offDiff.resolvedCount
+
   // Where the up/down navigation is standing. Kept as a NUMBER rather than an
   // index so it survives the list changing under it (resolving the one you are on
   // shortens the list, which would otherwise silently move you somewhere else).
@@ -4012,7 +4389,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     const next = openComments[(((at < 0 ? (delta > 0 ? -1 : 0) : at) + delta) % openComments.length + openComments.length) % openComments.length]
     setAtComment(next.number)
     if (next.unread) markRead(next.numbers)
-    handleJumpToComment({ path: next.path, lineNum: next.lineNum, isNew: next.isNew } as PendingReviewComment)
+    handleJumpToComment({ number: next.number, path: next.path, lineNum: next.lineNum, isNew: next.isNew })
   }, [openComments, atComment, markRead, handleJumpToComment])
 
   useEffect(() => {
@@ -4021,7 +4398,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         ?? reviewComments.find((c) => c.number === number)
       setAtComment(number)
       markRead([number])
-      if (target) handleJumpToComment({ path: target.path, lineNum: target.lineNum, isNew: target.isNew } as PendingReviewComment)
+      if (target) handleJumpToComment({ number, path: target.path, lineNum: target.lineNum, isNew: target.isNew })
     }
   }, [openComments, reviewComments, markRead, handleJumpToComment])
 
@@ -4048,7 +4425,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setAtComment(focusComment)
     markRead([focusComment])
-    handleJumpToComment({ path: target.path, lineNum: target.lineNum, isNew: target.isNew } as PendingReviewComment)
+    handleJumpToComment({ number: focusComment, path: target.path, lineNum: target.lineNum, isNew: target.isNew })
   }, [focusComment, diff, reviewComments, openComments, markRead, handleJumpToComment])
 
   // Forge review threads for this head's MR, fetched when the head is linked. The
@@ -4189,7 +4566,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // honest test of whether anything reached it - the comments are published
       // (and durable) either way, but a stopped head is told nothing.
       if (toReviewer) showSentToast('Sent to your reviewer - open the Review tab to see the reply')
-      else if (notified) showSentToast(count === 1 ? 'Review sent to agent' : `Review of ${count} comments sent to agent`)
+      else if (notified) showSentToast(sentToAgentText(notifiedNumbers(notified), count))
       else showSentToast(UNDELIVERED_COMMENT, 'warning')
     } catch (e) {
       console.error('Failed to submit review:', e)
@@ -4734,16 +5111,20 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             <div className="flex items-center gap-0.5 rounded-md border border-stone-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] px-1.5 py-0.5">
               <MessageSquare className="w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500" />
               <span className="optical-center text-2xs tabular-nums text-stone-500 dark:text-stone-400">
-                {openComments.length} open
+                {/* "unresolved", not "open": the chip sits beside a count of
+                    unread ones, and two words that both mean "not dealt with in
+                    some sense" have to say WHICH sense. It is also the word the
+                    resolve control on every comment uses. */}
+                {openComments.length} unresolved
               </span>
               {unreadCount > 0 && (
                 <>
                   <span className="optical-center text-2xs tabular-nums text-blue-600 dark:text-blue-400">
-                    · {unreadCount} new
+                    · {unreadCount} unread
                   </span>
                   {/* For comments you have read in passing rather than by
                       navigating to them. Nothing clears read state on its own, so
-                      without this the only way out of "3 new" is to visit each. */}
+                      without this the only way out of "3 unread" is to visit each. */}
                   <Tooltip content="Mark every comment read" side="bottom">
                     <button
                       onClick={() => markRead(openComments.flatMap((c) => c.numbers))}
@@ -4810,6 +5191,40 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           the file-list column + diffs. */}
       {filesHeaderEl}
       {diffContentEl}
+
+      {/* Commented files with no changes, then the comments that name no line at
+          all. AFTER the diff, and outside the file-list column: these are not
+          files the comparison changed, so putting them in the list would make the
+          count and the "N viewed" tally answer a different question. The "No
+          changes" diff never renders that column anyway, and this is where every
+          comment on such a head ends up. */}
+      {offDiffFiles.map((f) => (
+        <OffDiffFileCard
+          key={f.path}
+          projectId={projectId}
+          gitRef={agent.branch_name}
+          path={f.path}
+          entries={f.entries}
+          you={you}
+          openInRepo={openInRepo}
+          onEditComment={handleUpdateReviewComment}
+          onRemoveComment={removeQueuedComment}
+          onResolveComment={handleResolveComment}
+          onCopyCommentLink={handleCopyCommentLink}
+        />
+      ))}
+      <UnanchoredComments
+        entries={unanchored}
+        resolvedCount={resolvedOffDiffCount}
+        showResolved={showResolvedOffDiff}
+        onToggleResolved={() => setShowResolvedOffDiff((v) => !v)}
+        you={you}
+        openInRepo={openInRepo}
+        onEditComment={handleUpdateReviewComment}
+        onRemoveComment={removeQueuedComment}
+        onResolveComment={handleResolveComment}
+        onCopyCommentLink={handleCopyCommentLink}
+      />
       {dragOverlay}
       {/* Mobile file-picker sheet (item 31). Portalled to document.body so its
           position:fixed is viewport-relative - the narrow screen-stack track has

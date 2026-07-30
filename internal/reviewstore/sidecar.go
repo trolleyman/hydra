@@ -182,6 +182,20 @@ func noteHighWater(projectRoot, id string, n int) {
 	})
 }
 
+// ForgeThreads returns the thread handle of every numbered forge note, with
+// duplicates left in - one per note, since a thread with three notes appears
+// three times. Callers that want threads dedupe; the sidecar deliberately does
+// not, because "which threads exist" and "how many notes are in them" are both
+// answered from this and only one of them wants a set.
+func ForgeThreads(projectRoot, id string) []string {
+	sc := loadSidecar(projectRoot, id)
+	out := make([]string, 0, len(sc.Keys))
+	for _, ref := range sc.Keys {
+		out = append(out, ref.Thread)
+	}
+	return out
+}
+
 // ForgeRef resolves a number back to the forge note (and thread) it names.
 func ForgeRef(projectRoot, id string, number int) (noteID string, ref NumberedRef, ok bool) {
 	sc := loadSidecar(projectRoot, id)

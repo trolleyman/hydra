@@ -40,7 +40,7 @@ function splitHighlighted(content: string, lang: string): string[] {
   return lines
 }
 
-export function CodePane({ content, lang, wrap, className, highlightRange, onSelectLine }: {
+export function CodePane({ content, lang, wrap, className, highlightRange, onSelectLine, startLine = 1 }: {
   content: string
   /** Prism language name; '' (or one with no grammar) renders plain. */
   lang: string
@@ -48,10 +48,23 @@ export function CodePane({ content, lang, wrap, className, highlightRange, onSel
   wrap: boolean
   /** Extra classes for the pane itself - padding, type size overrides. */
   className?: string
-  /** Lines to tint (the repository browser's URL-hash selection). */
+  /** Lines to tint (the repository browser's URL-hash selection), ABSOLUTE. */
   highlightRange?: LineRange | null
   /** Makes the gutter numbers clickable; shift-click extends the range. */
   onSelectLine?: (line: number, extend: boolean) => void
+  /**
+   * The file line `content`'s first line actually is, for callers that pass a
+   * WINDOW of a file rather than the whole of it (the off-diff comment cards
+   * show a few lines either side of the commented line). The gutter, the
+   * `data-line` anchors and `highlightRange` are all in the file's own numbers,
+   * so a window reads like the file it came from rather than like its own file
+   * starting at 1.
+   *
+   * The highlighter still only sees the window, so a construct that OPENS
+   * before it - a block comment, a template literal - can tokenise oddly inside
+   * it. That is the price of not shipping the whole file to colour six lines.
+   */
+  startLine?: number
 }) {
   // Fetch a not-yet-bundled grammar on demand (the diff viewer does the same via
   // its worker), then re-highlight: hasGrammar flips false->true once it lands.
@@ -80,7 +93,7 @@ export function CodePane({ content, lang, wrap, className, highlightRange, onSel
     [highlighted, ws],
   )
 
-  const gutterWidth = `${Math.max(2, String(lines.length).length)}ch`
+  const gutterWidth = `${Math.max(2, String(startLine + lines.length - 1).length)}ch`
 
   // CODE_TEXT, not text-xs: this is a Code surface, so it follows the Code size
   // control (the gutter is already `ch`-based and follows by itself).
@@ -93,7 +106,7 @@ export function CodePane({ content, lang, wrap, className, highlightRange, onSel
         // page scrolls the row carrying data-line into view when the URL hash
         // selects it, and we tint the selected range GitHub-style. Clicking the
         // gutter number selects the line (shift+click extends the range).
-        const ln = i + 1
+        const ln = startLine + i
         const isHi = inRange(ln, highlightRange)
         return (
           <div key={i} data-line={ln} className={`flex ${isHi ? 'bg-amber-100/70 dark:bg-amber-400/10' : 'hover:bg-gray-50 dark:hover:bg-gray-800/40'}`}>

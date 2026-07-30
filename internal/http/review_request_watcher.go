@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -95,6 +96,8 @@ func (s *Server) drainReviewRequests(ctx context.Context, projectRoot string) {
 				res = s.hydraCommentsText(projectRoot, id, r)
 			case reviewq.OpAddComment:
 				res = s.addHydraComment(projectRoot, id, r)
+			case reviewq.OpResolveComment:
+				res = s.resolveHydraComments(projectRoot, id, r)
 			case reviewq.OpHeadStatus:
 				res = s.headStatusText(ctx, id)
 			case reviewq.OpTestLogs:
@@ -291,6 +294,65 @@ func (s *Server) addHydraComment(projectRoot, id string, r reviewq.Request) revi
 		msg += " on " + anchor
 	}
 	return reviewq.Result{OK: true, Message: msg + ". The user can see it in Hydra's diff viewer; refer to it by its number from here on."}
+}
+
+// resolveHydraComments marks comments dealt with on the agent's say-so.
+//
+// The agent that just acted on #3 is the one thing that knows #3 is done, and
+// leaving the mark solely to the user means the list only ever grows while the
+// work is finished. It resolves BOTH origins, because the numbering is one
+// sequence: a number that is not one of Hydra's own may name a forge note, in
+// which case what resolves is the thread it belongs to - the same rule the user's
+// own button follows (see ResolveReviewComment).
+//
+// Nothing here notifies the head, and nor does the user's own resolve any more -
+// this path is why (see review_comments.go). A head resolving its own comments is
+// the commonest case by far, and a notice for it is a message the agent caused
+// itself to receive, mid-turn, about work it has already finished.
+func (s *Server) resolveHydraComments(projectRoot, id string, r reviewq.Request) reviewq.Result {
+	if len(r.Numbers) == 0 {
+		return reviewq.Result{Message: "No comment numbers were given. Pass the numbers you are done with, from get_review_comments."}
+	}
+	owner, _ := commentOwner(id)
+	resolved := !r.Reopen
+	var done, missing []string
+	for _, n := range r.Numbers {
+		if _, err := reviewstore.SetResolved(projectRoot, owner, n, resolved); err == nil {
+			done = append(done, fmt.Sprintf("#%d", n))
+			continue
+		} else if !errors.Is(err, reviewstore.ErrNoComment) {
+			return reviewq.Result{Message: fmt.Sprintf("#%d could not be updated: %v", n, err)}
+		}
+		_, ref, ok := reviewstore.ForgeRef(projectRoot, owner, n)
+		if !ok || ref.Thread == "" {
+			missing = append(missing, fmt.Sprintf("#%d", n))
+			continue
+		}
+		if err := reviewstore.SetThreadResolved(projectRoot, owner, ref.Thread, resolved, time.Now().Format(time.RFC3339)); err != nil {
+			return reviewq.Result{Message: fmt.Sprintf("#%d could not be updated: %v", n, err)}
+		}
+		done = append(done, fmt.Sprintf("#%d", n))
+	}
+	if len(done) == 0 {
+		return reviewq.Result{Message: fmt.Sprintf(
+			"No comment has %s. Call get_review_comments to see what is there.", strings.Join(missing, " or "))}
+	}
+	s.notifyAgentsChanged(projectRoot, false)
+	verb := "Marked resolved"
+	if r.Reopen {
+		verb = "Reopened"
+	}
+	msg := fmt.Sprintf("%s: %s.", verb, strings.Join(done, ", "))
+	if len(missing) > 0 {
+		// Naming what was skipped matters more than it looks: silently resolving 3
+		// of 4 reads as "all done" to an agent that then moves on.
+		msg += fmt.Sprintf(" No comment has %s, so %s left alone.",
+			strings.Join(missing, " or "), map[bool]string{true: "it was", false: "they were"}[len(missing) == 1])
+	}
+	// A resolved comment is LOCAL to Hydra even when the number named a forge
+	// thread - the agent has no forge credentials, and saying so stops it
+	// reporting to the user that a PR discussion was closed.
+	return reviewq.Result{OK: true, Message: msg + " This is Hydra's own record; nothing was resolved on the forge."}
 }
 
 // fresh reports whether an RFC3339 timestamp is within d of now. An empty or

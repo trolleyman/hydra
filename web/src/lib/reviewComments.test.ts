@@ -6,7 +6,7 @@ vi.mock('../stores/apiClient', () => ({
   api: { default: { addReviewComment } },
 }))
 
-import { sendReviewComment } from './reviewComments'
+import { sendReviewComment, notifiedNumbers } from './reviewComments'
 
 describe('sendReviewComment', () => {
   beforeEach(() => addReviewComment.mockReset())
@@ -50,5 +50,18 @@ describe('sendReviewComment', () => {
       published: true,
       text: 'Handle this edge case',
     })])
+  })
+})
+
+describe('notifiedNumbers', () => {
+  it('reads the handles out of the line the agent was actually sent', () => {
+    expect(notifiedNumbers('Review comments added: #3 (a.ts:4), #4. Read them with the get_review_comments tool.'))
+      .toEqual([3, 4])
+  })
+
+  it('is empty when nothing was delivered, so the caller can say so', () => {
+    expect(notifiedNumbers(null)).toEqual([])
+    // A line with no handle in it is not a number we may invent one from.
+    expect(notifiedNumbers('Review comments added.')).toEqual([])
   })
 })

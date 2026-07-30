@@ -205,6 +205,18 @@ export async function publishReviewComments(
   return { comments: all(res), notified: res.notified ?? null, toReviewer: res.notified_reviewer === true }
 }
 
+// The comment numbers named in the server's notification line ("Review comments
+// added: #3 (a.ts:4), #4. Read them with ..."). That line is the only place the
+// browser learns WHICH comments actually went, and it names them by the handle
+// everybody else uses - so a confirmation can say "#3" instead of "1 comment",
+// and the number you are shown is the number the agent was given. Reading it back
+// out of the line rather than recomputing it here is deliberate: there is then no
+// second opinion about what was sent.
+export function notifiedNumbers(notified: string | null): number[] {
+  if (!notified) return []
+  return [...notified.matchAll(/#(\d+)/g)].map((m) => Number(m[1]))
+}
+
 // Resolve (or reopen) a comment by number. Works for a forge comment too - the
 // numbering is one sequence, so from here it is the same call - and resolving a
 // forge thread is local to Hydra (see the API description).
