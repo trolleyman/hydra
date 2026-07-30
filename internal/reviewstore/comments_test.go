@@ -302,6 +302,37 @@ func TestResolveHidesAcommentFromTheOpenRead(t *testing.T) {
 	}
 }
 
+func TestResolveAppliesToTheWholeNativeThread(t *testing.T) {
+	root := t.TempDir()
+	first, _ := AppendComment(root, "h", Comment{Body: "please fix", Status: StatusPublished})
+	reply, _ := AppendComment(root, "h", Comment{Body: "fixed", Status: StatusPublished, ReplyTo: first.Number})
+	nested, _ := AppendComment(root, "h", Comment{Body: "confirmed", Status: StatusPublished, ReplyTo: reply.Number})
+	other, _ := AppendComment(root, "h", Comment{Body: "separate", Status: StatusPublished})
+
+	if _, err := SetResolved(root, "h", reply.Number, true); err != nil {
+		t.Fatalf("resolve reply: %v", err)
+	}
+	for _, number := range []int{first.Number, reply.Number, nested.Number} {
+		got, _ := FindComment(root, "h", number)
+		if !got.Resolved || got.ResolvedAt == "" {
+			t.Errorf("thread comment #%d was not resolved: %+v", number, got)
+		}
+	}
+	if got, _ := FindComment(root, "h", other.Number); got.Resolved {
+		t.Errorf("unrelated comment was resolved: %+v", got)
+	}
+
+	if _, err := SetResolved(root, "h", nested.Number, false); err != nil {
+		t.Fatalf("reopen nested reply: %v", err)
+	}
+	for _, number := range []int{first.Number, reply.Number, nested.Number} {
+		got, _ := FindComment(root, "h", number)
+		if got.Resolved || got.ResolvedAt != "" {
+			t.Errorf("thread comment #%d was not reopened: %+v", number, got)
+		}
+	}
+}
+
 // A forge thread's resolve mark is Hydra-local, and must not be mistaken for the
 // forge's own.
 func TestThreadResolutionIsLocalAndReversible(t *testing.T) {

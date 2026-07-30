@@ -34,12 +34,10 @@ interface ServerUpdateState {
   // Whether this run is a plain restart rather than a rebuild, so the panel can
   // say so instead of showing an empty build log.
   restartOnly: boolean
-  expanded: boolean
 
   begin: (opts: { restartOnly: boolean }) => void
   apply: (ev: ServerUpdateFrame) => void
   socketClosed: () => void
-  setExpanded: (expanded: boolean) => void
   reset: () => void
 }
 
@@ -50,7 +48,6 @@ export const useServerUpdateStore = create<ServerUpdateState>((set, get) => ({
   error: null,
   outcome: null,
   restartOnly: false,
-  expanded: false,
 
   begin: ({ restartOnly }) =>
     set({ running: true, phase: null, lines: [], error: null, outcome: null, restartOnly }),
@@ -70,9 +67,6 @@ export const useServerUpdateStore = create<ServerUpdateState>((set, get) => ({
         running: false,
         error: ev.error ?? null,
         outcome: ev.error ? 'failed' : 'done',
-        // A failed build is the case you actually need to read, so open the log
-        // rather than making the user go looking for it.
-        expanded: ev.error ? true : get().expanded,
       })
     }
   },
@@ -94,9 +88,8 @@ export const useServerUpdateStore = create<ServerUpdateState>((set, get) => ({
     }
   },
 
-  setExpanded: (expanded) => set({ expanded }),
   reset: () =>
-    set({ running: false, phase: null, lines: [], error: null, outcome: null, expanded: false }),
+    set({ running: false, phase: null, lines: [], error: null, outcome: null }),
 }))
 
 // connectUpdateStream subscribes to the server's update log and feeds the store.

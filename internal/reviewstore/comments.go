@@ -414,25 +414,66 @@ func DeleteDraft(projectRoot, id string, n int) error {
 	return errtrace.Wrap(ErrNoComment)
 }
 
-// SetResolved marks a comment resolved (or reopens it). Allowed on a PUBLISHED
-// comment - and only meaningful there - because it is a state change rather than
-// an edit of content: the body stays exactly as written, and a reader can still
-// see both what was said and that it has been dealt with.
+// SetResolved marks a comment's whole thread resolved (or reopens it). A native
+// thread is its root comment plus every reply descended from it; resolution is a
+// property of that conversation, not of one message inside it. Accepting any
+// member's number also keeps permalinks and agent tool calls unsurprising.
+//
+// Allowed on a PUBLISHED comment - and only meaningful there - because it is a
+// state change rather than an edit of content: every body stays exactly as
+// written and a reader can still see both what was said and that it was handled.
 func SetResolved(projectRoot, id string, n int, resolved bool) (Comment, error) {
 	all := LoadComments(projectRoot, id)
-	for i, c := range all {
-		if c.Number != n {
+	byNumber := make(map[int]Comment, len(all))
+	for _, c := range all {
+		byNumber[c.Number] = c
+	}
+	target, ok := byNumber[n]
+	if !ok {
+		return Comment{}, errtrace.Wrap(ErrNoComment)
+	}
+
+	rootNumber := target.Number
+	seen := map[int]bool{}
+	for target.ReplyTo > 0 && !seen[target.Number] {
+		seen[target.Number] = true
+		parent, exists := byNumber[target.ReplyTo]
+		if !exists {
+			break
+		}
+		target = parent
+		rootNumber = parent.Number
+	}
+
+	now := ""
+	if resolved {
+		now = time.Now().Format(time.RFC3339)
+	}
+	inThread := map[int]bool{rootNumber: true}
+	changed := true
+	for changed {
+		changed = false
+		for _, c := range all {
+			if c.ReplyTo > 0 && inThread[c.ReplyTo] && !inThread[c.Number] {
+				inThread[c.Number] = true
+				changed = true
+			}
+		}
+	}
+	for i := range all {
+		if !inThread[all[i].Number] {
 			continue
 		}
 		all[i].Resolved = resolved
-		all[i].ResolvedAt = ""
-		if resolved {
-			all[i].ResolvedAt = time.Now().Format(time.RFC3339)
+		all[i].ResolvedAt = now
+	}
+	if err := saveComments(projectRoot, id, all); err != nil {
+		return Comment{}, errtrace.Wrap(err)
+	}
+	for _, c := range all {
+		if c.Number == n {
+			return c, nil
 		}
-		if err := saveComments(projectRoot, id, all); err != nil {
-			return Comment{}, errtrace.Wrap(err)
-		}
-		return all[i], nil
 	}
 	return Comment{}, errtrace.Wrap(ErrNoComment)
 }
