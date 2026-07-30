@@ -24,7 +24,7 @@ const DIRECT_URI_RE = /^(https?:|data:)/i
 // Where to fetch an image icon from: an http(s)/data URI is used verbatim, any
 // other value is a path the backend serves out of the project.
 export function projectImageIconSrc(icon: string, projectId: string): string {
-  return DIRECT_URI_RE.test(icon) ? icon : `/project-icon/projects/${encodeURIComponent(projectId)}`
+  return DIRECT_URI_RE.test(icon) ? icon : `/api/projects/${encodeURIComponent(projectId)}/icon`
 }
 
 // Whether an icon value that is neither an image nor a lucide name should be

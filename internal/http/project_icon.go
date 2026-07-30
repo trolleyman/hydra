@@ -19,8 +19,9 @@ func isImageIcon(icon string) bool {
 }
 
 // HandleProjectIcon serves a project's icon image when its configured icon is a
-// local file path. Registered outside the OpenAPI mux because it returns raw
-// bytes, not JSON. GET only; the icon path is operator-configured (the user
+// local file path. Documented in api/openapi.yaml under the
+// `manual` tag but hand-served, because it returns raw bytes and needs the
+// ResponseWriter directly. GET only; the icon path is operator-configured (the user
 // administers the project they registered), so a relative path is resolved
 // against the project root and an absolute path is used as-is. Non-image icons
 // (emoji, lucide names) and http(s)/data URIs never reach here - the web UI only

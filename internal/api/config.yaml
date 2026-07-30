@@ -8,3 +8,11 @@ generate:
 output-options:
   # to make sure that all types are generated
   skip-prune: true
+  # Routes tagged `manual` are documented in the spec but hand-registered on the
+  # mux (see the "Hand-served routes" note in api/openapi.yaml). They are excluded
+  # here because strict-server owns the ResponseWriter, and every blob route among
+  # them needs it directly for http.ServeContent - range and conditional requests,
+  # plus per-file Content-Type sniffing. skip-prune above keeps their schemas
+  # generated regardless, so the hand-written handlers still share the API types.
+  exclude-tags:
+    - manual

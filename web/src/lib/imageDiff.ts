@@ -18,7 +18,7 @@ export function isImagePath(p: string): boolean {
 // endpoint the repository browser uses for image previews. Used by the
 // branch-compare diff, where both sides are real refs.
 export function repoBlobUrl(projectId: string, filePath: string, ref: string): string {
-  return `/repository/projects/${encodeURIComponent(projectId)}/blob?path=${encodeURIComponent(filePath)}&ref=${encodeURIComponent(ref)}`
+  return `/api/projects/${encodeURIComponent(projectId)}/repository/blob?path=${encodeURIComponent(filePath)}&ref=${encodeURIComponent(ref)}`
 }
 
 // agentBlobUrl points at the raw bytes of a file as seen in an agent's diff.
@@ -31,7 +31,7 @@ export function agentBlobUrl(
   filePath: string,
   opts: { ref?: string; worktree?: boolean },
 ): string {
-  const base = `/repository/projects/${encodeURIComponent(projectId)}/agents/${encodeURIComponent(agentId)}/blob?path=${encodeURIComponent(filePath)}`
+  const base = `/api/projects/${encodeURIComponent(projectId)}/agents/${encodeURIComponent(agentId)}/repository/blob?path=${encodeURIComponent(filePath)}`
   if (opts.worktree) return `${base}&worktree=true`
   return `${base}&ref=${encodeURIComponent(opts.ref ?? '')}`
 }

@@ -23,19 +23,28 @@
 
 export type PictureKind = 'artifact' | 'agent-file' | 'upload' | 'other'
 
+// Whole-path patterns, not prefixes. These routes used to live at three distinct
+// top-level prefixes (/artifacts/, /agent-files/, /uploads/), so a startsWith was
+// enough to tell them apart. Under /api/ they share one, and the segment that
+// discriminates now sits AFTER the project id - so the shape has to be matched,
+// not the head of the string. Anchored at both ends, which also subsumes what the
+// prefix check was guarding against: a filename containing "/uploads/" cannot be
+// mistaken for an upload, because a pathname is only ever these exact routes.
+const ARTIFACT_BLOB_RE = /^\/api\/projects\/[^/]+\/artifacts\/blob$/
+const AGENT_FILE_BLOB_RE = /^\/api\/projects\/[^/]+\/agents\/[^/]+\/files\/blob$/
+const UPLOAD_BLOB_RE = /^\/api\/projects\/[^/]+\/uploads\/blob$/
+
 export function pictureKind(url: string | null | undefined): PictureKind {
   if (!url) return 'other'
-  // Path-prefix matching on the route, not a substring search: a filename
-  // containing "/uploads/" must not be mistaken for an upload.
   let path: string
   try {
     path = new URL(url, window.location.origin).pathname
   } catch {
     return 'other'
   }
-  if (path.startsWith('/artifacts/projects/')) return 'artifact'
-  if (path.startsWith('/agent-files/projects/')) return 'agent-file'
-  if (path.startsWith('/uploads/projects/')) return 'upload'
+  if (ARTIFACT_BLOB_RE.test(path)) return 'artifact'
+  if (AGENT_FILE_BLOB_RE.test(path)) return 'agent-file'
+  if (UPLOAD_BLOB_RE.test(path)) return 'upload'
   return 'other'
 }
 

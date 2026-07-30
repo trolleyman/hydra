@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
 )
@@ -75,7 +76,7 @@ func TestHandleUpload(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	var resp uploadResponse
+	var resp api.UploadResponse
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestPruneUploads(t *testing.T) {
 	fresh := write("fresh.png", 1*time.Hour)
 	gitignore := write(".gitignore", 40*24*time.Hour) // must be preserved
 
-	if err := PruneUploads(root, DefaultUploadMaxAge); err != nil {
+	if err := PruneUploads(root, DefaultUploadMaxAge, 0); err != nil {
 		t.Fatalf("prune: %v", err)
 	}
 
@@ -228,8 +229,111 @@ func TestPruneUploads(t *testing.T) {
 
 func TestPruneUploadsMissingDir(t *testing.T) {
 	// Nothing ever uploaded: a missing dir is not an error.
-	if err := PruneUploads(t.TempDir(), DefaultUploadMaxAge); err != nil {
+	if err := PruneUploads(t.TempDir(), DefaultUploadMaxAge, 0); err != nil {
 		t.Errorf("expected nil for missing dir, got %v", err)
+	}
+}
+
+// Directories in the uploads dir are always foreign - nothing in the upload path
+// creates one - and used to be skipped outright, so an agent that used the dir as
+// scratch left a tree there forever. Their files age out on the same rule now,
+// and the emptied tree goes with them in the SAME pass (bottom-up), not one level
+// per hourly tick.
+func TestPruneUploadsRecursesAndReclaimsEmptyDirs(t *testing.T) {
+	root := t.TempDir()
+	dir := paths.GetUploadsDirFromProjectRoot(root)
+	nested := filepath.Join(dir, "stall-20260730", "inner")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	age := func(p string, d time.Duration) {
+		mt := time.Now().Add(-d)
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	staleNested := filepath.Join(nested, "run.log")
+	if err := os.WriteFile(staleNested, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	age(staleNested, 40*24*time.Hour)
+
+	if err := PruneUploads(root, DefaultUploadMaxAge, 0); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+
+	if _, err := os.Stat(staleNested); !os.IsNotExist(err) {
+		t.Errorf("a stale file inside a subdirectory survived, so the sweep is still flat: err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stall-20260730")); !os.IsNotExist(err) {
+		t.Error("the emptied tree survived - both levels should go in one pass, not one level per tick")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("the uploads root itself was removed: %v", err)
+	}
+}
+
+// A directory that still holds a live file must survive, or a fresh paste sitting
+// beside stale scratch would be collateral.
+func TestPruneUploadsKeepsNonEmptyDirs(t *testing.T) {
+	root := t.TempDir()
+	dir := paths.GetUploadsDirFromProjectRoot(root)
+	sub := filepath.Join(dir, "scratch")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fresh := filepath.Join(sub, "keep.png")
+	if err := os.WriteFile(fresh, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := PruneUploads(root, DefaultUploadMaxAge, 0); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("a fresh nested file was reclaimed: %v", err)
+	}
+	if _, err := os.Stat(sub); err != nil {
+		t.Errorf("a non-empty directory was removed: %v", err)
+	}
+}
+
+// The size cap is the bound age alone never provided: every file here is far too
+// young to age out, so only maxBytes can evict, and it must take the OLDEST
+// first.
+func TestPruneUploadsEnforcesByteCap(t *testing.T) {
+	root := t.TempDir()
+	dir := paths.GetUploadsDirFromProjectRoot(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name string, size int, age time.Duration) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mt := time.Now().Add(-age)
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	oldest := write("a.png", 600, 3*time.Hour)
+	middle := write("b.png", 600, 2*time.Hour)
+	newest := write("c.png", 600, 1*time.Hour)
+
+	// 1800 bytes on disk, cap at 1000: the two oldest must go.
+	if err := PruneUploads(root, DefaultUploadMaxAge, 1000); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if _, err := os.Stat(oldest); !os.IsNotExist(err) {
+		t.Errorf("the oldest file survived the byte cap: err=%v", err)
+	}
+	if _, err := os.Stat(middle); !os.IsNotExist(err) {
+		t.Errorf("the cap stopped evicting while still over budget: err=%v", err)
+	}
+	if _, err := os.Stat(newest); err != nil {
+		t.Errorf("the newest file was evicted even though dropping the older two got under the cap: %v", err)
 	}
 }
 

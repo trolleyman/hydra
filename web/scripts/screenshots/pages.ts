@@ -751,7 +751,7 @@ export const pages: {
   // as plain text - GitHub's "raw" page. We navigate straight to that blob
   // URL to document where the Raw button lands. Theme doesn't affect the
   // browser's plain-text rendering, so the light/dark shots match.
-  { name: 'repository-raw', path: '/repository/projects/sim-project/blob?path=internal/server/server.go&ref=main' },
+  { name: 'repository-raw', path: '/api/projects/sim-project/repository/blob?path=internal/server/server.go&ref=main' },
   // The branch selector opened over the source-file view: Hydra agent
   // branches (hydra/*) are listed first.
   {

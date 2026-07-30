@@ -22,7 +22,7 @@ describe('attachmentFromPath', () => {
     expect(a.path).toBe(UPLOAD)
     // The "<unixnano>-" prefix uniqueUploadName adds is dropped for the label.
     expect(a.filename).toBe('image1.png')
-    expect(a.url).toContain('/uploads/projects/proj/blob?name=')
+    expect(a.url).toContain('/api/projects/proj/uploads/blob?name=')
     expect(a.previewUrl).toBe(a.url)
     expect(a.uploading).toBe(false)
   })

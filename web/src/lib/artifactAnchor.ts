@@ -50,7 +50,7 @@ export function artifactRefFromUrl(url: string | null | undefined): ArtifactRef 
 export function artifactBlobUrl(projectId: string | null, a: ReviewImageAnchor): string | null {
   if (!projectId || !a.script || !a.key || !a.file) return null
   const q = new URLSearchParams({ script: a.script, key: a.key, file: a.file })
-  return `/artifacts/projects/${encodeURIComponent(projectId)}/blob?${q.toString()}`
+  return `/api/projects/${encodeURIComponent(projectId)}/artifacts/blob?${q.toString()}`
 }
 
 /** Which half of a comparison a URL is, given the pair. Null when the picture is

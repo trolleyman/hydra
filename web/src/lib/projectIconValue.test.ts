@@ -35,7 +35,7 @@ describe('IMAGE_ICON_RE', () => {
 describe('projectImageIconSrc', () => {
   it('uses a URI verbatim and routes a path through the backend', () => {
     expect(projectImageIconSrc('https://example.com/a.png', 'p')).toBe('https://example.com/a.png')
-    expect(projectImageIconSrc('assets/a.png', 'my project')).toBe('/project-icon/projects/my%20project')
+    expect(projectImageIconSrc('assets/a.png', 'my project')).toBe('/api/projects/my%20project/icon')
   })
 })
 

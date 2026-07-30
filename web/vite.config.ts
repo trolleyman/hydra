@@ -84,17 +84,13 @@ export default defineConfig({
   server: {
     port: devPort,
     proxy: {
+      // Every backend route the browser calls now lives under /api (including
+      // the hand-served blob + log + upload + folder-picker ones, which used to
+      // need a proxy entry each - and were missed often enough that /tests and
+      // /project-icon never got one). A new backend route needs no change here.
       '/api': apiBase,
-      '/uploads': apiBase,
-      '/folder-picker': apiBase,
       '/health': apiBase,
       '/.well-known': apiBase,
-      // Non-OpenAPI blob + log routes served by both the real and simulation
-      // servers (repository image/text bytes, the artifacts "Show build log"
-      // toggle). Needed for the diff viewer's images to load when browsing
-      // through this dev server (e.g. `mage demo`).
-      '/repository': apiBase,
-      '/artifacts': apiBase,
       '/ws': { target: `ws://localhost:${apiPort}`, ws: true },
     },
   },

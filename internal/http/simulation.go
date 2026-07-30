@@ -1618,11 +1618,11 @@ func (s *SimulationServer) GetAgentTests(w http.ResponseWriter, r *http.Request,
 // Without it a settled card's log button would sit permanently disabled in the
 // simulation, which is not what a real settled run looks like.
 func simTestLogURL(runner string) string {
-	return "/tests/projects/sim-project/log?runner=" + runner + "&key=commit/a1b2c3d"
+	return "/api/projects/sim-project/tests/log?runner=" + runner + "&key=commit/a1b2c3d"
 }
 
 // HandleTestLog serves the persisted build log ({lines:[...]}) for a settled
-// runner, mirroring the real server's non-OpenAPI route (Server.HandleTestLog).
+// runner, mirroring the real server's hand-served route (Server.HandleTestLog).
 // The failing runner resolves to a failing log, so the red-bordered terminal
 // treatment is exercised too.
 func (s *SimulationServer) HandleTestLog(w http.ResponseWriter, r *http.Request) {
@@ -2952,7 +2952,7 @@ func simArtifactBlob(script, key, file, dataURL string) string {
 	q.Set("key", key)
 	q.Set("file", file)
 	q.Set("d", dataURL)
-	return "/artifacts/projects/sim-project/blob?" + q.Encode()
+	return "/api/projects/sim-project/artifacts/blob?" + q.Encode()
 }
 
 type simBlobKey struct{ script, key, file string }
@@ -2963,7 +2963,7 @@ var (
 )
 
 // HandleArtifactBlob serves a simulated artifact's bytes, mirroring the real
-// server's non-OpenAPI route. The content is carried in the request itself (see
+// server's hand-served route. The content is carried in the request itself (see
 // simArtifactBlob), so there is nothing to look up: this decodes the data URL it
 // was handed back into bytes and a content type.
 func (s *SimulationServer) HandleArtifactBlob(w http.ResponseWriter, r *http.Request) {
@@ -3124,7 +3124,7 @@ func simArtifactFailedLog(script string) []api.ArtifactLogLine {
 // opaque to the real server; here HandleArtifactLog inspects it ("error" → failed
 // log) so the failure sets resolve to a believable red-bordered terminal.
 func simLogURL(script, key string) string {
-	return "/artifacts/projects/sim-project/log?script=" + script + "&key=" + key
+	return "/api/projects/sim-project/artifacts/log?script=" + script + "&key=" + key
 }
 
 // The bodies behind the "files" set's text artifacts. Each pair is a before and
@@ -3247,7 +3247,7 @@ func simLightboxSet() api.ArtifactSet {
 				// card is one ←/→ step away from the viewers that do render.
 				Name:       "bundle.tgz",
 				ChangeType: api.ArtifactFileChangeTypeAdded,
-				RightUrl:   ptr("/artifacts/projects/sim-project/blob?script=files&key=commit/bbbb&file=bundle.tgz"),
+				RightUrl:   ptr("/api/projects/sim-project/artifacts/blob?script=files&key=commit/bbbb&file=bundle.tgz"),
 				Size:       ptr(int64(9437184)),
 			},
 		},
@@ -3472,8 +3472,8 @@ func simReadyChangedSet() api.ArtifactSet {
 				Name:       "app-debug.apk",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("variant::debug"),
-				LeftUrl:    ptr("/artifacts/projects/sim-project/blob?script=screenshots&key=commit/aaaa&file=app-debug.apk"),
-				RightUrl:   ptr("/artifacts/projects/sim-project/blob?script=screenshots&key=commit/bbbb&file=app-debug.apk"),
+				LeftUrl:    ptr("/api/projects/sim-project/artifacts/blob?script=screenshots&key=commit/aaaa&file=app-debug.apk"),
+				RightUrl:   ptr("/api/projects/sim-project/artifacts/blob?script=screenshots&key=commit/bbbb&file=app-debug.apk"),
 				Size:       ptr(int64(48522619)),
 			},
 		},
@@ -4053,7 +4053,7 @@ func (s *SimulationServer) GetRepositoryArtifacts(w http.ResponseWriter, r *http
 // show off the flex-wrap layout); "components" demonstrates the in-flight
 // generating state; any other name is a 404.
 func (s *SimulationServer) GetRepositoryArtifact(w http.ResponseWriter, r *http.Request, projectId string, name string, params api.GetRepositoryArtifactParams) {
-	logURL := "/artifacts/projects/" + projectId + "/log?script=" + name + "&key=commit/a1b2c3d"
+	logURL := "/api/projects/" + projectId + "/artifacts/log?script=" + name + "&key=commit/a1b2c3d"
 	switch name {
 	case "screenshots":
 		api.WriteJSON(w, http.StatusOK, api.RepositoryArtifactResponse{
@@ -4084,7 +4084,7 @@ func (s *SimulationServer) GetRepositoryArtifact(w http.ResponseWriter, r *http.
 }
 
 // HandleArtifactLog serves the persisted build log ({lines:[...]}) for a settled
-// script, mirroring the real server's non-OpenAPI route (Server.HandleArtifactLog)
+// script, mirroring the real server's hand-served route (Server.HandleArtifactLog)
 // so the "Show build log" toggle resolves to a real terminal in simulation mode.
 // It's addressed by an opaque (script, key) URL the set hands out, so any request
 // just returns the canned generation log.

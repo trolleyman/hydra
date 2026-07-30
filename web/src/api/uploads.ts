@@ -1,24 +1,24 @@
 // File uploads for pasted/attached prompt assets.
 //
 // The generated OpenAPI client only handles JSON bodies, so uploads use a raw
-// multipart request against the same-origin /uploads endpoint (proxied to the
-// backend in dev - see vite.config.ts). The backend stores the file under the
+// multipart request against the same-origin POST /api/projects/{id}/uploads
+// route (documented in api/openapi.yaml under the `manual` tag, hand-served
+// because of the multipart body). The backend stores the file under the
 // project's .hydra/local/uploads dir and returns its absolute path, which is valid
 // both on the host and inside the agent sandbox. Inserting that path into the
 // prompt/terminal lets the agent read the file directly.
 
-export interface UploadResult {
-  /** Absolute path of the stored file, readable by the agent. */
-  path: string
-  /** Sanitized on-disk filename. */
-  filename: string
-}
+import type { UploadResponse } from './models/UploadResponse'
+
+// From the spec, not hand-copied - see the note in folderPicker.ts. `path` is the
+// absolute host path (readable by the agent), `filename` the sanitized on-disk name.
+export type UploadResult = UploadResponse
 
 export async function uploadFile(projectId: string | null, file: File): Promise<UploadResult> {
   const form = new FormData()
   form.append('file', file, file.name || 'paste')
   const pid = projectId ? encodeURIComponent(projectId) : '_'
-  const res = await fetch(`/uploads/projects/${pid}`, {
+  const res = await fetch(`/api/projects/${pid}/uploads`, {
     method: 'POST',
     body: form,
   })
@@ -31,21 +31,21 @@ export async function uploadFile(projectId: string | null, file: File): Promise<
 
 // URL that serves a stored upload's bytes by its on-disk filename, so the UI can
 // render an image attachment (thumbnail + lightbox) for a path embedded in an
-// already-submitted prompt. Backed by GET /uploads/projects/{id}/blob.
+// already-submitted prompt. Backed by GET /api/projects/{id}/uploads/blob.
 export function uploadBlobUrl(projectId: string | null, filename: string): string {
   const pid = projectId ? encodeURIComponent(projectId) : '_'
-  return `/uploads/projects/${pid}/blob?name=${encodeURIComponent(filename)}`
+  return `/api/projects/${pid}/uploads/blob?name=${encodeURIComponent(filename)}`
 }
 
 // URL that serves a file an agent referenced by path in a chat message (a
 // screenshot it wrote to its worktree or to /tmp). The path is sent exactly as
 // the agent wrote it; the backend translates it to its host location and serves
 // it only if it lands inside that head's worktree, private /tmp, or the project's
-// uploads dir. Backed by GET /agent-files/projects/{id}/agents/{id}/blob.
+// uploads dir. Backed by GET /api/projects/{id}/agents/{id}/files/blob.
 export function agentFileUrl(projectId: string, agentId: string, path: string): string {
   const pid = encodeURIComponent(projectId)
   const aid = encodeURIComponent(agentId)
-  return `/agent-files/projects/${pid}/agents/${aid}/blob?path=${encodeURIComponent(path)}`
+  return `/api/projects/${pid}/agents/${aid}/files/blob?path=${encodeURIComponent(path)}`
 }
 
 const IMAGE_RE = /^image\//

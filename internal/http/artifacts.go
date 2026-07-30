@@ -542,7 +542,7 @@ func blobURL(projectID, script, key, file string) string {
 	q.Set("script", script)
 	q.Set("key", key)
 	q.Set("file", file)
-	return fmt.Sprintf("/artifacts/projects/%s/blob?%s", url.PathEscape(projectID), q.Encode())
+	return fmt.Sprintf("/api/projects/%s/artifacts/blob?%s", url.PathEscape(projectID), q.Encode())
 }
 
 // logURL builds the (same-origin) URL the frontend fetches a settled side's
@@ -551,7 +551,7 @@ func logURL(projectID, script, key string) string {
 	q := url.Values{}
 	q.Set("script", script)
 	q.Set("key", key)
-	return fmt.Sprintf("/artifacts/projects/%s/log?%s", url.PathEscape(projectID), q.Encode())
+	return fmt.Sprintf("/api/projects/%s/artifacts/log?%s", url.PathEscape(projectID), q.Encode())
 }
 
 // nonEmptyPtr returns &s, or nil when s is empty, so an absent progress line
@@ -580,7 +580,7 @@ func earliestStart(a, b int64) int64 {
 
 // HandleArtifactLog serves the persisted build log (JSON {lines:[...]}) for one
 // settled side of a script, so the panel can reopen the log after generation
-// finishes. Registered outside the OpenAPI mux (like HandleArtifactBlob) because
+// finishes. Hand-served (like HandleArtifactBlob; tag `manual`) because
 // it is addressed by the opaque (script, key) URL the set hands out.
 func (s *Server) HandleArtifactLog(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project_id")
@@ -597,13 +597,12 @@ func (s *Server) HandleArtifactLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	api.WriteJSON(w, http.StatusOK, struct {
-		Lines []api.ArtifactLogLine `json:"lines"`
-	}{Lines: toAPILog(lines)})
+	api.WriteJSON(w, http.StatusOK, api.ArtifactLogResponse{Lines: toAPILog(lines)})
 }
 
 // HandleArtifactBlob serves a single generated artifact file. It is registered
-// outside the OpenAPI mux because it returns raw image bytes, not JSON.
+// hand-served (tag `manual`) because it returns raw image bytes and needs the
+// ResponseWriter directly for ServeContent.
 func (s *Server) HandleArtifactBlob(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project_id")
 	projectRoot, err := s.resolveProjectRoot(projectID)

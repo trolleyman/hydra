@@ -178,30 +178,30 @@ func runSimulationServer() error {
 	mux.HandleFunc("/ws/projects/{project_id}/events", server.HandleEventsWS)
 
 	// Raw repository blob - image bytes and raw text (mirrors the real server's
-	// non-OpenAPI route; backs the image preview and the file viewer's Raw link).
-	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
-	mux.HandleFunc("/repository/projects/{project_id}/agents/{id}/blob", server.HandleAgentBlob)
+	// hand-served route; backs the image preview and the file viewer's Raw link).
+	mux.HandleFunc("/api/projects/{project_id}/repository/blob", server.HandleRepositoryBlob)
+	mux.HandleFunc("/api/projects/{project_id}/agents/{id}/repository/blob", server.HandleAgentBlob)
 
 	// Images an agent embedded in a chat message by local path (mirrors the real
-	// server's non-OpenAPI route), so the inline-image rendering can be demoed.
-	mux.HandleFunc("GET /agent-files/projects/{project_id}/agents/{id}/blob", server.HandleAgentFileBlob)
+	// server's hand-served route), so the inline-image rendering can be demoed.
+	mux.HandleFunc("GET /api/projects/{project_id}/agents/{id}/files/blob", server.HandleAgentFileBlob)
 
 	// Persisted build logs behind the artifacts / tests "Show build log" toggles
-	// (mirrors the real server's non-OpenAPI routes), so those toggles can be
+	// (mirrors the real server's hand-served routes), so those toggles can be
 	// screenshotted - and so a settled test card's log button is live, as it is
 	// against a real project.
 	// Simulated artifact bytes. The pictures are addressed the way generated ones
 	// are (blob?script=&key=&file=), because that triple is an artifact's identity
 	// and the review pins derive their anchor from it - a data URL is a picture
 	// nothing can be pinned to. See simArtifactBlob.
-	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
-	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
-	mux.HandleFunc("/tests/projects/{project_id}/log", server.HandleTestLog)
+	mux.HandleFunc("/api/projects/{project_id}/artifacts/blob", server.HandleArtifactBlob)
+	mux.HandleFunc("/api/projects/{project_id}/artifacts/log", server.HandleArtifactLog)
+	mux.HandleFunc("/api/projects/{project_id}/tests/log", server.HandleTestLog)
 
 	// Simulated self-update stream, so the update panel is drivable here too.
 	mux.HandleFunc("/ws/server/update", server.HandleServerUpdateWS)
 
-	// Auth status (mirrors the real server's non-OpenAPI route): the sim is
+	// Auth status (mirrors the real server's hand-served route): the sim is
 	// always local/authenticated. Without it every page load logs a 404 in the
 	// console - noise when the sim is used as a live preview.
 	mux.HandleFunc("GET /api/auth/status", func(w http.ResponseWriter, _ *http.Request) {
@@ -209,11 +209,11 @@ func runSimulationServer() error {
 		_, _ = w.Write([]byte(`{"auth_required":false,"authenticated":true}`))
 	})
 
-	// Folder-picker availability (mirrors the real server's non-OpenAPI route).
+	// Folder-picker availability (mirrors the real server's hand-served route).
 	// The sim has no native picker to open, so it answers "no" - the project
 	// dropdown just hides its "Browse..." button. Same reason as the auth route:
 	// without it every project-dropdown open logs a 404.
-	mux.HandleFunc("GET /folder-picker/available", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/folder-picker/available", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"available":false}`))
 	})

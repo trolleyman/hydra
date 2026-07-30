@@ -55,15 +55,19 @@ func (a *Authenticator) Enabled() bool { return a != nil && a.key != "" }
 // embedded SPA shell, its JS/CSS assets, /health, and /api/auth/*) stays open so
 // an unauthenticated remote browser can still load the page and show the login
 // screen.
+//
+// This list used to name one prefix per hand-served route family - /artifacts/,
+// /uploads/, /shells/ and so on - which made it a thing somebody had to remember
+// to extend. Twice nobody did: /tests/projects/{id}/log (whole test and build
+// output) and /project-icon/projects/{id} were both reachable from an
+// unauthenticated remote client for as long as they existed. Every one of those
+// routes now lives under /api/, so this list is three ENTIRE namespaces rather
+// than an enumeration, and a new route is gated by where it is registered rather
+// than by anyone updating this slice. Keep it that way: if a route needs a new
+// top-level prefix here, that is the signal it belongs under /api/ instead.
 var protectedPrefixes = []string{
 	"/api/",
 	"/ws/",
-	"/shells/",
-	"/artifacts/",
-	"/repository/",
-	"/agent-files/",
-	"/uploads/",
-	"/folder-picker/",
 	"/.well-known/",
 }
 

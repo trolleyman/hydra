@@ -6,9 +6,11 @@ import type { BaseHttpRequest } from './core/BaseHttpRequest';
 import type { OpenAPIConfig } from './core/OpenAPI';
 import { FetchHttpRequest } from './core/FetchHttpRequest';
 import { DefaultService } from './services/DefaultService';
+import { ManualService } from './services/ManualService';
 type HttpRequestConstructor = new (config: OpenAPIConfig) => BaseHttpRequest;
 export class Hydra {
     public readonly default: DefaultService;
+    public readonly manual: ManualService;
     public readonly request: BaseHttpRequest;
     constructor(config?: Partial<OpenAPIConfig>, HttpRequest: HttpRequestConstructor = FetchHttpRequest) {
         this.request = new HttpRequest({
@@ -23,6 +25,7 @@ export class Hydra {
             ENCODE_PATH: config?.ENCODE_PATH,
         });
         this.default = new DefaultService(this.request);
+        this.manual = new ManualService(this.request);
     }
 }
 

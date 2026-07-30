@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
@@ -114,6 +115,10 @@ func (s *Server) notifyFailingTestsOnce(ctx context.Context, projectRoot string)
 			continue
 		}
 		v := hydratests.Version{Ref: *head.Branch}
+		// Deferred and computed at most once per head: only a head that actually
+		// has a red verdict pays for the git call, rather than every head on every
+		// tick. See headHasOwnCommits for why the gate exists.
+		hasOwnCommits := sync.OnceValue(func() bool { return headHasOwnCommits(projectRoot, head) })
 		for _, r := range s.testRunnersFor(projectRoot, v, cfg) {
 			rep, ok, err := mgr.Peek(r.Name, v)
 			if err != nil || !ok {
@@ -128,6 +133,11 @@ func (s *Server) notifyFailingTestsOnce(ctx context.Context, projectRoot string)
 			if rep.Status != hydratests.StatusFailing {
 				continue
 			}
+			// Before the dedup entry, for the same reason the idle check is: a head
+			// we are not going to tell should not have the news marked delivered.
+			if !hasOwnCommits() {
+				continue
+			}
 			if !markTestNotified(head.ID, r.Name, rep.Key) {
 				continue
 			}
@@ -140,6 +150,35 @@ func (s *Server) notifyFailingTestsOnce(ctx context.Context, projectRoot string)
 			log.Printf("tests: %s went red for %s (%s)", name, headID, rep.Key)
 		}
 	}
+}
+
+// headHasOwnCommits reports whether the head's branch carries a commit its base
+// does not.
+//
+// A head that has committed nothing is sitting on its base branch's tip, so the
+// verdict cached against that tip is the BASE's news, not the head's. Telling it
+// "tests are failing on your branch" sends it hunting for a break it did not
+// cause and cannot see in its own diff - which is exactly what happened to the
+// head that wrote this: its branch was identical to main, main was red, and it
+// spent a turn discovering the failure was inherited.
+//
+// Uncommitted work in the worktree is deliberately NOT enough. Runs are keyed by
+// branch tip (hydratests.Version{Ref: *head.Branch}), so until the head commits,
+// the verdict genuinely describes the base and the message would still be wrong.
+//
+// Fails OPEN - a head with no recorded base, or refs git cannot resolve, is
+// notified as before. This is a noise filter sitting in front of the dedup and
+// streak caps, not a correctness boundary, and a missed red suite costs more than
+// a spurious message.
+func headHasOwnCommits(projectRoot string, head *heads.Head) bool {
+	if head.Branch == nil || head.BaseBranch == "" {
+		return true
+	}
+	ahead, _, ok := git.AheadBehind(projectRoot, *head.Branch, head.BaseBranch)
+	if !ok {
+		return true
+	}
+	return ahead > 0
 }
 
 // markTestNotified records a (runner, commit) as reported and reports whether it

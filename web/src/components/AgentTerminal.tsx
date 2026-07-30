@@ -964,7 +964,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
       const pid = projectId ? encodeURIComponent(projectId) : '_'
       const params = new URLSearchParams({ shell_id: id })
       if (tab.sandboxed === false) params.set('sandboxed', 'false')
-      void fetch(`/shells/projects/${pid}/agents/${encodeURIComponent(agentId)}/close?${params.toString()}`, {
+      void fetch(`/api/projects/${pid}/agents/${encodeURIComponent(agentId)}/shell/close?${params.toString()}`, {
         method: 'POST',
       }).catch(() => { /* best-effort; the idle reaper is the backstop */ })
     }

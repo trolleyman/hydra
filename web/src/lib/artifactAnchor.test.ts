@@ -5,7 +5,7 @@ import {
   formatTimecode, sameArtifactPicture, sideOfUrl,
 } from './artifactAnchor'
 
-const BLOB = '/artifacts/projects/p1/blob?script=screenshots&key=commit%2Fabc1234def0567&file=home-dark.png'
+const BLOB = '/api/projects/p1/artifacts/blob?script=screenshots&key=commit%2Fabc1234def0567&file=home-dark.png'
 
 describe('artifactRefFromUrl', () => {
   it('recovers the triple that addresses an artifact blob', () => {
@@ -21,9 +21,9 @@ describe('artifactRefFromUrl', () => {
   // against a missing script/key could never be resolved back to a picture.
   it.each([
     ['a data URL', 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='],
-    ['an upload', '/uploads/projects/p1/blob?name=1699-shot.png'],
-    ['an agent file', '/agent-files/projects/p1/agents/a1/blob?path=%2Ftmp%2Fx.png'],
-    ['a blob URL missing the file', '/artifacts/projects/p1/blob?script=s&key=commit%2Fa'],
+    ['an upload', '/api/projects/p1/uploads/blob?name=1699-shot.png'],
+    ['an agent file', '/api/projects/p1/agents/a1/files/blob?path=%2Ftmp%2Fx.png'],
+    ['a blob URL missing the file', '/api/projects/p1/artifacts/blob?script=s&key=commit%2Fa'],
     ['nothing at all', ''],
   ])('returns null for %s', (_label, url) => {
     expect(artifactRefFromUrl(url)).toBeNull()

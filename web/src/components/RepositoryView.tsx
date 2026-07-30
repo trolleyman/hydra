@@ -169,7 +169,7 @@ function useFileActions(file: RepositoryFileResponse, projectId: string, refStr:
   const { state, flash } = useCopyFlash()
   const available = !(file.symlink && !file.target_path)
   const contentPath = file.target_path ?? file.path
-  const rawUrl = `/repository/projects/${encodeURIComponent(projectId)}/blob?path=${encodeURIComponent(contentPath)}&ref=${encodeURIComponent(refStr)}`
+  const rawUrl = `/api/projects/${encodeURIComponent(projectId)}/repository/blob?path=${encodeURIComponent(contentPath)}&ref=${encodeURIComponent(refStr)}`
   const isImg = isImage(contentPath)
   // Copy applies to text (file.content) or an image the browser can put on the
   // clipboard; binaries have neither, so it's hidden for them.
@@ -587,7 +587,7 @@ function FileContent({
   const contentPath = file.target_path ?? file.path
 
   if (isImage(contentPath)) {
-    const url = `/repository/projects/${encodeURIComponent(projectId)}/blob?path=${encodeURIComponent(contentPath)}&ref=${encodeURIComponent(refStr)}`
+    const url = `/api/projects/${encodeURIComponent(projectId)}/repository/blob?path=${encodeURIComponent(contentPath)}&ref=${encodeURIComponent(refStr)}`
     return (
       <div className="min-h-full flex flex-col items-center justify-center gap-3 p-6 bg-gray-50 dark:bg-gray-800/40">
         <img

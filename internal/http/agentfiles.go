@@ -105,7 +105,7 @@ func resolveAgentFile(projectRoot, worktree, tmpDir, raw string) string {
 }
 
 // HandleAgentFileBlob serves an image or video file an agent referenced by path
-// in a chat message. Registered outside the OpenAPI mux (like HandleAgentBlob)
+// in a chat message. Hand-served (like HandleAgentBlob; tag `manual`)
 // because it returns raw bytes. Query: path (required) - absolute as the agent
 // saw it, or relative to its worktree.
 func (s *Server) HandleAgentFileBlob(w http.ResponseWriter, r *http.Request) {

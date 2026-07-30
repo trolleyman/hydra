@@ -669,7 +669,7 @@ func (s *Server) GetRepositoryFile(_ context.Context, request api.GetRepositoryF
 }
 
 // HandleRepositoryBlob serves the raw bytes of a repo-relative file at a ref. It
-// is registered outside the OpenAPI mux because it returns raw bytes (so the
+// is hand-served (tag `manual`) because it returns raw bytes (so the
 // repository browser can render binary images via an <img> tag) rather than the
 // JSON envelope of GetRepositoryFile. Query: path (required), ref (optional).
 func (s *Server) HandleRepositoryBlob(w http.ResponseWriter, r *http.Request) {

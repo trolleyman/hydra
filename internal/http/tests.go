@@ -291,7 +291,7 @@ func testLogURL(projectID, runner, key string) string {
 	q := url.Values{}
 	q.Set("runner", runner)
 	q.Set("key", key)
-	return fmt.Sprintf("/tests/projects/%s/log?%s", url.PathEscape(projectID), q.Encode())
+	return fmt.Sprintf("/api/projects/%s/tests/log?%s", url.PathEscape(projectID), q.Encode())
 }
 
 // HandleTestLog serves the persisted build log for one settled test run, mirroring
@@ -310,9 +310,7 @@ func (s *Server) HandleTestLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	api.WriteJSON(w, http.StatusOK, struct {
-		Lines []api.ArtifactLogLine `json:"lines"`
-	}{Lines: toAPITestLog(lines)})
+	api.WriteJSON(w, http.StatusOK, api.ArtifactLogResponse{Lines: toAPITestLog(lines)})
 }
 
 // testSummaryFor computes the compact per-head verdict chip for the head's branch

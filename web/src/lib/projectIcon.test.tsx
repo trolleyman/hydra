@@ -40,7 +40,7 @@ describe('ProjectIcon', () => {
   it('renders an image icon through the backend route', () => {
     const { container } = render(<ProjectIcon icon="logo.png" projectId="my project" size={16} />)
     const img = container.querySelector('img')
-    expect(img?.getAttribute('src')).toBe('/project-icon/projects/my%20project')
+    expect(img?.getAttribute('src')).toBe('/api/projects/my%20project/icon')
   })
 
   it('falls back to the project initial with no icon set', () => {

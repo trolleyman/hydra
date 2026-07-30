@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+
+	"github.com/trolleyman/hydra/internal/api"
 )
 
 // Native folder picker.
@@ -20,7 +22,7 @@ import (
 // absolute path back to the browser - something a browser-side picker can't do,
 // since browsers deliberately hide absolute filesystem paths.
 //
-// Two non-OpenAPI routes back this (raw handlers, mirroring uploads/terminal):
+// Two hand-served routes back this (tag `manual`, mirroring uploads/terminal):
 //   - GET  /folder-picker/available - whether to show the "Browse..." button.
 //   - POST /folder-picker/open      - blocks until the user picks or cancels.
 //
@@ -89,7 +91,7 @@ func (s *Server) HandleFolderPickerAvailable(w http.ResponseWriter, r *http.Requ
 	if isLoopbackRequest(r) {
 		_, _, available = lookupFolderPicker()
 	}
-	writeJSONResponse(w, http.StatusOK, map[string]bool{"available": available})
+	writeJSONResponse(w, http.StatusOK, api.FolderPickerAvailableResponse{Available: available})
 }
 
 // HandleFolderPickerOpen pops the native folder dialog and blocks until the
@@ -122,16 +124,16 @@ func (s *Server) HandleFolderPickerOpen(w http.ResponseWriter, r *http.Request) 
 		// dialogs; we can't reliably distinguish it from a genuine failure, so
 		// log for diagnosis and treat it as a cancel from the UI's view.
 		log.Printf("folder picker (%s) exited without a selection: %v", name, err)
-		writeJSONResponse(w, http.StatusOK, map[string]any{"cancelled": true})
+		writeJSONResponse(w, http.StatusOK, api.FolderPickerOpenResponse{Cancelled: ptr(true)})
 		return
 	}
 
 	path := strings.TrimSpace(string(out))
 	if path == "" {
-		writeJSONResponse(w, http.StatusOK, map[string]any{"cancelled": true})
+		writeJSONResponse(w, http.StatusOK, api.FolderPickerOpenResponse{Cancelled: ptr(true)})
 		return
 	}
-	writeJSONResponse(w, http.StatusOK, map[string]any{"path": path})
+	writeJSONResponse(w, http.StatusOK, api.FolderPickerOpenResponse{Path: &path})
 }
 
 func writeJSONResponse(w http.ResponseWriter, status int, body any) {

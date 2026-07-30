@@ -861,6 +861,11 @@ type ArtifactLogLine struct {
 // ArtifactLogLineStream Which stream the line came from; stderr is rendered in red
 type ArtifactLogLineStream string
 
+// ArtifactLogResponse defines model for ArtifactLogResponse.
+type ArtifactLogResponse struct {
+	Lines []ArtifactLogLine `json:"lines"`
+}
+
 // ArtifactScript A per-project script that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
 type ArtifactScript struct {
 	// CleanIgnored Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
@@ -2045,6 +2050,21 @@ type ErrorResponse struct {
 
 // ErrorResponseError Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
 type ErrorResponseError string
+
+// FolderPickerAvailableResponse defines model for FolderPickerAvailableResponse.
+type FolderPickerAvailableResponse struct {
+	// Available True only when the request is local AND a native dialog tool exists. A remote browser never gets a "Browse..." button, since the dialog would open on the server's display.
+	Available bool `json:"available"`
+}
+
+// FolderPickerOpenResponse defines model for FolderPickerOpenResponse.
+type FolderPickerOpenResponse struct {
+	// Cancelled True when the dialog was dismissed. A non-zero exit is the normal cancel signal for these tools and can't be reliably told apart from a genuine failure, so both are reported as a cancel.
+	Cancelled *bool `json:"cancelled,omitempty"`
+
+	// Path The picked folder's absolute path; absent when cancelled
+	Path *string `json:"path,omitempty"`
+}
 
 // GeneratedTitleResponse defines model for GeneratedTitleResponse.
 type GeneratedTitleResponse struct {
@@ -4308,6 +4328,15 @@ type UpdateAgentRequest struct {
 // UpdateReviewCommentBody defines model for UpdateReviewCommentBody.
 type UpdateReviewCommentBody struct {
 	Body string `json:"body"`
+}
+
+// UploadResponse defines model for UploadResponse.
+type UploadResponse struct {
+	// Filename The upload's bare on-disk name, for use with the blob route
+	Filename string `json:"filename"`
+
+	// Path Absolute HOST path of the stored file. The same path is valid inside every agent sandbox (the host filesystem is bind-mounted read-only at the same locations), which is what lets a prompt reference an upload by path for any agent type.
+	Path string `json:"path"`
 }
 
 // UsageUpdatedEvent defines model for UsageUpdatedEvent.

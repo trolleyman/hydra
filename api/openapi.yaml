@@ -271,6 +271,33 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
   /api/projects/{project_id}/icon:
+    # GET and PUT are deliberately the same resource in two representations: PUT
+    # sets the icon VALUE (an emoji, a lucide name, or a file path), GET serves
+    # the image BYTES and so exists only for the file-path case. GET is
+    # hand-served (tag: manual, raw bytes); PUT is generated.
+    get:
+      summary: Serve a project's icon image, when its icon is a local file path
+      operationId: getProjectIconImage
+      tags: [manual]
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The icon's bytes. Content-Type is sniffed per file.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: >-
+            Project not found, or its icon is not a local image file - an emoji,
+            a lucide icon name, and an http(s)/data URI all 404 here, because the
+            browser renders those directly and never points an <img> at this route.
     put:
       summary: Set (or clear) a project's custom icon
       operationId: setProjectIcon
@@ -3193,6 +3220,399 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  # ---------------------------------------------------------------------------
+  # Hand-served routes (tag: manual)
+  #
+  # These are described here so the API has no undocumented surface, but they are
+  # registered directly on the mux (internal/cli/runtime.go buildMux, mirrored in
+  # internal/cli/server.go for the simulation server) rather than generated.
+  # oapi-codegen skips them via `exclude-tags: [manual]` in internal/api/config.yaml;
+  # Go's ServeMux routes them because a specific pattern beats the /api/ catch-all.
+  #
+  # Two different reasons a route is here, and only the first is a hard constraint:
+  #
+  #   - The binary ones CANNOT be generated. strict-server owns the
+  #     ResponseWriter, and every blob route needs it directly for
+  #     http.ServeContent (range + conditional requests) and per-file
+  #     Content-Type sniffing.
+  #   - The JSON ones are merely not generated YET. The blocker is that
+  #     strict-server hands handlers (ctx, request) with no *http.Request, and
+  #     the folder-picker pair gates on isLoopbackRequest(r) - a security
+  #     control that needs RemoteAddr. Moving them onto the generated server
+  #     wants a strict middleware that carries RemoteAddr in the context.
+  #
+  # They previously lived at top-level prefixes (/artifacts/, /uploads/,
+  # /project-icon/, ...). That was never required - "outside the OpenAPI mux"
+  # is about the handler, not the URL - and it cost real bugs: the auth gate is a
+  # hand-maintained prefix list, and /tests/ and /project-icon/ were both missing
+  # from it, reachable unauthenticated from remote clients. Under /api/ they are
+  # protected by construction.
+
+  /api/projects/{project_id}/artifacts/blob:
+    get:
+      summary: Serve a single generated artifact file (raw bytes)
+      operationId: getArtifactBlob
+      tags: [manual]
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: query
+          name: script
+          required: true
+          schema:
+            type: string
+          description: Artifact script name
+        - in: query
+          name: key
+          required: true
+          schema:
+            type: string
+          description: Artifact cache key (e.g. commit/<sha> or worktree/<hash>)
+        - in: query
+          name: file
+          required: true
+          schema:
+            type: string
+          description: Artifact-relative path of the file to serve
+      responses:
+        '200':
+          description: The artifact's bytes. Content-Type is sniffed per file.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Project, artifact or file not found
+        '500':
+          description: Internal Server Error
+
+  /api/projects/{project_id}/artifacts/log:
+    get:
+      summary: Read a settled artifact generation's captured build log
+      operationId: getArtifactLog
+      tags: [manual]
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: query
+          name: script
+          required: true
+          schema:
+            type: string
+          description: Artifact script name
+        - in: query
+          name: key
+          required: true
+          schema:
+            type: string
+          description: Artifact cache key
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactLogResponse'
+        '404':
+          description: Project or log not found
+
+  /api/projects/{project_id}/tests/log:
+    get:
+      summary: Read a settled test run's captured output
+      operationId: getTestLog
+      tags: [manual]
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: query
+          name: runner
+          required: true
+          schema:
+            type: string
+          description: Test runner name
+        - in: query
+          name: key
+          required: true
+          schema:
+            type: string
+          description: Test cache key
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactLogResponse'
+        '404':
+          description: Project or log not found
+
+  /api/projects/{project_id}/repository/blob:
+    get:
+      summary: Serve a file from the project's repository (raw bytes)
+      operationId: getRepositoryBlob
+      tags: [manual]
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+          description: Repo-relative path of the file to serve
+        - in: query
+          name: ref
+          required: false
+          schema:
+            type: string
+          description: Git ref to read from (defaults to HEAD)
+      responses:
+        '200':
+          description: The file's bytes. Content-Type is sniffed per file.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Project or file not found
+
+  /api/projects/{project_id}/agents/{id}/repository/blob:
+    get:
+      summary: Serve a file from a head's worktree (raw bytes)
+      operationId: getAgentRepositoryBlob
+      tags: [manual]
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Head ID
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+          description: Repo-relative path of the file to serve
+      responses:
+        '200':
+          description: The file's bytes. Content-Type is sniffed per file.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Project, head or file not found
+
+  /api/projects/{project_id}/agents/{id}/files/blob:
+    get:
+      summary: Serve a file a head referenced by local path (raw bytes)
+      operationId: getAgentFileBlob
+      tags: [manual]
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Head ID
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+          description: >-
+            Absolute host path of the file. Resolved against an allow-list of
+            roots (the head's worktree, the project's uploads dir, the head's
+            private /tmp) and restricted to servable extensions.
+      responses:
+        '200':
+          description: The file's bytes. Content-Type is sniffed per file.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: No file path given
+        '404':
+          description: Project, head or file not found, or the path is outside every allowed root
+
+  /api/projects/{project_id}/uploads:
+    post:
+      summary: Upload a pasted or attached file
+      operationId: uploadFile
+      tags: [manual]
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The file's bytes. Capped at 25MB.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400':
+          description: Invalid or oversize upload
+        '404':
+          description: Project not found
+        '500':
+          description: Internal Server Error
+
+  /api/projects/{project_id}/uploads/blob:
+    get:
+      summary: Serve a previously uploaded file (raw bytes)
+      operationId: getUploadBlob
+      tags: [manual]
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: query
+          name: name
+          required: true
+          schema:
+            type: string
+          description: >-
+            The upload's bare on-disk filename, no path. Validated against the
+            names the uploader generates, so it cannot escape the uploads dir.
+      responses:
+        '200':
+          description: The upload's bytes. Content-Type is sniffed per file.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Project or upload not found
+
+  /api/projects/{project_id}/agents/{id}/shell/close:
+    post:
+      summary: Terminate one web bash shell immediately
+      operationId: closeShell
+      tags: [manual]
+      description: >-
+        Closing a terminal tab kills its process now, instead of waiting out the
+        idle grace period - which only covers reloads and transient disconnects.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Head ID
+        - in: query
+          name: shell_id
+          required: false
+          schema:
+            type: string
+          description: The shell's token, as used when opening its WebSocket
+        - in: query
+          name: sandboxed
+          required: false
+          schema:
+            type: boolean
+            default: true
+          description: >-
+            Which of the head's two shells to close. Sandboxed and host shells
+            are separate sessions with separate ids, so this has to match the one
+            that was opened.
+      responses:
+        '204':
+          description: Closed (or already gone - this is idempotent)
+        '400':
+          description: Agent ID required
+
+  /api/folder-picker/available:
+    get:
+      summary: Report whether a native folder dialog can be offered
+      operationId: getFolderPickerAvailable
+      tags: [manual]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FolderPickerAvailableResponse'
+
+  /api/folder-picker/open:
+    post:
+      summary: Open the native folder dialog and block until it is answered
+      operationId: openFolderPicker
+      tags: [manual]
+      responses:
+        '200':
+          description: A folder was picked, or the dialog was dismissed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FolderPickerOpenResponse'
+        '403':
+          description: Not a local client
+        '409':
+          description: A folder picker is already open
+        '503':
+          description: No native folder picker available on this system
+
 components:
   schemas:
     GeneratedTitleResponse:
@@ -5911,6 +6331,15 @@ components:
           enum: [stdout, stderr]
           description: Which stream the line came from; stderr is rendered in red
 
+    ArtifactLogResponse:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtifactLogLine'
+
     ArtifactsResponse:
       type: object
       required: [scripts]
@@ -5919,6 +6348,52 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ArtifactSet'
+
+    # --- Hand-served route payloads (tag: manual) -----------------------------
+    #
+    # Described so the API has no undocumented surface. The handlers are
+    # hand-written (see the "Hand-served routes" note in paths), so these types
+    # are the contract between them and the generated TS client, not something
+    # the Go server is generated from.
+
+    UploadResponse:
+      type: object
+      required: [path, filename]
+      properties:
+        path:
+          type: string
+          description: >-
+            Absolute HOST path of the stored file. The same path is valid inside
+            every agent sandbox (the host filesystem is bind-mounted read-only at
+            the same locations), which is what lets a prompt reference an upload
+            by path for any agent type.
+        filename:
+          type: string
+          description: The upload's bare on-disk name, for use with the blob route
+
+    FolderPickerAvailableResponse:
+      type: object
+      required: [available]
+      properties:
+        available:
+          type: boolean
+          description: >-
+            True only when the request is local AND a native dialog tool exists.
+            A remote browser never gets a "Browse..." button, since the dialog
+            would open on the server's display.
+
+    FolderPickerOpenResponse:
+      type: object
+      properties:
+        path:
+          type: string
+          description: The picked folder's absolute path; absent when cancelled
+        cancelled:
+          type: boolean
+          description: >-
+            True when the dialog was dismissed. A non-zero exit is the normal
+            cancel signal for these tools and can't be reliably told apart from a
+            genuine failure, so both are reported as a cancel.
 
     # --- Terminal WebSocket (/ws/projects/{id}/agents/{id}/terminal) ----------
     #

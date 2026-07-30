@@ -578,18 +578,31 @@ func buildMux(server *httppkg.Server, auth *httppkg.Authenticator) *http.ServeMu
 	mux.HandleFunc("/ws/projects/{project_id}/agents/{id}/tests", server.HandleTestsWS)
 	mux.HandleFunc("/ws/projects/{project_id}/events", server.HandleEventsWS)
 	mux.HandleFunc("/ws/server/update", server.HandleServerUpdateWS)
-	mux.HandleFunc("POST /shells/projects/{project_id}/agents/{id}/close", server.HandleShellClose)
-	mux.HandleFunc("/artifacts/projects/{project_id}/blob", server.HandleArtifactBlob)
-	mux.HandleFunc("/artifacts/projects/{project_id}/log", server.HandleArtifactLog)
-	mux.HandleFunc("/tests/projects/{project_id}/log", server.HandleTestLog)
-	mux.HandleFunc("/repository/projects/{project_id}/blob", server.HandleRepositoryBlob)
-	mux.HandleFunc("/repository/projects/{project_id}/agents/{id}/blob", server.HandleAgentBlob)
-	mux.HandleFunc("GET /agent-files/projects/{project_id}/agents/{id}/blob", server.HandleAgentFileBlob)
-	mux.HandleFunc("GET /project-icon/projects/{project_id}", server.HandleProjectIcon)
-	mux.HandleFunc("GET /uploads/projects/{project_id}/blob", server.HandleUploadBlob)
-	mux.HandleFunc("/uploads/projects/{project_id}", server.HandleUpload)
-	mux.HandleFunc("GET /folder-picker/available", server.HandleFolderPickerAvailable)
-	mux.HandleFunc("POST /folder-picker/open", server.HandleFolderPickerOpen)
+	// Hand-served routes. These sit UNDER /api/ alongside the generated handler
+	// registered above: Go's ServeMux picks the most specific matching pattern, so
+	// each of these wins over the "/api/" prefix while everything else still falls
+	// through to the generated one. They are documented in api/openapi.yaml under
+	// the `manual` tag and excluded from generation there - see that note for why
+	// each one can't be (or isn't yet) generated.
+	//
+	// Keeping them under /api/ is what makes the auth gate structural: it matches
+	// on prefix, so a route added here is protected without anyone remembering to
+	// extend a list. Two of them (/tests/, /project-icon/) were reachable
+	// unauthenticated for exactly that reason.
+	mux.HandleFunc("POST /api/projects/{project_id}/agents/{id}/shell/close", server.HandleShellClose)
+	mux.HandleFunc("/api/projects/{project_id}/artifacts/blob", server.HandleArtifactBlob)
+	mux.HandleFunc("/api/projects/{project_id}/artifacts/log", server.HandleArtifactLog)
+	mux.HandleFunc("/api/projects/{project_id}/tests/log", server.HandleTestLog)
+	mux.HandleFunc("/api/projects/{project_id}/repository/blob", server.HandleRepositoryBlob)
+	mux.HandleFunc("/api/projects/{project_id}/agents/{id}/repository/blob", server.HandleAgentBlob)
+	mux.HandleFunc("GET /api/projects/{project_id}/agents/{id}/files/blob", server.HandleAgentFileBlob)
+	// GET only: PUT on this same path is the generated setProjectIcon, and falls
+	// through to apiHandler because this pattern does not match it.
+	mux.HandleFunc("GET /api/projects/{project_id}/icon", server.HandleProjectIcon)
+	mux.HandleFunc("GET /api/projects/{project_id}/uploads/blob", server.HandleUploadBlob)
+	mux.HandleFunc("/api/projects/{project_id}/uploads", server.HandleUpload)
+	mux.HandleFunc("GET /api/folder-picker/available", server.HandleFolderPickerAvailable)
+	mux.HandleFunc("POST /api/folder-picker/open", server.HandleFolderPickerOpen)
 	mux.Handle("/.well-known/", apiHandler)
 	registerPprof(mux)
 	registerFrontend(mux)
@@ -629,7 +642,7 @@ func runStoragePruner(ctx context.Context, artifactReg *artifacts.Registry, test
 		}
 		// Uploads are a plain per-project directory, so prune every project.
 		for _, root := range roots() {
-			if err := httppkg.PruneUploads(root, httppkg.DefaultUploadMaxAge); err != nil {
+			if err := httppkg.PruneUploads(root, httppkg.DefaultUploadMaxAge, httppkg.DefaultUploadMaxBytes); err != nil {
 				log.Printf("warn: prune uploads (%s): %v", root, err)
 			}
 		}
