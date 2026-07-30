@@ -4079,8 +4079,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           .map((n) => `> ${(n.author ? `@${n.author}: ` : '') + n.body.replace(/\n/g, '\n> ')}`)
           .join('\n>\n')
         const where = thread.line ? `${thread.path}:${thread.line}` : thread.path
+        // A markdown link so the chat resolves it to the repository view at that
+        // line (RepoLink parses the trailing :line), same as buildFixTestMessage.
         await api.default.sendAgentInput(projectId, agent.id, {
-          text: `Address this review comment on ${where} (thread ${thread.id}) and commit the fix:\n\n${quoted}\n\n`
+          text: `Address this review comment on [${where}](${where}) (thread ${thread.id}) and commit the fix:\n\n${quoted}\n\n`
             + `When you are done, reply to the thread with mcp__hydra__reply_to_review_comment so I can see what you changed.`,
           origin: 'review_thread',
         })
