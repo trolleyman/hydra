@@ -10063,7 +10063,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         {!pinned && replayDone && (
           // The float (absolute + centring translate) moves to the wrapper, which
           // is now what sits in the transcript pane.
-          <Tooltip content="Jump to bottom (Ctrl+End)" side="top" className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
+          <Tooltip content="Jump to bottom" shortcut={{ keys: ['Ctrl', 'End'] }} side="top" className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
             <button
               onClick={() => scrollToBottom(true)}
               aria-label="Jump to bottom"
@@ -10258,7 +10258,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   )}
                 </div>
                 {isTurnRunning && (
-                  <Tooltip content="Interrupt (Ctrl+C)" side="top">
+                  <Tooltip content="Interrupt" shortcut={{ keys: ['Ctrl', 'C'] }} side="top">
                     <button
                       onClick={interrupt}
                       className="p-1.5 rounded-lg text-red-500/90 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
@@ -10268,7 +10268,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     </button>
                   </Tooltip>
                 )}
-                <Tooltip content={isTurnRunning ? 'Queue message (Enter)' : 'Send (Enter)'} side="top">
+                <Tooltip content={isTurnRunning ? 'Queue message' : 'Send'} shortcut={{ keys: ['Enter'] }} side="top">
                   <button
                     onClick={send}
                     disabled={!canSend}

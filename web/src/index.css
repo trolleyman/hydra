@@ -712,8 +712,11 @@ body {
    slowly while a pulse of brightness + length travels around its spokes (each
    spoke carries a negative animation-delay, so the wave is already mid-flight
    on the first frame). */
+/* Anticlockwise. The pulse still travels the spokes in index order, so the two
+   motions run against each other - which is what stops the whole mark from
+   reading as one rigid thing being turned. */
 @keyframes work-spark-spin {
-  to { transform: rotate(360deg); }
+  to { transform: rotate(-360deg); }
 }
 @keyframes work-spark-pulse {
   0%, 100% { opacity: 0.28; transform: scaleY(0.58); }

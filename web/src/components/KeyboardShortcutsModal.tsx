@@ -3,15 +3,7 @@ import { X } from 'lucide-react'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { SHORTCUT_GROUPS } from '../lib/shortcuts'
 import { IconButton } from './IconButton'
-
-// A single key rendered as a lowlit keycap.
-function Key({ children }: { children: string }) {
-  return (
-    <kbd className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-2xs font-medium text-gray-500 dark:text-gray-400">
-      {children}
-    </kbd>
-  )
-}
+import { Kbd } from './Kbd'
 
 // The keyboard-shortcuts help overlay (opened with `?`, the footer button, or
 // useShortcutsStore.setOpen). Lists every shortcut from the central registry so
@@ -66,7 +58,7 @@ export function KeyboardShortcutsModal() {
                     <span className="text-sm text-gray-700 dark:text-gray-300">{s.label}</span>
                     <span className="flex items-center gap-1 shrink-0">
                       {s.keys.map((k, i) => (
-                        <Key key={i}>{k}</Key>
+                        <Kbd key={i}>{k}</Kbd>
                       ))}
                     </span>
                   </div>

@@ -856,7 +856,7 @@ function RootLayout() {
         {/* Sidebar toggle: always present, so it never jumps in and out of the
             bar - the icon flips between hide and show. On mobile it's the
             hamburger for the full-screen sidebar panel. */}
-        <Tooltip content={`${sidebarVisible ? 'Hide' : 'Show'} sidebar (Ctrl+.)`}>
+        <Tooltip content={`${sidebarVisible ? 'Hide' : 'Show'} sidebar`} shortcut={{ keys: ['Ctrl', '.'] }}>
           <button
             type="button"
             aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
@@ -1117,21 +1117,35 @@ function RootLayout() {
               size before this (the row simply overflowed), and it is why a
               larger Interface size costs a few characters of "up 2 hours"
               instead of a second line. */}
-          <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
+          <div className="group border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
             {canRestart && (
               // Primary action is whichever one is actually useful here: a server
               // that can rebuild itself gets "update", one that can't gets a plain
               // restart. The secondary is offered as a hold-Alt variant rather
-              // than a second control, to keep the footer a single row.
+              // than a second control, to keep the footer a single row - and it
+              // is a `shortcut` rather than prose in brackets, so the modifier
+              // reads as a key.
+              //
+              // The uptime rides along here because this button is what it is
+              // about (the server, and how long this one has been up), and
+              // because the label beside it gives way to the usage strip.
               <Tooltip
                 content={
-                  restarting
-                    ? 'Restarting...'
-                    : canUpdate
-                      ? 'Rebuild and restart the server (Alt: restart without rebuilding)'
-                      : 'Restart the server'
+                  <>
+                    {restarting
+                      ? 'Restarting...'
+                      : canUpdate
+                        ? 'Rebuild and restart the server'
+                        : 'Restart the server'}
+                    {spawnedAt.current !== null && (
+                      <span className="mt-0.5 block text-gray-500 dark:text-gray-400">
+                        <Uptime spawnedAt={spawnedAt.current} format={formatUptime} />
+                      </span>
+                    )}
+                  </>
                 }
+                shortcut={canUpdate && !restarting ? { keys: ['Alt'], note: 'restart without rebuilding' } : undefined}
               >
                 <button
                   onClick={(e) => handleRestart(canUpdate && !e.altKey ? 'update' : 'restart')}
@@ -1144,11 +1158,21 @@ function RootLayout() {
               </Tooltip>
             )}
             {spawnedAt.current !== null && (
-              // min-w-0 on the Tooltip's own wrapper as well as the label: the
-              // wrapper is an inline-flex box, so without it the label's
-              // `truncate` never engages and the uptime pushes the usage strip
-              // over the settings gear at a large Interface size.
-              <Tooltip className="min-w-0" content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}>
+              // Hidden outright once the Claude usage strip is on screen, rather
+              // than truncated to "up 2 h...": the two of them do not fit beside
+              // the icon buttons in a 264px sidebar, and half a word is worth
+              // less than the strip's figures. `group-has-[[data-usage]]` reads
+              // the strip's own marker off the footer row, so this needs no
+              // second copy of the poll that decides whether it renders.
+              //
+              // Only when there is a restart button to hold it: that button's
+              // tooltip is where the uptime goes, so with no button the label
+              // stays and truncates as before (min-w-0 on the Tooltip's own
+              // inline-flex wrapper, or the label's `truncate` never engages).
+              <Tooltip
+                className={`min-w-0 ${canRestart ? 'group-has-[[data-usage]]:hidden' : ''}`}
+                content={`Spawned at ${new Date(spawnedAt.current).toUTCString()}`}
+              >
                 <span className="block min-w-0 truncate text-2xs text-gray-400 dark:text-gray-500 cursor-default">
                   <Uptime spawnedAt={spawnedAt.current} format={formatUptime} />
                 </span>

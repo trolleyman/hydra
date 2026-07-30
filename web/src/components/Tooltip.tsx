@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { ShortcutHint } from './Kbd'
 
 type Placement = 'top' | 'bottom'
 
@@ -64,6 +65,19 @@ export interface TooltipProps {
   /** Extra gap (px) between the trigger and the box, on top of the base 8px -
    *  e.g. to clear a neighbouring control the box would otherwise sit against. */
   offset?: number
+  /**
+   * A keyboard shortcut for this control, rendered as keycaps on their own line
+   * under the label and lowlit (see ShortcutHint). `note` is what the keys do
+   * when that differs from the control's main action - a modifier variant, e.g.
+   * Alt on the restart button.
+   *
+   * A prop rather than something a caller composes into `content`, so that every
+   * shortcut in the UI lands in the same place, at the same size, in the same
+   * component. It used to be prose in brackets - "(Alt: restart without
+   * rebuilding)" - which read as part of the sentence and wrapped in the middle
+   * of the label.
+   */
+  shortcut?: { keys: string[]; note?: string }
 }
 
 // One configurable tooltip. The shared core - a portalled, fixed-position box
@@ -82,6 +96,7 @@ export function Tooltip({
   title,
   width = 384,
   offset = 0,
+  shortcut,
 }: TooltipProps) {
   const card = variant === 'card'
   const showDelay = delay ?? (card ? 0 : 600)
@@ -425,6 +440,11 @@ export function Tooltip({
             style={{ top: pos.top, left: pos.left, width: 'max-content', maxWidth: 'min(320px, calc(100vw - 1rem))' }}
           >
             {content}
+            {shortcut && (
+              <div className="mt-1">
+                <ShortcutHint keys={shortcut.keys} note={shortcut.note} />
+              </div>
+            )}
             {arrow(pos.placement)}
           </div>
         ),
