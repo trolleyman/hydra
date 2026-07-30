@@ -3870,11 +3870,20 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // Resolved at write time, exactly as a line comment's is, so "latest commit"
     // cannot drift between placing the pin and publishing it.
     const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
-    const cs = await addImageComment(projectId, agent.id, {
+    const { comments, toReviewer } = await addImageComment(projectId, agent.id, {
       image, text, diffLabel: `${fromLabel} -> ${toLabel}`, publish,
     })
-    setReviewComments(cs)
-    if (publish) showSentToast('Comment sent to agent')
+    setReviewComments(comments)
+    // Same wording as the line-comment path, and for the same reason: a pin whose
+    // body mentions `@review` wakes the REVIEWER, possibly starting one in a tab
+    // that has never been opened, which is otherwise entirely invisible.
+    if (publish) {
+      showSentToast(
+        toReviewer
+          ? 'Sent to your reviewer - open the Review tab to see the reply'
+          : 'Comment sent to agent',
+      )
+    }
   }, [projectId, agent.id, agent.base_branch, showSentToast])
   useEffect(() => {
     registerImageComments({ comments: reviewComments, submit: submitImageComment })

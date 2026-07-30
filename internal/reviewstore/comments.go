@@ -205,9 +205,11 @@ func FormatTimecode(sec float64) string {
 	if sec < 0 {
 		sec = 0
 	}
-	m := int(sec) / 60
-	s := sec - float64(m*60)
-	return fmt.Sprintf("%d:%04.1f", m, s)
+	// Round to tenths FIRST, then split. Splitting first and rounding the seconds
+	// afterwards lets the rounding carry past 60 without the minute ever seeing
+	// it, so 59.96s renders as "0:60.0" instead of "1:00.0".
+	tenths := int(math.Round(sec * 10))
+	return fmt.Sprintf("%d:%02d.%d", tenths/600, tenths%600/10, tenths%10)
 }
 
 // Position is the precise form, for a reader who has already decided to look:

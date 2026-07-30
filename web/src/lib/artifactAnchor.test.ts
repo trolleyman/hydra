@@ -162,5 +162,8 @@ describe('video timestamps', () => {
     expect(formatTimecode(9.28)).toBe('0:09.3')
     expect(formatTimecode(75.52)).toBe('1:15.5')
     expect(formatTimecode(-3)).toBe('0:00.0')
+    // The carry must reach the MINUTE, or 59.96s reads as "0:60.0".
+    expect(formatTimecode(59.96)).toBe('1:00.0')
+    expect(formatTimecode(119.99)).toBe('2:00.0')
   })
 })

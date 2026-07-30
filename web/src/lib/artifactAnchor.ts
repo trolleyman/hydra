@@ -135,9 +135,12 @@ export function anchorPositionLabel(a: ReviewImageAnchor): string {
  *  with an hour field costs more than the rare long clip saves. Mirrors
  *  reviewstore.FormatTimecode in Go. */
 export function formatTimecode(sec: number): string {
-  const s = Math.max(0, sec)
-  const m = Math.floor(s / 60)
-  return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`
+  // Round to tenths FIRST, then split. Splitting first and rounding the seconds
+  // afterwards lets the rounding carry past 60 without the minute ever seeing it,
+  // so 59.96s renders as "0:60.0" instead of "1:00.0".
+  const tenths = Math.round(Math.max(0, sec) * 10)
+  const s = Math.floor((tenths % 600) / 10)
+  return `${Math.floor(tenths / 600)}:${String(s).padStart(2, '0')}.${tenths % 10}`
 }
 
 /** Which version of the tree the picture was rendered from, in words that say

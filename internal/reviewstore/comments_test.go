@@ -376,7 +376,9 @@ func TestFormatTimecode(t *testing.T) {
 	for _, tc := range []struct {
 		in   float64
 		want string
-	}{{0, "0:00.0"}, {9.28, "0:09.3"}, {75.52, "1:15.5"}, {-3, "0:00.0"}} {
+	}{{0, "0:00.0"}, {9.28, "0:09.3"}, {75.52, "1:15.5"}, {-3, "0:00.0"},
+		// The carry must reach the MINUTE, or 59.96s reads as "0:60.0".
+		{59.96, "1:00.0"}, {119.99, "2:00.0"}} {
 		if got := FormatTimecode(tc.in); got != tc.want {
 			t.Errorf("FormatTimecode(%v) = %q, want %q", tc.in, got, tc.want)
 		}

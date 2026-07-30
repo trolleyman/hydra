@@ -318,6 +318,14 @@ export function Lightbox({
   // the element the browser has already painted, which is the only thing that can
   // render every format an artifact might be (an SVG, a video frame).
   const imgRef = useRef<HTMLImageElement | null>(null)
+  // The moment being SHOWN, which is what decides whether an existing pin belongs
+  // to the frame on screen. Deliberately separate from the moment a pin RECORDS:
+  // one variable doing both meant the filter only ever moved when you dropped a
+  // pin, so a clip opened at 0 hid every remark past the first 0.75s - and the
+  // overlay was not even mounted, making a commented clip look uncommented.
+  const [frameT, setFrameT] = useState(0)
+  // The moment the pending pin was placed at, read from the element at the click
+  // because by the time the remark is typed the clip has moved on.
   const [pendingT, setPendingT] = useState(0)
   const [pinError, setPinError] = useState('')
   // Arming and any half-written pin are dropped when the picture changes: a comment
@@ -329,6 +337,8 @@ export function Lightbox({
     setPending(null)
     setPinBody('')
     setPinError('')
+    setPendingT(0)
+    setFrameT(0)
   }
 
   // Which single picture a pin would be placed on. A comparator shows two at once
@@ -365,7 +375,7 @@ export function Lightbox({
       // every remark in the clip at once would stack marks from frames that are
       // not on screen over the one that is. The window is generous enough that a
       // pin does not blink out while you look at it.
-      .filter((c) => !c.image?.t || Math.abs(c.image.t - pendingT) <= PIN_TIME_WINDOW)
+      .filter((c) => !c.image?.t || Math.abs(c.image.t - frameT) <= PIN_TIME_WINDOW)
       .map((c) => ({
         id: c.id,
         x: c.image?.x ?? 0,
@@ -378,7 +388,7 @@ export function Lightbox({
         draft: !c.published,
         resolved: c.resolved,
       })),
-    [pinComments, pinnedRef, pinnedSide, pendingT],
+    [pinComments, pinnedRef, pinnedSide, frameT],
   )
   // Only a still picture that is a real artifact can carry a pin: a video has a
   // time axis this anchor does not model, and an upload or a chat image has no
@@ -892,6 +902,7 @@ export function Lightbox({
               onDims={setDims}
               videoRef={videoRef}
               paused={arming}
+              onTime={setFrameT}
               overlay={showsPins ? (
                 <ImagePins
                   pins={pinsHere}
@@ -930,6 +941,10 @@ export function Lightbox({
               maxWidth={hasSiblings ? '80vw' : '90vw'}
               maxHeight="85vh"
               onVerticalSlide={followFrameSlide}
+              // The composer hangs off the pin, and the pin travels with the
+              // picture - so a wheel-zoom over the image has to re-place it or the
+              // box is left pointing at where the pin used to be.
+              onViewChange={placePopover}
             >
               {/* The wrapper hugs the image (shrink-to-fit inside ZoomPan's content
                   box), so the checkerboard layer behind it lines up with the picture -
@@ -968,7 +983,8 @@ export function Lightbox({
                     pending={pending}
                     armed={arming}
                     layerRef={pinLayerRef}
-                    onPlace={(p) => { setPending(p); setPendingT(videoRef.current?.currentTime ?? 0); setPinError('') }}
+                    // A still has no moment to record - only the clip path reads one.
+                    onPlace={(p) => { setPending(p); setPinError('') }}
                   />
                 )}
               </div>
@@ -1067,6 +1083,10 @@ export function Lightbox({
                   key={v}
                   type="button"
                   onClick={() => setAbView(v)}
+                  // A toggle group, so which side is selected has to be readable
+                  // as STATE, not only as a colour - the comparator's equivalent
+                  // controls already do this.
+                  aria-pressed={abView === v}
                   className={`px-2 h-6 rounded text-3xs font-medium transition-colors cursor-pointer ${
                     abView === v ? 'bg-white/20 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/90'
                   }`}

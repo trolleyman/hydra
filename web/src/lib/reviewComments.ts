@@ -158,16 +158,19 @@ export async function addImageComment(
   projectId: string | null,
   agentId: string,
   c: { image: ReviewImageAnchor; text: string; diffLabel?: string; publish?: boolean },
-): Promise<PendingReviewComment[]> {
-  if (!projectId) return []
-  return all(
-    await api.default.addReviewComment(projectId, agentId, {
-      body: c.text,
-      image: c.image,
-      diff: c.diffLabel,
-      publish: c.publish,
-    }),
-  )
+): Promise<{ comments: PendingReviewComment[]; toReviewer: boolean }> {
+  if (!projectId) return { comments: [], toReviewer: false }
+  const res = await api.default.addReviewComment(projectId, agentId, {
+    body: c.text,
+    image: c.image,
+    diff: c.diffLabel,
+    publish: c.publish,
+  })
+  // Returned rather than dropped, in the same shape sendReviewComment uses: a pin
+  // can address the reviewer too (the composer paints mentions precisely because
+  // `@review` is how you do it), and the caller has to be able to say WHICH agent
+  // it just woke.
+  return { comments: all(res), toReviewer: res.notified_reviewer === true }
 }
 
 export async function updateReviewComment(

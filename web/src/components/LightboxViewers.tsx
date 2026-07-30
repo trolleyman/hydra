@@ -95,7 +95,7 @@ export function DownloadLinks({ url, diff }: { url: string; diff?: { left?: stri
 // LightboxVideo plays a single (non-diff) clip fullscreen with the browser's own
 // transport. A before/after PAIR goes through LightboxDiff instead, which drives
 // both clips off one synced transport - see VideoDiffView.
-export function LightboxVideo({ url, aspect, onDims, videoRef, overlay, paused }: {
+export function LightboxVideo({ url, aspect, onDims, videoRef, overlay, paused, onTime }: {
   url: string
   // The clip's aspect ratio when known ahead of load, so the panel lays out at its
   // final shape immediately instead of collapsing to the default 300x150 box and
@@ -115,21 +115,49 @@ export function LightboxVideo({ url, aspect, onDims, videoRef, overlay, paused }
   // recorded would already have passed by the time you finished typing - so
   // arming stops playback rather than trying to catch up with it.
   paused?: boolean
+  // The moment being shown, reported as it changes. Distinct from the moment a
+  // pin RECORDS (read at the click): this is what decides which existing pins
+  // belong to the frame on screen.
+  onTime?: (t: number) => void
 }) {
+  const innerRef = useRef<HTMLVideoElement | null>(null)
+  // `autoPlay` is a LOAD-TIME attribute: flipping it on an element that is
+  // already playing does nothing, so pausing has to be an imperative call on the
+  // element. Without this, arming left the clip running and the frame drifted
+  // away from the one that was pinned.
+  useEffect(() => {
+    const el = innerRef.current
+    if (!el) return
+    if (paused) { el.pause(); return }
+    // play() returns a promise in every current browser, but not in jsdom and not
+    // in older ones - so the result is checked rather than assumed. A rejection is
+    // the autoplay policy declining, which is fine: the clip simply stays paused.
+    const started = el.play() as Promise<void> | undefined
+    if (started && typeof started.catch === 'function') started.catch(() => {})
+  }, [paused])
   return (
     <div className={`${PANEL_CLASS} relative`} data-lb-picture>
       {/* autoPlay + muted + loop mirrors how the grid tiles behave, so opening a
           clip continues rather than restarts the impression of it; controls are
           the browser's because there is only one clip to drive. */}
       <video
-        ref={(el) => { if (videoRef) videoRef.current = el }}
+        ref={(el) => {
+          innerRef.current = el
+          if (videoRef) videoRef.current = el
+        }}
         src={url}
         controls
-        autoPlay={!paused}
-        loop={!paused}
+        autoPlay
+        // Kept true even while armed: looping is how the clip behaves, and
+        // dropping it made an armed clip stop at the end instead - which was the
+        // only thing the old `paused` prop actually changed.
+        loop
         muted
         playsInline
+        onTimeUpdate={(e) => onTime?.(e.currentTarget.currentTime)}
+        onSeeked={(e) => onTime?.(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => {
+          onTime?.(e.currentTarget.currentTime)
           const { videoWidth: w, videoHeight: h } = e.currentTarget
           if (w && h) {
             rememberMediaSize(url, w, h)
