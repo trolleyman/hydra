@@ -145,6 +145,25 @@ func (s *Server) HandleShellClose(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HandleReviewClose ends a head's review session, so closing the Review tab
+// stops the reviewer rather than only detaching the pane from it.
+//
+// It sits under /shells/ with the tab-close it mirrors: the reviewer is a session
+// attached to a head, opened from the same `+` menu as the bash tabs, and this is
+// the same verb. What it kills is the PROCESS - the checkout and the conversation
+// survive, so re-opening the tab resumes it (see heads.KillReviewSession).
+// URL pattern: POST /shells/projects/{project_id}/agents/{id}/review/close
+func (s *Server) HandleReviewClose(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	if agentID == "" {
+		http.Error(w, "agent ID required", http.StatusBadRequest)
+		return
+	}
+	log.Printf("review close: agent=%q", agentID)
+	heads.KillReviewSession(s.Sessions, agentID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // parseTermSize reads the client-seeded cols/rows query params, falling back to
 // the supplied defaults (the project's last persisted geometry) for any value
 // that's missing, unparseable, or out of a sane range (rows/cols are uint16, and

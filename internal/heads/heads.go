@@ -1613,6 +1613,12 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 		// Tear down any slot sessions for this head (bash shells, ...) - they share
 		// its worktree, which is about to be removed, so they must not outlive it.
 		reg.KillMatching(SlotPrefix(head.ID))
+		// The sweep above kills the reviewer's PROCESS, but the reviewer is the one
+		// slot with a supervisor and an egress proxy of its own (it runs in a
+		// different tree, so it cannot share the head's) - and those are keyed by the
+		// slot id, which nothing else here touches. Idempotent for a head that never
+		// had a reviewer.
+		KillReviewSession(reg, head.ID)
 	}
 	if killErr == nil {
 		// Sandboxed teardown hook: the agent's session is dead but the worktree is

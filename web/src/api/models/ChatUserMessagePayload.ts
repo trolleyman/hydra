@@ -17,7 +17,7 @@ export type ChatUserMessagePayload = {
     content?: Record<string, any>;
     shell?: ChatShellResult;
     /**
-     * Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+     * Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "review_mention", "tests_failed", "fix_conflicts", "review_thread", "fix_test". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
      */
     origin?: string;
 };

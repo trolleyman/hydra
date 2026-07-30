@@ -1828,6 +1828,13 @@ const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
     label: 'Sent by Hydra',
     why: 'Sent automatically when a test runner went red while the agent was idle. Turn it off with [notify] test_failures = false.',
   },
+  // The review slot's own. Nothing else reaches a reviewer unprompted - its
+  // checkout follows the head's commits silently, precisely so that a commit
+  // never costs a model turn (internal/heads/reviewsync.go).
+  review_mention: {
+    label: 'Sent by Hydra',
+    why: 'Sent because a review comment mentioned @review, so the reviewer knows it was addressed. It fetches the comment itself with get_review_comments.',
+  },
   fix_conflicts: {
     label: 'Sent from a button',
     why: 'You pressed a button rather than typing this - Hydra wrote the wording and sent it on your behalf.',
