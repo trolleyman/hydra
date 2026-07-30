@@ -9,6 +9,7 @@ import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal, Git
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
+import { Kbd } from './Kbd'
 import { Lightbox } from './Lightbox'
 import { AttachmentChips } from './AttachmentChips'
 import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
@@ -1069,7 +1070,7 @@ export const SpawnForm = memo(function SpawnForm({
     }
   }
 
-  const submitHint = isMac ? '⌘↵ to spawn' : 'Ctrl+Enter to spawn'
+  const submitKeys = isMac ? ['⌘', '↵'] : ['Ctrl', 'Enter']
 
   // Shared across both layout variants. The index can fall out of range if an
   // image is removed while open, so clamp it and close when there are none left.
@@ -1206,7 +1207,10 @@ export const SpawnForm = memo(function SpawnForm({
                   {renderSpawnSettings()}
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
-                  <span className="hidden sm:inline text-xs text-gray-400 dark:text-gray-500">{submitHint}</span>
+                  <span className="hidden sm:inline-flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+                    {submitKeys.map((k, i) => <Kbd key={i} size="sm">{k}</Kbd>)}
+                    <span className="optical-center">to spawn</span>
+                  </span>
                   <button
                     type="submit"
                     disabled={!canSubmit || loading}
