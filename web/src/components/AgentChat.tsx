@@ -9729,7 +9729,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return (
           <div className="flex items-center gap-2.5 select-none" aria-label="Agent resumed">
             <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
-            <span className="optical-center text-[11px] text-stone-400 dark:text-stone-500">Resumed</span>
+            <span className="optical-center text-2xs text-stone-400 dark:text-stone-500">Resumed</span>
             <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
           </div>
         )
