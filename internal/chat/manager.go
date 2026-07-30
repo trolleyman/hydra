@@ -521,6 +521,11 @@ func (m *Manager) Flush(id string) error {
 	done := make(chan struct{})
 	w.in <- observedLine{done: done}
 	<-done
+	// A quiet point - the queue is empty and a client is usually about to attach.
+	// Appends only checkpoint the projection every so often (see
+	// checkpointInterval), so put the current fold down while nothing is racing
+	// it, and Open has less to replay if the daemon dies mid-conversation.
+	w.store.Checkpoint()
 	return nil
 }
 
