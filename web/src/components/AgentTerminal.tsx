@@ -1077,14 +1077,25 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
             <div key={tab.id} className="flex items-center">
               <button
                 onClick={() => setActiveTabId(tab.id)}
+                // Violet marks the reviewer, the same violet the `+` menu's Review
+                // entry and an `@review` mention already use - three places meaning
+                // one thing. Only the TAB is tinted, not the pane: the risk this
+                // guards against is forgetting which agent you are talking to, and a
+                // glance at the tab strip answers that, where a violet-washed
+                // transcript would just be tiring to read and would fight the chat's
+                // warm palette.
                 className={`px-2.5 py-0.5 text-xs font-mono rounded transition-colors cursor-pointer ${
-                  chatActive
+                  tab.kind === 'review'
                     ? activeTabId === tab.id
-                      ? 'bg-stone-200/80 dark:bg-white/[0.08] text-stone-800 dark:text-stone-100'
-                      : 'text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 hover:bg-stone-200/50 dark:hover:bg-white/[0.05]'
-                    : activeTabId === tab.id
-                      ? 'bg-gray-700 text-gray-200'
-                      : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50'
+                      ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300'
+                      : 'text-violet-400 dark:text-violet-400/70 hover:text-violet-600 dark:hover:text-violet-300 hover:bg-violet-100/60 dark:hover:bg-violet-500/10'
+                    : chatActive
+                      ? activeTabId === tab.id
+                        ? 'bg-stone-200/80 dark:bg-white/[0.08] text-stone-800 dark:text-stone-100'
+                        : 'text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 hover:bg-stone-200/50 dark:hover:bg-white/[0.05]'
+                      : activeTabId === tab.id
+                        ? 'bg-gray-700 text-gray-200'
+                        : 'text-gray-500 hover:text-gray-300 hover:bg-gray-700/50'
                 }`}
               >
                 <span className="inline-flex items-center gap-1.5">
@@ -1092,7 +1103,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                   {/* The reviewer is working on a tab you are not watching. */}
                   {tab.kind === 'review' && reviewBusy && activeTabId !== tab.id && (
                     <span
-                      className={`h-1.5 w-1.5 rounded-full ${chatActive ? 'bg-green-600 dark:bg-green-400' : 'bg-green-400'}`}
+                      className="h-1.5 w-1.5 rounded-full bg-violet-500 dark:bg-violet-400"
                     />
                   )}
                 </span>

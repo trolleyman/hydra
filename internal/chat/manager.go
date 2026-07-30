@@ -21,6 +21,11 @@ type HeadContext struct {
 	Prompt      string
 	AgentType   string
 	Plan        string
+	// The branch the head is based on, used only to recognise a fast-forward
+	// that absorbed the base (see reconcileCommits). Empty is fine - the
+	// collapse then only happens for a merge Hydra itself performed, which
+	// names its ref explicitly.
+	BaseBranch string
 }
 
 // ContextResolver maps the globally-unique head id carried by session
@@ -39,6 +44,11 @@ type observedLine struct {
 	provider string
 	line     []byte
 	done     chan struct{}
+	// A commit reconcile asked for out of band (see ReconcileCommits) rather
+	// than a provider line. It rides the same queue so it is serialised against
+	// the worker's own reconciles instead of racing them.
+	reconcile bool
+	mergedRef string
 }
 
 type worker struct {
@@ -106,6 +116,26 @@ func (m *Manager) store(id string) (*Store, error) {
 	return s, nil
 }
 
+// Forget drops what a head's chat store holds in memory, after its files have
+// been deleted (wired to heads.SetOnStateRemoved). The store keeps the whole
+// event log resident to page from, and nothing else would ever tell it the log
+// it is holding no longer exists - so a killed head went on costing tens of
+// megabytes for the life of the daemon.
+//
+// The worker itself stays. Its goroutine is a few KB against the log's tens of
+// megabytes, and taking it out would mean either racing a straggler line onto a
+// closed channel or letting a later one open a SECOND worker for the same id,
+// with two stores appending to one file. A store reset to empty is exactly a
+// fresh one, which is also what an id taken over by a forced respawn wants.
+func (m *Manager) Forget(id string) {
+	m.mu.Lock()
+	w := m.workers[id]
+	m.mu.Unlock()
+	if w != nil {
+		w.store.Discard()
+	}
+}
+
 func (m *Manager) worker(id string) (*worker, error) {
 	if _, err := m.store(id); err != nil {
 		return nil, errtrace.Wrap(err)
@@ -128,6 +158,25 @@ func (m *Manager) ObserveProviderLine(id, provider string, line []byte) {
 	w.in <- observedLine{provider: provider, line: append([]byte(nil), line...)}
 }
 
+// ReconcileCommits folds commits that landed on a head's branch OUT OF BAND
+// into its timeline, and returns once they are durable. The worker otherwise
+// only looks at git when the agent finishes a tool call or a turn, so a merge
+// Hydra performed itself - update-from-base, pull-from-MR - stayed invisible in
+// the chat until the agent happened to do something next; on a finished head,
+// indefinitely.
+//
+// mergedRef names the ref that was merged in, when the caller knows it; "" is a
+// plain "look at git again" for the attach path.
+func (m *Manager) ReconcileCommits(id, mergedRef string) {
+	w, err := m.worker(id)
+	if err != nil {
+		return
+	}
+	done := make(chan struct{})
+	w.in <- observedLine{reconcile: true, mergedRef: mergedRef, done: done}
+	<-done
+}
+
 func (m *Manager) ObserveClaudeSidechain(id, agentID string, meta *claudestream.SubagentMeta, line []byte) {
 	w, err := m.worker(id)
 	if err != nil {
@@ -139,6 +188,13 @@ func (m *Manager) ObserveClaudeSidechain(id, agentID string, meta *claudestream.
 
 func (w *worker) run(id string) {
 	for item := range w.in {
+		if item.reconcile {
+			w.reconcileCommits(id, "", item.mergedRef)
+			if item.done != nil {
+				close(item.done)
+			}
+			continue
+		}
 		if item.done != nil {
 			close(item.done)
 			continue
@@ -211,7 +267,7 @@ func (w *worker) run(id string) {
 				log.Printf("warn: chat events: append %s event for %s: %v", item.provider, id, err)
 			}
 			if kind == "tool_completed" || kind == "turn_completed" || kind == "turn_failed" {
-				w.reconcileCommits(id, causalItemID(spec.payload))
+				w.reconcileCommits(id, causalItemID(spec.payload), "")
 			}
 			// Read the shell's directory off the transcript for the call that
 			// just finished, and for whatever the one starting now has left
@@ -253,10 +309,7 @@ func (w *worker) isEchoedQueuedCommand(spec eventSpec) bool {
 	if text == "" {
 		return false
 	}
-	for _, event := range w.store.Events() {
-		if event.Type != "user_message" {
-			continue
-		}
+	for _, event := range w.store.EventsOfType("user_message") {
 		var payload struct {
 			Content json.RawMessage `json:"content"`
 		}
@@ -287,7 +340,10 @@ func (w *worker) reconcileClaudeUserEcho(spec eventSpec, provider string) bool {
 	// Copies already in the log that came from the transcript rather than from
 	// Hydra - see the re-import case below.
 	fromTranscript := 0
-	for _, event := range w.store.Events() {
+	// Only the two kinds below can pair, and the timeline is mostly tool output -
+	// scanning it whole meant copying and then parsing tens of megabytes of it per
+	// user turn to read a few hundred bytes (see Store.EventsOfType).
+	for _, event := range w.store.EventsOfType("user_message", "user_message_echoed") {
 		var payload struct {
 			Content json.RawMessage `json:"content"`
 		}
@@ -442,7 +498,7 @@ func causalItemID(payload any) string {
 	return value.ID
 }
 
-func (w *worker) reconcileCommits(id, causalItemID string) {
+func (w *worker) reconcileCommits(id, causalItemID, mergedRef string) {
 	if w.ctx.Worktree == "" {
 		return
 	}
@@ -453,6 +509,9 @@ func (w *worker) reconcileCommits(id, causalItemID string) {
 	}
 	isAncestor, ancestorErr := git.IsAncestor(w.ctx.Worktree, oldHead, newHead)
 	if oldHead != "" && ancestorErr == nil && isAncestor {
+		if w.appendAbsorbedBase(id, oldHead, newHead, mergedRef) {
+			return
+		}
 		// Walk first parents only: a merge (e.g. the agent merging main in) then
 		// surfaces as one commit rather than replaying every merged-in commit into
 		// the chat feed. The merge's own summary carries the collapsed list.
@@ -465,7 +524,7 @@ func (w *worker) reconcileCommits(id, causalItemID string) {
 				commit.Subject, commit.AuthorName = c.Subject, c.AuthorName
 				commit.AuthorEmail, commit.Timestamp = c.AuthorEmail, c.Timestamp
 				commit.CausalItemId = causalItemID
-				w.annotateMerge(&c, &commit)
+				w.annotateMerge(&c, &commit, "")
 				if _, _, err := w.store.AppendSource("git:commit:"+c.SHA, commit); err != nil {
 					log.Printf("warn: chat events: append commit for %s: %v", id, err)
 				}
@@ -486,7 +545,9 @@ const mergedCommitsCap = 100
 // annotateMerge enriches a merge commit's payload with the commits it brought in
 // (its second parent's history not already on the first parent), so the chat can
 // render a single collapsed "Merged ... - N commits" chip that expands to the list.
-func (w *worker) annotateMerge(c *git.CommitInfo, commit *CommitCreated) {
+// mergedRef labels the chip when the caller knows which ref came in; otherwise the
+// chip reads it out of the commit subject.
+func (w *worker) annotateMerge(c *git.CommitInfo, commit *CommitCreated, mergedRef string) {
 	if !c.IsMerge() || len(c.Parents) < 2 {
 		return
 	}
@@ -495,7 +556,14 @@ func (w *worker) annotateMerge(c *git.CommitInfo, commit *CommitCreated) {
 		return
 	}
 	commit.IsMerge = true
+	commit.MergedRef = mergedRef
 	commit.MergedCount = len(merged)
+	commit.MergedCommits = cappedMergedCommits(merged)
+}
+
+// cappedMergedCommits is the preview list a merge chip expands to, bounded by
+// mergedCommitsCap.
+func cappedMergedCommits(merged []git.CommitInfo) []api.ChatMergedCommit {
 	limit := min(len(merged), mergedCommitsCap)
 	list := make([]api.ChatMergedCommit, 0, limit)
 	for _, m := range merged[:limit] {
@@ -504,7 +572,54 @@ func (w *worker) annotateMerge(c *git.CommitInfo, commit *CommitCreated) {
 			AuthorName: m.AuthorName, Timestamp: m.Timestamp,
 		})
 	}
-	commit.MergedCommits = list
+	return list
+}
+
+// appendAbsorbedBase records a head that took its base in by FAST-FORWARD as the
+// one thing that happened - "Merged main - N commits" - and reports whether it
+// did.
+//
+// A fast-forward leaves the branch sitting ON the base's own tip, so the
+// first-parent walk below would replay the BASE's timeline into this head's
+// chat: main's merges of OTHER heads, rendered from their subjects as
+// "Merged hydra/some-other-head", which reads as if Hydra had just merged a
+// stranger's branch into this one. It didn't - that commit was already on main.
+// The head absorbed main; that is what the chip says, and it expands to every
+// commit that came in.
+//
+// Only the ref that was actually pulled in qualifies: the hint from an
+// update-from-base / pull-from-MR, else the head's own base. If the branch
+// fast-forwarded onto something else (an agent merging a sibling head in), the
+// walk stays the honest account and this returns false.
+func (w *worker) appendAbsorbedBase(id, oldHead, newHead, mergedRef string) bool {
+	ref := mergedRef
+	if ref == "" {
+		ref = w.ctx.BaseBranch
+	}
+	if ref == "" {
+		return false
+	}
+	if tip, err := git.ResolveRef(w.ctx.Worktree, ref); err != nil || tip != newHead {
+		return false // not a fast-forward onto the base - a real merge commit, or the head's own work
+	}
+	merged, err := git.ListCommits(w.ctx.Worktree, oldHead, newHead)
+	if err != nil || len(merged) == 0 {
+		return false
+	}
+	c, err := git.GetCommitInfo(w.ctx.Worktree, newHead)
+	if err != nil {
+		return false
+	}
+	commit := CommitCreated{}
+	commit.Head, commit.Sha, commit.ShortSha = newHead, c.SHA, c.ShortSHA
+	commit.Subject, commit.AuthorName = c.Subject, c.AuthorName
+	commit.AuthorEmail, commit.Timestamp = c.AuthorEmail, c.Timestamp
+	commit.IsMerge, commit.MergedRef = true, ref
+	commit.MergedCount, commit.MergedCommits = len(merged), cappedMergedCommits(merged)
+	if _, _, err := w.store.AppendSource("git:commit:"+newHead, commit); err != nil {
+		log.Printf("warn: chat events: append base update for %s: %v", id, err)
+	}
+	return true
 }
 
 // Flush waits until every provider line queued before it has been normalized

@@ -149,7 +149,7 @@ interface MergedCommit { sha: string; shortSha: string; subject: string }
 // mergeFieldsFromPayload pulls the merge annotation off a commit_created payload
 // (see chat.annotateMerge). Absent on ordinary commits and on merges recorded
 // before the annotation existed - both render as a plain commit chip.
-function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitChipItem, 'isMerge' | 'mergedCount' | 'merged'> {
+function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitChipItem, 'isMerge' | 'mergedCount' | 'merged' | 'mergedRef'> {
   if (payload.is_merge !== true) return {}
   const raw = Array.isArray(payload.merged_commits) ? payload.merged_commits : []
   const merged: MergedCommit[] = []
@@ -165,14 +165,20 @@ function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitCh
     })
   }
   const mergedCount = typeof payload.merged_count === 'number' ? payload.merged_count : merged.length
-  return { isMerge: true, mergedCount, merged }
+  const mergedRef = typeof payload.merged_ref === 'string' ? payload.merged_ref : undefined
+  return { isMerge: true, mergedCount, merged, mergedRef }
 }
 
-// mergeChipLabel renders "Merged <ref> - N commits", extracting the merged ref
-// name from a standard git merge subject and falling back to the raw subject.
-function mergeChipLabel(subject: string, count: number): string {
+// mergeChipLabel renders "Merged <ref> - N commits". The ref is whatever the
+// reconciler named (merged_ref, set when the head absorbed its base by
+// fast-forward and the commit's own subject therefore names a DIFFERENT branch -
+// see the openapi field), else the one in a standard git merge subject, else the
+// raw subject.
+// eslint-disable-next-line react-refresh/only-export-components
+export function mergeChipLabel(subject: string, count: number, mergedRef?: string): string {
   const m = subject.match(/^Merge (?:remote-tracking )?branch '([^']+)'/)
   const n = `${count} commit${count === 1 ? '' : 's'}`
+  if (mergedRef) return `Merged ${mergedRef} - ${n}`
   return m ? `Merged ${m[1]} - ${n}` : `${subject} - ${n}`
 }
 
@@ -193,7 +199,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
   const [expanded, setExpanded] = useState(false)
   const clickable = !!onSelectCommit
   const count = item.mergedCount ?? item.merged?.length ?? 0
-  const label = mergeChipLabel(item.subject, count)
+  const label = mergeChipLabel(item.subject, count, item.mergedRef)
   const shown = item.merged?.length ?? 0
   return (
     <div className="flex max-w-full flex-col items-center gap-1">
@@ -327,7 +333,7 @@ type ChatItem =
   // `seq` is the source event's log sequence - the tie-break when two commits
   // share a `ts`, so the chip list has one total order no matter what order the
   // pages that produced it arrived in.
-  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[] }
+  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[]; mergedRef?: string }
 
 // A sub-agent (Claude Task tool) run, assembled from its sidechain events.
 // Keyed by agentId in the `subagents` map (a live line that carries only a
@@ -6311,6 +6317,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // texts still awaiting their CLI echo, so a late echo is deduped rather than
   // rendered a second time.
   const optimisticIdRef = useRef(-1)
+  // takeOptimisticId allocates that id and stamps it with the time, exactly as
+  // the reducer's push does for an event-borne item. An optimistic row is
+  // appended straight to `items` instead of going through push, and an UNSTAMPED
+  // row is one mergedItems can never flush a commit chip before (it only flushes
+  // when it meets an item stamped later) - so every chip newer than the last
+  // stamped item slid BELOW the new bubble, and a message sent after a run of
+  // commits appeared above them until a reload put it back underneath.
+  const takeOptimisticId = () => {
+    const id = optimisticIdRef.current--
+    itemTsRef.current.set(id, Date.now())
+    return id
+  }
   const optimisticTextsRef = useRef<{ clientId: string; text: string }[]>([])
   // Client ids of "!command" cards shown optimistically as "running": when the
   // daemon's result event (a user_message carrying `shell`) arrives it settles
@@ -9263,7 +9281,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // A message that goes straight through appears immediately, in-flow, above
       // the thinking/response it triggers (item 26); the CLI's echo (which can
       // arrive after that response) is deduped by optimisticTextsRef.
-      setItems((prev) => [...prev, { kind: 'user', id: optimisticIdRef.current--, text, sending: true }])
+      // Allocated OUTSIDE the updater: React may run an updater more than once
+      // (StrictMode does, in dev), and an id/stamp taken in there would be too.
+      const optId = takeOptimisticId()
+      setItems((prev) => [...prev, { kind: 'user', id: optId, text, sending: true }])
       optimisticTextsRef.current.push({ clientId, text })
       // It starts a turn; nudge the status optimistically (like the terminal's
       // Enter handling), unless the agent is answering our question.
@@ -9288,7 +9309,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const clientId = randomId()
     ws.send(JSON.stringify({ type: 'shell_command', id: clientId, command }))
     optimisticShellRef.current.add(clientId)
-    setItems((prev) => [...prev, { kind: 'shellCmd', id: optimisticIdRef.current--, clientId, command, output: '', running: true }])
+    const optId = takeOptimisticId()
+    setItems((prev) => [...prev, { kind: 'shellCmd', id: optId, clientId, command, output: '', running: true }])
     return true
   }
 
@@ -9417,7 +9439,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // /model change to the transcript but not always to the live stream, so it
     // would otherwise not appear until a reload. The CLI's real echo, when it
     // arrives, supersedes this (routeUserText).
-    const optId = optimisticIdRef.current--
+    const optId = takeOptimisticId()
     optimisticModelIdRef.current = optId
     setItems((prev) => [...prev, { kind: 'cmdout', id: optId, text: `Set model to ${id}` }])
     pinnedRef.current = true
@@ -10156,11 +10178,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               </span>
             </div>
           )}
-          {!replayDone && !chatError && items.length === 0 && (
-            <div className="text-xs text-stone-400 dark:text-stone-500 italic py-2">
-              {connected ? 'Loading conversation...' : 'Connecting...'}
-            </div>
-          )}
           {/* Load-older affordance at the very top (item 25). */}
           {replayDone && loadingOlder && (
             <div className="flex items-center justify-center gap-1.5 py-1 text-2xs text-stone-400 dark:text-stone-500 select-none">
@@ -10256,6 +10273,24 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           )}
           </div>
         </div>
+        {/* Waiting for the transcript: the spark drawn large in the middle of
+            the empty pane, with the label under it. It used to be a line of
+            small italic text in the top-left corner, which read as a stray
+            first message rather than as "the pane is still filling".
+            Positioned over the scroll pane rather than inside it because the
+            content column is a top-anchored flex column with no height of its
+            own while there is nothing in it - there is nothing to centre
+            within. pointer-events-none so it can't swallow a click, and
+            aria-live so a screen reader hears the state change rather than
+            only the (silent) spark. */}
+        {!replayDone && !chatError && items.length === 0 && !viewSub && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 select-none pointer-events-none">
+            <WorkSpark size="lg" />
+            <div aria-live="polite" className="text-xs text-stone-400 dark:text-stone-500">
+              {connected ? 'Loading conversation' : 'Connecting'}
+            </div>
+          </div>
+        )}
         {/* Jump to bottom (item 14): floats above the composer while the user
             is scrolled up, claude.ai style. */}
         {!pinned && replayDone && (

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, toProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
+import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
@@ -769,5 +769,75 @@ describe('planStepRows', () => {
     expect(s.tools).toBe('Read x2 · Bash · Edit · Write')
     expect(s.thinkingMs).toBe(6000)
     expect(s.failed).toBe(0)
+  })
+})
+
+// A commit chip is interleaved into the transcript by TIME (mergedItems), and a
+// chip can only be flushed when the walk meets a transcript item stamped after
+// it. An optimistic bubble is appended straight to `items` rather than pushed
+// through the reducer, so it used to carry no time at all - and every chip the
+// walk still held then landed BELOW it. Sending a message right after a run of
+// commits (a merge, an update-from-base) therefore put it above commits that
+// predate it, and only a reload - where the message came back off the transcript
+// with a real timestamp - put it back underneath.
+describe('a message sent after a commit lands under it', () => {
+  beforeAll(() => {
+    vi.stubGlobal('WebSocket', RecordingWebSocket)
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    sockets.length = 0
+    localStorage.clear()
+  })
+
+  it('keeps the optimistic bubble below a chip that predates it', async () => {
+    renderChat()
+    const ta = await connectedComposer()
+    const ws = sockets[0]
+    act(() => ws.emit({ type: 'replay_done' }))
+    act(() =>
+      ws.emit({
+        type: 'chat_event',
+        event: {
+          seq: 1,
+          type: 'commit_created',
+          timestamp: '2024-01-01T00:00:00.000Z',
+          payload: { sha: 'abc123def4567', short_sha: 'abc123d', subject: 'Teach the loader about overlays' },
+        },
+      }),
+    )
+    const chip = await screen.findByText('Teach the loader about overlays')
+
+    fireEvent.change(ta, { target: { value: 'ship it' } })
+    fireEvent.keyDown(ta, { key: 'Enter' })
+    const bubble = await screen.findByText('ship it')
+
+    expect(chip.compareDocumentPosition(bubble) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+// The chip for a merge names the branch that came in. It reads that out of the
+// commit subject - except when the head absorbed its base by FAST-FORWARD, where
+// the branch now sits on the base's own tip and that commit's subject names
+// whatever IT merged (some other head). The reconciler then says which ref came
+// in (merged_ref), and it wins.
+describe('mergeChipLabel', () => {
+  it('reads the ref out of a merge subject', () => {
+    expect(mergeChipLabel("Merge branch 'main'", 11)).toBe('Merged main - 11 commits')
+    expect(mergeChipLabel("Merge remote-tracking branch 'origin/main'", 1)).toBe('Merged origin/main - 1 commit')
+  })
+
+  it('prefers the ref the reconciler named', () => {
+    // Landing on main's tip, which happens to be main's merge of another head.
+    expect(mergeChipLabel("Merge branch 'hydra/some-other-head'", 4, 'main')).toBe('Merged main - 4 commits')
+  })
+
+  it('falls back to the subject when it is not a merge subject', () => {
+    expect(mergeChipLabel('Squashed everything', 3)).toBe('Squashed everything - 3 commits')
   })
 })

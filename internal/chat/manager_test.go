@@ -297,6 +297,144 @@ func TestManagerSequencesCommitAfterToolCompletion(t *testing.T) {
 	}
 }
 
+// An update-from-base is nobody's tool call, so nothing in the provider stream
+// makes the reconciler look at git: without an explicit ReconcileCommits the
+// merge stayed out of the chat until the head next did something. And when the
+// head had nothing of its own to merge, git FAST-FORWARDS it onto the base's
+// tip - whose subject names whatever THAT commit merged (another head) - so the
+// move has to be recorded as one "merged <base>" chip rather than by replaying
+// the base's own first-parent history into this head's chat.
+func TestReconcileCommitsCollapsesFastForwardedBase(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	write := func(text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, "file"), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	write("one")
+	run("add", "file")
+	run("commit", "-qm", "base")
+	// main gains a merge of a sibling head - the commit the head will land on.
+	run("checkout", "-q", "-b", "sibling")
+	write("two")
+	run("commit", "-qam", "sibling work")
+	run("checkout", "-q", "main")
+	run("merge", "-q", "--no-ff", "-m", "Merge branch 'hydra/sibling'", "sibling")
+	run("checkout", "-q", "-b", "head")
+	run("reset", "-q", "--hard", "HEAD~1") // the head branched off before main's merge
+
+	m := NewManager(func(id string) (HeadContext, bool) {
+		return HeadContext{ProjectRoot: repo, Worktree: repo, BaseBranch: "main"}, id == "head"
+	})
+	if _, err := m.Snapshot("head"); err != nil { // opens the store and observes the baseline HEAD
+		t.Fatal(err)
+	}
+	run("merge", "--ff-only", "main")
+	m.ReconcileCommits("head", "main")
+
+	events, _, _, err := m.Before("head", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commits := []Event{}
+	for _, e := range events {
+		if e.Type == "commit_created" {
+			commits = append(commits, e)
+		}
+	}
+	if len(commits) != 1 {
+		t.Fatalf("want one collapsed commit event, got %d: %+v", len(commits), events)
+	}
+	var payload struct {
+		Subject     string `json:"subject"`
+		IsMerge     bool   `json:"is_merge"`
+		MergedRef   string `json:"merged_ref"`
+		MergedCount int    `json:"merged_count"`
+	}
+	if err := json.Unmarshal(commits[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	// The subject stays the real commit's; merged_ref is what the chip is labelled
+	// from, so it reads "Merged main", not "Merged hydra/sibling".
+	if !payload.IsMerge || payload.MergedRef != "main" || payload.MergedCount != 2 {
+		t.Fatalf("commit payload = %+v", payload)
+	}
+}
+
+// A merge Hydra performs when the head HAS work of its own makes a real merge
+// commit, which the first-parent walk already renders correctly - the collapse
+// must not swallow it, and the head's own commits must still be reconciled.
+func TestReconcileCommitsKeepsRealMergeCommit(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repo, "base"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "base")
+	run("commit", "-qm", "base")
+	run("checkout", "-q", "-b", "head")
+
+	m := NewManager(func(id string) (HeadContext, bool) {
+		return HeadContext{ProjectRoot: repo, Worktree: repo, BaseBranch: "main"}, id == "head"
+	})
+	if _, err := m.Snapshot("head"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "head-work"), []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "head-work")
+	run("commit", "-qm", "head work")
+	run("checkout", "-q", "main")
+	if err := os.WriteFile(filepath.Join(repo, "main-work"), []byte("theirs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "main-work")
+	run("commit", "-qm", "main work")
+	run("checkout", "-q", "head")
+	run("merge", "-q", "--no-ff", "-m", "Merge branch 'main'", "main")
+	m.ReconcileCommits("head", "main")
+
+	subjects := []string{}
+	events, _, _, err := m.Before("head", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range events {
+		if e.Type != "commit_created" {
+			continue
+		}
+		var payload struct {
+			Subject string `json:"subject"`
+		}
+		if err := json.Unmarshal(e.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		subjects = append(subjects, payload.Subject)
+	}
+	if len(subjects) != 2 || subjects[0] != "head work" || subjects[1] != "Merge branch 'main'" {
+		t.Fatalf("commit subjects = %v", subjects)
+	}
+}
+
 func TestCodexInterruptSettlesDeltaOnlyAssistantMessage(t *testing.T) {
 	w := worker{codexAssistantDeltas: map[string]string{}}
 	partial := &AssistantDelta{}

@@ -548,15 +548,21 @@ type = "stdout"
 # unconfigured, so cgroup io.weight is accepted and ignored). The two caps below
 # are cgroup io.max, which needs no particular scheduler and always takes effect.
 #
-# Sized to be invisible to ordinary work and to clip only a burst: a head was
-# measured writing 417MB in 60s, and it is bursts filling the device queue that
-# stall everything else, not the sustained average. Raise them if a build feels
-# slower; lower them if the desktop still hitches while a head is busy.
+# Sized from a captured stall rather than guessed. At io "full" 27% - the whole
+# machine doing nothing but waiting on disk - screenshot artifact generation was
+# writing 66 MB/s and reading 49 MB/s across its vite build and Playwright run
+# (scripts/hydra-profile.sh --watch, stall-20260730-150357). An earlier 100/300
+# was set from the ~8 MB/s SUSTAINED average and never engaged: what stalls the
+# box is the burst, so the ceiling has to sit under the burst, not above it.
+#
+# A screenshot run taking longer in the background is a far better trade than the
+# desktop freezing. Raise them if artifact generation gets painfully slow; lower
+# them further if it still hitches.
 #
 # NOTE these apply to SCOPED workloads only - agent, preview, service, artifact.
 # The daemon's own IO is not covered.
-io_write_bandwidth_max = 100  # MB/s
-io_read_bandwidth_max  = 300  # MB/s
+io_write_bandwidth_max = 40  # MB/s
+io_read_bandwidth_max  = 80  # MB/s
 # cpu_weight = 50   # 1-10000, soft CPU share under contention (default 50; below the daemon's 100)
 # io_weight  = 50   # 1-10000, soft block-IO share under contention (default 50)
 # cpu_quota  = 200  # hard CPU cap in percent of one core (200 = 2 cores); omit = no cap

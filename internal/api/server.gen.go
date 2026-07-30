@@ -1146,10 +1146,13 @@ type ChatCommitCreatedPayload struct {
 	IsMerge       bool               `json:"is_merge,omitempty"`
 	MergedCommits []ChatMergedCommit `json:"merged_commits,omitempty"`
 	MergedCount   int                `json:"merged_count,omitempty"`
-	Sha           string             `json:"sha,omitempty"`
-	ShortSha      string             `json:"short_sha,omitempty"`
-	Subject       string             `json:"subject,omitempty"`
-	Timestamp     string             `json:"timestamp,omitempty"`
+
+	// MergedRef The ref this merge brought in, when the reconciler knows it rather than having to read it out of the commit subject. Set when the head absorbed its base by FAST-FORWARD (update-from-base with nothing of its own to merge): the branch then sits on the base's own tip, whose subject names whatever that commit merged - another head - so the chip must be labelled from the ref that was pulled in, not from it.
+	MergedRef string `json:"merged_ref,omitempty"`
+	Sha       string `json:"sha,omitempty"`
+	ShortSha  string `json:"short_sha,omitempty"`
+	Subject   string `json:"subject,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // ChatContentStreamPayload A provider content-boundary hint; a state signal, not a card.
@@ -2996,6 +2999,9 @@ type ReviewCommentsResponse struct {
 
 	// Notified On a publish, the one line the agent was told. Absent otherwise.
 	Notified *string `json:"notified,omitempty"`
+
+	// NotifiedReviewer On a publish, true when at least one comment named @review, so the head's reviewer was told (and started, if it was not already running). The UI says so, because a reviewer working in a tab you have not opened is otherwise invisible.
+	NotifiedReviewer *bool `json:"notified_reviewer,omitempty"`
 
 	// You Who "you" is on this machine, from git's user.name. Hydra has no accounts and hosts no pictures, so a comment you wrote is drawn as a monogram of this rather than an avatar. Empty when git has no user.name configured.
 	You *string `json:"you,omitempty"`

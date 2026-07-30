@@ -3844,6 +3844,12 @@ components:
         notified:
           type: string
           description: On a publish, the one line the agent was told. Absent otherwise.
+        notified_reviewer:
+          type: boolean
+          description: >-
+            On a publish, true when at least one comment named @review, so the head's
+            reviewer was told (and started, if it was not already running). The UI says so,
+            because a reviewer working in a tab you have not opened is otherwise invisible.
         you:
           type: string
           description: >
@@ -6613,6 +6619,16 @@ components:
         merged_count:
           type: integer
           x-go-type-skip-optional-pointer: true
+        merged_ref:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            The ref this merge brought in, when the reconciler knows it rather
+            than having to read it out of the commit subject. Set when the head
+            absorbed its base by FAST-FORWARD (update-from-base with nothing of
+            its own to merge): the branch then sits on the base's own tip, whose
+            subject names whatever that commit merged - another head - so the
+            chip must be labelled from the ref that was pulled in, not from it.
         merged_commits:
           type: array
           items:

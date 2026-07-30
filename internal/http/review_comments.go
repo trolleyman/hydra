@@ -76,7 +76,9 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 		if err != nil {
 			return commentBadRequest(fmt.Sprintf("the comment was saved but could not be published: %v", err)), nil
 		}
-		resp = commentsResponse(projectRoot, head.ID, s.notifyComments(ctx, projectRoot, *head, published))
+		notified, toReviewer := s.notifyComments(ctx, projectRoot, *head, published)
+		resp = commentsResponse(projectRoot, head.ID, notified)
+		resp.NotifiedReviewer = ptr(toReviewer)
 	}
 	s.notifyAgentsChanged(projectRoot, false)
 	return api.AddReviewComment200JSONResponse(resp), nil
@@ -127,9 +129,11 @@ func (s *Server) PublishReviewComments(ctx context.Context, request api.PublishR
 	if len(published) == 0 {
 		return publishCommentsBadRequest("there is nothing to publish"), nil
 	}
-	notified := s.notifyComments(ctx, projectRoot, *head, published)
+	notified, toReviewer := s.notifyComments(ctx, projectRoot, *head, published)
 	s.notifyAgentsChanged(projectRoot, false)
-	return api.PublishReviewComments200JSONResponse(commentsResponse(projectRoot, head.ID, notified)), nil
+	resp := commentsResponse(projectRoot, head.ID, notified)
+	resp.NotifiedReviewer = ptr(toReviewer)
+	return api.PublishReviewComments200JSONResponse(resp), nil
 }
 
 // notifyComments tells whoever a batch of published comments was addressed to,
@@ -144,7 +148,7 @@ func (s *Server) PublishReviewComments(ctx context.Context, request api.PublishR
 // expects to land, and a chat head steers a mid-turn message in at its next step
 // boundary rather than having it corrupt the turn. Waiting for idle here would
 // mean commenting on a working agent did nothing until it stopped.
-func (s *Server) notifyComments(ctx context.Context, projectRoot string, head heads.Head, published []reviewstore.Comment) *string {
+func (s *Server) notifyComments(ctx context.Context, projectRoot string, head heads.Head, published []reviewstore.Comment) (*string, bool) {
 	var forHead, forReviewer []reviewstore.Comment
 	for _, c := range published {
 		// An agent's own comment never routes. Without this rule one "@review this"
@@ -161,37 +165,65 @@ func (s *Server) notifyComments(ctx context.Context, projectRoot string, head he
 			forReviewer = append(forReviewer, c)
 		}
 	}
+	toReviewer := false
 	if line := reviewstore.NotifyLine(forReviewer); line != "" {
 		s.notifyReviewer(projectRoot, head, line)
+		toReviewer = true
 	}
 	line := reviewstore.NotifyLine(forHead)
 	if line == "" {
-		return nil
+		return nil, toReviewer
 	}
 	if !s.notifyHead(ctx, projectRoot, head.ID, notifyAlways, reasonReviewComments, line) {
-		return nil
+		return nil, toReviewer
 	}
-	return &line
+	return &line, toReviewer
 }
 
-// notifyReviewer delivers a line to the head's review slot.
+// notifyReviewer delivers a line to the head's review slot, STARTING one if it is
+// not already running.
 //
-// Deliberately does NOT start one. A slot is lazy - opening the Review tab creates
-// the checkout and the model session - and typing "@review" in a comment should not
-// spawn a sandbox. When there is no reviewer running the comment is still durable,
-// and the reviewer reads it with get_review_comments the moment it is next opened.
+// Starting it was the open question, and the answer turned on what a mention
+// actually is. An accidental spawn would be indefensible - a slot costs a
+// checkout, a sandbox and a model session - but `@review` is not an accident: it
+// is a person typing the reviewer's name to address it, which is the same
+// intent as clicking the Review tab and should not do less. (An AGENT's comment
+// still never routes, so no agent can spawn one by writing the word.)
+//
+// The start is asynchronous. Spawning a sandbox takes seconds and the caller is
+// answering an HTTP request, so the publish returns immediately and the message
+// follows when the session is up. A failure is logged and dropped: the comment is
+// durable either way, and the reviewer reads it with get_review_comments the
+// moment it is next opened.
 func (s *Server) notifyReviewer(projectRoot string, head heads.Head, line string) {
-	slot := heads.ReviewSessionID(head.ID)
-	if !s.Sessions.IsLive(slot) {
-		return
-	}
 	content, err := json.Marshal([]map[string]any{{"type": "text", "text": autoPrefix + line}})
 	if err != nil {
 		return
 	}
-	if err := s.Sessions.SendChatUser(slot, content); err != nil {
-		log.Printf("warn: notify reviewer %s: %v", slot, err)
+	slot := heads.ReviewSessionID(head.ID)
+	if s.Sessions.IsLive(slot) {
+		if err := s.Sessions.SendChatUser(slot, content); err != nil {
+			log.Printf("warn: notify reviewer %s: %v", slot, err)
+		}
+		return
 	}
+	go func() {
+		rows, cols := heads.LoadResumeSize(s.DB, projectRoot, head.ID)
+		if _, err := heads.StartReviewSession(s.Sessions, projectRoot, head, rows, cols); err != nil {
+			log.Printf("warn: @review could not start a reviewer for %s: %v", head.ID, err)
+			return
+		}
+		// A just-started Claude is not ready for stdin the instant Start returns;
+		// it has to come up and read its system prompt first. Retry briefly rather
+		// than writing into a pipe nobody is reading yet.
+		for range 20 {
+			if err := s.Sessions.SendChatUser(slot, content); err == nil {
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		log.Printf("warn: @review started a reviewer for %s but could not deliver the notice", head.ID)
+	}()
 }
 
 // ResolveReviewComment marks a comment dealt with, whichever origin it came from.
