@@ -51,7 +51,7 @@ export interface PendingPin {
 // picture, so it means the same thing on a thumbnail and on a 4K screenshot.
 const MIN_BOX = 0.01
 
-export function ImagePins({ pins, pending, armed, onPlace, onSelect }: {
+export function ImagePins({ pins, pending, armed, onPlace, onSelect, layerRef }: {
   pins: ImagePin[]
   /** The pin being composed right now, drawn like a placed one but unnumbered. */
   pending?: PendingPin | null
@@ -60,6 +60,10 @@ export function ImagePins({ pins, pending, armed, onPlace, onSelect }: {
   armed: boolean
   onPlace?: (pin: PendingPin) => void
   onSelect?: (id: string) => void
+  /** Published so the caller can turn a pin's normalized position into screen
+   *  pixels - this element IS the picture's box, so it is the only honest thing
+   *  to measure against. The composer anchors to the pin that way. */
+  layerRef?: React.MutableRefObject<HTMLDivElement | null>
 }) {
   const scale = useZoomScale()
   const ref = useRef<HTMLDivElement>(null)
@@ -122,7 +126,10 @@ export function ImagePins({ pins, pending, armed, onPlace, onSelect }: {
 
   return (
     <div
-      ref={ref}
+      ref={(el) => {
+        ref.current = el
+        if (layerRef) layerRef.current = el
+      }}
       // Inert unless armed, so an unarmed layer cannot swallow a pan or a click on
       // the picture. Individual markers re-enable their own pointer events below.
       className={`absolute inset-0 ${armed ? 'cursor-crosshair' : 'pointer-events-none'}`}

@@ -9,6 +9,7 @@ import {
   anchorPositionLabel, anchorVersionLabel, artifactRefFromUrl, buildImageAnchor, sameArtifactPicture,
 } from '../lib/artifactAnchor'
 import { ReviewImageAnchor } from '../api'
+import { placePinPopover, type PopoverPlacement } from '../lib/pinPopover'
 import type { ImageDiffMode } from './ArtifactImageDiff'
 import { LightboxDiff, LightboxDiffControls } from './LightboxDiff'
 import { LightboxFile, LightboxPdf, LightboxText, LightboxVideo } from './LightboxViewers'
@@ -346,6 +347,43 @@ export function Lightbox({
   // (script, key, file) identity to record.
   const canPin = !!submitPin && !!pinnedRef && kindOf(pinnedItem) === 'image'
 
+  // The composer opens ON the pin, so the remark is written next to the spot it
+  // is about. That needs the pin's position in SCREEN pixels, which only the pin
+  // layer can give: it is the picture's own box, so measuring it converts the
+  // stored fractions correctly at any zoom or window size.
+  const pinLayerRef = useRef<HTMLDivElement | null>(null)
+  const popoverRef = useRef<HTMLDivElement | null>(null)
+  const [popover, setPopover] = useState<PopoverPlacement | null>(null)
+  const placePopover = useCallback(() => {
+    const layer = pinLayerRef.current
+    const box = popoverRef.current
+    if (!layer || !box || !pending) {
+      setPopover(null)
+      return
+    }
+    const b = layer.getBoundingClientRect()
+    // Anchored to the pin's bottom-right: for a box that is its far corner, so
+    // the composer never covers the region being talked about.
+    const anchor = {
+      x: b.left + (pending.x + (pending.w ?? 0)) * b.width,
+      y: b.top + (pending.y + (pending.h ?? 0)) * b.height,
+    }
+    const r = box.getBoundingClientRect()
+    setPopover(placePinPopover({
+      anchor,
+      size: { w: r.width, h: r.height },
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+    }))
+  }, [pending])
+  // Measured after layout, so the box's real size decides which corner it takes -
+  // guessing the height would flip it wrongly the moment an error line appears.
+  useLayoutEffect(() => { placePopover() }, [placePopover])
+  useEffect(() => {
+    if (!pending) return
+    window.addEventListener('resize', placePopover)
+    return () => window.removeEventListener('resize', placePopover)
+  }, [pending, placePopover])
+
   // Store the pin being composed. `publish` is the difference between adding it to
   // the review you are building and telling the agent about it now - the same two
   // buttons the diff viewer's line comments offer, and the same meaning.
@@ -575,7 +613,7 @@ export function Lightbox({
   // `object-contain` then letterboxes the picture inside its own box, painting
   // checkerboard down both sides. Letting the width follow the height keeps the
   // ratio, and the attributes still supply it.
-  const mediaMaxH = arming ? 'max-h-[62vh] w-auto' : 'max-h-[85vh]'
+  const mediaMaxH = arming ? 'max-h-[72vh] w-auto' : 'max-h-[85vh]'
   // Where the pin being composed sits, in the picture's own pixels when they are
   // known - the same form the agent is given, so what you are told you marked and
   // what it is told are the same sentence.
@@ -834,7 +872,7 @@ export function Lightbox({
               // than the full-width wrapper it is centred in.
               className={`${LIGHTBOX_MEDIA_CLASS} rounded-lg shadow-2xl ${shadowFade}`}
               maxWidth={hasSiblings ? '80vw' : '90vw'}
-              maxHeight={arming ? '62vh' : '85vh'}
+              maxHeight={arming ? '72vh' : '85vh'}
               onVerticalSlide={followFrameSlide}
             >
               {/* The wrapper hugs the image (shrink-to-fit inside ZoomPan's content
@@ -872,6 +910,7 @@ export function Lightbox({
                     pins={pinsHere}
                     pending={pending}
                     armed={arming}
+                    layerRef={pinLayerRef}
                     onPlace={(p) => { setPending(p); setPinError('') }}
                   />
                 )}
@@ -928,68 +967,11 @@ export function Lightbox({
                 ))}
               </div>
             )}
-            {!pending ? (
-              <p className="text-center text-2xs text-white/60">
-                Click a point on the picture, or drag a box around what you mean.
-              </p>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 mb-2 text-3xs text-white/50 font-mono">
-                  <span>{pendingLabel}</span>
-                  {pinnedRef && <span className="text-white/30">·</span>}
-                  {pinnedRef && <span className="truncate">{anchorVersionLabel({ file: pinnedRef.file, key: pinnedRef.key, x: 0, y: 0 })}</span>}
-                </div>
-                <HighlightedTextarea
-                  value={pinBody}
-                  autoFocus
-                  onChange={(e) => setPinBody(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault()
-                      void savePin(false)
-                    }
-                  }}
-                  placeholder="What is wrong with this spot?"
-                  // The textarea is absolutely positioned inside the wrapper, so it
-                  // cannot size the box - the height belongs on the wrapper, as it
-                  // does on the diff viewer's comment box.
-                  wrapperClassName="w-full h-20 rounded border border-white/15 bg-black/30 focus-within:ring-1 focus-within:ring-blue-400"
-                  textClassName="p-2 text-xs leading-5"
-                  textColorClassName="text-gray-100"
-                  caretClassName="caret-gray-100"
-                  // Mentions decide who the comment wakes - `@review` sends it to
-                  // the reviewer instead of the head - so they are painted while it
-                  // is typed, exactly as in the line-comment box.
-                  renderContent={renderCommentSource}
-                />
-                {pinError && <p className="mt-2 text-2xs text-red-400">{pinError}</p>}
-                <div className="flex items-center justify-end gap-2 mt-2">
-                  <button
-                    type="button"
-                    onClick={() => { setPending(null); setPinBody(''); setPinError('') }}
-                    className="px-2.5 h-7 rounded text-2xs text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                  >
-                    <span className="optical-center">Cancel</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={pinBusy || !pinBody.trim()}
-                    onClick={() => void savePin(true)}
-                    className="px-2.5 h-7 rounded text-2xs text-white/80 bg-white/10 hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                  >
-                    <span className="optical-center">Comment to agent</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={pinBusy || !pinBody.trim()}
-                    onClick={() => void savePin(false)}
-                    className="px-2.5 h-7 rounded text-2xs font-medium text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                  >
-                    <span className="optical-center">Add to review</span>
-                  </button>
-                </div>
-              </>
-            )}
+            <p className="text-center text-2xs text-white/60">
+              {pending
+                ? 'Write the remark in the box beside the pin.'
+                : 'Click a point on the picture, or drag a box around what you mean.'}
+            </p>
           </div>
         )}
         <figcaption ref={captionRef} className={`flex items-center gap-2 text-xs font-mono ${chromeFade}`}>
@@ -1028,6 +1010,80 @@ export function Lightbox({
         >
           <ChevronRight className="w-7 h-7" />
         </button>
+      )}
+
+      {/* The pin composer, hanging off the pin itself rather than sitting in a
+          panel elsewhere: the position is part of what is being said, so the
+          sentence belongs next to the spot. Fixed-positioned against the viewport
+          (the placement is computed in client pixels), and hidden for the first
+          frame because the corner it takes depends on measuring its own size. */}
+      {pending && (
+        <div
+          ref={popoverRef}
+          className="fixed z-[102] w-80 rounded-lg border border-white/15 bg-gray-900/95 backdrop-blur-sm shadow-2xl p-3"
+          style={{
+            left: popover?.left ?? 0,
+            top: popover?.top ?? 0,
+            visibility: popover ? 'visible' : 'hidden',
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-2 mb-2 text-3xs text-white/50 font-mono">
+            <span>{pendingLabel}</span>
+            {pinnedRef && <span className="text-white/30">·</span>}
+            {pinnedRef && <span className="truncate">{anchorVersionLabel({ file: pinnedRef.file, key: pinnedRef.key, x: 0, y: 0 })}</span>}
+          </div>
+          <HighlightedTextarea
+            value={pinBody}
+            autoFocus
+            onChange={(e) => setPinBody(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault()
+                void savePin(false)
+              }
+            }}
+            placeholder="What is wrong with this spot?"
+            // The textarea is absolutely positioned inside the wrapper, so it
+            // cannot size the box - the height belongs on the wrapper, as it
+            // does on the diff viewer's comment box.
+            wrapperClassName="w-full h-20 rounded border border-white/15 bg-black/30 focus-within:ring-1 focus-within:ring-blue-400"
+            textClassName="p-2 text-xs leading-5"
+            textColorClassName="text-gray-100"
+            caretClassName="caret-gray-100"
+            // Mentions decide who the comment wakes - `@review` sends it to the
+            // reviewer instead of the head - so they are painted while it is
+            // typed, exactly as in the line-comment box.
+            renderContent={renderCommentSource}
+          />
+          {pinError && <p className="mt-2 text-2xs text-red-400">{pinError}</p>}
+          <div className="flex items-center justify-end gap-1.5 mt-2">
+            <button
+              type="button"
+              onClick={() => { setPending(null); setPinBody(''); setPinError('') }}
+              className="px-2 h-7 rounded text-2xs text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <span className="optical-center">Cancel</span>
+            </button>
+            <button
+              type="button"
+              disabled={pinBusy || !pinBody.trim()}
+              onClick={() => void savePin(true)}
+              className="px-2 h-7 rounded text-2xs text-white/80 bg-white/10 hover:bg-white/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              <span className="optical-center">To agent</span>
+            </button>
+            <button
+              type="button"
+              disabled={pinBusy || !pinBody.trim()}
+              onClick={() => void savePin(false)}
+              className="px-2 h-7 rounded text-2xs font-medium text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              <span className="optical-center">Add to review</span>
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Next file preview (large screens only) - hidden at the end */}
