@@ -1078,10 +1078,16 @@ const CommentButton = memo(function CommentButton({ idx, onToggle }: { idx: numb
 
 export type { DiffSide, DiffLineSelection } from './lib/diffSelection'
 
-// A left accent bar for a selected diff row, and the tint on its gutter numbers.
-// Inset box-shadow so it reads clearly over the green/red change tints without
-// shifting layout.
-const SELECTED_ROW_STYLE = { boxShadow: 'inset 2px 0 0 0 #f59e0b' }
+// A selected diff row: the WHOLE row tinted amber, plus a left accent bar. The
+// tint is what the repository browser's file view does for a selected line
+// (CodePane), and the two are the same act - "this is the line I mean" - so they
+// should not look different depending on which page you are reading the file in.
+//
+// `!` because the row already carries a change tint: an addition is green, a
+// deletion red, and a selected line has to read as selected over either. The
+// inset bar rides on top of that so the edge stays visible whatever the row's own
+// colour, and neither shifts layout.
+const SELECTED_ROW_CLASS = '!bg-amber-100/70 dark:!bg-amber-400/10 shadow-[inset_2px_0_0_0_#f59e0b]'
 const SELECTED_NUM_CLASS = 'bg-amber-100 dark:bg-amber-400/15 !text-amber-700 dark:!text-amber-300'
 
 // LineNumCell renders one gutter line number that, when a line number is present
@@ -1201,7 +1207,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
         const lineEntries = commentLn != null ? comments?.get(`${isNewSide ? 'new' : 'old'}:${commentLn}`) : undefined
         return (
           <Fragment key={idx}>
-            <div className={`${UNIFIED_ROW} ${UNIFIED_ROW_HOVER} relative group ${bgClass}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
+            <div className={`${UNIFIED_ROW} ${UNIFIED_ROW_HOVER} relative group ${bgClass} ${rowSel ? SELECTED_ROW_CLASS : ''}`}>
               <div className={UNIFIED_GUTTER}>
                 <LineNumCell num={line.old_line_num} side="old" oldNum={line.old_line_num} newNum={line.new_line_num} baseClass={UNIFIED_LINE_NUM_CLASS} selected={rowSel} onSelectLine={onSelectLine} />
                 <LineNumCell num={line.new_line_num} side="new" oldNum={line.old_line_num} newNum={line.new_line_num} baseClass={UNIFIED_LINE_NUM_CLASS} selected={rowSel} onSelectLine={onSelectLine} />
@@ -1296,7 +1302,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
         return (
           <Fragment key={idx}>
             <div className={SBS_ROW}>
-              <div className={`${SBS_HALF} ${oldBg}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
+              <div className={`${SBS_HALF} ${oldBg} ${rowSel ? SELECTED_ROW_CLASS : ''}`}>
                 <div className={UNIFIED_GUTTER}>
                   <LineNumCell num={line.oldLineNum} side="old" oldNum={line.oldLineNum} newNum={line.newLineNum} baseClass={SBS_LINE_NUM} selected={rowSel} onSelectLine={onSelectLine} />
                   {line.oldLineNum != null && !readOnly && (
@@ -1311,7 +1317,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
                   : <span className={SBS_CODE}>{line.oldContent ?? ''}</span>
                 }
               </div>
-              <div className={`${SBS_HALF} ${newBg}`} style={rowSel ? SELECTED_ROW_STYLE : undefined}>
+              <div className={`${SBS_HALF} ${newBg} ${rowSel ? SELECTED_ROW_CLASS : ''}`}>
                 <div className={UNIFIED_GUTTER}>
                   <LineNumCell num={line.newLineNum} side="new" oldNum={line.oldLineNum} newNum={line.newLineNum} baseClass={SBS_LINE_NUM} selected={rowSel} onSelectLine={onSelectLine} />
                   {line.newLineNum != null && !readOnly && (
