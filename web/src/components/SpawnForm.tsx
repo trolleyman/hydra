@@ -17,6 +17,8 @@ import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
 import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
+import { appendToComposer, formatAnnotation } from '../lib/pinNote'
+import { useImageCommentStore } from '../stores/imageCommentStore'
 import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime, pasteMarkerText, stripPasteMarker } from '../lib/pastedText'
 import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
@@ -518,6 +520,25 @@ export const SpawnForm = memo(function SpawnForm({
     commit((prev) => makeSnapshot(value, prev.attachments, selStart, selEnd), true)
     if (draftKey) writeLocal(draftKey, value || null)
   }
+
+  // A pin placed on an ATTACHMENT here, arriving as text. There is no head yet -
+  // that is the whole point of this form - so there is nothing to store a comment
+  // against; the remark is markup on the prompt being written, and goes straight
+  // into it. Only `annotate` is registered: no agent has posted a picture into a
+  // conversation that does not exist, so there is nothing to reply to.
+  const registerPinTargets = useImageCommentStore((st) => st.register)
+  useEffect(() => {
+    registerPinTargets({
+      annotate: (note) => {
+        commit((prev) => {
+          const next = appendToComposer(prev.prompt, formatAnnotation(note))
+          return makeSnapshot(next, prev.attachments, next.length, next.length)
+        }, false)
+        requestAnimationFrame(() => textareaRef.current?.focus())
+      },
+    })
+    return () => registerPinTargets({ annotate: null })
+  }, [registerPinTargets, commit])
 
   // Persist the textarea's scroll offset so it travels with the draft when
   // switching projects (saved live on scroll; restored by the load effect above).

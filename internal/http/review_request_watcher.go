@@ -167,7 +167,7 @@ func (s *Server) recordLocalNote(projectRoot, id string, r reviewq.Request) revi
 	owner, author := commentOwner(id)
 	target := r.ReplyTo
 	if target <= 0 {
-		return reviewq.Result{Message: "No comment number was given, so the reply had nothing to attach to. Take the number from get_review_comments."}
+		return reviewq.Result{Message: "No comment number was given, so the reply had nothing to attach to. Take the number from mcp__hydra__get_review_comments."}
 	}
 
 	// One of Hydra's own comments: reply in kind, threaded under it.
@@ -188,7 +188,7 @@ func (s *Server) recordLocalNote(projectRoot, id string, r reviewq.Request) revi
 	_, ref, ok := reviewstore.ForgeRef(projectRoot, owner, target)
 	if !ok || ref.Thread == "" {
 		return reviewq.Result{Message: fmt.Sprintf(
-			"No comment on this head has the number %d. Call get_review_comments to see what is there.", target)}
+			"No comment on this head has the number %d. Call mcp__hydra__get_review_comments to see what is there.", target)}
 	}
 	if _, err := reviewstore.AppendNote(projectRoot, owner, reviewstore.LocalNote{
 		ThreadID: ref.Thread, Author: author, Body: r.Body,
@@ -236,14 +236,42 @@ func (s *Server) hydraCommentsText(projectRoot, id string, r reviewq.Request) re
 			}
 		}
 		if len(picked) == 0 {
-			return reviewq.Result{OK: false, Message: "No published comment matches those numbers. Call get_review_comments with no arguments to see what is there."}
+			return reviewq.Result{OK: false, Message: "No published comment matches those numbers. Call mcp__hydra__get_review_comments with no arguments to see what is there."}
 		}
 		all = picked
 	}
 	// Full context only for a narrowed read. "Show me everything" should stay
 	// cheap enough to call habitually; a diff block per comment would make an
 	// unfiltered read on a long review the most expensive tool in the session.
-	return reviewq.Result{OK: true, Message: reviewstore.RenderForAgent(all, len(r.Numbers) > 0)}
+	return reviewq.Result{OK: true, Message: reviewstore.RenderForAgent(all, len(r.Numbers) > 0, s.artifactImagePath(projectRoot))}
+}
+
+// artifactImagePath resolves a comment's image anchor back to the picture it was
+// pinned on, so an agent reading the comment can simply open the file and look at
+// what was meant instead of reasoning from coordinates alone. The sandbox mounts
+// the filesystem read-only, so the path it hands out is one the agent can read.
+//
+// Validation is Manager.BlobPath's, deliberately: it already checks the key's
+// shape and keeps the resolved path inside the entry dir, and an anchor arrives
+// from a browser like any other client input. A file that no longer exists (the
+// artifact cache was cleared, or it has been regenerated under a new key) returns
+// "", which renders the anchor without a path rather than a path that 404s.
+func (s *Server) artifactImagePath(projectRoot string) reviewstore.ImagePathFunc {
+	return func(c reviewstore.Comment) (string, string) {
+		a := c.Image
+		picture := ""
+		if a != nil && s.Artifacts != nil && a.Script != "" && a.Key != "" && a.File != "" {
+			if path, _, err := s.Artifacts.Manager(projectRoot).BlobPath(a.Script, a.Key, a.File); err == nil {
+				if _, err := os.Stat(path); err == nil {
+					picture = path
+				}
+			}
+		}
+		// No second path any more: the artifact entry a comment points at is
+		// PINNED against pruning, so the full picture stays retrievable and there
+		// is nothing derived to keep alongside it.
+		return picture, ""
+	}
 }
 
 // addHydraComment appends an agent-authored review comment and tells the user's

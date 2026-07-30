@@ -19,7 +19,7 @@
 // would be absurd, and nothing else ever needs to see them.
 
 import { api } from '../stores/apiClient'
-import type { ReviewComment } from '../api'
+import type { ReviewComment, ReviewImageAnchor } from '../api'
 
 // One queued comment, in the shape the diff viewer renders.
 //
@@ -54,6 +54,11 @@ export interface PendingReviewComment {
   /** The comment this answers, which is how a thread forms without a thread object. */
   replyTo: number
   createdAt: number
+  /** Set when the comment is pinned to a POINT ON A PICTURE (an artifact) rather
+   *  than a line of the diff. The two are mutually exclusive in practice: an image
+   *  comment has no path or line to render in the gutter, and is drawn on the
+   *  picture in the lightbox instead. */
+  image?: ReviewImageAnchor
 }
 
 // The anchor a new comment carries. `diff` is the comparison it was written
@@ -89,6 +94,7 @@ function toPending(c: ReviewComment): PendingReviewComment {
     read: !!c.read,
     replyTo: c.reply_to ?? 0,
     createdAt: Date.parse(c.created_at) || 0,
+    image: c.image,
   }
 }
 
@@ -138,6 +144,34 @@ export async function addReviewComment(
       hunk_hash: c.hunkHash,
     }),
   )
+}
+
+// A comment pinned to a point on a picture rather than to a line of code.
+//
+// Its own function rather than a widened NewComment: an image comment has no
+// path, line or hunk hash, and passing four empty strings through the line-comment
+// shape would put a comment in the store that claims to be anchored to a file it
+// says nothing about. `diffLabel` is the comparison it was written on, in the same
+// "before -> after" form the line comments use, so both read the same way when an
+// agent is told when the observation was made.
+export async function addImageComment(
+  projectId: string | null,
+  agentId: string,
+  c: { image: ReviewImageAnchor; text: string; diffLabel?: string; publish?: boolean },
+): Promise<{ comments: PendingReviewComment[]; notified: string | null; toReviewer: boolean }> {
+  if (!projectId) return { comments: [], notified: null, toReviewer: false }
+  const res = await api.default.addReviewComment(projectId, agentId, {
+    body: c.text,
+    image: c.image,
+    diff: c.diffLabel,
+    publish: c.publish,
+  })
+  // The same shape sendReviewComment returns, so a pin can be confirmed the same
+  // way a line comment is: `notified` is the only place the browser learns what
+  // actually went (and that anything did), and `notified_reviewer` says WHICH
+  // agent was woken - a pin can address the reviewer too, which is why the
+  // composer paints mentions at all.
+  return { comments: all(res), notified: res.notified ?? null, toReviewer: res.notified_reviewer === true }
 }
 
 export async function updateReviewComment(

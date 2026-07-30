@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"sort"
@@ -1415,6 +1416,9 @@ func (s *SimulationServer) AddReviewComment(w http.ResponseWriter, r *http.Reque
 		Path: body.Path, Line: body.Line, OldSide: body.OldSide,
 		Commit: body.Commit, Diff: body.Diff, Context: body.Context,
 		HunkHash: body.HunkHash, ReplyTo: body.ReplyTo,
+		// Carried through, or a pin placed on a picture comes back anchored to
+		// nothing and disappears the moment it is saved.
+		Image:     body.Image,
 		CreatedAt: time.Now().Format(time.RFC3339),
 	}
 	if body.Publish != nil && *body.Publish {
@@ -2388,6 +2392,11 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  19,
 					Deletions:  9,
+					// The real file's length. It is what lets the windowed view below
+					// count the run under its last hunk (the server sends it from the
+					// full read it does anyway), and here it also sizes the tail
+					// simReconstructFull fabricates when this file is promoted.
+					TotalLines: ptr(11038),
 					Hunks: []api.DiffHunk{
 						{
 							// A realistic modify deep in a large file (a scroll-pin rewrite ~line
@@ -2788,6 +2797,15 @@ func simReconstructFull(f api.DiffFile, maxFullLines int) api.DiffFile {
 			lines = append(lines, nl)
 		}
 	}
+	// A fixture that states its length gets the rest of the file too, so a promoted
+	// file ends where it says it ends and its trailing gap is the one the windowed
+	// view was counting down to.
+	if f.TotalLines != nil {
+		// Counted on the head side, as TotalLines is.
+		for ; newN <= *f.TotalLines; oldN, newN = oldN+1, newN+1 {
+			lines = append(lines, synthContextLine(ext, oldN, newN))
+		}
+	}
 	// The real server drops the expanded version when it blew past the cap (a few
 	// changed lines scattered through a long file) and keeps the windowed hunks.
 	if len(lines) > maxFullLines {
@@ -2882,6 +2900,16 @@ const simArtifactScale = 4
 
 // simSVGDoc wraps one placeholder's markup (drawn in w×h coordinates) as a
 // data-URL SVG that DECLARES simArtifactScale×(w×h) - see simArtifactScale.
+// The two cache keys the simulated artifact sets compare: a "before" commit and
+// an "after" one. Real keys are "commit/<sha>" or "worktree/<content-hash>" (see
+// internal/artifacts.versionKey); these are the same shape, so anything reading a
+// key - the review pin's anchor, which reports WHICH COMMIT a picture was
+// rendered from - behaves here exactly as it does against a real project.
+const (
+	simKeyLeft  = "commit/aaaa"
+	simKeyRight = "commit/bbbb"
+)
+
 func simSVGDoc(body string, w, h int) string {
 	doc := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">%s</svg>`,
 		w*simArtifactScale, h*simArtifactScale, w, h, body)
@@ -2893,6 +2921,91 @@ func simSVGDoc(body string, w, h int) string {
 // text viewer fetches the URL it is given, and a data URL is one.
 func simTextURL(mime, body string) string {
 	return "data:" + mime + ";charset=utf-8;base64," + base64.StdEncoding.EncodeToString([]byte(body))
+}
+
+// simArtifactBlob dresses an inline data URL as a real artifact blob URL, so a
+// simulated picture is addressed the way a generated one is:
+// blob?script=&key=&file=.
+//
+// It exists because that triple is an artifact's IDENTITY, not just a route. The
+// review pins read their anchor back out of the URL the picture is loaded from
+// (web/src/lib/artifactAnchor.ts), so a data URL - which carries no script, key or
+// file - is a picture nothing can be pinned to. Without this the simulation could
+// not exercise image comments at all.
+//
+// The bytes still ride in the URL (the `d` parameter, ignored by everything that
+// reads the identity), so this keeps the property that made data URLs attractive
+// here: no on-disk blob serving, and no cache to seed.
+func simArtifactBlob(script, key, file, dataURL string) string {
+	// Also remembered by its (script, key, file) triple, because that is how a
+	// REAL daemon addresses a blob - and anything that reconstructs a URL from an
+	// artifact's identity rather than reusing the one it was handed will ask that
+	// way. A review comment's card is the case in point: it holds an anchor, not a
+	// URL, so without this it asks for a picture the simulation would not
+	// recognise. The map only grows as the fixtures are built, once, at startup.
+	simBlobMu.Lock()
+	simBlobs[simBlobKey{script, key, file}] = dataURL
+	simBlobMu.Unlock()
+
+	q := url.Values{}
+	q.Set("script", script)
+	q.Set("key", key)
+	q.Set("file", file)
+	q.Set("d", dataURL)
+	return "/artifacts/projects/sim-project/blob?" + q.Encode()
+}
+
+type simBlobKey struct{ script, key, file string }
+
+var (
+	simBlobMu sync.Mutex
+	simBlobs  = map[simBlobKey]string{}
+)
+
+// HandleArtifactBlob serves a simulated artifact's bytes, mirroring the real
+// server's non-OpenAPI route. The content is carried in the request itself (see
+// simArtifactBlob), so there is nothing to look up: this decodes the data URL it
+// was handed back into bytes and a content type.
+func (s *SimulationServer) HandleArtifactBlob(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	d := q.Get("d")
+	if d == "" {
+		// Addressed by identity rather than by the URL we handed out - which is
+		// how the real blob route works, and how anything holding an artifact
+		// anchor will ask.
+		simBlobMu.Lock()
+		d = simBlobs[simBlobKey{q.Get("script"), q.Get("key"), q.Get("file")}]
+		simBlobMu.Unlock()
+	}
+	mime, body, ok := decodeDataURL(d)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	_, _ = w.Write(body)
+}
+
+// decodeDataURL splits "data:<mime>[;charset=...];base64,<payload>" into its mime
+// type and decoded bytes. Only the base64 form is produced by the helpers above,
+// so anything else is refused rather than guessed at.
+func decodeDataURL(s string) (mime string, body []byte, ok bool) {
+	const prefix = "data:"
+	if !strings.HasPrefix(s, prefix) {
+		return "", nil, false
+	}
+	meta, payload, found := strings.Cut(s[len(prefix):], ",")
+	if !found || !strings.HasSuffix(meta, ";base64") {
+		return "", nil, false
+	}
+	mime = strings.TrimSuffix(meta, ";base64")
+	// A charset parameter belongs on the Content-Type as written, so keep it.
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return "", nil, false
+	}
+	return mime, raw, true
 }
 
 // simSVG builds an inline data-URL SVG image (w×h) so the demo can render
@@ -3286,8 +3399,8 @@ func simReadyChangedSet() api.ArtifactSet {
 				Name:       "home.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("theme::light", "viewport::desktop"),
-				LeftUrl:    ptr(simSVGUI("Home", false, "#64748b", "Draft", 360, 220)),
-				RightUrl:   ptr(simSVGUI("Home", false, "#16a34a", "Live", 360, 220)),
+				LeftUrl:    ptr(simArtifactBlob("screenshots", simKeyLeft, "home.png", simSVGUI("Home", false, "#64748b", "Draft", 360, 220))),
+				RightUrl:   ptr(simArtifactBlob("screenshots", simKeyRight, "home.png", simSVGUI("Home", false, "#16a34a", "Live", 360, 220))),
 				Width:      ptr(1440), Height: ptr(880),
 				// Only the centred tile + status badge moved, so a small fraction of
 				// pixels differ - below a ~10% threshold this reads as "identical".
@@ -3297,8 +3410,8 @@ func simReadyChangedSet() api.ArtifactSet {
 				Name:       "home-dark.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("theme::dark", "viewport::desktop"),
-				LeftUrl:    ptr(simSVGUI("Home", true, "#64748b", "Draft", 360, 220)),
-				RightUrl:   ptr(simSVGUI("Home", true, "#16a34a", "Live", 360, 220)),
+				LeftUrl:    ptr(simArtifactBlob("screenshots", simKeyLeft, "home-dark.png", simSVGUI("Home", true, "#64748b", "Draft", 360, 220))),
+				RightUrl:   ptr(simArtifactBlob("screenshots", simKeyRight, "home-dark.png", simSVGUI("Home", true, "#16a34a", "Live", 360, 220))),
 				Width:      ptr(1440), Height: ptr(880),
 				ChangeRatio: ptr(0.03),
 			},
@@ -3306,8 +3419,8 @@ func simReadyChangedSet() api.ArtifactSet {
 				Name:       "login-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("theme::light", "viewport::phone"),
-				LeftUrl:    ptr(simSVGUI("Login", false, "#64748b", "Draft", 240, 480)),
-				RightUrl:   ptr(simSVGUI("Login", false, "#16a34a", "Live", 240, 480)),
+				LeftUrl:    ptr(simArtifactBlob("screenshots", simKeyLeft, "login-phone.png", simSVGUI("Login", false, "#64748b", "Draft", 240, 480))),
+				RightUrl:   ptr(simArtifactBlob("screenshots", simKeyRight, "login-phone.png", simSVGUI("Login", false, "#16a34a", "Live", 240, 480))),
 				Width:      ptr(960), Height: ptr(1920),
 				// A larger fraction differs here, so this one stays "modified" past a
 				// ~10% threshold - contrasting with the near-identical home shots.
@@ -3317,8 +3430,8 @@ func simReadyChangedSet() api.ArtifactSet {
 				Name:       "profile-phone-dark.png",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("theme::dark", "viewport::phone"),
-				LeftUrl:    ptr(simSVGUI("Profile", true, "#64748b", "Draft", 240, 480)),
-				RightUrl:   ptr(simSVGUI("Profile", true, "#16a34a", "Live", 240, 480)),
+				LeftUrl:    ptr(simArtifactBlob("screenshots", simKeyLeft, "profile-phone-dark.png", simSVGUI("Profile", true, "#64748b", "Draft", 240, 480))),
+				RightUrl:   ptr(simArtifactBlob("screenshots", simKeyRight, "profile-phone-dark.png", simSVGUI("Profile", true, "#16a34a", "Live", 240, 480))),
 				Width:      ptr(960), Height: ptr(1920),
 				ChangeRatio: ptr(0.42),
 			},
@@ -3326,7 +3439,7 @@ func simReadyChangedSet() api.ArtifactSet {
 				Name:       "settings-phone.png",
 				ChangeType: api.ArtifactFileChangeTypeAdded,
 				Tags:       artTags("theme::dark", "viewport::phone", "new"),
-				RightUrl:   ptr(simSVG("Settings (new)", "#15803d", 240, 480)),
+				RightUrl:   ptr(simArtifactBlob("screenshots", simKeyRight, "settings-phone.png", simSVG("Settings (new)", "#15803d", 240, 480))),
 				Width:      ptr(960), Height: ptr(1920),
 			},
 			// A .webm artifact: the frontend routes it to the video diff viewer
@@ -3336,8 +3449,8 @@ func simReadyChangedSet() api.ArtifactSet {
 				Name:       "loader-animation.webm",
 				ChangeType: api.ArtifactFileChangeTypeModified,
 				Tags:       artTags("theme::dark", "viewport::desktop"),
-				LeftUrl:    ptr(simWebM(simVideoBefore)),
-				RightUrl:   ptr(simWebM(simVideoAfter)),
+				LeftUrl:    ptr(simArtifactBlob("screenshots", simKeyLeft, "loader-animation.webm", simWebM(simVideoBefore))),
+				RightUrl:   ptr(simArtifactBlob("screenshots", simKeyRight, "loader-animation.webm", simWebM(simVideoAfter))),
 				Width:      ptr(280), Height: ptr(150),
 				// Video ratio is the share of differing frames; this animation changes
 				// across much of its run, so it stays "modified" at a ~10% threshold.
@@ -3347,8 +3460,8 @@ func simReadyChangedSet() api.ArtifactSet {
 				Name:       "about.png",
 				ChangeType: api.ArtifactFileChangeTypeUnchanged,
 				Tags:       artTags("theme::light", "viewport::desktop"),
-				LeftUrl:    ptr(simSVG("About", "#334155", 360, 220)),
-				RightUrl:   ptr(simSVG("About", "#334155", 360, 220)),
+				LeftUrl:    ptr(simArtifactBlob("screenshots", simKeyLeft, "about.png", simSVG("About", "#334155", 360, 220))),
+				RightUrl:   ptr(simArtifactBlob("screenshots", simKeyRight, "about.png", simSVG("About", "#334155", 360, 220))),
 				Width:      ptr(1440), Height: ptr(880),
 			},
 			// A download-class artifact (an Android build): the frontend renders a

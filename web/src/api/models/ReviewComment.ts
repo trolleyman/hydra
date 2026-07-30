@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ReviewImageAnchor } from './ReviewImageAnchor';
 /**
  * One durable, numbered review comment. The number is the handle everything else uses ("fix #3") - one token for a model, speakable by a person, and never reused.
  *
@@ -57,6 +58,7 @@ export type ReviewComment = {
      * The user has seen it. Set only by an explicit mark-read; nothing becomes read by the passage of time.
      */
     read?: boolean;
+    image?: ReviewImageAnchor;
 };
 export namespace ReviewComment {
     /**

@@ -197,6 +197,72 @@ describe('expander context labels', () => {
   })
 })
 
+// A file too big to ship whole arrives as `-U3` fragments, and its two edge
+// expanders used to be bare chevrons: the gaps BETWEEN hunks could state their
+// size (two hunk headers bracket them) but the runs above the first and below the
+// last had nothing to measure against, so the reader was told "there is more"
+// without being told how much - and only learnt it after a click promoted the
+// file. The run above is measurable from the first hunk's start line; the run
+// below needs the file's length, which the diff now carries as total_lines.
+describe('a windowed file counts what its edges hide', () => {
+  // One `-U3` hunk spanning lines 100-105 of a 500-line file: 99 lines above it,
+  // 395 below. Its trailing context is a full 3 lines, so the old
+  // "fewer context lines than we asked for" test can't tell where EOF is.
+  const deepHunk = () =>
+    hunk([ctx('a', 100), ctx('b', 101), add('added', 102), ctx('c', 103), ctx('d', 104), ctx('e', 105)], 100, 100)
+  const windowedDeep = (over: Partial<DiffFile> = {}) =>
+    file({ expanded: false, additions: 1, deletions: 0, hunks: [deepHunk()], ...over })
+
+  const expanderTexts = (f: DiffFile, currentContext = 3) => {
+    cleanup()
+    const { container } = render(
+      <FileDiff
+        file={f} sideBySide={false} currentContext={currentContext}
+        onComment={() => {}} onExpand={() => {}}
+        isCollapsed={false} onToggleCollapse={() => {}}
+      />,
+    )
+    return Array.from(container.querySelectorAll(`div[class="${EXPANDER_ROW}"]`), (el) => el.textContent ?? '')
+  }
+
+  it('counts both edges when the file states its length', () => {
+    const f = windowedDeep({ total_lines: 500 })
+    expect(expanderTexts(f)).toEqual([
+      expect.stringContaining('99 lines'),
+      expect.stringContaining('395 lines'),
+    ])
+    expect(bodyShape(f, false, false, 3)).toMatchObject({
+      expanders: [{ buttons: 1, hidden: 99 }, { buttons: 1, hidden: 395 }],
+    })
+  })
+
+  it('still counts the leading run without one, and leaves the trailing chevron bare', () => {
+    const f = windowedDeep()
+    expect(expanderTexts(f)).toEqual([expect.stringContaining('99 lines'), ''])
+    expect(bodyShape(f, false, false, 3)).toMatchObject({
+      expanders: [{ buttons: 1, hidden: 99 }, { buttons: 1, hidden: null }],
+    })
+  })
+
+  // The old EOF test - "fewer trailing context lines than we asked for" - can't
+  // tell a hunk that ends exactly `currentContext` lines from EOF apart from one
+  // with more file below it, and drew a chevron that expanded to nothing.
+  // total_lines settles it, so that expander now disappears.
+  it('drops the trailing expander when the last hunk provably reaches EOF', () => {
+    const atEof = windowedDeep({ total_lines: 105 })
+    expect(expanderTexts(atEof)).toEqual([expect.stringContaining('99 lines')])
+    expect(bodyShape(atEof, false, false, 3)).toMatchObject({ expanders: [{ buttons: 1, hidden: 99 }] })
+  })
+
+  it('leaves a file that starts at line 1 without a leading expander', () => {
+    const f = file({
+      expanded: false, additions: 1, deletions: 0, total_lines: 500,
+      hunks: [hunk([ctx('a', 1), add('added', 2), ctx('b', 3)], 1, 1)],
+    })
+    expect(expanderTexts(f)).toEqual([expect.stringContaining('497 lines')])
+  })
+})
+
 // A silent (WS-triggered) refresh skips re-rendering when the FILES it fetched
 // are identical to the ones on screen - that early-out is what keeps an agent's
 // every git command from disturbing the reader's text selection. But merging the

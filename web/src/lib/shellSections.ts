@@ -55,7 +55,17 @@ export interface MatchesView {
   numbered: boolean
 }
 
-export type ScriptStep =
+// `cap` is the most lines a step's own script says it can print, whatever the
+// step turns out to BE: a trailing `| tail -2` bounds a `mage build` this module
+// can say nothing else about, and a `git log --oneline -3` bounds itself. It
+// rides beside the kind rather than inside one of them because it is the one
+// bound that does not come from knowing what the output is - which is exactly
+// why it matters. An opaque step with no bound at all is a boundary nothing can
+// place, and it costs every neighbour in the same stretch its attribution (see
+// distribute); a bounded one costs nothing but its own lines.
+//
+// stepLimit takes the tighter of this and whatever the kind's own shape says.
+export type ScriptStep = { cap?: number } & (
   // A constant line-printer: prints a known string, so it anchors the output.
   | { kind: 'marker'; text: string }
   // A constant line-printer whose text is too short to search the output for -
@@ -87,6 +97,7 @@ export type ScriptStep =
   | { kind: 'silent' }
   // Prints something this module cannot describe.
   | { kind: 'unknown'; command: string }
+)
 
 // Every section carries `lines` with any ANSI colour stripped out - that is what
 // gets matched, attributed and highlighted, since an escape sequence in the
@@ -780,12 +791,49 @@ function parseGitBlame(words: Word[]): string | null {
   return operands.length >= 1 && !file.dynamic ? file.text : null
 }
 
+// A `head`/`tail` flag that takes its value as the next word (`head -n 5`),
+// which is what keeps that bare `5` from being read as the file operand that
+// would make this a read rather than a filter.
+const TRIM_VALUE = /^(-n|-c|--lines|--bytes)=?(.*)$/
+// The count both tools take when nothing says otherwise.
+const TRIM_DEFAULT = 10
+
 // isFilter reports whether a command only trims what the command before it in
-// the pipeline printed - `| head`, `| tail -20` with no file of its own.
-function isFilter(cmd: Command): 'head' | 'tail' | null {
-  const name = cmd.words[0].text
-  if (name !== 'head' && name !== 'tail') return null
-  return cmd.words.slice(1).every((w) => w.text.startsWith('-') && !w.quoted) ? name : null
+// the pipeline printed - `| head`, `| tail -20` with no file of its own - and
+// how many lines it can leave at most.
+//
+// The count is an upper bound, not a promise: `tail -20` of twelve lines prints
+// twelve. That is all any caller wants from it.
+//
+// Null count for the spellings that bound nothing: `-c`/`--bytes` measures bytes,
+// `-f` never ends, and a SIGNED count runs from the other end - `tail -n +5` is
+// "line 5 onwards" and `head -n -5` is "all but the last five", both of which are
+// as long as the stream is. Those still trim, which is all the callers below
+// that ignore the count need.
+function isFilter(cmd: Command): { end: 'head' | 'tail'; count: number | null } | null {
+  const name = cmd.words[0]
+  if (name.quoted || (name.text !== 'head' && name.text !== 'tail')) return null
+  const args = cmd.words.slice(1)
+  let count: number | null = TRIM_DEFAULT
+  for (let i = 0; i < args.length; i++) {
+    const w = args[i]
+    // An operand: this is reading a file of its own, not the pipe.
+    if (w.quoted || !w.text.startsWith('-')) return null
+    const bare = /^-(\d+)$/.exec(w.text)
+    if (bare) { count = Number(bare[1]); continue }
+    const flag = TRIM_VALUE.exec(w.text)
+    if (flag) {
+      // `-n20` and `--lines=20` carry their value in the same word; `-n 20`
+      // spends the word after, and `-n` at the end of the line has none at all.
+      const value = flag[2] || args[++i]?.text
+      const lines = flag[1] === '-n' || flag[1] === '--lines'
+      count = lines && value !== undefined && /^\d+$/.test(value) ? Number(value) : null
+      continue
+    }
+    // `-f`, `-v`, `-z`: still only a trim, but not one with a line count in it.
+    count = null
+  }
+  return { end: name.text, count }
 }
 
 // isPassthrough reports whether a command hands on what it was given byte for
@@ -863,8 +911,91 @@ function wholeFile(view: FileView): boolean {
   return view.start === 1 && view.end == null && !view.numbered && !view.ranges
 }
 
-// classify decides what one pipeline contributes to the output.
+// tighter is the smaller of two upper bounds, where null is "no bound".
+function tighter(a: number | null, b: number | null): number | null {
+  if (a == null) return b
+  return b == null ? a : Math.min(a, b)
+}
+
+// pipelineCap is the most lines a pipeline can print when one of the filters at
+// the end of it is a `head`/`tail` with a count - whatever the command at the
+// FRONT of it was, and whether or not this module can say anything about it.
+//
+// This is the only bound there is for a step it cannot describe at all, and that
+// is the whole reason it is worth having: a script ending
+// `git log --oneline -3; mage build 2>&1 | tail -2` has no separator in it and
+// no shape the split can find, so the two lines of build output at the bottom
+// used to take the three commit lines above them down with them into one plain
+// block. Two lines is all the split needed to know.
+//
+// The other filters drop lines without adding any, so a `| tail -5 | grep x`
+// still prints at most five; anything that is not a filter ends the walk,
+// because what it prints is its own.
+function pipelineCap(cmds: Command[]): number | null {
+  let cap: number | null = null
+  for (let i = cmds.length - 1; i > 0; i--) {
+    const trim = isFilter(cmds[i])
+    if (trim) { cap = tighter(cap, trim.count); continue }
+    if (!isPassthrough(cmds[i]) && !isLineFilter(cmds[i]) && !isRangeFilter(cmds[i]) && !isReorderFilter(cmds[i])) break
+  }
+  return cap
+}
+
+// Everything a `git log` prints MORE of per commit, which takes the count below
+// back: a patch, a diffstat, a signature, the `--graph` topology (whose edges get
+// lines of their own between the commits), the machine-readable listings.
+const LOG_EXTRA = /^(-p|-u|--patch|--patch-with-stat|--stat(=.*)?|--shortstat|--graph|--cc|--numstat|--name-only|--name-status|--show-signature|--notes(=.*)?)$/
+// `-3`, `-n3`, `--max-count=3`. The two-word spellings (`-n 3`,
+// `--max-count 3`) are read beside this.
+const LOG_COUNT = /^-(\d+)$|^-n(\d+)$|^--max-count=(\d+)$/
+
+// gitReportLimit is the most lines a git call's own arguments say it can print.
+//
+// One shape qualifies: `git log --oneline -3`, which is one line per commit and
+// at most three commits - the thing an agent puts at the top of a script to say
+// where it is. Everything else git reports is as long as the repository makes
+// it, and a count over a format that spends several lines on a commit bounds
+// commits rather than lines.
+function gitReportLimit(words: Word[]): number | null {
+  let i = 1
+  while (i < words.length && !words[i].quoted && words[i].text.startsWith('-')) {
+    if (words[i].text === '-C' || words[i].text === '-c') i++
+    i++
+  }
+  if (words[i]?.quoted || words[i]?.text !== 'log') return null
+  const args = words.slice(i + 1)
+  const flag = (w: Word) => (w.quoted ? '' : w.text)
+  if (!args.some((w) => flag(w) === '--oneline')) return null
+  if (args.some((w) => LOG_EXTRA.test(flag(w)))) return null
+  let count: number | null = null
+  for (let j = 0; j < args.length; j++) {
+    const m = LOG_COUNT.exec(flag(args[j]))
+    if (m) { count = Number(m[1] ?? m[2] ?? m[3]); continue }
+    if (flag(args[j]) === '-n' || flag(args[j]) === '--max-count') {
+      const value = args[++j]
+      // A count this parser cannot read leaves the call unbounded rather than
+      // bounded by whatever the LAST `-n` on the line happened to be.
+      if (!value || value.dynamic || !/^\d+$/.test(value.text)) return null
+      count = Number(value.text)
+    }
+  }
+  return count
+}
+
+// classify decides what one pipeline contributes to the output, and how many
+// lines the script says that can be (see ScriptStep.cap).
 function classify(p: Pipeline): ScriptStep {
+  const step = classifyKind(p)
+  // A git report's own bound is only claimed when the step really is that
+  // report: a `| sort` or a `| wc -l` in front of it makes the output something
+  // else, and `classifyKind` has already said so by handing back a kind that is
+  // not 'git'.
+  const own = step.kind === 'git' ? gitReportLimit(p.cmds[0].words) : null
+  const cap = tighter(pipelineCap(p.cmds), own)
+  return cap == null ? step : { ...step, cap }
+}
+
+function classifyKind(p: Pipeline): ScriptStep {
   // Trailing filters cut lines out of what the command before them printed; they
   // do not change what the lines ARE, so `grep -n x f | grep -v y | head` is
   // still that grep's matches.
@@ -883,7 +1014,7 @@ function classify(p: Pipeline): ScriptStep {
     const trim = isFilter(last)
     const line = isLineFilter(last)
     const range = isRangeFilter(last)
-    if (trim) trimmedFrom = trim
+    if (trim) trimmedFrom = trim.end
     else if (isReorderFilter(last)) reordered = true
     // A passthrough drops nothing, so it is not even a trim: `git log | cat`
     // is that log, and `sed -n 1,20p f | cat` is still lines 1 to 20 of f.
@@ -1115,8 +1246,16 @@ function matchesAt(lines: string[], pos: number, expected: string[]): boolean {
 // stepLimit is the most lines a step can have printed, or null when it is not
 // bounded by anything the script says. A step the output says failed printed
 // nothing, which is the tightest bound there is (see failedSteps).
+//
+// Two bounds meet here, and the tighter one wins: what the step's own KIND says
+// (an `echo` prints its text, a `sed -n 1,20p` prints twenty lines), and what
+// the script says about it from outside whatever it is (see ScriptStep.cap).
 function stepLimit(step: ScriptStep, failed: ReadonlySet<ScriptStep>): number | null {
   if (failed.has(step)) return 0
+  return tighter(step.cap ?? null, kindLimit(step))
+}
+
+function kindLimit(step: ScriptStep): number | null {
   if (step.kind === 'echo') return step.text.split('\n').length
   if (step.kind !== 'view') return null
   return viewLimit(step.view)
@@ -1191,6 +1330,10 @@ function mergeProducers(steps: ScriptStep[], failed: Set<ScriptStep>): ScriptSte
     const prev = out[out.length - 1]
     const merged = prev ? mergeStep(prev, step) : null
     if (!merged) { out.push(step); continue }
+    // The pair's bound is the two added up, and only when BOTH halves have one -
+    // one unbounded half makes the pair unbounded, exactly as it would have on
+    // its own.
+    if (prev.cap != null && step.cap != null) merged.cap = prev.cap + step.cap
     if (failed.has(prev) && failed.has(step)) failed.add(merged)
     out[out.length - 1] = merged
   }

@@ -117,7 +117,7 @@ func (s *Server) headTestsText(projectRoot string, head *heads.Head) string {
 		case rep.Status == hydratests.StatusErrored:
 			fmt.Fprintf(&b, "- %s: ERRORED (the runner itself failed, so there is no verdict): %s\n", r.Name, oneLine(rep.Error, headStatusMessageLen))
 			b.WriteString(logTailText(mgr, r.Name, rep.Key))
-			fmt.Fprintf(&b, "  Call get_test_logs with runner %q for its full output.\n", r.Name)
+			fmt.Fprintf(&b, "  Call mcp__hydra__get_test_logs with runner %q for its full output.\n", r.Name)
 			continue
 		}
 		fmt.Fprintf(&b, "- %s: %s (%d passed, %d failed, %d skipped of %d)\n",
@@ -138,7 +138,7 @@ func (s *Server) headTestsText(projectRoot string, head *heads.Head) string {
 		if withMessages == 0 {
 			b.WriteString(logTailText(mgr, r.Name, rep.Key))
 		}
-		fmt.Fprintf(&b, "  Call get_test_logs with runner %q for the full output.\n", r.Name)
+		fmt.Fprintf(&b, "  Call mcp__hydra__get_test_logs with runner %q for the full output.\n", r.Name)
 	}
 	if b.Len() == 0 {
 		return "No test verdicts are available.\n"
@@ -194,10 +194,10 @@ func failingCasesText(cases []hydratests.TestCase) (string, int) {
 		}
 	}
 	if rest := len(failing) - len(shown); rest > 0 {
-		fmt.Fprintf(&b, "  ... and %d more failing case(s) - call get_test_logs for the rest.\n", rest)
+		fmt.Fprintf(&b, "  ... and %d more failing case(s) - call mcp__hydra__get_test_logs for the rest.\n", rest)
 	}
 	if budget <= 0 {
-		b.WriteString("  (later failure messages were dropped to keep this short - call get_test_logs for them)\n")
+		b.WriteString("  (later failure messages were dropped to keep this short - call mcp__hydra__get_test_logs for them)\n")
 	}
 	return b.String(), withMessages
 }
@@ -220,7 +220,7 @@ func clampMessage(text string, maxLines, maxChars int) string {
 		t, truncated = t[:maxChars], true
 	}
 	if truncated {
-		t += "\n      ... (truncated - call get_test_logs for the rest)"
+		t += "\n      ... (truncated - call mcp__hydra__get_test_logs for the rest)"
 	}
 	return t
 }
@@ -353,7 +353,7 @@ func (s *Server) testLogsText(ctx context.Context, id string, req reviewq.Reques
 	}
 	runner := strings.TrimSpace(req.Runner)
 	if runner == "" {
-		return reviewq.Result{Message: "No runner was named. Call get_head_status first to see this project's runners, then pass one as \"runner\"."}
+		return reviewq.Result{Message: "No runner was named. Call mcp__hydra__get_head_status first to see this project's runners, then pass one as \"runner\"."}
 	}
 	if s.Tests == nil || head.Branch == nil {
 		return reviewq.Result{Message: "Tests are not available for this head, so it has no logs."}
@@ -373,7 +373,7 @@ func (s *Server) testLogsText(ctx context.Context, id string, req reviewq.Reques
 		return reviewq.Result{Message: fmt.Sprintf("The %q runner's state could not be read: %v", runner, err)}
 	}
 	if !ok {
-		return reviewq.Result{Message: fmt.Sprintf("The %q runner has not run for this commit, so there is no log. (If that name looks wrong, call get_head_status for the configured runners.)", runner)}
+		return reviewq.Result{Message: fmt.Sprintf("The %q runner has not run for this commit, so there is no log. (If that name looks wrong, call mcp__hydra__get_head_status for the configured runners.)", runner)}
 	}
 	if rep.Status == hydratests.StatusRunning {
 		// An in-flight run's log lives in memory on the Manager, not on disk yet.
@@ -534,7 +534,7 @@ func (s *Server) runArtifactsText(ctx context.Context, id string, req reviewq.Re
 func startedText(kind string, started, skipped []string) string {
 	var b strings.Builder
 	if len(started) > 0 {
-		fmt.Fprintf(&b, "Started %d %s(s): %s.\nThis runs in the background - call get_head_status in a little while for the result; do NOT call this again in the meantime.\n",
+		fmt.Fprintf(&b, "Started %d %s(s): %s.\nThis runs in the background - call mcp__hydra__get_head_status in a little while for the result; do NOT call this again in the meantime.\n",
 			len(started), kind, strings.Join(started, ", "))
 	}
 	if len(skipped) > 0 {

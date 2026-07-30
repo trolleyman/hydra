@@ -8,6 +8,7 @@ function tag(cls: string): string {
   if (cls.includes('green')) return 'add'
   if (cls.includes('red')) return 'del'
   if (cls.includes('amber')) return 'sha'
+  if (cls.includes('yellow')) return 'mod'
   if (cls.includes('sky')) return 'ref'
   // A span carrying a fragment of a language takes Prism's own token classes -
   // the ignore pattern in a `check-ignore -v` line.
@@ -21,10 +22,14 @@ function spans(...lines: string[]) {
 
 describe('gitOutputSpans', () => {
   it('splits a short status into its two columns', () => {
-    expect(spans(' M web/src/x.tsx', 'A  a.go', 'MM b.go', '?? scratch/')).toEqual([
-      [[' ', ''], ['M', 'del'], [' ', ''], ['web/src/x.tsx', '']],
+    expect(spans(' M web/src/x.tsx', 'A  a.go', ' D gone.go', 'MM b.go', '?? scratch/')).toEqual([
+      // Modified is neither an addition nor a deletion either, so it is not
+      // coloured by which of the two columns it sits in - the column itself
+      // still says whether it is staged.
+      [[' ', ''], ['M', 'mod'], [' ', ''], ['web/src/x.tsx', '']],
       [['A', 'add'], [' ', ''], [' ', ''], ['a.go', '']],
-      [['M', 'add'], ['M', 'del'], [' ', ''], ['b.go', '']],
+      [[' ', ''], ['D', 'del'], [' ', ''], ['gone.go', '']],
+      [['M', 'mod'], ['M', 'mod'], [' ', ''], ['b.go', '']],
       // Untracked is neither an addition nor a deletion.
       [['?', 'dim'], ['?', 'dim'], [' ', ''], ['scratch/', '']],
     ])
@@ -103,17 +108,21 @@ describe('gitOutputSpans', () => {
       'On branch main',
       'Changes to be committed:',
       '  (use "git restore --staged <file>..." to unstage)',
-      '\tmodified:   a.go',
+      '\tnew file:   a.go',
       'Changes not staged for commit:',
-      '\tmodified:   b.go',
+      '\tdeleted:    b.go',
+      '\tmodified:   c.go',
       'Untracked files:',
       '\tscratch/',
     )
     expect(out[0]).toEqual([['On branch ', 'dim'], ['main', 'ref']])
     expect(out[2]).toEqual([['  (use "git restore --staged <file>..." to unstage)', 'dim']])
-    expect(out[3]).toEqual([['\t', ''], ['modified:', 'add'], ['   ', ''], ['a.go', 'add']])
-    expect(out[5]).toEqual([['\t', ''], ['modified:', 'del'], ['   ', ''], ['b.go', 'del']])
-    expect(out[7]).toEqual([['\t', ''], ['scratch/', 'del']])
+    expect(out[3]).toEqual([['\t', ''], ['new file:', 'add'], ['   ', ''], ['a.go', 'add']])
+    expect(out[5]).toEqual([['\t', ''], ['deleted:', 'del'], ['    ', ''], ['b.go', 'del']])
+    // `modified:` is the long status's spelling of an `M` column, and takes the
+    // same colour: what the heading says about it is still said by the heading.
+    expect(out[6]).toEqual([['\t', ''], ['modified:', 'mod'], ['   ', ''], ['c.go', 'mod']])
+    expect(out[8]).toEqual([['\t', ''], ['scratch/', 'del']])
   })
 
   it('colours a patch by direction, with its header receding', () => {

@@ -370,6 +370,12 @@ const (
 	Published ReviewCommentStatus = "published"
 )
 
+// Defines values for ReviewImageAnchorSide.
+const (
+	ReviewImageAnchorSideLeft  ReviewImageAnchorSide = "left"
+	ReviewImageAnchorSideRight ReviewImageAnchorSide = "right"
+)
+
 // Defines values for ReviewThreadNoteOrigin.
 const (
 	Forge     ReviewThreadNoteOrigin = "forge"
@@ -555,8 +561,8 @@ const (
 
 // Defines values for GetAgentArtifactsParamsRefreshSide.
 const (
-	Left  GetAgentArtifactsParamsRefreshSide = "left"
-	Right GetAgentArtifactsParamsRefreshSide = "right"
+	GetAgentArtifactsParamsRefreshSideLeft  GetAgentArtifactsParamsRefreshSide = "left"
+	GetAgentArtifactsParamsRefreshSideRight GetAgentArtifactsParamsRefreshSide = "right"
 )
 
 // Defines values for GetConfigParamsScope.
@@ -1957,6 +1963,9 @@ type DiffFile struct {
 
 	// Path File path (new path for renamed files)
 	Path string `json:"path"`
+
+	// TotalLines Total number of lines in the whole file on the head side (the old side for a deletion), when the server knows it. A windowed file carries only fragments, so this is the one thing the client cannot derive from the hunks - and without it the expander below the last hunk cannot say how many lines it hides. Absent when the file was never read in full (its change count exceeded max_full_changes, or the full-context read failed), in which case that expander stays a bare chevron.
+	TotalLines *int `json:"total_lines,omitempty"`
 }
 
 // DiffFileChangeType defines model for DiffFile.ChangeType.
@@ -2320,9 +2329,12 @@ type NewReviewCommentBody struct {
 	Context  *string `json:"context,omitempty"`
 	Diff     *string `json:"diff,omitempty"`
 	HunkHash *string `json:"hunk_hash,omitempty"`
-	Line     *int    `json:"line,omitempty"`
-	OldSide  *bool   `json:"old_side,omitempty"`
-	Path     *string `json:"path,omitempty"`
+
+	// Image A pin on a generated artifact, the way path/line pin a comment to a diff. The position is normalized (0..1) because the same picture is laid out at different sizes and densities depending on the pane; natural_w/natural_h are kept alongside so real pixels can be recovered, which is the form an agent is told.
+	Image   *ReviewImageAnchor `json:"image,omitempty"`
+	Line    *int               `json:"line,omitempty"`
+	OldSide *bool              `json:"old_side,omitempty"`
+	Path    *string            `json:"path,omitempty"`
 
 	// Publish Publish immediately instead of storing a draft (the "Comment to agent" one-shot path).
 	Publish *bool `json:"publish,omitempty"`
@@ -3019,7 +3031,10 @@ type ReviewComment struct {
 
 	// HunkHash Hash of the anchoring hunk when written, so staleness is detectable later.
 	HunkHash *string `json:"hunk_hash,omitempty"`
-	Line     *int    `json:"line,omitempty"`
+
+	// Image A pin on a generated artifact, the way path/line pin a comment to a diff. The position is normalized (0..1) because the same picture is laid out at different sizes and densities depending on the pane; natural_w/natural_h are kept alongside so real pixels can be recovered, which is the form an agent is told.
+	Image *ReviewImageAnchor `json:"image,omitempty"`
+	Line  *int               `json:"line,omitempty"`
 
 	// Number Per-head sequence number, rendered "#4". Retired numbers are never reissued.
 	Number int `json:"number"`
@@ -3119,6 +3134,48 @@ type ReviewConfigResponse struct {
 	RequireLocalTests *bool   `json:"require_local_tests,omitempty"`
 	Squash            *bool   `json:"squash,omitempty"`
 }
+
+// ReviewImageAnchor A pin on a generated artifact, the way path/line pin a comment to a diff. The position is normalized (0..1) because the same picture is laid out at different sizes and densities depending on the pane; natural_w/natural_h are kept alongside so real pixels can be recovered, which is the form an agent is told.
+type ReviewImageAnchor struct {
+	// File The output's name within the artifact, e.g. "home-dark.png".
+	File string `json:"file"`
+
+	// H Box height as a fraction of the image's height.
+	H *float32 `json:"h,omitempty"`
+
+	// Hash The file's content hash when the pin was placed - the picture's hunk_hash, so a regenerated artifact is detectable as having moved under the comment.
+	Hash *string `json:"hash,omitempty"`
+
+	// Key The artifact cache key of the pinned SIDE, verbatim - "commit/<sha>" or "worktree/<content-hash>". It says which commit the picture was rendered from, and stays honest when that side was the uncommitted working tree, which has no sha to report. Doubles as the entry's path on disk.
+	Key *string `json:"key,omitempty"`
+
+	// NaturalH The picture's own pixel height.
+	NaturalH *int `json:"natural_h,omitempty"`
+
+	// NaturalW The picture's own pixel width, so the fractions can be turned back into pixels. Absent when it could not be determined.
+	NaturalW *int `json:"natural_w,omitempty"`
+
+	// Script The [artifacts.<name>] table the picture came from.
+	Script *string `json:"script,omitempty"`
+
+	// Side Which half of the comparison was pinned.
+	Side *ReviewImageAnchorSide `json:"side,omitempty"`
+
+	// T For a VIDEO artifact, the moment the pin was placed at, in seconds from the start. A recording has a time axis as well as two spatial ones, so a position without it sends the reader hunting through the run. Absent for a still.
+	T *float32 `json:"t,omitempty"`
+
+	// W Box width as a fraction of the image's width. Present with h when a drag placed a box instead of a point.
+	W *float32 `json:"w,omitempty"`
+
+	// X Pin position as a fraction (0..1) of the image's width.
+	X float32 `json:"x"`
+
+	// Y Pin position as a fraction (0..1) of the image's height.
+	Y float32 `json:"y"`
+}
+
+// ReviewImageAnchorSide Which half of the comparison was pinned.
+type ReviewImageAnchorSide string
 
 // ReviewLink The per-head link to a forge MR/PR (docs/non-local-integration.md). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
 type ReviewLink struct {

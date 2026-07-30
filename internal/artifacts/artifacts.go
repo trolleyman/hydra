@@ -1628,10 +1628,30 @@ func (m *Manager) MigrateLegacyLayout() int {
 	return moved
 }
 
+// Pin names one cache entry a caller wants kept, by the same (script, key) pair
+// that addresses its blobs.
+type Pin struct {
+	Script string
+	Key    string
+}
+
 // PruneStale removes cache entries older than maxAge, then removes the oldest
 // remaining entries until the total cache size is under maxBytes. Entries with
-// an in-flight generation are never touched.
-func (m *Manager) PruneStale(maxAge time.Duration, maxBytes int64) error {
+// an in-flight generation are never touched, and neither are any named in
+// `pinned`.
+//
+// Pinning exists for review comments anchored to a picture: the whole value of a
+// pin is that you can go back and look at what it points at, and an entry
+// reclaimed on age or size takes that with it. The pins are passed IN rather than
+// looked up here so this package stays a leaf - it has no business knowing what a
+// review comment is, and the caller already holds both halves.
+//
+// A pinned entry is exempt from BOTH eviction paths, including the size cap. That
+// is deliberate: the cap exists to stop the cache growing without bound, and a
+// pin is a bound - there are only so many comments - whereas silently deleting
+// the evidence for a comment to save disk is the failure this is meant to
+// prevent.
+func (m *Manager) PruneStale(maxAge time.Duration, maxBytes int64, pinned []Pin) error {
 	type entry struct {
 		dir     string
 		modTime time.Time
@@ -1653,6 +1673,16 @@ func (m *Manager) PruneStale(maxAge time.Duration, maxBytes int64) error {
 		inFlight[d] = struct{}{}
 	}
 	m.mu.Unlock()
+
+	// Resolved to directories here so the caller never has to know how a script
+	// name is sanitized into a path - the same reason entryDir is unexported.
+	keep := make(map[string]struct{}, len(pinned))
+	for _, p := range pinned {
+		if p.Script == "" || p.Key == "" || !keyRe.MatchString(p.Key) {
+			continue
+		}
+		keep[m.entryDir(p.Script, p.Key)] = struct{}{}
+	}
 
 	cutoff := time.Now().Add(-maxAge)
 	for _, sd := range scriptDirs {
@@ -1684,6 +1714,9 @@ func (m *Manager) PruneStale(maxAge time.Duration, maxBytes int64) error {
 				}
 				dir := filepath.Join(kindPath, id.Name())
 				if _, busy := inFlight[dir]; busy {
+					continue
+				}
+				if _, held := keep[dir]; held {
 					continue
 				}
 				size, modTime := dirStats(dir)

@@ -69,12 +69,42 @@ type DiffFile struct {
 	// content (a single whole-file hunk) rather than the default windowed context,
 	// so the client can render the reveal/collapse model without re-fetching.
 	Expanded bool
+	// TotalLines is the file's whole-file line count on the head side (the old
+	// side for a deletion), or 0 when it isn't known. A windowed file's hunks are
+	// fragments, so the client can work out how many lines sit between two of them
+	// but not how many follow the last one; this is that missing number. It is
+	// filled in from the full-context read the expansion pass already does, so it
+	// costs nothing extra and is simply absent for a file that read never covered.
+	TotalLines int
 	// HeadBlobSHA is the git blob sha of this file's content on the head side of
 	// the comparison (from the head tree, or a hash-object of the working-tree
 	// file for an uncommitted diff). "" for a deletion or when it can't be
 	// resolved. The client keys per-file "viewed" state on it, so a file re-shows
 	// as unviewed exactly when its content changes.
 	HeadBlobSHA string
+}
+
+// LastLineNum returns the line number the file's last diff line sits on, counted
+// on the head side - or on the old side when the head side has no lines at all (a
+// deletion). Called on a WHOLE-file diff it is the file's line count, which is
+// what fills TotalLines; the client applies the same "new unless there is no new"
+// rule when it measures the run below the last hunk, so the two agree.
+func (f DiffFile) LastLineNum() int {
+	lastOld, lastNew := 0, 0
+	for _, h := range f.Hunks {
+		for _, l := range h.Lines {
+			if l.OldLineNum != nil {
+				lastOld = *l.OldLineNum
+			}
+			if l.NewLineNum != nil {
+				lastNew = *l.NewLineNum
+			}
+		}
+	}
+	if lastNew > 0 {
+		return lastNew
+	}
+	return lastOld
 }
 
 // UncommittedSummary holds counts of uncommitted changes, plus the paths behind
