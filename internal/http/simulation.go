@@ -3942,6 +3942,7 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 		Defaults: api.AgentConfig{
 			PrePrompt: ptr("Default pre-prompt"),
 		},
+		ResourceCapacity: configuredResourceCapacity(),
 		Agents: map[string]api.AgentConfig{
 			"claude": {
 				PrePrompt: ptr("Claude pre-prompt"),

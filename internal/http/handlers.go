@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1097,8 +1098,31 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 	// The raw [resources] table for this layer (nil = unset → the editor shows the
 	// fields empty and inherits the layer below / the built-in defaults).
 	resp.Resources = toAPIResourceLimits(cfg.Resources)
+	resp.ResourceCapacity = configuredResourceCapacity()
 
 	return api.GetConfig200JSONResponse(resp), nil
+}
+
+func configuredResourceCapacity() api.ResourceCapacity {
+	logicalCPUs := runtime.NumCPU()
+	limits := sandbox.DefaultAggregateLimits(logicalCPUs)
+	if path, err := config.GetUserConfigPath(); err == nil {
+		if cfg, err := config.LoadFile(path); err == nil && cfg != nil {
+			limits = cfg.ResolveAggregateResourceLimits()
+		}
+	}
+	return api.ResourceCapacity{
+		LogicalCpus:          logicalCPUs,
+		WorkloadCpuQuota:     sandbox.DefaultWorkloadCPUQuota(logicalCPUs),
+		WorkloadIoReadMax:    sandbox.DefaultWorkloadIOReadBandwidthMax,
+		WorkloadIoWriteMax:   sandbox.DefaultWorkloadIOWriteBandwidthMax,
+		MachineCpuQuota:      limits.MachineCPUQuota,
+		MachineIoReadMax:     limits.MachineIOReadBandwidthMax,
+		MachineIoWriteMax:    limits.MachineIOWriteBandwidthMax,
+		BackgroundCpuQuota:   limits.BackgroundCPUQuota,
+		BackgroundIoReadMax:  limits.BackgroundIOReadBandwidthMax,
+		BackgroundIoWriteMax: limits.BackgroundIOWriteBandwidthMax,
+	}
 }
 
 // toAPIArtifactScript converts an internal ArtifactScript to the API representation.
@@ -1307,13 +1331,19 @@ func toAPIResourceLimits(r *config.ResourceLimits) *api.ResourceLimits {
 		return nil
 	}
 	return &api.ResourceLimits{
-		CpuWeight:           copyIntPtr(r.CPUWeight),
-		IoWeight:            copyIntPtr(r.IOWeight),
-		CpuQuota:            copyIntPtr(r.CPUQuota),
-		MemoryMax:           copyIntPtr(r.MemoryMax),
-		TasksMax:            copyIntPtr(r.TasksMax),
-		IoReadBandwidthMax:  copyIntPtr(r.IOReadBandwidthMax),
-		IoWriteBandwidthMax: copyIntPtr(r.IOWriteBandwidthMax),
+		CpuWeight:                     copyIntPtr(r.CPUWeight),
+		IoWeight:                      copyIntPtr(r.IOWeight),
+		CpuQuota:                      copyIntPtr(r.CPUQuota),
+		MemoryMax:                     copyIntPtr(r.MemoryMax),
+		TasksMax:                      copyIntPtr(r.TasksMax),
+		IoReadBandwidthMax:            copyIntPtr(r.IOReadBandwidthMax),
+		IoWriteBandwidthMax:           copyIntPtr(r.IOWriteBandwidthMax),
+		MachineCpuQuota:               copyIntPtr(r.MachineCPUQuota),
+		MachineIoReadBandwidthMax:     copyIntPtr(r.MachineIOReadBandwidthMax),
+		MachineIoWriteBandwidthMax:    copyIntPtr(r.MachineIOWriteBandwidthMax),
+		BackgroundCpuQuota:            copyIntPtr(r.BackgroundCPUQuota),
+		BackgroundIoReadBandwidthMax:  copyIntPtr(r.BackgroundIOReadBandwidthMax),
+		BackgroundIoWriteBandwidthMax: copyIntPtr(r.BackgroundIOWriteBandwidthMax),
 	}
 }
 
@@ -1335,13 +1365,19 @@ func fromAPIResourceLimits(r *api.ResourceLimits) *config.ResourceLimits {
 		return &n
 	}
 	return &config.ResourceLimits{
-		CPUWeight:           clamp(r.CpuWeight),
-		IOWeight:            clamp(r.IoWeight),
-		CPUQuota:            clamp(r.CpuQuota),
-		MemoryMax:           clamp(r.MemoryMax),
-		TasksMax:            clamp(r.TasksMax),
-		IOReadBandwidthMax:  clamp(r.IoReadBandwidthMax),
-		IOWriteBandwidthMax: clamp(r.IoWriteBandwidthMax),
+		CPUWeight:                     clamp(r.CpuWeight),
+		IOWeight:                      clamp(r.IoWeight),
+		CPUQuota:                      clamp(r.CpuQuota),
+		MemoryMax:                     clamp(r.MemoryMax),
+		TasksMax:                      clamp(r.TasksMax),
+		IOReadBandwidthMax:            clamp(r.IoReadBandwidthMax),
+		IOWriteBandwidthMax:           clamp(r.IoWriteBandwidthMax),
+		MachineCPUQuota:               clamp(r.MachineCpuQuota),
+		MachineIOReadBandwidthMax:     clamp(r.MachineIoReadBandwidthMax),
+		MachineIOWriteBandwidthMax:    clamp(r.MachineIoWriteBandwidthMax),
+		BackgroundCPUQuota:            clamp(r.BackgroundCpuQuota),
+		BackgroundIOReadBandwidthMax:  clamp(r.BackgroundIoReadBandwidthMax),
+		BackgroundIOWriteBandwidthMax: clamp(r.BackgroundIoWriteBandwidthMax),
 	}
 }
 
@@ -1581,6 +1617,9 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 
 	if err := config.SaveToFile(savePath, newCfg); err != nil {
 		return nil, errtrace.Wrap(err)
+	}
+	if scope == api.SaveConfigParamsScopeUser {
+		sandbox.ConfigureAggregateLimits(newCfg.ResolveAggregateResourceLimits())
 	}
 
 	// Restart the project's services so config changes (added/removed/edited

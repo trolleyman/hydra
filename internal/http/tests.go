@@ -391,6 +391,8 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 		switch rep.Status {
 		case hydratests.StatusRunning:
 			anyRunning = true
+			// Progress is always structured: an explicit ::hydra:progress::
+			// headline or parsed case counts. Ordinary stdout is log-only.
 			if rep.Progress != "" {
 				progress = rep.Progress
 			}

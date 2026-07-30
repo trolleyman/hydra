@@ -1261,7 +1261,7 @@ func (m *Manager) generate(parent context.Context, spec config.ArtifactScript, v
 	// cgroup on every return path (this is the exact runaway-headless-Chrome case
 	// that motivated scoping).
 	scopeUnit := sandbox.ScopeUnit("artifact", spec.Name+"-"+sandbox.ScopeHash(dir))
-	scope.Apply(m.projectRoot, scopeUnit, launch)
+	scope.Apply(m.projectRoot, scopeUnit, launch, sandbox.ScopeBackground)
 	defer sandbox.StopScope(scopeUnit)
 
 	cmd := scope.Command(ctx, launch)

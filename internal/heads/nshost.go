@@ -139,7 +139,7 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 	// returns whether the scope took, which the error paths below use to skip a
 	// StopScope that would otherwise be a no-op.
 	scopeUnit := sandbox.ScopeUnit("", id)
-	scoped := scope.Apply(projectRoot, scopeUnit, spec)
+	scoped := scope.Apply(projectRoot, scopeUnit, spec, sandbox.ScopeInteractive)
 
 	cmd := exec.Command(spec.Path, spec.Args[1:]...)
 	cmd.Env = spec.Env

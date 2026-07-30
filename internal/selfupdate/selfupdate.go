@@ -327,7 +327,7 @@ func (m *Manager) runLogged(ctx context.Context, name string, args ...string) er
 		Dir:  m.SourceRoot,
 	}
 	unit := sandbox.ScopeUnit("update", "build")
-	if scope.Apply(m.SourceRoot, unit, spec) {
+	if scope.Apply(m.SourceRoot, unit, spec, sandbox.ScopeBackground) {
 		defer sandbox.StopScope(unit)
 	}
 

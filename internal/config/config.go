@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -736,9 +737,10 @@ func (t TestScript) IsStreaming() bool { return t.Type == "stdout" }
 // default). Values resolve into a sandbox.ScopeLimits at each call site via
 // ResolveResourceLimits; the sandbox package never reads config.
 //
-// Weights are soft (they only bite under contention); the hard caps apply even on
-// an idle box, so they can break a legitimate workload (an OOM-kill mid-render, a
-// quota that starves a build) and are opt-in - unset means no cap.
+// Weights are soft (they only bite under contention). CPU and IO throughput use
+// machine-scaled safe defaults because those are the resources most likely to
+// make the desktop unresponsive; an explicit 0 opts out. Memory and task caps
+// remain opt-in because crossing either can terminate otherwise valid work.
 type ResourceLimits struct {
 	// CPUWeight is the relative CPU share under contention (systemd CPUWeight,
 	// 1-10000). Soft. nil = the built-in default (sandbox.ScopeCPUWeight).
@@ -748,7 +750,7 @@ type ResourceLimits struct {
 	// the built-in default (sandbox.ScopeIOWeight).
 	IOWeight *int `toml:"io_weight"`
 	// CPUQuota is a hard CPU cap in percent of one core (systemd CPUQuota; 200 =
-	// 2 cores). Applies even on an idle box. nil / 0 = no cap.
+	// 2 cores). nil = the machine-scaled safe default; 0 = no cap.
 	CPUQuota *int `toml:"cpu_quota"`
 	// MemoryMax is a hard memory ceiling in MB (systemd MemoryMax); the cgroup is
 	// OOM-killed past it. nil / 0 = no cap.
@@ -758,7 +760,8 @@ type ResourceLimits struct {
 	TasksMax *int `toml:"tasks_max"`
 	// IOReadBandwidthMax / IOWriteBandwidthMax are hard throughput ceilings in
 	// MB/s (systemd IOReadBandwidthMax=/IOWriteBandwidthMax=, i.e. cgroup io.max),
-	// applied to the device backing the project root. nil / 0 = no cap.
+	// applied to the device backing the project root. nil = the safe default
+	// (80/40 MB/s); 0 = no cap.
 	//
 	// Reach for these rather than io_weight when a single head can still stall the
 	// machine: weights only work under BFQ or blk-iocost, and on a typical NVMe
@@ -767,6 +770,15 @@ type ResourceLimits struct {
 	// a warning at startup when it detects that io_weight is inert.
 	IOReadBandwidthMax  *int `toml:"io_read_bandwidth_max"`
 	IOWriteBandwidthMax *int `toml:"io_write_bandwidth_max"`
+
+	// Machine and background fields are machine-wide and are resolved only from
+	// the user config. Project/local values are preserved but never applied.
+	MachineCPUQuota               *int `toml:"machine_cpu_quota"`
+	MachineIOReadBandwidthMax     *int `toml:"machine_io_read_bandwidth_max"`
+	MachineIOWriteBandwidthMax    *int `toml:"machine_io_write_bandwidth_max"`
+	BackgroundCPUQuota            *int `toml:"background_cpu_quota"`
+	BackgroundIOReadBandwidthMax  *int `toml:"background_io_read_bandwidth_max"`
+	BackgroundIOWriteBandwidthMax *int `toml:"background_io_write_bandwidth_max"`
 }
 
 // isEmpty reports whether no field is set at this layer (all pointers nil), so
@@ -774,7 +786,10 @@ type ResourceLimits struct {
 func (r ResourceLimits) isEmpty() bool {
 	return r.CPUWeight == nil && r.IOWeight == nil && r.CPUQuota == nil &&
 		r.MemoryMax == nil && r.TasksMax == nil &&
-		r.IOReadBandwidthMax == nil && r.IOWriteBandwidthMax == nil
+		r.IOReadBandwidthMax == nil && r.IOWriteBandwidthMax == nil &&
+		r.MachineCPUQuota == nil && r.MachineIOReadBandwidthMax == nil &&
+		r.MachineIOWriteBandwidthMax == nil && r.BackgroundCPUQuota == nil &&
+		r.BackgroundIOReadBandwidthMax == nil && r.BackgroundIOWriteBandwidthMax == nil
 }
 
 // Merge merges another ResourceLimits into this one: per-field last-wins, so a
@@ -801,6 +816,24 @@ func (r *ResourceLimits) Merge(other ResourceLimits) {
 	}
 	if other.IOWriteBandwidthMax != nil {
 		r.IOWriteBandwidthMax = other.IOWriteBandwidthMax
+	}
+	if other.MachineCPUQuota != nil {
+		r.MachineCPUQuota = other.MachineCPUQuota
+	}
+	if other.MachineIOReadBandwidthMax != nil {
+		r.MachineIOReadBandwidthMax = other.MachineIOReadBandwidthMax
+	}
+	if other.MachineIOWriteBandwidthMax != nil {
+		r.MachineIOWriteBandwidthMax = other.MachineIOWriteBandwidthMax
+	}
+	if other.BackgroundCPUQuota != nil {
+		r.BackgroundCPUQuota = other.BackgroundCPUQuota
+	}
+	if other.BackgroundIOReadBandwidthMax != nil {
+		r.BackgroundIOReadBandwidthMax = other.BackgroundIOReadBandwidthMax
+	}
+	if other.BackgroundIOWriteBandwidthMax != nil {
+		r.BackgroundIOWriteBandwidthMax = other.BackgroundIOWriteBandwidthMax
 	}
 }
 
@@ -909,17 +942,17 @@ type Config struct {
 	Jira *JiraConfig `toml:"jira"`
 	// Resources configures the cgroup limits (CPU/IO weight, CPU quota, memory max,
 	// tasks max) applied to every scoped workload of this project via its transient
-	// systemd scope. nil = all defaults (weights on, hard caps off). Pointer so its
-	// own fields' nil-means-default convention is preserved across merge layers.
+	// systemd scope. nil = all safe defaults. Pointer so its own fields'
+	// nil-means-default convention is preserved across merge layers.
 	Resources *ResourceLimits `toml:"resources"`
 }
 
 // ResolveResourceLimits resolves this project's [resources] table into the
-// sandbox.ScopeLimits threaded to each scoped-workload call site. Unset weights
-// fall back to the built-in defaults (sandbox.ScopeCPUWeight/ScopeIOWeight);
-// unset hard caps stay 0 (no cap). This is the single seam the four call sites
-// (agent, preview, service, artifact) use, so limits never leak config into the
-// sandbox package.
+// sandbox.ScopeLimits threaded to each scoped-workload call site. Unset weights,
+// CPU quota and IO throughput limits use built-in safe defaults; explicit zero
+// disables a hard cap. Memory and task caps remain off unless configured. This
+// is the single seam all workload call sites use, so limits never leak config
+// into the sandbox package.
 //
 // ioPath is the project root: the IO bandwidth caps are per-device, and systemd
 // resolves a plain path to the device backing it. It is a parameter rather than
@@ -928,9 +961,12 @@ type Config struct {
 // apply to.
 func (c Config) ResolveResourceLimits(ioPath string) sandbox.ScopeLimits {
 	limits := sandbox.ScopeLimits{
-		CPUWeight: sandbox.ScopeCPUWeight,
-		IOWeight:  sandbox.ScopeIOWeight,
-		IOPath:    ioPath,
+		CPUWeight:           sandbox.ScopeCPUWeight,
+		IOWeight:            sandbox.ScopeIOWeight,
+		CPUQuota:            sandbox.DefaultWorkloadCPUQuota(runtime.NumCPU()),
+		IOPath:              ioPath,
+		IOReadBandwidthMax:  sandbox.DefaultWorkloadIOReadBandwidthMax,
+		IOWriteBandwidthMax: sandbox.DefaultWorkloadIOWriteBandwidthMax,
 	}
 	r := c.Resources
 	if r == nil {
@@ -956,6 +992,35 @@ func (c Config) ResolveResourceLimits(ioPath string) sandbox.ScopeLimits {
 	}
 	if r.TasksMax != nil {
 		limits.TasksMax = *r.TasksMax
+	}
+	return limits
+}
+
+// ResolveAggregateResourceLimits resolves machine-wide parent-slice ceilings.
+// Call this only on the raw user config, never a project-merged Config.
+func (c Config) ResolveAggregateResourceLimits() sandbox.AggregateLimits {
+	limits := sandbox.DefaultAggregateLimits(runtime.NumCPU())
+	if c.Resources == nil {
+		return limits
+	}
+	r := c.Resources
+	if r.MachineCPUQuota != nil {
+		limits.MachineCPUQuota = *r.MachineCPUQuota
+	}
+	if r.MachineIOReadBandwidthMax != nil {
+		limits.MachineIOReadBandwidthMax = *r.MachineIOReadBandwidthMax
+	}
+	if r.MachineIOWriteBandwidthMax != nil {
+		limits.MachineIOWriteBandwidthMax = *r.MachineIOWriteBandwidthMax
+	}
+	if r.BackgroundCPUQuota != nil {
+		limits.BackgroundCPUQuota = *r.BackgroundCPUQuota
+	}
+	if r.BackgroundIOReadBandwidthMax != nil {
+		limits.BackgroundIOReadBandwidthMax = *r.BackgroundIOReadBandwidthMax
+	}
+	if r.BackgroundIOWriteBandwidthMax != nil {
+		limits.BackgroundIOWriteBandwidthMax = *r.BackgroundIOWriteBandwidthMax
 	}
 	return limits
 }
@@ -2972,6 +3037,8 @@ func testsDocLines() []string {
 		docPrefix + "   ::hydra:test:warn:: web/src/x.ts:12:5 › no-console | Unexpected console statement",
 		docPrefix + "   ::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon",
 		docPrefix + "   ::hydra:test:pass:38:: internal/artifacts › TestFast       (38 = duration in ms)",
+		docPrefix + " Print ::hydra:progress:: <text> for an explicit phase headline; ordinary stdout",
+		docPrefix + " stays in the live log but is not used as compact status for streaming runners.",
 		docPrefix + " The token before the first › is the location (path[:line[:col]] or dotted class),",
 		docPrefix + " middle › tokens are scope levels, the last is the test name, text after | is the",
 		docPrefix + " message. A verb takes an optional :<ms> duration suffix, giving a streamed case",
@@ -3845,6 +3912,12 @@ func resourceFieldLines(r ResourceLimits) []string {
 	addInt("tasks_max", r.TasksMax)
 	addInt("io_read_bandwidth_max", r.IOReadBandwidthMax)
 	addInt("io_write_bandwidth_max", r.IOWriteBandwidthMax)
+	addInt("machine_cpu_quota", r.MachineCPUQuota)
+	addInt("machine_io_read_bandwidth_max", r.MachineIOReadBandwidthMax)
+	addInt("machine_io_write_bandwidth_max", r.MachineIOWriteBandwidthMax)
+	addInt("background_cpu_quota", r.BackgroundCPUQuota)
+	addInt("background_io_read_bandwidth_max", r.BackgroundIOReadBandwidthMax)
+	addInt("background_io_write_bandwidth_max", r.BackgroundIOWriteBandwidthMax)
 	return out
 }
 
@@ -3855,8 +3928,8 @@ func resourcesExampleLines() []string {
 		docPrefix + " [resources] caps the cgroup limits applied to every scoped workload of this",
 		docPrefix + " project (agent, preview, service, artifact) via its transient systemd scope, so",
 		docPrefix + " one runaway workload yields to the daemon and interactive work instead of",
-		docPrefix + " starving the box. Weights are soft (they only bite under contention); the hard",
-		docPrefix + " caps apply even on an idle box and are opt-in.",
+		docPrefix + " starving the box. Weights are soft (they only bite under contention). CPU and",
+		docPrefix + " IO ceilings have safe defaults; set a ceiling to 0 to opt out.",
 		docPrefix + " A hard cap is silently skipped where its cgroup controller is not delegated to",
 		docPrefix + " the user systemd manager (cpu/io often are not).",
 		docPrefix + "",
@@ -3868,11 +3941,18 @@ func resourcesExampleLines() []string {
 		"# [resources]",
 		fmt.Sprintf("# cpu_weight = %d   # 1-10000, soft CPU share under contention (default %d; below the daemon's 100)", sandbox.ScopeCPUWeight, sandbox.ScopeCPUWeight),
 		fmt.Sprintf("# io_weight  = %d   # 1-10000, soft block-IO share under contention (default %d)", sandbox.ScopeIOWeight, sandbox.ScopeIOWeight),
-		"# cpu_quota  = 200  # hard CPU cap in percent of one core (200 = 2 cores); omit = no cap",
+		fmt.Sprintf("# cpu_quota  = %d  # hard CPU cap, percent of one core; default scales with this machine", sandbox.DefaultWorkloadCPUQuota(runtime.NumCPU())),
 		"# memory_max = 2048 # hard memory ceiling in MB (OOM-killed past it); omit = no cap",
 		"# tasks_max  = 512  # hard cap on processes/threads; omit = no cap",
-		"# io_read_bandwidth_max  = 200 # hard read ceiling in MB/s for this project's device; omit = no cap",
-		"# io_write_bandwidth_max = 100 # hard write ceiling in MB/s; the one that stops a head freezing the desktop",
+		fmt.Sprintf("# io_read_bandwidth_max  = %d # hard read ceiling in MB/s for this project's device", sandbox.DefaultWorkloadIOReadBandwidthMax),
+		fmt.Sprintf("# io_write_bandwidth_max = %d # hard write ceiling in MB/s; set 0 for no cap", sandbox.DefaultWorkloadIOWriteBandwidthMax),
+		docPrefix + " The machine_* and background_* fields are honored only in the user config.",
+		fmt.Sprintf("# machine_cpu_quota = %d", sandbox.DefaultMachineCPUQuota(runtime.NumCPU())),
+		fmt.Sprintf("# machine_io_read_bandwidth_max = %d", sandbox.DefaultMachineIOReadBandwidthMax),
+		fmt.Sprintf("# machine_io_write_bandwidth_max = %d", sandbox.DefaultMachineIOWriteBandwidthMax),
+		fmt.Sprintf("# background_cpu_quota = %d", sandbox.DefaultBackgroundCPUQuota(runtime.NumCPU())),
+		fmt.Sprintf("# background_io_read_bandwidth_max = %d", sandbox.DefaultBackgroundIOReadBandwidthMax),
+		fmt.Sprintf("# background_io_write_bandwidth_max = %d", sandbox.DefaultBackgroundIOWriteBandwidthMax),
 	}
 }
 

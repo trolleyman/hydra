@@ -48,7 +48,7 @@ export type TestRunResult = {
      */
     started_at?: number | null;
     /**
-     * Latest progress line of the in-flight run (from ::hydra:progress:: markers, else latest stdout). Only set while running.
+     * Latest structured progress for the in-flight run (from ::hydra:progress:: or parsed test counts). Ordinary stdout is log-only. Only set while running.
      */
     progress?: string | null;
     /**

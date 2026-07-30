@@ -201,7 +201,7 @@ func (in *instance) run(ctx context.Context, cancel context.CancelFunc, spec con
 	// pending of the same script/head), so pre-clearing a stale unit can't kill a
 	// sibling's scope.
 	scopeUnit := sandbox.ScopeUnit("preview", spec.Name+"-"+in.version.HeadID+"-"+strconv.Itoa(childPort))
-	scope.Apply(in.root, scopeUnit, launch)
+	scope.Apply(in.root, scopeUnit, launch, sandbox.ScopeInteractive)
 
 	cmd := scope.Command(ctx, launch)
 	configureProc(cmd)

@@ -37,6 +37,24 @@ describe('Markdown', () => {
     expect(container.querySelectorAll('br')).toHaveLength(1)
   })
 
+  it('highlights routing mentions only when requested', () => {
+    const { container, rerender } = render(
+      <Markdown text="@agent please ask @review too" highlightMentions />,
+    )
+    expect([...container.querySelectorAll('[data-review-mention]')].map((el) => el.textContent))
+      .toEqual(['@agent', '@review'])
+    expect(container.querySelector('[data-review-mention]')).not.toHaveClass('font-medium')
+
+    rerender(<Markdown text="@agent is ordinary text here" />)
+    expect(container.querySelector('[data-review-mention]')).toBeNull()
+  })
+
+  it('does not highlight mention-like text inside code', () => {
+    const { container } = render(<Markdown text="`@agent` outside @head" highlightMentions />)
+    expect(container.querySelector('code [data-review-mention]')).toBeNull()
+    expect(container.querySelector('[data-review-mention]')).toHaveTextContent('@head')
+  })
+
   // The chat variant renders at half a dozen body sizes - 13px chat prose, 14px
   // when the chat font is a serif, 12px sub-agent cards and review comments,
   // 10px config previews, plus whatever the Chat size control adds. An absolute

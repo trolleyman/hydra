@@ -371,7 +371,7 @@ func (r *Registry) Start(opts StartOptions) (*Session, error) {
 	// the sandbox directly so a scope problem can never block an agent.
 	origPath, origArgs := spec.Path, spec.Args
 	unit := sandbox.ScopeUnit("", opts.ID)
-	scoped := sandbox.WrapScope(unit, spec, opts.Limits)
+	scoped := sandbox.WrapScope(unit, spec, opts.Limits, sandbox.ScopeInteractive)
 
 	proc, err := startProcess(spec, opts.Rows, opts.Cols)
 	if err != nil && scoped {
