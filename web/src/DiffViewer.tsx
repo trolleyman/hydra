@@ -3820,12 +3820,19 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // Stored AND published in one call, so a comment sent straight to the agent
       // is as durable and as citable ("#4") as one that went through the queue.
       // The agent is notified by number server-side; nothing is pasted into it.
-      await sendReviewComment(projectId, agent.id, {
+      const { comments, toReviewer } = await sendReviewComment(projectId, agent.id, {
         path, lineNum, isNew, text, fromLabel, toLabel,
         contextBlock: block,
         hunkHash: hunk ? hashHunks([hunk]) : '',
       })
-      showSentToast('Comment sent to agent')
+      // The write response is the canonical full list. Apply it immediately so
+      // the published comment appears under its diff line without a reload.
+      setReviewComments(comments)
+      showSentToast(
+        toReviewer
+          ? 'Sent to your reviewer - open the Review tab to see the reply'
+          : 'Comment sent to agent',
+      )
     } catch (e) {
       console.error('Failed to send comment:', e)
     }

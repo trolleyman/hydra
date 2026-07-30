@@ -4,6 +4,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { ArtifactSet, ArtifactLogLine } from '../api'
 import { useIsDark } from '../lib/theme'
+import { hasAnsi } from '../lib/ansi'
+import { colorizeGradleLogLine } from '../lib/gradleLog'
 import { useLiveLogLines } from './artifactLogStore'
 import { copyWithToast } from '../lib/copyToast'
 
@@ -52,6 +54,12 @@ const LOG_THEME_LIGHT = {
 // the next line. No newline is emitted here - the caller joins lines with CRLF
 // as a SEPARATOR (not a terminator), so the log never ends on a blank line.
 function formatLogLine(l: ArtifactLogLine): string {
+  // Real terminal colour always wins. When Gradle notices that stdout is being
+  // captured it emits plain text, so restore colour only for its distinctive
+  // structural lines. stderr's existing red fallback remains the last resort.
+  if (hasAnsi(l.text)) return l.text
+  const gradle = colorizeGradleLogLine(l.text)
+  if (gradle) return gradle
   return (l.stream as string) === 'stderr' ? `\x1b[31m${l.text}\x1b[0m` : l.text
 }
 
