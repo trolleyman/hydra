@@ -1348,6 +1348,24 @@ func simSeedComments(id string) []api.ReviewComment {
 			Diff:      ptr("main -> a1b2c3d"),
 			CreatedAt: "2026-07-28T10:09:00Z", Read: ptr(true),
 		},
+		// Two comments the DIFF cannot show, which is the normal case rather than
+		// an exotic one: a reviewer's remark about an unchanged caller, and a
+		// comment about the head as a whole (add_review_comment's path is
+		// optional). Both are here so the off-diff section is exercised by the
+		// simulation - it is otherwise invisible, and invisible is the exact bug
+		// it exists to fix.
+		{
+			Number: 9, Status: api.Published, Author: "reviewer",
+			Body:      "`ListHeads` is the only caller of this and it is not in the diff - it still passes the old two-arg form, so this will not compile.",
+			Path:      ptr("internal/heads/registry.go"),
+			Line:      ptr(112),
+			CreatedAt: "2026-07-28T11:14:00Z", PublishedAt: ptr("2026-07-28T11:14:00Z"),
+		},
+		{
+			Number: 10, Status: api.Published, Author: "reviewer",
+			Body:      "Overall this reads well. The schema split is the right call; my only real worry is the migration ordering.",
+			CreatedAt: "2026-07-28T11:16:00Z", PublishedAt: ptr("2026-07-28T11:16:00Z"),
+		},
 	}
 }
 

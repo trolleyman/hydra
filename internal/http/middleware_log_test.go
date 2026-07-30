@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"braces.dev/errtrace"
 )
 
 // captureLog swaps the standard logger's output for a buffer and restores it.
@@ -119,7 +121,7 @@ type syncBuffer struct {
 func (s *syncBuffer) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.buf.Write(p)
+	return errtrace.Wrap2(s.buf.Write(p))
 }
 
 func (s *syncBuffer) String() string {
