@@ -86,6 +86,7 @@ import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentL
 // highlighted by, item 3) now lives in lib/fileKind, beside the file-type
 // classifier, so the lightbox's text viewer highlights by the same table.
 import { langFromPath } from '../lib/fileKind'
+import { getFileIcon } from '../lib/fileIcons'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
@@ -2146,12 +2147,19 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
         const diff = typeof change.diff === 'string' ? change.diff : ''
         const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
+        const slash = path.lastIndexOf('/')
+        const directory = slash >= 0 ? path.slice(0, slash + 1) : ''
+        const fileName = slash >= 0 ? path.slice(slash + 1) : path
+        const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName)
         return (
           <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
             {showFileHeaders && (
               <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
-                <FileText className="h-3 w-3 shrink-0 text-blue-500" />
-                <span className="min-w-0 truncate font-medium text-stone-700 dark:text-stone-200">{path}</span>
+                <FileIcon className={`h-3.5 w-3.5 shrink-0 ${fileIconClass}`} />
+                <span className="min-w-0 truncate font-medium">
+                  {directory && <span className="text-stone-400 dark:text-stone-500">{directory}</span>}
+                  <span className="text-stone-700 dark:text-stone-200">{fileName}</span>
+                </span>
                 <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
               </div>
             )}
