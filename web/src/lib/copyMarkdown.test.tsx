@@ -124,6 +124,77 @@ describe('selectionToMarkdown', () => {
     expect(selectionToMarkdown(sel(range))).toBe('const a = 1\nconst b = 2')
   })
 
+  // What a real triple-click hands over, measured in Chrome: the range starts
+  // on the clicked line's text but ENDS at offset 0 of the next block's
+  // container - a boundary that contributes no characters, yet lifts the common
+  // ancestor out of the code block. Everything here is that shape.
+  describe('a selection that only covers code', () => {
+    // spillingRange renders `text` followed by a second message and returns a
+    // range from the start of the line beginning `startsWith` to offset 0 of
+    // whatever block comes next - the block after it in the same message, or
+    // the next message's root when it was the last one.
+    function spillingRange(text: string, startsWith: string) {
+      const { container } = render(
+        <div>
+          <div><Markdown text={text} /></div>
+          <div><Markdown text="next message" /></div>
+        </div>,
+      )
+      const walk = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+      let start: Text | null = null
+      for (let n = walk.nextNode(); n && !start; n = walk.nextNode()) {
+        if ((n as Text).data.startsWith(startsWith)) start = n as Text
+      }
+      if (!start) throw new Error('line not found')
+      // The top-level block of the message that holds the clicked line.
+      let blk: Element = start.parentElement!
+      while (!blk.parentElement!.hasAttribute('data-md-root')) blk = blk.parentElement!
+      const range = document.createRange()
+      range.setStart(start, 0)
+      range.setEnd(blk.nextElementSibling ?? container.querySelectorAll('[data-md-root]')[1], 0)
+      return range
+    }
+
+    it('copies a one-line code block as the bare command', () => {
+      expect(selectionToMarkdown(sel(spillingRange('```bash\nnpm run dev\n```', 'npm')))).toBe(
+        'npm run dev',
+      )
+    })
+
+    it('copies it bare even when the message has prose around it', () => {
+      const md = 'Run this:\n\n```bash\nnpm run dev\n```\n\nThen reload.'
+      expect(selectionToMarkdown(sel(spillingRange(md, 'npm')))).toBe('npm run dev')
+    })
+
+    it('copies an inline code span without its backticks', () => {
+      expect(selectionToMarkdown(sel(spillingRange('`git status --short`', 'git status')))).toBe(
+        'git status --short',
+      )
+    })
+
+    it('copies only the prose when the click landed on the prose', () => {
+      const md = 'Run this:\n\n```bash\nnpm run dev\n```'
+      expect(selectionToMarkdown(sel(spillingRange(md, 'Run this:')))).toBe('Run this:')
+    })
+
+    it('still fences a selection that reaches out of the code block', () => {
+      const md = 'Run this:\n\n```bash\nnpm run dev\n```'
+      const { container } = render(<Markdown text={md} />)
+      expect(copyBetween(container, { text: 'Run', offset: 0 }, { text: 'run dev', offset: 7 })).toBe(md)
+    })
+
+    // Narrowing must stop at content that has no text of its own, or the image
+    // a selection ends on would fall outside it.
+    it('keeps a trailing image the selection ends past', () => {
+      const { container } = render(<Markdown text="text ![alt](https://example.com/a.png)" />)
+      const first = document.createTreeWalker(container, NodeFilter.SHOW_TEXT).nextNode() as Text
+      const range = document.createRange()
+      range.setStart(first, 2)
+      range.setEnd(container, container.childNodes.length)
+      expect(selectionToMarkdown(sel(range))).toBe('xt ![alt](https://example.com/a.png)')
+    })
+  })
+
   it('separates two rendered messages by a blank line and leaves chrome as text', () => {
     const { container } = render(
       <div>

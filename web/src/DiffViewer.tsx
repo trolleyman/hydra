@@ -31,6 +31,8 @@ import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './li
 import { buildRepoSplat } from './lib/repoSplat'
 import { hashDiffFile, hashHunks } from './lib/diffSig'
 import { buildWordRangeMaps, renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS, type WordRange } from './lib/wordDiff'
+import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from './lib/whitespaceMarks'
+import { useWhitespaceMarks } from './lib/whitespacePrefs'
 import { Tooltip } from './components/Tooltip'
 import { CollapseSlide } from './components/CollapseSlide'
 import { ResizeGrip } from './components/ResizeGrip'
@@ -647,11 +649,15 @@ const EMPTY_WORD_RANGES: Map<number, WordRange[]> = new Map()
 
 // codeCellHtml resolves the HTML for a diff line's code cell: the word-diff
 // overlay when this line has changed ranges, else the plain syntax-highlighted
-// HTML. Returns null to signal "render the raw content as a text node" (no
-// highlight, no word ranges) - the safe path that needs no dangerouslySetInnerHTML.
-function codeCellHtml(highlighted: string | undefined, content: string, ranges: WordRange[] | undefined, wordClass: string): string | null {
-  if (ranges && ranges.length) return renderWordDiffHtml(highlighted, content, ranges, wordClass)
-  return highlighted ?? null
+// HTML, with the whitespace marks (lib/whitespaceMarks) laid over whichever it
+// is - last, so neither the highlighter nor the word diff has to know about
+// them. Returns null to signal "render the raw content as a text node" (no
+// highlight, no word ranges, nothing to mark) - the safe path that needs no
+// dangerouslySetInnerHTML.
+function codeCellHtml(highlighted: string | undefined, content: string, ranges: WordRange[] | undefined, wordClass: string, ws: WhitespaceMarks): string | null {
+  const html = ranges && ranges.length ? renderWordDiffHtml(highlighted, content, ranges, wordClass) : highlighted
+  if (html != null) return markWhitespace(html, ws)
+  return markWhitespaceText(content, ws)
 }
 
 const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, you, lineDraftApi, readOnly, selection, onSelectLine }: {
@@ -677,6 +683,10 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   // Stable so the memo'd CommentButton on each line skips a re-highlight tick.
   const toggleComment = useCallback((idx: number) => setOpenCommentIdx((cur) => (cur === idx ? null : idx)), [])
+  // Read here rather than threaded down as a prop: the hunks are memo'd on their
+  // props, so a subscription inside is what re-renders them when the setting
+  // changes (and nothing re-highlights - the marks go on the finished HTML).
+  const ws = useWhitespaceMarks()
   return (
     <div>
       {hunk.lines.map((line, idx) => {
@@ -689,7 +699,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
         const wordRanges = isAdd
           ? (line.new_line_num != null ? wordRangesNew.get(line.new_line_num) : undefined)
           : isDel ? (line.old_line_num != null ? wordRangesOld.get(line.old_line_num) : undefined) : undefined
-        const codeHtml = codeCellHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS)
+        const codeHtml = codeCellHtml(highlighted, line.content, wordRanges, isAdd ? WORD_ADD_CLASS : WORD_DEL_CLASS, ws)
         const bgClass = isAdd ? 'bg-green-50 dark:bg-green-500/15' : isDel ? 'bg-red-50 dark:bg-red-500/15' : ''
         const markerClass = isAdd ? 'text-green-600 dark:text-green-400' : isDel ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'
         const selOld = selectionHas(selection, 'old', line.old_line_num)
@@ -770,6 +780,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
 }) {
   const [openCommentIdx, setOpenCommentIdx] = useState<number | null>(null)
   const toggleComment = useCallback((idx: number) => setOpenCommentIdx((cur) => (cur === idx ? null : idx)), [])
+  const ws = useWhitespaceMarks()
   const sbsLines = buildSideBySide(hunk.lines)
   return (
     <div>
@@ -780,8 +791,8 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
         // a context line shown on both sides.
         const oldWordRanges = line.oldType === 'deletion' && line.oldLineNum != null ? wordRangesOld.get(line.oldLineNum) : undefined
         const newWordRanges = line.newType === 'addition' && line.newLineNum != null ? wordRangesNew.get(line.newLineNum) : undefined
-        const oldCodeHtml = line.oldContent != null ? codeCellHtml(oldHighlighted, line.oldContent, oldWordRanges, WORD_DEL_CLASS) : null
-        const newCodeHtml = line.newContent != null ? codeCellHtml(newHighlighted, line.newContent, newWordRanges, WORD_ADD_CLASS) : null
+        const oldCodeHtml = line.oldContent != null ? codeCellHtml(oldHighlighted, line.oldContent, oldWordRanges, WORD_DEL_CLASS, ws) : null
+        const newCodeHtml = line.newContent != null ? codeCellHtml(newHighlighted, line.newContent, newWordRanges, WORD_ADD_CLASS, ws) : null
         const oldBg = line.oldType === 'deletion' ? 'bg-red-50 dark:bg-red-500/15' : line.oldType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const newBg = line.newType === 'addition' ? 'bg-green-50 dark:bg-green-500/15' : line.newType === 'empty' ? 'bg-gray-50 dark:bg-gray-900/50' : ''
         const selOld = selectionHas(selection, 'old', line.oldLineNum)

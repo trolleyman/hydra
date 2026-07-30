@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, memo, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -342,6 +342,51 @@ const STYLES: Record<Variant, Style> = {
   },
 }
 
+// --- Code blocks vs inline code -----------------------------------------------
+
+// InCodeBlock tells the `code` component that it is rendering a code BLOCK
+// rather than an inline `code` span.
+//
+// Being a child of <pre> is the only thing that separates the two: markdown
+// gives a fenced (or indented) block and an inline span the same <code>
+// element, and react-markdown dropped the `inline` prop it used to pass in v9.
+// Guessing from the content instead - "no language and no newline means
+// inline", which this did - gets a one-line fence with no info string wrong,
+// and that is exactly how a command gets written:
+//
+//     ```
+//     git rebase --onto main x y
+//     ```
+//
+// which is a block by the spec but rendered as an inline chip mid-sentence.
+const InCodeBlock = createContext(false)
+
+// MarkdownCode renders one <code> element: an inline chip, or - inside a <pre> -
+// the block, highlighted through our own highlight.js pass. data-md-code-block /
+// data-md-lang let copy-as-markdown (lib/copyMarkdown) tell the two apart too,
+// and put the fence and its info string back when a block is copied as part of
+// a wider selection.
+function MarkdownCode({ s, className, children }: { s: Style; className?: string; children?: ReactNode }) {
+  const block = useContext(InCodeBlock)
+  if (!block) return <code className={s.codeInline}>{children}</code>
+  const text = String(children ?? '').replace(/\n$/, '')
+  const lang = /language-([\w-]+)/.exec(className || '')?.[1] ?? ''
+  const html = highlightCode(text, lang)
+  // No highlighter root class: the `.token` spans carry their own colours,
+  // while a root class would also pull in a theme's white bg.
+  if (html != null) {
+    return (
+      <code
+        className={s.codeBlock}
+        data-md-code-block=""
+        data-md-lang={lang}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    )
+  }
+  return <code className={s.codeBlock} data-md-code-block="" data-md-lang={lang}>{text}</code>
+}
+
 // cellAlign turns remark-gfm's per-cell `align` into a text-align style.
 function alignStyle(align?: string | null): React.CSSProperties | undefined {
   return align ? { textAlign: align as React.CSSProperties['textAlign'] } : undefined
@@ -388,34 +433,11 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext): Components {
     tbody: ({ children }) => <tbody className={s.tbody}>{children}</tbody>,
     th: ({ children, style }) => <th className={s.th} style={alignStyle(style?.textAlign)}>{children}</th>,
     td: ({ children, style }) => <td className={s.td} style={alignStyle(style?.textAlign)}>{children}</td>,
-    // react-markdown wraps fenced blocks in <pre>; we style the inner <code> as a
-    // display:block element instead, so strip <pre>'s own box.
-    pre: ({ children }) => <>{children}</>,
-    code: ({ className, children }) => {
-      const text = String(children ?? '').replace(/\n$/, '')
-      const lang = /language-([\w-]+)/.exec(className || '')?.[1] ?? ''
-      // Inline code: no language info-string and no newline. A fenced block gets a
-      // language- class (when annotated) or spans multiple lines.
-      if (!lang && !text.includes('\n')) {
-        return <code className={s.codeInline}>{children}</code>
-      }
-      const html = highlightCode(text, lang)
-      // data-md-code-block / data-md-lang let copy-as-markdown (lib/copyMarkdown)
-      // put the fence and its info string back when this block is copied.
-      if (html != null) {
-        // No highlighter root class: the `.token` spans carry their own
-        // colours, while a root class would also pull in a theme's white bg.
-        return (
-          <code
-            className={s.codeBlock}
-            data-md-code-block=""
-            data-md-lang={lang}
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
-        )
-      }
-      return <code className={s.codeBlock} data-md-code-block="" data-md-lang={lang}>{text}</code>
-    },
+    // react-markdown wraps code blocks in <pre>; we style the inner <code> as a
+    // display:block element instead, so strip <pre>'s own box - but not before
+    // it has marked what it holds as a block (see InCodeBlock).
+    pre: ({ children }) => <InCodeBlock.Provider value={true}>{children}</InCodeBlock.Provider>,
+    code: ({ className, children }) => <MarkdownCode s={s} className={className}>{children}</MarkdownCode>,
   }
 }
 
