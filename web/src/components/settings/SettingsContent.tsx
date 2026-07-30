@@ -205,6 +205,8 @@ export function SettingsContent({
               onConcurrencyChange={(n) => setConfig({ ...config, test_concurrency: n })}
               prefetch={config.test_prefetch}
               onPrefetchChange={(v) => setConfig({ ...config, test_prefetch: v })}
+              notifyFailures={config.notify_test_failures}
+              onNotifyFailuresChange={(v) => setConfig({ ...config, notify_test_failures: v })}
             />
           </div>
 

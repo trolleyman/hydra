@@ -1037,6 +1037,10 @@ func (s *Server) GetConfig(_ context.Context, request api.GetConfigRequestObject
 		n := *cfg.TestConcurrency
 		resp.TestConcurrency = &n
 	}
+	if cfg.Notify != nil && cfg.Notify.TestFailures != nil {
+		b := *cfg.Notify.TestFailures
+		resp.NotifyTestFailures = &b
+	}
 	if cfg.TestPrefetch != nil {
 		b := *cfg.TestPrefetch
 		resp.TestPrefetch = &b
@@ -1503,6 +1507,13 @@ func (s *Server) SaveConfig(_ context.Context, request api.SaveConfigRequestObje
 	if request.Body.TestPrefetch != nil {
 		b := *request.Body.TestPrefetch
 		newCfg.TestPrefetch = &b
+	}
+	if request.Body.NotifyTestFailures != nil {
+		b := *request.Body.NotifyTestFailures
+		if newCfg.Notify == nil {
+			newCfg.Notify = &config.NotifyConfig{}
+		}
+		newCfg.Notify.TestFailures = &b
 	}
 
 	scope := api.SaveConfigParamsScopeProject
@@ -3195,6 +3206,7 @@ func (s *Server) SendAgentInput(ctx context.Context, request api.SendAgentInputR
 		s.ChatQueues.Submit(projectRoot, head.ID, heads.QueuedMessage{
 			ID:      id,
 			Content: claudestream.TextUserContent(text),
+			Origin:  derefOr(request.Body.Origin, ""),
 		}, false)
 		return api.SendAgentInput200Response{}, nil
 	}

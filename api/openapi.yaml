@@ -4713,6 +4713,14 @@ components:
         text:
           type: string
           description: Text to send to the agent's stdin (a newline is appended automatically)
+        origin:
+          type: string
+          description: >-
+            Why this message exists, when the user did not type it - "review_comments",
+            "review_resolved", "tests_failed", "fix_conflicts", "review_thread". Absent
+            for anything typed in the composer. It rides through to the chat event so the
+            transcript can mark an automated turn as such; the agent sees only the text,
+            which is why those messages also carry a "[Hydra]" prefix.
 
     ApprovalRequest:
       type: object
@@ -5388,6 +5396,15 @@ components:
             config.toml). When false, tests run only on open / at merge;
             foreground runs and test_concurrency still apply. null/absent uses
             the built-in default (enabled).
+        notify_test_failures:
+          type: boolean
+          nullable: true
+          description: >-
+            Whether a test runner settling FAILING wakes the head with a one-line message
+            ([notify] test_failures in config.toml). It only fires while the head is IDLE, so
+            it cannot interrupt a turn or loop, and it is deduped per (runner, commit). The
+            agent pulls the output with get_test_logs. null/absent uses the built-in default
+            (enabled).
         artifact_concurrency:
           type: integer
           nullable: true
@@ -6159,6 +6176,16 @@ components:
           description: Content blocks, or a bare string for a provider command echo.
         shell:
           $ref: '#/components/schemas/ChatShellResult'
+        origin:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: >-
+            Why this turn exists, when the user did not type it - "review_comments",
+            "review_resolved", "tests_failed", "fix_conflicts", "review_thread". Absent for
+            anything typed in the composer. The test is not "did Hydra write the words" but
+            "did the user type it", so a one-click action like Fix with agent counts as
+            automated too. Drives the chat's automated-turn marker; the agent sees only the
+            text, which is why those messages also carry a "[Hydra]" prefix.
 
     ChatUserMessageEchoedPayload:
       type: object

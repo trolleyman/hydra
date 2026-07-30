@@ -35,6 +35,7 @@ import {
   SquareTerminal,
   TriangleAlert,
   Wrench,
+  Zap,
   X,
 } from 'lucide-react'
 import { SiGit } from '@icons-pack/react-simple-icons'
@@ -243,7 +244,7 @@ type ChatItem =
   // suppresses the fade/slide entrance for a message that takes the place of a
   // queued bubble already on screen (item 21) - it was visible, so re-animating
   // it as it settles reads as a flicker.
-  | { kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean }
+  | { kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean; origin?: string }
   // A slash command echoed back by the CLI (<command-name>/<command-args>).
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
@@ -526,6 +527,10 @@ interface ProviderEvent {
   // SKILL.md body. The reducer routes these out of the normal chat flow (a
   // collapsed meta card / a skill card) instead of rendering them as a user turn.
   isMeta?: boolean
+  // Why a user turn exists when the user did not type it (review_comments,
+  // tests_failed, fix_conflicts, ...). Carried from the durable event so the
+  // bubble can be marked as automated - see AUTOMATED_ORIGIN.
+  origin?: string
   // A <task-notification> bookkeeping record (a background sub-agent finishing,
   // a background command completing) arrives as a notice carrying its XML here.
   // handleProviderEvent settles the sub off it (see handleTaskNotification).
@@ -754,7 +759,9 @@ export function toProviderEvents(ev: ChatEventUnion, showEmptyReasoning = false)
         }]
       }
       const text = contentText(p.content)
-      return text.trim() ? [{ ...base, type: 'user', message: { content: p.content as ClaudeContentBlock[] | string } }] : []
+      // origin rides along so the bubble can say Hydra sent it (see
+      // AUTOMATED_ORIGIN). Absent for anything typed in the composer.
+      return text.trim() ? [{ ...base, type: 'user', origin: p.origin || undefined, message: { content: p.content as ClaudeContentBlock[] | string } }] : []
     }
     case 'context_message':
       return [{ ...providerBase(ev, ev.payload), type: 'user', isMeta: true, message: { content: ev.payload.content as ClaudeContentBlock[] | string } }]
@@ -1684,6 +1691,49 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
 // preserves typed newlines.
 const USER_BUBBLE_CLASS =
   'max-w-[85%] rounded-2xl rounded-br-md bg-[#f0eee6] dark:bg-[#31302c] px-3.5 py-2 break-words'
+
+// A turn the user did NOT type. Same shape and side as their bubble - it speaks
+// for them, and the agent answers it as if they had - but a cooler tint and a
+// dashed edge, so a transcript scanned quickly still reads "you said this" for
+// everything that is plain.
+const AUTOMATED_BUBBLE_CLASS =
+  'max-w-[85%] rounded-2xl rounded-br-md border border-dashed border-sky-300/70 dark:border-sky-500/30 bg-sky-50/70 dark:bg-sky-950/25 px-3.5 py-2 break-words'
+
+// What each origin means, in the words the user needs. The KEY is the machine tag
+// the daemon sends (internal/http/notify.go, and the one-click callers in the diff
+// viewer); the label is short enough to sit above a bubble and the tip says what
+// caused it, because "why is this here?" is the only question this marker exists
+// to answer.
+//
+// The test for belonging here is not "did Hydra write the words" but "did the user
+// type it in the composer" - which is why a one-click Fix with agent counts, even
+// though the user meant every word of it.
+const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
+  review_comments: {
+    label: 'Sent by Hydra',
+    why: 'Sent automatically when review comments were published, so the agent knows to read them. It fetches the bodies itself with get_review_comments.',
+  },
+  review_resolved: {
+    label: 'Sent by Hydra',
+    why: 'Sent automatically when you resolved a review comment while the agent was working, so it stops on something you have already dealt with.',
+  },
+  tests_failed: {
+    label: 'Sent by Hydra',
+    why: 'Sent automatically when a test runner went red while the agent was idle. Turn it off with [notify] test_failures = false.',
+  },
+  fix_conflicts: {
+    label: 'Sent from a button',
+    why: 'You pressed a button rather than typing this - Hydra wrote the wording and sent it on your behalf.',
+  },
+  review_thread: {
+    label: 'Sent from a button',
+    why: 'You sent a review thread to the agent - Hydra quoted it and wrote the request on your behalf.',
+  },
+  unknown: {
+    label: 'Sent by Hydra',
+    why: 'Hydra sent this on your behalf rather than you typing it.',
+  },
+}
 
 // Quiet code/output panels inside tool cards.
 const PANEL_CLASS =
@@ -5204,10 +5254,16 @@ const ChatUserMessage = memo(function ChatUserMessage({
   text,
   sending,
   dimmed,
+  origin,
   projectId,
 }: {
   text: string
   sending?: boolean
+  // Why this turn exists when the user did not type it. The chat could not tell
+  // "you said this" from "Hydra said this for you" - both arrive as a user turn -
+  // which mattered most for the ones that ARE actions you took, one click at a
+  // time: Fix with agent, Resolve with agent. See AUTOMATED_ORIGIN.
+  origin?: string
   // dimmed renders the muted (opacity-75) bubble without the "Sending..." row -
   // used for a queued message pinned under the transcript, so it shows the same
   // image thumbnails / chips as a finalized turn instead of raw upload paths.
@@ -5223,12 +5279,25 @@ const ChatUserMessage = memo(function ChatUserMessage({
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
+  const auto = origin ? AUTOMATED_ORIGIN[origin] ?? AUTOMATED_ORIGIN.unknown : null
   return (
     <div className="flex flex-col items-end gap-1">
+      {/* An automated turn is still YOUR side of the conversation - it acts on
+          your behalf and the agent answers it as if you had spoken - so it keeps
+          the user bubble's shape and side. What changes is the tint and this
+          line, which says who really sent it and why. */}
+      {auto && (
+        <Tooltip content={auto.why} side="top">
+          <span className="flex items-center gap-1 text-[10px] text-stone-400 dark:text-stone-500 cursor-help">
+            <Zap className="w-2.5 h-2.5" />
+            <span className="optical-center">{auto.label}</span>
+          </span>
+        </Tooltip>
+      )}
       {/* Copying out of a bubble is handled by the transcript's copy-as-markdown
           handler (copyTranscriptAsMarkdown), which also trims the trailing
           newlines the browser adds for the bubble's block padding. */}
-      <div className={`${USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
+      <div className={`${auto ? AUTOMATED_BUBBLE_CLASS : USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
         {body && <Markdown text={body} />}
         {attachments.length > 0 && (
           <AttachmentChips
@@ -7257,7 +7326,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // routeUserText classifies one user-turn text: slash-command echoes and
     // local command output arrive wrapped in pseudo-XML tags, interrupts as a
     // bracketed marker, everything else is a real user message.
-    const routeUserText = (rawText: string, ts?: number | null, isMeta?: boolean, clientId = '') => {
+    const routeUserText = (rawText: string, ts?: number | null, isMeta?: boolean, clientId = '', origin = '') => {
       // Machine-injected context (a Skill's SKILL.md body, the resume nudge) rides
       // in a `user` envelope but was never typed - route it to a skill/meta card
       // off the isMeta flag rather than the content-sniffing below. It doesn't
@@ -7388,7 +7457,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const fromQueue = pendingSendsRef.current.some((p) => p.text === text)
       settlePendingSend(text)
       interruptPending = false
-      push({ kind: 'user', text, noEntrance: fromQueue })
+      push({ kind: 'user', text, noEntrance: fromQueue, origin: origin || undefined })
     }
 
     const handleProviderEvent = (ev: ProviderEvent) => {
@@ -7514,13 +7583,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           const content = ev.message?.content
           const userTs = parseEventTs(ev)
           if (typeof content === 'string') {
-            if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '')
+            if (content.trim()) routeUserText(content, userTs, ev.isMeta, ev.uuid ?? '', ev.origin)
             return
           }
           const editPatch = eventEditPatch(ev, content ?? [])
           for (const block of content ?? []) {
             if (block.type === 'text' && block.text?.trim()) {
-              routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '')
+              routeUserText(block.text, userTs, ev.isMeta, ev.uuid ?? '', ev.origin)
             } else if (block.type === 'tool_result' && block.tool_use_id) {
               const parsed = parseToolResult(block.content)
               patchTool(block.tool_use_id, parsed.text, block.is_error === true, parsed.images, rawResultBlock(block, providerEntry(ev)), editPatch, ev.cwd)
@@ -9505,7 +9574,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function renderChatItem(item: ChatItem, shellCwd: string | null = null): ReactNode {
     switch (item.kind) {
       case 'user':
-        return <ChatUserMessage text={item.text} sending={item.sending} projectId={projectId} />
+        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} projectId={projectId} />
       case 'command': {
         const name = item.name.startsWith('/') ? item.name : '/' + item.name
         return (

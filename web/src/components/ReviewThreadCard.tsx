@@ -7,6 +7,7 @@ import { ProviderIcon } from './ReviewControls'
 import { providerLabel } from '../lib/forgeDisplay'
 import { formatStartedAgo } from '../lib/agentDisplay'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import { renderCommentSource } from '../lib/mentionHighlight'
 import { copyWithToast } from '../lib/copyToast'
 import { Avatar } from './Avatar'
 import { commentAsMarkdown } from '../lib/reviewComments'
@@ -399,6 +400,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                   composers - review replies are markdown on both forges, so what
                   you type should read like what will be posted. */}
               <HighlightedTextarea
+                renderContent={renderCommentSource}
                 ref={replyRef}
                 value={text}
                 onChange={(e) => changeText(e.target.value)}

@@ -436,6 +436,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// Likewise re-run heads' test suites in the background when their verdict goes
 	// stale (a new commit landed), so the verdict is fresh before it's looked at.
 	go server.RunTestPrefetcher(ctx, roots)
+	// Tell an IDLE head when its suite goes red, so a finished head does not sit
+	// believing it is done (docs/review-agent.md; [notify] test_failures).
+	go server.RunTestFailureNotifier(ctx, roots)
 	// Watch heads with auto-merge armed and merge them once their tests pass.
 	go server.RunAutoMergeWatcher(ctx)
 	// Poll MR-linked heads: refresh cached MR state, detect remote merges (fetch +

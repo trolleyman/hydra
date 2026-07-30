@@ -15,11 +15,11 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
@@ -126,26 +126,66 @@ func (s *Server) PublishReviewComments(ctx context.Context, request api.PublishR
 	return api.PublishReviewComments200JSONResponse(commentsResponse(projectRoot, head.ID, notified)), nil
 }
 
-// notifyComments tells the head's agent that comments landed, and returns the
-// line it was told (empty when there was no one to tell).
+// notifyComments tells whoever a batch of published comments was addressed to,
+// and returns the line the HEAD was told (empty when it was not told anything).
 //
-// Batched by construction: "Submit review" with six comments is one notification,
-// not six. A head with no live session is not an error - the comments are durable,
-// so the agent can read them whenever it next runs; losing the nudge is not losing
-// the comment, which is the whole reason this stopped being an injected blob.
+// Addressed to whom is the mention system (reviewstore.Mentions): no mention means
+// the head, as it always has; `@review` sends it to the reviewer instead; naming
+// both sends it to both. So one "Submit review" can produce two messages - one per
+// audience - and never more, because each is batched over its own recipients.
+//
+// notifyAlways for the head: this is something the user just did on purpose and
+// expects to land, and a chat head steers a mid-turn message in at its next step
+// boundary rather than having it corrupt the turn. Waiting for idle here would
+// mean commenting on a working agent did nothing until it stopped.
 func (s *Server) notifyComments(ctx context.Context, projectRoot string, head heads.Head, published []reviewstore.Comment) *string {
-	line := reviewstore.NotifyLine(published)
+	var forHead, forReviewer []reviewstore.Comment
+	for _, c := range published {
+		// An agent's own comment never routes. Without this rule one "@review this"
+		// in a reply becomes a chain of agents summoning each other, which is an
+		// unbounded bill and nobody's idea of a review.
+		if c.Author != reviewstore.AuthorUser {
+			continue
+		}
+		m := reviewstore.ParseMentions(c.Body)
+		if m.Head {
+			forHead = append(forHead, c)
+		}
+		if m.Reviewer {
+			forReviewer = append(forReviewer, c)
+		}
+	}
+	if line := reviewstore.NotifyLine(forReviewer); line != "" {
+		s.notifyReviewer(projectRoot, head, line)
+	}
+	line := reviewstore.NotifyLine(forHead)
 	if line == "" {
 		return nil
 	}
-	if _, err := s.SendAgentInput(ctx, api.SendAgentInputRequestObject{
-		ProjectId: projectRoot,
-		Id:        head.ID,
-		Body:      &api.SendAgentInputJSONRequestBody{Text: line},
-	}); err != nil {
+	if !s.notifyHead(ctx, projectRoot, head.ID, notifyAlways, reasonReviewComments, line) {
 		return nil
 	}
 	return &line
+}
+
+// notifyReviewer delivers a line to the head's review slot.
+//
+// Deliberately does NOT start one. A slot is lazy - opening the Review tab creates
+// the checkout and the model session - and typing "@review" in a comment should not
+// spawn a sandbox. When there is no reviewer running the comment is still durable,
+// and the reviewer reads it with get_review_comments the moment it is next opened.
+func (s *Server) notifyReviewer(projectRoot string, head heads.Head, line string) {
+	slot := heads.ReviewSessionID(head.ID)
+	if !s.Sessions.IsLive(slot) {
+		return
+	}
+	content, err := json.Marshal([]map[string]any{{"type": "text", "text": autoPrefix + line}})
+	if err != nil {
+		return
+	}
+	if err := s.Sessions.SendChatUser(slot, content); err != nil {
+		log.Printf("warn: notify reviewer %s: %v", slot, err)
+	}
 }
 
 // ResolveReviewComment marks a comment dealt with, whichever origin it came from.
@@ -208,71 +248,32 @@ func (s *Server) MarkReviewCommentsRead(ctx context.Context, request api.MarkRev
 	return api.MarkReviewCommentsRead200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
 }
 
-// resolveNotify batches a burst of resolves into one message per head. Resolving
-// a run of comments is one gesture, and it must not cost one model turn each.
-var resolveNotify = struct {
-	mu      sync.Mutex
-	pending map[string][]int
-	timer   map[string]*time.Timer
-}{pending: map[string][]int{}, timer: map[string]*time.Timer{}}
-
-// resolveNotifyDelay is how long a resolve waits for its neighbours. Long enough
-// to collect a run of clicks, short enough that a single resolve still lands while
-// the turn it is cancelling is plausibly still running.
-const resolveNotifyDelay = 4 * time.Second
+// resolveBatcher collects a run of resolves so clicking through five costs one
+// message. Long enough to catch a burst, short enough that a single resolve still
+// lands while the turn it is cancelling is plausibly still running.
+var resolveBatcher = newNotifyBatcher(4 * time.Second)
 
 // notifyResolved tells a WORKING head that a comment has been dealt with.
 //
-// The gating is the interesting part, and it inverts the rule every other
-// notification here follows. Elsewhere Hydra waits until the head is NOT mid-turn,
-// so it never interrupts. This one only fires BECAUSE it is mid-turn: resolving is
+// notifyWorking, not notifyIdle, and that is the whole point: resolving is
 // otherwise the user's own bookkeeping, and an idle agent picks the change up for
-// free the next time it reads its comments (reviewstore.OpenComments already
-// filters resolved ones out). The single case worth spending a turn on is "you are
-// working on #3 right now and I have just cancelled it" - and reopening is never
-// worth one, because the comment is simply back in the list it reads anyway.
+// free next time it reads its comments (reviewstore.OpenComments already filters
+// resolved ones out). The single case worth spending a turn on is "you are working
+// on #3 right now and I have just cancelled it". Reopening never notifies - the
+// comment is simply back in the list it reads anyway.
 func (s *Server) notifyResolved(projectRoot string, head heads.Head, number int, resolved bool) {
 	if !resolved || !s.headIsWorking(projectRoot, head.ID) {
 		return
 	}
-	resolveNotify.mu.Lock()
-	defer resolveNotify.mu.Unlock()
-	resolveNotify.pending[head.ID] = append(resolveNotify.pending[head.ID], number)
-	if t := resolveNotify.timer[head.ID]; t != nil {
-		t.Stop()
-	}
-	resolveNotify.timer[head.ID] = time.AfterFunc(resolveNotifyDelay, func() {
-		resolveNotify.mu.Lock()
-		numbers := resolveNotify.pending[head.ID]
-		delete(resolveNotify.pending, head.ID)
-		delete(resolveNotify.timer, head.ID)
-		resolveNotify.mu.Unlock()
-		if len(numbers) == 0 || !s.headIsWorking(projectRoot, head.ID) {
-			return // it finished while we were batching; it will read the list itself
+	resolveBatcher.add(head.ID, fmt.Sprintf("#%d", number), func(items []string) {
+		it := "them"
+		if len(items) == 1 {
+			it = "it"
 		}
-		labels := make([]string, 0, len(numbers))
-		for _, n := range numbers {
-			labels = append(labels, fmt.Sprintf("#%d", n))
-		}
-		noun := "comments"
-		if len(labels) == 1 {
-			noun = "comment"
-		}
-		_, _ = s.SendAgentInput(s.BackgroundCtx, api.SendAgentInputRequestObject{
-			ProjectId: projectRoot,
-			Id:        head.ID,
-			Body: &api.SendAgentInputJSONRequestBody{Text: fmt.Sprintf(
-				"Review %s resolved: %s. No further work is needed on %s - stop if you are part-way through.",
-				noun, strings.Join(labels, ", "), map[bool]string{true: "it", false: "them"}[len(labels) == 1])},
-		})
+		s.notifyHead(s.BackgroundCtx, projectRoot, head.ID, notifyWorking, reasonReviewResolved, fmt.Sprintf(
+			"Review %s resolved: %s. No further work is needed on %s - stop if you are part-way through.",
+			map[bool]string{true: "comment", false: "comments"}[len(items) == 1], strings.Join(items, ", "), it))
 	})
-}
-
-// headIsWorking reports whether a head is mid-turn, read from the status its own
-// hooks write.
-func (s *Server) headIsWorking(projectRoot, headID string) bool {
-	info := heads.ReadAgentStatus(projectRoot, headID)
-	return info != nil && (info.Status == api.Running || info.Status == api.Starting)
 }
 
 func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCommentsResponse {

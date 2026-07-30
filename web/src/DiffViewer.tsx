@@ -65,6 +65,7 @@ import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
 import { addReviewComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, draftsOf, type PendingReviewComment } from './lib/reviewComments'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
+import { renderCommentSource } from './lib/mentionHighlight'
 import { Markdown } from './lib/MarkdownRenderer'
 import { useCopyFlash } from './lib/useCopyFlash'
 import { CopyStateIcon } from './components/CopyStateIcon'
@@ -414,6 +415,9 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
         wrapperClassName="w-full h-20 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus-within:ring-1 focus-within:ring-blue-500"
         textClassName="p-2 text-xs leading-5"
         placeholder={placeholder}
+        // Mentions decide who this comment wakes, so they are painted while you
+        // type it. Only here - they mean nothing in the chat composer.
+        renderContent={renderCommentSource}
       />
       <div className="flex justify-end gap-2 mt-2">
         <button onClick={onCancel} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
@@ -2717,6 +2721,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
         await runWithToast(
           () => api.default.sendAgentInput(projectId ?? '', agent.id, {
             text: `Update this branch from its base by merging the local ${baseBranch} branch in (do not git fetch first), resolving any conflicts that arise.`,
+            origin: 'fix_conflicts',
           }),
           { errorPrefix: 'Failed to send update request to agent' },
         )
@@ -3838,6 +3843,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         await api.default.sendAgentInput(projectId, agent.id, {
           text: `Address this review comment on ${where} (thread ${thread.id}) and commit the fix:\n\n${quoted}\n\n`
             + `When you are done, reply to the thread with mcp__hydra__reply_to_review_comment so I can see what you changed.`,
+          origin: 'review_thread',
         })
         showSentToast('Sent the thread to the agent')
       },

@@ -599,6 +599,9 @@ type AgentConfig struct {
 
 // AgentInputRequest defines model for AgentInputRequest.
 type AgentInputRequest struct {
+	// Origin Why this message exists, when the user did not type it - "review_comments", "review_resolved", "tests_failed", "fix_conflicts", "review_thread". Absent for anything typed in the composer. It rides through to the chat event so the transcript can mark an automated turn as such; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+	Origin *string `json:"origin,omitempty"`
+
 	// Text Text to send to the agent's stdin (a newline is appended automatically)
 	Text string `json:"text"`
 }
@@ -1579,6 +1582,9 @@ type ChatUserMessagePayload struct {
 	// Id The client-generated id, so a queued bubble reconciles to it.
 	Id string `json:"id,omitempty"`
 
+	// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "tests_failed", "fix_conflicts", "review_thread". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+	Origin string `json:"origin,omitempty"`
+
 	// Shell The sandboxed result of a composer "!command", carried on the user_message it settles into so the chat renders a shell card rather than a bubble.
 	Shell *ChatShellResult `json:"shell,omitempty"`
 }
@@ -1679,6 +1685,9 @@ type ConfigResponse struct {
 
 	// McpServers Read-only: candidate MCP servers discovered in the host ~/.claude.json and project .mcp.json, for populating the mcp_allowed picker. Ignored on save.
 	McpServers *[]McpServer `json:"mcp_servers"`
+
+	// NotifyTestFailures Whether a test runner settling FAILING wakes the head with a one-line message ([notify] test_failures in config.toml). It only fires while the head is IDLE, so it cannot interrupt a turn or loop, and it is deduped per (runner, commit). The agent pulls the output with get_test_logs. null/absent uses the built-in default (enabled).
+	NotifyTestFailures *bool `json:"notify_test_failures"`
 
 	// Previews Per-project live-server scripts, each proxied on demand as a clickable preview of the head's app ([previews.<name>] in config.toml). A config still spelling one as an [artifacts.<name>] with type = "server" is upgraded on read, so it appears here and not under artifacts.
 	Previews *[]PreviewScript `json:"previews"`
@@ -4167,6 +4176,9 @@ type UserMessageEvent struct {
 
 		// Id The client-generated id, so a queued bubble reconciles to it.
 		Id string `json:"id,omitempty"`
+
+		// Origin Why this turn exists, when the user did not type it - "review_comments", "review_resolved", "tests_failed", "fix_conflicts", "review_thread". Absent for anything typed in the composer. The test is not "did Hydra write the words" but "did the user type it", so a one-click action like Fix with agent counts as automated too. Drives the chat's automated-turn marker; the agent sees only the text, which is why those messages also carry a "[Hydra]" prefix.
+		Origin string `json:"origin,omitempty"`
 
 		// ParentItemId The tool call this belongs under.
 		ParentItemId string `json:"parent_item_id,omitempty"`
