@@ -160,6 +160,7 @@ export { ReviewComment } from './models/ReviewComment';
 export type { ReviewCommentsResponse } from './models/ReviewCommentsResponse';
 export type { ReviewConfig } from './models/ReviewConfig';
 export type { ReviewConfigResponse } from './models/ReviewConfigResponse';
+export { ReviewImageAnchor } from './models/ReviewImageAnchor';
 export type { ReviewLink } from './models/ReviewLink';
 export type { ReviewRef } from './models/ReviewRef';
 export type { ReviewReplyRequest } from './models/ReviewReplyRequest';

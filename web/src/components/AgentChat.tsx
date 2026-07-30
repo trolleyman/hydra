@@ -85,6 +85,8 @@ import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
 import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
+import { appendToComposer, formatAnnotation, formatQuote } from '../lib/pinNote'
+import { useImageCommentStore } from '../stores/imageCommentStore'
 // langFromPath (the extension -> Prism language map a Read tool's output is
 // highlighted by, item 3) now lives in lib/fileKind, beside the file-type
 // classifier, so the lightbox's text viewer highlights by the same table.
@@ -2378,11 +2380,13 @@ function ReviewContextPanel({ context, lang }: { context: string; lang: string }
 // reading this card, so "- user" on every row is a column of noise; "reviewer"
 // or "agent" is a genuinely different claim about where the remark came from.
 function ReviewCommentCard({
-  number, path, line, replyTo, resolved, author, diff, context, body, subject,
+  number, path, line, image, replyTo, resolved, author, diff, context, body, subject,
 }: {
   number?: number
   path?: string
   line?: number
+  /** Set instead of path/line when the comment is pinned to a spot in a picture. */
+  image?: { file: string; position: string }
   replyTo?: number
   resolved?: boolean
   author?: string
@@ -2392,24 +2396,31 @@ function ReviewCommentCard({
   /** Overrides the anchor line when the comment has no file of its own (a reply). */
   subject?: ReactNode
 }) {
-  const slash = path ? path.lastIndexOf('/') : -1
-  const directory = slash >= 0 ? path!.slice(0, slash + 1) : ''
-  const fileName = path ? (slash >= 0 ? path.slice(slash + 1) : path) : ''
+  // A pin names a picture where a line comment names a path, so both take the
+  // same file line - icon, name, and the location in mono where ":12" sits.
+  const anchorPath = path || image?.file || ''
+  const slash = anchorPath ? anchorPath.lastIndexOf('/') : -1
+  const directory = slash >= 0 ? anchorPath.slice(0, slash + 1) : ''
+  const fileName = anchorPath ? (slash >= 0 ? anchorPath.slice(slash + 1) : anchorPath) : ''
   const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName || 'comment.txt')
   const [fromLabel, toLabel] = (diff ?? '').split(' -> ')
   const meta = (author && author !== 'user') || replyTo || resolved || diff
   return (
     <div className={`${PANEL_CLASS} overflow-hidden`}>
-      {(path || subject || number) && (
+      {(anchorPath || subject || number) && (
         <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
-          {path ? (
+          {anchorPath ? (
             <>
               <FileIcon className={`h-3.5 w-3.5 shrink-0 ${fileIconClass}`} />
-              <span className="min-w-0 truncate" title={path}>
+              <span className="min-w-0 truncate" title={anchorPath}>
                 {directory && <span className="text-stone-400 dark:text-stone-500">{directory}</span>}
                 <span className="text-stone-700 dark:text-stone-200">{fileName}</span>
               </span>
-              {line ? <span className="shrink-0 font-mono text-stone-400 dark:text-stone-500">:{line}</span> : null}
+              {image ? (
+                <span className="shrink-0 font-mono text-stone-400 dark:text-stone-500">@ {image.position}</span>
+              ) : line ? (
+                <span className="shrink-0 font-mono text-stone-400 dark:text-stone-500">:{line}</span>
+              ) : null}
             </>
           ) : subject ? (
             <>
@@ -2466,11 +2477,13 @@ function ReviewCommentsPanel({ text }: { text: string }) {
         // file, which is the parent's line repeated verbatim.
         const parent = parsed.comments.find((p) => p.number === c.replyTo)
         const sameAnchor = parent != null && parent.path === c.path && parent.line === c.line
+          && parent.image?.file === c.image?.file && parent.image?.position === c.image?.position
         return (
           <div key={c.number} className={parent ? 'ml-3 border-l-2 border-stone-200 pl-2 dark:border-white/[0.08]' : ''}>
             <ReviewCommentCard
               {...c}
               path={sameAnchor ? undefined : c.path}
+              image={sameAnchor ? undefined : c.image}
               replyTo={sameAnchor ? undefined : c.replyTo}
               subject={sameAnchor ? <>In reply to <CommentMention number={c.replyTo} /></> : undefined}
             />
@@ -9630,6 +9643,29 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
   const canSend = connected && !uploading && (!!input.trim() || readyAttachments.length > 0)
+
+  // A pin placed on a picture in the lightbox, arriving as text for this
+  // composer. Two kinds reach here and they are NOT the same thing: a remark
+  // about a picture the agent posted is a reply (the chat is already the thread,
+  // so a second numbered conversation about one of its own messages would split
+  // the discussion in two), and a remark about an attachment is an instruction
+  // about a file this message is carrying. Both land in the box for you to send -
+  // neither is stored, because there is nothing durable to attach them to.
+  const registerPinTargets = useImageCommentStore((st) => st.register)
+  const addToComposer = useCallback((text: string) => {
+    commit((prev) => {
+      const next = appendToComposer(prev.prompt, text)
+      return makeSnapshot(next, prev.attachments, next.length, next.length)
+    }, false)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [commit])
+  useEffect(() => {
+    registerPinTargets({
+      quote: (note) => addToComposer(formatQuote(note)),
+      annotate: (note) => addToComposer(formatAnnotation(note)),
+    })
+    return () => registerPinTargets({ quote: null, annotate: null })
+  }, [registerPinTargets, addToComposer])
 
   // --- Composer: slash commands ----------------------------------------------
 
