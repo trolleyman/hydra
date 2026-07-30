@@ -108,6 +108,17 @@ func (r *Registry) SetOnChatStep(fn func(id string)) {
 	r.mu.Unlock()
 }
 
+// ChatStep reports a provider-native completed item to the same mid-turn queue
+// lifecycle used by Claude's stream reducer.
+func (r *Registry) ChatStep(id string) {
+	r.mu.RLock()
+	fn := r.onChatStep
+	r.mu.RUnlock()
+	if fn != nil {
+		go fn(id)
+	}
+}
+
 // SetOnChatPlanApproval registers a callback invoked (off the read goroutine)
 // when a chat-mode session's stdout carries a can_use_tool control_request for
 // ExitPlanMode - the plan-approval gate a head hits when it leaves plan mode.

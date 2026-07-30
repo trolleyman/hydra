@@ -52,10 +52,10 @@ describe('browser prefs reset', () => {
   })
 
   // A pref missing from the list survives a reset silently, so the size is worth
-  // pinning: theme + 4 font families + 4 font sizes + one each for the other ten
-  // sections of the tab. Adding a section? This number moves with it.
+  // pinning: theme + 4 font families + 4 font sizes + one each for the other
+  // eleven sections of the tab. Adding a section? This number moves with it.
   it('covers every pref on the tab', () => {
-    expect(browserPrefs()).toHaveLength(19)
+    expect(browserPrefs()).toHaveLength(20)
   })
 
   // The Fonts section's own reset is a filter over the same list, so it must
