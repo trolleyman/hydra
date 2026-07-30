@@ -1,7 +1,6 @@
 package http
 
 import (
-	"braces.dev/errtrace"
 	"bytes"
 	"log"
 	"net/http"

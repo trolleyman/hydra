@@ -2,12 +2,15 @@ package http
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/reviewq"
+	"github.com/trolleyman/hydra/internal/reviewstore"
 )
 
 // A refresh request must ALWAYS be answered, whatever state the head is in - the
@@ -80,5 +83,81 @@ func TestFresh(t *testing.T) {
 		if got := fresh(c.ts, reviewRefreshMinAge); got != c.want {
 			t.Errorf("fresh(%s) = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// An agent resolving its own review comments is the point of the tool: it is the
+// only thing that knows #3 is actually done. The parts worth pinning are that it
+// resolves by the shared numbering, that it does NOT silently swallow a number
+// nobody has (an agent told "resolved 3 of 4" as if it were 4 moves on), and that
+// reopen is the inverse rather than a second spelling of resolve.
+func TestResolveHydraComments(t *testing.T) {
+	projectRoot := t.TempDir()
+	s := &Server{}
+	first, err := reviewstore.AppendComment(projectRoot, "head", reviewstore.Comment{
+		Status: reviewstore.StatusPublished, Author: reviewstore.AuthorUser, Body: "fix this", Path: "a.go", Line: 4,
+	})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	res := s.resolveHydraComments(projectRoot, "head", reviewq.Request{Numbers: []int{first.Number}})
+	if !res.OK {
+		t.Fatalf("resolve failed: %s", res.Message)
+	}
+	if got, _ := reviewstore.FindComment(projectRoot, "head", first.Number); !got.Resolved {
+		t.Error("the comment was not marked resolved")
+	}
+	// Local only, and it has to SAY so - an agent that believes it closed a PR
+	// discussion will tell the user it did.
+	if !strings.Contains(res.Message, "forge") {
+		t.Errorf("message does not say the resolve is local: %s", res.Message)
+	}
+
+	// A number nobody has is called out, and the one that does exist still lands.
+	second, _ := reviewstore.AppendComment(projectRoot, "head", reviewstore.Comment{
+		Status: reviewstore.StatusPublished, Author: reviewstore.AuthorUser, Body: "and this", Path: "b.go", Line: 9,
+	})
+	res = s.resolveHydraComments(projectRoot, "head", reviewq.Request{Numbers: []int{second.Number, 999}})
+	if !res.OK {
+		t.Fatalf("partial resolve reported failure: %s", res.Message)
+	}
+	if !strings.Contains(res.Message, "#999") {
+		t.Errorf("the number that matched nothing was not named: %s", res.Message)
+	}
+	if got, _ := reviewstore.FindComment(projectRoot, "head", second.Number); !got.Resolved {
+		t.Error("the real comment was skipped because an unknown one rode with it")
+	}
+
+	// Reopen is the inverse.
+	if res := s.resolveHydraComments(projectRoot, "head", reviewq.Request{Numbers: []int{first.Number}, Reopen: true}); !res.OK {
+		t.Fatalf("reopen failed: %s", res.Message)
+	}
+	if got, _ := reviewstore.FindComment(projectRoot, "head", first.Number); got.Resolved {
+		t.Error("reopen did not put the comment back")
+	}
+
+	// No numbers at all is a mistake worth naming rather than a silent no-op.
+	if res := s.resolveHydraComments(projectRoot, "head", reviewq.Request{}); res.OK {
+		t.Error("an empty resolve reported success")
+	}
+}
+
+// A REVIEWER resolves the head's comments, not its own private set: the review
+// slot has no comment store, so its writes must land on the head it is reviewing.
+func TestResolveHydraCommentsFromTheReviewSlot(t *testing.T) {
+	projectRoot := t.TempDir()
+	s := &Server{}
+	c, err := reviewstore.AppendComment(projectRoot, "head", reviewstore.Comment{
+		Status: reviewstore.StatusPublished, Author: reviewstore.AuthorUser, Body: "look at this", Path: "a.go", Line: 1,
+	})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if res := s.resolveHydraComments(projectRoot, heads.ReviewSessionID("head"), reviewq.Request{Numbers: []int{c.Number}}); !res.OK {
+		t.Fatalf("reviewer resolve failed: %s", res.Message)
+	}
+	if got, _ := reviewstore.FindComment(projectRoot, "head", c.Number); !got.Resolved {
+		t.Error("the reviewer's resolve did not reach the head's comment store")
 	}
 }

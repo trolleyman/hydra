@@ -60,6 +60,12 @@ type Deps struct {
 	// AddComment leaves a review comment anchored to a file and line, for the user
 	// (and any other agent) to read in the diff viewer. Nil hides the tool.
 	AddComment func(path string, line int, replyTo int, body string) (message string, ok bool)
+	// ResolveComments marks review comments dealt with (reopen inverts it), by the
+	// same numbering the read and reply tools use. The agent that just did the work
+	// is the only one that knows a comment is finished, so without this the open
+	// list only ever grows. Local to Hydra: a forge thread is never resolved on the
+	// forge, since agents have no forge credentials by design. Nil hides the tool.
+	ResolveComments func(numbers []int, reopen bool) (message string, ok bool)
 	// GitOp performs a git write-operation on the head's OWN branch, inside its
 	// worktree - never another branch or a path outside the worktree. It backs the
 	// git_* tools (commit / reset / revert / add / rebase / cherry-pick): raw git
@@ -431,6 +437,28 @@ func toolDefs(deps Deps) []map[string]any {
 			},
 		})
 	}
+	if deps.ResolveComments != nil {
+		defs = append(defs, map[string]any{
+			"name": "resolve_review_comments",
+			"description": "Mark review comments on YOUR OWN diff as dealt with, by their numbers, so they drop off the user's open list. " +
+				"Do this once the work a comment asked for is actually committed - you are the only one who knows that, and a list nobody closes only ever grows. " +
+				"Say what you did first (reply_to_review_comment), then resolve: a comment that vanishes with no answer leaves the user unable to check your reasoning. " +
+				"Do NOT resolve one you disagreed with or decided not to act on - reply and leave it open for the user to decide. " +
+				"Works for any comment get_review_comments shows you, since Hydra's own comments and your merge/pull request's share one numbering, but it is LOCAL to Hydra: nothing is resolved on the forge.",
+			"inputSchema": map[string]any{
+				"type":     "object",
+				"required": []string{"numbers"},
+				"properties": map[string]any{
+					"numbers": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "integer"},
+						"description": "The comment numbers you are done with, as given by get_review_comments.",
+					},
+					"reopen": map[string]any{"type": "boolean", "description": "Put these back on the open list instead - for undoing a resolve you made too early."},
+				},
+			},
+		})
+	}
 	return defs
 }
 
@@ -549,6 +577,20 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		if msg == "" && ok {
 			msg = "Saved. The user can see it in Hydra next to the comment it answers; it was NOT posted to the forge."
 		}
+		return textResult(msg, !ok)
+	case "resolve_review_comments":
+		if deps.ResolveComments == nil {
+			return textResult("resolve_review_comments is not available in this session.", true)
+		}
+		var args struct {
+			Numbers []int `json:"numbers"`
+			Reopen  bool  `json:"reopen"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		if len(args.Numbers) == 0 {
+			return textResult("resolve_review_comments needs \"numbers\" - the comments you are done with, from get_review_comments.", true)
+		}
+		msg, ok := deps.ResolveComments(args.Numbers, args.Reopen)
 		return textResult(msg, !ok)
 	default:
 		return textResult("unknown tool: "+p.Name, true)

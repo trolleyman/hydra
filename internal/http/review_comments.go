@@ -424,3 +424,45 @@ func unreadCommentCount(projectRoot, headID string) *int {
 	}
 	return &n
 }
+
+// openCommentCount is how much of the review is still OUTSTANDING on a head -
+// unresolved comments across both origins - for the count on its card. Nil when
+// there are none, like the unread count beside it.
+//
+// A different question from unread, and worth its own number precisely because
+// the two disagree in both directions: a comment you have read is still work, and
+// a comment you left yourself was never unread but is certainly outstanding. The
+// unread badge alone therefore said "nothing new" on a head with six open remarks
+// on it, which reads as "nothing to do".
+//
+// A REPLY is not counted. A thread is one piece of work however long the
+// conversation under it gets, and counting replies would make an argument look
+// like a backlog.
+func openCommentCount(projectRoot, headID string) *int {
+	if projectRoot == "" || headID == "" {
+		return nil
+	}
+	n := 0
+	for _, c := range reviewstore.OpenComments(projectRoot, headID) {
+		if c.ReplyTo == 0 {
+			n++
+		}
+	}
+	// The forge notes live in the sidecar rather than the comment store, and
+	// resolve by THREAD - so count threads, not notes, and only the ones Hydra's
+	// local overlay has not marked done.
+	seen := map[string]bool{}
+	for _, ref := range reviewstore.ForgeThreads(projectRoot, headID) {
+		if ref == "" || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		if !reviewstore.ThreadResolved(projectRoot, headID, ref) {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	return &n
+}

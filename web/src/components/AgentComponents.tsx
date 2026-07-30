@@ -40,6 +40,28 @@ function MRSidebarMarker({ review }: { review: NonNullable<AgentResponse['review
   )
 }
 
+// commentBadge decides what a head's review-comment chip says, from the two
+// counts the API carries, or null when there is nothing to show.
+//
+// They answer different questions and disagree in both directions, which is why
+// there are two: a comment you have READ is still outstanding work, and a comment
+// you left YOURSELF was never unread but is certainly outstanding. So the count
+// is the unresolved one - "how much is left" - and unread only decides whether it
+// reads as new. Unread with nothing unresolved still shows (a resolved comment
+// can arrive unread), because "someone said something" is worth a glance even
+// when the thread is closed.
+function commentBadge(agent: AgentResponse): { count: number; unread: boolean; label: string } | null {
+  const open = agent.open_comments ?? 0
+  const unread = agent.unread_comments ?? 0
+  if (!open && !unread) return null
+  const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? '' : 's'}`
+  if (!open) return { count: unread, unread: true, label: `${plural(unread, 'unread review comment')}, all resolved` }
+  const label = unread > 0
+    ? `${plural(open, 'unresolved review comment')}, ${unread} unread`
+    : plural(open, 'unresolved review comment')
+  return { count: open, unread: unread > 0, label }
+}
+
 // memo: the sidebar renders one of these per agent and the list re-renders on
 // every agent-store refresh (about once a second while an agent is working).
 // The store preserves object identity for unchanged agents, so memo makes a
@@ -60,6 +82,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
   onDeselect: () => void
 }) {
   const archived = agent.archived ?? false
+  const comments = commentBadge(agent)
   return (
     <Link
       to="/project/$projectId/agent/$agentId"
@@ -85,20 +108,30 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           className={`w-2 h-2 rounded-full shrink-0 ${archived ? 'bg-gray-300 dark:bg-gray-600' : `${agentDotClass(agent)} ${agentDotAnimate(agent)}`}`}
         />
         <span className={`font-medium text-sm truncate ${archived ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>{agent.title || agent.id}</span>
-        {/* Unread review comments: a speech bubble with a count, NOT a third dot.
-            The card already carries a needs-input dot and an unread-changes dot,
-            and a third would make none of them readable - this one also has to say
-            HOW MANY, which a dot cannot. It sits before them because it is the
+        {/* Review comments: a speech bubble with a count, NOT a third dot. The
+            card already carries a needs-input dot and an unread-changes dot, and a
+            third would make none of them readable - this one also has to say HOW
+            MANY, which a dot cannot. It sits before them because it is the
             narrower claim ("someone said something") and they are the louder ones.
-            Cleared only by arriving at a comment, never by opening the page. */}
-        {!archived && !!agent.unread_comments && (
+
+            The NUMBER is how much is left (unresolved); the COLOUR is whether any
+            of it is new. Those are different questions and the badge used to
+            answer only the second, so a head with six open remarks you had
+            already read showed nothing at all - which reads as "nothing to do".
+            Unread clears by arriving at a comment; unresolved clears by
+            resolving it, which is the point. */}
+        {!archived && comments && (
           <span
-            aria-label={`${agent.unread_comments} unread review comment${agent.unread_comments === 1 ? '' : 's'}`}
-            title={`${agent.unread_comments} unread review comment${agent.unread_comments === 1 ? '' : 's'}`}
-            className="ml-auto shrink-0 inline-flex items-center gap-0.5 rounded bg-blue-100 px-1 text-3xs font-medium tabular-nums text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+            aria-label={comments.label}
+            title={comments.label}
+            className={`ml-auto shrink-0 inline-flex items-center gap-0.5 rounded px-1 text-3xs font-medium tabular-nums ${
+              comments.unread
+                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                : 'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400'
+            }`}
           >
             <MessageSquare className="w-2.5 h-2.5" />
-            {agent.unread_comments}
+            {comments.count}
           </span>
         )}
         {!archived && agent.agent_status?.status === 'needs_input' ? (
@@ -109,7 +142,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           // over the blue dot since "needs you now" is the stronger signal.
           <span
             aria-label="needs your input"
-            className={`${agent.unread_comments ? 'ml-1' : 'ml-auto'} shrink-0 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-red-500/25`}
+            className={`${comments ? 'ml-1' : 'ml-auto'} shrink-0 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-red-500/25`}
           />
         ) : agent.has_unread_changes && !archived ? (
           // Unread-changes marker, pinned to the right of the title line so it
@@ -117,7 +150,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           // agent settles into finished (or reaches needs_input), cleared when it's opened.
           <span
             aria-label="unread changes"
-            className={`${agent.unread_comments ? 'ml-1' : 'ml-auto'} shrink-0 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25`}
+            className={`${comments ? 'ml-1' : 'ml-auto'} shrink-0 w-2.5 h-2.5 rounded-full bg-sky-400 ring-2 ring-sky-400/25`}
           />
         ) : null}
       </div>

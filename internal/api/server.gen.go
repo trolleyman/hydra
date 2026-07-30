@@ -660,6 +660,9 @@ type AgentResponse struct {
 	// NetworkEnforcement Network egress posture for a live head: "off" (no network), "unrestricted" (network on, host filtering off → every host reachable), "filtered-hard" (allow-list enforced in a pasta netns + nft lock - an inescapable boundary), "filtered-advisory" (allow-list enforced by the proxy via HTTP(S)_PROXY only; a determined process can bypass it), or absent/empty (the head isn't live).
 	NetworkEnforcement *string `json:"network_enforcement,omitempty"`
 
+	// OpenComments How many review comments on this head are still unresolved - the size of the review that is left, across both origins (Hydra's own comments and the MR's discussions, which share one numbering). A different question from unread_comments: a comment you have read is still work, and a comment you left yourself was never unread but is certainly outstanding. Absent when there are none.
+	OpenComments *int `json:"open_comments,omitempty"`
+
 	// Plan The chat plan/to-do list JSON the daemon tracks from the head's live Task*/TodoWrite events (empty if none).
 	Plan        *string `json:"plan,omitempty"`
 	PrePrompt   string  `json:"pre_prompt"`
