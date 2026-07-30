@@ -1963,12 +1963,6 @@ function commentPermalink(projectId: string | null, agentId: string, number: num
   return `${window.location.origin}/project/${encodeURIComponent(projectId ?? '_')}/agent/${encodeURIComponent(agentId)}?comment=${number}`
 }
 
-function formatShortLabel(commit: CommitInfo | null | undefined, sha: string): string {
-  if (!commit) return sha.slice(0, 7)
-  const msg = commit.message.slice(0, 24)
-  return `${commit.short_sha} ${msg}${commit.message.length > 24 ? '...' : ''}`
-}
-
 // ── Commit info formatting ────────────────────────────────────────────────────
 
 function formatCommitDate(iso: string): string {
@@ -2238,6 +2232,22 @@ function menuOffset(el: HTMLElement | null): number {
 const COMMIT_SHA_CHIP =
   'font-mono text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0'
 
+// The label a commit selector's trigger wears: the short sha lowlit ahead of the
+// subject, the way HostName fades everything but the registrable domain. The sha
+// is the part you only reach for deliberately, so it recedes and lets the subject
+// - which is what tells the two ends of the comparison apart at a glance - read
+// first. Lowlit with opacity rather than a colour so it composes on the trigger's
+// own text colour in both themes, and the subject alone takes the truncation.
+function CommitLabel({ commit, sha }: { commit: CommitInfo | null | undefined; sha: string }) {
+  const subject = commit ? commitParts(commit.message).subject : ''
+  return (
+    <span className="flex items-baseline gap-1.5 min-w-0">
+      <span className="font-mono text-[11px] opacity-55 shrink-0">{commit?.short_sha ?? sha.slice(0, 7)}</span>
+      {subject && <span className="max-w-[150px] truncate">{subject}</span>}
+    </span>
+  )
+}
+
 // The shift-click affordance, spelled out at the foot of both commit dropdowns -
 // otherwise nobody would ever find it.
 function ShiftClickHint() {
@@ -2284,11 +2294,9 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const label = selected.type === 'base'
-    ? baseBranch
-    : selected.type === 'latest'
-      ? 'Latest commit'
-      : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
+  const label = selected.type === 'commit'
+    ? <CommitLabel commit={commits.find((c) => c.sha === selected.sha)} sha={selected.sha} />
+    : <span className="max-w-[150px] truncate">{selected.type === 'base' ? baseBranch : 'Latest commit'}</span>
 
   // Determine which commits are valid for the left selector (must be older than right)
   const rightIdx = rightSel.type === 'commit' ? commitIdx(rightSel.sha, commits) : -1
@@ -2301,7 +2309,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        <span className="max-w-[150px] truncate">{label}</span>
+        {label}
         <ChevronDown className="w-3 h-3 text-gray-400 shrink-0" />
       </button>
 
@@ -2409,9 +2417,9 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
     return () => document.removeEventListener('mousedown', handleClick)
   }, [open])
 
-  const label = selected.type === 'uncommitted' ? 'Latest changes'
-    : selected.type === 'latest' ? 'Latest commit'
-      : formatShortLabel(commits.find((c) => c.sha === selected.sha), selected.sha)
+  const label = selected.type === 'commit'
+    ? <CommitLabel commit={commits.find((c) => c.sha === selected.sha)} sha={selected.sha} />
+    : <span className="max-w-[150px] truncate">{selected.type === 'uncommitted' ? 'Latest changes' : 'Latest commit'}</span>
 
   const validCommits = commits.filter((_, idx) => {
     if (left.type === 'base') return true
@@ -2428,7 +2436,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
         className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-        <span className="max-w-[150px] truncate">{label}</span>
+        {label}
         {hasUncommitted && selected.type !== 'uncommitted' && (
           <TriangleAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
         )}
