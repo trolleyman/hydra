@@ -396,8 +396,9 @@ func (s *Server) testSummaryFor(projectRoot string, h heads.Head) *api.TestSumma
 			// live log, but it is noisy and sometimes terminal-oriented
 			// ("[2K transforming...") in the compact head chip. Its parsed case
 			// counts already provide meaningful compact progress once markers
-			// arrive, so keep raw stdout out of the summary.
-			if !r.IsStreaming() && rep.Progress != "" {
+			// arrive. Preserve a deliberate ::hydra:progress:: headline while
+			// keeping raw stdout out of the summary.
+			if (!r.IsStreaming() || rep.ProgressExplicit) && rep.Progress != "" {
 				progress = rep.Progress
 			}
 		case hydratests.StatusFailing:

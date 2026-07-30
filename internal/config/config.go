@@ -2972,6 +2972,8 @@ func testsDocLines() []string {
 		docPrefix + "   ::hydra:test:warn:: web/src/x.ts:12:5 › no-console | Unexpected console statement",
 		docPrefix + "   ::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon",
 		docPrefix + "   ::hydra:test:pass:38:: internal/artifacts › TestFast       (38 = duration in ms)",
+		docPrefix + " Print ::hydra:progress:: <text> for an explicit phase headline; ordinary stdout",
+		docPrefix + " stays in the live log but is not used as compact status for streaming runners.",
 		docPrefix + " The token before the first › is the location (path[:line[:col]] or dotted class),",
 		docPrefix + " middle › tokens are scope levels, the last is the test name, text after | is the",
 		docPrefix + " message. A verb takes an optional :<ms> duration suffix, giving a streamed case",

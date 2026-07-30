@@ -162,6 +162,28 @@ func TestGenerateErroredOnExecFailure(t *testing.T) {
 	}
 }
 
+func TestExplicitProgressIsDistinguishedFromStdoutFallback(t *testing.T) {
+	m := NewManager(t.TempDir())
+	dir := "running-entry"
+	m.gens[dir] = struct{}{}
+
+	m.appendLog(dir, "transforming...", StreamStdout, false)
+	if m.progress[dir] != "transforming..." || m.progressExplicit[dir] {
+		t.Fatalf("stdout fallback: progress=%q explicit=%v", m.progress[dir], m.progressExplicit[dir])
+	}
+
+	m.appendLog(dir, "Running web tests", StreamStdout, true)
+	if m.progress[dir] != "Running web tests" || !m.progressExplicit[dir] {
+		t.Fatalf("marker: progress=%q explicit=%v", m.progress[dir], m.progressExplicit[dir])
+	}
+
+	// Once an explicit marker appears, later command output remains log-only.
+	m.appendLog(dir, "more build noise", StreamStdout, false)
+	if m.progress[dir] != "Running web tests" || !m.progressExplicit[dir] {
+		t.Fatalf("post-marker stdout: progress=%q explicit=%v", m.progress[dir], m.progressExplicit[dir])
+	}
+}
+
 func TestInvalidateAndCache(t *testing.T) {
 	work := t.TempDir()
 	initGitRepo(t, work)

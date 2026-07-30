@@ -3726,7 +3726,7 @@ type TestSummary struct {
 	Failed     *int   `json:"failed,omitempty"`
 	Passed     *int   `json:"passed,omitempty"`
 
-	// Progress Latest non-streaming runner progress line while status is "running" (e.g. "84/142"). Streaming stdout runners expose their parsed counts instead of raw stdout here.
+	// Progress Latest explicit runner progress line while status is "running" (e.g. "Installing dependencies"). Streaming stdout runners expose parsed counts or an explicit `::hydra:progress::` headline here, never raw stdout.
 	Progress *string `json:"progress"`
 
 	// Ref The resolved commit SHA the verdict was computed for.
