@@ -33,7 +33,10 @@ describe('UncommittedChip', () => {
     expect(screen.queryByPlaceholderText('Commit message')).toBeNull()
 
     fireEvent.click(screen.getByTestId('uncommitted-chip'))
-    expect(screen.getByText('.hydra/config.toml')).toBeInTheDocument()
+    // The directory and filename are separate spans so the directory can be
+    // lowlit. Assert against the path row itself rather than requiring one text
+    // node to contain the whole path.
+    expect(screen.getByTitle('.hydra/config.toml')).toHaveTextContent('.hydra/config.toml')
     expect(screen.getByText('modified')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Commit message')).toHaveValue('Update .hydra/config.toml')
   })
