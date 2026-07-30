@@ -643,6 +643,39 @@ you were elsewhere. The cursor is held as a NUMBER rather than an index, so
 resolving the comment you are standing on does not silently move you somewhere
 else.
 
+### Who said it: avatars without hosting any
+
+A comment carries a small rounded square saying who left it
+(`web/src/components/Avatar.tsx`). Three sources, each falling back to the next
+rather than to a broken frame, and **Hydra stores no images and proxies none**:
+
+1. **An agent** gets its own brand mark - the same logomark the sidebar and spawn
+   form use, in the same accent colour, on a tinted tile. Nothing to fetch, it is
+   already in the bundle, and "an agent said this" becomes readable at a glance
+   instead of a name you have to read.
+2. **A forge user** gets the picture the forge already hosts. Both providers hand
+   it over with the comment - GitHub's GraphQL `author { avatarUrl }`, GitLab's
+   `author.avatar_url` - so this is a field on `forge.Note`, not a URL Hydra
+   guesses from a login (which would break on Enterprise and on GitLab entirely).
+   The browser loads it directly with `referrerPolicy="no-referrer"`, and an
+   error falls silently to (3).
+3. **Everyone else, including you**, gets a monogram on a colour derived from the
+   name by a small string hash - deterministic, so one person is one colour in
+   every list, and it works with no network at all.
+
+**"You" is whoever git says you are.** Hydra has no accounts, so the comments
+response carries `you` from the project's `user.name`; it is the only name a
+comment that never went near a forge has, and it is the name your commits already
+carry. Deliberately NOT built: matching your git name against a forge login to
+borrow that avatar. `Callum Tolley` and `trolleyman` are not the same string, and
+a heuristic that silently attributes your comment to someone else's face is worse
+than a monogram.
+
+A rounded square rather than a circle, to match the chips and tiles the rest of
+the UI is built from - a lone circle in a square-cornered gutter reads as a
+different system. A DRAFT keeps the plain speech-bubble glyph instead: it has not
+been said yet, so attributing it to anyone is premature.
+
 ### Permalinks
 
 `?comment=4` on the agent page. The number is the whole address - the head is
@@ -701,6 +734,7 @@ same batching principle as the notify-by-id line the agent gets. Not built.
 | Per-comment read state + the open/new navigator | **built** |
 | Permalink (`?comment=4`) | **built** (`validateSearch` on the agent route) |
 | Agent replies to a comment by number | **built** (`reviewq.OpNote` takes a number) |
+| Avatars (agent mark / forge picture / monogram) | **built** (`components/Avatar.tsx`; no image is hosted or proxied) |
 | Third origin badge for agent-authored notes | new (`ReviewThreadCard.tsx` knows only `forge` / `local_only`) |
 | A head-level unread-comments badge, and an arrival toast | new (see "Unread, and where it should go next") |
 | `resolve_review_thread` as an agent tool | new |

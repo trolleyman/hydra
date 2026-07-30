@@ -1166,6 +1166,18 @@ var (
 // 45), so the diff viewer renders them inline, and cover the three shapes worth
 // looking at: a plain forge thread, a thread with an agent's local-only reply,
 // and a resolved one.
+// simAvatar stands in for a forge-hosted profile picture. A data: URL rather than
+// a real one so the simulation needs no network and hotlinks nobody - what is
+// being demonstrated is that the AVATAR PATH works, not whose face is on it.
+func simAvatar(name, colour string) string {
+	svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48">`+
+		`<rect width="48" height="48" fill="%s"/>`+
+		`<circle cx="24" cy="18" r="8" fill="#ffffff" opacity="0.9"/>`+
+		`<path d="M8 48c0-9 7-16 16-16s16 7 16 16z" fill="#ffffff" opacity="0.9"/>`+
+		`<title>%s</title></svg>`, colour, name)
+	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(svg))
+}
+
 func simSeedThreads(id string) []api.ReviewThread {
 	if id != "agent-1" {
 		return nil
@@ -1176,7 +1188,7 @@ func simSeedThreads(id string) []api.ReviewThread {
 			Resolved: ptr(false), Outdated: ptr(false),
 			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701"),
 			Notes: []api.ReviewThreadNote{
-				{Id: "701", Number: ptr(3), Read: ptr(true), Author: ptr("priya"), Body: "Is `errors` still used after the refactor? If not this import can go.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:12:00Z"), Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701")},
+				{Id: "701", Number: ptr(3), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "Is `errors` still used after the refactor? If not this import can go.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:12:00Z"), Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_701")},
 			},
 		},
 		{
@@ -1184,8 +1196,8 @@ func simSeedThreads(id string) []api.ReviewThread {
 			Resolved: ptr(false), Outdated: ptr(false),
 			Url: ptr("https://gitlab.example.com/team/repo/-/merge_requests/42#note_702"),
 			Notes: []api.ReviewThreadNote{
-				{Id: "702", Number: ptr(4), Read: ptr(true), Author: ptr("sam"), Body: "Threading a `*db.Store` through here couples spawn to the DB - can we pass the narrower interface instead?", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:20:00Z")},
-				{Id: "703", Number: ptr(5), Read: ptr(true), Author: ptr("priya"), Body: "Agreed, and it would make this testable without a temp DB.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:26:00Z")},
+				{Id: "702", Number: ptr(4), Read: ptr(true), Author: ptr("sam"), AvatarUrl: ptr(simAvatar("sam", "#0891b2")), Body: "Threading a `*db.Store` through here couples spawn to the DB - can we pass the narrower interface instead?", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:20:00Z")},
+				{Id: "703", Number: ptr(5), Read: ptr(true), Author: ptr("priya"), AvatarUrl: ptr(simAvatar("priya", "#7c3aed")), Body: "Agreed, and it would make this testable without a temp DB.", Origin: api.Forge, CreatedAt: ptr("2026-07-28T09:26:00Z")},
 				// Unread: an agent's reply is news, and this is what the unread dot and
 				// the next-unread jump are for.
 				{Id: "local-1", Number: ptr(6), Read: ptr(false), Author: ptr("agent"), Body: "Narrowed it to a `HeadStore` interface in 4f21ac9 - spawn now takes just `CreateAgent`/`GetAgent`.", Origin: api.LocalOnly, CreatedAt: ptr("2026-07-28T09:41:00Z")},
@@ -1195,7 +1207,7 @@ func simSeedThreads(id string) []api.ReviewThread {
 			Id: "704", Path: "web/src/components/AgentDetail.tsx", Line: 46,
 			Resolved: ptr(true), Outdated: ptr(false),
 			Notes: []api.ReviewThreadNote{
-				{Id: "704", Number: ptr(7), Read: ptr(true), Author: ptr("sam"), Body: "Nit: this could use the shared formatter.", Origin: api.Forge, CreatedAt: ptr("2026-07-27T16:02:00Z")},
+				{Id: "704", Number: ptr(7), Read: ptr(true), Author: ptr("sam"), AvatarUrl: ptr(simAvatar("sam", "#0891b2")), Body: "Nit: this could use the shared formatter.", Origin: api.Forge, CreatedAt: ptr("2026-07-27T16:02:00Z")},
 			},
 		},
 	}

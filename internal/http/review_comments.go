@@ -211,6 +211,12 @@ func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCo
 		Comments: make([]api.ReviewComment, 0, len(stored)),
 		Notified: notified,
 	}
+	// Hydra has no accounts, so "you" is whoever git says you are. It is the only
+	// name available for a comment that never went near a forge, and it is the
+	// right one - it is the name your commits already carry.
+	if who := gitConfigVal(projectRoot, "user.name"); who != "" {
+		out.You = &who
+	}
 	for _, c := range stored {
 		ac := api.ReviewComment{
 			Number:    c.Number,

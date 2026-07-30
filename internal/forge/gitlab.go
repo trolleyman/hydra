@@ -194,7 +194,8 @@ type glabNote struct {
 	Resolved  bool   `json:"resolved"`
 	CreatedAt string `json:"created_at"`
 	Author    struct {
-		Username string `json:"username"`
+		Username  string `json:"username"`
+		AvatarURL string `json:"avatar_url"`
 	} `json:"author"`
 	Position *struct {
 		NewPath string `json:"new_path"`
@@ -230,7 +231,7 @@ func (p *gitlabProvider) Threads(ctx context.Context, repoDir, _ string, id stri
 				t.Path, t.Line = n.Position.NewPath, n.Position.NewLine
 			}
 			note := Note{
-				ID: strconv.Itoa(n.ID), Author: n.Author.Username,
+				ID: strconv.Itoa(n.ID), Author: n.Author.Username, AvatarURL: n.Author.AvatarURL,
 				Body: n.Body, CreatedAt: n.CreatedAt,
 			}
 			if webURL != "" {

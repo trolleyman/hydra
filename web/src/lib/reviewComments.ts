@@ -100,14 +100,25 @@ function all(res: { comments: ReviewComment[] }): PendingReviewComment[] {
   return res.comments.map(toPending)
 }
 
+// Who "you" is on this machine, from git's user.name. Hydra has no accounts and
+// hosts no pictures, so a comment you wrote is drawn as a monogram of this. The
+// server sends it with every comments response, so it needs no fetch of its own.
+export function youFrom(res: { you?: string }): string {
+  return res.you ?? ''
+}
+
 /** The unpublished subset: what "Submit review" would send. */
 export function draftsOf(comments: PendingReviewComment[]): PendingReviewComment[] {
   return comments.filter((c) => !c.published)
 }
 
-export async function fetchReviewComments(projectId: string | null, agentId: string): Promise<PendingReviewComment[]> {
-  if (!projectId) return []
-  return all(await api.default.getReviewComments(projectId, agentId))
+export async function fetchReviewComments(
+  projectId: string | null,
+  agentId: string,
+): Promise<{ comments: PendingReviewComment[]; you: string }> {
+  if (!projectId) return { comments: [], you: '' }
+  const res = await api.default.getReviewComments(projectId, agentId)
+  return { comments: all(res), you: youFrom(res) }
 }
 
 export async function addReviewComment(

@@ -119,8 +119,13 @@ type Thread struct {
 
 // Note is one comment inside a Thread.
 type Note struct {
-	ID        string
-	Author    string
+	ID     string
+	Author string
+	// AvatarURL is the author's picture, hosted BY THE FORGE. Hydra stores no
+	// images and proxies nothing: the browser loads this URL directly, and a
+	// failure (offline, a private instance, an avatar that has moved) falls back
+	// to a monogram rather than showing a broken frame.
+	AvatarURL string
 	Body      string
 	URL       string
 	CreatedAt string // RFC3339, as reported by the forge

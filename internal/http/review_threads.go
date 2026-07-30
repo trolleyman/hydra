@@ -191,6 +191,9 @@ func (s *Server) mergeLocalNotes(projectRoot, headID string, threads []forge.Thr
 			if n.URL != "" {
 				an.Url = ptr(n.URL)
 			}
+			if n.AvatarURL != "" {
+				an.AvatarUrl = ptr(n.AvatarURL)
+			}
 			if n.CreatedAt != "" {
 				an.CreatedAt = ptr(n.CreatedAt)
 			}

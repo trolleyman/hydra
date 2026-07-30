@@ -8,6 +8,7 @@ import { providerLabel } from '../lib/forgeDisplay'
 import { formatStartedAgo } from '../lib/agentDisplay'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { copyWithToast } from '../lib/copyToast'
+import { Avatar } from './Avatar'
 
 // The actions a thread card can perform, supplied by the diff viewer through
 // context (see reviewThreadContext) so the memo'd hunks between them never need
@@ -153,6 +154,15 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
           {thread.notes.map((n, i) => (
             <div key={n.id} className={i > 0 ? 'mt-2 pt-2 border-t border-violet-200/60 dark:border-violet-900/40' : ''}>
               <div className="flex items-center gap-2">
+                {/* Who said it, before what they said. A forge user gets the
+                    picture the forge already hosts; an agent gets its brand mark;
+                    anyone else a monogram. See components/Avatar.tsx - Hydra hosts
+                    no images and proxies none. */}
+                <Avatar
+                  name={n.author || 'someone'}
+                  avatarUrl={n.avatar_url}
+                  agentType={n.author === 'agent' ? 'claude' : undefined}
+                />
                 {/* The number is the handle you would quote ("fix #3"), and it is
                     the SAME sequence Hydra's own comments use - a gutter with two
                     numbering schemes in it would be worse than none. The unread

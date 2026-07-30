@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
+import { Avatar } from './components/Avatar'
 import { getFileIcon } from './lib/fileIcons'
 import { copyText } from './lib/clipboard'
 import { buildFileTree, compactTree, getGroupedFiles, type TreeNode } from './lib/fileTree'
@@ -183,9 +184,12 @@ const EMPTY_FILE_THREADS: ReviewThread[] = []
 // One queued comment shown inline beneath its diff line: the authored text rendered
 // as markdown (matching how it lands in the agent chat), with edit + remove. A
 // stale comment (its diff moved since it was queued) gets a warning but still reads.
-function QueuedCommentCard({ comment, stale, onEdit, onRemove, onResolve, onCopyLink }: {
+function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, onCopyLink }: {
   comment: PendingReviewComment
   stale: boolean
+  // Who "you" is on this machine (git's user.name). Hydra has no accounts, so a
+  // comment you wrote is a monogram of this rather than a picture of anyone.
+  you?: string
   onEdit: () => void
   onRemove: () => void
   onResolve?: (resolved: boolean) => void
@@ -205,7 +209,19 @@ function QueuedCommentCard({ comment, stale, onEdit, onRemove, onResolve, onCopy
         : 'border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20'
     }`}>
       <div className="flex items-start gap-2">
-        <MessageSquare className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${sent ? 'text-stone-400 dark:text-stone-500' : 'text-blue-500'}`} />
+        {/* A DRAFT keeps the plain speech-bubble: it has not been said yet, so
+            attributing it to anyone is premature. Once published it carries whose
+            it is - which for an agent is its brand mark, and for you a monogram
+            of git's user.name. */}
+        {sent ? (
+          <Avatar
+            name={mine ? (you || 'You') : comment.author}
+            agentType={mine ? undefined : 'claude'}
+            className="mt-0.5"
+          />
+        ) : (
+          <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0 text-blue-500" />
+        )}
         <div className="min-w-0 flex-1">
           {sent && (
             <div className="mb-0.5 flex items-center gap-1.5 text-[11px] text-stone-400 dark:text-stone-500">
@@ -435,7 +451,7 @@ function CommentRow({ initialText = '', onSubmit, onAddToReview, onCommentOnPR, 
 // Shared by the unified and side-by-side hunks so both views show inline comments
 // identically. `openNew` drives the new-comment CommentRow; editing an existing
 // comment is tracked here by id.
-function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, lineDraftApi }: {
+function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, you, lineDraftApi }: {
   entries: LineCommentEntry[] | undefined
   path: string
   lineNum: number
@@ -448,6 +464,7 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
   onRemoveComment?: (id: string) => void
   onResolveComment?: (number: number, resolved: boolean) => void
   onCopyCommentLink?: (number: number) => void
+  you?: string
   lineDraftApi?: LineDraftApi
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -476,6 +493,7 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
             onRemove={() => onRemoveComment?.(entry.comment.id)}
             onResolve={(r) => onResolveComment?.(entry.comment.number, r)}
             onCopyLink={() => onCopyCommentLink?.(entry.comment.number)}
+            you={you}
           />
         ),
       )}
@@ -611,7 +629,7 @@ function codeCellHtml(highlighted: string | undefined, content: string, ranges: 
   return highlighted ?? null
 }
 
-const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, lineDraftApi, readOnly, selection, onSelectLine }: {
+const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, you, lineDraftApi, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   path: string
   highlightedOld: Map<number, string>
@@ -625,6 +643,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
   onRemoveComment?: (id: string) => void
   onResolveComment?: (number: number, resolved: boolean) => void
   onCopyCommentLink?: (number: number) => void
+  you?: string
   lineDraftApi?: LineDraftApi
   readOnly?: boolean
   selection?: DiffLineSelection | null
@@ -692,6 +711,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
                 onRemoveComment={onRemoveComment}
                 onResolveComment={onResolveComment}
                 onCopyCommentLink={onCopyCommentLink}
+                you={you}
                 lineDraftApi={lineDraftApi}
               />
             )}
@@ -703,7 +723,7 @@ const UnifiedHunk = memo(function UnifiedHunk({ hunk, path, highlightedOld, high
 })
 
 
-const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, lineDraftApi, readOnly, selection, onSelectLine }: {
+const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld, highlightedNew, wordRangesOld, wordRangesNew, comments, onComment, onAddToReview, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, you, lineDraftApi, readOnly, selection, onSelectLine }: {
   hunk: DiffHunk
   path: string
   highlightedOld: Map<number, string>
@@ -717,6 +737,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
   onRemoveComment?: (id: string) => void
   onResolveComment?: (number: number, resolved: boolean) => void
   onCopyCommentLink?: (number: number) => void
+  you?: string
   lineDraftApi?: LineDraftApi
   readOnly?: boolean
   selection?: DiffLineSelection | null
@@ -793,6 +814,7 @@ const SideBySideHunk = memo(function SideBySideHunk({ hunk, path, highlightedOld
                 onRemoveComment={onRemoveComment}
                 onResolveComment={onResolveComment}
                 onCopyCommentLink={onCopyCommentLink}
+                you={you}
                 lineDraftApi={lineDraftApi}
               />
             )}
@@ -1103,7 +1125,7 @@ function firstFileLine(file: DiffFile): string | undefined {
   return line.content
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, onCopyCommentLink, you, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -1129,6 +1151,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   onRemoveComment?: (id: string) => void
   onResolveComment?: (number: number, resolved: boolean) => void
   onCopyCommentLink?: (number: number) => void
+  you?: string
   lineDraftApi?: LineDraftApi
   isCollapsed: boolean
   onToggleCollapse: (path: string) => void
@@ -1487,11 +1510,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     sideBySide
       ? <SideBySideHunk key={key} hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink}
+        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink} you={you}
         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
       : <UnifiedHunk key={key} hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink}
+        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink} you={you}
         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
   )
 
@@ -1728,11 +1751,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                     {sideBySide
                       ? <SideBySideHunk hunk={hunk} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
                         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink}
+                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink} you={you}
                         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                       : <UnifiedHunk hunk={hunk} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
                         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink}
+                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} onCopyCommentLink={onCopyCommentLink} you={you}
                         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
                     }
                     {isLast && !atEndOfFile && (
@@ -3489,6 +3512,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // them. Reloaded when the agent changes (DiffViewerImpl is not remounted per
   // agent - see the memo comparator - so switching agents re-runs this effect).
   const [reviewComments, setReviewComments] = useState<PendingReviewComment[]>([])
+  // Who "you" is on this machine (git's user.name), for the monogram on a comment
+  // you wrote. Hydra has no accounts and hosts no pictures.
+  const [you, setYou] = useState('')
   // Refetch when the agent changes. The store is server-side now, so this starts
   // empty and fills in - which also means a draft written in another browser (or
   // before a reload) is simply there, the thing localStorage could never do.
@@ -3496,7 +3522,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => {
     let cancelled = false
     fetchReviewComments(projectId, agent.id)
-      .then((cs) => { if (!cancelled) setReviewComments(cs) })
+      .then((res) => { if (!cancelled) { setReviewComments(res.comments); setYou(res.you) } })
       .catch((e) => console.error('Failed to load review comments:', e))
     return () => { cancelled = true }
   }, [projectId, agent.id])
@@ -4164,6 +4190,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               onRemoveComment={removeQueuedComment}
               onResolveComment={handleResolveComment}
               onCopyCommentLink={handleCopyCommentLink}
+              you={you}
               lineDraftApi={lineDraftApi}
               onExpand={expandFileDiff}
               isHidden={hiddenFiles.has(diff.files[singleFileIdx].path)}
@@ -4205,6 +4232,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               onRemoveComment={removeQueuedComment}
               onResolveComment={handleResolveComment}
               onCopyCommentLink={handleCopyCommentLink}
+              you={you}
               lineDraftApi={lineDraftApi}
               onExpand={expandFileDiff}
               isHidden={hiddenFiles.has(f.path)}

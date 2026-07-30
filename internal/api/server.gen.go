@@ -2946,6 +2946,9 @@ type ReviewCommentsResponse struct {
 
 	// Notified On a publish, the one line the agent was told. Absent otherwise.
 	Notified *string `json:"notified,omitempty"`
+
+	// You Who "you" is on this machine, from git's user.name. Hydra has no accounts and hosts no pictures, so a comment you wrote is drawn as a monogram of this rather than an avatar. Empty when git has no user.name configured.
+	You *string `json:"you,omitempty"`
 }
 
 // ReviewConfig The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.
@@ -3113,7 +3116,10 @@ type ReviewThread struct {
 
 // ReviewThreadNote One comment in a review thread. Local notes never reach the forge.
 type ReviewThreadNote struct {
-	Author    *string `json:"author,omitempty"`
+	Author *string `json:"author,omitempty"`
+
+	// AvatarUrl The author's picture, hosted by the FORGE. Hydra stores no images and proxies nothing - the browser loads this directly, and a failure falls back to a monogram.
+	AvatarUrl *string `json:"avatar_url,omitempty"`
 	Body      string  `json:"body"`
 	CreatedAt *string `json:"created_at,omitempty"`
 	Id        string  `json:"id"`

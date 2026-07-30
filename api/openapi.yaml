@@ -3809,6 +3809,9 @@ components:
           description: The note's handle in the head's ONE numbering sequence, shared with Hydra's own comments so "fix #3" is unambiguous. Assigned on first sight and never reused.
         read:
           type: boolean
+        avatar_url:
+          type: string
+          description: The author's picture, hosted by the FORGE. Hydra stores no images and proxies nothing - the browser loads this directly, and a failure falls back to a monogram.
         author:
           type: string
         body:
@@ -3834,6 +3837,12 @@ components:
         notified:
           type: string
           description: On a publish, the one line the agent was told. Absent otherwise.
+        you:
+          type: string
+          description: >
+            Who "you" is on this machine, from git's user.name. Hydra has no accounts and
+            hosts no pictures, so a comment you wrote is drawn as a monogram of this rather
+            than an avatar. Empty when git has no user.name configured.
 
     ReviewComment:
       type: object

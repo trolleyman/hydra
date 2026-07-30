@@ -12,6 +12,10 @@ export type ReviewThreadNote = {
      */
     number?: number;
     read?: boolean;
+    /**
+     * The author's picture, hosted by the FORGE. Hydra stores no images and proxies nothing - the browser loads this directly, and a failure falls back to a monogram.
+     */
+    avatar_url?: string;
     author?: string;
     body: string;
     url?: string;
