@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults - weights on 50/50, hard caps off - are applied only when resolving). Weights are soft (bite only under contention); the hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
+ * The raw [resources] cgroup limits for ONE config layer (project / user / local), as edited in the Settings scope tabs. Applied to every scoped workload of the project (agent, preview, service, artifact) via its transient systemd scope. Every field is nullable; a null field is unset at this layer and inherits the layer below. Built-in defaults apply CPU and IO ceilings as well as 50/50 weights; explicit zero disables a hard cap. Weights are soft (bite only under contention); hard caps apply even on an idle box and may be silently skipped where their cgroup controller is not delegated to the user systemd manager.
  */
 export type ResourceLimits = {
     /**
@@ -15,7 +15,7 @@ export type ResourceLimits = {
      */
     io_weight?: number | null;
     /**
-     * Hard CPU cap in percent of one core (systemd CPUQuota; 200 = 2 cores). null/0 = no cap.
+     * Hard CPU cap in percent of one core (systemd CPUQuota; 200 = 2 cores). null uses the machine-scaled safe default; 0 = no cap.
      */
     cpu_quota?: number | null;
     /**
@@ -27,12 +27,36 @@ export type ResourceLimits = {
      */
     tasks_max?: number | null;
     /**
-     * Hard read ceiling in MB/s for the device backing the project root (systemd IOReadBandwidthMax, i.e. cgroup io.max). null/0 = no cap.
+     * Hard read ceiling in MB/s for the device backing the project root (systemd IOReadBandwidthMax, i.e. cgroup io.max). null uses the 80 MB/s safe default; 0 = no cap.
      */
     io_read_bandwidth_max?: number | null;
     /**
-     * Hard write ceiling in MB/s (systemd IOWriteBandwidthMax, i.e. cgroup io.max). Unlike io_weight this needs no particular IO scheduler, so it is the cap that reliably bites - weights are inert unless the host uses bfq or blk-iocost. null/0 = no cap.
+     * Hard write ceiling in MB/s (systemd IOWriteBandwidthMax, i.e. cgroup io.max). Unlike io_weight this needs no particular IO scheduler, so it is the cap that reliably bites - weights are inert unless the host uses bfq or blk-iocost. null uses the 40 MB/s safe default; 0 = no cap.
      */
     io_write_bandwidth_max?: number | null;
+    /**
+     * Machine-wide CPU ceiling for all Hydra workloads. User scope only; null uses the machine-scaled default and 0 disables the ceiling.
+     */
+    machine_cpu_quota?: number | null;
+    /**
+     * Machine-wide read ceiling in MB/s for all Hydra workloads. User scope only.
+     */
+    machine_io_read_bandwidth_max?: number | null;
+    /**
+     * Machine-wide write ceiling in MB/s for all Hydra workloads. User scope only.
+     */
+    machine_io_write_bandwidth_max?: number | null;
+    /**
+     * Shared CPU ceiling for tests, artifacts, and updates. User scope only.
+     */
+    background_cpu_quota?: number | null;
+    /**
+     * Shared background read ceiling in MB/s. User scope only.
+     */
+    background_io_read_bandwidth_max?: number | null;
+    /**
+     * Shared background write ceiling in MB/s. User scope only.
+     */
+    background_io_write_bandwidth_max?: number | null;
 };
 

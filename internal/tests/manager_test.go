@@ -162,6 +162,28 @@ func TestGenerateErroredOnExecFailure(t *testing.T) {
 	}
 }
 
+func TestProgressIgnoresOrdinaryStdout(t *testing.T) {
+	m := NewManager(t.TempDir())
+	dir := "running-entry"
+	m.gens[dir] = struct{}{}
+
+	m.appendLog(dir, "transforming...", StreamStdout, false)
+	if m.progress[dir] != "" {
+		t.Fatalf("stdout set progress to %q", m.progress[dir])
+	}
+
+	m.appendLog(dir, "Running web tests", StreamStdout, true)
+	if m.progress[dir] != "Running web tests" {
+		t.Fatalf("marker progress = %q", m.progress[dir])
+	}
+
+	// Later command output remains log-only.
+	m.appendLog(dir, "more build noise", StreamStdout, false)
+	if m.progress[dir] != "Running web tests" {
+		t.Fatalf("post-marker progress = %q", m.progress[dir])
+	}
+}
+
 func TestInvalidateAndCache(t *testing.T) {
 	work := t.TempDir()
 	initGitRepo(t, work)

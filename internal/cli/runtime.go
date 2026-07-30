@@ -399,6 +399,15 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// draining (crash / SIGKILL). We own no live sessions yet, so every
 	// hydra-*.scope is stale. This is what recovers from an orphaned-sandbox
 	// pile-up on the next boot.
+	if userPath, err := config.GetUserConfigPath(); err == nil {
+		if userCfg, err := config.LoadFile(userPath); err != nil {
+			log.Printf("warn: load aggregate resource limits: %v", err)
+		} else if userCfg != nil {
+			sandbox.ConfigureAggregateLimits(userCfg.ResolveAggregateResourceLimits())
+		} else {
+			sandbox.ConfigureAggregateLimits(config.Config{}.ResolveAggregateResourceLimits())
+		}
+	}
 	sandbox.SweepOrphanScopes()
 
 	// Resume heads that were running before a restart (best-effort), clear out

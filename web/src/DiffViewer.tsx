@@ -309,7 +309,7 @@ function QueuedCommentCard({ comment, stale, you, onEdit, onRemove, onResolve, o
                 )}
               </span>
             </div>
-          <Markdown text={comment.text} className="text-xs text-gray-700 dark:text-gray-200 break-words" />
+          <Markdown text={comment.text} highlightMentions className="text-xs text-gray-700 dark:text-gray-200 break-words" />
           {stale && !sent && (
             <div className="mt-1 flex items-start gap-1 text-2xs text-amber-700 dark:text-amber-300">
               <TriangleAlert className="w-3 h-3 mt-px shrink-0" />

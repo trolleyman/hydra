@@ -18,7 +18,7 @@ export type TestSummary = {
     warnings?: number;
     duration_ms?: number | null;
     /**
-     * Latest progress line while status is "running" (e.g. "84/142").
+     * Latest explicit runner progress line while status is "running" (e.g. "Installing dependencies"). Streaming stdout runners expose parsed counts or an explicit `::hydra:progress::` headline here, never raw stdout.
      */
     progress?: string | null;
     /**
