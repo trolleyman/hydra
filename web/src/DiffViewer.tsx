@@ -67,6 +67,7 @@ import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
 import { addReviewComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, notifiedNumbers, draftsOf, type PendingReviewComment } from './lib/reviewComments'
+import { commentPermalink, registerCommentJump } from './lib/reviewCommentLink'
 import { HighlightedTextarea } from './components/HighlightedTextarea'
 import { renderCommentSource } from './lib/mentionHighlight'
 import { Markdown } from './lib/MarkdownRenderer'
@@ -2288,13 +2289,6 @@ function diffContextBlock(path: string, hunk: DiffHunk | undefined, lineNum: num
   return `\`\`\`diff\n--- ${path}\n+++ ${path}\n${header}${rows.join('\n')}\n\`\`\`\n`
 }
 
-// A comment's permalink. The number is the whole address - the head is already in
-// the path, and a number is stable and never reused - so this stays short enough
-// to paste into a message and still means one exact thing months later.
-function commentPermalink(projectId: string | null, agentId: string, number: number): string {
-  return `${window.location.origin}/project/${encodeURIComponent(projectId ?? '_')}/agent/${encodeURIComponent(agentId)}?comment=${number}`
-}
-
 // ── Commit info formatting ────────────────────────────────────────────────────
 
 function formatCommitDate(iso: string): string {
@@ -4370,6 +4364,12 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       if (target) handleJumpToComment({ number, path: target.path, lineNum: target.lineNum, isNew: target.isNew })
     }
   }, [openComments, reviewComments, markRead, handleJumpToComment])
+
+  // The same jump, published for panes outside this component - the chat's review
+  // comment cards link to a comment and land you on it without a navigation (see
+  // lib/reviewCommentLink). Through the ref, so registration survives the comment
+  // list changing under it.
+  useEffect(() => registerCommentJump(agent.id, (number) => openCommentRef.current?.(number)), [agent.id])
 
   // `?comment=4`: jump to it once there is a diff to find it in, and mark it read.
   // Runs on the number rather than on every diff refresh, so a background refresh

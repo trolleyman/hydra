@@ -18,6 +18,7 @@ import {
   Globe,
   History,
   Info,
+  Link2,
   ListChecks,
   ListEnd,
   ListPlus,
@@ -108,6 +109,9 @@ import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '..
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
 import { markWhitespace } from '../lib/whitespaceMarks'
 import { useWhitespaceMarks } from '../lib/whitespacePrefs'
+import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommentsText'
+import { commentPermalink, jumpToReviewComment } from '../lib/reviewCommentLink'
+import { BranchPill } from './BranchPill'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -1087,12 +1091,14 @@ function summarizeToolInput(input: unknown, name = ''): { text: string; prose: b
   if (typeof input !== 'object') return { text: String(input), prose: false }
   const obj = input as Record<string, unknown>
   if (Object.keys(obj).filter((key) => !key.startsWith('_')).length === 0) return { text: '', prose: false }
+  // A list of comment handles is a reference, not prose: it renders mono, the
+  // way a comment's own number does everywhere else (CommentRef). "All published
+  // comments" IS prose - it is a phrase we wrote, not something to quote back.
   if (name === 'mcp__hydra__get_review_comments' && Array.isArray(obj.numbers)) {
     const numbers = obj.numbers.filter((number): number is number => typeof number === 'number')
-    return {
-      text: numbers.length > 0 ? `#${numbers.join(', #')}` : 'All published comments',
-      prose: true,
-    }
+    return numbers.length > 0
+      ? { text: `#${numbers.join(', #')}`, prose: false }
+      : { text: 'All published comments', prose: true }
   }
   if (name === 'mcp__hydra__get_test_logs') {
     const runner = typeof obj.runner === 'string' ? obj.runner : ''
@@ -1109,13 +1115,13 @@ function summarizeToolInput(input: unknown, name = ''): { text: string; prose: b
     return { text: typeof obj.name === 'string' ? obj.name : '', prose: true }
   }
   if (name === 'mcp__hydra__reply_to_review_comment') {
-    return { text: typeof obj.number === 'number' ? `#${obj.number}` : '', prose: true }
+    return { text: typeof obj.number === 'number' ? `#${obj.number}` : '', prose: false }
   }
   if (name === 'mcp__hydra__add_review_comment') {
     const path = typeof obj.path === 'string' ? obj.path : ''
     const line = typeof obj.line === 'number' ? `:${obj.line}` : ''
-    const reply = typeof obj.reply_to === 'number' ? `Reply to #${obj.reply_to}` : ''
-    return { text: reply || `${path}${line}`, prose: reply !== '' }
+    const reply = typeof obj.reply_to === 'number' ? `#${obj.reply_to}` : ''
+    return { text: reply || `${path}${line}`, prose: false }
   }
   if (name === 'ToolSearch' && typeof obj.query === 'string') return summarizeToolSearchQuery(obj.query)
   const gitTool = /^mcp__hydra__(git_.+)$/.exec(name)
@@ -2206,6 +2212,276 @@ function WebSearchOutput({ text }: { text: string }) {
         </div>
       )}
       {parsed.body && <Markdown text={parsed.body} />}
+    </div>
+  )
+}
+
+// ── Review comments ───────────────────────────────────────────────────────────
+
+// A comment's handle, rendered the way the diff viewer's own comment cards
+// render it (ReviewThreadCard): mono, quiet, and never wrapped. It is a
+// reference you quote back ("fix #3"), not part of the sentence, so it should
+// look the same wherever it appears.
+//
+// It is also the comment's permalink, so reading about a comment in the chat and
+// going to look at it are one click apart. A real <a href> - so copy-link-address
+// and middle-click behave - whose plain click is handled in-app: the diff is on
+// this very page, and navigating to `?comment=N` would push a history entry to
+// scroll it, then do nothing at all the second time you clicked the same link.
+// Without a mounted diff for this head (a sub-agent view), the href is followed
+// and the page honours the number on load.
+function CommentLink({ number, className, children }: { number: number; className: string; children: ReactNode }) {
+  const ctx = useContext(AgentFileContext)
+  if (!ctx) return <span className={className}>{children}</span>
+  return (
+    <Tooltip content={`Go to #${number} in the diff`} side="top">
+      <a
+        href={commentPermalink(ctx.projectId, ctx.agentId, number)}
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+          if (jumpToReviewComment(ctx.agentId, number)) e.preventDefault()
+        }}
+        className={className}
+      >
+        {children}
+      </a>
+    </Tooltip>
+  )
+}
+
+// The handle as a card carries it: on the right, with the link mark that says it
+// goes somewhere.
+function CommentRef({ number }: { number: number }) {
+  return (
+    <CommentLink
+      number={number}
+      className="shrink-0 inline-flex items-center gap-1 rounded px-1 -mx-1 py-px font-mono text-stone-400 hover:bg-stone-100 hover:text-stone-600 dark:text-stone-500 dark:hover:bg-white/[0.06] dark:hover:text-stone-300 transition-colors"
+    >
+      <Link2 className="h-3 w-3" />
+      #{number}
+    </CommentLink>
+  )
+}
+
+// The handle inside a sentence ("In reply to #19"). No mark - the sentence
+// already says what it is, and an icon mid-phrase reads as punctuation.
+function CommentMention({ number }: { number: number }) {
+  return (
+    <CommentLink number={number} className="font-mono rounded hover:text-stone-700 hover:underline dark:hover:text-stone-200 transition-colors">
+      #{number}
+    </CommentLink>
+  )
+}
+
+// A sentence that names comments by number ("Saved as #20, threaded under #19."),
+// with each handle a link to the comment it names - the same reference the cards
+// carry, and the shortest path from "it was saved" to looking at it.
+function CommentRefText({ text }: { text: string }) {
+  return <>{text.split(/(#\d+)/).map((part, i) => (/^#\d+$/.test(part) ? <CommentMention key={i} number={Number(part.slice(1))} /> : <Fragment key={i}>{part}</Fragment>))}</>
+}
+
+// A comparison label as a pill, matching how a branch is written anywhere else
+// in the UI. "latest commit" / "uncommitted changes" are prose, not refs
+// (resolveDiffLabels in DiffViewer), so they stay prose - a pill around them
+// would claim they are things you could check out.
+function DiffLabel({ label }: { label: string }) {
+  if (label === 'latest commit' || label === 'uncommitted changes') return <span>{label}</span>
+  return <BranchPill>{label}</BranchPill>
+}
+
+// One row of a comment's frozen diff excerpt.
+type ReviewContextRow = { text: string; kind: 'add' | 'del' | 'ctx' | 'meta'; anchor: boolean }
+
+// reviewContextRows turns the ```diff block a comment carries (diffContextBlock
+// in DiffViewer) into rows.
+//
+// Two of its lines are scaffolding for a model reading plain text, and both are
+// dropped here because the card says the same thing better: the `--- / +++` pair
+// (the header already names the file, once, with its icon) and the `# ^ Comment`
+// marker, which becomes an accent on the row it points at.
+//
+// No line-number gutter, deliberately. The excerpt is a slice of the middle of a
+// hunk, so counting from the `@@` header would print numbers that are confidently
+// wrong; the anchor's real number is on the card header instead.
+function reviewContextRows(context: string): ReviewContextRow[] {
+  const out: ReviewContextRow[] = []
+  for (const line of context.replace(/\n$/, '').split('\n')) {
+    if (line.startsWith('--- ') || line.startsWith('+++ ')) continue
+    if (line.startsWith('# ^')) {
+      if (out.length > 0) out[out.length - 1].anchor = true
+      continue
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@ ?(.*)$/.exec(line)
+    if (hunk) {
+      // Keep only the function context a hunk header carries; the line ranges
+      // belong to a gutter this panel does not have.
+      if (hunk[1].trim()) out.push({ text: hunk[1].trim(), kind: 'meta', anchor: false })
+      continue
+    }
+    const kind = line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : 'ctx'
+    out.push({ text: line.slice(1), kind, anchor: false })
+  }
+  return out
+}
+
+// The frozen excerpt around a comment's anchor, coloured like the diff it was
+// taken from and highlighted as the file's own language (not as `diff`, which
+// can only colour the +/- column).
+function ReviewContextPanel({ context, lang }: { context: string; lang: string }) {
+  const rows = useMemo(() => reviewContextRows(context), [context])
+  const ws = useWhitespaceMarks()
+  const highlighted = useMemo(
+    () => highlightLines(rows.map((r) => r.text).join('\n'), lang || 'plaintext')
+      // A hunk header is a caption ABOUT the code, so it stays unhighlighted:
+      // token colours would override its muted italic and it would read as one
+      // more line of the excerpt.
+      .map((l, i) => (rows[i]?.kind === 'meta' ? escapeText(rows[i].text) : markWhitespace(l, ws))),
+    [rows, lang, ws],
+  )
+  return (
+    <div className="border-t border-stone-200 dark:border-white/[0.06] bg-white dark:bg-[#20201e] font-mono text-2xs leading-4 max-h-64 overflow-y-auto">
+      {rows.map((row, i) => (
+        <div
+          key={i}
+          // The accent bar rides on every row, transparent except the anchored
+          // one, so marking a row cannot shift the code sideways.
+          className={`border-l-2 ${row.anchor ? 'border-violet-400 dark:border-violet-500' : 'border-transparent'} ${
+            row.kind === 'add' ? 'bg-emerald-50 dark:bg-emerald-950/25' : row.kind === 'del' ? 'bg-red-50 dark:bg-red-950/25' : row.anchor ? 'bg-violet-50/60 dark:bg-violet-950/20' : ''
+          }`}
+        >
+          <span
+            className={`block min-w-0 whitespace-pre-wrap break-words px-2 ${
+              row.kind === 'add' ? 'text-emerald-900 dark:text-emerald-200'
+                : row.kind === 'del' ? 'text-red-900 dark:text-red-200'
+                : row.kind === 'meta' ? 'text-stone-400 dark:text-stone-500 italic'
+                : 'text-stone-700 dark:text-stone-300'
+            }`}
+            dangerouslySetInnerHTML={{ __html: highlighted[i] ?? '' }}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ReviewCommentCard renders one review comment - read back by
+// get_review_comments, or just written by add/reply - as a comment rather than
+// as the line of text an agent reads.
+//
+// Three things it does that the plain text could not, all of them the ordinary
+// convention elsewhere in this UI: the anchor is a file (icon, lowlit directory,
+// mono line number) like every other path in the chat; the handle is a quiet mono
+// `#19` on the right, where the diff viewer's own cards put it; and the
+// comparison is a branch pill.
+//
+// The author is named only when it is NOT the user. A user comment is the person
+// reading this card, so "- user" on every row is a column of noise; "reviewer"
+// or "agent" is a genuinely different claim about where the remark came from.
+function ReviewCommentCard({
+  number, path, line, replyTo, resolved, author, diff, context, body, subject,
+}: {
+  number?: number
+  path?: string
+  line?: number
+  replyTo?: number
+  resolved?: boolean
+  author?: string
+  diff?: string
+  context?: string
+  body: string
+  /** Overrides the anchor line when the comment has no file of its own (a reply). */
+  subject?: ReactNode
+}) {
+  const slash = path ? path.lastIndexOf('/') : -1
+  const directory = slash >= 0 ? path!.slice(0, slash + 1) : ''
+  const fileName = path ? (slash >= 0 ? path.slice(slash + 1) : path) : ''
+  const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName || 'comment.txt')
+  const [fromLabel, toLabel] = (diff ?? '').split(' -> ')
+  const meta = (author && author !== 'user') || replyTo || resolved || diff
+  return (
+    <div className={`${PANEL_CLASS} overflow-hidden`}>
+      {(path || subject || number) && (
+        <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
+          {path ? (
+            <>
+              <FileIcon className={`h-3.5 w-3.5 shrink-0 ${fileIconClass}`} />
+              <span className="min-w-0 truncate" title={path}>
+                {directory && <span className="text-stone-400 dark:text-stone-500">{directory}</span>}
+                <span className="text-stone-700 dark:text-stone-200">{fileName}</span>
+              </span>
+              {line ? <span className="shrink-0 font-mono text-stone-400 dark:text-stone-500">:{line}</span> : null}
+            </>
+          ) : subject ? (
+            <>
+              <MessageSquare className="h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
+              <span className="min-w-0 truncate text-stone-700 dark:text-stone-200">{subject}</span>
+            </>
+          ) : null}
+          {number ? <span className="ml-auto"><CommentRef number={number} /></span> : null}
+        </div>
+      )}
+      {meta && (
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 px-2.5 pt-1.5 text-3xs text-stone-400 dark:text-stone-500">
+          {author && author !== 'user' && <span className="text-stone-500 dark:text-stone-400">{author}</span>}
+          {replyTo ? <span>reply to <CommentMention number={replyTo} /></span> : null}
+          {resolved ? <span className="rounded bg-stone-100 px-1 py-px text-stone-500 dark:bg-white/[0.06] dark:text-stone-400">resolved</span> : null}
+          {diff && <span className="inline-flex items-baseline gap-1">on <DiffLabel label={fromLabel} />{toLabel && <><span aria-hidden>-&gt;</span><DiffLabel label={toLabel} /></>}</span>}
+        </div>
+      )}
+      {context && <div className="mt-1.5"><ReviewContextPanel context={context} lang={langFromPath(path ?? '')} /></div>}
+      {body && (
+        // The remark is separated from the code it is about, the way it is in the
+        // diff viewer: the excerpt ends, then someone speaks.
+        <div className={`px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200 ${context ? 'border-t border-stone-200 dark:border-white/[0.06]' : ''}`}>
+          <Markdown text={body} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ReviewCommentsPanel renders a get_review_comments result: the comments as
+// cards, with anything around them (the "Review comments left in Hydra:"
+// heading, the forge half of a linked head's review) left as the markdown it is.
+//
+// A text that does not parse as comments at all - "No review comments on this
+// head yet.", an unlinked-head explanation - renders exactly as it did before.
+function ReviewCommentsPanel({ text }: { text: string }) {
+  const parsed = useMemo(() => parseReviewCommentsText(text), [text])
+  if (!parsed) {
+    return (
+      <div className={`${PANEL_CLASS} px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200`}>
+        <Markdown text={text} />
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-1.5">
+      {parsed.preamble && (
+        <div className="break-words leading-relaxed chat-font text-stone-500 dark:text-stone-400"><Markdown text={parsed.preamble} /></div>
+      )}
+      {parsed.comments.map((c) => {
+        // A reply to a comment shown above it is drawn as a thread: indented
+        // under its parent, and headed by what it answers rather than by the
+        // file, which is the parent's line repeated verbatim.
+        const parent = parsed.comments.find((p) => p.number === c.replyTo)
+        const sameAnchor = parent != null && parent.path === c.path && parent.line === c.line
+        return (
+          <div key={c.number} className={parent ? 'ml-3 border-l-2 border-stone-200 pl-2 dark:border-white/[0.08]' : ''}>
+            <ReviewCommentCard
+              {...c}
+              path={sameAnchor ? undefined : c.path}
+              replyTo={sameAnchor ? undefined : c.replyTo}
+              subject={sameAnchor ? <>In reply to <CommentMention number={c.replyTo} /></> : undefined}
+            />
+          </div>
+        )
+      })}
+      {parsed.trailer && (
+        <div className={`${PANEL_CLASS} px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200`}>
+          <Markdown text={parsed.trailer} />
+        </div>
+      )}
     </div>
   )
 }
@@ -3449,13 +3725,18 @@ const ToolCard = memo(function ToolCard({
   const isGlob = item.name === 'Glob' && typeof input?.pattern === 'string'
   const isWebFetch = item.name === 'WebFetch' && typeof input?.url === 'string'
   const isReviewComments = item.name === 'mcp__hydra__get_review_comments'
-  const isReviewCommentWrite =
-    item.name === 'mcp__hydra__add_review_comment' ||
-    item.name === 'mcp__hydra__reply_to_review_comment'
+  const isReply = item.name === 'mcp__hydra__reply_to_review_comment'
+  const isReviewCommentWrite = item.name === 'mcp__hydra__add_review_comment' || isReply
   const reviewCommentBody =
     isReviewCommentWrite && typeof input?.body === 'string'
       ? input.body
       : ''
+  // A comment an agent writes renders as the comment it becomes, not as its
+  // arguments - the same card get_review_comments reads back. Its number exists
+  // only in Hydra's confirmation ("Saved as #20"), so the card is unnumbered
+  // until the tool answers, exactly as the comment itself is.
+  const replyTarget = isReply && typeof input?.number === 'number' ? input.number : 0
+  const savedNumber = isReviewCommentWrite && !item.isError ? savedCommentNumber(visibleResult ?? '') : 0
   // These first-party tools have compact arguments fully represented by their
   // heading and summary. Repeating them as JSON makes a native action look like
   // protocol plumbing. Review writes are the exception in spirit, not layout:
@@ -3667,9 +3948,14 @@ const ToolCard = memo(function ToolCard({
                   hunks={editHunks}
                 />
               ) : reviewCommentBody ? (
-                <div className={`${PANEL_CLASS} px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200`}>
-                  <Markdown text={reviewCommentBody} />
-                </div>
+                <ReviewCommentCard
+                  number={savedNumber || undefined}
+                  path={typeof input?.path === 'string' ? input.path : undefined}
+                  line={typeof input?.line === 'number' ? input.line : undefined}
+                  replyTo={typeof input?.reply_to === 'number' ? input.reply_to : undefined}
+                  subject={replyTarget ? <>In reply to <CommentMention number={replyTarget} /></> : undefined}
+                  body={reviewCommentBody}
+                />
               ) : isSendMessage && input ? (
                 <SendMessageFields
                   input={input}
@@ -3740,7 +4026,13 @@ const ToolCard = memo(function ToolCard({
                         : isWebFetch && !item.isError
                           ? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
                         : isReviewComments && !item.isError
-                          ? <div className={`${PANEL_CLASS} px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200`}><Markdown text={renderedResult} /></div>
+                          ? <ReviewCommentsPanel text={renderedResult} />
+                        : isReviewCommentWrite && !item.isError
+                          // Hydra's confirmation is one sentence about where the
+                          // comment landed, and the card above already shows what
+                          // was said - so it reads as a caption under it rather
+                          // than as another block of tool output.
+                          ? <div className="px-0.5 break-words chat-font text-3xs text-stone-400 dark:text-stone-500"><CommentRefText text={renderedResult} /></div>
                         : scriptSections
                           ? <ScriptOutputPanel sections={scriptSections} />
                         : isRead && !item.isError
