@@ -2388,6 +2388,11 @@ func (s *SimulationServer) GetAgentDiff(w http.ResponseWriter, r *http.Request, 
 					ChangeType: api.DiffFileChangeTypeModified,
 					Additions:  19,
 					Deletions:  9,
+					// The real file's length. It is what lets the windowed view below
+					// count the run under its last hunk (the server sends it from the
+					// full read it does anyway), and here it also sizes the tail
+					// simReconstructFull fabricates when this file is promoted.
+					TotalLines: ptr(11038),
 					Hunks: []api.DiffHunk{
 						{
 							// A realistic modify deep in a large file (a scroll-pin rewrite ~line
@@ -2786,6 +2791,15 @@ func simReconstructFull(f api.DiffFile, maxFullLines int) api.DiffFile {
 				nl.OldLineNum, nl.NewLineNum = l.OldLineNum, l.NewLineNum
 			}
 			lines = append(lines, nl)
+		}
+	}
+	// A fixture that states its length gets the rest of the file too, so a promoted
+	// file ends where it says it ends and its trailing gap is the one the windowed
+	// view was counting down to.
+	if f.TotalLines != nil {
+		// Counted on the head side, as TotalLines is.
+		for ; newN <= *f.TotalLines; oldN, newN = oldN+1, newN+1 {
+			lines = append(lines, synthContextLine(ext, oldN, newN))
 		}
 	}
 	// The real server drops the expanded version when it blew past the cap (a few

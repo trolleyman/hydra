@@ -4776,6 +4776,17 @@ components:
             whole-file hunk (full_context view), so the client can drive the
             context reveal/collapse model without re-fetching. Absent/false means
             the file is shown at the requested windowed context.
+        total_lines:
+          type: integer
+          description: >-
+            Total number of lines in the whole file on the head side (the old
+            side for a deletion), when the server knows it. A windowed file
+            carries only fragments, so this is the one thing the client cannot
+            derive from the hunks - and without it the expander below the last
+            hunk cannot say how many lines it hides. Absent when the file was
+            never read in full (its change count exceeded max_full_changes, or
+            the full-context read failed), in which case that expander stays a
+            bare chevron.
         head_blob_sha:
           type: string
           nullable: true

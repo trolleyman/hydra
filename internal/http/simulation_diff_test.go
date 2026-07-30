@@ -97,8 +97,15 @@ func TestSimSingleFilePromotionExpands(t *testing.T) {
 		return api.DiffFile{}
 	}
 
-	if f := get(6000); f.Expanded != nil && *f.Expanded {
+	windowed := get(6000)
+	if windowed.Expanded != nil && *windowed.Expanded {
 		t.Errorf("bulk cap: want %s left windowed, got expanded", deepFile)
+	}
+	// The windowed file must still say how long it is: its fragments can't tell
+	// the client where EOF is, so without this its trailing expander is a bare
+	// chevron with no idea how many lines it hides.
+	if windowed.TotalLines == nil || *windowed.TotalLines == 0 {
+		t.Errorf("bulk cap: want %s to carry total_lines while windowed", deepFile)
 	}
 
 	f := get(20000)
@@ -110,6 +117,11 @@ func TestSimSingleFilePromotionExpands(t *testing.T) {
 	}
 	if f.Hunks[0].OldStart != 1 || f.Hunks[0].NewStart != 1 {
 		t.Errorf("want the hunk to start at line 1, got old %d new %d", f.Hunks[0].OldStart, f.Hunks[0].NewStart)
+	}
+	// ...and the promoted file reaches the end the windowed one pointed at, so the
+	// "··· N lines ···" the reader clicked is the run that opens up.
+	if last := f.Hunks[0].Lines[len(f.Hunks[0].Lines)-1]; last.NewLineNum == nil || *last.NewLineNum != *windowed.TotalLines {
+		t.Errorf("promoted file ends at %v, want total_lines %d", last.NewLineNum, *windowed.TotalLines)
 	}
 	prevOld, prevNew := 0, 0
 	for _, l := range f.Hunks[0].Lines {

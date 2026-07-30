@@ -2759,6 +2759,11 @@ func (s *Server) getFullContextDiff(projectRoot, diffRoot, baseRef, headRef stri
 		if !ok {
 			continue
 		}
+		// The full read spans the whole file, so its last line number IS the file's
+		// length. Record it even for the files dropped below: a windowed file has no
+		// other way to know where EOF is, and that is exactly what its trailing
+		// expander needs in order to say how many lines it hides.
+		merged[i].TotalLines = ff.LastLineNum()
 		// Drop the full version if expansion blew past the cap (e.g. a few changed
 		// lines scattered through a very long file); keep the normal-context hunks.
 		lines := 0
@@ -2882,6 +2887,11 @@ func apiDiffFiles(diffFiles []git.DiffFile) []api.DiffFile {
 			s := f.HeadBlobSHA
 			headBlobSHA = &s
 		}
+		var totalLines *int
+		if f.TotalLines > 0 {
+			n := f.TotalLines
+			totalLines = &n
+		}
 		apiFiles[i] = api.DiffFile{
 			Path:        f.Path,
 			OldPath:     f.OldPath,
@@ -2890,6 +2900,7 @@ func apiDiffFiles(diffFiles []git.DiffFile) []api.DiffFile {
 			Deletions:   f.Deletions,
 			Binary:      f.Binary,
 			Expanded:    expanded,
+			TotalLines:  totalLines,
 			HeadBlobSha: headBlobSHA,
 			Hunks:       apiHunks,
 		}

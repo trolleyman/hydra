@@ -184,6 +184,86 @@ func TestGetDiffScopedRenameKeepsRename(t *testing.T) {
 	}
 }
 
+// TotalLines is filled in from LastLineNum over a full-context diff, on the
+// premise that a diff spanning the whole file ends on the file's last line. The
+// windowed view's trailing expander counts with it, so if the premise is wrong
+// the reader is told the wrong number of hidden lines. Checked against a real
+// `git diff -U<huge>`, including the file whose last line has no newline (git
+// appends a `\ No newline at end of file` marker line, which carries no line
+// number of its own and must not be mistaken for one).
+func TestFullContextDiffEndsOnTheLastLine(t *testing.T) {
+	dir := gitInit(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	lines := func(n int, changed int, trailingNewline bool) string {
+		s := ""
+		for i := 1; i <= n; i++ {
+			s += "line" + string(rune('0'+i%10))
+			if i == changed {
+				s += "-changed"
+			}
+			if i < n || trailingNewline {
+				s += "\n"
+			}
+		}
+		return s
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("newline.txt", lines(30, 0, true))
+	write("nonewline.txt", lines(30, 0, false))
+	run("add", ".")
+	run("commit", "-qm", "first")
+	base, err := ResolveRef(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A change in the middle, so a windowed diff would stop well short of the end.
+	write("newline.txt", lines(30, 15, true))
+	write("nonewline.txt", lines(30, 15, false))
+	run("commit", "-aqm", "second")
+	head, err := ResolveRef(dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := GetDiff(dir, base, head, false, false, "", 1_000_000)
+	if err != nil {
+		t.Fatalf("GetDiff: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("got %d files, want 2", len(files))
+	}
+	for _, f := range files {
+		if got := f.LastLineNum(); got != 30 {
+			t.Errorf("%s: LastLineNum = %d, want 30", f.Path, got)
+		}
+	}
+
+	// The windowed diff of the same commit stops at the change plus its context -
+	// which is precisely why the length has to be carried alongside it.
+	windowed, err := GetDiff(dir, base, head, false, false, "", 3)
+	if err != nil {
+		t.Fatalf("GetDiff: %v", err)
+	}
+	if got := windowed[0].LastLineNum(); got >= 30 {
+		t.Errorf("windowed LastLineNum = %d, want short of the file's 30 lines", got)
+	}
+}
+
 // A path with a space in it, a rename, and an untracked file - the three shapes
 // that broke when the summary was parsed from plain (non -z) porcelain output:
 // git quotes and C-escapes the spaced path, and a rename's source path shares
