@@ -386,6 +386,7 @@ export class DefaultService {
      * List all Hydra agents (heads)
      * @param projectId Project ID to scope the agent list
      * @param archived List archived (killed/merged) heads instead of live ones, newest first. Archived entries are read straight from the DB, so they carry no live session, review or test summary.
+     * Deliberately has NO `default: false`. A default makes the generated clients send `?archived=false` on every poll of the live list, which is noise on the hot path and changes the URL the list is fetched from. Absent means false server-side anyway.
      * @param limit Page size; archived listings only
      * @param offset Page offset; archived listings only
      * @returns AgentResponse OK
@@ -393,7 +394,7 @@ export class DefaultService {
      */
     public listAgents(
         projectId: string,
-        archived: boolean = false,
+        archived?: boolean,
         limit?: number,
         offset?: number,
     ): CancelablePromise<Array<AgentResponse>> {

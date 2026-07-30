@@ -4436,6 +4436,7 @@ type PreviewConfigTomlParams struct {
 // ListAgentsParams defines parameters for ListAgents.
 type ListAgentsParams struct {
 	// Archived List archived (killed/merged) heads instead of live ones, newest first. Archived entries are read straight from the DB, so they carry no live session, review or test summary.
+	// Deliberately has NO `default: false`. A default makes the generated clients send `?archived=false` on every poll of the live list, which is noise on the hot path and changes the URL the list is fetched from. Absent means false server-side anyway.
 	Archived *bool `form:"archived,omitempty" json:"archived,omitempty"`
 
 	// Limit Page size; archived listings only

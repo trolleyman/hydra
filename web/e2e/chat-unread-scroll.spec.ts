@@ -46,7 +46,13 @@ test.describe('opening an unread chat agent', () => {
     })
     // Exactly one chat agent carries the unread flag; the read-agent case below
     // uses the other one.
-    await page.route('**/api/projects/*/agents', async (route) => {
+    // Trailing `*` so a query string still matches. Without it this stops
+    // intercepting the moment the list gains a param - which is exactly what
+    // happened when `archived` was added with a default, making the client send
+    // `?archived=false`: the patch below silently stopped applying, the agent
+    // never looked unread, and the failure surfaced as a wrong SCROLL OFFSET
+    // rather than as a missing route.
+    await page.route('**/api/projects/*/agents*', async (route) => {
       const res = await route.fetch()
       const list = await res.json()
       for (const a of list) a.has_unread_changes = a.id === CHAT_AGENT
