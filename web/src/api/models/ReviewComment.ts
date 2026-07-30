@@ -58,6 +58,11 @@ export type ReviewComment = {
      * The user has seen it. Set only by an explicit mark-read; nothing becomes read by the passage of time.
      */
     read?: boolean;
+    /**
+     * Absolute paths of files attached to the comment, under the project's .hydra/local/uploads. A separate field rather than paths pasted into the body because a draft's body is edited in a textarea (raw paths would be in it) and because copy-as-markdown and the forge-publish path must not leak them. The path resolves identically on the host and inside every agent sandbox, so the agent reads the file directly; the browser renders it through the uploads blob endpoint.
+     *
+     */
+    attachments?: Array<string>;
     image?: ReviewImageAnchor;
 };
 export namespace ReviewComment {

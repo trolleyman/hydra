@@ -95,7 +95,7 @@ func (s *Server) drainReviewRequests(ctx context.Context, projectRoot string) {
 			case reviewq.OpComments:
 				res = s.hydraCommentsText(projectRoot, id, r)
 			case reviewq.OpAddComment:
-				res = s.addHydraComment(projectRoot, id, r)
+				res = s.addHydraComment(ctx, projectRoot, id, r)
 			case reviewq.OpResolveComment:
 				res = s.resolveHydraComments(projectRoot, id, r)
 			case reviewq.OpHeadStatus:
@@ -276,14 +276,16 @@ func (s *Server) artifactImagePath(projectRoot string) reviewstore.ImagePathFunc
 
 // addHydraComment appends an agent-authored review comment and tells the user's
 // UI to refresh. Published on write: an agent has no drafts.
-func (s *Server) addHydraComment(projectRoot, id string, r reviewq.Request) reviewq.Result {
+func (s *Server) addHydraComment(ctx context.Context, projectRoot, id string, r reviewq.Request) reviewq.Result {
 	if strings.TrimSpace(r.Body) == "" {
 		return reviewq.Result{Message: "The comment was empty, so nothing was recorded."}
 	}
 	owner, author := commentOwner(id)
+	attachments, failed := s.storeAgentAttachments(ctx, projectRoot, owner, r.Attachments)
 	c, err := reviewstore.AppendComment(projectRoot, owner, reviewstore.Comment{
 		Status: reviewstore.StatusPublished, Author: author, Body: r.Body,
 		Path: r.Path, Line: r.Line, ReplyTo: r.ReplyTo,
+		Attachments: attachments,
 	})
 	if err != nil {
 		return reviewq.Result{Message: "The comment could not be saved: " + err.Error()}
@@ -293,7 +295,63 @@ func (s *Server) addHydraComment(projectRoot, id string, r reviewq.Request) revi
 	if anchor := c.Anchor(); anchor != "" {
 		msg += " on " + anchor
 	}
-	return reviewq.Result{OK: true, Message: msg + ". The user can see it in Hydra's diff viewer; refer to it by its number from here on."}
+	msg += ". The user can see it in Hydra's diff viewer; refer to it by its number from here on."
+	// The comment is saved either way - a file that could not be attached must not
+	// cost the remark. But say so plainly, naming the paths, so the agent does not
+	// go on to describe a screenshot the user cannot see.
+	if len(failed) > 0 {
+		msg += fmt.Sprintf(" NOTE: could not attach %s. Only files inside your worktree or your own /tmp can be attached, and each must be a regular file under 25MB.", strings.Join(failed, ", "))
+	}
+	return reviewq.Result{OK: true, Message: msg}
+}
+
+// storeAgentAttachments turns the paths an agent named into durable uploads,
+// returning the stored paths and the raw paths it could not take.
+//
+// Two things have to happen here and nowhere else. The path is resolved against
+// the head's OWN readable roots (its worktree, its private /tmp, the uploads dir)
+// by the same resolver that guards the agent-file blob endpoint - an agent naming
+// /etc/shadow must get nothing, and the containment is re-checked after symlinks.
+// Then the file is COPIED, because the agent's own path dies with the head: a
+// worktree is removed on merge or kill and the per-head /tmp is reclaimed with it,
+// so a comment that merely pointed at one would rot while still looking fine.
+//
+// Failures are collected rather than fatal. An attachment is an illustration; a
+// comment that vanished because one path was wrong would be a much worse trade
+// than a comment that arrives saying which file did not make it.
+func (s *Server) storeAgentAttachments(ctx context.Context, projectRoot, headID string, raw []string) (stored, failed []string) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	// A review slot has no worktree of its own, so commentOwner's head id is the
+	// right one to resolve against - it is the tree the reviewer was given.
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, headID)
+	if err != nil || head == nil {
+		return nil, raw
+	}
+	worktree := ""
+	if head.Worktree != nil {
+		worktree = *head.Worktree
+	}
+	tmpDir := heads.HeadTmpDir(projectRoot, headID)
+	for _, p := range raw {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		src := resolveAgentFile(projectRoot, worktree, tmpDir, p)
+		if src == "" {
+			failed = append(failed, p)
+			continue
+		}
+		dest, err := StoreUploadFile(projectRoot, src)
+		if err != nil {
+			failed = append(failed, p)
+			continue
+		}
+		stored = append(stored, dest)
+	}
+	return stored, failed
 }
 
 // resolveHydraComments marks comments dealt with on the agent's say-so.

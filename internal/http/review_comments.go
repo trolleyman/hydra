@@ -46,7 +46,10 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 		return api.AddReviewComment404JSONResponse(*errResp), nil
 	}
 	body := strings.TrimSpace(request.Body.Body)
-	if body == "" {
+	attachments := derefOr(request.Body.Attachments, nil)
+	// A comment carrying only an attachment is a real comment - a screenshot of the
+	// thing being pointed at often says more than a sentence about it would.
+	if body == "" && len(attachments) == 0 {
 		return commentBadRequest("the comment is empty"), nil
 	}
 	image, err := imageAnchorFromAPI(request.Body.Image)
@@ -54,17 +57,18 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 		return commentBadRequest(err.Error()), nil
 	}
 	c := reviewstore.Comment{
-		Body:     body,
-		Author:   reviewstore.AuthorUser,
-		Path:     derefOr(request.Body.Path, ""),
-		Line:     derefOr(request.Body.Line, 0),
-		OldSide:  derefOr(request.Body.OldSide, false),
-		Commit:   derefOr(request.Body.Commit, ""),
-		Diff:     derefOr(request.Body.Diff, ""),
-		Context:  derefOr(request.Body.Context, ""),
-		HunkHash: derefOr(request.Body.HunkHash, ""),
-		ReplyTo:  derefOr(request.Body.ReplyTo, 0),
-		Image:    image,
+		Body:        body,
+		Author:      reviewstore.AuthorUser,
+		Path:        derefOr(request.Body.Path, ""),
+		Line:        derefOr(request.Body.Line, 0),
+		OldSide:     derefOr(request.Body.OldSide, false),
+		Commit:      derefOr(request.Body.Commit, ""),
+		Diff:        derefOr(request.Body.Diff, ""),
+		Context:     derefOr(request.Body.Context, ""),
+		HunkHash:    derefOr(request.Body.HunkHash, ""),
+		ReplyTo:     derefOr(request.Body.ReplyTo, 0),
+		Attachments: attachments,
+		Image:       image,
 	}
 	stored, err := reviewstore.AppendComment(projectRoot, head.ID, c)
 	if err != nil {
@@ -91,10 +95,17 @@ func (s *Server) UpdateReviewComment(ctx context.Context, request api.UpdateRevi
 		return api.UpdateReviewComment404JSONResponse(*errResp), nil
 	}
 	body := strings.TrimSpace(request.Body.Body)
-	if body == "" {
+	attachments := derefOr(request.Body.Attachments, nil)
+	if body == "" && len(attachments) == 0 {
 		return updateCommentBadRequest("the comment is empty"), nil
 	}
-	if _, err := reviewstore.UpdateDraft(projectRoot, head.ID, request.Number, body); err != nil {
+	// nil (the field omitted) leaves the draft's attachments as they were; an empty
+	// list clears them, which is what removing the last chip has to do. So the
+	// pointer's nil-ness is carried through rather than flattened by derefOr above.
+	if request.Body.Attachments != nil && attachments == nil {
+		attachments = []string{}
+	}
+	if _, err := reviewstore.UpdateDraft(projectRoot, head.ID, request.Number, body, attachments); err != nil {
 		return updateCommentBadRequest(commentWriteError(err)), nil
 	}
 	return api.UpdateReviewComment200JSONResponse(commentsResponse(projectRoot, head.ID, nil)), nil
@@ -333,6 +344,7 @@ func commentsResponse(projectRoot, headID string, notified *string) api.ReviewCo
 		setIf(&ac.PublishedAt, c.PublishedAt, c.PublishedAt != "")
 		setIf(&ac.Resolved, c.Resolved, c.Resolved)
 		setIf(&ac.ResolvedAt, c.ResolvedAt, c.ResolvedAt != "")
+		setIf(&ac.Attachments, c.Attachments, len(c.Attachments) > 0)
 		// A comment you wrote yourself is born read; anything an agent or a
 		// reviewer left is not, which is what the unread dot is for.
 		setIf(&ac.Read, true, read[c.Number] || c.Author == reviewstore.AuthorUser)

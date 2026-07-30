@@ -59,7 +59,10 @@ type Deps struct {
 	HydraComments func(numbers []int) (message string, ok bool)
 	// AddComment leaves a review comment anchored to a file and line, for the user
 	// (and any other agent) to read in the diff viewer. Nil hides the tool.
-	AddComment func(path string, line int, replyTo int, body string) (message string, ok bool)
+	// attachments are paths to files the agent wrote (a screenshot, a log); the
+	// host copies each into the project's uploads dir so the comment survives the
+	// worktree.
+	AddComment func(path string, line int, replyTo int, body string, attachments []string) (message string, ok bool)
 	// ResolveComments marks review comments dealt with (reopen inverts it), by the
 	// same numbering the read and reply tools use. The agent that just did the work
 	// is the only one that knows a comment is finished, so without this the open
@@ -408,6 +411,13 @@ func toolDefs(deps Deps) []map[string]any {
 					"line":     map[string]any{"type": "integer", "description": "Line number in the CURRENT version of that file."},
 					"reply_to": map[string]any{"type": "integer", "description": "Reply to an existing comment by its number, rather than opening a new one. Prefer this to restating a point already made."},
 					"body":     map[string]any{"type": "string", "description": "What you want to say, in markdown."},
+					"attachments": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
+						"description": "Files to attach - a screenshot of what you are describing, a log, a generated report. " +
+							"Give the paths as YOU see them (in your worktree, or /tmp); each file is copied into the project's uploads so it outlives your worktree. " +
+							"An image is shown inline to the user. Attach a picture when the point is visual: it is far more use than describing what you saw.",
+					},
 				},
 			},
 		})
@@ -552,16 +562,21 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 			return textResult("add_review_comment is not available in this session.", true)
 		}
 		var args struct {
-			Path    string `json:"path"`
-			Line    int    `json:"line"`
-			ReplyTo int    `json:"reply_to"`
-			Body    string `json:"body"`
+			Path        string   `json:"path"`
+			Line        int      `json:"line"`
+			ReplyTo     int      `json:"reply_to"`
+			Body        string   `json:"body"`
+			Attachments []string `json:"attachments"`
 		}
 		_ = json.Unmarshal(p.Arguments, &args)
+		// An attachment alone is a real comment everywhere else in this feature,
+		// but not from a tool: a model that sends a bare screenshot with no words
+		// has almost certainly lost the thread, and there is no user typing here to
+		// mean it deliberately.
 		if strings.TrimSpace(args.Body) == "" {
 			return textResult("add_review_comment needs a non-empty \"body\".", true)
 		}
-		msg, ok := deps.AddComment(strings.TrimSpace(args.Path), args.Line, args.ReplyTo, args.Body)
+		msg, ok := deps.AddComment(strings.TrimSpace(args.Path), args.Line, args.ReplyTo, args.Body, args.Attachments)
 		return textResult(msg, !ok)
 	case "reply_to_review_comment":
 		if deps.ReplyLocal == nil {

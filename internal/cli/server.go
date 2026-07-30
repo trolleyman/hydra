@@ -186,6 +186,12 @@ func runSimulationServer() error {
 	// server's non-OpenAPI route), so the inline-image rendering can be demoed.
 	mux.HandleFunc("GET /agent-files/projects/{project_id}/agents/{id}/blob", server.HandleAgentFileBlob)
 
+	// Prompt/comment attachments (mirrors the real server's non-OpenAPI routes),
+	// so an attachment chip has bytes behind it here too - the review-comment and
+	// chat composers otherwise show a broken thumbnail and log a 404.
+	mux.HandleFunc("GET /uploads/projects/{project_id}/blob", server.HandleUploadBlob)
+	mux.HandleFunc("/uploads/projects/{project_id}", server.HandleUpload)
+
 	// Persisted build logs behind the artifacts / tests "Show build log" toggles
 	// (mirrors the real server's non-OpenAPI routes), so those toggles can be
 	// screenshotted - and so a settled test card's log button is live, as it is
@@ -207,6 +213,15 @@ func runSimulationServer() error {
 	mux.HandleFunc("GET /api/auth/status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"auth_required":false,"authenticated":true}`))
+	})
+
+	// Folder-picker availability (mirrors the real server's non-OpenAPI route).
+	// The sim has no native picker to open, so it answers "no" - the project
+	// dropdown just hides its "Browse..." button. Same reason as the auth route:
+	// without it every project-dropdown open logs a 404.
+	mux.HandleFunc("GET /folder-picker/available", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"available":false}`))
 	})
 
 	registerFrontend(mux)

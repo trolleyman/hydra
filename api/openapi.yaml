@@ -3986,6 +3986,18 @@ components:
         read:
           type: boolean
           description: The user has seen it. Set only by an explicit mark-read; nothing becomes read by the passage of time.
+        attachments:
+          type: array
+          items:
+            type: string
+          description: >
+            Absolute paths of files attached to the comment, under the project's
+            .hydra/local/uploads. A separate field rather than paths pasted into the body
+            because a draft's body is edited in a textarea (raw paths would be in it) and
+            because copy-as-markdown and the forge-publish path must not leak them. The
+            path resolves identically on the host and inside every agent sandbox, so the
+            agent reads the file directly; the browser renders it through the uploads blob
+            endpoint.
         image:
           $ref: '#/components/schemas/ReviewImageAnchor'
 
@@ -4084,6 +4096,13 @@ components:
           type: string
         reply_to:
           type: integer
+        attachments:
+          type: array
+          items:
+            type: string
+          description: >
+            Absolute paths under the project's .hydra/local/uploads, from the upload
+            endpoint. Anything outside that directory is rejected.
         image:
           $ref: '#/components/schemas/ReviewImageAnchor'
         publish:
@@ -4096,6 +4115,13 @@ components:
       properties:
         body:
           type: string
+        attachments:
+          type: array
+          items:
+            type: string
+          description: >
+            Replaces the draft's attachments wholesale, like body. Omitted leaves them
+            untouched, so a caller that predates attachments cannot silently drop them.
 
     PublishReviewCommentsBody:
       type: object
