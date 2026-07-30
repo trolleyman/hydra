@@ -16,7 +16,7 @@ import { ReviewThreadContext, useReviewThreadActions } from './lib/reviewThreadC
 import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
-  Folder, FolderOpen, X, GitMergeConflict, Bot, File, FileDiff as FileDiffIcon, Files as FilesIcon,
+  Folder, FolderOpen, X, GitMergeConflict, Bot, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   CircleCheck, Link2, ArrowUp, ArrowDown,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
 import { IconButton } from './components/IconButton'
+import { CodePane } from './components/CodePane'
 import { Avatar } from './components/Avatar'
 import { getFileIcon } from './lib/fileIcons'
 import { copyText } from './lib/clipboard'
@@ -1272,6 +1273,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // (after a paint at height 0) so the 0→height glide can play.
   const bodyOpen = !isCollapsed && bodyMounted
 
+
   // Signature of the visible hunks. A background refresh hands us new file
   // objects even when nothing changed, so keying derived work on identity would
   // recompute on every refresh. The string signature is stable across no-op
@@ -1438,6 +1440,61 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     () => (near ? 0 : measuredBodyH ?? (isHidden || file.binary ? 100 : estimateVisibleRows(file) * EST_ROW_H)),
     [near, measuredBodyH, isHidden, file],
   )
+
+  // The height the body wrapper renders at. Held in one place because it is not
+  // only a style: when it changes for a card that has already scrolled past, the
+  // whole diff below that card moves, and the pane switches the browser's own
+  // scroll anchoring off ([overflow-anchor:none] in InspectorPane - the cards
+  // own their scroll positioning explicitly), so nothing puts it back.
+  const wrapperH = headless ? null : !bodyOpen ? 0 : near ? bodyH : estBodyH
+  const prevWrapperH = useRef<number | null>(wrapperH)
+  // The wrapper element itself, for the one thing React's style prop cannot
+  // express: whether a height change is allowed to animate.
+  const boxEl = useRef<HTMLDivElement | null>(null)
+  const prevBodyOpen = useRef(bodyOpen)
+  useLayoutEffect(() => {
+    const prev = prevWrapperH.current
+    const wasOpen = prevBodyOpen.current
+    prevWrapperH.current = wrapperH
+    prevBodyOpen.current = bodyOpen
+    if (prev == null || wrapperH == null) return
+    const delta = wrapperH - prev
+    if (!delta) return
+    // The 200ms glide belongs to the collapse/expand toggle. This height is also
+    // where a measurement correction lands - the placeholder's predicted height
+    // giving way to the body's real one when the card mounts - and animating
+    // THAT spent a fifth of a second dragging every card below it down the pane,
+    // under a scroll in flight, which is when a sticky file header ends up
+    // painted off its card. So a change with no toggle behind it has its
+    // transition killed and the new height forced in (reading offsetHeight
+    // commits it) before this frame paints: the reader sees one reflow, not a
+    // slide. Restoring the empty string hands the glide straight back to the
+    // class for the next real toggle.
+    if (wasOpen === bodyOpen && boxEl.current) {
+      const el = boxEl.current
+      el.style.transition = 'none'
+      void el.offsetHeight
+      el.style.transition = ''
+    }
+    const card = cardRef.current
+    const scroller = card?.closest<HTMLElement>('[data-inspector-scroll], [data-main-scroll]')
+    if (!card || !scroller) return
+    // Only where the browser has been told to keep its hands off. A container
+    // that still has scroll anchoring on corrects this itself, and correcting it
+    // twice moves the view by double the difference.
+    if (getComputedStyle(scroller).overflowAnchor !== 'none') return
+    // Only for a card wholly above the viewport, which is the case the reader
+    // cannot see coming: the placeholder for a file scrolled back up to mounts
+    // at its real height, or an idle measurement lands late, and everything on
+    // screen - including every sticky file header, which then paints away from
+    // its card until the next scroll - slides by the difference. A card that is
+    // even partly visible is left alone: its growth happens where the reader is
+    // looking, and yanking the scroll to hide that would be the worse artifact.
+    // Runs in a layout effect so the correction and the resize land in the same
+    // frame; the reader sees neither.
+    if (card.getBoundingClientRect().bottom > scroller.getBoundingClientRect().top) return
+    scroller.scrollTop += delta
+  }, [wrapperH, bodyOpen])
 
   // A file with whole-file content but no additions/deletions (e.g. a pure
   // rename) has nothing to collapse - render its lines plainly rather than
@@ -1665,14 +1722,18 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
           open, and never animates. */}
       <div
         // Also the width reference for the offscreen body measurement above: its
-        // clientWidth is exactly the width the rows inside it wrap at.
-        ref={boxRef}
+        // clientWidth is exactly the width the rows inside it wrap at. boxEl is
+        // the same node, kept for the transition-cancelling layout effect.
+        ref={(el) => { boxEl.current = el; boxRef(el) }}
         // `isolate` keeps this body's positioned content (an in-tree image renders
         // as `absolute inset-0` via ImageDiffView) in its own stacking context so
         // it can't paint over the sticky file/section/changes bars above it - see
         // the matching note in CollapsibleCard.
+        // The height glide stays declared here for the collapse/expand toggle;
+        // the layout effect above cancels it for a height change that is only a
+        // measurement correction.
         className={headless ? 'isolate' : 'isolate overflow-hidden rounded-b-lg transition-[height] duration-200 ease-out motion-reduce:transition-none'}
-        style={headless ? undefined : { height: !bodyOpen ? 0 : near ? bodyH : estBodyH }}
+        style={headless ? undefined : { height: wrapperH ?? 0 }}
         aria-hidden={headless ? undefined : !bodyOpen}
       >
         {(headless || bodyMounted) && (
@@ -2557,6 +2618,21 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const count = n || '?'
   const plural = n !== 1
   const worktreePath = agent.worktree_path ?? '<worktree-path>'
+  const resolveScript = [
+    "# Navigate to the agent's worktree",
+    `cd ${worktreePath}`,
+    '',
+    '# Merge the base branch (triggers conflict markers)',
+    `git merge ${baseBranch}`,
+    '',
+    '# Edit conflicting files, then stage and commit',
+    // `git add -A` rather than a `<resolved-files>` placeholder: after a merge
+    // you resolve every conflicted file before committing anyway, so naming
+    // them adds nothing but a token to hand-edit - and the whole point of this
+    // block is that you can paste it and have it run.
+    'git add -A',
+    'git commit',
+  ].join('\n')
 
   return (
     <>
@@ -2615,12 +2691,21 @@ function MergeConflictButton({ diff, agent, projectId }: {
                   <div>
                     <DialogSectionLabel>Conflicting files</DialogSectionLabel>
                     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 divide-y divide-gray-100 dark:divide-gray-700/50 max-h-40 overflow-y-auto">
-                      {conflictFiles.map((f) => (
-                        <div key={f} className="flex items-center gap-2.5 px-3.5 py-2.5">
-                          <File className="w-4 h-4 shrink-0 text-red-500 dark:text-red-400" />
-                          <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{f}</span>
-                        </div>
-                      ))}
+                      {/* A row reads exactly like a row of the diff's file list:
+                          the shared per-filetype icon (getFileIcon) rather than
+                          a generic red page - the panel around it already says
+                          "conflict", so colouring the icon red only hid which
+                          KIND of file each one is - and PathName's lowlit
+                          directories with the filename in normal text. */}
+                      {conflictFiles.map((f) => {
+                        const { Icon, className } = getFileIcon(f.split('/').pop() ?? f)
+                        return (
+                          <div key={f} className="flex items-center gap-2.5 px-3.5 py-2.5">
+                            <Icon className={`w-4 h-4 shrink-0 ${className}`} />
+                            <span className="text-sm truncate min-w-0" title={f}><PathName path={f} /></span>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -2628,14 +2713,15 @@ function MergeConflictButton({ diff, agent, projectId }: {
                 {/* Resolution instructions */}
                 <div>
                   <DialogSectionLabel>Resolving locally</DialogSectionLabel>
-                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4 space-y-1.5 text-[13px] font-mono leading-relaxed">
-                    <p className="text-gray-500 dark:text-gray-400"># Navigate to the agent's worktree</p>
-                    <p className="text-green-600 dark:text-green-400 break-all">cd {worktreePath}</p>
-                    <p className="text-gray-500 dark:text-gray-400 pt-2"># Merge the base branch (triggers conflict markers)</p>
-                    <p className="text-green-600 dark:text-green-400">git merge {baseBranch}</p>
-                    <p className="text-gray-500 dark:text-gray-400 pt-2"># Edit conflicting files, then stage and commit</p>
-                    <p className="text-green-600 dark:text-green-400">git add {'<resolved-files>'}</p>
-                    <p className="text-green-600 dark:text-green-400">git commit</p>
+                  {/* The script goes through CodePane - the app's one
+                      syntax-highlighted code surface - so it reads as bash
+                      here exactly as it does in the repository browser and the
+                      lightbox, rather than as hand-coloured paragraphs. wrap,
+                      because a long worktree path must stay readable in a
+                      dialog that can't scroll sideways; the gutter numbers are
+                      select-none, so copying still yields a runnable script. */}
+                  <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden py-1.5">
+                    <CodePane content={resolveScript} lang="bash" wrap />
                   </div>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-2.5 leading-snug">
                     The worktree at <span className="font-mono">{worktreePath}</span> is isolated - changes only affect this agent's branch.
