@@ -1612,6 +1612,9 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                   <FileDiff
                     key={f.path}
                     file={f}
+                    // The repository browser is read-only - no comment box, so
+                    // nothing here ever attaches or renders a file.
+                    projectId={null}
                     sideBySide={diffSettings.sideBySide}
                     wordHighlight={diffSettings.wordHighlight}
                     isCollapsed={collapsedDiffFiles.has(f.path)}

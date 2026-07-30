@@ -289,13 +289,16 @@ func hydraCommentsFromMCP(numbers []int) (string, bool) {
 }
 
 // addReviewCommentFromMCP backs add_review_comment.
-func addReviewCommentFromMCP(path string, line, replyTo int, body string) (string, bool) {
+func addReviewCommentFromMCP(path string, line, replyTo int, body string, attachments []string) (string, bool) {
 	dir := os.Getenv("HYDRA_REVIEW_REQ_DIR")
 	if dir == "" {
 		return "Leaving review comments is not available in this session.", false
 	}
+	// The paths go over as the agent wrote them; the daemon does the resolving and
+	// the copying, because only it can see outside the sandbox.
 	res, ok := reviewRoundTrip(dir, reviewq.Request{
 		Op: reviewq.OpAddComment, Path: path, Line: line, ReplyTo: replyTo, Body: body,
+		Attachments: attachments,
 	})
 	if !ok {
 		return "Hydra did not confirm the comment in time, so it may not have been saved. Ask the user to check the daemon.", false

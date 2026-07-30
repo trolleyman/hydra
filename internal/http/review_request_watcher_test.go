@@ -2,6 +2,8 @@ package http
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -159,5 +161,73 @@ func TestResolveHydraCommentsFromTheReviewSlot(t *testing.T) {
 	}
 	if got, _ := reviewstore.FindComment(projectRoot, "head", c.Number); !got.Resolved {
 		t.Error("the reviewer's resolve did not reach the head's comment store")
+	}
+}
+
+// An agent attaching a screenshot is the whole point of the attachments field on
+// this path, and the two things that must hold are that the file is COPIED (the
+// agent's worktree is deleted on merge, so a stored path into it would rot) and
+// that a path outside what the head may read is refused.
+func TestAddHydraCommentStoresAttachments(t *testing.T) {
+	projectRoot := t.TempDir()
+	store, err := db.Open(projectRoot)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	// Head.Worktree is derived from the canonical path and only set when the dir
+	// exists, so the tree has to be made where heads.ListHeads will look for it.
+	worktree := paths.GetWorktreeDirFromProjectRoot(projectRoot, "head")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateAgent(&db.Agent{ID: "head", ProjectPath: projectRoot}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	s := &Server{DB: store}
+
+	shot := filepath.Join(worktree, "shot.png")
+	if err := os.WriteFile(shot, []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A file the agent must not be able to launder into an attachment - the stored
+	// path is handed straight back to the browser to serve. It has to be outside
+	// EVERY root this head may read, which rules out anywhere under t.TempDir():
+	// a head with no private /tmp (this one) legitimately reads the host's, and
+	// t.TempDir() lives there. /etc/passwd exists and is outside all of them.
+	const secret = "/etc/passwd"
+
+	res := s.addHydraComment(context.Background(), projectRoot, "head", reviewq.Request{
+		Body: "the spinner never stops", Path: "a.go", Line: 4,
+		Attachments: []string{shot, secret, filepath.Join(worktree, "missing.png")},
+	})
+	if !res.OK {
+		t.Fatalf("add failed: %s", res.Message)
+	}
+
+	c, ok := reviewstore.FindComment(projectRoot, "head", 1)
+	if !ok {
+		t.Fatal("the comment was not saved")
+	}
+	if len(c.Attachments) != 1 {
+		t.Fatalf("attachments = %v, want just the worktree screenshot", c.Attachments)
+	}
+	// Copied into uploads, not pointing back into the worktree.
+	if dir := filepath.Dir(c.Attachments[0]); dir != paths.GetUploadsDirFromProjectRoot(projectRoot) {
+		t.Errorf("attachment stored at %s, want a copy in the uploads dir", c.Attachments[0])
+	}
+	if b, err := os.ReadFile(c.Attachments[0]); err != nil || string(b) != "png" {
+		t.Errorf("the copy read back as (%q, %v), want \"png\"", b, err)
+	}
+
+	// The comment still lands - an attachment is an illustration, and losing the
+	// remark over a bad path would be the worse trade - but the agent is told
+	// which files did not make it, so it does not describe a picture nobody has.
+	for _, want := range []string{"passwd", "missing.png", "could not attach"} {
+		if !strings.Contains(res.Message, want) {
+			t.Errorf("message does not mention %q: %s", want, res.Message)
+		}
+	}
+	if strings.Contains(res.Message, "shot.png") {
+		t.Errorf("the attachment that DID land was reported as failed: %s", res.Message)
 	}
 }

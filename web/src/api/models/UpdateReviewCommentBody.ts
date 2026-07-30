@@ -4,5 +4,10 @@
 /* eslint-disable */
 export type UpdateReviewCommentBody = {
     body: string;
+    /**
+     * Replaces the draft's attachments wholesale, like body. Omitted leaves them untouched, so a caller that predates attachments cannot silently drop them.
+     *
+     */
+    attachments?: Array<string>;
 };
 
