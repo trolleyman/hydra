@@ -104,3 +104,29 @@ describe('diskOutputSpans: stat', () => {
     ])
   })
 })
+
+describe('diskOutputSpans: wc', () => {
+  const wc = (...lines: string[]) =>
+    diskOutputSpans('wc', lines).map((row) => row.map((s) => [s.text, tag(s.cls)]))
+
+  it('marks the count and keeps the padding, leaving the path in the panel colour', () => {
+    expect(wc('  370 english_inflect.py', '   81 en_inflections.py')).toEqual([
+      [['  ', ''], ['370', 'size'], [' ', ''], ['english_inflect.py', '']],
+      [['   ', ''], ['81', 'size'], [' ', ''], ['en_inflections.py', '']],
+    ])
+  })
+
+  it('lowlights the total row, which names no file', () => {
+    expect(wc('  451 total')).toEqual([[['  ', ''], ['451', 'size'], [' ', ''], ['total', 'dim']]])
+  })
+
+  it('marks every column of a bare `wc` (lines, words, bytes)', () => {
+    expect(wc('  370  1234  9876 english_inflect.py')).toEqual([
+      [['  ', ''], ['370  1234  9876', 'size'], [' ', ''], ['english_inflect.py', '']],
+    ])
+  })
+
+  it('leaves a line that is not a count alone', () => {
+    expect(wc('"""Inflect an English gloss"""')).toEqual([[['"""Inflect an English gloss"""', '']]])
+  })
+})

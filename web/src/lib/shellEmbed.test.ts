@@ -168,6 +168,16 @@ describe('highlightShell', () => {
     for (const s of samples) expect(text(highlightShell(s)), JSON.stringify(s)).toBe(s)
   })
 
+  it('does not colour a digit welded into a larger argument as a number', () => {
+    // The `1` of a sed range is part of `1,60p`, not a number of its own: it used
+    // to light up blue while the `,60p` beside it stayed plain.
+    const html = highlightShell('sed -n 1,60p f.py')
+    expect(tokensAround(html, '1,60p')).toEqual([])
+    // A standalone numeric argument still reads as the number it is.
+    expect(tokensAround(highlightShell('head -n 20 f.py'), '20')).toEqual(['token number'])
+    expect(tokensAround(highlightShell('chmod 755 f'), '755')).toEqual(['token number'])
+  })
+
   it('renders a heredoc body as inert text, not as bash keywords', () => {
     const html = highlightShell("cat << 'EOF'\nThis is not code: if echo printf fi\nEOF\n")
     expect(tokensAround(html, 'if echo printf fi')).toEqual(['token string'])

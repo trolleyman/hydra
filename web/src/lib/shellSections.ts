@@ -730,6 +730,10 @@ const DISK_REFUSED: Record<DiskTool, RegExp> = {
   df: /^(--output(=.*)?|-i|--inodes|--portability|-P)$/,
   ls: /^(--format=(?!long)|-m|-x|-C|-1|--zero|-Z|--context)$/,
   stat: /^(-c|--format(=.*)?|--printf(=.*)?|-t|--terse)$/,
+  // `--files0-from` reads the list of files from somewhere else, so the operands
+  // this can see no longer say what was counted; every other wc flag only picks
+  // which counts each row carries, never that a row IS a count and a name.
+  wc: /^(--files0-from(=.*)?)$/,
 }
 
 // `ls` only prints a table when asked for one; anything else is a list of names
@@ -747,11 +751,16 @@ const LS_LONG = /^--format=long$|^--full-time$|^-[A-Za-z]*l/
 function diskTool(words: Word[]): DiskTool | null {
   const name = words[0]
   if (name.quoted) return null
-  const tool = (['du', 'df', 'ls', 'stat'] as DiskTool[]).find((t) => t === name.text)
+  const tool = (['du', 'df', 'ls', 'stat', 'wc'] as DiskTool[]).find((t) => t === name.text)
   if (!tool) return null
   const args = words.slice(1).filter((w) => !w.quoted)
   if (args.some((w) => DISK_REFUSED[tool].test(w.text))) return null
   if (tool === 'ls' && !args.some((w) => LS_LONG.test(w.text))) return null
+  // A `wc` with no file operand counts its stdin - a single figure about the
+  // command piped into it, not a "<count> <path>" listing of files on disk. So
+  // it is a listing only when it names a file (`wc -l a b`), which is also the
+  // only shape whose rows diskExtent can find in the output.
+  if (tool === 'wc' && !words.slice(1).some((w) => w.quotedStart || (!w.text.startsWith('-') && w.text !== '-'))) return null
   return tool
 }
 
@@ -1366,6 +1375,30 @@ function searchExtent(step: ScriptStep, slice: string[], lo: number, hi: number,
   return n > 0 ? n : null
 }
 
+// A `wc` output row: right-aligned integer counts and a name. The counterpart of
+// searchExtent's prefixes - a shape the OUTPUT carries that the script does not.
+const WC_OUTPUT = /^\s*\d+(?:\s+\d+)*\s+\S/
+
+// diskExtent is how many lines at one END of a stretch carry a disk listing's
+// own shape - only `wc`'s, whose rows are plain integer counts and a name (the
+// `total` among them). That is the wc counterpart of searchExtent: `wc -l a b`
+// prints a row per file and a `total`, but a brace or glob operand hides HOW
+// many files, so the script cannot bound it and the rows' own shape is what says
+// where they stop and the next producer's output begins. Letting wc self-bound
+// this way is also what pins the read after it (`wc ... && sed -n 1,60p f`), so
+// that file gets its line-number gutter.
+//
+// The other disk tools are left out: a du size (`18G`), an ls mode line, a df
+// row are looser shapes that a line of source can wander into, and they already
+// have the merge and marker paths. A wc row's bare integers are tight enough,
+// and the read that usually follows one is exactly what wants the boundary.
+function diskExtent(step: ScriptStep, slice: string[], lo: number, hi: number, from: 'start' | 'end'): number | null {
+  if (step.kind !== 'disk' || step.tool !== 'wc') return null
+  let n = 0
+  while (hi - lo - n > 0 && WC_OUTPUT.test(slice[from === 'start' ? lo + n : hi - n - 1])) n++
+  return n > 0 ? n : null
+}
+
 // What one stretch of output was split into: the lines each producer printed,
 // and - per producer - whether the FIRST of those lines is provably the first
 // line it printed.
@@ -1472,7 +1505,9 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
 
   let head = 0
   for (; head < producers.length; head++) {
-    const limit = bounds[head] ?? searchExtent(producers[head], slice, lo, hi, 'start')
+    const limit = bounds[head]
+      ?? searchExtent(producers[head], slice, lo, hi, 'start')
+      ?? diskExtent(producers[head], slice, lo, hi, 'start')
     if (limit == null) break
     const n = Math.min(limit, hi - lo)
     // Printed nothing, which is a count like any other.
@@ -1483,7 +1518,9 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   }
   let tail = producers.length - 1
   for (; tail > head; tail--) {
-    const limit = bounds[tail] ?? searchExtent(producers[tail], slice, lo, hi, 'end')
+    const limit = bounds[tail]
+      ?? searchExtent(producers[tail], slice, lo, hi, 'end')
+      ?? diskExtent(producers[tail], slice, lo, hi, 'end')
     if (limit == null) break
     const n = Math.min(limit, hi - lo)
     if (!fits(producers[tail], hi - n)) { exact[tail] = true; continue }

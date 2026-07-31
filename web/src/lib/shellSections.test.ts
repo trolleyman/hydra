@@ -320,6 +320,29 @@ describe('parseScriptSteps', () => {
     expect(kinds('df -i\ncat b.go')).toEqual(['unknown', 'view'])
   })
 
+  it('reads a wc that names files as the count-and-name table it is', () => {
+    expect(steps('wc -l a.py b.py')[0]).toMatchObject({ kind: 'disk', tool: 'wc' })
+    expect(steps('wc a.py')[0]).toMatchObject({ kind: 'disk', tool: 'wc' })
+    // A brace/glob operand hides how many files, but each row still counts and
+    // names one.
+    expect(kinds('wc -l src/{a,b}.py\ncat c.go')).toEqual(['disk', 'view'])
+    // A `wc` with no file counts its stdin - a figure about the pipe, not a
+    // listing - and `--files0-from` reads the operands from elsewhere.
+    expect(kinds('grep -c foo a.go | wc -l\necho ----')).toEqual(['unknown', 'marker'])
+    expect(kinds('wc -l\ncat b.go')).toEqual(['unknown', 'view'])
+    expect(kinds('wc --files0-from=list\ncat b.go')).toEqual(['unknown', 'view'])
+  })
+
+  it('numbers a file read after a wc, whose rows bound where its own output ends', () => {
+    // `wc -l a b && sed -n 1,3p a`: the wc rows self-identify, so the sed view
+    // after them gets pinned and keeps its file-line gutter.
+    const script = 'wc -l a.py b.py &&\nsed -n 1,3p a.py'
+    const output = ['  30 a.py', '  12 b.py', '  42 total', 'import os', 'x = 1', 'y = 2'].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections?.map((s) => [s.kind, s.lines.length])).toEqual([['disk', 3], ['view', 3]])
+    expect(sections?.[1]).toMatchObject({ kind: 'view', view: { path: 'a.py', start: 1, end: 3 } })
+  })
+
   it('refuses a du whose lines are not a size and a path', () => {
     // NUL-separated, and a timestamp column between the two.
     expect(kinds('du -sh0 x\ncat b.go')).toEqual(['unknown', 'view'])

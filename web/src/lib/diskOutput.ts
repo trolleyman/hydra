@@ -4,6 +4,7 @@
 //   df -h                           /dev/nvme0n1p2  1.8T  1.2T  522G  70% /
 //   ls -l internal/http             -rw-rw-r-- 1 callum callum  87K Jul 29 16:57 simulation_chat.go
 //   stat web/dist                     Size: 4096      Blocks: 8
+//   wc -l a.py b.py                   370 a.py / 81 b.py / 451 total
 //
 // Each of these is a table whose whole point is ONE column - which of these is
 // big, how full is it, which is newest - arriving as one flat grey block where
@@ -19,7 +20,7 @@ import type { OutputSpan } from './outputSpan'
 // The tools whose listings this colours. The caller says which ran - the shapes
 // overlap far too much to tell apart from the text (a `du` line and an `ls -s`
 // line are both "a number, then a name").
-export type DiskTool = 'du' | 'df' | 'ls' | 'stat'
+export type DiskTool = 'du' | 'df' | 'ls' | 'stat' | 'wc'
 
 const SIZE = 'text-amber-600 dark:text-amber-400'
 const FULL = 'text-red-600 dark:text-red-400'
@@ -55,6 +56,13 @@ const LS_HEADING = /^(\S.*):$/
 
 // A `stat` line is a run of `Label: value` pairs.
 const STAT_FIELD = /\b(File|Size|Blocks|IO Block|Device|Inode|Links|Access|Modify|Change|Birth|Uid|Gid):/g
+
+// A `wc` line: one or more right-aligned integer counts (lines, words, bytes,
+// chars, longest line - as many as its flags asked for), whitespace, the name.
+// The name is a path, or the `total` wc appends when it was given more than one
+// file. Unlike du's size this is always a plain integer, which is what makes a
+// wc row tellable from a line of source (see shellSections.diskExtent).
+const WC_LINE = new RegExp('^(\\s*)(\\d+(?:\\s+\\d+)*)(\\s+)(.+)$')
 
 // A use% worth worrying about. Below this it is just a number; above it, it is
 // the reason someone ran `df`.
@@ -134,10 +142,28 @@ function statSpans(line: string): OutputSpan[] {
   return spans
 }
 
+function wcSpans(line: string): OutputSpan[] {
+  const m = WC_LINE.exec(line)
+  if (!m) return [{ text: line, cls: '' }]
+  const [, indent, counts, gap, name] = m
+  return [
+    { text: indent, cls: '' },
+    // The counts are the measurement du/ls mark too; the name keeps the panel's
+    // colour, and the `total` row - a sum, naming no file - is dimmed like du's.
+    { text: counts, cls: SIZE },
+    { text: gap, cls: '' },
+    { text: name, cls: name === 'total' ? DIM : '' },
+  ]
+}
+
 // diskOutputSpans colours a whole listing, one span list per line. A line that
 // fits no shape - a `du: cannot read directory ...` on stderr, a banner - comes
 // back exactly as it arrived.
 export function diskOutputSpans(tool: DiskTool, lines: string[]): OutputSpan[][] {
-  const spansFor = tool === 'du' ? duSpans : tool === 'df' ? dfSpans : tool === 'ls' ? lsSpans : statSpans
+  const spansFor = tool === 'du' ? duSpans
+    : tool === 'df' ? dfSpans
+      : tool === 'ls' ? lsSpans
+        : tool === 'wc' ? wcSpans
+          : statSpans
   return lines.map((line) => spansFor(line).filter((s) => s.text !== ''))
 }

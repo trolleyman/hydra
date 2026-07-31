@@ -86,6 +86,18 @@ const EAGER = [
 
 for (const lang of EAGER) refractor.register(lang)
 
+// Prism's bash grammar colours a number wherever a word STARTS with one, so the
+// `1` of a `sed -n 1,60p` range lights up blue while the `,60p` welded to it
+// stays plain - a lone highlighted digit stranded in the middle of one argument.
+// Require the number to be a whole word (only whitespace or the line end after
+// it) so a standalone numeric argument (`head -n 20`, `chmod 755`, `sleep 1.5`)
+// still colours while a number that is part of a larger token (`1,60p`, `2>&1`)
+// does not. Mutating the token object in place also fixes the copy the grammar
+// makes for command substitutions, which references the same object.
+const bashNumber = (refractor.languages as Record<string, Record<string, { pattern?: RegExp }>>)
+  .bash?.number
+if (bashNumber?.pattern) bashNumber.pattern = /(^|\s)(?:[1-9]\d*|0)(?:[.,]\d+)?(?=\s|$)/
+
 // hasLanguage reports whether a grammar is registered and usable right now.
 // Aliases count: refractor resolves `html` to markup, `ts` to typescript.
 export function hasLanguage(name: string): boolean {
