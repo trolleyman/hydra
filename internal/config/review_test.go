@@ -63,6 +63,8 @@ func TestExpandBranchTemplate(t *testing.T) {
 		want string
 	}{
 		{"{id}", map[string]string{"id": "cool-head"}, "cool-head"},
+		{"feat/{issue}-{id}", map[string]string{"issue": "ENG-1", "id": "abc"}, "feat/ENG-1-abc"},
+		// {ticket} remains a template-only compatibility alias.
 		{"feat/{ticket}-{id}", map[string]string{"ticket": "PROJ-1", "id": "abc"}, "feat/PROJ-1-abc"},
 		// Empty ticket collapses the adjacent '-' separator.
 		{"feat/{ticket}-{id}", map[string]string{"ticket": "", "id": "abc"}, "feat/abc"},
@@ -94,6 +96,10 @@ func TestReviewValidate(t *testing.T) {
 	if err := (&ReviewConfig{Publisher: &bad}).Validate(); err == nil {
 		t.Error("expected error for bad publisher")
 	}
+	badPattern := "["
+	if err := (&ReviewConfig{IssuePattern: &badPattern}).Validate(); err == nil {
+		t.Error("expected error for invalid issue_pattern")
+	}
 	graphite := ReviewPublisherGraphite
 	gitlab := ReviewProviderGitLab
 	if err := (&ReviewConfig{Provider: &gitlab, Publisher: &graphite}).Validate(); err == nil {
@@ -110,27 +116,27 @@ func TestReviewValidate(t *testing.T) {
 	}
 }
 
-func TestTicketConfigPrefersGenericSpelling(t *testing.T) {
+func TestIssuePatternPrefersReviewAndFallsBackToJira(t *testing.T) {
 	legacyPattern := "J-[0-9]+"
 	linearPattern := "ENG-[0-9]+"
 	cfg := Config{
-		Jira:    &JiraConfig{TicketPattern: &legacyPattern},
-		Tickets: &JiraConfig{TicketPattern: &linearPattern},
+		Review: &ReviewConfig{IssuePattern: &linearPattern},
+		Jira:   &JiraConfig{TicketPattern: &legacyPattern},
 	}
-	if got := cfg.TicketConfig().GetTicketPattern(); got != linearPattern {
-		t.Fatalf("TicketConfig pattern = %q, want %q", got, linearPattern)
+	if got := cfg.GetIssuePattern(); got != linearPattern {
+		t.Fatalf("GetIssuePattern = %q, want %q", got, linearPattern)
 	}
-	cfg.Tickets = nil
-	if got := cfg.TicketConfig().GetTicketPattern(); got != legacyPattern {
-		t.Fatalf("legacy TicketConfig pattern = %q, want %q", got, legacyPattern)
+	cfg.Review.IssuePattern = nil
+	if got := cfg.GetIssuePattern(); got != legacyPattern {
+		t.Fatalf("legacy GetIssuePattern = %q, want %q", got, legacyPattern)
 	}
 }
 
 func TestExtractTicket(t *testing.T) {
-	if got := ExtractTicket("implement PROJ-1234 rate limit", defaultJiraTicketPattern); got != "PROJ-1234" {
+	if got := ExtractTicket("implement PROJ-1234 rate limit", defaultIssuePattern); got != "PROJ-1234" {
 		t.Errorf("ExtractTicket = %q, want PROJ-1234", got)
 	}
-	if got := ExtractTicket("no ticket here", defaultJiraTicketPattern); got != "" {
+	if got := ExtractTicket("no ticket here", defaultIssuePattern); got != "" {
 		t.Errorf("ExtractTicket = %q, want empty", got)
 	}
 }
@@ -160,18 +166,18 @@ url = "https://x.atlassian.net"
 	}
 }
 
-func TestRenderPreservesTicketsBlock(t *testing.T) {
+func TestRemovedTicketsBlockHasNoEffectAndIsDropped(t *testing.T) {
 	existing := []byte("[tickets]\nticket_pattern = \"ENG-[0-9]+\"\n")
 	out := renderConfig(existing, Config{})
-	if !contains(out, "[tickets]") || !contains(out, `ticket_pattern = "ENG-[0-9]+"`) {
-		t.Fatalf("renderConfig dropped [tickets]:\n%s", out)
+	if contains(out, "[tickets]") || contains(out, `ticket_pattern = "ENG-[0-9]+"`) {
+		t.Fatalf("removed [tickets] table survived render:\n%s", out)
 	}
 	cfg, err := decodeConfig([]byte(out))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.TicketConfig() == nil || cfg.TicketConfig().GetTicketPattern() != "ENG-[0-9]+" {
-		t.Fatalf("round-trip Tickets = %+v", cfg.Tickets)
+	if cfg.GetIssuePattern() != defaultIssuePattern {
+		t.Fatalf("removed [tickets] changed issue pattern to %q", cfg.GetIssuePattern())
 	}
 }
 

@@ -47,7 +47,8 @@ remote = "origin"
 target_branch = "main"          # default MR target; per-head editable
 auth = "cli"                    # cli (gh/glab, recommended) | token (NOT implemented)
 default_action = "merge"        # merge | create_mr - which button leads; both stay available
-push_branch_template = "{id}"   # e.g. "feat/{ticket}-{id}" - {id}, {ticket}, {base}
+push_branch_template = "{id}"   # e.g. "feat/{issue}-{id}" - {id}, {issue}, {base}
+issue_pattern = "[A-Z]+-[0-9]+" # extracts an issue key from the prompt/title
 draft = true                    # open MRs as draft
 squash = true                   # request squash-on-merge
 delete_remote_branch = true     # tell the forge to delete the source branch on merge
@@ -55,19 +56,18 @@ require_local_tests = true      # gate Publish on local tests, like Merge
 # publish_when_green = true     # arm new heads to auto-open a draft MR once green
 # protected_branches = ["main"] # warn before a DIRECT LOCAL merge into these
 
-[tickets]
-ticket_pattern = "[A-Z]+-[0-9]+"   # pulls {ticket} out of the prompt/title
 ```
 
 Template placeholders collapse cleanly: a placeholder expanding to nothing eats
 its adjacent separator (`-`, `_`, `/`) and empty path segments drop, so
-`feat/{ticket}-{id}` with no ticket yields `feat/<id>`. There is deliberately no
+`feat/{issue}-{id}` with no issue yields `feat/<id>`. There is deliberately no
 `${x:-fallback}` syntax.
 
-`[tickets]` is tracker-neutral: the default covers Linear identifiers such as
-`ENG-123` and Jira keys alike. Hydra adds an extracted key to the PR title when
-it is not already present, so the forge-side tracker integration can link it.
-The former `[jira]` spelling remains a compatibility fallback.
+`issue_pattern` is tracker-neutral: the default covers Linear identifiers such
+as `ENG-123` and Jira keys alike. Hydra adds an extracted key to the PR title
+when it is not already present, so the forge-side tracker integration can link
+it. The former `[jira].ticket_pattern` spelling and `{ticket}` placeholder remain
+compatibility fallbacks.
 
 ### Graphite publishing and stacked heads
 
@@ -383,11 +383,11 @@ Approving, resolving and everything else still happen on the forge.
   there was already a PR", but it is not urgent.
 - **Token/REST auth.** `auth = "token"` returns `NotConfiguredError`; forge
   access is CLI-only.
-- **Spawn-from-ticket / JIRA depth.** Only the `{ticket}` templating rung is
-  wired. The ladder, in order, stopping when satisfied: (1) `{ticket}` in branch
+- **Spawn-from-issue depth.** Only the `{issue}` templating rung is wired. The
+  ladder, in order, stopping when satisfied: (1) `{issue}` in branch
   names and MR titles - corporate JIRA<->forge integrations auto-link off this
   for free; (2) spawn-from-ticket fetch, REST or via MCP; (3) a "my open
-  tickets" picker in the spawn form; (4) skip transitions/comments/two-way sync
+  issues" picker in the spawn form; (4) skip transitions/comments/two-way sync
   entirely - server-side integrations already do that off MR events.
 - **Notifications on MR events** (approval, CI failure, new comments).
 

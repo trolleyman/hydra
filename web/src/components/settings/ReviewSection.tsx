@@ -100,6 +100,12 @@ export function ReviewSection({
           <Row label="Branch template">
             <Text value={r.push_branch_template ?? ''} placeholder={resolved?.push_branch_template || '{id}'} onChange={(v) => set('push_branch_template', v || null)} className="w-64 font-mono" />
           </Row>
+          <Row label="Issue pattern">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Text value={r.issue_pattern ?? ''} placeholder={resolved?.issue_pattern || '[A-Z]+-[0-9]+'} onChange={(v) => set('issue_pattern', v || null)} className="w-64 font-mono" />
+              <Hint>Extracts issue keys for PR titles and {'{issue}'} branch templates</Hint>
+            </div>
+          </Row>
           <Row label="Defaults">
             <div className="flex flex-col gap-1.5">
               <Bool label="Open MRs as draft" value={r.draft} effective={resolved?.draft} onChange={(v) => set('draft', v)} />

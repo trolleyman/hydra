@@ -52,19 +52,17 @@ func downstreamAheadBehind(projectRoot, localBranch, remote, downstream string) 
 }
 
 // resolveDownstreamBranch returns the head's downstream branch, seeding it from
-// review.push_branch_template (with {id}/{ticket}/{base}) when unset. It never
+// review.push_branch_template (with {id}/{issue}/{base}) when unset. It never
 // writes to the DB - the caller persists the resolved value at publish.
-func resolveDownstreamBranch(review *config.ReviewConfig, tickets *config.JiraConfig, h heads.Head) string {
+func resolveDownstreamBranch(review *config.ReviewConfig, issuePattern string, h heads.Head) string {
 	if h.DownstreamBranch != "" {
 		return h.DownstreamBranch
 	}
-	ticket := ""
-	if tickets != nil {
-		ticket = config.ExtractTicket(h.Prompt+" "+h.Title, tickets.GetTicketPattern())
-	}
+	issue := config.ExtractTicket(h.Prompt+" "+h.Title, issuePattern)
 	name := config.ExpandBranchTemplate(review.GetPushBranchTemplate(), map[string]string{
 		"id":     h.ID,
-		"ticket": ticket,
+		"issue":  issue,
+		"ticket": issue, // legacy placeholder
 		"base":   h.BaseBranch,
 	})
 	if name == "" {
@@ -163,7 +161,8 @@ func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads
 	// the publish request explicitly overrode it. There is no configurable
 	// [review] target_branch - the base branch is the source of truth.
 	target := firstNonEmpty(ov.TargetBranch, head.BaseBranch)
-	downstream := firstNonEmpty(ov.DownstreamBranch, resolveDownstreamBranch(review, cfg.TicketConfig(), head))
+	issuePattern := cfg.GetIssuePattern()
+	downstream := firstNonEmpty(ov.DownstreamBranch, resolveDownstreamBranch(review, issuePattern, head))
 	if review.GetPublisher() == config.ReviewPublisherGraphite {
 		// Graphite's stack metadata is keyed by the local branch. Hydra cannot
 		// submit hydra/<id> and simultaneously make a differently named ref the
@@ -172,10 +171,8 @@ func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads
 		target = head.BaseBranch
 	}
 	title := firstNonEmpty(ov.Title, defaultMRTitle(head))
-	if tickets := cfg.TicketConfig(); tickets != nil {
-		if ticket := config.ExtractTicket(head.Prompt+" "+head.Title, tickets.GetTicketPattern()); ticket != "" && !strings.Contains(strings.ToUpper(title), strings.ToUpper(ticket)) {
-			title = ticket + " " + title
-		}
+	if issue := config.ExtractTicket(head.Prompt+" "+head.Title, issuePattern); issue != "" && !strings.Contains(strings.ToUpper(title), strings.ToUpper(issue)) {
+		title = issue + " " + title
 	}
 	description := head.Prompt
 	if ov.Description != nil {
@@ -485,6 +482,7 @@ func (s *Server) resolveReviewConfigResponse(projectRoot string) api.ReviewConfi
 		Auth:               review.GetAuth(),
 		DefaultAction:      review.GetDefaultAction(),
 		PushBranchTemplate: ptr(review.GetPushBranchTemplate()),
+		IssuePattern:       ptr(cfg.GetIssuePattern()),
 		Draft:              ptr(review.IsDraft()),
 		Squash:             ptr(review.IsSquash()),
 		DeleteRemoteBranch: ptr(review.IsDeleteRemoteBranch()),

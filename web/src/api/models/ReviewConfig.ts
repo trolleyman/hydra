@@ -24,6 +24,7 @@ export type ReviewConfig = {
      */
     default_action?: string | null;
     push_branch_template?: string | null;
+    issue_pattern?: string | null;
     draft?: boolean | null;
     squash?: boolean | null;
     delete_remote_branch?: boolean | null;

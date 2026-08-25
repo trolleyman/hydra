@@ -48,6 +48,10 @@ export type ReviewConfigResponse = {
      */
     default_action: string;
     push_branch_template?: string;
+    /**
+     * Regex used to extract an issue key for PR titles and branch templates.
+     */
+    issue_pattern?: string;
     draft?: boolean;
     squash?: boolean;
     delete_remote_branch?: boolean;

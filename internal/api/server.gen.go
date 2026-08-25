@@ -3109,6 +3109,7 @@ type ReviewConfig struct {
 	DefaultAction      *string   `json:"default_action"`
 	DeleteRemoteBranch *bool     `json:"delete_remote_branch"`
 	Draft              *bool     `json:"draft"`
+	IssuePattern       *string   `json:"issue_pattern"`
 	ProtectedBranches  *[]string `json:"protected_branches"`
 
 	// Provider "auto" | "github" | "gitlab".
@@ -3141,10 +3142,13 @@ type ReviewConfigResponse struct {
 	Configured bool `json:"configured"`
 
 	// DefaultAction Primary head action ("merge" | "create_mr").
-	DefaultAction      string    `json:"default_action"`
-	DeleteRemoteBranch *bool     `json:"delete_remote_branch,omitempty"`
-	Draft              *bool     `json:"draft,omitempty"`
-	ProtectedBranches  *[]string `json:"protected_branches,omitempty"`
+	DefaultAction      string `json:"default_action"`
+	DeleteRemoteBranch *bool  `json:"delete_remote_branch,omitempty"`
+	Draft              *bool  `json:"draft,omitempty"`
+
+	// IssuePattern Regex used to extract an issue key for PR titles and branch templates.
+	IssuePattern      *string   `json:"issue_pattern,omitempty"`
+	ProtectedBranches *[]string `json:"protected_branches,omitempty"`
 
 	// Provider Resolved provider ("github" | "gitlab" | "") - empty when auto-detection could not decide.
 	Provider string `json:"provider"`

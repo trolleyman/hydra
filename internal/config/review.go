@@ -14,7 +14,7 @@ import (
 // example rather than emitting an empty [review] table.
 func (r ReviewConfig) isEmpty() bool {
 	return r.Provider == nil && r.Publisher == nil && r.Remote == nil && r.Auth == nil &&
-		r.DefaultAction == nil && r.PushBranchTemplate == nil && r.Draft == nil && r.Squash == nil &&
+		r.DefaultAction == nil && r.PushBranchTemplate == nil && r.IssuePattern == nil && r.Draft == nil && r.Squash == nil &&
 		r.DeleteRemoteBranch == nil && r.RequireLocalTests == nil && r.PublishWhenGreen == nil &&
 		len(r.ProtectedBranches) == 0
 }
@@ -40,6 +40,7 @@ func reviewFieldLines(r ReviewConfig) []string {
 	addStr("auth", r.Auth)
 	addStr("default_action", r.DefaultAction)
 	addStr("push_branch_template", r.PushBranchTemplate)
+	addStr("issue_pattern", r.IssuePattern)
 	addBool("draft", r.Draft)
 	addBool("squash", r.Squash)
 	addBool("delete_remote_branch", r.DeleteRemoteBranch)
@@ -80,7 +81,7 @@ const (
 	defaultReviewAuth               = ReviewAuthCLI
 	defaultReviewDefaultAction      = ReviewActionMerge
 	defaultReviewPushBranchTemplate = "{id}"
-	defaultJiraTicketPattern        = "[A-Z]+-[0-9]+"
+	defaultIssuePattern             = "[A-Z]+-[0-9]+"
 )
 
 // ReviewConfig configures how Hydra talks to a forge (GitHub/GitLab) and supplies
@@ -113,8 +114,11 @@ type ReviewConfig struct {
 	ProtectedBranches []string `toml:"protected_branches"`
 	// PushBranchTemplate is the default downstream branch name template the head
 	// branch is pushed AS (the local branch stays hydra/<id>). Placeholders {id},
-	// {ticket}, {base}; empty placeholders collapse adjacent separators. Default "{id}".
+	// {issue}, {base}; {ticket} is a legacy alias. Default "{id}".
 	PushBranchTemplate *string `toml:"push_branch_template"`
+	// IssuePattern extracts a Linear/Jira-style issue key from the head prompt or
+	// title for PR titles and {issue} branch templates.
+	IssuePattern *string `toml:"issue_pattern"`
 	// Draft opens MRs as draft by default. Default true.
 	Draft *bool `toml:"draft"`
 	// Squash requests squash-on-merge. Default true.
@@ -127,8 +131,8 @@ type ReviewConfig struct {
 	RequireLocalTests *bool `toml:"require_local_tests"`
 }
 
-// JiraConfig is the legacy Go name for tracker configuration used by both the
-// generic [tickets] table and its deprecated [jira] spelling.
+// JiraConfig is the legacy issue-pattern configuration retained for existing
+// [jira] tables. New configuration belongs at [review].issue_pattern.
 type JiraConfig struct {
 	// URL is retained for compatibility with the former Jira-specific design.
 	URL *string `toml:"url"`
@@ -137,17 +141,16 @@ type JiraConfig struct {
 	TicketPattern *string `toml:"ticket_pattern"`
 }
 
-// TicketConfig returns the generic [tickets] config, falling back to the legacy
-// [jira] spelling. Keeping the fallback makes existing projects migrate without
-// a flag day while new integrations no longer pretend every issue is Jira.
-func (c *Config) TicketConfig() *JiraConfig {
-	if c != nil && c.Tickets != nil {
-		return c.Tickets
+// GetIssuePattern returns [review].issue_pattern, falling back to the legacy
+// [jira].ticket_pattern spelling and finally the built-in default.
+func (c *Config) GetIssuePattern() string {
+	if c != nil && c.Review != nil && c.Review.IssuePattern != nil && *c.Review.IssuePattern != "" {
+		return *c.Review.IssuePattern
 	}
-	if c != nil {
-		return c.Jira
+	if c != nil && c.Jira != nil {
+		return c.Jira.GetTicketPattern()
 	}
-	return nil
+	return defaultIssuePattern
 }
 
 // GetProvider returns the configured provider or the "auto" default. This is the
@@ -228,7 +231,7 @@ func (r *ReviewConfig) IsRequireLocalTests() bool {
 // GetTicketPattern returns the configured ticket regex or the default.
 func (j *JiraConfig) GetTicketPattern() string {
 	if j == nil || j.TicketPattern == nil || *j.TicketPattern == "" {
-		return defaultJiraTicketPattern
+		return defaultIssuePattern
 	}
 	return *j.TicketPattern
 }
@@ -268,6 +271,9 @@ func (r *ReviewConfig) Merge(other ReviewConfig) {
 	}
 	if other.PushBranchTemplate != nil {
 		r.PushBranchTemplate = other.PushBranchTemplate
+	}
+	if other.IssuePattern != nil {
+		r.IssuePattern = other.IssuePattern
 	}
 	if other.Draft != nil {
 		r.Draft = other.Draft
@@ -311,6 +317,11 @@ func (r *ReviewConfig) Validate() error {
 	}
 	if r.GetPublisher() == ReviewPublisherGraphite && r.GetProvider() == ReviewProviderGitLab {
 		return errtrace.Wrap(fmt.Errorf("[review] publisher = \"graphite\" requires provider = \"github\" or \"auto\""))
+	}
+	if r.IssuePattern != nil && *r.IssuePattern != "" {
+		if _, err := regexp.Compile(*r.IssuePattern); err != nil {
+			return errtrace.Wrap(fmt.Errorf("[review] issue_pattern %q: %w", *r.IssuePattern, err))
+		}
 	}
 	switch r.GetAuth() {
 	case ReviewAuthCLI, ReviewAuthToken:
@@ -379,10 +390,10 @@ func DetectProvider(remoteURL string) string {
 var branchPlaceholderRe = regexp.MustCompile(`\{[a-zA-Z_]+\}`)
 
 // ExpandBranchTemplate expands a push_branch_template (placeholders {id},
-// {ticket}, {base}) into a concrete downstream branch name using vals. A
+// {issue}, {base}, plus legacy {ticket}) into a concrete downstream branch name. A
 // placeholder that expands to nothing collapses its adjacent separator characters
-// ('-', '_', '/') and empty path segments are dropped, so "feat/{ticket}-{id}"
-// with no ticket yields "feat/<id>" (docs/non-local-integration.md). Unknown
+// ('-', '_', '/') and empty path segments are dropped, so "feat/{issue}-{id}"
+// with no issue yields "feat/<id>" (docs/non-local-integration.md). Unknown
 // placeholders are treated as empty. There is deliberately no ${x:-fallback}
 // syntax - the collapse rule covers the real cases.
 func ExpandBranchTemplate(tmpl string, vals map[string]string) string {

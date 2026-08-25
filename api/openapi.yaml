@@ -4716,6 +4716,9 @@ components:
           description: Primary head action ("merge" | "create_mr").
         push_branch_template:
           type: string
+        issue_pattern:
+          type: string
+          description: Regex used to extract an issue key for PR titles and branch templates.
         draft:
           type: boolean
         squash:
@@ -4761,6 +4764,9 @@ components:
           nullable: true
           description: '"merge" | "create_mr".'
         push_branch_template:
+          type: string
+          nullable: true
+        issue_pattern:
           type: string
           nullable: true
         draft:

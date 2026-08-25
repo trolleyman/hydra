@@ -1150,7 +1150,7 @@ func (s *SimulationServer) GetReviewConfig(w http.ResponseWriter, r *http.Reques
 		AuthStatus:         ptr("glab: logged in to gitlab.example.com as sim-user"),
 		Authenticated:      ptr(true),
 		DefaultAction:      "create_mr",
-		PushBranchTemplate: ptr("feat/{ticket}-{id}"),
+		PushBranchTemplate: ptr("feat/{issue}-{id}"),
 		Draft:              ptr(true),
 		Squash:             ptr(true),
 		DeleteRemoteBranch: ptr(true),
@@ -4245,7 +4245,7 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 	case params.Scope == nil || *params.Scope == api.GetConfigParamsScopeProject:
 		resp.Review = &api.ReviewConfig{
 			Provider:           ptr("gitlab"),
-			PushBranchTemplate: ptr("feat/{ticket}-{id}"),
+			PushBranchTemplate: ptr("feat/{issue}-{id}"),
 		}
 		// Resource limits: a lowered CPU weight plus a hard memory cap in the
 		// shared project config, so the Resource limits section renders populated.
