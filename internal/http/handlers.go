@@ -1294,6 +1294,7 @@ func toAPIReviewConfig(r *config.ReviewConfig) *api.ReviewConfig {
 	}
 	out := api.ReviewConfig{
 		Provider:           r.Provider,
+		Publisher:          r.Publisher,
 		Remote:             r.Remote,
 		Auth:               r.Auth,
 		DefaultAction:      r.DefaultAction,
@@ -1318,6 +1319,7 @@ func fromAPIReviewConfig(r *api.ReviewConfig) *config.ReviewConfig {
 	}
 	out := config.ReviewConfig{
 		Provider:           r.Provider,
+		Publisher:          r.Publisher,
 		Remote:             r.Remote,
 		Auth:               r.Auth,
 		DefaultAction:      r.DefaultAction,
@@ -2297,7 +2299,7 @@ func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, he
 			return nil, errtrace.Wrap(err)
 		}
 		for _, child := range children {
-			if err := s.DB.UpdateAgentBaseBranch(child.ID, target); err != nil {
+			if err := s.DB.ReparentAgent(child.ID, branchName, target); err != nil {
 				return nil, errtrace.Wrap(err)
 			}
 		}

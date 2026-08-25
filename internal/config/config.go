@@ -955,9 +955,10 @@ type Config struct {
 	// the list of things that can notify keeps growing and one place to look is
 	// worth more than each switch sitting next to its source. nil = defaults.
 	Notify *NotifyConfig `toml:"notify"`
-	// Jira configures ticket-key extraction and the JIRA base URL for {ticket}
-	// templating and spawn-from-ticket. nil = unset.
-	Jira *JiraConfig `toml:"jira"`
+	// Tickets configures generic issue-key extraction for {ticket} templating.
+	// Jira is the deprecated spelling, retained as a compatibility fallback.
+	Tickets *JiraConfig `toml:"tickets"`
+	Jira    *JiraConfig `toml:"jira"`
 	// Resources configures the cgroup limits (CPU/IO weight, CPU quota, memory max,
 	// tasks max) applied to every scoped workload of this project via its transient
 	// systemd scope. nil = all safe defaults. Pointer so its own fields'
@@ -1167,6 +1168,7 @@ type rawConfig struct {
 	Review              *ReviewConfig   `toml:"review"`
 	Notify              *NotifyConfig   `toml:"notify"`
 	Jira                *JiraConfig     `toml:"jira"`
+	Tickets             *JiraConfig     `toml:"tickets"`
 	Resources           *ResourceLimits `toml:"resources"`
 }
 
@@ -1183,7 +1185,7 @@ var reservedTopLevel = map[string]bool{
 	"icon":          true,
 	"resume_prompt": true, "artifact_concurrency": true, "artifact_prefetch": true, "test_concurrency": true,
 	"test_prefetch": true, "preview_ports": true,
-	"review": true, "jira": true, "resources": true,
+	"review": true, "tickets": true, "jira": true, "resources": true,
 }
 
 // GetUserConfigPath returns the path to the global user configuration file.
@@ -1384,11 +1386,15 @@ func decodeConfig(data []byte) (Config, error) {
 	cfg.Review = raw.Review
 	cfg.Notify = raw.Notify
 	cfg.Jira = raw.Jira
+	cfg.Tickets = raw.Tickets
 	cfg.Resources = raw.Resources
 	if err := cfg.Review.Validate(); err != nil {
 		return cfg, errtrace.Wrap(err)
 	}
 	if err := cfg.Jira.Validate(); err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
+	if err := cfg.Tickets.validateTable("tickets"); err != nil {
 		return cfg, errtrace.Wrap(err)
 	}
 
@@ -1615,6 +1621,12 @@ func (c *Config) Merge(other Config) {
 			c.Jira = &JiraConfig{}
 		}
 		c.Jira.Merge(*other.Jira)
+	}
+	if other.Tickets != nil {
+		if c.Tickets == nil {
+			c.Tickets = &JiraConfig{}
+		}
+		c.Tickets.Merge(*other.Tickets)
 	}
 	if other.Notify != nil {
 		if c.Notify == nil {
@@ -3160,6 +3172,7 @@ type existingAnalysis struct {
 	reviewBlock       []string                    // verbatim [review] table (comments + table), fallback when cfg.Review is unset
 	reviewComments    []string                    // just the user comments above [review], kept when the table is regenerated from cfg.Review
 	jiraBlock         []string                    // verbatim [jira] table, preserved on save
+	ticketsBlock      []string                    // verbatim [tickets] table, preserved on save
 	resourcesBlock    []string                    // verbatim [resources] table, fallback when cfg.Resources is unset
 	resourcesComments []string                    // just the user comments above [resources], kept when it is regenerated from cfg.Resources
 }
@@ -3341,7 +3354,7 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		inArray, curArray, artLeading, artInterior, artName = false, "", nil, nil, ""
 	}
 
-	// [review] and [jira] are top-level single tables Hydra parses but does not
+	// [review], [tickets], and [jira] are top-level single tables Hydra parses but does not
 	// render through the spec machinery, so preserve them verbatim (like the
 	// [[artifacts]] blocks) rather than dropping them on a Settings save.
 	inVerbatim := false
@@ -3361,6 +3374,8 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 			res.reviewComments = comments
 		case "jira":
 			res.jiraBlock = block
+		case "tickets":
+			res.ticketsBlock = block
 		case "resources":
 			res.resourcesBlock = block
 			res.resourcesComments = comments
@@ -3368,7 +3383,7 @@ func analyzeExisting(data []byte, keys map[string]bool) *existingAnalysis {
 		inVerbatim, verbNorm, verbLeading = false, "", nil
 	}
 	isVerbatimTable := func(norm string) bool {
-		return norm == "review" || norm == "jira" || norm == "resources"
+		return norm == "review" || norm == "tickets" || norm == "jira" || norm == "resources"
 	}
 
 	for _, it := range items {
@@ -3520,7 +3535,7 @@ func isManagedCommentedArrayHeader(line string) bool {
 // managedExampleTables are the single tables whose commented-out example blocks
 // ("# [review]" followed by "# key = value" lines) Hydra regenerates on every
 // save, mirroring managedArraySections for array-of-tables examples.
-var managedExampleTables = []string{"review", "jira", "resources"}
+var managedExampleTables = []string{"review", "tickets", "jira", "resources"}
 
 // isManagedCommentedTableHeader reports whether a line is a commented-out header
 // for a managed example table (e.g. "# [review]") - the start of a regenerated
@@ -3864,6 +3879,10 @@ func renderConfig(existing []byte, cfg Config) string {
 		out = appendBlank(out)
 		out = append(out, prior.jiraBlock...)
 	}
+	if len(prior.ticketsBlock) > 0 {
+		out = appendBlank(out)
+		out = append(out, prior.ticketsBlock...)
+	}
 
 	// Resources: like [review], the Settings editor sends it, so regenerate the
 	// [resources] table from cfg when it carries values (keeping any user comments
@@ -3898,6 +3917,7 @@ func reviewExampleLines() []string {
 		docPrefix + " never put a token here (host-side gh/glab creds or the 0600 secrets file).",
 		"# [review]",
 		`# provider = "auto"            # auto | github | gitlab (auto detects from the remote URL)`,
+		`# publisher = "forge"          # forge | graphite (Graphite uses GitHub underneath)`,
 		`# remote = "origin"`,
 		`# auth = "cli"                 # cli (shell out to gh/glab) | token (REST)`,
 		`# default_action = "merge"     # merge (local, as today) | create_mr`,
@@ -3909,9 +3929,8 @@ func reviewExampleLines() []string {
 		"# publish_when_green = false   # arm new heads to auto-open a draft MR when green",
 		`# protected_branches = ["main"] # warn before a direct LOCAL merge into these`,
 		"",
-		docPrefix + " [jira] powers {ticket} templating and (later) spawn-from-ticket.",
-		"# [jira]",
-		`# url = "https://mycorp.atlassian.net"`,
+		docPrefix + " [tickets] powers generic {ticket} templating for Linear, Jira, and similar tools.",
+		"# [tickets]",
 		`# ticket_pattern = "[A-Z]+-[0-9]+"`,
 	}
 }

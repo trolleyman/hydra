@@ -366,7 +366,8 @@ export function CreateMRDialog({
   // fix and retry) instead of a toast.
   error?: string | null
 }) {
-  const [branch, setBranch] = useState(agent.downstream_branch || config?.push_branch_template?.replace('{id}', agent.id).replace(/\{[a-z]+\}/g, '') || agent.id)
+  const graphite = config?.publisher === 'graphite'
+  const [branch, setBranch] = useState(graphite ? agent.branch_name || agent.id : agent.downstream_branch || config?.push_branch_template?.replace('{id}', agent.id).replace(/\{[a-z]+\}/g, '') || agent.id)
   const [remote, setRemote] = useState(config?.remote || 'origin')
   // The MR targets the head's base branch (where its work merges back); editable
   // here as a per-publish override. There is no configurable [review] target.
@@ -415,8 +416,8 @@ export function CreateMRDialog({
           )}
           <label className="flex flex-col gap-1">
             <FieldLabel>Downstream branch</FieldLabel>
-            <input value={branch} onChange={(e) => setBranch(e.target.value)} className={`${inputClass} font-mono`} />
-            <span className="text-2xs text-gray-400">The local branch stays {agent.branch_name}; this is the name it is pushed as.</span>
+            <input value={branch} onChange={(e) => setBranch(e.target.value)} disabled={graphite} className={`${inputClass} font-mono disabled:opacity-60`} />
+            <span className="text-2xs text-gray-400">{graphite ? 'Graphite tracks the local branch as the PR source.' : `The local branch stays ${agent.branch_name}; this is the name it is pushed as.`}</span>
           </label>
           <div className="flex gap-3">
             {remotes.length > 1 && (
@@ -433,7 +434,7 @@ export function CreateMRDialog({
             )}
             <label className="flex flex-col gap-1 flex-1">
               <FieldLabel>Target branch</FieldLabel>
-              <input value={target} onChange={(e) => setTarget(e.target.value)} className={`${inputClass} font-mono`} />
+              <input value={target} onChange={(e) => setTarget(e.target.value)} disabled={graphite} className={`${inputClass} font-mono disabled:opacity-60`} />
             </label>
           </div>
           <label className="flex flex-col gap-1">

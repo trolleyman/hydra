@@ -4680,7 +4680,7 @@ components:
     ReviewConfigResponse:
       type: object
       description: Resolved [review] config for a project plus live forge auth status (docs/non-local-integration.md).
-      required: [configured, provider, remote, auth, default_action]
+      required: [configured, provider, publisher, remote, auth, default_action]
       properties:
         configured:
           type: boolean
@@ -4691,6 +4691,9 @@ components:
         provider_setting:
           type: string
           description: The raw provider setting ("auto" | "github" | "gitlab").
+        publisher:
+          type: string
+          description: PR publication backend ("forge" | "graphite").
         remote:
           type: string
         remote_url:
@@ -4742,6 +4745,10 @@ components:
           type: string
           nullable: true
           description: '"auto" | "github" | "gitlab".'
+        publisher:
+          type: string
+          nullable: true
+          description: '"forge" | "graphite".'
         remote:
           type: string
           nullable: true

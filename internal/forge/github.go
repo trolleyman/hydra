@@ -38,6 +38,11 @@ func (p *githubProvider) EnsureMR(ctx context.Context, o EnsureMROptions) (MR, e
 	if pr, ok, err := p.find(ctx, o.RepoDir, o.SourceBranch); err != nil {
 		return MR{}, errtrace.Wrap(err)
 	} else if ok {
+		if o.UpdateExistingMetadata {
+			if _, err := p.run(ctx, o.RepoDir, "gh", "pr", "edit", strconv.Itoa(pr.Number), "--title", o.Title, "--body", o.Description); err != nil {
+				return MR{}, errtrace.Wrap(err)
+			}
+		}
 		return MR{ID: strconv.Itoa(pr.Number), URL: pr.URL}, nil
 	}
 	args := []string{"pr", "create", "--head", o.SourceBranch, "--base", o.TargetBranch, "--title", o.Title, "--body", o.Description}

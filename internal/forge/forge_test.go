@@ -111,6 +111,29 @@ func TestGithubEnsureMRIdempotent(t *testing.T) {
 	}
 }
 
+func TestGithubEnsureMRUpdatesGraphiteMetadata(t *testing.T) {
+	f := &fakeRunner{response: func(cmd string) (string, error) {
+		if strings.Contains(cmd, "pr view") {
+			return `{"number":42,"url":"https://gh/pr/42","state":"OPEN"}`, nil
+		}
+		if strings.Contains(cmd, "pr edit 42 --title ENG-123 Fix it --body Details") {
+			return "", nil
+		}
+		t.Fatalf("unexpected command: %s", cmd)
+		return "", nil
+	}}
+	p := &githubProvider{run: f.run}
+	_, err := p.EnsureMR(context.Background(), EnsureMROptions{
+		SourceBranch: "hydra/fix", Title: "ENG-123 Fix it", Description: "Details", UpdateExistingMetadata: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 2 || !strings.Contains(f.calls[1], "pr edit 42") {
+		t.Fatalf("calls = %v", f.calls)
+	}
+}
+
 func TestGithubEnsureMRCreates(t *testing.T) {
 	created := false
 	f := &fakeRunner{response: func(cmd string) (string, error) {

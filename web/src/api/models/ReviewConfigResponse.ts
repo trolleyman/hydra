@@ -18,6 +18,10 @@ export type ReviewConfigResponse = {
      * The raw provider setting ("auto" | "github" | "gitlab").
      */
     provider_setting?: string;
+    /**
+     * PR publication backend ("forge" | "graphite").
+     */
+    publisher: string;
     remote: string;
     /**
      * The URL of the configured remote (what provider detection ran against).

@@ -338,6 +338,21 @@ func (s *Store) UpdateAgentBaseBranch(id, baseBranch string) error {
 	return errtrace.Wrap(result.Error)
 }
 
+// ReparentAgent updates a stacked head's local base and, when its linked PR was
+// targeting that same old base, its cached review target. Graphite/GitHub
+// retarget the remote child PR after the parent merges; this keeps Hydra's
+// corresponding source of truth from dangling on the deleted parent branch.
+func (s *Store) ReparentAgent(id, oldBase, newBase string) error {
+	return errtrace.Wrap(s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&Agent{}).Where("id = ?", id).Update("base_branch", newBase).Error; err != nil {
+			return errtrace.Wrap(err)
+		}
+		return errtrace.Wrap(tx.Model(&Agent{}).
+			Where("id = ? AND review_target_branch = ?", id, oldBase).
+			Update("review_target_branch", newBase).Error)
+	}))
+}
+
 // UpdateAgentChatMode flips the head's structured chat-mode flag.
 // Metadata only; the live session is restarted separately so
 // the new mode takes effect.

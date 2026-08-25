@@ -54,13 +54,13 @@ func downstreamAheadBehind(projectRoot, localBranch, remote, downstream string) 
 // resolveDownstreamBranch returns the head's downstream branch, seeding it from
 // review.push_branch_template (with {id}/{ticket}/{base}) when unset. It never
 // writes to the DB - the caller persists the resolved value at publish.
-func resolveDownstreamBranch(review *config.ReviewConfig, jira *config.JiraConfig, h heads.Head) string {
+func resolveDownstreamBranch(review *config.ReviewConfig, tickets *config.JiraConfig, h heads.Head) string {
 	if h.DownstreamBranch != "" {
 		return h.DownstreamBranch
 	}
 	ticket := ""
-	if jira != nil {
-		ticket = config.ExtractTicket(h.Prompt+" "+h.Title, jira.GetTicketPattern())
+	if tickets != nil {
+		ticket = config.ExtractTicket(h.Prompt+" "+h.Title, tickets.GetTicketPattern())
 	}
 	name := config.ExpandBranchTemplate(review.GetPushBranchTemplate(), map[string]string{
 		"id":     h.ID,
@@ -163,8 +163,20 @@ func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads
 	// the publish request explicitly overrode it. There is no configurable
 	// [review] target_branch - the base branch is the source of truth.
 	target := firstNonEmpty(ov.TargetBranch, head.BaseBranch)
-	downstream := firstNonEmpty(ov.DownstreamBranch, resolveDownstreamBranch(review, cfg.Jira, head))
+	downstream := firstNonEmpty(ov.DownstreamBranch, resolveDownstreamBranch(review, cfg.TicketConfig(), head))
+	if review.GetPublisher() == config.ReviewPublisherGraphite {
+		// Graphite's stack metadata is keyed by the local branch. Hydra cannot
+		// submit hydra/<id> and simultaneously make a differently named ref the
+		// PR identity, so Graphite owns the source name in this mode.
+		downstream = *head.Branch
+		target = head.BaseBranch
+	}
 	title := firstNonEmpty(ov.Title, defaultMRTitle(head))
+	if tickets := cfg.TicketConfig(); tickets != nil {
+		if ticket := config.ExtractTicket(head.Prompt+" "+head.Title, tickets.GetTicketPattern()); ticket != "" && !strings.Contains(strings.ToUpper(title), strings.ToUpper(ticket)) {
+			title = ticket + " " + title
+		}
+	}
 	description := head.Prompt
 	if ov.Description != nil {
 		description = *ov.Description
@@ -182,6 +194,9 @@ func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads
 	provider, err := forge.Resolve(review, remoteURL)
 	if err != nil {
 		return nil, &publishFailure{badReq: true, detail: err.Error()}
+	}
+	if review.GetPublisher() == config.ReviewPublisherGraphite && provider.Name() != forge.ProviderGitHub {
+		return nil, &publishFailure{badReq: true, detail: "Graphite publishing requires a GitHub remote/provider"}
 	}
 
 	if s.DB != nil {
@@ -214,29 +229,40 @@ func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads
 	pubCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), publishTimeout)
 	defer cancel()
 
-	refspec := *head.Branch + ":refs/heads/" + downstream
-	if _, err := git.PushRefspec(pubCtx, projectRoot, remote, refspec, nil); err != nil {
+	var pushErr error
+	if review.GetPublisher() == config.ReviewPublisherGraphite {
+		worktree := ""
+		if head.Worktree != nil {
+			worktree = *head.Worktree
+		}
+		pushErr = forge.SubmitGraphite(pubCtx, worktree, *head.Branch, head.BaseBranch, draft)
+	} else {
+		refspec := *head.Branch + ":refs/heads/" + downstream
+		_, pushErr = git.PushRefspec(pubCtx, projectRoot, remote, refspec, nil)
+	}
+	if pushErr != nil {
 		var authErr *git.AuthError
-		if errors.As(err, &authErr) {
+		if errors.As(pushErr, &authErr) {
 			errMsg := authErr.Error()
 			release(&errMsg)
 			return nil, &publishFailure{badReq: true, detail: errMsg}
 		}
-		errMsg := fmt.Sprintf("push failed: %v", err)
+		errMsg := fmt.Sprintf("publish failed: %v", pushErr)
 		release(&errMsg)
 		return nil, &publishFailure{errType: api.MergeConflictErrorErrorConflict, detail: errMsg}
 	}
 
 	mr, err := provider.EnsureMR(pubCtx, forge.EnsureMROptions{
-		RepoDir:            projectRoot,
-		Remote:             remote,
-		SourceBranch:       downstream,
-		TargetBranch:       target,
-		Title:              title,
-		Description:        description,
-		Draft:              draft,
-		Squash:             review.IsSquash(),
-		RemoveSourceBranch: review.IsDeleteRemoteBranch(),
+		RepoDir:                projectRoot,
+		Remote:                 remote,
+		SourceBranch:           downstream,
+		TargetBranch:           target,
+		Title:                  title,
+		Description:            description,
+		UpdateExistingMetadata: review.GetPublisher() == config.ReviewPublisherGraphite,
+		Draft:                  draft,
+		Squash:                 review.IsSquash(),
+		RemoveSourceBranch:     review.IsDeleteRemoteBranch(),
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("create MR failed: %v", err)
@@ -316,6 +342,13 @@ func (s *Server) pushHeadToMR(ctx context.Context, projectRoot string, head head
 	remote := reviewPushTarget(projectRoot, head)
 	pubCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), publishTimeout)
 	defer cancel()
+	if reviewConfigFor(projectRoot).GetPublisher() == config.ReviewPublisherGraphite && !head.ReviewAdopted {
+		worktree := ""
+		if head.Worktree != nil {
+			worktree = *head.Worktree
+		}
+		return errtrace.Wrap(forge.SubmitGraphite(pubCtx, worktree, *head.Branch, head.BaseBranch, false))
+	}
 	refspec := *head.Branch + ":refs/heads/" + head.DownstreamBranch
 	_, err := git.PushRefspec(pubCtx, projectRoot, remote, refspec, nil)
 	return errtrace.Wrap(err)
@@ -445,6 +478,7 @@ func (s *Server) resolveReviewConfigResponse(projectRoot string) api.ReviewConfi
 		Configured:         cfg.Review != nil || provider != "",
 		Provider:           provider,
 		ProviderSetting:    ptr(review.GetProvider()),
+		Publisher:          review.GetPublisher(),
 		Remote:             remote,
 		RemoteUrl:          ptr(remoteURL),
 		BrowseUrl:          ptr(config.BrowseURL(remoteURL)),

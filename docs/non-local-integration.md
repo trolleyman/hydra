@@ -42,6 +42,7 @@ per-user-per-project layer: personal remote names, extra allowed hosts, a
 ```toml
 [review]
 provider = "auto"               # auto | github | gitlab - auto detects from the remote URL
+publisher = "forge"             # forge | graphite - Graphite publishes GitHub PRs
 remote = "origin"
 target_branch = "main"          # default MR target; per-head editable
 auth = "cli"                    # cli (gh/glab, recommended) | token (NOT implemented)
@@ -54,8 +55,7 @@ require_local_tests = true      # gate Publish on local tests, like Merge
 # publish_when_green = true     # arm new heads to auto-open a draft MR once green
 # protected_branches = ["main"] # warn before a DIRECT LOCAL merge into these
 
-[jira]
-url = "https://mycorp.atlassian.net"
+[tickets]
 ticket_pattern = "[A-Z]+-[0-9]+"   # pulls {ticket} out of the prompt/title
 ```
 
@@ -63,6 +63,30 @@ Template placeholders collapse cleanly: a placeholder expanding to nothing eats
 its adjacent separator (`-`, `_`, `/`) and empty path segments drop, so
 `feat/{ticket}-{id}` with no ticket yields `feat/<id>`. There is deliberately no
 `${x:-fallback}` syntax.
+
+`[tickets]` is tracker-neutral: the default covers Linear identifiers such as
+`ENG-123` and Jira keys alike. Hydra adds an extracted key to the PR title when
+it is not already present, so the forge-side tracker integration can link it.
+The former `[jira]` spelling remains a compatibility fallback.
+
+### Graphite publishing and stacked heads
+
+Graphite is a GitHub publication layer, not a forge provider. Use
+`provider = "github"` (or auto-detection) with `publisher = "graphite"`. Hydra
+then runs `gt branch track` and `gt submit` from the head worktree; PR status,
+comments, and lifecycle still flow through GitHub and `gh`.
+
+Hydra's existing stack edge is authoritative: a child whose `base_branch` is a
+parent's `hydra/<id>` branch is tracked against that branch in Graphite.
+Graphite mode uses the local `hydra/<id>` as the PR source branch because its
+metadata is branch-keyed, so `push_branch_template` only affects the normal
+forge publisher. When a parent lands, Hydra reparents local children to the
+parent's base and updates their cached PR target while Graphite/GitHub handles
+the corresponding remote retarget.
+
+This requires Graphite CLI 1.8.4 or newer, `gt` authenticated and on the
+daemon's PATH, `gt repo init` run for the repository, and automatic deletion of
+merged GitHub head branches as recommended by Graphite.
 
 Settings -> Review shows the *effective* values, where each came from, and live
 auth status (`gh: logged in as X` / `glab: not authenticated`), and edits
@@ -357,8 +381,6 @@ Approving, resolving and everything else still happen on the forge.
   (never resetting - that would discard the head's own commits); the merge half
   already exists as Pull from MR. Worth doing for "I started work and then found
   there was already a PR", but it is not urgent.
-- **Stacked-MR retargeting.** When a parent MR merges, the child MR is not
-  retargeted at trunk.
 - **Token/REST auth.** `auth = "token"` returns `NotConfiguredError`; forge
   access is CLI-only.
 - **Spawn-from-ticket / JIRA depth.** Only the `{ticket}` templating rung is

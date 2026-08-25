@@ -3112,8 +3112,11 @@ type ReviewConfig struct {
 	ProtectedBranches  *[]string `json:"protected_branches"`
 
 	// Provider "auto" | "github" | "gitlab".
-	Provider           *string `json:"provider"`
-	PublishWhenGreen   *bool   `json:"publish_when_green"`
+	Provider         *string `json:"provider"`
+	PublishWhenGreen *bool   `json:"publish_when_green"`
+
+	// Publisher "forge" | "graphite".
+	Publisher          *string `json:"publisher"`
 	PushBranchTemplate *string `json:"push_branch_template"`
 	Remote             *string `json:"remote"`
 	RequireLocalTests  *bool   `json:"require_local_tests"`
@@ -3150,7 +3153,10 @@ type ReviewConfigResponse struct {
 	ProviderSetting *string `json:"provider_setting,omitempty"`
 
 	// PublishWhenGreen Default arming for new heads.
-	PublishWhenGreen   *bool   `json:"publish_when_green,omitempty"`
+	PublishWhenGreen *bool `json:"publish_when_green,omitempty"`
+
+	// Publisher PR publication backend ("forge" | "graphite").
+	Publisher          string  `json:"publisher"`
 	PushBranchTemplate *string `json:"push_branch_template,omitempty"`
 	Remote             string  `json:"remote"`
 

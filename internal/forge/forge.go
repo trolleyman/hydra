@@ -43,15 +43,19 @@ const (
 // EnsureMROptions describes the MR/PR to create-or-update. The source branch must
 // already be pushed to the remote (publish step 3 precedes EnsureMR).
 type EnsureMROptions struct {
-	RepoDir            string // dir to run the CLI in (the project root)
-	Remote             string // git remote name, for repo resolution
-	SourceBranch       string // the pushed downstream branch (MR source)
-	TargetBranch       string // MR target
-	Title              string
-	Description        string
-	Draft              bool
-	Squash             bool // request squash-on-merge
-	RemoveSourceBranch bool // tell the forge to delete the source branch on merge
+	RepoDir      string // dir to run the CLI in (the project root)
+	Remote       string // git remote name, for repo resolution
+	SourceBranch string // the pushed downstream branch (MR source)
+	TargetBranch string // MR target
+	Title        string
+	Description  string
+	// UpdateExistingMetadata asks the provider to apply title/body to an existing
+	// PR. Graphite creates the PR first, then Hydra uses this to preserve its
+	// tracker-aware title and prompt-derived description.
+	UpdateExistingMetadata bool
+	Draft                  bool
+	Squash                 bool // request squash-on-merge
+	RemoveSourceBranch     bool // tell the forge to delete the source branch on merge
 }
 
 // MergeOptions controls a forge-side merge.

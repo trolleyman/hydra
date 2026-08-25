@@ -10,6 +10,10 @@ export type ReviewConfig = {
      * "auto" | "github" | "gitlab".
      */
     provider?: string | null;
+    /**
+     * "forge" | "graphite".
+     */
+    publisher?: string | null;
     remote?: string | null;
     /**
      * "cli" | "token".

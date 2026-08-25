@@ -91,6 +91,14 @@ func TestReviewValidate(t *testing.T) {
 	if err := (&ReviewConfig{DefaultAction: &bad}).Validate(); err == nil {
 		t.Error("expected error for bad default_action")
 	}
+	if err := (&ReviewConfig{Publisher: &bad}).Validate(); err == nil {
+		t.Error("expected error for bad publisher")
+	}
+	graphite := ReviewPublisherGraphite
+	gitlab := ReviewProviderGitLab
+	if err := (&ReviewConfig{Provider: &gitlab, Publisher: &graphite}).Validate(); err == nil {
+		t.Error("expected Graphite with GitLab to fail")
+	}
 	good := ReviewProviderGitHub
 	if err := (&ReviewConfig{Provider: &good}).Validate(); err != nil {
 		t.Errorf("unexpected error for good config: %v", err)
@@ -99,6 +107,22 @@ func TestReviewValidate(t *testing.T) {
 	var nilR *ReviewConfig
 	if err := nilR.Validate(); err != nil {
 		t.Errorf("nil Validate: %v", err)
+	}
+}
+
+func TestTicketConfigPrefersGenericSpelling(t *testing.T) {
+	legacyPattern := "J-[0-9]+"
+	linearPattern := "ENG-[0-9]+"
+	cfg := Config{
+		Jira:    &JiraConfig{TicketPattern: &legacyPattern},
+		Tickets: &JiraConfig{TicketPattern: &linearPattern},
+	}
+	if got := cfg.TicketConfig().GetTicketPattern(); got != linearPattern {
+		t.Fatalf("TicketConfig pattern = %q, want %q", got, linearPattern)
+	}
+	cfg.Tickets = nil
+	if got := cfg.TicketConfig().GetTicketPattern(); got != legacyPattern {
+		t.Fatalf("legacy TicketConfig pattern = %q, want %q", got, legacyPattern)
 	}
 }
 
@@ -133,6 +157,21 @@ url = "https://x.atlassian.net"
 	}
 	if cfg.Review == nil || derefStr(cfg.Review.Provider) != "gitlab" {
 		t.Errorf("round-trip Review = %+v", cfg.Review)
+	}
+}
+
+func TestRenderPreservesTicketsBlock(t *testing.T) {
+	existing := []byte("[tickets]\nticket_pattern = \"ENG-[0-9]+\"\n")
+	out := renderConfig(existing, Config{})
+	if !contains(out, "[tickets]") || !contains(out, `ticket_pattern = "ENG-[0-9]+"`) {
+		t.Fatalf("renderConfig dropped [tickets]:\n%s", out)
+	}
+	cfg, err := decodeConfig([]byte(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TicketConfig() == nil || cfg.TicketConfig().GetTicketPattern() != "ENG-[0-9]+" {
+		t.Fatalf("round-trip Tickets = %+v", cfg.Tickets)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 // protected branches). Used by renderConfig to fall back to the commented
 // example rather than emitting an empty [review] table.
 func (r ReviewConfig) isEmpty() bool {
-	return r.Provider == nil && r.Remote == nil && r.Auth == nil &&
+	return r.Provider == nil && r.Publisher == nil && r.Remote == nil && r.Auth == nil &&
 		r.DefaultAction == nil && r.PushBranchTemplate == nil && r.Draft == nil && r.Squash == nil &&
 		r.DeleteRemoteBranch == nil && r.RequireLocalTests == nil && r.PublishWhenGreen == nil &&
 		len(r.ProtectedBranches) == 0
@@ -35,6 +35,7 @@ func reviewFieldLines(r ReviewConfig) []string {
 		}
 	}
 	addStr("provider", r.Provider)
+	addStr("publisher", r.Publisher)
 	addStr("remote", r.Remote)
 	addStr("auth", r.Auth)
 	addStr("default_action", r.DefaultAction)
@@ -57,9 +58,11 @@ func reviewFieldLines(r ReviewConfig) []string {
 // Review provider / auth / action constants. The string values are the config
 // spellings (see docs/non-local-integration.md).
 const (
-	ReviewProviderAuto   = "auto"
-	ReviewProviderGitHub = "github"
-	ReviewProviderGitLab = "gitlab"
+	ReviewProviderAuto      = "auto"
+	ReviewProviderGitHub    = "github"
+	ReviewProviderGitLab    = "gitlab"
+	ReviewPublisherForge    = "forge"
+	ReviewPublisherGraphite = "graphite"
 
 	ReviewAuthCLI   = "cli"
 	ReviewAuthToken = "token"
@@ -72,6 +75,7 @@ const (
 // (nil), following the nil-means-default pointer convention.
 const (
 	defaultReviewProvider           = ReviewProviderAuto
+	defaultReviewPublisher          = ReviewPublisherForge
 	defaultReviewRemote             = "origin"
 	defaultReviewAuth               = ReviewAuthCLI
 	defaultReviewDefaultAction      = ReviewActionMerge
@@ -89,6 +93,9 @@ type ReviewConfig struct {
 	// Provider is the forge type: "auto" (detect from the remote URL), "github", or
 	// "gitlab". nil/"" = auto.
 	Provider *string `toml:"provider"`
+	// Publisher selects who creates and updates GitHub PRs. "forge" uses Hydra's
+	// normal git+gh flow; "graphite" preserves BaseBranch ancestry through gt.
+	Publisher *string `toml:"publisher"`
 	// Remote is the git remote a publish targets (default "origin").
 	Remote *string `toml:"remote"`
 	// Auth is how Hydra talks to the forge: "cli" (shell out to gh/glab) or "token"
@@ -120,14 +127,27 @@ type ReviewConfig struct {
 	RequireLocalTests *bool `toml:"require_local_tests"`
 }
 
-// JiraConfig configures ticket-key extraction and the JIRA base URL, used for
-// {ticket} templating and (later) spawn-from-ticket (docs/non-local-integration.md).
+// JiraConfig is the legacy Go name for tracker configuration used by both the
+// generic [tickets] table and its deprecated [jira] spelling.
 type JiraConfig struct {
-	// URL is the JIRA base URL, e.g. "https://mycorp.atlassian.net". nil/"" = unset.
+	// URL is retained for compatibility with the former Jira-specific design.
 	URL *string `toml:"url"`
 	// TicketPattern is a regex to pull a ticket key out of the spawn prompt / branch.
 	// Default "[A-Z]+-[0-9]+".
 	TicketPattern *string `toml:"ticket_pattern"`
+}
+
+// TicketConfig returns the generic [tickets] config, falling back to the legacy
+// [jira] spelling. Keeping the fallback makes existing projects migrate without
+// a flag day while new integrations no longer pretend every issue is Jira.
+func (c *Config) TicketConfig() *JiraConfig {
+	if c != nil && c.Tickets != nil {
+		return c.Tickets
+	}
+	if c != nil {
+		return c.Jira
+	}
+	return nil
 }
 
 // GetProvider returns the configured provider or the "auto" default. This is the
@@ -137,6 +157,14 @@ func (r *ReviewConfig) GetProvider() string {
 		return defaultReviewProvider
 	}
 	return *r.Provider
+}
+
+// GetPublisher returns the PR publication backend (default "forge").
+func (r *ReviewConfig) GetPublisher() string {
+	if r == nil || r.Publisher == nil || *r.Publisher == "" {
+		return defaultReviewPublisher
+	}
+	return *r.Publisher
 }
 
 // GetRemote returns the configured remote or "origin".
@@ -205,7 +233,7 @@ func (j *JiraConfig) GetTicketPattern() string {
 	return *j.TicketPattern
 }
 
-// GetURL returns the configured JIRA base URL (trailing slash trimmed) or "".
+// GetURL returns the configured tracker base URL (trailing slash trimmed) or "".
 func (j *JiraConfig) GetURL() string {
 	if j == nil || j.URL == nil {
 		return ""
@@ -219,6 +247,9 @@ func (j *JiraConfig) GetURL() string {
 func (r *ReviewConfig) Merge(other ReviewConfig) {
 	if other.Provider != nil {
 		r.Provider = other.Provider
+	}
+	if other.Publisher != nil {
+		r.Publisher = other.Publisher
 	}
 	if other.Remote != nil {
 		r.Remote = other.Remote
@@ -273,6 +304,14 @@ func (r *ReviewConfig) Validate() error {
 	default:
 		return errtrace.Wrap(fmt.Errorf("[review] provider = %q: must be auto, github, or gitlab", *r.Provider))
 	}
+	switch r.GetPublisher() {
+	case ReviewPublisherForge, ReviewPublisherGraphite:
+	default:
+		return errtrace.Wrap(fmt.Errorf("[review] publisher = %q: must be forge or graphite", *r.Publisher))
+	}
+	if r.GetPublisher() == ReviewPublisherGraphite && r.GetProvider() == ReviewProviderGitLab {
+		return errtrace.Wrap(fmt.Errorf("[review] publisher = \"graphite\" requires provider = \"github\" or \"auto\""))
+	}
 	switch r.GetAuth() {
 	case ReviewAuthCLI, ReviewAuthToken:
 	default:
@@ -286,13 +325,17 @@ func (r *ReviewConfig) Validate() error {
 	return nil
 }
 
-// Validate checks the jira config's ticket pattern compiles.
+// Validate checks the legacy [jira] config's ticket pattern compiles.
 func (j *JiraConfig) Validate() error {
+	return errtrace.Wrap(j.validateTable("jira"))
+}
+
+func (j *JiraConfig) validateTable(table string) error {
 	if j == nil {
 		return nil
 	}
 	if _, err := regexp.Compile(j.GetTicketPattern()); err != nil {
-		return errtrace.Wrap(fmt.Errorf("[jira] ticket_pattern %q: %w", j.GetTicketPattern(), err))
+		return errtrace.Wrap(fmt.Errorf("[%s] ticket_pattern %q: %w", table, j.GetTicketPattern(), err))
 	}
 	return nil
 }

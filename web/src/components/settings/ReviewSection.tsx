@@ -85,6 +85,12 @@ export function ReviewSection({
               )}
             </div>
           </Row>
+          <Row label="Publisher">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Select value={r.publisher ?? ''} onChange={(v) => set('publisher', v || null)} options={[['', 'Inherit'], ['forge', 'Hydra'], ['graphite', 'Graphite']]} />
+              <Hint>effective: {resolved?.publisher === 'graphite' ? 'Graphite' : 'Hydra'}</Hint>
+            </div>
+          </Row>
           <Row label="Remote">
             <div className="flex items-center gap-2 flex-wrap">
               <Text value={r.remote ?? ''} placeholder={resolved?.remote || 'origin'} onChange={(v) => set('remote', v || null)} className="w-40" />

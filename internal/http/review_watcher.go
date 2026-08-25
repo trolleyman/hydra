@@ -215,6 +215,17 @@ func (s *Server) handleRemoteMerge(ctx context.Context, projectRoot, headID stri
 	if ok, err := s.DB.TrySetHeadStatus(head.ID, "idle", "merging"); err != nil || !ok {
 		return
 	}
+	// Preserve Hydra's local stack edge when the parent PR lands remotely. This
+	// mirrors performClaimedMerge; Graphite/GitHub handle the remote retarget.
+	if head.Branch != nil {
+		if children, err := s.DB.AgentsByBaseBranch(projectRoot, *head.Branch); err == nil {
+			for _, child := range children {
+				if err := s.DB.ReparentAgent(child.ID, *head.Branch, target); err != nil {
+					log.Printf("warn: review watcher: reparent child %s: %v", child.ID, err)
+				}
+			}
+		}
+	}
 	s.stopHeadPreviews(projectRoot, head.ID)
 	if err := heads.KillHeadNoLock(ctx, s.Sessions, s.DB, *head, "merged"); err != nil {
 		log.Printf("warn: review watcher: teardown of remotely-merged head %s failed: %v", head.ID, err)

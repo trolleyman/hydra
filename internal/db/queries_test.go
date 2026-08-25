@@ -362,6 +362,24 @@ func TestUnarchiveAgent(t *testing.T) {
 	}
 }
 
+func TestReparentAgentUpdatesMatchingReviewTarget(t *testing.T) {
+	store := newTestStore(t)
+	child := &Agent{ID: "child", ProjectPath: "/tmp/proj", AgentType: "claude", BaseBranch: "hydra/parent", ReviewTargetBranch: "hydra/parent"}
+	if err := store.CreateAgent(child); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReparentAgent(child.ID, "hydra/parent", "main"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetAgent(child.ID)
+	if err != nil || got == nil {
+		t.Fatalf("GetAgent: (%+v, %v)", got, err)
+	}
+	if got.BaseBranch != "main" || got.ReviewTargetBranch != "main" {
+		t.Fatalf("reparented child = %+v", got)
+	}
+}
+
 func TestGetAgentAny(t *testing.T) {
 	store := newTestStore(t)
 
