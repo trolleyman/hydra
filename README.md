@@ -105,7 +105,9 @@ go build -tags hydra_desktop -o hydra-desktop ./cmd/hydra-desktop
 The separate build keeps the normal `hydra` CLI free of GTK/WebKit runtime
 dependencies. The project flag is optional; without it the app opens the global
 service in Hydra's built-in Chat project. `-url http://127.0.0.1:<port>` remains
-available for development.
+available for shell development. Ctrl+N opens another native window sharing the
+same WebKit profile and backend. External HTTP(S) links open in the system
+browser; cross-origin redirects and non-web schemes are blocked in the WebView.
 
 Install it as a systemd --user service, so it comes up on login and survives
 your terminal closing:

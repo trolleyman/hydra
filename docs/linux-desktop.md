@@ -355,6 +355,12 @@ behavior and the full shell comparison remain. The daemon's web endpoint is now
 a versioned JSON ownership record tied to the authoritative live daemon PID;
 stale records are ignored during startup, unsafe/non-loopback addresses and
 unknown record protocols are rejected, and shutdown removes the record.
+The GTK shell also supports repeated application activation and Ctrl+N as
+native multi-window actions against the same application/backend. WebKit policy
+keeps same-origin Hydra navigation embedded, opens clicked external HTTP(S)
+links with the system handler, and blocks cross-origin redirects and non-web
+schemes. Shared cookie/storage behavior and window-manager lifecycle still need
+native Wayland/X11 validation.
 
 ### Phase 2: add desktop window routes and lifecycle
 
