@@ -69,6 +69,12 @@ Resolving a thread is deliberately NOT here: resolution semantics differ between
 the forges and belong to the review UI proper. Hydra shows the resolved state and
 links out.
 
+The Changes toolbar carries a compact comment pager. Its position counts every
+top-level comment/thread in document order, including resolved ones, so resolving
+a finding never makes it unreachable from Previous/Next. The adjacent open count
+is status only; unread comments add a mark-read action. The control is UI chrome
+and is not text-selectable.
+
 ## Why agents can only reply locally
 
 An agent has no forge credentials by design (`~/.config/gh` is not in the

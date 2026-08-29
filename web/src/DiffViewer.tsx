@@ -4446,41 +4446,42 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   const [threads, setThreads] = useState<ReviewThread[]>([])
 
-  // Every OPEN comment on this diff, in document order (file order, then line),
-  // across both origins - a forge thread and a Hydra comment are the same thing
-  // to someone working through a review, and the numbering already says so.
-  // Resolved ones drop out, which is what makes resolving worth doing: the list
-  // shortens as you deal with it.
-  const openComments = useMemo(() => {
+  // Every top-level comment stop on this diff, in document order (file order,
+  // then line), across both origins. Navigation uses ALL stops: resolving a
+  // finding changes its status, not whether Previous/Next can reach it.
+  const commentStops = useMemo(() => {
     // `numbers` is everything arriving at this stop has you read: for a thread
     // that is the WHOLE conversation, not just its opening comment - you cannot
     // land on a thread and be shown only half of it, so marking only the anchor
     // would leave a dot lit on something you have plainly seen.
-    type Stop = { number: number; numbers: number[]; path: string; lineNum: number; isNew: boolean; unread: boolean }
+    type Stop = { number: number; numbers: number[]; path: string; lineNum: number; isNew: boolean; unread: boolean; resolved: boolean }
     const stops: Stop[] = []
     for (const c of reviewComments) {
-      if (!c.published || c.resolved || c.replyTo > 0) continue
+      if (!c.published || c.replyTo > 0) continue
       const replies = reviewComments.filter((r) => r.replyTo === c.number)
       stops.push({
         number: c.number,
         numbers: [c.number, ...replies.map((r) => r.number)],
         path: c.path, lineNum: c.lineNum, isNew: c.isNew,
         unread: !c.read || replies.some((r) => !r.read),
+        resolved: c.resolved,
       })
     }
     for (const t of threads) {
-      if (t.resolved) continue
       const numbers = t.notes.map((n) => n.number).filter((n): n is number => n != null)
       if (numbers.length === 0) continue
       stops.push({
         number: numbers[0], numbers, path: t.path, lineNum: t.line, isNew: true,
         unread: t.notes.some((n) => n.read === false),
+        resolved: !!t.resolved,
       })
     }
     const order = new Map((diff?.files ?? []).map((f, i) => [f.path, i]))
     stops.sort((a, b) => (order.get(a.path) ?? 1e9) - (order.get(b.path) ?? 1e9) || a.lineNum - b.lineNum)
     return stops
   }, [reviewComments, threads, diff])
+
+  const openComments = useMemo(() => commentStops.filter((c) => !c.resolved), [commentStops])
 
   // The comments the diff has no line for: their file is not among the changed
   // files of the current comparison (a path-less comment is here too - '' is
@@ -4572,29 +4573,33 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // How many of the open ones you have not seen. Separate from the open count
   // because they answer different questions - one is "how much is left", the
   // other "what arrived while I was elsewhere".
-  const unreadCount = useMemo(() => openComments.filter((c) => c.unread).length, [openComments])
+  const unreadCount = useMemo(() => commentStops.filter((c) => c.unread).length, [commentStops])
+  const commentPosition = useMemo(() => {
+    const index = commentStops.findIndex((c) => c.number === atComment)
+    return index < 0 ? null : index + 1
+  }, [commentStops, atComment])
 
   // Jump to one comment by number - what a permalink and a clicked date both do.
   // Held in a ref so the thread-actions memo below can call it without depending
   // on it (see openComment there).
   const openCommentRef = useRef<((number: number) => void) | null>(null)
 
-  // Step to the next/previous open comment, wrapping at the ends. Marks the one
+  // Step to the next/previous comment, wrapping at the ends. Marks the one
   // you land on as read: arriving at a comment is what "seen" means, and it is a
   // far better signal than a scroll position, which fires for anything that
   // happens to pass the viewport on the way somewhere else.
   const stepComment = useCallback((delta: 1 | -1) => {
-    if (openComments.length === 0) return
-    const at = openComments.findIndex((c) => c.number === atComment)
-    const next = openComments[(((at < 0 ? (delta > 0 ? -1 : 0) : at) + delta) % openComments.length + openComments.length) % openComments.length]
+    if (commentStops.length === 0) return
+    const at = commentStops.findIndex((c) => c.number === atComment)
+    const next = commentStops[(((at < 0 ? (delta > 0 ? -1 : 0) : at) + delta) % commentStops.length + commentStops.length) % commentStops.length]
     visit(next.number)
     if (next.unread) markRead(next.numbers)
     handleJumpToComment({ number: next.number, path: next.path, lineNum: next.lineNum, isNew: next.isNew })
-  }, [openComments, atComment, markRead, handleJumpToComment, visit])
+  }, [commentStops, atComment, markRead, handleJumpToComment, visit])
 
   useEffect(() => {
     openCommentRef.current = (number: number) => {
-      const target = openComments.find((c) => c.number === number)
+      const target = commentStops.find((c) => c.number === number)
         ?? reviewComments.find((c) => c.number === number)
       visit(number)
       markRead([number])
@@ -4605,7 +4610,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       addressComment(number)
       if (target) handleJumpToComment({ number, path: target.path, lineNum: target.lineNum, isNew: target.isNew })
     }
-  }, [openComments, reviewComments, markRead, handleJumpToComment, visit, addressComment])
+  }, [commentStops, reviewComments, markRead, handleJumpToComment, visit, addressComment])
 
   // The same jump, published for panes outside this component - the chat's review
   // comment cards link to a comment and land you on it without a navigation (see
@@ -4619,7 +4624,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => {
     if (!focusComment || !diff || jumpedToRef.current === focusComment) return
     const target = reviewComments.find((c) => c.number === focusComment)
-      ?? openComments.find((c) => c.number === focusComment)
+      ?? commentStops.find((c) => c.number === focusComment)
     if (!target) return
     jumpedToRef.current = focusComment
     // Legitimate effect: this fires once per permalink, and the state it sets is
@@ -4630,7 +4635,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     visit(focusComment)
     markRead([focusComment])
     handleJumpToComment({ number: focusComment, path: target.path, lineNum: target.lineNum, isNew: target.isNew })
-  }, [focusComment, diff, reviewComments, openComments, markRead, handleJumpToComment, visit])
+  }, [focusComment, diff, reviewComments, commentStops, markRead, handleJumpToComment, visit])
 
   // Forge review threads for this head's MR, fetched when the head is linked. The
   // fetch reads the forge live host-side (~a second), so it runs on mount and
@@ -5331,54 +5336,47 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         <div className="flex items-center gap-2 shrink-0">
           {/* "Submit review" - shown only once the user has queued at least one
               "Add to review" comment for this agent. */}
-          {/* Step through what is still open, in document order, across both
-              origins. The count is the point as much as the arrows: "4 open" is
-              the one number that says how much review is left, and it shrinks as
-              you resolve. The unread part is called out separately because "new
-              since I last looked" and "still to deal with" are different
-              questions. */}
-          {openComments.length > 0 && (
-            <div className="flex items-center gap-0.5 rounded-md border border-stone-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] px-1.5 py-0.5">
+          {/* Compact comment pager. Position/total answers where navigation will
+              go; the open count answers how much review remains. They are kept
+              separate because resolved comments stay navigable. */}
+          {commentStops.length > 0 && (
+            <div
+              className="flex h-6 items-center gap-0.5 rounded-md border border-stone-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] px-1 select-none"
+              aria-label={`${commentStops.length} comments, ${openComments.length} unresolved${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
+            >
               <MessageSquare className="w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500" />
-              <span className="optical-center text-2xs tabular-nums text-stone-500 dark:text-stone-400">
-                {/* "unresolved", not "open": the chip sits beside a count of
-                    unread ones, and two words that both mean "not dealt with in
-                    some sense" have to say WHICH sense. It is also the word the
-                    resolve control on every comment uses. */}
-                {openComments.length} unresolved
+              <span className="optical-center min-w-6 text-center text-3xs tabular-nums text-stone-500 dark:text-stone-400">
+                {commentPosition ?? '-'} / {commentStops.length}
+              </span>
+              <span className={`optical-center text-3xs tabular-nums ${openComments.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                {openComments.length} open
               </span>
               {unreadCount > 0 && (
-                <>
-                  <span className="optical-center text-2xs tabular-nums text-blue-600 dark:text-blue-400">
-                    · {unreadCount} unread
-                  </span>
-                  {/* For comments you have read in passing rather than by
-                      navigating to them. Nothing clears read state on its own, so
-                      without this the only way out of "3 unread" is to visit each. */}
-                  <Tooltip content="Mark every comment read" side="bottom">
-                    <button
-                      onClick={() => markRead(openComments.flatMap((c) => c.numbers))}
-                      aria-label="Mark every comment read"
-                      className="p-0.5 rounded text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
-                    >
-                      <MailOpen className="w-3 h-3" />
-                    </button>
-                  </Tooltip>
-                </>
+                <Tooltip content={`Mark ${unreadCount} unread comment${unreadCount === 1 ? '' : 's'} read`} side="bottom">
+                  <button
+                    onClick={() => markRead(commentStops.flatMap((c) => c.numbers))}
+                    aria-label="Mark every comment read"
+                    className="ml-0.5 p-0.5 rounded text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                  >
+                    <MailOpen className="w-3 h-3" />
+                    <span className="sr-only">{unreadCount} unread</span>
+                  </button>
+                </Tooltip>
               )}
-              <Tooltip content="Previous open comment" side="bottom">
+              <span className="mx-0.5 h-3 w-px bg-stone-200 dark:bg-white/10" />
+              <Tooltip content="Previous comment" side="bottom">
                 <button
                   onClick={() => stepComment(-1)}
-                  aria-label="Previous open comment"
-                  className="ml-0.5 p-0.5 rounded text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer"
+                  aria-label="Previous comment"
+                  className="p-0.5 rounded text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer"
                 >
                   <ArrowUp className="w-3 h-3" />
                 </button>
               </Tooltip>
-              <Tooltip content="Next open comment" side="bottom">
+              <Tooltip content="Next comment" side="bottom">
                 <button
                   onClick={() => stepComment(1)}
-                  aria-label="Next open comment"
+                  aria-label="Next comment"
                   className="p-0.5 rounded text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer"
                 >
                   <ArrowDown className="w-3 h-3" />
