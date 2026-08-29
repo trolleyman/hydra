@@ -43,6 +43,12 @@ Completed 2026-08-29:
 - Completed the initial block schema: level 1-3 headings, bullet/ordered/task
   lists, blockquotes, fenced code and hard breaks all share the same Markdown
   parser/serializer. Task item checked state has explicit round-trip coverage.
+- Added a production Settings -> Rich text lab tab on both Settings routes. It
+  synchronizes the new structured editor, the current `HighlightedTextarea` and
+  Hydra's current rendered chat Markdown through one canonical Markdown value.
+  It also exposes formatting controls and local attachment-node insertion. This
+  is the first production-bundle consumer, so `THIRD_PARTY_NOTICES.md` now
+  carries the Tiptap, ProseMirror and Marked MIT notices.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -566,6 +572,9 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
    belong to chat integration.
 5. **Block subset - DONE.** Headings 1-3, bullet/ordered/task lists,
    blockquotes, fenced code and hard breaks are registered and round-trip tested.
+5a. **Settings evaluation lab - DONE.** The structured editor, old composer and
+    rendered chat Markdown are live-synchronized for hands-on comparison without
+    saving or sending data.
 6. **Chat integration.** Preserve send, queue recall, shell mode, uploads, large
    paste, drafts, resizing/auto-grow, disabled states and focus return. Migrate
    old drafts without loss; keep a development flag until parity tests pass.
