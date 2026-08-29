@@ -160,7 +160,7 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 # strict_mcp = true
 
 ## allow this head to send attributed messages to other live heads in the same project. Discovery stays available when this is off. Off by default.
-# agent_messaging = false
+agent_messaging = true
 
 ## extra tool names to treat as safe (allowed without approval), extending the gate's built-in set. The gate fails closed on any tool it doesn't recognize (not a known built-in and no mcp__ prefix), parking it for approval; register a legitimate tool here to stop that. The default value below is the built-in set the gate already recognizes - add names to it, don't remove.
 # known_tools = ["Agent", "Artifact", "AskUserQuestion", "Bash", "BashOutput", "CronCreate", "CronDelete", "CronList", "DesignSync", "Edit", "EnterPlanMode", "EnterWorktree", "ExitPlanMode", "ExitWorktree", "Glob", "Grep", "KillBash", "KillShell", "LS", "LSP", "Monitor", "MultiEdit", "NotebookEdit", "NotebookRead", "PushNotification", "Read", "RemoteTrigger", "ReportFindings", "ScheduleWakeup", "SendMessage", "Skill", "SlashCommand", "Task", "TaskCreate", "TaskGet", "TaskList", "TaskOutput", "TaskStop", "TaskUpdate", "TodoWrite", "ToolSearch", "WebFetch", "WebSearch", "Workflow", "Write", "apply_patch", "create_goal", "exec", "exec_command", "followup_task", "get_goal", "interrupt_agent", "list_agents", "list_mcp_resource_templates", "list_mcp_resources", "read_mcp_resource", "request_plugin_install", "request_user_input", "send_message", "spawn_agent", "tool_search", "update_goal", "update_plan", "view_image", "wait", "wait_agent", "write_stdin"]
