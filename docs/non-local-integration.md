@@ -125,13 +125,12 @@ service acting as *each* reviewer - which contradicts its trust model.
 `performClaimedMerge`:
 
 1. Claim the head (`idle -> publishing`).
-2. Run the local test gate (same verdict logic as merge; `force` overrides).
-3. `git push <remote> hydra/<id>:refs/heads/<downstream>` - the LOCAL branch is
+2. `git push <remote> hydra/<id>:refs/heads/<downstream>` - the LOCAL branch is
    untouched, publish is a refspec push and nothing more.
-4. `EnsureMR` creates the MR/PR if none exists (idempotent, so re-publishing is
+3. `EnsureMR` creates the MR/PR if none exists (idempotent, so re-publishing is
    safe) and the link is stored on the head: `ReviewURL`, `ReviewID`,
    `ReviewProvider`, `ReviewTargetBranch`, `DownstreamBranch`.
-5. **Nothing is deleted.** Worktree, branch and session all survive - review
+4. **Nothing is deleted.** Worktree, branch and session all survive - review
    iteration is the normal case. The link is metadata.
 
 Each head owns a **`downstream_branch`**: the name its work is pushed AS (the
@@ -202,17 +201,15 @@ daemon's boot project's). Unlinked heads cost nothing. It:
   head keeps its MR in sync for the rest of its life. That is the point - the
   commit an agent makes *after* the MR opens is exactly the one that used to sit
   there. One flag covers both faces (`publish_when_green` on the row): before the
-  MR exists it opens a draft one, after it pushes, and the menu label follows
-  whichever the head is about to do ("Queue MR" -> "Push automatically"). It is
+  MR exists it opens a draft one, and after it pushes. Manual creation is always
+  immediate; the linked-head menu labels the arm "Push automatically". It is
   consumed only on failure, so a push that can never succeed (bad credentials, a
   protected branch) cannot retry every 30s forever. A linked armed head with
   nothing to push is a no-op: one local rev-list per tick, no network.
 
   **"when green" is the code's name for this, never the user's.** The UI says
-  "Queue MR" / "Push automatically" / "...once tests pass", matching how the
-  merge button has always spelled its own arm ("Queue merge", not
-  "merge-when-green"). Keep new strings on that side of the line: the config key
-  and the Go identifiers stay `publish_when_green`, the labels do not.
+  "Push automatically" / "...once tests pass" for linked reviews. The config key
+  and the Go identifiers stay `publish_when_green`; the labels do not expose it.
 
   `[review] publish_when_green` arms new heads at spawn (`SpawnHead`), which is
   what the Settings toggle has always claimed to do - before this it was read

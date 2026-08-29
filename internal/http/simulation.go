@@ -1201,7 +1201,7 @@ func simReviewLink(state, ci string, approvals, unresolved, ahead, behind int) *
 	}
 }
 
-func (s *SimulationServer) PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.PublishAgentParams) {
+func (s *SimulationServer) PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	resp := simAgentByID(id)
 	resp.DownstreamBranch = ptr("feat/published")
 	resp.Review = simReviewLink("draft", forge.CIPending, 0, 0, 0, 0)

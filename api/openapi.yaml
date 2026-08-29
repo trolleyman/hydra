@@ -810,9 +810,9 @@ paths:
       operationId: publishAgent
       description: >-
         Host-side, by the daemon, with the user's own credentials
-        (docs/non-local-integration.md). Claims the head (publishing), runs the
-        local test gate (like merge; force bypasses), pushes hydra/<id> to the
-        downstream branch on the remote, then creates the MR/PR if none exists.
+        (docs/non-local-integration.md). Claims the head (publishing), pushes
+        hydra/<id> to the downstream branch on the remote, then creates the
+        MR/PR if none exists.
         The local branch is untouched. Idempotent: re-publishing pushes again and
         the MR follows. Returns the updated agent with its review link.
       parameters:
@@ -824,11 +824,6 @@ paths:
           name: agent_id
           required: true
           schema: { type: string }
-        - in: query
-          name: force
-          required: false
-          schema: { type: boolean }
-          description: Bypass the local test gate (same semantics as merge's force).
       requestBody:
         required: false
         content:

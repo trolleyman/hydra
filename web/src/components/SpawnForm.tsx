@@ -33,6 +33,14 @@ import { fetchBranches, peekBranches } from '../lib/branchCache'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
+// Native desktop focused windows land on the ordinary project route for the
+// first implementation phase, but ask its composer to start in focused mode.
+// The query is only an initial default; the visible Workspace control remains
+// authoritative and the URL carries no session identity.
+function readDesktopFocusedDraft(): boolean {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new_focused') === '1'
+}
+
 // The base branch to start on before the branch list has loaded, from the shared
 // cache. Same rule the real load uses (HEAD, else the first branch), so the
 // seeded pick matches what the response would have chosen and nothing jumps.
@@ -237,11 +245,11 @@ export const SpawnForm = memo(function SpawnForm({
   // Chat mode: drive Claude or Codex via its structured protocol and
   // show a chat view instead of a terminal. Remembered like the agent/model;
   // defaults ON when the user has never touched the toggle (only 'false' opts out).
-  const [chatMode, setChatMode] = useState(readDefaultChatMode)
+  const [chatMode, setChatMode] = useState(() => readDesktopFocusedDraft() || readDefaultChatMode())
   // Focused sessions run directly in the project checkout instead of creating a
   // branch and worktree. Native desktop shells use the same spawn contract, and
   // full Hydra exposes it here so both surfaces create identical heads.
-  const [focused, setFocused] = useState(false)
+  const [focused, setFocused] = useState(readDesktopFocusedDraft)
   const [focusedFilesystemMode, setFocusedFilesystemMode] = useState(FocusedFilesystemMode.FocusedFilesystemEdit)
   const [focusedAllowCommits, setFocusedAllowCommits] = useState(false)
   // Per-head git-isolation override ('' = use the project's policy default, so the
@@ -335,6 +343,10 @@ export const SpawnForm = memo(function SpawnForm({
   useEffect(() => {
     if (gitIsolation === 'readonly' && !GIT_TOOL_AGENTS.includes(agentType)) setGitIsolation('')
   }, [agentType, gitIsolation])
+
+  useEffect(() => {
+    if (focused && agentType !== 'claude' && agentType !== 'codex') setFocused(false)
+  }, [agentType, focused])
 
   // Remember the chosen model per agent type so the next spawn of that agent
   // defaults to it (mirrors defaultAgentType).

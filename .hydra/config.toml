@@ -126,7 +126,7 @@ mode = "hard"
 ##       *.oaiusercontent.com
 ##     gemini: *.googleapis.com
 ##     copilot: *.githubcopilot.com
-allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.com", "browser-intake-us5-datadoghq.com", "fonts.googleapis.com", "fonts.gstatic.com", "aube.jdx.dev", "npm.jsr.io", "api.osv.dev", "git-scm.com"]
+allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.com", "browser-intake-us5-datadoghq.com", "fonts.googleapis.com", "fonts.gstatic.com", "aube.jdx.dev", "npm.jsr.io", "api.osv.dev", "git-scm.com", "dot.net", "builds.dotnet.microsoft.com", "download.visualstudio.microsoft.com"]
 
 ## outbound hosts (exact host or *.suffix) to deny even when otherwise allowed - overrides both allowed_hosts and the built-in defaults, so you can subtract a default host without redefining the list.
 # blocked_hosts = []

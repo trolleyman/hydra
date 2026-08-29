@@ -83,8 +83,14 @@ func runServer(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
+	cleanupDesktopReady, err := publishDesktopReady(tcpLn.Addr())
+	if err != nil {
+		_ = tcpLn.Close()
+		return errtrace.Wrap(err)
+	}
+	defer cleanupDesktopReady()
 	attachSelfUpdate(rt, tcpLn)
-	log.Printf("Server starting on http://%s", addr)
+	log.Printf("Server starting on http://%s", tcpLn.Addr())
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(tcpLn) }()

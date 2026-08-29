@@ -4688,12 +4688,6 @@ type PublishAgentJSONBody struct {
 	Title        *string `json:"title,omitempty"`
 }
 
-// PublishAgentParams defines parameters for PublishAgent.
-type PublishAgentParams struct {
-	// Force Bypass the local test gate (same semantics as merge's force).
-	Force *bool `form:"force,omitempty" json:"force,omitempty"`
-}
-
 // ArmPublishWhenGreenParams defines parameters for ArmPublishWhenGreen.
 type ArmPublishWhenGreenParams struct {
 	// AcknowledgeAdopted Acknowledges that this head is working on a PR Hydra did not create, so arming means auto-pushing into someone else's PR on every green commit. Required (true) to arm an adopted head; ignored for any other head. A read-only adopted PR (no maintainer edits) is refused even with it, since no push can succeed.
@@ -7228,7 +7222,7 @@ type ServerInterface interface {
 	StopAgentPreview(w http.ResponseWriter, r *http.Request, projectId string, agentId string, name string, params StopAgentPreviewParams)
 	// Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish)
-	PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params PublishAgentParams)
+	PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
 	PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
@@ -8462,19 +8456,8 @@ func (siw *ServerInterfaceWrapper) PublishAgent(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PublishAgentParams
-
-	// ------------- Optional query parameter "force" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "force", r.URL.Query(), &params.Force)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "force", Err: err})
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PublishAgent(w, r, projectId, agentId, params)
+		siw.Handler.PublishAgent(w, r, projectId, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11359,7 +11342,6 @@ func (response StopAgentPreview500JSONResponse) VisitStopAgentPreviewResponse(w 
 type PublishAgentRequestObject struct {
 	ProjectId string `json:"project_id"`
 	AgentId   string `json:"agent_id"`
-	Params    PublishAgentParams
 	Body      *PublishAgentJSONRequestBody
 }
 
@@ -14187,12 +14169,11 @@ func (sh *strictHandler) StopAgentPreview(w http.ResponseWriter, r *http.Request
 }
 
 // PublishAgent operation middleware
-func (sh *strictHandler) PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params PublishAgentParams) {
+func (sh *strictHandler) PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request PublishAgentRequestObject
 
 	request.ProjectId = projectId
 	request.AgentId = agentId
-	request.Params = params
 
 	var body PublishAgentJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

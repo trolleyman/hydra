@@ -80,6 +80,7 @@ function CIChip({ status }: { status?: string }) {
 function MRSyncChip({
   ahead,
   behind,
+  noun,
   readOnly,
   onPush,
   onPull,
@@ -87,6 +88,7 @@ function MRSyncChip({
 }: {
   ahead?: number
   behind?: number
+  noun: 'PR' | 'MR'
   readOnly?: boolean
   onPush?: () => void
   onPull?: () => void
@@ -100,7 +102,7 @@ function MRSyncChip({
 
   if (up === 0 && down === 0) {
     return (
-      <Tooltip content="In sync: this branch and the MR branch have the same commits">
+      <Tooltip content={`In sync: this branch and the ${noun} branch have the same commits`}>
         <Badge tone="faint">in sync</Badge>
       </Tooltip>
     )
@@ -108,8 +110,8 @@ function MRSyncChip({
   return (
     <>
       {down > 0 && (
-        <Tooltip content={`Pull ${down} commit${down === 1 ? '' : 's'} from the MR branch (merged into this head)`}>
-          <SyncChipButton onClick={onPull} disabled={disabled} label={`Pull ${down} from the MR branch`}>
+        <Tooltip content={`Pull ${down} commit${down === 1 ? '' : 's'} from the ${noun} branch (merged into this head)`}>
+          <SyncChipButton onClick={onPull} disabled={disabled} label={`Pull ${down} from the ${noun} branch`}>
             <Badge tone="yellow" icon={<ArrowDown className="w-3 h-3" />}>
               {down}
             </Badge>
@@ -120,11 +122,11 @@ function MRSyncChip({
         <Tooltip
           content={
             readOnly
-              ? `${up} commit${up === 1 ? '' : 's'} not on the MR branch - this PR is read-only, so they cannot be pushed`
-              : `Push ${up} commit${up === 1 ? '' : 's'} to the MR branch`
+              ? `${up} commit${up === 1 ? '' : 's'} not on the ${noun} branch - this PR is read-only, so they cannot be pushed`
+              : `Push ${up} commit${up === 1 ? '' : 's'} to the ${noun} branch`
           }
         >
-          <SyncChipButton onClick={readOnly ? undefined : onPush} disabled={disabled} label={`Push ${up} to the MR branch`}>
+          <SyncChipButton onClick={readOnly ? undefined : onPush} disabled={disabled} label={`Push ${up} to the ${noun} branch`}>
             <Badge tone={readOnly ? 'muted' : 'blue'} icon={<ArrowUp className="w-3 h-3" />}>
               {up}
             </Badge>
@@ -182,12 +184,13 @@ export function MRStateChip({
   const review = agent.review
   if (!review) return null
   const st = review.state
-  // The chip names the MR ("MR 41") - the state (open/draft/merged) is carried
+  const noun = review.provider === 'github' ? 'PR' : 'MR'
+  // The chip names the review ("PR 41" / "MR 41") - the state is carried
   // by the tone color and spelled out in the tooltip.
-  const label = review.id != null ? `MR ${review.id}` : 'MR'
+  const label = review.id != null ? `${noun} ${review.id}` : noun
   return (
     <span className="inline-flex items-center gap-1.5">
-      <Tooltip content={`Open ${review.provider} MR #${review.id}${st?.state ? ` (${st.state})` : ''}`}>
+      <Tooltip content={`Open ${review.provider} ${noun} #${review.id}${st?.state ? ` (${st.state})` : ''}`}>
         <a
           href={review.url}
           target="_blank"
@@ -217,6 +220,7 @@ export function MRStateChip({
       <MRSyncChip
         ahead={review.ahead}
         behind={review.behind}
+        noun={noun}
         readOnly={review.adopted === true && review.can_push === false}
         onPush={onPush}
         onPull={onPull}
