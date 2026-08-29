@@ -230,9 +230,9 @@ runtime paths, executable discovery, updates, and sandbox helper behavior.
   application menu and desktop actions where the environment exposes them.
 - Treat single-instance activation as a request delivered to the existing app,
   not as permission to start another backend.
-- Define a versioned `hydra://` deep-link grammar for project and conversation
-  identities. Reject unknown actions and never accept raw filesystem paths or
-  shell commands from a link.
+- Use the constrained [`hydra://` deep-link grammar](desktop-deep-links.md) for
+  project and conversation identities. Reject unknown actions and never accept
+  raw filesystem paths or shell commands from a link.
 - Restore window size and position conservatively. Do not restore a window
   entirely onto a disconnected display or assume client-side decorations.
 
@@ -388,8 +388,8 @@ making the filesystem-protected endpoint protocol platform-UI-specific.
   Focused Chat, and close requests. AppKit and WebView2 additionally consume
   active-project and active-turn lifecycle messages.
 - [x] Add native New Window/New Chat/Settings commands, project handoff, a
-  constrained `hydra://` deep-link grammar, and active-window close
-  confirmation.
+  constrained [`hydra://` deep-link grammar](desktop-deep-links.md), and
+  active-window close confirmation.
 - [x] Make Quit warn about active turns and explicitly leave the shared backend
   and agents running, regardless of which client originally launched it.
 - Keep browser-safe dialogs and navigation paths for every essential action.

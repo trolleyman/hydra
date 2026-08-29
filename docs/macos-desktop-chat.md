@@ -276,7 +276,8 @@ that tests the difficult parts with the existing production frontend:
 - native notification permission and click routing;
 - popup/context-menu behavior;
 - accessibility and text input, including IME;
-- app activation, deep links and menu commands;
+- app activation, the shared [`hydra://` grammar](desktop-deep-links.md), and
+  menu commands;
 - bundling and launching the Go service;
 - development against Vite without changing production routing.
 

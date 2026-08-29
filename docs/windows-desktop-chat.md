@@ -140,9 +140,10 @@ assuming a browser can use that socket directly.
 - If shell and backend are separate processes, an app update replaces neither
   while it is executing. Reuse Hydra's verified atomic update concepts, but add
   an explicit shell/backend version handshake and coordinated restart.
-- Register app activation for notification clicks and an internal deep-link
-  shape containing only stable project/head identifiers. Never put bootstrap
-  credentials in a URI or command line.
+- Register app activation for notification clicks and the shared
+  [`hydra://` deep-link grammar](desktop-deep-links.md), whose URLs contain only
+  stable project/head identifiers. Never put bootstrap credentials in a URI or
+  command line.
 
 ## Packaging and distribution
 

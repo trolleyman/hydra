@@ -110,6 +110,10 @@ mage buildDesktop
 mage runDesktop
 ```
 
+Installed desktop builds can be activated with constrained `hydra://` links;
+see [Desktop deep links](docs/desktop-deep-links.md) for the supported grammar,
+examples, platform status, and security rules.
+
 `buildDesktop` selects the current host. Release builders and platform-specific
 development can select explicitly with `mage buildDesktopLinux`,
 `mage buildDesktopMac`, or `mage buildDesktopWindows`; `mage buildDesktopAll`
