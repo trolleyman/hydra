@@ -5,11 +5,38 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trolleyman/hydra/internal/artifacts"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/reviewq"
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
+
+func TestArtifactFilesTextEmbedsPreviewsAndLinksOtherOutputs(t *testing.T) {
+	meta := artifacts.Meta{
+		Key: "commit/abc123",
+		Files: []artifacts.FileMeta{
+			{Name: "settings light.png"},
+			{Name: "trace.json"},
+			{Name: "demo.webm"},
+		},
+	}
+	got := artifactFilesText(meta, "my project", "screenshots")
+	for _, want := range []string{
+		"![settings light.png](/api/projects/my%20project/artifacts/screenshots/commit/abc123/files/settings%20light.png)",
+		"[trace.json](/api/projects/my%20project/artifacts/screenshots/commit/abc123/files/trace.json)",
+		"![demo.webm](/api/projects/my%20project/artifacts/screenshots/commit/abc123/files/demo.webm)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("artifactFilesText = %q, missing %q", got, want)
+		}
+	}
+
+	got = artifactFilesText(meta, "", "screenshots")
+	if !strings.Contains(got, "settings light.png") || strings.Contains(got, "](") {
+		t.Errorf("name-only fallback = %q", got)
+	}
+}
 
 // Like a refresh, a status request must ALWAYS be answered: the agent is blocked
 // mid tool-call polling for the result file, so an unanswered request costs it
