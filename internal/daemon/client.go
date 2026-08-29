@@ -181,6 +181,18 @@ func (c *Client) Status(ctx context.Context) (*api.StatusResponse, error) {
 	return &st, nil
 }
 
+// ListProjects returns every project registered with the user-global daemon.
+func (c *Client) ListProjects(ctx context.Context) ([]api.ProjectInfo, error) {
+	var projects []api.ProjectInfo
+	if err := c.do(ctx, http.MethodGet, "/api/projects", nil, &projects); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	return projects, nil
+}
+
+// SelectProjectID selects a known project for subsequent project-scoped calls.
+func (c *Client) SelectProjectID(projectID string) { c.ProjectID = projectID }
+
 // IssueDesktopBootstrap obtains a single-use web login credential through the
 // filesystem-protected control socket.
 func (c *Client) IssueDesktopBootstrap(ctx context.Context) (*DesktopBootstrap, error) {

@@ -90,6 +90,9 @@ func ResolveServer(ctx context.Context, rawURL, projectRoot string) (string, err
 				return "", errtrace.Wrap(fmt.Errorf("daemon published an unsafe web URL: %w", validateErr))
 			}
 			appURL.Fragment = "desktop-bootstrap=" + url.QueryEscape(bootstrap.Token)
+			if client.ProjectID != "" && client.ProjectID != chatProject.ID {
+				appURL.Path = "/project/" + url.PathEscape(client.ProjectID)
+			}
 			return appURL.String(), nil
 		} else if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, daemon.ErrStaleWebRecord) {
 			return "", errtrace.Wrap(fmt.Errorf("read daemon web listener: %w", err))

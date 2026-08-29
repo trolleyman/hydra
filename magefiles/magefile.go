@@ -600,17 +600,11 @@ func BuildDesktopWindows() error {
 		"-Runtime", targetRuntime, "-PortableGitDirectory", portableGit))
 }
 
-// BuildDesktopAll builds every native desktop application. Native UI toolchains
-// make this a release-orchestrator target: each platform-specific target must be
-// run on its matching builder, so a single ordinary host reports that limitation
-// instead of pretending to cross-build an untestable app bundle.
+// BuildDesktopAll is the common target for every leg of the desktop build matrix.
+// Native UI toolchains are host-only, so each Linux/macOS/Windows runner builds
+// and validates its own artifact rather than cross-compiling the other two.
 func BuildDesktopAll() error {
-	for _, build := range []func() error{BuildDesktopLinux, BuildDesktopMac, BuildDesktopWindows} {
-		if err := build(); err != nil {
-			return errtrace.Wrap(err)
-		}
-	}
-	return nil
+	return errtrace.Wrap(BuildDesktop())
 }
 
 // RunDesktop builds and runs the native desktop application for the host

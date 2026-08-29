@@ -35,6 +35,9 @@ func desktopDaemonEnv() []string {
 }
 
 func ensureRunning(ctx context.Context, projectRoot string, extraEnv []string) error {
+	if err := RefuseLegacyDaemons(ctx); err != nil {
+		return errtrace.Wrap(err)
+	}
 	sock, err := SocketPath(projectRoot)
 	if err != nil {
 		return errtrace.Wrap(err)

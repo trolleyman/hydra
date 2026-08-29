@@ -253,14 +253,21 @@ model or duplicate the permission/commit implementation.
 This can run before the native Windows head backend exists and is the cheapest
 way to reject an unsuitable shell.
 
-Status: an app-launched protocol-2 backend now includes a one-minute,
+Status: an app-launched protocol-3 backend now includes a one-minute,
 single-use auth bootstrap credential in its private atomic readiness record.
 The first WebView2 window places it only in the URL fragment and redeems it for
 the persistent profile's ordinary HttpOnly cookie. App-launched backends require
 this authentication for all TCP clients even when deploy configuration has no
-key; an ephemeral secret is generated in memory for that backend lifetime. Both new and reused servers
-must now advertise the same desktop protocol in their live status response; an
-absent or mismatched value is rejected before a window opens. The shell now
+key; an ephemeral secret is generated in memory for that backend lifetime.
+Protocol 3 carries version, build, project, and protocol compatibility metadata
+in the trusted control-socket or private ready-file response. The shell does not
+query protected `/api/status` over TCP before WebView2 redeems its credential.
+Navigation compares the complete scheme/host/effective-port origin, keeping any
+other loopback service out of the privileged native message bridge; only
+external HTTP(S) links are handed to the system browser. The selected project ID
+is part of the trusted connection record, and quit-time running-session checks
+go through the control channel instead of a separate unauthenticated HTTP
+client. The shell now
 invokes the shared bundled `__desktop-connect` contract first and no longer
 probes a fixed TCP port. On Windows that command deliberately reports the
 still-unimplemented native daemon transport, so the shell falls back to its

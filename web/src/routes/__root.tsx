@@ -929,7 +929,11 @@ function RootLayout() {
             value={selectedAgentId ?? ''}
             onChange={(event) => {
               const agentId = event.target.value
-              if (!agentId || !currentProjectId) return
+              if (!currentProjectId) return
+              if (!agentId) {
+                navigate({ to: '/focused/$projectId', params: { projectId: currentProjectId } })
+                return
+              }
               navigate({
                 to: '/project/$projectId/agent/$agentId',
                 params: { projectId: currentProjectId, agentId },

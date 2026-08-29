@@ -46,16 +46,37 @@ var desktopConnectCmd = &cobra.Command{
 		if err != nil {
 			return errtrace.Wrap(err)
 		}
+		status, err := client.Status(ctx)
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		if status.DesktopProtocol == nil || *status.DesktopProtocol != desktopcontract.Protocol {
+			got := 0
+			if status.DesktopProtocol != nil {
+				got = *status.DesktopProtocol
+			}
+			return errtrace.Wrap(fmt.Errorf("desktop backend protocol %d is incompatible with shell protocol %d", got, desktopcontract.Protocol))
+		}
 		return errtrace.Wrap(json.NewEncoder(os.Stdout).Encode(struct {
-			Protocol       int    `json:"protocol"`
-			URL            string `json:"url"`
-			BootstrapToken string `json:"bootstrap_token"`
-			ExpiresAt      string `json:"expires_at"`
+			Protocol        int     `json:"protocol"`
+			URL             string  `json:"url"`
+			BootstrapToken  string  `json:"bootstrap_token"`
+			ExpiresAt       string  `json:"expires_at"`
+			Version         *string `json:"version"`
+			ProjectRoot     *string `json:"project_root"`
+			DefaultProject  *string `json:"default_project_id"`
+			BuildID         *string `json:"build_id"`
+			SelectedProject string  `json:"selected_project_id"`
 		}{
-			Protocol:       desktopcontract.Protocol,
-			URL:            webURL,
-			BootstrapToken: bootstrap.Token,
-			ExpiresAt:      time.Now().Add(time.Duration(bootstrap.ExpiresInSeconds) * time.Second).UTC().Format(time.RFC3339),
+			Protocol:        desktopcontract.Protocol,
+			URL:             webURL,
+			BootstrapToken:  bootstrap.Token,
+			ExpiresAt:       time.Now().Add(time.Duration(bootstrap.ExpiresInSeconds) * time.Second).UTC().Format(time.RFC3339),
+			Version:         status.Version,
+			ProjectRoot:     status.ProjectRoot,
+			DefaultProject:  status.DefaultProjectId,
+			BuildID:         status.BuildId,
+			SelectedProject: client.ProjectID,
 		}))
 	},
 }

@@ -11,10 +11,23 @@ protocol HydraWindowControllerDelegate: AnyObject {
     func desktopWindowActivatedProject(_ projectID: String)
 }
 
+private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var delegate: WKScriptMessageHandler?
+
+    init(delegate: WKScriptMessageHandler) {
+        self.delegate = delegate
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        delegate?.userContentController(userContentController, didReceive: message)
+    }
+}
+
 final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKScriptMessageHandler {
     private let baseURL: URL
     private let webView: WKWebView
     private weak var desktopDelegate: HydraWindowControllerDelegate?
+    private var messageHandler: WeakScriptMessageHandler?
     private(set) var activeTurn = false
 
     init(kind: HydraWindowKind, baseURL: URL, defaultProjectID: String?, bootstrapToken: String?, configuration: WKWebViewConfiguration, desktopDelegate: HydraWindowControllerDelegate) {
@@ -33,7 +46,9 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
         window.tabbingMode = .preferred
         window.contentView = webView
         super.init(window: window)
-        configuration.userContentController.add(self, name: "hydra")
+        let messageHandler = WeakScriptMessageHandler(delegate: self)
+        self.messageHandler = messageHandler
+        configuration.userContentController.add(messageHandler, name: "hydra")
         webView.navigationDelegate = self
         webView.allowsMagnification = true
 
@@ -57,6 +72,12 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
 
     deinit {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "hydra")
+    }
+
+    func prepareForClose() {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "hydra")
+        messageHandler = nil
+        webView.navigationDelegate = nil
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -83,13 +104,30 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
         webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('hydra-desktop-command',{detail:{type:'stop-and-close'}}))")
     }
 
+    private func effectivePort(_ url: URL) -> Int? {
+        if let port = url.port { return port }
+        switch url.scheme?.lowercased() {
+        case "http": return 80
+        case "https": return 443
+        default: return nil
+        }
+    }
+
+    private func isHydraOrigin(_ url: URL) -> Bool {
+        url.scheme?.caseInsensitiveCompare(baseURL.scheme ?? "") == .orderedSame &&
+            url.host?.caseInsensitiveCompare(baseURL.host ?? "") == .orderedSame &&
+            effectivePort(url) == effectivePort(baseURL)
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else {
             decisionHandler(.cancel)
             return
         }
-        if navigationAction.navigationType == .linkActivated, url.host != baseURL.host {
-            NSWorkspace.shared.open(url)
+        if !isHydraOrigin(url) {
+            if url.scheme?.lowercased() == "http" || url.scheme?.lowercased() == "https" {
+                NSWorkspace.shared.open(url)
+            }
             decisionHandler(.cancel)
             return
         }

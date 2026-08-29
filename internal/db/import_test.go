@@ -75,7 +75,7 @@ func TestImportLegacyPreservesRecordsAndSource(t *testing.T) {
 	}
 }
 
-func TestImportLegacyRejectsConflictingAgentID(t *testing.T) {
+func TestImportLegacyQualifiesCrossProjectAgentID(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	rootA := seedLegacyAgent(t, "same-id", "First")
 	rootB := seedLegacyAgent(t, "same-id", "Different")
@@ -88,20 +88,60 @@ func TestImportLegacyRejectsConflictingAgentID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer global.Close()
-	if err := global.ImportLegacy([]string{rootA, rootB}); err == nil {
-		t.Fatal("conflicting import succeeded")
+	if err := global.ImportLegacy([]string{rootA, rootB}); err != nil {
+		t.Fatalf("ImportLegacy: %v", err)
 	}
-	var agents int64
-	if err := global.db.Unscoped().Model(&Agent{}).Count(&agents).Error; err != nil {
+	if err := global.ImportLegacy([]string{rootA, rootB}); err != nil {
+		t.Fatalf("idempotent ImportLegacy: %v", err)
+	}
+	var agents []Agent
+	if err := global.db.Unscoped().Find(&agents).Error; err != nil {
 		t.Fatal(err)
 	}
-	if agents != 0 {
-		t.Fatalf("agents = %d after rolled-back migration, want 0", agents)
+	if len(agents) != 2 {
+		t.Fatalf("agents = %#v, want both project-local records", agents)
+	}
+	byProject := make(map[string]Agent, len(agents))
+	for _, agent := range agents {
+		byProject[agent.ProjectPath] = agent
+	}
+	if agent := byProject[rootA]; agent.ID != "same-id" {
+		t.Fatalf("first agent = %#v", agent)
+	}
+	wantQualified := collisionImportID("same-id", rootB)
+	if agent := byProject[rootB]; agent.ID != wantQualified {
+		t.Fatalf("second agent = %#v, want ID %q in %q", agent, wantQualified, rootB)
 	}
 	var markers int64
 	global.db.Model(&LegacyImport{}).Count(&markers)
-	if markers != 0 {
-		t.Fatalf("markers = %d after rolled-back migration, want 0", markers)
+	if markers != 2 {
+		t.Fatalf("markers = %d, want 2", markers)
+	}
+}
+
+func TestImportLegacyProjectImportsNewlyRegisteredProject(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	root := seedLegacyAgent(t, "late-agent", "Registered later")
+	globalPath, _ := GlobalPath()
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	global, err := openPath(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer global.Close()
+	global.importLegacyOnAdd = true
+
+	if err := global.ImportLegacyProject(root); err != nil {
+		t.Fatalf("ImportLegacyProject: %v", err)
+	}
+	var agent Agent
+	if err := global.db.First(&agent, "id = ?", "late-agent").Error; err != nil {
+		t.Fatalf("find imported agent: %v", err)
+	}
+	if agent.ProjectPath != root {
+		t.Fatalf("ProjectPath = %q, want %q", agent.ProjectPath, root)
 	}
 }
 

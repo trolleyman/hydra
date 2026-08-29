@@ -21,12 +21,20 @@ private struct ReadyRecord: Decodable {
     let url: URL
     let pid: Int
     let bootstrapToken: String
+    let version: String?
+    let projectRoot: String?
+    let defaultProjectId: String?
+    let buildId: String?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case url
         case pid
         case bootstrapToken = "bootstrap_token"
+        case version
+        case projectRoot = "project_root"
+        case defaultProjectId = "default_project_id"
+        case buildId = "build_id"
     }
 }
 
@@ -34,12 +42,26 @@ private struct DesktopConnectRecord: Decodable {
     let protocolVersion: Int
     let url: URL
     let bootstrapToken: String
+    let version: String?
+    let projectRoot: String?
+    let defaultProjectId: String?
+    let buildId: String?
+    let selectedProjectId: String?
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case url
         case bootstrapToken = "bootstrap_token"
+        case version
+        case projectRoot = "project_root"
+        case defaultProjectId = "default_project_id"
+        case buildId = "build_id"
+        case selectedProjectId = "selected_project_id"
     }
+}
+
+private struct DesktopActiveRecord: Decodable {
+    let active: Bool
 }
 
 enum BackendError: LocalizedError {
@@ -47,9 +69,8 @@ enum BackendError: LocalizedError {
     case launchFailed(String)
     case readinessTimedOut(String)
     case incompatibleProtocol(Int)
-    case incompatibleVersion(String)
-    case serverRefused(Int)
     case invalidResponse
+    case desktopConnectUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -61,19 +82,16 @@ enum BackendError: LocalizedError {
             return "The Hydra backend did not become ready. See \(logPath)."
         case .incompatibleProtocol(let version):
             return "The bundled backend uses unsupported desktop protocol \(version)."
-        case .incompatibleVersion(let version):
-            return "A Hydra server is already running, but version \(version) is incompatible with this app."
-        case .serverRefused(let status):
-            return "A server is already running on Hydra's default address but refused the app (HTTP \(status)). Stop it or adjust its local authentication settings."
         case .invalidResponse:
             return "The Hydra backend returned an invalid status response."
+        case .desktopConnectUnavailable:
+            return "The bundled backend predates shared desktop connection support."
         }
     }
 }
 
 final class BackendController {
-    static let supportedDesktopProtocol = 2
-    static let supportedServerVersion = "0.1.0"
+    static let supportedDesktopProtocol = 3
 
     private(set) var baseURL: URL?
     private(set) var status: BackendStatus?
@@ -83,6 +101,7 @@ final class BackendController {
     private var process: Process?
     private var logHandle: FileHandle?
     private var readyFile: URL?
+    private var selectedProjectRoot: URL?
 
     func takeBootstrapToken() -> String? {
         defer { bootstrapToken = nil }
@@ -96,14 +115,17 @@ final class BackendController {
                 completion(.failure(BackendError.launchFailed("no project was selected")))
                 return
             }
+            self.selectedProjectRoot = selectedRoot
             self.connectThroughBundledCLI(projectRoot: selectedRoot) { result in
                 switch result {
                 case .success:
                     completion(result)
-                case .failure:
+                case .failure(.desktopConnectUnavailable):
                     // Development bundles predating the shared control command
                     // still use the private ready-file launch path.
                     self.launchBundledBackend(projectRoot: selectedRoot, completion: completion)
+                case .failure(let error):
+                    completion(.failure(error))
                 }
             }
         }
@@ -117,32 +139,41 @@ final class BackendController {
             return
         }
         let output = Pipe()
+        let errors = Pipe()
         let process = Process()
         process.executableURL = binary
         process.arguments = ["__desktop-connect", "--project", projectRoot.path]
         process.standardOutput = output
-        process.standardError = Pipe()
+        process.standardError = errors
         process.terminationHandler = { [weak self] task in
             guard let self else { return }
             let data = output.fileHandleForReading.readDataToEndOfFile()
-            guard task.terminationStatus == 0,
+            if task.terminationStatus != 0 {
+                let detail = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let error: BackendError = detail.contains("unknown command") && detail.contains("__desktop-connect")
+                    ? .desktopConnectUnavailable
+                    : .launchFailed(detail.trimmingCharacters(in: .whitespacesAndNewlines))
+                DispatchQueue.main.async { completion(.failure(error)) }
+                return
+            }
+            guard
                   let record = try? JSONDecoder().decode(DesktopConnectRecord.self, from: data),
                   record.protocolVersion == Self.supportedDesktopProtocol,
                   record.url.host == "127.0.0.1" || record.url.host == "localhost" || record.url.host == "::1" else {
                 DispatchQueue.main.async { completion(.failure(BackendError.invalidResponse)) }
                 return
             }
-            self.fetchStatus(at: record.url) { result in
-                switch result {
-                case .success(let status):
-                    self.baseURL = record.url
-                    self.status = status
-                    self.bootstrapToken = record.bootstrapToken
-                    DispatchQueue.main.async { completion(.success(status)) }
-                case .failure(let error):
-                    DispatchQueue.main.async { completion(.failure(error)) }
-                }
-            }
+            let status = BackendStatus(
+                version: record.version,
+                projectRoot: record.projectRoot,
+                defaultProjectId: record.selectedProjectId ?? record.defaultProjectId,
+                desktopProtocol: record.protocolVersion,
+                buildId: record.buildId
+            )
+            self.baseURL = record.url
+            self.status = status
+            self.bootstrapToken = record.bootstrapToken
+            DispatchQueue.main.async { completion(.success(status)) }
         }
         do {
             try process.run()
@@ -164,38 +195,31 @@ final class BackendController {
     }
 
     func hasActiveSessions(completion: @escaping (Bool) -> Void) {
-        guard let baseURL else {
+        guard let projectRoot = selectedProjectRoot else {
             completion(false)
             return
         }
-        fetchJSON(path: "/api/projects", at: baseURL) { (projects: Result<[[String: JSONValue]], Error>) in
-            guard case .success(let values) = projects else {
-                completion(true)
-                return
-            }
-            let ids = values.compactMap { $0["id"]?.string }
-            if ids.isEmpty {
-                completion(false)
-                return
-            }
-            let group = DispatchGroup()
-            let lock = NSLock()
-            var active = false
-            for id in ids {
-                group.enter()
-                let escaped = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
-                self.fetchJSON(path: "/api/projects/\(escaped)/agents", at: baseURL) { (agents: Result<[[String: JSONValue]], Error>) in
-                    defer { group.leave() }
-                    guard case .success(let rows) = agents else {
-                        lock.lock(); active = true; lock.unlock()
-                        return
-                    }
-                    if rows.contains(where: { $0["session_status"]?.string == "running" }) {
-                        lock.lock(); active = true; lock.unlock()
-                    }
-                }
-            }
-            group.notify(queue: .main) { completion(active) }
+        let binary = ProcessInfo.processInfo.environment["HYDRA_DESKTOP_BACKEND"].map(URL.init(fileURLWithPath:))
+            ?? Bundle.main.resourceURL?.appendingPathComponent("HydraBackend")
+        guard let binary else {
+            completion(true)
+            return
+        }
+        let output = Pipe()
+        let process = Process()
+        process.executableURL = binary
+        process.arguments = ["__desktop-active", "--project", projectRoot.path]
+        process.standardOutput = output
+        process.standardError = Pipe()
+        process.terminationHandler = { task in
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            let record = try? JSONDecoder().decode(DesktopActiveRecord.self, from: data)
+            DispatchQueue.main.async { completion(task.terminationStatus == 0 ? record?.active ?? true : true) }
+        }
+        do {
+            try process.run()
+        } catch {
+            completion(true)
         }
     }
 
@@ -265,23 +289,17 @@ final class BackendController {
                         DispatchQueue.main.async { completion(.failure(BackendError.invalidResponse)) }
                         return
                     }
-                    self.fetchStatus(at: record.url) { result in
-                        switch result {
-                        case .success(let status):
-                            guard status.version == Self.supportedServerVersion else {
-                                DispatchQueue.main.async {
-                                    completion(.failure(BackendError.incompatibleVersion(status.version ?? "unknown")))
-                                }
-                                return
-                            }
-                            self.baseURL = record.url
-                            self.status = status
-                            self.bootstrapToken = record.bootstrapToken
-                            DispatchQueue.main.async { completion(.success(status)) }
-                        case .failure(let error):
-                            DispatchQueue.main.async { completion(.failure(error)) }
-                        }
-                    }
+                    let status = BackendStatus(
+                        version: record.version,
+                        projectRoot: record.projectRoot,
+                        defaultProjectId: record.defaultProjectId,
+                        desktopProtocol: record.protocolVersion,
+                        buildId: record.buildId
+                    )
+                    self.baseURL = record.url
+                    self.status = status
+                    self.bootstrapToken = record.bootstrapToken
+                    DispatchQueue.main.async { completion(.success(status)) }
                     return
                 }
                 if self.process?.isRunning == false { break }
@@ -289,49 +307,6 @@ final class BackendController {
             }
             DispatchQueue.main.async { completion(.failure(BackendError.readinessTimedOut(logFile.path))) }
         }
-    }
-
-    private func fetchStatus(at baseURL: URL, completion: @escaping (Result<BackendStatus, Error>) -> Void) {
-        fetchJSON(path: "/api/status", at: baseURL) { (result: Result<BackendStatus, Error>) in
-            switch result {
-            case .success(let status) where status.desktopProtocol != Self.supportedDesktopProtocol:
-                completion(.failure(BackendError.incompatibleProtocol(status.desktopProtocol ?? 0)))
-            default:
-                completion(result)
-            }
-        }
-    }
-
-    private func fetchJSON<T: Decodable>(path: String, at baseURL: URL, completion: @escaping (Result<T, Error>) -> Void) {
-        guard let url = URL(string: path, relativeTo: baseURL) else {
-            completion(.failure(BackendError.invalidResponse))
-            return
-        }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 1.5
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error {
-                completion(.failure(error))
-                return
-            }
-            guard let response = response as? HTTPURLResponse else {
-                completion(.failure(BackendError.invalidResponse))
-                return
-            }
-            guard response.statusCode == 200 else {
-                completion(.failure(BackendError.serverRefused(response.statusCode)))
-                return
-            }
-            guard let data else {
-                completion(.failure(BackendError.invalidResponse))
-                return
-            }
-            do {
-                completion(.success(try JSONDecoder().decode(T.self, from: data)))
-            } catch {
-                completion(.failure(error))
-            }
-        }.resume()
     }
 
     private func applicationSupportDirectory() throws -> URL {
@@ -345,29 +320,6 @@ final class BackendController {
     }
 }
 
-private enum JSONValue: Decodable {
-    case string(String)
-    case bool(Bool)
-    case number(Double)
-    case object([String: JSONValue])
-    case array([JSONValue])
-    case null
-
-    var string: String? {
-        if case .string(let value) = self { return value }
-        return nil
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if container.decodeNil() { self = .null }
-        else if let value = try? container.decode(String.self) { self = .string(value) }
-        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
-        else if let value = try? container.decode(Double.self) { self = .number(value) }
-        else if let value = try? container.decode([String: JSONValue].self) { self = .object(value) }
-        else { self = .array(try container.decode([JSONValue].self)) }
-    }
-}
 
 extension Notification.Name {
     static let hydraBackendExited = Notification.Name("HydraBackendExited")

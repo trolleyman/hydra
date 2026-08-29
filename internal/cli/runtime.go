@@ -32,6 +32,8 @@ import (
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
 
+const desktopAuthKeyEnv = "HYDRA_DESKTOP_AUTH_KEY"
+
 // runtime bundles the long-lived server state shared by `hydra server` and the
 // `hydra __daemon` process: the session registry, DB, HTTP handler, and the
 // background pollers (already started).
@@ -507,10 +509,17 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		// unrelated browsers and loopback applications must not inherit desktop
 		// access merely because they run on the same machine.
 		deployCfg.RequireLocalAuth = true
-		if deployCfg.AuthKey == "" {
+		if inherited := os.Getenv(desktopAuthKeyEnv); inherited != "" {
+			deployCfg.AuthKey = inherited
+		} else if deployCfg.AuthKey == "" {
 			deployCfg.AuthKey, err = config.GenerateAuthKey()
 			if err != nil {
 				return nil, errtrace.Wrap(fmt.Errorf("generate desktop daemon auth key: %w", err))
+			}
+			// Self-update re-execs this process with its environment intact. Preserve
+			// the ephemeral key so existing webview cookies remain authenticated.
+			if err := os.Setenv(desktopAuthKeyEnv, deployCfg.AuthKey); err != nil {
+				return nil, errtrace.Wrap(fmt.Errorf("preserve desktop daemon auth key: %w", err))
 			}
 		}
 	}
@@ -562,6 +571,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 // records the daemon pid/stamp, and serves the socket in the background.
 // Returns a cleanup function to run on shutdown.
 func serveUnixSocket(ctx context.Context, srv *http.Server, projectRoot string) (func(), error) {
+	if err := daemon.RefuseLegacyDaemons(ctx); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	if err := daemon.StopDaemon(ctx, projectRoot); err != nil {
 		return nil, errtrace.Wrap(err)
 	}

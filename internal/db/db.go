@@ -24,8 +24,9 @@ import (
 // Read methods in queries.go run against `read`; everything that mutates (incl.
 // AutoMigrate and the boot backfills) runs against `db`.
 type Store struct {
-	db   *gorm.DB // writer: a single serialised connection
-	read *gorm.DB // readers: a pool of query-only connections
+	db                *gorm.DB // writer: a single serialised connection
+	read              *gorm.DB // readers: a pool of query-only connections
+	importLegacyOnAdd bool     // global production DB only; explicit dev DBs stay isolated
 }
 
 // maxReadConns caps the read pool. Reads here are sub-millisecond, so a handful
@@ -95,6 +96,7 @@ func OpenGlobal(legacyProjectRoot string) (*Store, error) {
 	if os.Getenv(pathEnvironment) != "" {
 		return store, nil
 	}
+	store.importLegacyOnAdd = true
 
 	roots := []string{legacyProjectRoot}
 	if manager, managerErr := projects.NewManager(); managerErr == nil {

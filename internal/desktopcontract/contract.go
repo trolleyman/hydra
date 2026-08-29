@@ -4,4 +4,4 @@ package desktopcontract
 
 // Protocol changes whenever a shell/backend pairing would otherwise appear to
 // connect successfully but cannot safely perform its startup contract.
-const Protocol = 2
+const Protocol = 3

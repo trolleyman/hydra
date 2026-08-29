@@ -246,7 +246,19 @@ What remains, because each does a genuinely different job:
   Windows packaging takes its required PortableGit directory from
   `HYDRA_PORTABLE_GIT`. `mage buildDesktopLinux`, `buildDesktopMac`, and
   `buildDesktopWindows` select a platform explicitly; `buildDesktopAll` is the
-  release-matrix entry point and requires matching native platform builders.
+  shared release-matrix leg target, building the native artifact for whichever
+  OS each Linux/macOS/Windows runner provides.
+  When upgrading from the former per-project daemon layout, startup detects any
+  live hashed legacy control socket and refuses to create the user-global daemon
+  beside it. Stop the older process first; stale legacy socket files are removed
+  automatically. This prevents two daemon versions from managing the same heads
+  or migrating and writing the same state concurrently.
+  The production global database import also qualifies colliding project-local
+  head IDs deterministically, and a newly registered legacy project is imported
+  before it is exposed through the API. Explicit development databases never
+  perform that production migration. Desktop-owned ephemeral authentication is
+  carried in the process environment across an in-app re-exec, so an existing
+  webview cookie remains valid after an update.
 - `mage devFast` - Vite HMR in front of the Go API. Hot-module-replacement is
   faster than any rebuild loop and is a different mechanism, not a duplicate.
 - `mage demo` - simulation mode. `runSimulationServer` (`internal/cli/server.go`)

@@ -419,13 +419,24 @@ single-use auth bootstrap credential in their private atomic readiness record;
 the first WKWebView redeems it for the shared HttpOnly cookie without exposing
 the persistent auth key. App-launched backends require this authentication for
 all TCP clients even when deploy configuration has no key; an ephemeral secret
-is generated in memory for that backend lifetime. Both new and reused servers must now advertise the
-same desktop protocol in their live status response; an absent or mismatched
-value is rejected before any window opens. The bundled CLI now performs daemon
+is generated in memory for that backend lifetime. Protocol 3 carries version,
+build, project, and protocol compatibility metadata in the trusted control-socket
+or private ready-file response. AppKit does not query protected `/api/status`
+over TCP before the webview redeems its credential. The bundled CLI now performs daemon
 reuse and startup through the shared control socket, reads the versioned,
 PID-bound endpoint record, and returns a fresh bootstrap credential to AppKit;
-the fixed-port probe is gone. Older development bundles retain the private
-ready-file launch as a compatibility fallback. The build is ad-hoc signed rather than unsigned so the
+the fixed-port probe is gone. It also returns the selected project ID, so the
+first focused window opens the folder chosen by the user rather than the
+daemon's boot project. Older development bundles retain the private ready-file
+launch only when the bundled CLI does not recognise `__desktop-connect`;
+connection, authentication, and compatibility failures are surfaced without
+starting a competing backend. Quit-time running-session checks use the trusted
+control socket rather than an unauthenticated native HTTP client. Native navigation compares the
+complete scheme/host/effective-port origin; every other HTTP(S) origin opens in
+the system browser and non-web origins are blocked from the privileged webview.
+The WebKit script bridge uses a weak proxy and is removed during window close,
+so a closed window does not remain retained by its user-content controller.
+The build is ad-hoc signed rather than unsigned so the
 bundle is internally consistent. WebSocket, text-input, accessibility,
 notification, and lifecycle acceptance still require the development Mac.
 

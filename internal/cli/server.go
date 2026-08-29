@@ -89,7 +89,7 @@ func runServer(_ *cobra.Command, _ []string) error {
 		_ = tcpLn.Close()
 		return errtrace.Wrap(fmt.Errorf("desktop auth bootstrap: %w", err))
 	}
-	cleanupDesktopReady, err := publishDesktopReady(tcpLn.Addr(), bootstrapToken)
+	cleanupDesktopReady, err := publishDesktopReady(tcpLn.Addr(), bootstrapToken, rt.server.ProjectRoot, rt.server.DefaultProject.ID)
 	if err != nil {
 		_ = tcpLn.Close()
 		return errtrace.Wrap(err)

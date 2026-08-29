@@ -107,11 +107,13 @@ const AgentModelPicker = memo(function AgentModelPicker({
   model,
   onChange,
   size = 'md',
+  agents = AGENT_TYPES,
 }: {
   agent: AgentTypeOption
   model: string
   onChange: (agent: AgentTypeOption, model: string) => void
   size?: 'sm' | 'md'
+  agents?: typeof AGENT_TYPES
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -191,7 +193,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           style={{ position: 'fixed', left: coords.left, top: coords.top }}
           className="w-44 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
         >
-          {AGENT_TYPES.map((a, i) => (
+          {agents.map((a, i) => (
             <div key={a.id}>
               {i > 0 && <div className="my-1 border-t border-gray-100 dark:border-gray-700" />}
               <div className="flex items-center gap-2 px-3 py-1 text-2xs font-semibold text-gray-500 dark:text-gray-400">
@@ -239,7 +241,10 @@ export const SpawnForm = memo(function SpawnForm({
   disabled?: boolean
   focusedOnly?: boolean
 }) {
-  const [agentType, setAgentType] = useState<AgentTypeOption>(readDefaultAgentType)
+  const [agentType, setAgentType] = useState<AgentTypeOption>(() => {
+    const remembered = readDefaultAgentType()
+    return focusedOnly && remembered !== 'claude' && remembered !== 'codex' ? 'claude' : remembered
+  })
   // Model alias for the CLI's --model flag ('' = the CLI's own default). Seeded
   // from the remembered map for the initial agent type; the picker sets agent +
   // model together, and the effect below persists the pick per agent type.
@@ -347,8 +352,13 @@ export const SpawnForm = memo(function SpawnForm({
   }, [agentType, gitIsolation])
 
   useEffect(() => {
-    if (focused && agentType !== 'claude' && agentType !== 'codex') setFocused(false)
-  }, [agentType, focused])
+    if (focusedOnly && agentType !== 'claude' && agentType !== 'codex') {
+      setAgentType('claude')
+      setModel(readModelMap().claude ?? '')
+    } else if (focused && agentType !== 'claude' && agentType !== 'codex') {
+      setFocused(false)
+    }
+  }, [agentType, focused, focusedOnly])
 
   // Remember the chosen model per agent type so the next spawn of that agent
   // defaults to it (mirrors defaultAgentType).
@@ -831,6 +841,7 @@ export const SpawnForm = memo(function SpawnForm({
       // at the right size from its first paint instead of the 80x24 default (its
       // narrow-wrapped scrollback can't be re-flowed once a wide client attaches).
       const geom = spawnGeometry()
+      const focusedSession = focusedOnly || focused
       const req: SpawnAgentRequest = {
         prompt: finalPrompt,
         agent_type: agentType,
@@ -840,17 +851,17 @@ export const SpawnForm = memo(function SpawnForm({
         // Structured chat is available for Claude and Codex; send the choice
         // explicitly so turning the toggle off wins over the server-side
         // default-on, and a remembered value never leaks into another agent type.
-        ...(agentType === 'claude' || agentType === 'codex' ? { chat_mode: focused || chatMode } : {}),
-        ...(focused ? {
+        ...(agentType === 'claude' || agentType === 'codex' ? { chat_mode: focusedSession || chatMode } : {}),
+        ...(focusedSession ? {
           focused: true,
           filesystem_mode: focusedFilesystemMode,
           allow_commits: focusedAllowCommits,
         } : {}),
         // Adopting a PR takes precedence over (and ignores) the base branch: the
         // server bases the head on the PR head and its target branch.
-        ...(!focused && (adopt ? { adopt_mr: { id: adopt.id } } : baseBranch ? { base_branch: baseBranch } : {})),
+        ...(!focusedSession && (adopt ? { adopt_mr: { id: adopt.id } } : baseBranch ? { base_branch: baseBranch } : {})),
         // Omit git_isolation when '' so the server applies the project policy default.
-        ...(!focused && gitIsolation ? { git_isolation: gitIsolation } : {}),
+        ...(!focusedSession && gitIsolation ? { git_isolation: gitIsolation } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
         rows: geom.rows,
       }
@@ -934,7 +945,7 @@ export const SpawnForm = memo(function SpawnForm({
     setBaseBranch(defaultBranch)
     setChatMode(true)
     setGitIsolation('')
-    setFocused(false)
+    setFocused(focusedOnly)
     setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemEdit)
     setFocusedAllowCommits(false)
   }
@@ -995,14 +1006,14 @@ export const SpawnForm = memo(function SpawnForm({
         {canFocus && (
           <>
             <SettingsGroupLabel className="mb-1.5">Workspace</SettingsGroupLabel>
-            <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
+            {!focusedOnly && <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
               <button type="button" aria-pressed={!focused} onClick={() => setFocused(false)} className={modeSegment(!focused)}>
                 branch
               </button>
               <button type="button" aria-pressed={focused} onClick={() => { setFocused(true); setChatMode(true); setAdopt(null) }} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(focused)}`}>
                 focused
               </button>
-            </div>
+            </div>}
             {focused && (
               <div className="mt-2 space-y-2">
                 <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
@@ -1190,7 +1201,7 @@ export const SpawnForm = memo(function SpawnForm({
                     <Paperclip className="w-3 h-3" />
                   </button>
                 </Tooltip>
-                <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" />
+                <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" agents={focusedOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
               </div>
               {renderSpawnSettings()}
               <button
@@ -1269,7 +1280,7 @@ export const SpawnForm = memo(function SpawnForm({
                     </button>
                   </Tooltip>
                   {/* Agent + model picker (icon trigger + grouped dropdown) */}
-                  <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} />
+                  <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} agents={focusedOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
                   {renderSpawnSettings()}
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">

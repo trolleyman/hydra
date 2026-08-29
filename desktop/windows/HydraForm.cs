@@ -18,6 +18,11 @@ internal sealed class HydraForm : Form
     private bool allowClose;
     private bool activeTurn;
 
+    private static bool IsSameOrigin(Uri left, Uri right) =>
+        left.Scheme.Equals(right.Scheme, StringComparison.OrdinalIgnoreCase) &&
+        left.Host.Equals(right.Host, StringComparison.OrdinalIgnoreCase) &&
+        left.Port == right.Port;
+
     internal HydraForm(
         HydraWindowKind kind,
         BackendController backend,
@@ -50,8 +55,12 @@ internal sealed class HydraForm : Form
             await webView.EnsureCoreWebView2Async(webViewEnvironment);
             webView.CoreWebView2.NavigationStarting += (_, args) =>
             {
-                if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var target) ||
-                    target.Host.Equals(backend.BaseUrl!.Host, StringComparison.OrdinalIgnoreCase))
+                if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var target))
+                {
+                    args.Cancel = true;
+                    return;
+                }
+                if (IsSameOrigin(target, backend.BaseUrl!))
                 {
                     return;
                 }
@@ -64,7 +73,7 @@ internal sealed class HydraForm : Form
             webView.CoreWebView2.NewWindowRequested += (_, args) =>
             {
                 if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var target) &&
-                    !target.Host.Equals(backend.BaseUrl!.Host, StringComparison.OrdinalIgnoreCase) &&
+                    !IsSameOrigin(target, backend.BaseUrl!) &&
                     target.Scheme is "http" or "https")
                 {
                     Process.Start(new ProcessStartInfo(target.AbsoluteUri) { UseShellExecute = true });
