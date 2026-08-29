@@ -1,6 +1,7 @@
 import { Editor, markInputRule, type JSONContent } from '@tiptap/core'
 import { Italic, starInputRegex } from '@tiptap/extension-italic'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
+import { TableKit } from '@tiptap/extension-table'
 import { Markdown, MarkdownManager } from '@tiptap/markdown'
 import StarterKit from '@tiptap/starter-kit'
 import { Attachment } from './Attachment'
@@ -26,6 +27,7 @@ export const richEditorExtensions = [
   ConservativeItalic,
   TaskList,
   TaskItem.configure({ nested: true }),
+  TableKit.configure({ table: { resizable: false } }),
   Attachment,
   InlineCode,
   InlineCodeEditing,

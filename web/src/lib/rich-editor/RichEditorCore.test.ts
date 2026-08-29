@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseRichMarkdown, serializeRichMarkdown } from './RichEditorCore'
+import { createRichEditor, parseRichMarkdown, serializeRichMarkdown } from './RichEditorCore'
 import { serializeInlineCode } from './InlineCode'
 
 function roundTrip(markdown: string): string {
@@ -28,6 +28,43 @@ describe('rich editor Markdown interchange', () => {
       ],
     })
     expect(serializeRichMarkdown(document)).toBe(markdown)
+  })
+
+  it('round trips GFM tables with header cells and alignment', () => {
+    const markdown = '| Name | Value |\n| :--- | ---: |\n| alpha | 1 |\n| beta | 2 |'
+    const document = parseRichMarkdown(markdown)
+    expect(document.content?.[0]).toMatchObject({
+      type: 'table',
+      content: [
+        {
+          type: 'tableRow',
+          content: [
+            { type: 'tableHeader', attrs: { align: 'left' } },
+            { type: 'tableHeader', attrs: { align: 'right' } },
+          ],
+        },
+        { type: 'tableRow', content: [{ type: 'tableCell' }, { type: 'tableCell' }] },
+        { type: 'tableRow', content: [{ type: 'tableCell' }, { type: 'tableCell' }] },
+      ],
+    })
+    const serialized = serializeRichMarkdown(document)
+    // TableKit canonicalizes column widths; the semantic Markdown boundary is
+    // stable even though rich edits are not byte-for-byte source preserving.
+    expect(serialized).toContain('| Name  | Value |')
+    expect(serialized).toContain('| :----- | -----: |')
+    expect(roundTrip(serialized)).toBe(serialized)
+  })
+
+  it('inserts and reshapes a table through editor commands', () => {
+    const editor = createRichEditor()
+    expect(editor.commands.insertTable({ rows: 2, cols: 2, withHeaderRow: true })).toBe(true)
+    expect(editor.commands.addRowAfter()).toBe(true)
+    expect(editor.commands.addColumnAfter()).toBe(true)
+    const table = editor.getJSON().content?.[0]
+    expect(table?.type).toBe('table')
+    expect(table?.content).toHaveLength(3)
+    expect(table?.content?.every((row) => row.content?.length === 3)).toBe(true)
+    editor.destroy()
   })
 
   it('represents inline code as a content-bearing node', () => {

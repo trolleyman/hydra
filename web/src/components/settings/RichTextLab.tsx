@@ -1,6 +1,6 @@
 import { EditorContent, useEditor } from '@tiptap/react'
 import { useRef, useState } from 'react'
-import { Bold, Braces, CodeXml, Heading1, Heading2, ImagePlus, Italic, List, ListChecks, Quote, Redo2, Strikethrough, Undo2 } from 'lucide-react'
+import { Bold, Braces, CodeXml, Columns3, Heading1, Heading2, ImagePlus, Italic, List, ListChecks, Plus, Quote, Redo2, Rows3, Strikethrough, Table2, Trash2, Undo2 } from 'lucide-react'
 import type { Editor } from '@tiptap/core'
 import { insertAttachment, type AttachmentKind } from '../../lib/rich-editor/Attachment'
 import { inlineCodeCommands } from '../../lib/rich-editor/InlineCode'
@@ -21,7 +21,12 @@ Try **bold**, *italic*, ~~strike~~, links, lists and the unusual \`inline code\`
 - [ ] Try a task
 - [x] Keep Markdown as the interchange format
 
-> The editor and the preview below use the same document schema.`
+> The editor and the preview below use the same document schema.
+
+| Surface | Format |
+| :--- | ---: |
+| Editor | Structured |
+| Boundary | Markdown |`
 
 const CODE_LANGUAGES = [
   ['', 'Plain text'],
@@ -158,6 +163,17 @@ export function RichTextLab() {
             </label>
             <span className="mx-1 h-5 w-px bg-gray-200 dark:bg-white/10" />
             <ToolbarButton label="Insert files" onClick={() => fileInput.current?.click()}><ImagePlus className="h-4 w-4" /></ToolbarButton>
+            <span className="mx-1 h-5 w-px bg-gray-200 dark:bg-white/10" />
+            <ToolbarButton label="Insert table" active={editor.isActive('table')} onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table2 className="h-4 w-4" /></ToolbarButton>
+            {editor.isActive('table') && (
+              <>
+                <ToolbarButton label="Add row below" onClick={() => editor.chain().focus().addRowAfter().run()}><Rows3 className="h-4 w-4" /><Plus className="-ml-1 h-2.5 w-2.5" /></ToolbarButton>
+                <ToolbarButton label="Add column right" onClick={() => editor.chain().focus().addColumnAfter().run()}><Columns3 className="h-4 w-4" /><Plus className="-ml-1 h-2.5 w-2.5" /></ToolbarButton>
+                <ToolbarButton label="Delete row" onClick={() => editor.chain().focus().deleteRow().run()}><Rows3 className="h-4 w-4" /><Trash2 className="-ml-1 h-2.5 w-2.5" /></ToolbarButton>
+                <ToolbarButton label="Delete column" onClick={() => editor.chain().focus().deleteColumn().run()}><Columns3 className="h-4 w-4" /><Trash2 className="-ml-1 h-2.5 w-2.5" /></ToolbarButton>
+                <ToolbarButton label="Delete table" onClick={() => editor.chain().focus().deleteTable().run()}><Trash2 className="h-4 w-4" /></ToolbarButton>
+              </>
+            )}
             <input
               ref={fileInput}
               type="file"
@@ -172,7 +188,7 @@ export function RichTextLab() {
           <EditorContent editor={editor} />
         </div>
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-          Try arrows at both edges of inline code, Backspace/Delete at its boundaries, Ctrl/Cmd+B, typing <code className="font-mono">*italic*</code>, three backticks for a code block, and inserting a local file.
+          Try arrows at both edges of inline code, Backspace/Delete at its boundaries, Ctrl/Cmd+B, typing <code className="font-mono">*italic*</code>, three backticks for a code block, table row/column controls, and inserting a local file.
         </p>
       </SettingSection>
 

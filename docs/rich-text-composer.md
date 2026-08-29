@@ -56,6 +56,10 @@ Completed 2026-08-29:
 - Made a third consecutive backtick upgrade the empty inline capsule into a
   fenced code block. The lab exposes the block's language attribute through a
   selector, keeping language choice in the structured document and Markdown.
+- Added open-source TableKit support with GFM Markdown parsing/serialization,
+  an insert action, contextual row/column/delete controls and an overflow-safe
+  editable table surface in the Settings lab. The lazy lab chunk is now 196.6 KB
+  gzip, up 15.1 KB from the pre-table build.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -144,6 +148,7 @@ Start with this schema:
 | Task list | list item attribute | `- [ ] item` |
 | Blockquote | block node | `> text` |
 | Code block | block node with language | fenced code |
+| Table | table/row/header/cell nodes | GFM pipe table |
 | Hard break | inline node | Markdown hard break |
 | Text | text node | literal text |
 | Bold | mark | `**text**` |
@@ -153,9 +158,15 @@ Start with this schema:
 | Inline code | editable inline node initially | variable backtick run |
 | Attachment | atomic inline node | host-defined reference |
 
-Do not initially support tables, footnotes, arbitrary HTML, text colours,
+Do not initially support footnotes, arbitrary HTML, text colours,
 underlines, font selection, alignment, subscript, superscript or embedded remote
 content. They add document-editor surface without improving most prompts.
+
+Math remains a follow-up. Tiptap's open-source Mathematics extension is viable,
+but its `$$inline$$` / `$$$block$$$` input syntax differs from the usual Markdown
+`$inline$` / `$$block$$` boundary. Hydra should only add it alongside explicit
+parse/serialize adapters and rendered-message support, not as an editor-only
+format that changes meaning after send.
 
 ### Markdown is interchange, not live state
 
