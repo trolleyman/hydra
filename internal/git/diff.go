@@ -21,6 +21,8 @@ type CommitInfo struct {
 	AuthorName  string
 	AuthorEmail string
 	Timestamp   string
+	Additions   int
+	Deletions   int
 	// Parents holds the full SHAs of this commit's parents. A commit with two or
 	// more parents is a merge; callers use this to collapse a merge (which drags
 	// in every commit from the merged-in branch) into a single summary entry.
@@ -163,7 +165,58 @@ func logCommits(dir string, args ...string) []CommitInfo {
 			commits = append(commits, c)
 		}
 	}
+	applyCommitStats(commits, logCommitStats(dir, args...))
 	return commits
+}
+
+// logCommitStats repeats the same traversal with no commit message in its
+// format, leaving an unambiguous hash followed by git's tab-delimited numstat.
+// It is one git process for the whole list, not one diff per commit.
+// --diff-merges=first-parent affects only how merge diffs are calculated; unlike
+// --first-parent it does not remove merged-in commits from a full traversal.
+func logCommitStats(dir string, args ...string) map[string][2]int {
+	statArgs := append(append([]string{"log"}, args...), "--diff-merges=first-parent", "--format=%x1e%H", "--numstat")
+	out, err := gitOutput(dir, statArgs...)
+	if err != nil {
+		return nil
+	}
+	return parseCommitStats(out)
+}
+
+func parseCommitStats(out string) map[string][2]int {
+	stats := make(map[string][2]int)
+	for _, record := range strings.Split(out, "\x1e") {
+		lines := strings.Split(strings.TrimSpace(record), "\n")
+		if len(lines) == 0 {
+			continue
+		}
+		sha := strings.TrimSpace(lines[0])
+		if sha == "" {
+			continue
+		}
+		var additions, deletions int
+		for _, line := range lines[1:] {
+			fields := strings.SplitN(line, "\t", 3)
+			if len(fields) < 3 { // binary files report "-\t-" and add no lines
+				continue
+			}
+			added, addErr := strconv.Atoi(fields[0])
+			deleted, deleteErr := strconv.Atoi(fields[1])
+			if addErr == nil && deleteErr == nil {
+				additions += added
+				deletions += deleted
+			}
+		}
+		stats[sha] = [2]int{additions, deletions}
+	}
+	return stats
+}
+
+func applyCommitStats(commits []CommitInfo, stats map[string][2]int) {
+	for i := range commits {
+		commits[i].Additions = stats[commits[i].SHA][0]
+		commits[i].Deletions = stats[commits[i].SHA][1]
+	}
 }
 
 // ListCommits returns commits reachable from headBranch but not baseBranch, newest
@@ -196,6 +249,9 @@ func GetCommitInfo(projectRoot, ref string) (*CommitInfo, error) {
 	if !ok {
 		return nil, errtrace.Wrap(fmt.Errorf("unexpected git show output"))
 	}
+	statsOut, _ := gitOutput(projectRoot, "show", "--first-parent", "--format=%x1e%H", "--numstat", ref)
+	stats := parseCommitStats(statsOut)[c.SHA]
+	c.Additions, c.Deletions = stats[0], stats[1]
 	return &c, nil
 }
 

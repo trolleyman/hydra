@@ -1970,6 +1970,8 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
 				Timestamp:   "2026-07-09T18:05:30Z",
+				Additions:   49,
+				Deletions:   9,
 			},
 			{
 				Sha:         "cafebabe0123456789abcdef0123456789abcdef",
@@ -1979,6 +1981,8 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
 				Timestamp:   "2026-07-09T18:01:30Z",
+				Additions:   34,
+				Deletions:   6,
 			},
 		}
 		api.WriteJSON(w, http.StatusOK, resp)

@@ -83,6 +83,16 @@ func TestListFirstParentCommitsCollapsesMerge(t *testing.T) {
 	if len(merge.Parents) != 2 {
 		t.Fatalf("merge commit should have 2 parents, got %d", len(merge.Parents))
 	}
+	if merge.Additions != 1 || merge.Deletions != 0 {
+		t.Fatalf("merge stats = +%d -%d, want +1 -0 against its first parent", merge.Additions, merge.Deletions)
+	}
+	info, err := GetCommitInfo(dir, merge.SHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Additions != merge.Additions || info.Deletions != merge.Deletions {
+		t.Fatalf("single commit stats = +%d -%d, list reported +%d -%d", info.Additions, info.Deletions, merge.Additions, merge.Deletions)
+	}
 
 	// The commits the merge dragged in = second parent's history not on the first.
 	merged, err := ListCommits(dir, merge.Parents[0], merge.Parents[1])
@@ -91,6 +101,11 @@ func TestListFirstParentCommitsCollapsesMerge(t *testing.T) {
 	}
 	if len(merged) != 3 {
 		t.Fatalf("expected 3 merged-in commits, got %d: %v", len(merged), subjects(merged))
+	}
+	for _, commit := range merged {
+		if commit.Additions+commit.Deletions == 0 {
+			t.Fatalf("full traversal omitted stats for merged-in commit %q", commit.Subject)
+		}
 	}
 
 	if len(full) < len(firstParent) {

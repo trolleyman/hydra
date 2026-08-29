@@ -582,6 +582,7 @@ func (w *worker) reconcileCommits(id, causalItemID, mergedRef string) {
 				commit.Head, commit.Sha, commit.ShortSha = newHead, c.SHA, c.ShortSHA
 				commit.Subject, commit.AuthorName = c.Subject, c.AuthorName
 				commit.AuthorEmail, commit.Timestamp = c.AuthorEmail, c.Timestamp
+				commit.Additions, commit.Deletions = c.Additions, c.Deletions
 				commit.CausalItemId = causalItemID
 				w.annotateMerge(&c, &commit, "")
 				if _, _, err := w.store.AppendSource("git:commit:"+c.SHA, commit); err != nil {
@@ -629,6 +630,7 @@ func cappedMergedCommits(merged []git.CommitInfo) []api.ChatMergedCommit {
 		list = append(list, api.ChatMergedCommit{
 			Sha: m.SHA, ShortSha: m.ShortSHA, Subject: m.Subject,
 			AuthorName: m.AuthorName, Timestamp: m.Timestamp,
+			Additions: m.Additions, Deletions: m.Deletions,
 		})
 	}
 	return list
@@ -673,6 +675,7 @@ func (w *worker) appendAbsorbedBase(id, oldHead, newHead, mergedRef string) bool
 	commit.Head, commit.Sha, commit.ShortSha = newHead, c.SHA, c.ShortSHA
 	commit.Subject, commit.AuthorName = c.Subject, c.AuthorName
 	commit.AuthorEmail, commit.Timestamp = c.AuthorEmail, c.Timestamp
+	commit.Additions, commit.Deletions = c.Additions, c.Deletions
 	commit.IsMerge, commit.MergedRef = true, ref
 	commit.MergedCount, commit.MergedCommits = len(merged), cappedMergedCommits(merged)
 	if _, _, err := w.store.AppendSource("git:commit:"+newHead, commit); err != nil {
