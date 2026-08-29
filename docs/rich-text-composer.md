@@ -49,12 +49,19 @@ Completed 2026-08-29:
   It also exposes formatting controls and local attachment-node insertion. This
   is the first production-bundle consumer, so `THIRD_PARTY_NOTICES.md` now
   carries the Tiptap, ProseMirror and Marked MIT notices.
+- Refined inline-code presentation from a whole-capsule active outline to a
+  quiet edge-caret indicator. Empty capsules now occupy only a compact typing
+  slot, and the regular E2E runner explicitly excludes the fixture that requires
+  the dedicated rich-editor server.
+- Made a third consecutive backtick upgrade the empty inline capsule into a
+  fenced code block. The lab exposes the block's language attribute through a
+  selector, keeping language choice in the structured document and Markdown.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
 Left/Right grapheme step. It also maps the inside-start DOM caret to the node's
 left outer edge (and the outside-after caret to its right inner edge) even though
-ProseMirror's logical positions remain distinct. An active-node decoration makes
+ProseMirror's logical positions remain distinct. An edge-only decoration makes
 inside/outside visible without inserting zero-width sentinel characters. Pair
 insertion also needs an explicit history boundary so undo clears typed content
 before removing the empty capsule.

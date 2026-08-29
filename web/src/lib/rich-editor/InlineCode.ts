@@ -122,6 +122,27 @@ function backtick(editor: Editor): boolean {
     editor.view.dispatch(setCaret(state.tr, selection.$from.after(depth)))
     return true
   }
+  // Three consecutive backticks should become the block construct people
+  // expect. After the first key inserts an empty capsule and the second exits
+  // it, the third arrives immediately after that empty node. Only upgrade when
+  // it is the paragraph's sole content, so prose followed by an empty inline
+  // capsule keeps ordinary inline-code semantics.
+  const { $from } = selection
+  const before = $from.nodeBefore
+  if (selection.empty
+    && before?.type.name === INLINE_CODE_NAME
+    && before.content.size === 0
+    && $from.parent.type.name === 'paragraph'
+    && $from.parent.childCount === 1) {
+    const codeBlock = state.schema.nodes.codeBlock
+    if (codeBlock) {
+      const paragraphDepth = $from.depth
+      const from = $from.before(paragraphDepth)
+      const tr = state.tr.replaceWith(from, $from.after(paragraphDepth), codeBlock.create())
+      editor.view.dispatch(setCaret(tr, from + 1))
+      return true
+    }
+  }
   return insertInlineCode(editor, { from: selection.from, to: selection.to })
 }
 
@@ -223,6 +244,19 @@ export const InlineCodeEditing = Extension.create({
     return [
       new Plugin({
         props: {
+          handleTextInput(view, _from, _to, text) {
+            const { state } = view
+            if (!state.selection.empty || inlineCodeDepth(state) >= 0) return false
+            const { $from } = state.selection
+            // Chrome can paint an outside selection at the adjacent code DOM
+            // edge, then report typed input as if it belonged inside the node.
+            // The ProseMirror selection is authoritative: explicitly insert at
+            // that logical outside position on either boundary.
+            if ($from.nodeBefore?.type.name !== INLINE_CODE_NAME
+              && $from.nodeAfter?.type.name !== INLINE_CODE_NAME) return false
+            view.dispatch(state.tr.insertText(text, state.selection.from).scrollIntoView())
+            return true
+          },
           handleKeyDown(_view, event) {
             // A composition key is an IME protocol message, not punctuation or
             // navigation the editor may reinterpret. Leave every such event to
@@ -271,8 +305,17 @@ export const InlineCodeEditing = Extension.create({
             const depth = inlineCodeDepth(state)
             if (depth < 0) return DecorationSet.empty
             const { $from } = state.selection
+            const offset = $from.parentOffset
+            const edge = offset === 0
+              ? 'start'
+              : offset === $from.parent.content.size
+                ? 'end'
+                : undefined
             return DecorationSet.create(state.doc, [
-              Decoration.node($from.before(depth), $from.after(depth), { 'data-inline-code-active': 'true' }),
+              Decoration.node($from.before(depth), $from.after(depth), {
+                'data-inline-code-active': 'true',
+                ...(edge ? { 'data-inline-code-caret': edge } : {}),
+              }),
             ])
           },
         },

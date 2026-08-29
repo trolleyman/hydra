@@ -94,6 +94,19 @@ describe('inline-code insertion and exit', () => {
     expect(editor.getJSON()).toEqual(paragraph(code('foo')))
     expect(editor.state.selection.from).toBe(6)
   })
+
+  it('upgrades three backticks in an empty paragraph to a code block', () => {
+    const editor = make(paragraph())
+    select(editor, 1)
+    expect(inlineCodeCommands.backtick(editor)).toBe(true)
+    expect(inlineCodeCommands.backtick(editor)).toBe(true)
+    expect(inlineCodeCommands.backtick(editor)).toBe(true)
+    expect(editor.getJSON()).toEqual({
+      type: 'doc',
+      content: [{ type: 'codeBlock', attrs: { language: null } }],
+    })
+    expect(editor.state.selection.$from.parent.type.name).toBe('codeBlock')
+  })
 })
 
 describe('inline-code deletion', () => {

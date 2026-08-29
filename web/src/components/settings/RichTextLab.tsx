@@ -23,6 +23,20 @@ Try **bold**, *italic*, ~~strike~~, links, lists and the unusual \`inline code\`
 
 > The editor and the preview below use the same document schema.`
 
+const CODE_LANGUAGES = [
+  ['', 'Plain text'],
+  ['bash', 'Bash'],
+  ['css', 'CSS'],
+  ['go', 'Go'],
+  ['html', 'HTML'],
+  ['javascript', 'JavaScript'],
+  ['json', 'JSON'],
+  ['markdown', 'Markdown'],
+  ['python', 'Python'],
+  ['sql', 'SQL'],
+  ['typescript', 'TypeScript'],
+] as const
+
 function markdown(editor: Editor): string {
   return serializeRichMarkdown(editor.getJSON())
 }
@@ -130,6 +144,18 @@ export function RichTextLab() {
             <ToolbarButton label="Task list" active={editor.isActive('taskList')} onClick={() => editor.chain().focus().toggleTaskList().run()}><ListChecks className="h-4 w-4" /></ToolbarButton>
             <ToolbarButton label="Blockquote" active={editor.isActive('blockquote')} onClick={() => editor.chain().focus().toggleBlockquote().run()}><Quote className="h-4 w-4" /></ToolbarButton>
             <ToolbarButton label="Code block" active={editor.isActive('codeBlock')} onClick={() => editor.chain().focus().toggleCodeBlock().run()}><CodeXml className="h-4 w-4" /></ToolbarButton>
+            <label className="ml-1">
+              <span className="sr-only">Code block language</span>
+              <select
+                aria-label="Code block language"
+                disabled={!editor.isActive('codeBlock')}
+                value={editor.isActive('codeBlock') ? String(editor.getAttributes('codeBlock').language ?? '') : ''}
+                onChange={(event) => editor.chain().focus().updateAttributes('codeBlock', { language: event.target.value || null }).run()}
+                className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:bg-gray-900 dark:text-gray-300"
+              >
+                {CODE_LANGUAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
             <span className="mx-1 h-5 w-px bg-gray-200 dark:bg-white/10" />
             <ToolbarButton label="Insert files" onClick={() => fileInput.current?.click()}><ImagePlus className="h-4 w-4" /></ToolbarButton>
             <input
@@ -146,7 +172,7 @@ export function RichTextLab() {
           <EditorContent editor={editor} />
         </div>
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-          Try arrows at both edges of inline code, Backspace/Delete at its boundaries, Ctrl/Cmd+B, typing <code className="font-mono">*italic*</code>, and inserting a local file.
+          Try arrows at both edges of inline code, Backspace/Delete at its boundaries, Ctrl/Cmd+B, typing <code className="font-mono">*italic*</code>, three backticks for a code block, and inserting a local file.
         </p>
       </SettingSection>
 

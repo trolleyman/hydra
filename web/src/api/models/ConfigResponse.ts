@@ -43,7 +43,7 @@ export type ConfigResponse = {
      */
     test_prefetch?: boolean | null;
     /**
-     * Whether a test runner settling FAILING wakes the head with a one-line message ([notify] test_failures in config.toml). It only fires while the head is IDLE, so it cannot interrupt a turn or loop, and it is deduped per (runner, commit). The agent pulls the output with get_test_logs. null/absent uses the built-in default (enabled).
+     * Whether a test runner settling FAILING wakes the head with a one-line message ([notify] test_failures in config.toml). It only fires while the head is IDLE, so it cannot interrupt a turn or loop, and it is deduped per (runner, commit). The agent pulls the output with get_test_logs. null/absent uses the built-in default (disabled).
      */
     notify_test_failures?: boolean | null;
     /**

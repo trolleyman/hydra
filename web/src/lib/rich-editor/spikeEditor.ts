@@ -4,7 +4,17 @@ import { InlineCode, InlineCodeEditing } from './InlineCode'
 const Document = Node.create({
   name: 'doc',
   topNode: true,
-  content: 'paragraph+',
+  content: 'block+',
+})
+
+const CodeBlock = Node.create({
+  name: 'codeBlock',
+  group: 'block',
+  content: 'text*',
+  code: true,
+  addAttributes: () => ({ language: { default: null } }),
+  parseHTML: () => [{ tag: 'pre' }],
+  renderHTML: ({ HTMLAttributes }) => ['pre', ['code', HTMLAttributes, 0]],
 })
 
 const Paragraph = Node.create({
@@ -25,7 +35,7 @@ export interface InlineCodeSpikeOptions {
 export function createInlineCodeSpike(options: InlineCodeSpikeOptions): Editor {
   return new Editor({
     element: options.element,
-    extensions: [Document, Paragraph, Text, InlineCode, InlineCodeEditing],
+    extensions: [Document, Paragraph, Text, CodeBlock, InlineCode, InlineCodeEditing],
     content: options.content ?? '<p></p>',
     injectCSS: false,
     autofocus: false,

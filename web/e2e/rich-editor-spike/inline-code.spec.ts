@@ -93,6 +93,27 @@ test('backtick inserts, accepts text, and exits an inline code node', async ({ p
   await expect(page.locator('code[data-inline-code]')).toHaveText('foo')
 })
 
+test('three backticks open a code block', async ({ page }) => {
+  await reset(page, paragraph())
+  await select(page, 1)
+  await page.keyboard.type('```')
+  const state = await snapshot(page)
+  expect(state.parent).toBe('codeBlock')
+  expect((state.doc.content as Record<string, unknown>[])[0]).toEqual({
+    type: 'codeBlock',
+    attrs: { language: null },
+  })
+})
+
+test('Right exits a code capsule at the end of the paragraph', async ({ page }) => {
+  await reset(page, paragraph(code('a')))
+  await select(page, 3)
+  await page.keyboard.press('ArrowRight')
+  expect(await snapshot(page)).toMatchObject({ from: 4, parent: 'paragraph', activeCode: 0 })
+  await page.keyboard.type('X')
+  expect(await snapshot(page)).toMatchObject({ doc: paragraph(code('a'), text('X')) })
+})
+
 test('backtick wraps a selected run without visible delimiters', async ({ page }) => {
   await reset(page, paragraph(text('abc')))
   await select(page, 1, 4)
