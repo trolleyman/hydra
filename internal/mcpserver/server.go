@@ -97,6 +97,11 @@ type Deps struct {
 	// Nil hides them.
 	RunTests     func(runner string) (message string, ok bool)
 	RunArtifacts func(name string) (message string, ok bool)
+	// ListAgents / GetAgent expose bounded, project-scoped metadata about sibling
+	// heads. SendAgent is separately nil unless trusted policy opted in.
+	ListAgents func() (message string, ok bool)
+	GetAgent   func(id string) (message string, ok bool)
+	SendAgent  func(target, body, correlationID, inReplyTo string) (message string, ok bool)
 }
 
 // HostRunRequest is one host_run call: the command to run and the agent's
@@ -314,6 +319,40 @@ func toolDefs(deps Deps) []map[string]any {
 	if deps.HostRun != nil {
 		defs = append(defs, hostRunToolDef())
 	}
+	if deps.ListAgents != nil {
+		defs = append(defs, map[string]any{
+			"name":        "list_agents",
+			"description": "List the live Hydra agents in YOUR project with bounded status and branch metadata, including which entry is you. Read-only: it never starts or resumes an agent. Use the stable id from this result with get_agent or send_agent_message.",
+			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+			"annotations": map[string]any{"readOnlyHint": true},
+		})
+	}
+	if deps.GetAgent != nil {
+		defs = append(defs, map[string]any{
+			"name":        "get_agent",
+			"description": "Get bounded cached metadata for ONE live Hydra agent in YOUR project. This does not expose its prompt, transcript, process id, policy, or worktree path, and starts no work.",
+			"inputSchema": map[string]any{
+				"type": "object", "required": []string{"id"},
+				"properties": map[string]any{"id": map[string]any{"type": "string", "description": "Stable agent id from list_agents."}},
+			},
+			"annotations": map[string]any{"readOnlyHint": true},
+		})
+	}
+	if deps.SendAgent != nil {
+		defs = append(defs, map[string]any{
+			"name":        "send_agent_message",
+			"description": "Send a short, visibly attributed message to ONE other live agent in YOUR project. It may be delivered now or queued; this call never waits for or implies a reply. Use correlation_id and in_reply_to from an incoming agent message when replying, so Hydra can bound the conversation. Do not paste logs or large blobs - send paths, commit hashes, and review comment numbers instead.",
+			"inputSchema": map[string]any{
+				"type": "object", "required": []string{"target", "body"},
+				"properties": map[string]any{
+					"target":         map[string]any{"type": "string", "description": "Stable recipient id from list_agents."},
+					"body":           map[string]any{"type": "string", "description": "Message body, at most 4096 bytes."},
+					"correlation_id": map[string]any{"type": "string", "description": "Correlation id from the incoming message when replying. Omit to begin a new bounded chain."},
+					"in_reply_to":    map[string]any{"type": "string", "description": "Message id from the incoming message when replying."},
+				},
+			},
+		})
+	}
 	if deps.HeadStatus != nil {
 		defs = append(defs, map[string]any{
 			"name": "get_head_status",
@@ -504,6 +543,41 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		}
 		approved, msg := deps.RequestAccess(args.Name)
 		return textResult(msg, !approved)
+	case "list_agents":
+		if deps.ListAgents == nil {
+			return textResult("Agent discovery is not available in this session.", true)
+		}
+		msg, ok := deps.ListAgents()
+		return textResult(msg, !ok)
+	case "get_agent":
+		if deps.GetAgent == nil {
+			return textResult("Agent discovery is not available in this session.", true)
+		}
+		var args struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		if strings.TrimSpace(args.ID) == "" {
+			return textResult("get_agent needs an \"id\" from list_agents.", true)
+		}
+		msg, ok := deps.GetAgent(strings.TrimSpace(args.ID))
+		return textResult(msg, !ok)
+	case "send_agent_message":
+		if deps.SendAgent == nil {
+			return textResult("Agent messaging is disabled for this session. Enable policy.agent_messaging and restart the agent.", true)
+		}
+		var args struct {
+			Target        string `json:"target"`
+			Body          string `json:"body"`
+			CorrelationID string `json:"correlation_id"`
+			InReplyTo     string `json:"in_reply_to"`
+		}
+		_ = json.Unmarshal(p.Arguments, &args)
+		if strings.TrimSpace(args.Target) == "" || strings.TrimSpace(args.Body) == "" {
+			return textResult("send_agent_message needs non-empty \"target\" and \"body\" values.", true)
+		}
+		msg, ok := deps.SendAgent(strings.TrimSpace(args.Target), strings.TrimSpace(args.Body), strings.TrimSpace(args.CorrelationID), strings.TrimSpace(args.InReplyTo))
+		return textResult(msg, !ok)
 	case "git_commit", "git_reset", "git_revert", "git_add", "git_rebase", "git_rebase_continue", "git_rebase_abort", "git_cherry_pick",
 		"git_merge", "git_merge_continue", "git_merge_abort", "git_stash":
 		if deps.GitOp == nil {

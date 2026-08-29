@@ -443,6 +443,7 @@ interface PendingSend {
   clientId: string
   text: string
   queued: boolean
+  origin?: string
 }
 
 // Minimal shapes of the stream-json events the reducer consumes. Everything
@@ -1906,6 +1907,18 @@ const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
     label: 'Sent by Hydra',
     why: 'Hydra sent this on your behalf rather than you typing it.',
   },
+}
+
+function automatedOrigin(origin?: string): { label: string; why: string } | null {
+  if (!origin) return null
+  if (origin.startsWith('agent:')) {
+    const id = origin.slice('agent:'.length)
+    return {
+      label: `Sent by agent ${id}`,
+      why: `Hydra agent ${id} sent this through the project-scoped collaboration tool. The message is attributed and subject to Hydra's conversation limits.`,
+    }
+  }
+  return AUTOMATED_ORIGIN[origin] ?? AUTOMATED_ORIGIN.unknown
 }
 
 // Quiet code/output panels inside tool cards.
@@ -5886,7 +5899,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
-  const auto = origin ? AUTOMATED_ORIGIN[origin] ?? AUTOMATED_ORIGIN.unknown : null
+  const auto = automatedOrigin(origin)
   return (
     <div className="flex flex-col items-end gap-1">
       {/* An automated turn is still YOUR side of the conversation - it acts on
@@ -7940,17 +7953,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // any queued bubble the server still lists, and add server-queued messages
     // we don't have (on reconnect, local pending was reset, so this restores the
     // whole queue - item 21's survive-navigation guarantee).
-    const reconcileQueue = (messages: { id?: string; content?: unknown }[]) => {
+    const reconcileQueue = (messages: { id?: string; content?: unknown; origin?: string }[]) => {
       const server = messages
-        .filter((m): m is { id: string; content?: unknown } => typeof m.id === 'string')
-        .map((m) => ({ clientId: m.id, text: contentText(m.content) }))
+        .filter((m): m is { id: string; content?: unknown; origin?: string } => typeof m.id === 'string')
+        .map((m) => ({ clientId: m.id, text: contentText(m.content), origin: m.origin }))
       const serverIds = new Set(server.map((s) => s.clientId))
       setPendingSends((prev) => {
         const kept = prev.filter((p) => !p.queued || serverIds.has(p.clientId))
         const keptIds = new Set(kept.map((p) => p.clientId))
         const added = server
           .filter((s) => !keptIds.has(s.clientId))
-          .map((s) => ({ id: sendSeqRef.current++, clientId: s.clientId, text: s.text, queued: true }))
+          .map((s) => ({ id: sendSeqRef.current++, clientId: s.clientId, text: s.text, queued: true, origin: s.origin }))
         return [...kept, ...added]
       })
     }
@@ -10848,7 +10861,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       is sent (a real user bubble) - and rendered the same way, so
                       image thumbnails / attachment chips show here too, not raw
                       upload paths (dimmed while it waits). */}
-                  <ChatUserMessage text={p.text} dimmed projectId={projectId} linkCtx={chatLinkCtx} />
+                  <ChatUserMessage text={p.text} dimmed origin={p.origin} projectId={projectId} linkCtx={chatLinkCtx} />
                   {/* Discard button (item 52): drops the queued message from the
                       server queue. A floating chip overhanging the bubble's
                       top-right corner (revealed on hover so the resting stack

@@ -5693,6 +5693,13 @@ components:
             and a branch's .mcp.json are ignored outright rather than filtered.
             Costs the claude.ai account connectors (Gmail/Calendar/Drive), which
             cannot be re-declared. null = on (the default).
+        agent_messaging:
+          type: boolean
+          nullable: true
+          description: >-
+            Allow this head to send attributed messages to other live heads in
+            the same project. Agent discovery remains read-only and available
+            when this is off. null = off (the default).
         known_tools:
           type: array
           items:
@@ -6686,6 +6693,10 @@ components:
             additionalProperties: true
           x-go-type: json.RawMessage
           x-go-type-skip-optional-pointer: true
+        origin:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Why this message exists when the user did not type it.
 
     ChatPendingAsk:
       type: object
@@ -7385,6 +7396,10 @@ components:
           additionalProperties: true
           x-go-type: json.RawMessage
           x-go-type-skip-optional-pointer: true
+        origin:
+          type: string
+          x-go-type-skip-optional-pointer: true
+          description: Why this message exists when the user did not type it.
 
     ChatQueueMessageRemovedPayload:
       type: object

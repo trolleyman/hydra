@@ -1,5 +1,8 @@
 # Agent collaboration MCP
 
+Status: **built**. The initial protocol, policy, UI attribution, simulation
+fixture, and daemon-enforced limits described below are implemented.
+
 ## Recommendation
 
 Yes, with guardrails. Agent discovery is a cheap, useful primitive; messaging can
@@ -14,7 +17,7 @@ API token or connect directly to another head's MCP process.
 
 ## Tools
 
-Start with three tools:
+The `hydra` server exposes three tools:
 
 - `list_agents` lists live heads in the caller's project. Return stable ID,
   title, agent type, session state, current agent status/activity, branch and
@@ -58,9 +61,10 @@ instead of pasted logs.
 
 ## Safety rules
 
-Discovery can be available by default because it is read-only and
-project-scoped. Sending should initially require an explicit per-project or
-per-agent collaboration policy, defaulting off.
+Discovery is available by default because it is read-only and project-scoped.
+Sending requires `policy.agent_messaging = true` at the project/default or
+per-agent layer and defaults off. The tool is hidden when the effective policy
+is off, and the daemon re-loads trusted config before every delivery.
 
 Enforce limits in the daemon, not only in tool descriptions:
 
@@ -76,16 +80,19 @@ Enforce limits in the daemon, not only in tool descriptions:
 - Never let messaging bypass the recipient's lifecycle controls, sandbox, or MCP
   policy. Delivery is input to that agent, not authority borrowed from it.
 
-## Build order
+## Implementation
 
-1. Add daemon-side discovery plus `list_agents` and `get_agent`, with tests for
-   project scoping and metadata redaction.
-2. Add `agentq`, attributed chat events, and `send_agent_message` behind an
-   opt-in policy. Test queue ordering, stopped targets, attribution, and limits.
-3. Add chain budgets and a small UI treatment linking an agent-origin message to
-   its sender. Exercise two simulation heads end-to-end, including a deliberate
-   reply loop that Hydra cuts off.
-4. After observing real use, decide whether cross-project discovery, broadcast,
-   subscriptions, or durable inboxes solve demonstrated needs. Do not include
-   them in the initial protocol.
-
+1. **Built:** daemon-side `list_agents` and `get_agent`, with same-project live
+   head filtering and metadata redaction tests.
+2. **Built:** the separate `agentq` request channel and
+   `send_agent_message`, guarded by `policy.agent_messaging`. Chat-mode delivery
+   uses the durable queue; stopped, non-chat, self, oversized, and unknown
+   targets are rejected.
+3. **Built:** `agent:<source-id>` origin metadata in queued and durable events,
+   a sender marker in chat, 4 KiB message and four-item recipient queue caps,
+   six messages per chain, and six messages per pair per ten minutes. The
+   simulation transcript includes a real attributed sibling-agent turn for
+   browser verification.
+4. **Deferred intentionally:** cross-project discovery, broadcast,
+   subscriptions, durable inboxes, presence, and read receipts. Revisit these
+   only after the initial tools demonstrate a concrete need.

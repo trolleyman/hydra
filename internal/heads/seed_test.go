@@ -61,6 +61,29 @@ func TestSeedHeadClaudeConfigIsPerHead(t *testing.T) {
 	}
 }
 
+func TestSeedHeadAgentCollaborationEnv(t *testing.T) {
+	root, home := t.TempDir(), t.TempDir()
+	off := seedClaudeHead(t, root, home, "off", gate.Policy{})
+	on := seedClaudeHead(t, root, home, "on", gate.Policy{AgentMessaging: true})
+	contains := func(env []string, want string) bool {
+		for _, value := range env {
+			if value == want || strings.HasPrefix(value, want+"=") {
+				return true
+			}
+		}
+		return false
+	}
+	if !contains(off.Env, "HYDRA_AGENT_REQ_DIR") {
+		t.Fatal("discovery channel was not seeded")
+	}
+	if contains(off.Env, "HYDRA_AGENT_MESSAGING") {
+		t.Fatal("send opt-in seeded while disabled")
+	}
+	if !contains(on.Env, "HYDRA_AGENT_MESSAGING") {
+		t.Fatal("send opt-in not seeded while enabled")
+	}
+}
+
 // TestSeedHeadStrictMCPConfig covers the strict-mode seed: a per-head config
 // rendered from the allow-list, bound READ-ONLY under the head's own /tmp (not
 // over a host-owned path, whose bind the host can detach), and handed to

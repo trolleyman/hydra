@@ -11,5 +11,9 @@ export type ChatQueuedMessage = {
      */
     id: string;
     content: Array<Record<string, any>>;
+    /**
+     * Why this message exists when the user did not type it.
+     */
+    origin?: string;
 };
 

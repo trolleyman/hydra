@@ -393,6 +393,18 @@ func GetReviewReqDir(projectRoot, id string) string {
 	return filepath.Join(GetReviewReqRootDir(projectRoot), id)
 }
 
+// GetAgentReqRootDir returns the parent holding each head's daemon-mediated
+// discovery and collaboration channel.
+func GetAgentReqRootDir(projectRoot string) string {
+	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "agent-req")
+}
+
+// GetAgentReqDir returns one head's request/result channel. Its directory name
+// is the trusted source identity for every operation written inside it.
+func GetAgentReqDir(projectRoot, id string) string {
+	return filepath.Join(GetAgentReqRootDir(projectRoot), id)
+}
+
 // GetGitopsRootDir returns the parent dir holding every head's host-mediated git
 // channel (.hydra/local/gitops). The daemon's gitops watcher scans it to find
 // heads with pending git-operation requests.

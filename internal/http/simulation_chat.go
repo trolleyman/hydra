@@ -91,6 +91,12 @@ func simUser(id, text string) simNorm {
 	}}
 }
 
+func simAgentUser(id, source, text string) simNorm {
+	return simNorm{typ: "user_message", payload: map[string]any{
+		"id": id, "uuid": id, "content": simTextContent(text), "origin": "agent:" + source,
+	}}
+}
+
 // simUserEcho is a user event whose content is a bare string rather than
 // blocks - the shape the CLI uses for its local-command echoes.
 func simUserEcho(id, text string) simNorm {
@@ -758,6 +764,10 @@ var simChatEvents = []simNorm{
 	simCommit("beefcafe0123456789abcdef0123456789abcdef", "beefcaf", "Cover the giving-up path with a test", "2026-07-09T18:05:30.000Z"),
 	// ... and then the branch took main in, by fast-forward.
 	simBaseUpdate("2026-07-09T18:05:40.000Z"),
+	// A sibling head's attributed collaboration message. It stays on the user
+	// side because it is input to this agent, but carries its own sender marker.
+	simAgentUser("sim-agent-message", "api-tests", "[Message from Hydra agent api-tests (API test coverage); correlation_id=agent-chain-demo; message_id=agent-message-demo; chain=1/6]\n\nThe retry endpoint contract tests are ready in commit 9f24c10. Please cherry-pick it before your final verification."),
+	simSay("msg_sim_agent_reply", "Got it. I will incorporate `9f24c10` and keep the shared correlation id if I need to reply."),
 	// A standalone reply that is mostly an ordered list - exercises the block
 	// markdown renderer's <ol> styling (list-decimal, pl-5) so the demo proves
 	// 1./2./3. indent with hanging wrapped lines, and a trailing unordered list

@@ -197,6 +197,10 @@ type PolicyConfig struct {
 	// proxy URL as a plain http server just fails OAuth discovery (spike-verified).
 	// Turn this off for an agent that needs them. nil = default (on).
 	StrictMCP *bool `toml:"strict_mcp"`
+	// AgentMessaging lets this head send attributed messages to other live heads
+	// in the same project. Discovery remains read-only and always available.
+	// nil = default (off).
+	AgentMessaging *bool `toml:"agent_messaging"`
 	// KnownTools extends the gate's built-in known-tool allow-list with extra tool
 	// names to treat as safe (allowed without parking). The gate fails closed on any
 	// tool it doesn't recognize - not a known built-in and without the mcp__ prefix -
@@ -223,6 +227,10 @@ func (p PolicyConfig) IsGateEnabled() bool {
 // default. See PolicyConfig.StrictMCP for what it costs.
 func (p PolicyConfig) IsStrictMCP() bool {
 	return p.StrictMCP == nil || *p.StrictMCP
+}
+
+func (p PolicyConfig) IsAgentMessagingEnabled() bool {
+	return p.AgentMessaging != nil && *p.AgentMessaging
 }
 
 // ResolveGitIsolation returns the normalized git-isolation mode, defaulting to
@@ -272,6 +280,9 @@ func (p *PolicyConfig) Merge(other PolicyConfig) {
 	}
 	if other.StrictMCP != nil {
 		p.StrictMCP = other.StrictMCP
+	}
+	if other.AgentMessaging != nil {
+		p.AgentMessaging = other.AgentMessaging
 	}
 	if other.KnownTools != nil {
 		p.KnownTools = unionStrings(p.KnownTools, other.KnownTools)
@@ -2625,6 +2636,17 @@ func defaultsSpec() []specEntry {
 			},
 		},
 		{
+			table: "policy", key: "agent_messaging",
+			doc: "allow this head to send attributed messages to other live heads in the same project. Discovery stays available when this is off. Off by default.",
+			def: func() string { return "false" },
+			get: func(a AgentConfig) (string, bool) {
+				if a.Policy != nil && a.Policy.AgentMessaging != nil {
+					return fmt.Sprintf("%t", *a.Policy.AgentMessaging), true
+				}
+				return "", false
+			},
+		},
+		{
 			table: "policy", key: "known_tools",
 			doc: "extra tool names to treat as safe (allowed without approval), extending the gate's built-in set. The gate fails closed on any tool it doesn't recognize (not a known built-in and no mcp__ prefix), parking it for approval; register a legitimate tool here to stop that. The default value below is the built-in set the gate already recognizes - add names to it, don't remove.",
 			def: func() string { return tomlStringArray(gate.DefaultKnownTools()) },
@@ -4323,6 +4345,9 @@ func emitAgentPolicy(out *[]string, name string, p *PolicyConfig, keyComments, t
 	if p.StrictMCP != nil {
 		emitSetField(out, name+".policy", "strict_mcp", fmt.Sprintf("%t", *p.StrictMCP), true, keyComments)
 	}
+	if p.AgentMessaging != nil {
+		emitSetField(out, name+".policy", "agent_messaging", fmt.Sprintf("%t", *p.AgentMessaging), true, keyComments)
+	}
 	emitSetField(out, name+".policy", "known_tools", tomlStringArray(p.KnownTools), len(p.KnownTools) > 0, keyComments)
 }
 
@@ -4349,7 +4374,7 @@ func policyHasContent(p *PolicyConfig) bool {
 	}
 	return p.GateEnabled != nil || p.GitIsolation != nil || len(p.MCPAllowed) > 0 || len(p.MCPToolsAllowed) > 0 ||
 		len(p.MCPBlocked) > 0 || len(p.MCPToolsBlocked) > 0 ||
-		p.MCPAutoAllowRead != nil || len(p.KnownTools) > 0
+		p.MCPAutoAllowRead != nil || p.StrictMCP != nil || p.AgentMessaging != nil || len(p.KnownTools) > 0
 }
 
 func sandboxHasContent(sb *SandboxConfig) bool {

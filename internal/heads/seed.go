@@ -142,6 +142,19 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	res.WritablePaths = append(res.WritablePaths, reviewReqDirHost)
 	res.Env = append(res.Env, "HYDRA_REVIEW_REQ_DIR="+reviewReqDirHost)
 
+	// Per-head agent collaboration channel. Discovery is always available; the
+	// send tool is advertised only when trusted policy opts this head in, and the
+	// daemon re-checks that policy before delivery.
+	agentReqDirHost := paths.GetAgentReqDir(projectRoot, id)
+	if err := os.MkdirAll(agentReqDirHost, 0755); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("create %s: %w", agentReqDirHost, err))
+	}
+	res.WritablePaths = append(res.WritablePaths, agentReqDirHost)
+	res.Env = append(res.Env, "HYDRA_AGENT_REQ_DIR="+agentReqDirHost)
+	if policy.AgentMessaging {
+		res.Env = append(res.Env, "HYDRA_AGENT_MESSAGING=1")
+	}
+
 	// Per-head sub-agent tracking dir: trigger-hook drops a marker file per live
 	// Claude sub-agent so the main agent's Stop hook can distinguish a real finish
 	// from "turn ended but sub-agents still running". A directory (one file per
@@ -400,6 +413,7 @@ func resolveGatePolicy(cfg config.Config, agentType string) gate.Policy {
 		MCPToolsBlocked:  p.MCPToolsBlocked,
 		AutoAllowReadMCP: p.MCPAutoAllowRead != nil && *p.MCPAutoAllowRead,
 		StrictMCP:        p.IsStrictMCP(),
+		AgentMessaging:   p.IsAgentMessagingEnabled(),
 		KnownTools:       p.KnownTools,
 	}
 	// WebFetch host-gating is derived from the sandbox network policy rather than a

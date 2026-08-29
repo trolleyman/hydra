@@ -13,6 +13,13 @@ func msg(id, text string) QueuedMessage {
 	return QueuedMessage{ID: id, Content: content}
 }
 
+func TestQueuedMessageEventCarriesOrigin(t *testing.T) {
+	event := queuedMessage("m1", "queued", []byte(`[{"type":"text","text":"hello"}]`), "agent:source")
+	if event.Origin != "agent:source" {
+		t.Fatalf("queued origin = %q", event.Origin)
+	}
+}
+
 func newTestQueue(t *testing.T) (*ChatQueue, string) {
 	t.Helper()
 	// persist() creates the queue dir itself, so a bare temp root is enough.
