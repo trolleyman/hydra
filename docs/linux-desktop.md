@@ -371,17 +371,25 @@ schemes. Shared cookie/storage behavior and window-manager lifecycle still need
 native Wayland/X11 validation.
 Desktop cold-start explicitly binds `127.0.0.1:0`; the assigned port exists only
 in the private ownership record. `mage buildDesktop` and `mage runDesktop`
-dispatch by host OS; on Linux they build the frontend and tagged shell, and Run
-uses the checkout-local development database and a worktree-specific daemon
-runtime namespace while exercising this same random-port path. The namespace
+dispatch by host OS; on Linux they build the frontend and tagged shell.
+`mage runDesktop` deliberately behaves like an installed app, using the stable
+production socket and global database. `mage runDesktopLocal` uses the
+checkout-local development database and a worktree-specific daemon runtime
+namespace while exercising this same random-port path. `mage run` uses that same
+development namespace, so the two local commands can deliberately share a
+backend. A directly launched build has no development namespace and therefore
+also selects the stable production socket and global database instead of
+attaching based on whichever daemon happened to start first. The namespace
 isolates the socket, lock, PID, ownership metadata, listener record, and log, so
 running a development desktop cannot attach to or restart another Hydra daemon
 for the same OS user. The bundled `__desktop-connect` command exposes this same
 control-socket discovery/bootstrap operation to thin native shells without
 making the filesystem-protected endpoint protocol platform-UI-specific.
-When the Linux app launched by `mage runDesktop` closes or the command receives
-Ctrl+C, Mage stops the detached daemon in that exact development runtime
-namespace. Global, legacy-layout, and other checkout namespaces are untouched.
+When the Linux app launched by `mage runDesktopLocal` closes or the command
+receives Ctrl+C, Mage stops a desktop-managed daemon in that exact development
+runtime namespace. If it attached to an existing foreground `mage run`, that
+daemon is not desktop-managed and remains alive. Global, legacy-layout, and
+other checkout namespaces are untouched.
 Daemon control and web listeners become ready before best-effort recovery of
 previously running heads. Slow or broken provider/sandbox recovery therefore
 appears in the daemon log without making the desktop report a false startup

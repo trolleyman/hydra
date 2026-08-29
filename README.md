@@ -108,6 +108,7 @@ operating system:
 ```bash
 mage buildDesktop
 mage runDesktop
+mage runDesktopLocal
 ```
 
 Installed desktop builds can be activated with constrained `hydra://` links;
@@ -120,12 +121,21 @@ development can select explicitly with `mage buildDesktopLinux`,
 invokes the complete native build matrix and therefore belongs on an
 orchestrator with matching platform builders/toolchains.
 
-This uses the checkout-local development database and an OS-assigned loopback
-port when running. Installed desktop builds continue to use the OS-standard
-global database. Windows builds additionally require `HYDRA_PORTABLE_GIT` to
-point at an extracted official PortableGit distribution.
-On Linux, closing `mage runDesktop` or pressing Ctrl+C also stops the detached
-daemon in that checkout's development runtime namespace.
+`mage runDesktop` behaves like an installed app: it uses the stable production
+runtime socket and OS-standard global database. `mage run` and
+`mage runDesktopLocal` instead use the checkout-local development database and
+the same checkout-specific runtime socket, so they can intentionally share one
+development backend. A directly launched desktop build also uses production
+state unless development environment variables are explicitly supplied. Runtime
+sockets stay in the OS runtime directory rather than persistent database storage;
+on Linux these are
+`$XDG_RUNTIME_DIR/hydra/daemon.sock` for production and a checkout-keyed child of
+`$XDG_RUNTIME_DIR/hydra/` for development. The desktop backend uses an OS-assigned
+loopback port. Windows builds additionally require `HYDRA_PORTABLE_GIT` to point
+at an extracted official PortableGit distribution.
+On Linux, closing `mage runDesktopLocal` or pressing Ctrl+C stops a detached
+desktop daemon in that checkout's namespace, but leaves an existing `mage run`
+daemon alive.
 
 The separate build keeps the normal `hydra` CLI free of GTK/WebKit runtime
 dependencies. The project flag is optional; without it the app opens the global

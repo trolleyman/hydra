@@ -230,17 +230,23 @@ itself, and `HYDRA_API_ADDR` covers exposing a port.
 What remains, because each does a genuinely different job:
 
 - `mage run` - foreground, for debugging the daemon itself. It explicitly uses
-  the checkout's ignored `.hydra/local/db.sqlite3`, keeping development history
-  isolated from the OS-standard user-global database used by installed CLI and
-  desktop builds. Set `HYDRA_DB_PATH` to override that development location.
-- `mage buildDesktop` / `mage runDesktop` - dispatch to the native desktop app
-  for the host OS: GTK/WebKitGTK on Linux, AppKit/WKWebView on macOS, and Windows
-  Forms/WebView2 on Windows. Run uses the same checkout-local development
-  database and a worktree-specific daemon runtime namespace (socket, lock, PID,
+  the checkout's ignored `.hydra/local/state/db.sqlite3` and a checkout-specific
+  runtime namespace, keeping development history and IPC isolated from the
+  OS-standard user-global database and stable runtime socket used by installed
+  CLI and desktop builds. Set `HYDRA_DB_PATH` to override the database location.
+- `mage buildDesktop` / `mage runDesktop` / `mage runDesktopLocal` - dispatch to
+  the native desktop app for the host OS: GTK/WebKitGTK on Linux,
+  AppKit/WKWebView on macOS, and Windows Forms/WebView2 on Windows. `runDesktop`
+  uses production state, matching a directly launched or installed build.
+  `runDesktopLocal` uses the same checkout-local development database and
+  worktree-specific daemon runtime namespace as `mage run` (socket, lock, PID,
   ownership metadata, listener record, and log). It can therefore run beside an
-  installed or development Hydra daemon without attaching to it, restarting it,
-  or resuming its heads. On macOS the development target executes the app bundle
-  binary directly so this environment reaches the bundled backend. A
+  installed Hydra daemon without attaching to it, while intentionally reusing a
+  `mage run` backend from the same checkout. A directly launched built desktop
+  has no development namespace and deterministically selects the stable
+  production runtime and global database. On macOS the development target
+  executes the app bundle binary directly so this environment reaches the
+  bundled backend. A
   desktop-started backend asks the OS for a free loopback port and publishes the
   result; it does not depend on port 26600 being available.
   Windows packaging takes its required PortableGit directory from

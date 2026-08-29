@@ -145,4 +145,22 @@ func TestDesktopDaemonIsManaged(t *testing.T) {
 	if !IsServiceManaged(root) {
 		t.Fatal("desktop daemon was not recorded as managed")
 	}
+	if !IsDesktopManaged(root) {
+		t.Fatal("desktop daemon was not recorded as desktop-managed")
+	}
+}
+
+func TestSystemdDaemonIsNotDesktopManaged(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("INVOCATION_ID", "test-service")
+	root := t.TempDir()
+	if err := WriteDaemonFiles(root); err != nil {
+		t.Fatal(err)
+	}
+	if !IsServiceManaged(root) {
+		t.Fatal("systemd daemon was not recorded as managed")
+	}
+	if IsDesktopManaged(root) {
+		t.Fatal("systemd daemon was recorded as desktop-managed")
+	}
 }

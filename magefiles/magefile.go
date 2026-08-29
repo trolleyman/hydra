@@ -509,7 +509,7 @@ func useDevelopmentRuntime() error {
 		return errtrace.Wrap(err)
 	}
 	if os.Getenv("HYDRA_RUNTIME_NAMESPACE") == "" {
-		namespace := "desktop-dev:" + projectRoot
+		namespace := "checkout-dev:" + projectRoot
 		if err := os.Setenv("HYDRA_RUNTIME_NAMESPACE", namespace); err != nil {
 			return errtrace.Wrap(err)
 		}
@@ -521,6 +521,9 @@ func useDevelopmentRuntime() error {
 func Run() error {
 	ensureToolsEnv()
 	if err := useDevelopmentDatabase(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := useDevelopmentRuntime(); err != nil {
 		return errtrace.Wrap(err)
 	}
 	addGoBuildDeps()
@@ -666,9 +669,19 @@ func BuildDesktopAll() error {
 	return errtrace.Wrap(BuildDesktop())
 }
 
-// RunDesktop builds and runs the native desktop application for the host
-// platform with checkout-local database state.
+// RunDesktop builds and runs the native desktop application for the host using
+// the production runtime and OS-standard user database.
 func RunDesktop() error {
+	ensureToolsEnv()
+	if err := BuildDesktop(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(runDesktop(false))
+}
+
+// RunDesktopLocal builds and runs the native desktop application with the
+// checkout-local database and runtime used by mage run.
+func RunDesktopLocal() error {
 	ensureToolsEnv()
 	if err := useDevelopmentDatabase(); err != nil {
 		return errtrace.Wrap(err)
@@ -679,13 +692,21 @@ func RunDesktop() error {
 	if err := BuildDesktop(); err != nil {
 		return errtrace.Wrap(err)
 	}
+	return errtrace.Wrap(runDesktop(true))
+}
+
+func runDesktop(local bool) error {
 	switch runtime.GOOS {
 	case "linux":
-		return errtrace.Wrap(runDesktopLinuxDevelopment(filepath.Join(".", "dist", "linux", "hydra-desktop")))
+		binary := filepath.Join(".", "dist", "linux", "hydra-desktop")
+		if local {
+			return errtrace.Wrap(runDesktopLinuxDevelopment(binary))
+		}
+		return errtrace.Wrap(runV(binary))
 	case "darwin":
-		// Execute the bundle binary so the checkout-local database and runtime
-		// namespace reach the app and its bundled backend. LaunchServices does not
-		// reliably preserve a terminal process's environment.
+		// Execute the bundle binary so local mode's database and runtime namespace
+		// reach the bundled backend. LaunchServices does not reliably preserve a
+		// terminal process's environment.
 		return errtrace.Wrap(runV(filepath.Join(".", "dist", "macos", "Hydra.app", "Contents", "MacOS", "Hydra")))
 	case "windows":
 		targetRuntime := "win-x64"
@@ -700,8 +721,8 @@ func RunDesktop() error {
 
 // runDesktopLinuxDevelopment keeps Mage alive across Ctrl+C so it can stop the
 // detached daemon in this run's HYDRA_RUNTIME_NAMESPACE. The hidden stop command
-// inherits that namespace, so it cannot address the global or another checkout's
-// daemon even if those are running at the same time.
+// inherits that namespace and only stops a desktop-managed daemon. It therefore
+// leaves both the global daemon and an existing mage run daemon untouched.
 func runDesktopLinuxDevelopment(binary string) error {
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()

@@ -28,6 +28,9 @@ func main() {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		if !daemon.IsDesktopManaged("") {
+			return
+		}
 		if err := daemon.StopDaemon(ctx, ""); err != nil {
 			fmt.Fprintf(os.Stderr, "hydra-desktop: stop development daemon: %v\n", err)
 			os.Exit(1)

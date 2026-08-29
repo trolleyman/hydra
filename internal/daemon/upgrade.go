@@ -92,6 +92,27 @@ func IsServiceManaged(projectRoot string) bool {
 	return managed
 }
 
+// IsDesktopManaged reports whether the running daemon in the selected runtime
+// namespace was started by a desktop app. Development launchers use this to
+// clean up only a daemon they own, leaving an attached foreground mage run
+// process alive.
+func IsDesktopManaged(projectRoot string) bool {
+	ip, err := infoPath(projectRoot)
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(ip)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n")[1:] {
+		if strings.TrimSpace(line) == "managed=desktop" {
+			return true
+		}
+	}
+	return false
+}
+
 // removeDaemonFiles cleans up the PID/info files at shutdown.
 func RemoveDaemonFiles(projectRoot string) {
 	if pp, err := pidPath(projectRoot); err == nil {
