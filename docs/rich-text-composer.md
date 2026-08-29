@@ -100,6 +100,10 @@ Completed 2026-08-29:
   header. A compact selector appears in the existing composer footer only while
   the caret is inside a fenced code block, and updates that block's Markdown
   info string.
+- Added the composer-to-message handoff. Immediate and queued sends capture the
+  composer's screen position and animate the optimistic user bubble from it;
+  reduced-motion users get an instant handoff. The daemon echo settles the same
+  client-id-keyed row in place, so it cannot duplicate or restart the motion.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -642,10 +646,10 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
    disabled states, spellcheck, focus return and combined text/attachment undo
    have component and real-Chromium coverage. Attachments live at their document
    positions as inline NodeViews and still submit the existing path manifest.
-7. **Static user-message view and send transition - IN PROGRESS.** Rendered chat
-   Markdown now recognizes commit and file tokens without changing source.
-   Preserve the rich snapshot on optimistic rows, morph composer content into
-   immediate/queued bubbles and reconcile the daemon echo in place.
+7. **Static user-message view and send transition - DONE.** Rendered chat
+   Markdown recognizes commit and file tokens without changing source. Immediate
+   and queued messages fly from the composer into a client-id-keyed optimistic
+   bubble, and the daemon echo reconciles that same row in place.
 8. **Spawn integration.** Reuse the adapter in compact/full layouts and ensure
    surrounding selectors do not rerender on every editor transaction.
 9. **Polish/discovery.** Formatting menu, attachment display toggles, optional

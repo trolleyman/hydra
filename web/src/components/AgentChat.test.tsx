@@ -1069,6 +1069,30 @@ describe('a message sent after a commit lands under it', () => {
 
     expect(chip.compareDocumentPosition(bubble) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
+
+  it('flies the composer content into its optimistic bubble', async () => {
+    renderChat()
+    const composer = await connectedComposer()
+    act(() => sockets[0].emit({ type: 'replay_done' }))
+    const composerHost = composer.closest<HTMLElement>('[data-rich-chat-composer]')!
+    composerHost.getBoundingClientRect = vi.fn(() => ({ top: 500, right: 900 } as DOMRect))
+    const animate = vi.fn()
+    const previousAnimate = HTMLElement.prototype.animate
+      HTMLElement.prototype.animate = animate
+    try {
+      setComposerValue(composer, 'animate me')
+      const send = await screen.findByRole('button', { name: 'Send message' })
+      await waitFor(() => expect(send).not.toBeDisabled())
+      fireEvent.click(send)
+      await waitFor(() => expect(animate).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ transform: expect.stringContaining('translate(') })]),
+        expect.objectContaining({ duration: 220 }),
+      ))
+      expect(document.querySelector('[data-composer-flight]')).not.toBeNull()
+    } finally {
+      HTMLElement.prototype.animate = previousAnimate
+    }
+  })
 })
 
 // The chip for a merge names the branch that came in. It reads that out of the

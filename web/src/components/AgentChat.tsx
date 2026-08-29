@@ -290,7 +290,7 @@ type ChatItem =
   // suppresses the fade/slide entrance for a message that takes the place of a
   // queued bubble already on screen (item 21) - it was visible, so re-animating
   // it as it settles reads as a flicker.
-  | { kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean; origin?: string }
+  | { kind: 'user'; id: number; text: string; clientId?: string; sending?: boolean; noEntrance?: boolean; origin?: string; flightFrom?: ComposerFlightRect }
   // A slash command echoed back by the CLI (<command-name>/<command-args>).
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
@@ -473,6 +473,12 @@ interface PendingSend {
   text: string
   queued: boolean
   origin?: string
+  flightFrom?: ComposerFlightRect
+}
+
+interface ComposerFlightRect {
+  top: number
+  right: number
 }
 
 // Minimal shapes of the stream-json events the reducer consumes. Everything
@@ -5901,6 +5907,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
   origin,
   projectId,
   linkCtx,
+  flightFrom,
 }: {
   text: string
   sending?: boolean
@@ -5918,19 +5925,34 @@ const ChatUserMessage = memo(function ChatUserMessage({
   // test" send points at) to the repository view - same context the assistant
   // bubbles use. Without it a link falls back to a plain, unresolvable anchor.
   linkCtx?: RepoLinkContext
+  flightFrom?: ComposerFlightRect
 }) {
   const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   // The chip clicked, so the picture flies out of it instead of fading in.
   const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
-  // Nothing left after stripping the CLI's image placeholder (item 41) - don't
-  // render an empty bubble.
-  if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
   const auto = automatedOrigin(origin)
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  const flewRef = useRef(false)
+  useLayoutEffect(() => {
+    const bubble = bubbleRef.current
+    if (!bubble || !flightFrom || flewRef.current || typeof bubble.animate !== 'function') return
+    flewRef.current = true
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    const destination = bubble.getBoundingClientRect()
+    bubble.animate([
+      { transform: `translate(${flightFrom.right - destination.right}px, ${flightFrom.top - destination.top}px) scale(0.96)`, opacity: 0.72 },
+      { transform: 'translate(0, 0) scale(1)', opacity: 1 },
+    ], { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' })
+  }, [flightFrom])
+  // Nothing left after stripping the CLI's image placeholder (item 41) - don't
+  // render an empty bubble. Keep this after the transition hooks so every render
+  // calls the same hooks even if a streamed placeholder becomes empty.
+  if (!body && attachments.length === 0 && !sending && !dimmed) return null
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div ref={bubbleRef} className="flex flex-col items-end gap-1" data-composer-flight={flightFrom ? '' : undefined}>
       {/* An automated turn is still YOUR side of the conversation - it acts on
           your behalf and the agent answers it as if you had spoken - so it keeps
           the user bubble's shape and side. What changes is the tint and this
@@ -7039,6 +7061,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const contentRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const richComposerRef = useRef<RichComposerHandle>(null)
+  const richComposerHostRef = useRef<HTMLDivElement>(null)
   const [activeCodeBlockLanguage, setActiveCodeBlockLanguage] = useState<string | null>(null)
   const syncActiveCodeBlock = useCallback((editor: RichComposerHandle['editor']) => {
     setActiveCodeBlockLanguage(editor?.isActive('codeBlock') ? String(editor.getAttributes('codeBlock').language ?? '') : null)
@@ -8189,7 +8212,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           let j = -1
           for (let k = prev.length - 1; k >= 0; k--) {
             const it = prev[k]
-            if (it.kind === 'user' && it.sending && it.text === optimisticText) {
+            if (it.kind === 'user' && it.sending && (clientId ? it.clientId === clientId : it.text === optimisticText)) {
               j = k
               break
             }
@@ -9984,7 +10007,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // closing the window / navigating away, and stays editable (Up arrow). The
   // bubble is added optimistically; the CLI's echo (or a `queue` frame on
   // reattach) is the source of truth. Returns false when the socket isn't usable.
-  function sendUserText(text: string): boolean {
+  function sendUserText(text: string, flightFrom?: ComposerFlightRect): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
     pinnedRef.current = true
@@ -9997,7 +10020,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (queued) {
       // A held message shows as a queued bubble pinned under the transcript
       // (reconciled against the server's queue frame on reconnect).
-      setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, clientId, text, queued }])
+      setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, clientId, text, queued, flightFrom }])
     } else {
       // A message that goes straight through appears immediately, in-flow, above
       // the thinking/response it triggers (item 26); the CLI's echo (which can
@@ -10005,7 +10028,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // Allocated OUTSIDE the updater: React may run an updater more than once
       // (StrictMode does, in dev), and an id/stamp taken in there would be too.
       const optId = takeOptimisticId()
-      setItems((prev) => [...prev, { kind: 'user', id: optId, text, sending: true }])
+      setItems((prev) => [...prev, { kind: 'user', id: optId, text, clientId, sending: true, flightFrom }])
       optimisticTextsRef.current.push({ clientId, text })
       // It starts a turn; nudge the status optimistically (like the terminal's
       // Enter handling), unless the agent is answering our question.
@@ -10084,7 +10107,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Attachment paths ride below the typed text, same as the spawn box - the
     // agent reads the uploaded files from inside its sandbox.
     const finalText = paths.length > 0 ? (text ? `${text}\n\n${paths.join('\n')}` : paths.join('\n')) : text
-    if (!finalText || !sendUserText(finalText)) return
+    const composerRect = richComposerHostRef.current?.getBoundingClientRect()
+    const flightFrom = composerRect ? { top: composerRect.top, right: composerRect.right } : undefined
+    if (!finalText || !sendUserText(finalText, flightFrom)) return
     setSlashDismissed(false)
     // The message is sent - free every preview URL minted this session (including
     // ones only reachable via undo history) and reset the composer + its history.
@@ -10479,7 +10504,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function renderChatItem(item: ChatItem, shellCwd: string | null = null): ReactNode {
     switch (item.kind) {
       case 'user':
-        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} projectId={projectId} linkCtx={chatLinkCtx} />
+        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} projectId={projectId} linkCtx={chatLinkCtx} flightFrom={item.flightFrom} />
       case 'command': {
         const name = item.name.startsWith('/') ? item.name : '/' + item.name
         return (
@@ -11048,7 +11073,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       is sent (a real user bubble) - and rendered the same way, so
                       image thumbnails / attachment chips show here too, not raw
                       upload paths (dimmed while it waits). */}
-                  <ChatUserMessage text={p.text} dimmed origin={p.origin} projectId={projectId} linkCtx={chatLinkCtx} />
+                  <ChatUserMessage text={p.text} dimmed origin={p.origin} projectId={projectId} linkCtx={chatLinkCtx} flightFrom={p.flightFrom} />
                   {/* Discard button (item 52): drops the queued message from the
                       server queue. A floating chip overhanging the bubble's
                       top-right corner (revealed on hover so the resting stack
@@ -11209,7 +11234,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
               />
             ) : (
-              <div className="w-full overflow-hidden" style={{ height: composerHeight }} data-rich-chat-composer>
+              <div ref={richComposerHostRef} className="w-full overflow-hidden" style={{ height: composerHeight }} data-rich-chat-composer>
                 <Suspense fallback={<div className="h-full px-3.5 pt-2.5 text-sm leading-5 text-stone-400">Loading editor...</div>}>
                   <RichComposer
                     ref={richComposerRef}
