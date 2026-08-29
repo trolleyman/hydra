@@ -2846,6 +2846,13 @@ func synthContextLine(ext string, oldN, newN int) api.DiffLine {
 }
 
 func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffFilesParams) {
+	if id == "agent-chat" && params.HeadRef != nil && *params.HeadRef == "beefcafe0123456789abcdef0123456789abcdef" {
+		api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{
+			{Path: "internal/upload/retry.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 31, Deletions: 7},
+			{Path: "internal/upload/retry_test.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 18, Deletions: 2},
+		}})
+		return
+	}
 	if id == "agent-1" {
 		resp := api.DiffResponse{
 			Files: []api.DiffFile{

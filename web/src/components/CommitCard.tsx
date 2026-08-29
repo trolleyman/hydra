@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Markdown } from '../lib/MarkdownRenderer'
 
 /* eslint-disable react-refresh/only-export-components -- the card's formatting and style tokens are deliberately shared with its callers */
@@ -32,15 +33,18 @@ export const COMMIT_SHA_CHIP =
 
 // Shared by commit selectors and transcript chips so a commit always opens the
 // same author/date/message card, wherever the user encounters it.
-export function CommitCard({ commit }: { commit: CommitCardCommit }) {
+export function CommitCard({ commit, corner }: { commit: CommitCardCommit; corner?: ReactNode }) {
   const { subject, body } = commitParts(commit.message)
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-2xs text-gray-500 dark:text-gray-400">
-        <span className={COMMIT_SHA_CHIP}>{commit.shortSha}</span>
-        {commit.authorName && <span className="text-gray-600 dark:text-gray-300">{commit.authorName}</span>}
-        {commit.authorName && commit.timestamp && <span className="text-gray-400 dark:text-gray-500">&middot;</span>}
-        {commit.timestamp && <span>{formatCommitDate(commit.timestamp)}</span>}
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-2xs text-gray-500 dark:text-gray-400">
+          <span className={COMMIT_SHA_CHIP}>{commit.shortSha}</span>
+          {commit.authorName && <span className="text-gray-600 dark:text-gray-300">{commit.authorName}</span>}
+          {commit.authorName && commit.timestamp && <span className="text-gray-400 dark:text-gray-500">&middot;</span>}
+          {commit.timestamp && <span>{formatCommitDate(commit.timestamp)}</span>}
+        </div>
+        {corner}
       </div>
       <div className="border-t border-gray-200 pt-2 dark:border-gray-700">
         <p className="text-sm leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>

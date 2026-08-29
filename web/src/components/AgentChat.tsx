@@ -45,6 +45,7 @@ import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../l
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 import { useAgentStore } from '../stores/agentStore'
+import { api } from '../stores/apiClient'
 import { Markdown, type RepoLinkContext } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, leadingBashComment, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
@@ -202,6 +203,44 @@ export function mergeChipLabel(subject: string, count: number, mergedRef?: strin
 // the padding gives back what the trim removed rather than leaving the chip shorter.
 const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-[3px] text-2xs text-stone-500 dark:text-stone-400 select-none'
 const COMMIT_HOVER = 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors'
+
+interface CommitStats { additions: number; deletions: number }
+
+// Cards mount only while their tooltip is open. Keep settled results outside the
+// component so revisiting a commit is instant and never repeats the git diff.
+const commitStatsCache = new Map<string, CommitStats | null>()
+
+function CommitChangeStats({ projectId, agentId, sha }: { projectId: string | null; agentId: string; sha: string }) {
+  const key = `${projectId ?? ''}\0${agentId}\0${sha}`
+  const [stats, setStats] = useState<CommitStats | null | undefined>(() => commitStatsCache.get(key))
+
+  useEffect(() => {
+    if (!projectId || stats !== undefined) return
+    let live = true
+    api.default.getAgentDiffFiles(projectId, agentId, `${sha}^`, sha, false)
+      .then((diff) => {
+        const next = diff.files.reduce<CommitStats>((sum, file) => ({
+          additions: sum.additions + file.additions,
+          deletions: sum.deletions + file.deletions,
+        }), { additions: 0, deletions: 0 })
+        commitStatsCache.set(key, next)
+        if (live) setStats(next)
+      })
+      .catch(() => {
+        commitStatsCache.set(key, null)
+        if (live) setStats(null)
+      })
+    return () => { live = false }
+  }, [agentId, key, projectId, sha, stats])
+
+  if (!stats) return null
+  return (
+    <span className="flex shrink-0 items-baseline gap-1 font-mono text-2xs" aria-label={`${stats.additions} lines added, ${stats.deletions} lines removed`}>
+      <span className="text-green-600 dark:text-green-400">+{stats.additions}</span>
+      <span className="text-red-600 dark:text-red-400">-{stats.deletions}</span>
+    </span>
+  )
+}
 
 // MergeCommitChip renders a merge as a single pill that expands to list the commits
 // it dragged in. Its own useState survives row re-renders (the row is memo'd on the
@@ -10385,7 +10424,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               variant="card"
               pin={false}
               width={COMMIT_CARD_WIDTH}
-              content={<CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp }} />}
+              content={
+                <CommitCard
+                  commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp }}
+                  corner={<CommitChangeStats projectId={projectId} agentId={agentId} sha={item.sha} />}
+                />
+              }
             >
               <div
                 role={clickable ? 'button' : undefined}
