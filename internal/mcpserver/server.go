@@ -143,6 +143,7 @@ type GitOpRequest struct {
 
 	// rebase
 	Base string
+	Onto string
 	Plan []GitRebaseStep
 
 	// merge (Message doubles as the merge-commit subject)

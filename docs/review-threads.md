@@ -69,6 +69,12 @@ Resolving a thread is deliberately NOT here: resolution semantics differ between
 the forges and belong to the review UI proper. Hydra shows the resolved state and
 links out.
 
+The Changes toolbar carries a compact comment pager. Its position counts every
+top-level comment/thread in document order, including resolved ones, so resolving
+a finding never makes it unreachable from Previous/Next. The adjacent open count
+is status only; unread comments add a mark-read action. The control is UI chrome
+and is not text-selectable.
+
 ## Why agents can only reply locally
 
 An agent has no forge credentials by design (`~/.config/gh` is not in the
@@ -100,6 +106,9 @@ diff viewer ──GET .../agents/{id}/review/threads──▶ daemon
   authenticated, network down, rate limit - the response falls back to the cache
   with `stale: true` and the reason, so the diff still shows the conversation
   instead of implying there is none.
+- The Changes toolbar's Refresh action refreshes these live threads as well as
+  the diff. It is the explicit way to pick up a forge reply without remounting
+  the agent page.
 - Local notes are merged per thread, sorted by time, after the forge notes.
   A note whose thread has vanished from the forge is dropped rather than shown
   floating.

@@ -291,6 +291,7 @@ func (s *Server) GetRepositoryBranches(_ context.Context, request api.GetReposit
 
 	return api.GetRepositoryBranches200JSONResponse{
 		Current:  current,
+		Default:  git.DefaultBranch(projectRoot, names, current),
 		Branches: branches,
 	}, nil
 }

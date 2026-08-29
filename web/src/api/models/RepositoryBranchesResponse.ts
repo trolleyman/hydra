@@ -9,6 +9,10 @@ export type RepositoryBranchesResponse = {
      */
     current: string;
     /**
+     * The repository's default base branch, independent of the currently checked-out branch
+     */
+    default: string;
+    /**
      * Branches ordered with Hydra agent branches first, then the rest
      */
     branches: Array<RepositoryBranch>;

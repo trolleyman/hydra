@@ -21,6 +21,8 @@ export type BranchList = {
   branches: RepositoryBranch[]
   // The repo's checked-out branch (HEAD), '' when unknown.
   current: string
+  // Stable repository default, independent of the checked-out branch.
+  default: string
 }
 
 // A week, matching the agent-list cache: a stale branch list is still a useful
@@ -45,7 +47,8 @@ const inflight = new Map<string, Promise<BranchList>>()
 function valid(list: unknown): list is BranchList {
   if (!list || typeof list !== 'object') return false
   const l = list as BranchList
-  return Array.isArray(l.branches) && l.branches.every((b) => !!b && typeof b.name === 'string')
+  return typeof l.current === 'string' && typeof l.default === 'string'
+    && Array.isArray(l.branches) && l.branches.every((b) => !!b && typeof b.name === 'string')
 }
 
 // The cached branch list for a project, or null when there is nothing usable -
@@ -68,10 +71,10 @@ export function fetchBranches(projectId: string): Promise<BranchList> {
   if (pending) return pending
   const p = api.default.getRepositoryBranches(projectId)
     .then((r) => {
-      const list: BranchList = { branches: r.branches, current: r.current || '' }
+      const list: BranchList = { branches: r.branches, current: r.current || '', default: r.default || '' }
       memory.set(projectId, list)
       store.save(branchesCacheKey(projectId), {
-        list: { branches: list.branches.slice(0, MAX_BRANCHES), current: list.current },
+        list: { branches: list.branches.slice(0, MAX_BRANCHES), current: list.current, default: list.default },
       })
       return list
     })

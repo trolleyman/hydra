@@ -404,7 +404,7 @@ type SpawnHeadOptions struct {
 	Prompt     string            // prompt
 	AgentType  sandbox.AgentType // empty = "claude"
 	Model      string            // model alias for the CLI's --model flag; empty = CLI default
-	BaseBranch string            // empty = current HEAD branch
+	BaseBranch string            // empty = repository default branch
 	// Adopt, when set, spawns this head ON an existing PR/MR instead of branching
 	// from BaseBranch: the worktree is created from the already-fetched PR head
 	// ref, BaseBranch is taken from the PR's target branch (so the diff shows the
@@ -545,9 +545,9 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	}
 	if baseBranch == "" {
 		var err error
-		baseBranch, err = git.GetCurrentBranch(projectRoot)
+		baseBranch, err = git.GetDefaultBranch(projectRoot)
 		if err != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("detect current branch: %w", err))
+			return nil, errtrace.Wrap(fmt.Errorf("detect default branch: %w", err))
 		}
 	}
 	// The worktree is normally created from the base branch; an adopted head is
@@ -1504,9 +1504,9 @@ func ResumeArchivedHead(ctx context.Context, reg *session.Registry, store *db.St
 	worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, id)
 	baseBranch := a.BaseBranch
 	if baseBranch == "" {
-		baseBranch, err = git.GetCurrentBranch(projectRoot)
+		baseBranch, err = git.GetDefaultBranch(projectRoot)
 		if err != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("detect current branch: %w", err))
+			return nil, errtrace.Wrap(fmt.Errorf("detect default branch: %w", err))
 		}
 	}
 

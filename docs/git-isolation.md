@@ -124,7 +124,12 @@ own own-branch guard, so they're safe on codex/gemini without it.
   unstage paths. The uncommit primitive.
 - **`git_revert`** / **`git_cherry_pick`** - new commit; abort on conflict.
 - **`git_rebase`** - plan-based non-interactive history edit (`pick`/`reword`/`squash`/
-  `fixup`/`drop`, translated to a todo + `exec git commit --amend`). Leaves the rebase
+  `fixup`/`drop`, translated to a todo + `exec git commit --amend`). Optional `onto`
+  transplants that exact plan onto a different ref (`git rebase --onto` semantics)
+  while the own-branch guard still pins the operation to this head's branch. It does
+  not change Hydra's stored base-branch metadata; that needs a future atomic
+  `change_base_branch` operation rather than making raw history editing mutate UI
+  state as a side effect. Leaves the rebase
   in progress on conflict; **`git_rebase_continue`** / **`git_rebase_abort`** drive it
   from there (they validate the in-progress rebase's `head-name` is the head's branch,
   since HEAD is detached mid-rebase).

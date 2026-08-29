@@ -263,7 +263,12 @@ function RootLayout() {
   } else if (!selectedAgentId && (composerAgentType === 'claude' || composerAgentType === 'codex')) {
     lastUsageAgentType.current = composerAgentType
   }
-  const usageAgentType = lastUsageAgentType.current
+  // On an agent route, wait for that agent record before mounting the usage
+  // indicator. Otherwise the initial empty store briefly mounts the Claude
+  // default and launches a Claude quota probe even when the selected head is
+  // Codex; the correct Codex indicator replaces it a moment later, but the
+  // needless Claude process and parse warning have already happened.
+  const usageAgentType = selectedAgentId && !selectedAgentType ? null : lastUsageAgentType.current
   // Narrow slices of the agent store, so the layout re-renders only when one of
   // THESE derived values changes - not on every ~1/s agent refresh. The live
   // agent list itself lives in <AgentSidebarList>, which owns its own
@@ -440,7 +445,7 @@ function RootLayout() {
   // Paint the selected project's icon into the tab, so one-tab-per-project
   // setups are tellable apart (matches the OS notification icon).
   useProjectFavicon(currentProjectId)
-  const { refetchStatus, canRestart, canUpdate, spawnedAt } = useSystemStatus()
+  const { refetchStatus, canRestart, canUpdate, version, spawnedAt } = useSystemStatus()
 
   // Auto-clear an agent's unread dot when it's the one currently open AND the
   // page is actually in front of the user. Covers both opening an unread agent
@@ -1140,7 +1145,7 @@ function RootLayout() {
                         constantly). Branch fills the left; dirty/ahead-behind
                         chips and Sync sit right. When clean and in sync it
                         reads "up to date" instead of emptying. */}
-                    <div className="px-2.5 mt-0.5 pb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="min-h-7 px-2.5 mt-0.5 pb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                       <GitBranch className="w-3.5 h-3.5 shrink-0" />
                       <span className="font-mono truncate" title={pushStatus?.branch || undefined}>
                         {pushStatus ? (pushStatus.branch || 'detached') : '...'}
@@ -1291,7 +1296,7 @@ function RootLayout() {
             {/* The right half, as one group: usage strip + settings, neither of
                 which may shrink - see above. */}
             <div className="flex shrink-0 items-center gap-1.5">
-              <ClaudeUsageIndicator key={usageAgentType} agentType={usageAgentType} />
+              {usageAgentType && <ClaudeUsageIndicator key={usageAgentType} agentType={usageAgentType} />}
             {(() => {
               const settingsActive = /\/settings(\/|$)/.test(location.pathname)
               const cls = settingsActive
@@ -1301,7 +1306,14 @@ function RootLayout() {
               // deselects Settings and returns to the project page (or the root
               // when no project is selected).
               return (
-                <Tooltip content={settingsActive ? 'Close settings' : 'Settings'}>
+                <Tooltip
+                  content={
+                    <>
+                      <div>{settingsActive ? 'Close settings' : 'Settings'}</div>
+                      {version && <div className="font-mono text-gray-500 dark:text-gray-400">Server {version}</div>}
+                    </>
+                  }
+                >
                   {settingsActive ? (
                     <button
                       type="button"

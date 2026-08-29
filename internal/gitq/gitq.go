@@ -96,6 +96,7 @@ type Request struct {
 
 	// rebase
 	Base string       `json:"base,omitempty"`
+	Onto string       `json:"onto,omitempty"`
 	Plan []RebaseStep `json:"plan,omitempty"`
 
 	// merge (Message doubles as the merge-commit subject)
