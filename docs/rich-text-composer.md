@@ -40,6 +40,9 @@ Completed 2026-08-29:
   state and resolved paths never enter the document or Markdown. Document
   presence drives upload lifecycle, so undo aborts an in-flight upload and redo
   restarts it; asynchronous reconciliation adds no history transaction.
+- Completed the initial block schema: level 1-3 headings, bullet/ordered/task
+  lists, blockquotes, fenced code and hard breaks all share the same Markdown
+  parser/serializer. Task item checked state has explicit round-trip coverage.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -561,7 +564,8 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
    fake-tested upload registry prove cancellation on undo, restart on redo and
    path-free Markdown/JSON. React chip rendering and production upload wiring
    belong to chat integration.
-5. **Block subset.** Headings 1-3, lists/tasks, blockquotes and code blocks.
+5. **Block subset - DONE.** Headings 1-3, bullet/ordered/task lists,
+   blockquotes, fenced code and hard breaks are registered and round-trip tested.
 6. **Chat integration.** Preserve send, queue recall, shell mode, uploads, large
    paste, drafts, resizing/auto-grow, disabled states and focus return. Migrate
    old drafts without loss; keep a development flag until parity tests pass.
