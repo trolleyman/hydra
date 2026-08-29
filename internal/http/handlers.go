@@ -1149,7 +1149,7 @@ func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
 		out.CleanIgnored = &a.CleanIgnored
 	}
 	if a.AutoRun != "" {
-		mode := api.ArtifactScriptAutoRun(a.AutoRun)
+		mode := api.AutoRunMode(a.AutoRun)
 		out.AutoRun = &mode
 	}
 	out.Strict = a.Strict
@@ -1204,7 +1204,7 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 		out.CleanIgnored = *a.CleanIgnored
 	}
 	if a.AutoRun != nil {
-		out.AutoRun = string(*a.AutoRun)
+		out.AutoRun = config.AutoRunMode(*a.AutoRun)
 	}
 	out.Strict = a.Strict
 	out.Enabled = a.Enabled
@@ -1225,7 +1225,7 @@ func toAPITestScript(t config.TestScript) api.TestScript {
 		out.CleanIgnored = &t.CleanIgnored
 	}
 	if t.AutoRun != "" {
-		mode := api.TestScriptAutoRun(t.AutoRun)
+		mode := api.AutoRunMode(t.AutoRun)
 		out.AutoRun = &mode
 	}
 	if t.Type != "" {
@@ -1249,7 +1249,7 @@ func fromAPITestScript(t api.TestScript) config.TestScript {
 		out.CleanIgnored = *t.CleanIgnored
 	}
 	if t.AutoRun != nil {
-		out.AutoRun = string(*t.AutoRun)
+		out.AutoRun = config.AutoRunMode(*t.AutoRun)
 	}
 	if t.Type != nil {
 		out.Type = *t.Type

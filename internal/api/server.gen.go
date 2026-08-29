@@ -62,13 +62,6 @@ const (
 	Stdout ArtifactLogLineStream = "stdout"
 )
 
-// Defines values for ArtifactScriptAutoRun.
-const (
-	ArtifactScriptAutoRunAlways  ArtifactScriptAutoRun = "always"
-	ArtifactScriptAutoRunNever   ArtifactScriptAutoRun = "never"
-	ArtifactScriptAutoRunSettled ArtifactScriptAutoRun = "settled"
-)
-
 // Defines values for ArtifactSetStatus.
 const (
 	ArtifactSetStatusError      ArtifactSetStatus = "error"
@@ -120,6 +113,13 @@ const (
 // Defines values for AssistantMessageEventType.
 const (
 	AssistantMessage AssistantMessageEventType = "assistant_message"
+)
+
+// Defines values for AutoRunMode.
+const (
+	AutoRunAlways  AutoRunMode = "always"
+	AutoRunNever   AutoRunMode = "never"
+	AutoRunSettled AutoRunMode = "settled"
 )
 
 // Defines values for ChatClientMessageType.
@@ -469,13 +469,6 @@ const (
 	TestCasePassed  TestCaseStatus = "passed"
 	TestCaseSkipped TestCaseStatus = "skipped"
 	TestCaseWarning TestCaseStatus = "warning"
-)
-
-// Defines values for TestScriptAutoRun.
-const (
-	TestScriptAutoRunAlways  TestScriptAutoRun = "always"
-	TestScriptAutoRunNever   TestScriptAutoRun = "never"
-	TestScriptAutoRunSettled TestScriptAutoRun = "settled"
 )
 
 // Defines values for TestStatus.
@@ -880,35 +873,32 @@ type ArtifactLogResponse struct {
 	Lines []ArtifactLogLine `json:"lines"`
 }
 
-// ArtifactScript A per-project script that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
+// ArtifactScript defines model for ArtifactScript.
 type ArtifactScript struct {
-	// AutoRun When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
-	AutoRun *ArtifactScriptAutoRun `json:"auto_run,omitempty"`
+	// AutoRun When missing cached work starts automatically.
+	AutoRun *AutoRunMode `json:"auto_run,omitempty"`
 
-	// CleanIgnored Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
+	// CleanIgnored Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower, but prevents stale ignored output leaking between runs.
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
 
-	// Enabled Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
+	// Enabled Whether this configured script is active (absent/null or true = enabled; false = skipped).
 	Enabled *bool `json:"enabled"`
 
-	// Name Unique label, also used as the cache directory
+	// Name Unique label, also used as the cache directory.
 	Name string `json:"name"`
 
-	// Script Shell script run via `bash -c` in the checkout directory. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
+	// Script Shell script run via `bash -c`. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
 	Script string `json:"script"`
 
-	// Strict Run the command under `set -eo pipefail` so a failing step aborts and propagates instead of being swallowed into a success (absent/null or true = strict; false = run exactly as written)
+	// Strict Run under `set -eo pipefail` so a failing step propagates (absent/null or true = strict; false = run exactly as written).
 	Strict *bool `json:"strict"`
 
-	// TimeoutSec Max seconds the command may run (0 = built-in default)
+	// TimeoutSec Max seconds the command may run (0 = built-in default).
 	TimeoutSec *int `json:"timeout_sec,omitempty"`
 
-	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false)
+	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false).
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
 }
-
-// ArtifactScriptAutoRun When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
-type ArtifactScriptAutoRun string
 
 // ArtifactSet defines model for ArtifactSet.
 type ArtifactSet struct {
@@ -1118,6 +1108,21 @@ type AssistantMessageEvent struct {
 
 // AssistantMessageEventType defines model for AssistantMessageEvent.Type.
 type AssistantMessageEventType string
+
+// AutoRunMode When missing cached work starts automatically.
+type AutoRunMode string
+
+// CachedRunPolicy Execution and cache policy shared by tests and diff artifacts.
+type CachedRunPolicy struct {
+	// AutoRun When missing cached work starts automatically.
+	AutoRun *AutoRunMode `json:"auto_run,omitempty"`
+
+	// CleanIgnored Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower, but prevents stale ignored output leaking between runs.
+	CleanIgnored *bool `json:"clean_ignored,omitempty"`
+
+	// TimeoutSec Max seconds the command may run (0 = built-in default).
+	TimeoutSec *int `json:"timeout_sec,omitempty"`
+}
 
 // ChatAssistantMessagePayload A settled assistant message; it replaces its streamed preview.
 type ChatAssistantMessagePayload struct {
@@ -2561,27 +2566,27 @@ type PolicyConfig struct {
 	StrictMcp *bool `json:"strict_mcp"`
 }
 
-// PreviewScript A per-project script that boots a live, clickable preview of the app at a checkout ([previews.<name>] in config.toml). Hydra proxies a dedicated port to it, spawning it when its link is opened and tearing it down when idle.
+// PreviewScript defines model for PreviewScript.
 type PreviewScript struct {
-	// Enabled Whether the preview is offered on the agent page (absent/null or true = enabled; false = hidden)
+	// Enabled Whether this configured script is active (absent/null or true = enabled; false = skipped).
 	Enabled *bool `json:"enabled"`
 
-	// IdleTimeoutSec Teardown after this long with zero in-flight proxied requests; open WebSocket/long-poll connections count as in-flight (0 = default 300).
+	// IdleTimeoutSec Teardown after this long with zero in-flight requests (0 = default 300).
 	IdleTimeoutSec *int `json:"idle_timeout_sec,omitempty"`
 
-	// Name Unique label, shown in the agent page's Previews row
+	// Name Unique label, shown in the agent page's Previews row.
 	Name string `json:"name"`
 
-	// ReadyTimeoutSec Max seconds from spawn to ready, builds included (0 = default 900)
+	// ReadyTimeoutSec Max seconds from spawn to ready, builds included (0 = default 900).
 	ReadyTimeoutSec *int `json:"ready_timeout_sec,omitempty"`
 
-	// Script Shell script run via `bash -c` in the checkout directory. It must start a server listening on $HYDRA_PREVIEW_ADDR and stay in the foreground.
+	// Script Shell script run via `bash -c`. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
 	Script string `json:"script"`
 
-	// Strict Run the command under `set -eo pipefail` so a failing build step aborts the spawn instead of serving a half-built tree (absent/null or true = strict)
+	// Strict Run under `set -eo pipefail` so a failing step propagates (absent/null or true = strict; false = run exactly as written).
 	Strict *bool `json:"strict"`
 
-	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false)
+	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false).
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
 }
 
@@ -3419,6 +3424,33 @@ type SandboxConfig struct {
 	WritablePaths  *[]string `json:"writable_paths"`
 }
 
+// SandboxedScriptDefinition defines model for SandboxedScriptDefinition.
+type SandboxedScriptDefinition struct {
+	// Enabled Whether this configured script is active (absent/null or true = enabled; false = skipped).
+	Enabled *bool `json:"enabled"`
+
+	// Script Shell script run via `bash -c`. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
+	Script string `json:"script"`
+
+	// Strict Run under `set -eo pipefail` so a failing step propagates (absent/null or true = strict; false = run exactly as written).
+	Strict *bool `json:"strict"`
+
+	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false).
+	UnsafeHost *bool `json:"unsafe_host,omitempty"`
+}
+
+// ScriptDefinition Fields shared by every configured command script.
+type ScriptDefinition struct {
+	// Enabled Whether this configured script is active (absent/null or true = enabled; false = skipped).
+	Enabled *bool `json:"enabled"`
+
+	// Script Shell script run via `bash -c`. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
+	Script string `json:"script"`
+
+	// Strict Run under `set -eo pipefail` so a failing step propagates (absent/null or true = strict; false = run exactly as written).
+	Strict *bool `json:"strict"`
+}
+
 // ServerUpdateDoneFrame The update finished without restarting - which in practice means it failed, since a success re-execs instead of sending this.
 type ServerUpdateDoneFrame struct {
 	// Error Empty means success.
@@ -3471,24 +3503,24 @@ type ServerUpdatePhaseFrame struct {
 // ServerUpdatePhaseFrameKind defines model for ServerUpdatePhaseFrame.Kind.
 type ServerUpdatePhaseFrameKind string
 
-// ServiceScript A per-project long-running script the daemon supervises while the project is registered ([services.<name>] in config.toml)
+// ServiceScript defines model for ServiceScript.
 type ServiceScript struct {
-	// Enabled Whether the daemon supervises this service (absent/null or true = enabled; false = skipped)
+	// Enabled Whether this configured script is active (absent/null or true = enabled; false = skipped).
 	Enabled *bool `json:"enabled"`
 
-	// Host Run on the host with NO sandbox - needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
+	// Host Run on the host with NO sandbox - needed for host devices such as /dev/kvm (default false).
 	Host *bool `json:"host,omitempty"`
 
-	// MaxRestarts Relaunch cap after an unexpected exit (null = default 3; 0 = never restart)
+	// MaxRestarts Relaunch cap after an unexpected exit (null = default 3; 0 = never restart).
 	MaxRestarts *int `json:"max_restarts"`
 
-	// Name Unique label, shown in the UI and logs
+	// Name Unique label, shown in the UI and logs.
 	Name string `json:"name"`
 
-	// Script Shell script run via `bash -c` from the project root. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
+	// Script Shell script run via `bash -c`. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
 	Script string `json:"script"`
 
-	// Strict Run the command under `set -eo pipefail` so a failed startup step surfaces as a crash instead of a healthy process (absent/null or true = strict; false = run exactly as written)
+	// Strict Run under `set -eo pipefail` so a failing step propagates (absent/null or true = strict; false = run exactly as written).
 	Strict *bool `json:"strict"`
 }
 
@@ -3862,38 +3894,35 @@ type TestRunResult struct {
 	Warnings *int `json:"warnings,omitempty"`
 }
 
-// TestScript A per-project test-runner script whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN
+// TestScript defines model for TestScript.
 type TestScript struct {
-	// AutoRun When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
-	AutoRun *TestScriptAutoRun `json:"auto_run,omitempty"`
+	// AutoRun When missing cached work starts automatically.
+	AutoRun *AutoRunMode `json:"auto_run,omitempty"`
 
-	// CleanIgnored Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
+	// CleanIgnored Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower, but prevents stale ignored output leaking between runs.
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
 
-	// Enabled Whether the test gate runs this command (absent/null or true = enabled; false = skipped)
+	// Enabled Whether this configured script is active (absent/null or true = enabled; false = skipped).
 	Enabled *bool `json:"enabled"`
 
-	// Name Unique label, also used as the cache directory
+	// Name Unique label, also used as the cache directory.
 	Name string `json:"name"`
 
-	// Script Shell script run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
+	// Script Shell script run via `bash -c`. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
 	Script string `json:"script"`
 
-	// Strict Run the command under `set -eo pipefail` (absent/null or true = strict; false = run exactly as written). The verdict still comes from the parsed report, not the exit code.
+	// Strict Run under `set -eo pipefail` so a failing step propagates (absent/null or true = strict; false = run exactly as written).
 	Strict *bool `json:"strict"`
 
-	// TimeoutSec Max seconds the command may run (0 = built-in default)
+	// TimeoutSec Max seconds the command may run (0 = built-in default).
 	TimeoutSec *int `json:"timeout_sec,omitempty"`
 
-	// Type How results are read - "junit" (default; parse *.xml/*.json report files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse `::hydra:test:*::` markers streamed live from stdout; the accumulated cases are the report, no file needed).
+	// Type Result input format - junit (default) or stdout marker streaming.
 	Type *string `json:"type"`
 
-	// UnsafeHost Run on the host with NO sandbox - runs the diffed ref's test code; only for trusted refs (default false)
+	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false).
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
 }
-
-// TestScriptAutoRun When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
-type TestScriptAutoRun string
 
 // TestStatus running = a run is in flight; passing/failing/errored = settled verdict; stale = a cached verdict exists but predates the current commit; none = no tests configured or never run. (A per-runner TestRunResult only ever uses running/passing/failing/errored; stale/none are head-summary states.)
 type TestStatus string

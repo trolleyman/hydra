@@ -381,11 +381,24 @@ type ServiceScript struct {
 
 // IsEnabled reports whether the service should be supervised. An absent flag
 // (nil) means enabled, for backward compatibility with pre-flag configs.
-func (s ServiceScript) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
+func (s ServiceScript) IsEnabled() bool { return scriptFlagEnabled(s.Enabled) }
 
 // IsStrict reports whether the command runs under `set -eo pipefail`. An absent
 // flag (nil) means strict, so a failed startup step surfaces rather than hiding.
-func (s ServiceScript) IsStrict() bool { return s.Strict == nil || *s.Strict }
+func (s ServiceScript) IsStrict() bool { return scriptFlagEnabled(s.Strict) }
+
+// scriptFlagEnabled is the shared absent-means-on rule for enabled and strict
+// across services, artifacts, previews and tests.
+func scriptFlagEnabled(flag *bool) bool { return flag == nil || *flag }
+
+// AutoRunMode is the cache scheduling policy shared by tests and artifacts.
+type AutoRunMode string
+
+const (
+	AutoRunAlways  AutoRunMode = "always"
+	AutoRunSettled AutoRunMode = "settled"
+	AutoRunNever   AutoRunMode = "never"
+)
 
 // DefaultServiceMaxRestarts is the restart cap applied when a service does not
 // set max_restarts.
@@ -466,7 +479,7 @@ type ArtifactScript struct {
 	// "always" (or empty) preserves the historical behavior, "settled" waits
 	// until the agent is no longer actively working, and "never" requires an
 	// explicit refresh. Cached generations are returned in every mode.
-	AutoRun string `toml:"auto_run"`
+	AutoRun AutoRunMode `toml:"auto_run"`
 	// Enabled gates whether the diff viewer runs this script. nil or true means
 	// active; false means it is skipped entirely. nil is the default so configs
 	// written before this flag keep their artifacts running. Like unsafe_host,
@@ -509,11 +522,11 @@ const ArtifactTypeServer = "server"
 
 // IsEnabled reports whether the artifact script should run. An absent flag (nil)
 // means enabled, for backward compatibility with pre-flag configs.
-func (a ArtifactScript) IsEnabled() bool { return a.Enabled == nil || *a.Enabled }
+func (a ArtifactScript) IsEnabled() bool { return scriptFlagEnabled(a.Enabled) }
 
 // IsStrict reports whether the command runs under `set -eo pipefail`. An absent
 // flag (nil) means strict, so a failing step surfaces rather than being swallowed.
-func (a ArtifactScript) IsStrict() bool { return a.Strict == nil || *a.Strict }
+func (a ArtifactScript) IsStrict() bool { return scriptFlagEnabled(a.Strict) }
 
 // IsServer reports whether this entry is a legacy type = "server" artifact, i.e.
 // a preview written in the pre-[previews.<name>] syntax. Only the decode-time
@@ -588,11 +601,11 @@ type PreviewScript struct {
 
 // IsEnabled reports whether the preview should be offered. An absent flag (nil)
 // means enabled, for backward compatibility with pre-flag configs.
-func (p PreviewScript) IsEnabled() bool { return p.Enabled == nil || *p.Enabled }
+func (p PreviewScript) IsEnabled() bool { return scriptFlagEnabled(p.Enabled) }
 
 // IsStrict reports whether the command runs under `set -eo pipefail`. An absent
 // flag (nil) means strict, so a failing build step surfaces as a failed spawn.
-func (p PreviewScript) IsStrict() bool { return p.Strict == nil || *p.Strict }
+func (p PreviewScript) IsStrict() bool { return scriptFlagEnabled(p.Strict) }
 
 // previewFromArtifact converts a legacy type = "server" artifact into the
 // PreviewScript it now means. The artifact-only fields (timeout_sec,
@@ -731,7 +744,7 @@ type TestScript struct {
 	CleanIgnored bool `toml:"clean_ignored"`
 	// AutoRun controls when a missing test run starts automatically. See
 	// ArtifactScript.AutoRun for the accepted values and cache behavior.
-	AutoRun string `toml:"auto_run"`
+	AutoRun AutoRunMode `toml:"auto_run"`
 	// Enabled gates whether the test gate runs this command. nil or true means
 	// active; false skips it entirely. nil is the default for backward compat.
 	Enabled *bool `toml:"enabled"`
@@ -755,11 +768,11 @@ type TestScript struct {
 
 // IsEnabled reports whether the test runner should run. An absent flag (nil)
 // means enabled, for backward compatibility with pre-flag configs.
-func (t TestScript) IsEnabled() bool { return t.Enabled == nil || *t.Enabled }
+func (t TestScript) IsEnabled() bool { return scriptFlagEnabled(t.Enabled) }
 
 // IsStrict reports whether the command runs under `set -eo pipefail`. An absent
 // flag (nil) means strict.
-func (t TestScript) IsStrict() bool { return t.Strict == nil || *t.Strict }
+func (t TestScript) IsStrict() bool { return scriptFlagEnabled(t.Strict) }
 
 // IsStreaming reports whether results are parsed live from stdout markers
 // (type = "stdout") rather than from report files after exit.
@@ -2840,7 +2853,7 @@ func artifactFieldLines(a ArtifactScript) []string {
 		out = append(out, "clean_ignored = true")
 	}
 	if a.AutoRun != "" && a.AutoRun != "always" {
-		out = append(out, "auto_run = "+tomlStringValue(a.AutoRun))
+		out = append(out, "auto_run = "+tomlStringValue(string(a.AutoRun)))
 	}
 	if a.Strict != nil && !*a.Strict {
 		out = append(out, "strict = false")
@@ -3151,7 +3164,7 @@ func testFieldLines(t TestScript) []string {
 		out = append(out, "clean_ignored = true")
 	}
 	if t.AutoRun != "" && t.AutoRun != "always" {
-		out = append(out, "auto_run = "+tomlStringValue(t.AutoRun))
+		out = append(out, "auto_run = "+tomlStringValue(string(t.AutoRun)))
 	}
 	if t.Strict != nil && !*t.Strict {
 		out = append(out, "strict = false")
