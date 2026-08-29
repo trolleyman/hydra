@@ -10,6 +10,7 @@
 
 # Locally-built hydra binary (e.g. `go build -o hydra .`); mage builds to .mage/
 /hydra
+/dist/macos/
 
 # Test binary, built with `go test -c`
 *.test
@@ -53,4 +54,3 @@ core.*
 # Stray root-level node_modules (tooling run from the repo root by mistake;
 # the real one lives in web/)
 /node_modules/
-
