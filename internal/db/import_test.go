@@ -3,6 +3,7 @@ package db
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,7 +76,7 @@ func TestImportLegacyPreservesRecordsAndSource(t *testing.T) {
 	}
 }
 
-func TestImportLegacyQualifiesCrossProjectAgentID(t *testing.T) {
+func TestImportLegacyRejectsCrossProjectAgentIDCollisionAtomically(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	rootA := seedLegacyAgent(t, "same-id", "First")
 	rootB := seedLegacyAgent(t, "same-id", "Different")
@@ -88,34 +89,24 @@ func TestImportLegacyQualifiesCrossProjectAgentID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer global.Close()
-	if err := global.ImportLegacy([]string{rootA, rootB}); err != nil {
-		t.Fatalf("ImportLegacy: %v", err)
+	err = global.ImportLegacy([]string{rootA, rootB})
+	if err == nil {
+		t.Fatal("ImportLegacy succeeded despite a cross-project agent ID collision")
 	}
-	if err := global.ImportLegacy([]string{rootA, rootB}); err != nil {
-		t.Fatalf("idempotent ImportLegacy: %v", err)
+	if got := err.Error(); !strings.Contains(got, `agent ID "same-id"`) || !strings.Contains(got, "rename or archive") {
+		t.Fatalf("ImportLegacy error is not actionable: %v", err)
 	}
 	var agents []Agent
 	if err := global.db.Unscoped().Find(&agents).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(agents) != 2 {
-		t.Fatalf("agents = %#v, want both project-local records", agents)
-	}
-	byProject := make(map[string]Agent, len(agents))
-	for _, agent := range agents {
-		byProject[agent.ProjectPath] = agent
-	}
-	if agent := byProject[rootA]; agent.ID != "same-id" {
-		t.Fatalf("first agent = %#v", agent)
-	}
-	wantQualified := collisionImportID("same-id", rootB)
-	if agent := byProject[rootB]; agent.ID != wantQualified {
-		t.Fatalf("second agent = %#v, want ID %q in %q", agent, wantQualified, rootB)
+	if len(agents) != 0 {
+		t.Fatalf("transaction left partially imported agents: %#v", agents)
 	}
 	var markers int64
 	global.db.Model(&LegacyImport{}).Count(&markers)
-	if markers != 2 {
-		t.Fatalf("markers = %d, want 2", markers)
+	if markers != 0 {
+		t.Fatalf("transaction left %d import markers, want 0", markers)
 	}
 }
 

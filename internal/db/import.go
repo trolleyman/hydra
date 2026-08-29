@@ -1,12 +1,10 @@
 package db
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"time"
 
 	"braces.dev/errtrace"
@@ -25,9 +23,9 @@ type LegacyImport struct {
 }
 
 // ImportLegacy transactionally imports agents from project-local databases.
-// IDs were only project-unique in that layout; a cross-project collision gets a
-// deterministic project-qualified ID while its stored branch/worktree continue
-// to name the original project-local resources.
+// IDs were only project-unique in that layout. A cross-project collision aborts
+// the transaction because per-head resources are also keyed by that ID; changing
+// only the database key would make the imported head impossible to resume.
 func (s *Store) ImportLegacy(projectRoots []string) error {
 	seen := make(map[string]struct{}, len(projectRoots))
 	return errtrace.Wrap(s.db.Transaction(func(tx *gorm.DB) error {
@@ -120,32 +118,10 @@ func importLegacyFile(target *gorm.DB, source string) error {
 		case paths.ComparePaths(existing.ProjectPath, agents[i].ProjectPath):
 			return errtrace.Errorf("legacy database %s contains conflicting records for agent ID %s in the same project", source, originalID)
 		default:
-			agents[i].ID = collisionImportID(originalID, agents[i].ProjectPath)
-			var renamed Agent
-			if err := target.Unscoped().First(&renamed, "id = ?", agents[i].ID).Error; err == nil {
-				if reflect.DeepEqual(renamed, agents[i]) {
-					continue
-				}
-				return errtrace.Errorf("legacy database %s conflicts on qualified agent ID %s", source, agents[i].ID)
-			} else if err != gorm.ErrRecordNotFound {
-				return errtrace.Wrap(err)
-			}
-			if err := target.Unscoped().Create(&agents[i]).Error; err != nil {
-				return errtrace.Wrap(err)
-			}
+			return errtrace.Errorf("cannot import legacy database %s: agent ID %q is already used by project %s; rename or archive one of the colliding legacy heads before retrying", source, originalID, existing.ProjectPath)
 		}
 	}
 	return errtrace.Wrap(target.Create(&LegacyImport{Path: source, ImportedAt: time.Now()}).Error)
-}
-
-func collisionImportID(id, projectRoot string) string {
-	sum := sha256.Sum256([]byte(projectRoot))
-	suffix := fmt.Sprintf("-%x", sum[:8])
-	id = strings.TrimSuffix(id, ".")
-	if max := 100 - len(suffix); len(id) > max {
-		id = strings.TrimRight(id[:max], ".")
-	}
-	return id + suffix
 }
 
 func samePath(a, b string) (bool, error) {
