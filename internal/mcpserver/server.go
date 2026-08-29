@@ -564,7 +564,7 @@ func callTool(deps Deps, params json.RawMessage) map[string]any {
 		return textResult(msg, !ok)
 	case "send_agent_message":
 		if deps.SendAgent == nil {
-			return textResult("Agent messaging is disabled for this session. Enable policy.agent_messaging and restart the agent.", true)
+			return textResult("Agent messaging is not available in this session.", true)
 		}
 		var args struct {
 			Target        string `json:"target"`

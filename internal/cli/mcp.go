@@ -82,9 +82,7 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 	if os.Getenv("HYDRA_AGENT_REQ_DIR") != "" {
 		deps.ListAgents = listAgentsFromMCP
 		deps.GetAgent = getAgentFromMCP
-		if os.Getenv("HYDRA_AGENT_MESSAGING") == "1" {
-			deps.SendAgent = sendAgentFromMCP
-		}
+		deps.SendAgent = sendAgentFromMCP
 	}
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
 }
