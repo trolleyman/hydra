@@ -2,9 +2,19 @@
 Type=Application
 Name=Hydra
 Comment=Run and review AI coding agents
-Exec=hydra-desktop
+Exec=hydra-desktop %u
 Icon=dev.hydra.desktop
 Terminal=false
 Categories=Development;Utility;
 StartupNotify=true
 StartupWMClass=dev.hydra.desktop
+MimeType=x-scheme-handler/hydra;
+Actions=NewWindow;NewChat;
+
+[Desktop Action NewWindow]
+Name=New window
+Exec=hydra-desktop
+
+[Desktop Action NewChat]
+Name=New chat
+Exec=hydra-desktop hydra://focused/_chat

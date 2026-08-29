@@ -2,8 +2,36 @@ package desktop
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
+
+func TestApplyDeepLink(t *testing.T) {
+	base := "http://127.0.0.1:4321/#desktop-bootstrap=secret"
+	tests := map[string]string{
+		"hydra://settings":                        "/settings",
+		"hydra://project/my-project":              "/project/my-project",
+		"hydra://project/my-project/agent/head.2": "/project/my-project/agent/head.2",
+		"hydra://focused/_chat":                   "/focused/_chat",
+	}
+	for link, path := range tests {
+		got, err := ApplyDeepLink(base, link)
+		if err != nil {
+			t.Fatalf("ApplyDeepLink(%q): %v", link, err)
+		}
+		if !strings.Contains(got, path) || !strings.Contains(got, "desktop-bootstrap=secret") {
+			t.Errorf("ApplyDeepLink(%q) = %q", link, got)
+		}
+	}
+}
+
+func TestApplyDeepLinkRejectsUnsafeInput(t *testing.T) {
+	for _, link := range []string{"https://example.com", "hydra://project/../etc", "hydra://run/rm", "hydra://settings?x=1"} {
+		if _, err := ApplyDeepLink("http://127.0.0.1:4321", link); err == nil {
+			t.Errorf("ApplyDeepLink accepted %q", link)
+		}
+	}
+}
 
 func TestLocalServerURL(t *testing.T) {
 	t.Parallel()

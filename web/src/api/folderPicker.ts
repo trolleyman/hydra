@@ -9,6 +9,7 @@
 // systems with no dialog tool.
 
 import type { FolderPickerOpenResponse } from './models/FolderPickerOpenResponse'
+import { hasNativeFolderPicker, pickNativeFolder } from '../lib/desktopBridge'
 
 // The generated shape, not a hand-copied one: these routes are described in the
 // spec, so the payload type comes from there and a spec change is a type error
@@ -19,6 +20,7 @@ export type FolderPickResult = FolderPickerOpenResponse
 
 /** Whether the UI should show a native "Browse..." button. */
 export async function folderPickerAvailable(): Promise<boolean> {
+  if (hasNativeFolderPicker()) return true
   try {
     const res = await fetch('/api/folder-picker/available')
     if (!res.ok) return false
@@ -34,6 +36,11 @@ export async function folderPickerAvailable(): Promise<boolean> {
  * The request blocks for the whole time the dialog is on screen.
  */
 export async function openFolderPicker(): Promise<FolderPickResult> {
+  const native = pickNativeFolder()
+  if (native) {
+    const path = await native
+    return path ? { path } : { cancelled: true }
+  }
   const res = await fetch('/api/folder-picker/open', { method: 'POST' })
   if (!res.ok) {
     const text = await res.text().catch(() => '')

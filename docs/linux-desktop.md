@@ -1,7 +1,8 @@
 # Hydra as a standalone Linux app
 
-Status: **implementation started; shared focused-session foundation and first
-Linux WebKitGTK shell spike built.**
+Status: **preview implementation built; native lifecycle, notifications, folder
+selection, diagnostics, and a local `.deb` target are present. Platform release
+validation remains.**
 This document adapts the desktop product defined in
 [macos-desktop-chat.md](macos-desktop-chat.md) to Linux. The shared backend, API,
 and React base is already the branch point for platform work: focused heads are
@@ -21,11 +22,9 @@ of the React interface.
 - **Backend lifecycle:** an app-managed detached daemon is the default when no
   compatible backend is already running. The app attaches to an existing CLI or
   service-owned backend instead of competing with it.
-- **First packaging attempt:** AppImage, installed per-user without root. It is
-  only the release path if the spike proves that Hydra's namespaces, mounts,
-  helpers, provider execution, and updates work from its mounted runtime. A
-  `.deb` package for Ubuntu LTS is the planned fallback, not a reason to weaken
-  the sandbox.
+- **First packaging attempt:** an Ubuntu LTS `.deb` using the distro GTK 4 and
+  WebKitGTK 6 runtimes. AppImage is deferred until mounted-runtime sandbox and
+  upgrade behavior can be proven without weakening Hydra's sandbox.
 
 ## Product shape
 
@@ -388,10 +387,11 @@ making the filesystem-protected endpoint protocol platform-UI-specific.
 - [x] Wire the shared lifecycle bridge into WebKitGTK for New Full Window, New
   Focused Chat, and close requests. AppKit and WebView2 additionally consume
   active-project and active-turn lifecycle messages.
-- Add native New Window/New Chat commands, project handoff, deep links, and
-  active-window close confirmation.
-- Implement explicit Quit semantics for app-launched, service-owned, and
-  externally-owned backends.
+- [x] Add native New Window/New Chat/Settings commands, project handoff, a
+  constrained `hydra://` deep-link grammar, and active-window close
+  confirmation.
+- [x] Make Quit warn about active turns and explicitly leave the shared backend
+  and agents running, regardless of which client originally launched it.
 - Keep browser-safe dialogs and navigation paths for every essential action.
 
 Exit criterion: full and focused windows support the agreed lifecycle, and no
@@ -401,8 +401,12 @@ window action implicitly interrupts a head.
 
 - [x] Stage a Freedesktop desktop entry, hicolor icon, and stable application ID
   in the explicit Linux build output.
-- Add file/directory portals and native notifications.
-- Route notification clicks and secondary activations to exact windows.
+- [x] Add a GTK folder chooser (portal-backed by GTK where the desktop exposes
+  one) and GNotification integration, advertised to the web UI through explicit
+  shell capabilities so other platform shells retain browser fallbacks.
+- [x] Route notification clicks to the exact project/agent URL. Secondary
+  process deep-link handoff to an already-running instance still needs an
+  installed-session test.
 - Add optional StatusNotifier integration without making it required.
 - Verify accessibility, IME, clipboard, drag/drop, high-DPI, multi-monitor, and
   dark/light theme behavior across representative GNOME and KDE sessions.
@@ -415,8 +419,10 @@ and X11.
 - Implement XDG runtime/state layout and compatibility lookup or migration.
 - Make provider/helper discovery independent of an interactive shell.
 - Package all Hydra-owned sandbox helpers and validate their permissions.
-- Add capability diagnostics for namespaces, cgroups, network filtering,
-  portals, notifications, and the selected webview runtime.
+- [ ] Complete capability diagnostics for namespaces, cgroups, and network
+  filtering. `hydra-desktop --diagnostics` now reports GTK/WebKitGTK versions,
+  display/session details, desktop-bus notification availability, and portal
+  availability as JSON.
 - Run focused Read-only/Edit and ordinary worktree sessions through the packaged
   app on every supported distribution.
 
@@ -430,12 +436,14 @@ notification, and webview-runtime probes remain.
 
 ### Phase 5: package a preview
 
-- Produce reproducible amd64 and arm64 archives and an AppImage preview.
+- [x] Add `mage buildDesktopDeb`, producing an amd64/arm64 `.deb` on the matching
+  Linux host with the binary, desktop entry, icon, URL-scheme registration, and
+  GTK/WebKitGTK dependencies.
 - Prove user installation, desktop integration, mounted-runtime behavior,
   provider/tool discovery, sandbox helpers, and safe AppImage replacement on
   Ubuntu LTS/GNOME.
-- If any required sandbox property cannot be preserved, stop the AppImage path
-  and produce the Ubuntu LTS `.deb` instead.
+- [x] Use the Ubuntu LTS `.deb` path for the preview rather than claiming an
+  unvalidated AppImage sandbox.
 - Add uninstall behavior which leaves user projects and durable Hydra state
   intact.
 - Test clean install, upgrade, downgrade rejection, CLI coexistence, and removal

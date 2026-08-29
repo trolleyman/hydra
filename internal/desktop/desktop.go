@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	"github.com/trolleyman/hydra/internal/projects"
 )
 
+var desktopLinkID = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
 // Run opens a native Hydra window connected to rawURL.
 func Run(rawURL string) error {
 	appURL, err := localServerURL(rawURL)
@@ -25,6 +28,38 @@ func Run(rawURL string) error {
 		return errtrace.Wrap(err)
 	}
 	return errtrace.Wrap(run(appURL.String()))
+}
+
+// ApplyDeepLink maps the public hydra:// grammar onto a trusted server URL.
+// Links contain identifiers only - never arbitrary paths, hosts, or commands.
+func ApplyDeepLink(rawServerURL, rawLink string) (string, error) {
+	serverURL, err := localServerURL(rawServerURL)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	if rawLink == "" {
+		return serverURL.String(), nil
+	}
+	link, err := url.Parse(rawLink)
+	if err != nil || link.Scheme != "hydra" || link.RawQuery != "" || link.Fragment != "" || link.User != nil {
+		return "", errtrace.Wrap(fmt.Errorf("invalid Hydra deep link"))
+	}
+	parts := []string{link.Host}
+	parts = append(parts, strings.FieldsFunc(link.Path, func(r rune) bool { return r == '/' })...)
+	validID := func(value string) bool { return desktopLinkID.MatchString(value) }
+	switch {
+	case len(parts) == 1 && parts[0] == "settings":
+		serverURL.Path = "/settings"
+	case len(parts) == 2 && parts[0] == "project" && validID(parts[1]):
+		serverURL.Path = "/project/" + url.PathEscape(parts[1])
+	case len(parts) == 4 && parts[0] == "project" && parts[2] == "agent" && validID(parts[1]) && validID(parts[3]):
+		serverURL.Path = "/project/" + url.PathEscape(parts[1]) + "/agent/" + url.PathEscape(parts[3])
+	case len(parts) == 2 && parts[0] == "focused" && validID(parts[1]):
+		serverURL.Path = "/focused/" + url.PathEscape(parts[1])
+	default:
+		return "", errtrace.Wrap(fmt.Errorf("unknown or unsafe Hydra deep link action"))
+	}
+	return serverURL.String(), nil
 }
 
 // ResolveServer returns the explicitly supplied loopback URL, or ensures the

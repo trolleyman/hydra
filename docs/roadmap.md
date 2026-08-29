@@ -321,7 +321,13 @@ before starting. Grouped by area.
   [linux-desktop.md](linux-desktop.md) for the platform sequences. Each app also
   depends on closing its security-critical platform gaps in
   [macos-support.md](macos-support.md) or [windows-support.md](windows-support.md),
-  or validating the packaged Linux sandbox described by the Linux plan.
+  or validating the packaged Linux sandbox described by the Linux plan. Linux
+  now has native menus and safe-close prompts, native notifications with exact
+  conversation routing, GTK folder selection, constrained deep links, JSON
+  diagnostics, and a `mage buildDesktopDeb` preview target. The remaining Linux
+  work is real GNOME/KDE, Wayland/X11, IME, accessibility, multi-monitor,
+  notification activation, install/upgrade/removal, and packaged-sandbox test
+  coverage.
 
 - [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
 

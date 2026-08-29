@@ -573,6 +573,63 @@ func BuildDesktopLinux() error {
 	return errtrace.Wrap(sh.Copy(filepath.Join(icons, "dev.hydra.desktop.png"), filepath.Join("web", "public", "android-chrome-512x512.png")))
 }
 
+// BuildDesktopDeb builds an installable Ubuntu/Debian package for the host
+// architecture. The package uses the distro GTK/WebKitGTK runtime and leaves
+// user configuration, databases, and projects untouched on removal.
+func BuildDesktopDeb() error {
+	if runtime.GOOS != "linux" {
+		return errtrace.Wrap(fmt.Errorf("the .deb desktop package requires a Linux host, not %s", runtime.GOOS))
+	}
+	if _, err := exec.LookPath("dpkg-deb"); err != nil {
+		return errtrace.Wrap(errors.New("dpkg-deb is required to build the Linux desktop package"))
+	}
+	if err := BuildDesktopLinux(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	arch := map[string]string{"amd64": "amd64", "arm64": "arm64"}[runtime.GOARCH]
+	if arch == "" {
+		return errtrace.Wrap(fmt.Errorf("the .deb desktop package does not support %s", runtime.GOARCH))
+	}
+	version := strings.TrimPrefix(getVersion(), "v")
+	version = strings.ReplaceAll(version, "-", "+")
+	if version == "" || version == "dev" {
+		version = "0.0.0+dev"
+	} else if version[0] < '0' || version[0] > '9' {
+		version = "0.0.0+" + version
+	}
+	root := filepath.Join("dist", "linux", "deb-root")
+	if err := os.RemoveAll(root); err != nil {
+		return errtrace.Wrap(err)
+	}
+	paths := []string{
+		filepath.Join(root, "DEBIAN"),
+		filepath.Join(root, "usr", "bin"),
+		filepath.Join(root, "usr", "share", "applications"),
+		filepath.Join(root, "usr", "share", "icons", "hicolor", "512x512", "apps"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	control := fmt.Sprintf("Package: hydra-desktop\nVersion: %s\nSection: devel\nPriority: optional\nArchitecture: %s\nMaintainer: Hydra contributors\nDepends: libgtk-4-1, libwebkitgtk-6.0-4\nDescription: Desktop application for Hydra AI orchestration\n Run and review AI coding agents from a native Linux application.\n", version, arch)
+	if err := os.WriteFile(filepath.Join(root, "DEBIAN", "control"), []byte(control), 0o644); err != nil {
+		return errtrace.Wrap(err)
+	}
+	files := [][2]string{
+		{filepath.Join("dist", "linux", "hydra-desktop"), filepath.Join(root, "usr", "bin", "hydra-desktop")},
+		{filepath.Join("desktop", "linux", "dev.hydra.desktop"), filepath.Join(root, "usr", "share", "applications", "dev.hydra.desktop")},
+		{filepath.Join("web", "public", "android-chrome-512x512.png"), filepath.Join(root, "usr", "share", "icons", "hicolor", "512x512", "apps", "dev.hydra.desktop.png")},
+	}
+	for _, file := range files {
+		if err := sh.Copy(file[1], file[0]); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	output := filepath.Join("dist", "linux", fmt.Sprintf("hydra-desktop_%s_%s.deb", version, arch))
+	return errtrace.Wrap(runV("dpkg-deb", "--build", "--root-owner-group", root, output))
+}
+
 // BuildDesktopMac builds the AppKit application explicitly on macOS.
 func BuildDesktopMac() error {
 	if runtime.GOOS != "darwin" {

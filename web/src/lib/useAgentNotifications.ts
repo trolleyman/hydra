@@ -28,6 +28,10 @@ const FINISHED_TOAST_MS = 14_000
 // below) is the primary path; this is just the never-answered backstop.
 const OS_STICKY_DISMISS_MS = 120_000
 
+function agentURL(projectId: string, agentId: string): string {
+  return `${window.location.origin}/project/${encodeURIComponent(projectId)}/agent/${encodeURIComponent(agentId)}`
+}
+
 // useAgentNotifications watches the live agent list for the current project and
 // surfaces three kinds of toasts:
 //
@@ -244,6 +248,7 @@ export function useAgentNotifications(
             sticky: true,
             autoDismissMs: OS_STICKY_DISMISS_MS,
             icon: projectIcon,
+            url: agentURL(currentProjectId, agent.id),
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
@@ -262,6 +267,7 @@ export function useAgentNotifications(
             tag: `finished:${agent.id}`,
             sticky: false,
             icon: projectIcon,
+            url: agentURL(currentProjectId, agent.id),
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
@@ -283,6 +289,7 @@ export function useAgentNotifications(
             tag: `error:${agent.id}`,
             sticky: true,
             icon: projectIcon,
+            url: agentURL(currentProjectId, agent.id),
             onClick: () => openAgent(currentProjectId, agent.id),
           })
         }
@@ -501,6 +508,7 @@ export function useAgentNotifications(
               tag: `approval:${agentId}:${a.reqid}`,
               sticky: true,
               autoDismissMs: OS_STICKY_DISMISS_MS,
+              url: agentURL(currentProjectId, agentId),
               icon: projectIcon,
               onClick: () => openAgent(currentProjectId, agentId),
             })
@@ -562,6 +570,7 @@ export function useAgentNotifications(
               sticky: true,
               autoDismissMs: OS_STICKY_DISMISS_MS,
               icon: projectIconUrl(p.icon, pid),
+              url: agentURL(pid, a.id),
               onClick: () => openAgent(pid, a.id),
             })
           }
@@ -609,6 +618,7 @@ export function useAgentNotifications(
               tag: `${isErr ? 'error' : 'finished'}:${a.id}`,
               sticky: isErr,
               icon: projectIconUrl(p.icon, pid),
+              url: agentURL(pid, a.id),
               onClick: () => openAgent(pid, a.id),
             })
           }

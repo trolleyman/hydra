@@ -1,7 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
-import { onDesktopCommand, postDesktopMessage } from './desktopBridge'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { hasNativeFolderPicker, hasNativeNotifications, onDesktopCommand, postDesktopMessage } from './desktopBridge'
 
 describe('desktopBridge', () => {
+  afterEach(() => {
+    delete (window as Window & { hydraDesktopCapabilities?: unknown }).hydraDesktopCapabilities
+  })
   it('delivers native commands and removes the listener', () => {
     const handler = vi.fn()
     const remove = onDesktopCommand(handler)
@@ -14,5 +17,16 @@ describe('desktopBridge', () => {
 
   it('reports no native transport in an ordinary browser', () => {
     expect(postDesktopMessage({ type: 'new-full-window' })).toBe(false)
+  })
+
+  it('requires explicit capabilities for platform-specific bridge features', () => {
+    expect(hasNativeNotifications()).toBe(false)
+    expect(hasNativeFolderPicker()).toBe(false)
+    ;(window as Window & { hydraDesktopCapabilities?: object }).hydraDesktopCapabilities = {
+      nativeNotifications: true,
+      nativeFolderPicker: false,
+    }
+    expect(hasNativeNotifications()).toBe(true)
+    expect(hasNativeFolderPicker()).toBe(false)
   })
 })
