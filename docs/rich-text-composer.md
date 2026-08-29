@@ -91,6 +91,11 @@ Completed 2026-08-29:
   styling/scripts are discarded, and URL-over-selection creates a link.
   Ctrl/Cmd+Shift+V bypasses files and HTML and inserts the clipboard's plain
   text literally.
+- Kept inline presentation structurally quiet: editable code capsules and file
+  attachments stay within the composer's existing 20px line box, while rendered
+  commit/file chips stay within chat's existing 21px line box. Real-Chromium
+  assertions guard both heights so tokenization cannot make surrounding prose
+  jump vertically.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every

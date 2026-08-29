@@ -18,6 +18,7 @@ const text = (value: string) => ({ type: 'text', text: value })
 const code = (value = '') => value
   ? { type: 'inlineCode', content: [{ type: 'text', text: value }] }
   : { type: 'inlineCode' }
+const attachment = { type: 'attachment', attrs: { id: 'file-1', name: 'notes.txt', kind: 'text', display: 'chip' } }
 
 async function select(page: Page, from: number, to = from) {
   await page.evaluate(([start, end]) => window.richEditorSpike.select(start, end), [from, to])
@@ -44,6 +45,25 @@ declare global {
 test.beforeEach(async ({ page }) => {
   await page.goto('/')
   await expect(page.locator('[data-rich-editor-spike]')).toBeVisible()
+})
+
+test('inline code and attachments do not change the surrounding line height', async ({ page }) => {
+  const paragraphHeight = async () => page.locator('[data-rich-editor-spike] p').evaluate((element) => element.getBoundingClientRect().height)
+  await reset(page, paragraph(text('plain text')))
+  const plain = await paragraphHeight()
+  await reset(page, paragraph(text('before '), code('inline'), text(' after')))
+  const withCode = await paragraphHeight()
+  await reset(page, paragraph(text('before '), attachment, text(' after')))
+  const withAttachment = await paragraphHeight()
+  expect({ plain, withCode, withAttachment }).toEqual({ plain: 20, withCode: 20, withAttachment: 20 })
+})
+
+test('rendered commit and file chips do not change chat line height', async ({ page }) => {
+  await page.locator('[data-rendered-token-fixture]').evaluate((element) => { element.hidden = false })
+  const heights = await page.locator('[data-token-line]').evaluateAll((lines) => Object.fromEntries(
+    lines.map((line) => [line.getAttribute('data-token-line'), line.getBoundingClientRect().height]),
+  ))
+  expect(heights).toEqual({ plain: 21, commit: 21, file: 21 })
 })
 
 test('Right traverses outside, inside characters, then outside', async ({ page }) => {

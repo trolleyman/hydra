@@ -121,7 +121,7 @@ function FileLink({ href, path, onClick, children }: {
       )}
     >
       <a
-        className="inline-flex items-center gap-1 rounded border border-stone-300/70 bg-stone-100/70 px-1.5 py-0.5 align-middle font-mono text-[0.9em] text-stone-700 no-underline hover:bg-stone-200/70 focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/15 dark:bg-white/[0.06] dark:text-stone-200 dark:hover:bg-white/10"
+        className="inline-flex items-center gap-1 rounded border border-stone-300/70 bg-stone-100/70 px-1.5 align-middle font-mono text-[0.9em] text-stone-700 no-underline hover:bg-stone-200/70 focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/15 dark:bg-white/[0.06] dark:text-stone-200 dark:hover:bg-white/10"
         href={href}
         onClick={onClick}
       >
@@ -519,7 +519,7 @@ function MarkdownCode({ s, className, children }: { s: Style; className?: string
     if (/^[0-9a-f]{7,40}$/i.test(text)) {
       return (
         <code
-          className="inline-flex items-center gap-1 rounded border border-violet-300/60 bg-violet-50 px-1.5 py-0.5 align-middle font-mono text-[0.9em] text-violet-800 dark:border-violet-400/25 dark:bg-violet-400/10 dark:text-violet-200"
+          className="inline-flex items-center gap-1 rounded border border-violet-300/60 bg-violet-50 px-1.5 align-middle font-mono text-[0.9em] text-violet-800 dark:border-violet-400/25 dark:bg-violet-400/10 dark:text-violet-200"
           data-md-git-hash=""
         >
           <GitCommitHorizontal className="h-[1em] w-[1em] shrink-0 opacity-65" aria-hidden="true" />

@@ -9,7 +9,7 @@
         margin: 40px;
         color: #292524;
         background: #fafaf9;
-        font: 16px/1.5 system-ui, sans-serif;
+        font: 15px/20px system-ui, sans-serif;
       }
       #editor {
         width: 620px;
@@ -36,7 +36,19 @@
         border: 1px solid #d6d3d1;
         border-radius: 5px;
         background: #f5f5f4;
-        font: 0.92em/1.35 ui-monospace, monospace;
+        font: 0.92em/1.15 ui-monospace, monospace;
+        vertical-align: middle;
+      }
+      span[data-composer-attachment] {
+        display: inline-flex;
+        align-items: center;
+        margin: 0 0.15em;
+        padding: 0.1em 0.55em;
+        border: 1px solid #bfdbfe;
+        border-radius: 999px;
+        font-size: 0.9em;
+        line-height: 1;
+        vertical-align: baseline;
       }
       code[data-inline-code-caret="start"] { box-shadow: inset 1px 0 currentColor; }
       code[data-inline-code-caret="end"] { box-shadow: inset -1px 0 currentColor; }
@@ -46,6 +58,11 @@
     <main>
       <h1>Inline code behavior spike</h1>
       <div id="editor"></div>
+      <div hidden data-rendered-token-fixture>
+        <p data-token-line="plain" class="chat-leading">before plain after</p>
+        <p data-token-line="commit" class="chat-leading">before <code class="inline-flex items-center gap-1 rounded border border-violet-300/60 bg-violet-50 px-1.5 align-middle font-mono text-[0.9em]">5cf36289</code> after</p>
+        <p data-token-line="file" class="chat-leading">before <a class="inline-flex items-center gap-1 rounded border border-stone-300/70 bg-stone-100/70 px-1.5 align-middle font-mono text-[0.9em]">notes.txt</a> after</p>
+      </div>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

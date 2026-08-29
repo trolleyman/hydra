@@ -1,5 +1,6 @@
 import { TextSelection } from '@tiptap/pm/state'
 import { createRichEditor } from '../../src/lib/rich-editor/RichEditorCore'
+import '../../src/index.css'
 
 const host = document.querySelector('#editor')
 if (!host) throw new Error('Missing editor host')

@@ -98,7 +98,7 @@
 .dark .rich-text-surface th { background: rgb(255 255 255 / 0.04); }
 .rich-text-surface th > p, .rich-text-surface td > p { margin: 0; }
 .rich-text-surface .selectedCell::after { position: absolute; inset: 0; pointer-events: none; content: ''; background: color-mix(in srgb, var(--color-blue-500) 12%, transparent); }
-.rich-text-surface code[data-inline-code] { position: relative; display: inline-block; min-width: 0.25em; margin: 0 1px; border: 1px solid var(--color-gray-200); border-radius: 0.25rem; background: var(--color-gray-50); padding: 0.02em 0.28em; color: var(--color-red-600); font-family: var(--font-mono); font-size: 0.92em; line-height: 1.35; }
+.rich-text-surface code[data-inline-code] { position: relative; display: inline-block; min-width: 0.25em; margin: 0 1px; border: 1px solid var(--color-gray-200); border-radius: 0.25rem; background: var(--color-gray-50); padding: 0 0.28em; color: var(--color-red-600); font-family: var(--font-mono); font-size: 0.92em; line-height: 1.15; vertical-align: middle; }
 .dark .rich-text-surface code[data-inline-code] { border-color: var(--color-gray-700); background: rgb(255 255 255 / 0.05); color: var(--color-red-300); }
 /* Chrome paints an inside-edge selection at the outside DOM edge. A quiet
    inset caret makes the logical inside position visible without outlining the
@@ -107,8 +107,8 @@
 .rich-text-surface code[data-inline-code-caret="end"] { box-shadow: inset -1px 0 currentColor; }
 .rich-text-surface a { color: var(--color-blue-600); text-decoration: underline; }
 .dark .rich-text-surface a { color: var(--color-blue-400); }
-.rich-text-surface span[data-composer-attachment] { display: inline-flex; align-items: center; margin: 0 0.15em; border: 1px solid var(--color-blue-200); border-radius: 999px; background: var(--color-blue-50); padding: 0.1em 0.55em; color: var(--color-blue-700); font-size: 0.9em; }
-.rich-text-surface .composer-attachment-preview { width: 1.6em; height: 1.6em; margin: -0.1em 0.4em -0.1em -0.55em; border-radius: 999px 0 0 999px; object-fit: cover; }
+.rich-text-surface span[data-composer-attachment] { display: inline-flex; align-items: center; margin: 0 0.15em; border: 1px solid var(--color-blue-200); border-radius: 999px; background: var(--color-blue-50); padding: 0.1em 0.55em; color: var(--color-blue-700); font-size: 0.9em; line-height: 1; vertical-align: baseline; }
+.rich-text-surface .composer-attachment-preview { width: 1.2em; height: 1.2em; margin: 0 0.4em 0 -0.55em; border-radius: 999px 0 0 999px; object-fit: cover; }
 .dark .rich-text-surface span[data-composer-attachment] { border-color: rgb(96 165 250 / 0.35); background: rgb(59 130 246 / 0.12); color: var(--color-blue-300); }
 .rich-text-surface span[data-composer-attachment][data-upload-state="failed"] { border-color: var(--color-red-300); background: var(--color-red-50); color: var(--color-red-700); }
 .dark .rich-text-surface span[data-composer-attachment][data-upload-state="failed"] { border-color: var(--color-red-800); background: rgb(127 29 29 / 0.2); color: var(--color-red-300); }
