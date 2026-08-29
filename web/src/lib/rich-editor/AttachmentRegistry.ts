@@ -37,6 +37,35 @@ export class AttachmentRegistry {
     return this.entries.get(id)?.state
   }
 
+  attachment(id: string): ComposerAttachment | undefined {
+    return this.entries.get(id)?.attachment
+  }
+
+  retry(id: string): boolean {
+    const entry = this.entries.get(id)
+    if (!entry || entry.state.status !== 'failed' || !this.editor) return false
+    entry.state = { status: 'idle' }
+    this.emit()
+    this.reconcile(this.editor)
+    return true
+  }
+
+  uploadedPaths(editor: Editor): string[] {
+    const present = attachmentIds(editor)
+    const paths: string[] = []
+    editor.state.doc.descendants((node) => {
+      if (node.type.name !== 'attachment' || typeof node.attrs.id !== 'string' || !present.has(node.attrs.id)) return
+      const state = this.entries.get(node.attrs.id)?.state
+      if (state?.status === 'uploaded') paths.push(state.uploaded.path)
+    })
+    return paths
+  }
+
+  hasUploading(editor: Editor): boolean {
+    const present = attachmentIds(editor)
+    return [...present].some((id) => this.entries.get(id)?.state.status === 'uploading')
+  }
+
   add(editor: Editor, attachment: ComposerAttachment, file: File): boolean {
     if (this.entries.has(attachment.id)) throw new Error(`Duplicate attachment id: ${attachment.id}`)
     this.entries.set(attachment.id, { attachment, file, state: { status: 'idle' }, generation: 0 })

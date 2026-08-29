@@ -1,4 +1,4 @@
-import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
+import { Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -72,6 +72,7 @@ import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import type { RichComposerHandle, RichComposerKeyContext } from '../lib/rich-editor/RichComposer'
 import { applyEdit, enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
@@ -111,6 +112,8 @@ import type { ToolResultLink } from '../lib/toolResultLink'
 import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
 import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from '../lib/whitespaceMarks'
+
+const RichComposer = lazy(() => import('../lib/rich-editor/RichComposer').then((module) => ({ default: module.RichComposer })))
 import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommentsText'
 import { CommentLink } from './CommentLink'
@@ -6876,6 +6879,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
   const { present, commit, reconcile, reset: resetHistory, undo, redo } = useComposerHistory(initialComposer.current)
   const input = present.prompt
+  const shellComposer = input.startsWith('!')
   const attachments = present.attachments
   const inputRef = useRef(input)
   useEffect(() => {
@@ -6991,6 +6995,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // grows across the 0.22s disclosure animation, not in one step.
   const contentRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const richComposerRef = useRef<RichComposerHandle>(null)
+  const focusComposer = useCallback((position: 'start' | 'end' | number = 'end') => {
+    if (inputRef.current.startsWith('!')) {
+      const textarea = textareaRef.current
+      textarea?.focus()
+      if (textarea && position === 'end') textarea.selectionStart = textarea.selectionEnd = textarea.value.length
+    } else richComposerRef.current?.focus(position)
+  }, [])
+  const previousShellComposer = useRef(shellComposer)
+  useEffect(() => {
+    if (previousShellComposer.current === shellComposer) return
+    previousShellComposer.current = shellComposer
+    requestAnimationFrame(() => focusComposer('end'))
+  }, [focusComposer, shellComposer])
   // Pin-to-bottom: keep auto-scrolling while the user is at (or near) the
   // bottom; stop once they scroll up to read history. The ref is the live
   // value the socket/scroll handlers read; the state mirror drives the
@@ -7052,6 +7070,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Whether pasting an attachment also inserts its "[filename]" marker into the
   // composer (a Browser setting, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
+  const composerSpellcheck = useSpellcheckStore((s) => s.enabled)
   // Whether the composer auto-pairs (a Browser setting, default on). The shared
   // textarea applies the rules itself; this composer needs the flag because it
   // owns Enter (which sends), so the fence-body step is its call to make.
@@ -9707,6 +9726,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // whether they need a leading space; they never carry a trailing one, so the
   // caret stays against the "]".
   function insertPasteMarkers(names: string[]) {
+    const rich = richComposerRef.current?.editor
+    if (rich && !input.startsWith('!')) {
+      const insert = pasteMarkerText(names, input)
+      rich.commands.insertContent(insert)
+      return
+    }
     const ta = textareaRef.current
     const start = ta?.selectionStart ?? input.length
     const end = ta?.selectionEnd ?? input.length
@@ -9723,7 +9748,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     })
   }
 
-  function handlePaste(e: React.ClipboardEvent) {
+  function handlePaste(e: ClipboardEvent | globalThis.ClipboardEvent) {
     const files = extractFiles(e.clipboardData)
     if (files.length === 0) return
     e.preventDefault()
@@ -9761,8 +9786,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const next = appendToComposer(prev.prompt, text)
       return makeSnapshot(next, prev.attachments, next.length, next.length)
     }, false)
-    requestAnimationFrame(() => textareaRef.current?.focus())
-  }, [commit])
+    requestAnimationFrame(() => focusComposer())
+  }, [commit, focusComposer])
   useEffect(() => {
     registerPinTargets({
       quote: (note) => addToComposer(formatQuote(note)),
@@ -9798,30 +9823,34 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function acceptSlash(cmd: string) {
     const value = '/' + cmd + ' '
     commit((prev) => makeSnapshot(value, prev.attachments, value.length, value.length), false)
-    requestAnimationFrame(() => textareaRef.current?.focus())
+    requestAnimationFrame(() => focusComposer())
   }
 
   // --- Composer: sizing (item 9) ---------------------------------------------
 
   const MAX_ROWS = 10
 
+  const composerElement = useCallback((): HTMLElement | null => (
+    shellComposer ? textareaRef.current : richComposerRef.current?.editor?.view.dom ?? null
+  ), [shellComposer])
+
   // Grow/shrink the textarea one whole line at a time with its content,
   // respecting the user-dragged minimum.
   useEffect(() => {
-    const ta = textareaRef.current
-    if (!ta) return
-    const cs = getComputedStyle(ta)
+    const element = composerElement()
+    if (!element) return
+    const cs = getComputedStyle(element)
     const lineHeight = parseFloat(cs.lineHeight) || 20
     const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
     // The textarea fills its wrapper (position: absolute, inset-0), so collapsing
     // to 'auto' would just stretch it to the parent. Pin it to 0 instead: the box
     // is empty but the content overflows, so scrollHeight reports the true content
     // height. Restore to '' afterwards to hand sizing back to the wrapper.
-    ta.style.height = '0px'
-    const contentRows = Math.max(1, Math.round((ta.scrollHeight - pad) / lineHeight))
-    ta.style.height = ''
+    element.style.height = '0px'
+    const contentRows = Math.max(1, Math.round((element.scrollHeight - pad) / lineHeight))
+    element.style.height = ''
     const rows = Math.min(MAX_ROWS, Math.max(minRows, contentRows))
-    ta.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
+    element.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
     // Bail when the height is unchanged (sub-pixel tolerance): a fractional
     // lineHeight can make this recompute a hair-different value each pass, and an
     // unconditional setState there would keep committing - a needless re-render at
@@ -9840,16 +9869,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       composerHeightRef.current = nextH
       setComposerHeight(nextH)
     }
-  }, [input, minRows])
+  }, [composerElement, input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault()
-    const ta = textareaRef.current
-    if (!ta) return
-    const cs = getComputedStyle(ta)
+    const element = composerElement()
+    if (!element) return
+    const cs = getComputedStyle(element)
     const lineHeight = parseFloat(cs.lineHeight) || 20
     const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
-    const displayedRows = Math.max(1, Math.round((ta.clientHeight - pad) / lineHeight))
+    const displayedRows = Math.max(1, Math.round((element.clientHeight - pad) / lineHeight))
     composerDragRef.current = { startY: e.clientY, startRows: displayedRows, lineHeight }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
@@ -10080,6 +10109,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setSlashDismissed(false)
   }
 
+  function handleRichInputChange(value: string) {
+    commit((prev) => makeSnapshot(value, prev.attachments, value.length, value.length), true)
+    setSlashDismissed(false)
+  }
+
   // Ctrl+Enter / Alt+Enter insert a newline explicitly (plain Enter sends), so
   // they carry the same markdown list continuation the shared textarea handler
   // gives Shift+Enter - the box shouldn't behave differently depending on which
@@ -10106,11 +10140,80 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!snap) return
     const ta = textareaRef.current
     requestAnimationFrame(() => {
-      if (!ta) return
-      ta.focus()
-      ta.selectionStart = snap.selStart
-      ta.selectionEnd = snap.selEnd
+      if (snap.prompt.startsWith('!') && ta) {
+        ta.focus()
+        ta.selectionStart = snap.selStart
+        ta.selectionEnd = snap.selEnd
+      } else {
+        focusComposer('end')
+      }
     })
+  }
+
+  function recallLatestQueued(): boolean {
+    if (attachments.length > 0 || slashMatches.length > 0) return false
+    const last = [...pendingSends].reverse().find((pending) => pending.queued)
+    if (!last) return false
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'dequeue', id: last.clientId }))
+    setPendingSends((prev) => prev.filter((pending) => pending.id !== last.id))
+    const { text: body, attachments: recalled } = parseUploadAttachments(last.text, projectId)
+    const restored = recalled.map((attachment) => ({ ...attachment, id: nextAttachmentId() }))
+    commit(() => makeSnapshot(body, restored, body.length, body.length), false)
+    requestAnimationFrame(() => focusComposer('end'))
+    return true
+  }
+
+  function onRichComposerKeyDown(e: KeyboardEvent, context: RichComposerKeyContext): boolean {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+      const key = e.key.toLowerCase()
+      if (key === 'z') {
+        e.preventDefault()
+        restoreSnapshot(e.shiftKey ? redo() : undo())
+        return true
+      }
+      if (key === 'y' && !e.shiftKey) {
+        e.preventDefault()
+        restoreSnapshot(redo())
+        return true
+      }
+    }
+    if (slashMatches.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashSel((selection) => e.key === 'ArrowDown'
+          ? (selection + 1) % slashMatches.length
+          : (selection - 1 + slashMatches.length) % slashMatches.length)
+        return true
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashDismissed(true)
+        return true
+      }
+      const exact = slashMatches.length === 1 && slashQuery === slashMatches[0]
+      if (e.key === 'Tab' || (e.key === 'Enter' && !exact && !e.shiftKey && !e.ctrlKey && !e.altKey)) {
+        e.preventDefault()
+        acceptSlash(slashMatches[Math.min(slashSel, slashMatches.length - 1)])
+        return true
+      }
+    }
+    if (e.key === 'ArrowUp' && context.empty && recallLatestQueued()) {
+      e.preventDefault()
+      return true
+    }
+    if (e.key !== 'Enter' || e.isComposing) return false
+    if (e.altKey || (e.ctrlKey && !e.metaKey)) {
+      e.preventDefault()
+      context.editor.commands.setHardBreak()
+      return true
+    }
+    if (!e.shiftKey && !e.metaKey) {
+      e.preventDefault()
+      send()
+      return true
+    }
+    return false
   }
 
   function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -11020,22 +11123,46 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 setLightboxIndex(openable.findIndex((a) => a.id === id))
               }}
             />
-            <HighlightedTextarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => handleInputChange(e.target.value)}
-              onKeyDown={onComposerKeyDown}
-              onPaste={handlePaste}
-              renderContent={renderComposerBackdrop}
-              placeholder={connected ? (review ? 'Ask about the diff...' : 'Write a message...') : 'Connecting...'}
-              disabled={!connected}
-              rows={1}
-              wrapperClassName="w-full"
-              wrapperStyle={{ height: composerHeight }}
-              textColorClassName="text-stone-800 dark:text-stone-100"
-              caretClassName="caret-stone-800 dark:caret-stone-100"
-              textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
-            />
+            {shellComposer ? (
+              <HighlightedTextarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={onComposerKeyDown}
+                onPaste={handlePaste}
+                renderContent={renderComposerBackdrop}
+                placeholder={connected ? 'Run a shell command...' : 'Connecting...'}
+                disabled={!connected}
+                rows={1}
+                wrapperClassName="w-full"
+                wrapperStyle={{ height: composerHeight }}
+                textColorClassName="text-stone-800 dark:text-stone-100"
+                caretClassName="caret-stone-800 dark:caret-stone-100"
+                textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
+              />
+            ) : (
+              <div className="w-full overflow-hidden" style={{ height: composerHeight }} data-rich-chat-composer>
+                <Suspense fallback={<div className="h-full px-3.5 pt-2.5 text-sm leading-5 text-stone-400">Loading editor...</div>}>
+                  <RichComposer
+                    ref={richComposerRef}
+                    value={input}
+                    onChange={handleRichInputChange}
+                    onKeyDown={onRichComposerKeyDown}
+                    onPaste={(event) => {
+                      const files = extractFiles(event.clipboardData)
+                      if (files.length === 0) return false
+                      handlePaste(event)
+                      return true
+                    }}
+                    editable={connected}
+                    spellCheck={composerSpellcheck}
+                    placeholder={connected ? (review ? 'Ask about the diff...' : 'Write a message...') : 'Connecting...'}
+                    ariaLabel="Message"
+                    className="h-full overflow-y-auto px-3.5 pt-2.5 pb-1 text-sm leading-5 text-stone-800 caret-stone-800 dark:text-stone-100 dark:caret-stone-100"
+                  />
+                </Suspense>
+              </div>
+            )}
             <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
               <Tooltip content="Attach files" side="top">
                 <button

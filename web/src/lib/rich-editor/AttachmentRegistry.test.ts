@@ -61,4 +61,31 @@ describe('attachment upload lifecycle', () => {
     expect(upload).toHaveBeenCalledTimes(2)
     expect(signals[1].aborted).toBe(false)
   })
+
+  it('retries failed uploads and exposes only resolved document paths', async () => {
+    const upload = vi.fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ path: '/uploads/cat.png' })
+    const registry = new AttachmentRegistry(upload)
+    const editor = editorWith(registry)
+
+    registry.add(editor, attachment, new File(['image'], 'cat.png'))
+    await vi.waitFor(() => expect(registry.get(attachment.id)?.status).toBe('failed'))
+    expect(registry.uploadedPaths(editor)).toEqual([])
+    expect(registry.retry(attachment.id)).toBe(true)
+    await vi.waitFor(() => expect(registry.get(attachment.id)?.status).toBe('uploaded'))
+    expect(registry.uploadedPaths(editor)).toEqual(['/uploads/cat.png'])
+  })
+
+  it('renders upload state and removal inside the document chip', async () => {
+    const registry = new AttachmentRegistry(() => new Promise(() => {}))
+    const editor = editorWith(registry)
+    registry.add(editor, attachment, new File(['image'], 'cat.png'))
+
+    const chip = editor.view.dom.querySelector<HTMLElement>('[data-composer-attachment]')!
+    expect(chip.dataset.uploadState).toBe('uploading')
+    expect(chip.querySelector('[aria-label="Remove cat.png"]')).not.toBeNull()
+    chip.querySelector<HTMLButtonElement>('[aria-label="Remove cat.png"]')!.click()
+    expect(editor.getJSON()).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] })
+  })
 })

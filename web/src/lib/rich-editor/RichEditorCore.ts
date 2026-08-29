@@ -16,7 +16,8 @@ const ConservativeItalic = Italic.extend({
   },
 })
 
-export const richEditorExtensions = [
+export function createRichEditorExtensions(attachmentRegistry?: AttachmentRegistry) {
+  return [
   StarterKit.configure({
     code: false,
     heading: { levels: [1, 2, 3] },
@@ -28,11 +29,14 @@ export const richEditorExtensions = [
   TaskList,
   TaskItem.configure({ nested: true }),
   TableKit.configure({ table: { resizable: false } }),
-  Attachment,
+  Attachment.configure({ registry: attachmentRegistry }),
   InlineCode,
   InlineCodeEditing,
   Markdown,
-]
+  ]
+}
+
+export const richEditorExtensions = createRichEditorExtensions()
 
 const markdownManager = new MarkdownManager({ extensions: richEditorExtensions })
 
@@ -56,7 +60,7 @@ export interface RichEditorOptions {
 export function createRichEditor(options: RichEditorOptions = {}): Editor {
   const editor = new Editor({
     element: options.element,
-    extensions: richEditorExtensions,
+    extensions: createRichEditorExtensions(options.attachmentRegistry),
     content: options.content ?? options.markdown ?? '',
     contentType: options.content ? 'json' : 'markdown',
     editable: options.editable ?? true,

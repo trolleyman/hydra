@@ -1,4 +1,5 @@
 import { Node, type Editor } from '@tiptap/core'
+import type { AttachmentRegistry } from './AttachmentRegistry'
 
 export const ATTACHMENT_NAME = 'attachment'
 
@@ -12,13 +13,21 @@ export interface ComposerAttachment {
   display: AttachmentDisplay
 }
 
-export const Attachment = Node.create({
+export interface AttachmentOptions {
+  registry?: AttachmentRegistry
+}
+
+export const Attachment = Node.create<AttachmentOptions>({
   name: ATTACHMENT_NAME,
   group: 'inline',
   inline: true,
   atom: true,
   selectable: true,
   draggable: true,
+
+  addOptions() {
+    return { registry: undefined }
+  },
 
   addAttributes() {
     return {
@@ -50,6 +59,60 @@ export const Attachment = Node.create({
   renderMarkdown(node) {
     const name = String(node.attrs?.name ?? '').replaceAll('\\', '\\\\').replaceAll(']', '\\]')
     return `[${name}]`
+  },
+
+  addNodeView() {
+    const registry = this.options.registry
+    if (!registry) return null
+    return ({ node, view, getPos }) => {
+      const dom = document.createElement('span')
+      dom.dataset.composerAttachment = ''
+      dom.dataset.attachmentId = String(node.attrs.id)
+      dom.contentEditable = 'false'
+      dom.setAttribute('role', 'group')
+
+      const name = document.createElement('span')
+      name.className = 'composer-attachment-name'
+      name.textContent = String(node.attrs.name)
+      dom.append(name)
+
+      const status = document.createElement('span')
+      status.className = 'composer-attachment-status'
+      dom.append(status)
+
+      const retry = document.createElement('button')
+      retry.type = 'button'
+      retry.className = 'composer-attachment-action'
+      retry.textContent = 'Retry'
+      retry.setAttribute('aria-label', `Retry ${node.attrs.name}`)
+      retry.addEventListener('mousedown', (event) => event.preventDefault())
+      retry.addEventListener('click', () => registry.retry(String(node.attrs.id)))
+      dom.append(retry)
+
+      const remove = document.createElement('button')
+      remove.type = 'button'
+      remove.className = 'composer-attachment-action composer-attachment-remove'
+      remove.textContent = 'x'
+      remove.setAttribute('aria-label', `Remove ${node.attrs.name}`)
+      remove.addEventListener('mousedown', (event) => event.preventDefault())
+      remove.addEventListener('click', () => {
+        const position = getPos()
+        if (typeof position === 'number') view.dispatch(view.state.tr.delete(position, position + node.nodeSize))
+      })
+      dom.append(remove)
+
+      const render = () => {
+        const state = registry.get(String(node.attrs.id))
+        const stateName = state?.status ?? 'idle'
+        dom.dataset.uploadState = stateName
+        status.textContent = stateName === 'uploading' ? 'Uploading...' : stateName === 'failed' ? 'Failed' : ''
+        retry.hidden = stateName !== 'failed'
+        dom.setAttribute('aria-label', `${node.attrs.name}, ${stateName}`)
+      }
+      const unsubscribe = registry.subscribe(render)
+      render()
+      return { dom, destroy: unsubscribe }
+    }
   },
 })
 

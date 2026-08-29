@@ -6,6 +6,7 @@ import { AgentStatus, type AgentResponse } from '../api'
 import { useAgentStore } from '../stores/agentStore'
 import { formatBashForDisplay, leadingBashComment } from '../lib/bashFormat'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
+import { editorForRichComposer } from '../lib/rich-editor/mountedEditors'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
 // paste-markers preference on) a "[filename]" marker in the text. Both mutations
@@ -134,10 +135,18 @@ describe('Bash card summary comments', () => {
   })
 })
 
-async function connectedComposer(): Promise<HTMLTextAreaElement> {
-  const ta = screen.getByRole('textbox') as HTMLTextAreaElement
-  await waitFor(() => expect(ta).not.toBeDisabled())
-  return ta
+async function connectedComposer(): Promise<HTMLElement> {
+  const composer = await screen.findByRole('textbox')
+  await waitFor(() => expect(composer).toHaveAttribute('contenteditable', 'true'))
+  return composer
+}
+
+function setComposerValue(composer: HTMLElement, value: string) {
+  editorForRichComposer(composer)!.commands.setContent(value, { contentType: 'markdown' })
+}
+
+function composerValue(composer: HTMLElement): string {
+  return editorForRichComposer(composer)!.getText()
 }
 
 describe('review composer status', () => {
@@ -174,7 +183,7 @@ describe('review composer status', () => {
       />,
     )
     const ta = await connectedComposer()
-    fireEvent.change(ta, { target: { value: 'one more question' } })
+    setComposerValue(ta, 'one more question')
 
     act(() => sockets[0].emit({ type: 'status', status: AgentStatus.RUNNING }))
     await screen.findByRole('button', { name: 'Queue message' })
@@ -299,16 +308,16 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
 
     // The paste both inserts a "[image1.png]" marker and stages an image chip.
     await screen.findByLabelText('Remove image1.png')
-    expect(ta.value).toBe('[image1.png]')
+    expect(composerValue(ta)).toBe('[image1.png]')
 
     // First Ctrl+Z: the marker is gone but the chip remains (two distinct steps).
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('')
+    expect(composerValue(ta)).toBe('')
     expect(screen.getByLabelText('Remove image1.png')).toBeInTheDocument()
 
     // Second Ctrl+Z: the chip is gone too - back to an empty composer.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('')
+    expect(composerValue(ta)).toBe('')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
   })
 
@@ -328,7 +337,7 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true, shiftKey: true })
     expect(screen.getByLabelText('Remove image1.png')).toBeInTheDocument()
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true, shiftKey: true })
-    expect(ta.value).toBe('[image1.png]')
+    expect(composerValue(ta)).toBe('[image1.png]')
   })
 
   it('keeps typed text when a later pasted image is undone', async () => {
@@ -336,21 +345,20 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     const ta = await connectedComposer()
 
     // Type into the composer (a coalesced undo step), then paste an image.
-    fireEvent.change(ta, { target: { value: 'look at this ' } })
-    expect(ta.value).toBe('look at this ')
+    setComposerValue(ta, 'look at this ')
+    expect(composerValue(ta)).toBe('look at this ')
 
     // Paste with the caret at the end (jsdom doesn't move it on a controlled
     // re-render), so the marker lands after the typed text.
-    ta.selectionStart = ta.selectionEnd = ta.value.length
     fireEvent.paste(ta, imagePasteEvent())
     await screen.findByLabelText('Remove image1.png')
-    expect(ta.value).toBe('look at this [image1.png]')
+    expect(composerValue(ta)).toBe('look at this [image1.png]')
 
     // Undo marker, then chip - the typed text survives.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('look at this ')
+    expect(composerValue(ta)).toBe('look at this ')
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('look at this ')
+    expect(composerValue(ta)).toBe('look at this ')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
   })
 })
@@ -1048,7 +1056,7 @@ describe('a message sent after a commit lands under it', () => {
     )
     const chip = await screen.findByText('Teach the loader about overlays')
 
-    fireEvent.change(ta, { target: { value: 'ship it' } })
+    setComposerValue(ta, 'ship it')
     fireEvent.keyDown(ta, { key: 'Enter' })
     const bubble = await screen.findByText('ship it')
 

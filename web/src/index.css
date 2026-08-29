@@ -109,6 +109,13 @@
 .dark .rich-text-surface a { color: var(--color-blue-400); }
 .rich-text-surface span[data-composer-attachment] { display: inline-flex; align-items: center; margin: 0 0.15em; border: 1px solid var(--color-blue-200); border-radius: 999px; background: var(--color-blue-50); padding: 0.1em 0.55em; color: var(--color-blue-700); font-size: 0.9em; }
 .dark .rich-text-surface span[data-composer-attachment] { border-color: rgb(96 165 250 / 0.35); background: rgb(59 130 246 / 0.12); color: var(--color-blue-300); }
+.rich-text-surface span[data-composer-attachment][data-upload-state="failed"] { border-color: var(--color-red-300); background: var(--color-red-50); color: var(--color-red-700); }
+.dark .rich-text-surface span[data-composer-attachment][data-upload-state="failed"] { border-color: var(--color-red-800); background: rgb(127 29 29 / 0.2); color: var(--color-red-300); }
+.rich-text-surface .composer-attachment-status { margin-left: 0.35em; opacity: 0.7; }
+.rich-text-surface .composer-attachment-action { margin-left: 0.35em; cursor: pointer; border-radius: 0.2rem; padding: 0 0.15em; }
+.rich-text-surface .composer-attachment-action:hover { background: rgb(0 0 0 / 0.08); }
+.dark .rich-text-surface .composer-attachment-action:hover { background: rgb(255 255 255 / 0.1); }
+.rich-text-surface .composer-attachment-remove { font-family: var(--font-mono); }
 
 /* Iosevka and Iosevka Term, self-hosted. They are the only offered families that
    are not on Google Fonts, so scripts/build-fonts.ts cuts them from the upstream

@@ -66,6 +66,16 @@ Completed 2026-08-29:
   is Markdown and its event surface does not expose ProseMirror state, while an
   optional editor handle supports host formatting controls. The Settings lab
   now consumes this adapter instead of constructing Tiptap directly.
+- Added document attachment NodeViews backed by the external registry. Chips
+  show uploading/failed state, retry failed uploads, remove with a structural
+  transaction, cancel/restart work across undo/redo and expose resolved paths in
+  document order without leaking them into editor JSON or Markdown.
+- Moved the active-agent production chat composer onto the lazy-loaded rich
+  adapter. Existing Markdown drafts, external attachment chips, paste markers,
+  combined undo/redo, queue recall, send/queue semantics, auto-grow, resize,
+  disabled state, spellcheck and focus restoration remain intact. A leading
+  `!` switches to the existing Bash-highlighted source textarea; returning to
+  normal text switches back without losing the draft or caret.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -602,9 +612,13 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
 5a. **Settings evaluation lab - DONE.** The structured editor, old composer and
     rendered chat Markdown are live-synchronized for hands-on comparison without
     saving or sending data.
-6. **Chat integration.** Preserve send, queue recall, shell mode, uploads, large
-   paste, drafts, resizing/auto-grow, disabled states and focus return. Migrate
-   old drafts without loss; keep a development flag until parity tests pass.
+6. **Chat integration - IN PROGRESS.** The active-agent composer now uses the
+   lazy rich adapter for normal messages and retains the source textarea for
+   shell mode. Send, queue recall, uploads, paste markers, drafts, resizing,
+   disabled states, spellcheck, focus return and combined text/attachment undo
+   have component and real-Chromium coverage. Moving the existing external
+   attachment row into inline document NodeViews remains before this phase is
+   complete.
 7. **Static user-message view and send transition.** Preserve the rich snapshot
    on optimistic rows, morph composer content into immediate/queued bubbles and
    reconcile the daemon echo in place.

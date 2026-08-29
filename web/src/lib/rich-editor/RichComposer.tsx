@@ -1,7 +1,9 @@
 import type { Editor } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
-import { richEditorExtensions, serializeRichMarkdown } from './RichEditorCore'
+import { createRichEditorExtensions, serializeRichMarkdown } from './RichEditorCore'
+import type { AttachmentRegistry } from './AttachmentRegistry'
+import { registerMountedEditor } from './mountedEditors'
 
 export interface RichComposerHandle {
   editor: Editor | null
@@ -24,7 +26,9 @@ export interface RichComposerProps {
   editable?: boolean
   placeholder?: string
   ariaLabel?: string
+  spellCheck?: boolean
   className?: string
+  attachmentRegistry?: AttachmentRegistry
 }
 
 /**
@@ -45,7 +49,9 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
   editable = true,
   placeholder,
   ariaLabel = 'Message',
+  spellCheck = false,
   className = '',
+  attachmentRegistry,
 }, ref) {
   const onChangeRef = useRef(onChange)
   const onEditorRef = useRef(onEditor)
@@ -59,7 +65,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
   onSelectionChangeRef.current = onSelectionChange
 
   const editor: Editor | null = useEditor({
-    extensions: richEditorExtensions,
+    extensions: createRichEditorExtensions(attachmentRegistry),
     content: value,
     contentType: 'markdown',
     immediatelyRender: false,
@@ -69,6 +75,9 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
       attributes: {
         class: `rich-text-surface outline-none ${className}`.trim(),
         'aria-label': ariaLabel,
+        role: 'textbox',
+        'aria-multiline': 'true',
+        spellcheck: String(spellCheck),
         ...(placeholder ? { 'data-placeholder': placeholder } : {}),
       },
       handleKeyDown: (_view, event): boolean => {
@@ -89,13 +98,22 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
 
   useEffect(() => {
     onEditorRef.current?.(editor)
-    return () => onEditorRef.current?.(null)
+    const unregister = editor ? registerMountedEditor(editor) : undefined
+    return () => {
+      unregister?.()
+      onEditorRef.current?.(null)
+    }
   }, [editor])
 
   useEffect(() => {
     if (!editor) return
     editor.setEditable(editable)
   }, [editable, editor])
+
+  useEffect(() => {
+    if (!editor || !attachmentRegistry) return
+    return attachmentRegistry.bind(editor)
+  }, [attachmentRegistry, editor])
 
   useEffect(() => {
     if (!editor) return
