@@ -159,8 +159,11 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 ## make the allow-list the ONLY source of MCP servers: Hydra renders the allow-listed servers (plus its own control server) into a per-head config and launches Claude with --strict-mcp-config, so the host's ~/.claude.json and a branch's .mcp.json are ignored outright rather than filtered (filtering rides a bind mount the host can silently detach). Costs the claude.ai account connectors - Gmail/Calendar/Drive - which cannot be re-declared; turn it off for an agent that needs them. On by default.
 # strict_mcp = true
 
+## allow this head to send attributed messages to other live heads in the same project. Discovery stays available when this is off. Off by default.
+# agent_messaging = false
+
 ## extra tool names to treat as safe (allowed without approval), extending the gate's built-in set. The gate fails closed on any tool it doesn't recognize (not a known built-in and no mcp__ prefix), parking it for approval; register a legitimate tool here to stop that. The default value below is the built-in set the gate already recognizes - add names to it, don't remove.
-# known_tools = ["Agent", "Artifact", "AskUserQuestion", "Bash", "BashOutput", "CronCreate", "CronDelete", "CronList", "DesignSync", "Edit", "EnterPlanMode", "EnterWorktree", "ExitPlanMode", "ExitWorktree", "Glob", "Grep", "KillBash", "KillShell", "LS", "LSP", "Monitor", "MultiEdit", "NotebookEdit", "NotebookRead", "PushNotification", "Read", "RemoteTrigger", "ReportFindings", "ScheduleWakeup", "SendMessage", "Skill", "SlashCommand", "Task", "TaskCreate", "TaskGet", "TaskList", "TaskOutput", "TaskStop", "TaskUpdate", "TodoWrite", "ToolSearch", "WebFetch", "WebSearch", "Workflow", "Write"]
+# known_tools = ["Agent", "Artifact", "AskUserQuestion", "Bash", "BashOutput", "CronCreate", "CronDelete", "CronList", "DesignSync", "Edit", "EnterPlanMode", "EnterWorktree", "ExitPlanMode", "ExitWorktree", "Glob", "Grep", "KillBash", "KillShell", "LS", "LSP", "Monitor", "MultiEdit", "NotebookEdit", "NotebookRead", "PushNotification", "Read", "RemoteTrigger", "ReportFindings", "ScheduleWakeup", "SendMessage", "Skill", "SlashCommand", "Task", "TaskCreate", "TaskGet", "TaskList", "TaskOutput", "TaskStop", "TaskUpdate", "TodoWrite", "ToolSearch", "WebFetch", "WebSearch", "Workflow", "Write", "apply_patch", "create_goal", "exec", "exec_command", "followup_task", "get_goal", "interrupt_agent", "list_agents", "list_mcp_resource_templates", "list_mcp_resources", "read_mcp_resource", "request_plugin_install", "request_user_input", "send_message", "spawn_agent", "tool_search", "update_goal", "update_plan", "view_image", "wait", "wait_agent", "write_stdin"]
 
 ## Claude-specific overrides: any of the settings above, applied only to claude agents.
 # [claude]
@@ -251,6 +254,7 @@ fi
 node scripts/screenshots/take-screenshots.ts
 '''
 timeout_sec = 900
+auto_run = "settled"
 
 ## [previews.<name>]: per-project scripts that boot a live, clickable preview of
 ## the app at a checkout. Each appears in the Previews row on the agent page; Hydra
@@ -377,6 +381,8 @@ ready_timeout_sec = 900
 ##   ::hydra:test:warn:: web/src/x.ts:12:5 › no-console | Unexpected console statement
 ##   ::hydra:test:skip:: heads/resume_test.go › TestResumeOnBoot | needs daemon
 ##   ::hydra:test:pass:38:: internal/artifacts › TestFast       (38 = duration in ms)
+## Print ::hydra:progress:: <text> for an explicit phase headline; ordinary stdout
+## stays in the live log but is not used as compact status for streaming runners.
 ## The token before the first › is the location (path[:line[:col]] or dotted class),
 ## middle › tokens are scope levels, the last is the test name, text after | is the
 ## message. A verb takes an optional :<ms> duration suffix, giving a streamed case
@@ -425,6 +431,7 @@ echo "::hydra:progress:: Checking errtrace"
 go run ./scripts/errtrace-report
 '''
 timeout_sec = 900
+auto_run = "settled"
 type = "stdout"
 
 [tests.web]
@@ -465,6 +472,7 @@ echo "::hydra:progress:: Typechecking web"
 node scripts/tsc-report.ts
 '''
 timeout_sec = 600
+auto_run = "settled"
 type = "stdout"
 
 [tests.e2e]
@@ -526,6 +534,7 @@ echo "::hydra:progress:: Running browser tests"
 CI=1 $PX playwright test --reporter=./e2e/hydra-reporter.ts
 '''
 timeout_sec = 900
+auto_run = "never"
 type = "stdout"
 
 ## [review] configures how Hydra talks to a forge (GitHub/GitLab) and the
@@ -534,10 +543,12 @@ type = "stdout"
 ## never put a token here (host-side gh/glab creds or the 0600 secrets file).
 # [review]
 # provider = "auto"            # auto | github | gitlab (auto detects from the remote URL)
+# publisher = "forge"          # forge | graphite (Graphite uses GitHub underneath)
 # remote = "origin"
 # auth = "cli"                 # cli (shell out to gh/glab) | token (REST)
 # default_action = "merge"     # merge (local, as today) | create_mr
-# push_branch_template = "{id}" # e.g. "feat/{ticket}-{id}"; {id} {ticket} {base}
+# push_branch_template = "{id}" # e.g. "feat/{issue}-{id}"; {id} {issue} {base}
+# issue_pattern = "[A-Z]+-[0-9]+" # extracts a Linear/Jira key from the head
 # draft = true                 # open MRs as draft
 # squash = true                # request squash-on-merge
 # delete_remote_branch = true  # tell the forge to delete on merge
@@ -545,41 +556,6 @@ type = "stdout"
 # publish_when_green = false   # arm new heads to auto-open a draft MR when green
 # protected_branches = ["main"] # warn before a direct LOCAL merge into these
 
-## [jira] powers {ticket} templating and (later) spawn-from-ticket.
-# [jira]
-# url = "https://mycorp.atlassian.net"
-# ticket_pattern = "[A-Z]+-[0-9]+"
-
-## [resources] caps the cgroup limits applied to every scoped workload of this
-## project (agent, preview, service, artifact) via its transient systemd scope, so
-## one runaway workload yields to the daemon and interactive work instead of
-## starving the box. Weights are soft (they only bite under contention); the hard
-## caps (cpu_quota/memory_max/tasks_max) apply even on an idle box and are opt-in.
-## A hard cap is silently skipped where its cgroup controller is not delegated to
-## the user systemd manager (cpu/io often are not).
 [resources]
-# io_weight is left at its default 50 deliberately: on this machine it does
-# nothing at all (nvme0n1 uses the `none` scheduler and blk-iocost is
-# unconfigured, so cgroup io.weight is accepted and ignored). The two caps below
-# are cgroup io.max, which needs no particular scheduler and always takes effect.
-#
-# Sized from a captured stall rather than guessed. At io "full" 27% - the whole
-# machine doing nothing but waiting on disk - screenshot artifact generation was
-# writing 66 MB/s and reading 49 MB/s across its vite build and Playwright run
-# (scripts/hydra-profile.sh --watch, stall-20260730-150357). An earlier 100/300
-# was set from the ~8 MB/s SUSTAINED average and never engaged: what stalls the
-# box is the burst, so the ceiling has to sit under the burst, not above it.
-#
-# A screenshot run taking longer in the background is a far better trade than the
-# desktop freezing. Raise them if artifact generation gets painfully slow; lower
-# them further if it still hitches.
-#
-# NOTE these apply to SCOPED workloads only - agent, preview, service, artifact.
-# The daemon's own IO is not covered.
-io_write_bandwidth_max = 40  # MB/s
-io_read_bandwidth_max  = 80  # MB/s
-# cpu_weight = 50   # 1-10000, soft CPU share under contention (default 50; below the daemon's 100)
-# io_weight  = 50   # 1-10000, soft block-IO share under contention (default 50)
-# cpu_quota  = 200  # hard CPU cap in percent of one core (200 = 2 cores); omit = no cap
-# memory_max = 2048 # hard memory ceiling in MB (OOM-killed past it); omit = no cap
-# tasks_max  = 512  # hard cap on processes/threads; omit = no cap
+io_read_bandwidth_max = 80
+io_write_bandwidth_max = 40
