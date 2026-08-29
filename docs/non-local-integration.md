@@ -52,7 +52,6 @@ issue_pattern = "[A-Z]+-[0-9]+" # extracts an issue key from the prompt/title
 draft = true                    # open MRs as draft
 squash = true                   # request squash-on-merge
 delete_remote_branch = true     # tell the forge to delete the source branch on merge
-require_local_tests = true      # gate Publish on local tests, like Merge
 auto_push = true                # automatically push after an MR is linked (default)
 # protected_branches = ["main"] # warn before a DIRECT LOCAL merge into these
 
@@ -191,29 +190,28 @@ daemon's boot project's). Unlinked heads cost nothing. It:
   truth is the **MR state, not git ancestry** (the ancestry scan cannot see a
   squash; do not try to make it);
 - refreshes the remote-tracking refs (see the ahead/behind note above);
-- auto-publishes armed **publish/sync-when-green** heads after the agent has been
-  finished for the usual dwell. Linked heads plain-push without a local test
-  gate. An explicitly armed unlinked head retains the legacy behavior and opens
-  a DRAFT MR after tests pass. For an adopted PR it is opt-in per PR, never
-  implicit: the arm endpoint refuses one without `acknowledge_adopted=true` and
-  the spawn-time config default skips it entirely (docs/pr-adoption.md).
+- automatically pushes an armed linked head after the agent has been finished
+  for the usual dwell. This is a plain push with no local test gate and never an
+  automatic force-push. For an adopted PR it is opt-in per PR, never implicit:
+  the arm endpoint refuses one without `acknowledge_adopted=true`, and adoption
+  skips the project-wide default entirely (docs/pr-adoption.md).
 
   The arm is **sticky**: it survives a successful publish or push, so an armed
   head keeps its MR in sync for the rest of its life. That is the point - the
   commit an agent makes *after* the MR opens is exactly the one that used to sit
-  there. One flag covers both faces (`auto_push` on the API row): before the
-  MR exists it opens a draft one, and after it pushes. Manual creation is always
-  immediate; the linked-head menu labels the arm "Push automatically". It is
-  consumed only on failure, so a push that can never succeed (bad credentials, a
-  protected branch) cannot retry every 30s forever. A linked armed head with
-  nothing to push is a no-op: one local rev-list per tick, no network.
-
-  **"when green" is now only a legacy code/config name.** The UI says "Push
-  automatically" for linked reviews. `publish_when_green` remains accepted only
-  as a deprecated config compatibility alias; linked pushes do not wait for tests.
+  there. The linked-head menu labels the arm "Push automatically". It is consumed
+  only on failure, so a push that can never succeed (bad credentials, a protected
+  branch) cannot retry every 30s forever. A linked armed head with nothing to push
+  is a no-op: one local rev-list per tick, no network.
 
   `[review] auto_push` defaults on and arms a head when Hydra creates
   its MR. It does not arm at spawn, so Hydra never creates an MR automatically.
+
+  The per-head database fields follow the same naming. On startup, `db.Open`
+  renames the previous auto-publish columns to `auto_push` / `auto_push_at`
+  before GORM's `AutoMigrate` runs. The explicit pre-migration is idempotent and
+  preserves the stored arm state; `AutoMigrate` alone cannot infer a column
+  rename.
 
 ### Agent-facing review tools
 
@@ -346,9 +344,9 @@ Approving, resolving and everything else still happen on the forge.
 - **CLI-first fragility.** `gh`/`glab` output formats drift; always pin to
   `--json` / `-F json` modes and parse defensively. A REST client is the
   eventual stable path.
-- **Local tests vs remote CI drift.** The pre-push gate is local
-  `[tests.<name>]`; the forge gate is CI. Hydra can only surface both, not
-  align them.
+- **Local tests vs remote CI.** Auto-push deliberately does not wait for local
+  `[tests.<name>]` verdicts. The forge remains responsible for its own CI and
+  protected-branch rules; Hydra surfaces both states but does not align them.
 - **Hydra is personal at work.** The daemon acts as one user - you. Publishing
   uses your identity; this is not a shared service.
 - **Rebase-heavy teams.** Hydra has no rebase support in this flow
