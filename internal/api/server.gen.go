@@ -250,6 +250,12 @@ const (
 	ErrorResponseErrorUnauthorized  ErrorResponseError = "unauthorized"
 )
 
+// Defines values for FocusedFilesystemMode.
+const (
+	FocusedFilesystemEdit     FocusedFilesystemMode = "edit"
+	FocusedFilesystemReadonly FocusedFilesystemMode = "readonly"
+)
+
 // Defines values for HeadChangedEventType.
 const (
 	HeadChanged HeadChangedEventType = "head_changed"
@@ -641,6 +647,9 @@ type AgentResponse struct {
 	AgentStatus *AgentStatusInfo `json:"agent_status,omitempty"`
 	AgentType   string           `json:"agent_type"`
 
+	// AllowCommits Whether a focused head may request Hydra's guarded commit operation. Independent of filesystem_mode; false for ordinary heads.
+	AllowCommits *bool `json:"allow_commits,omitempty"`
+
 	// Archived True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only - they have no live session or worktree.
 	Archived *bool `json:"archived,omitempty"`
 
@@ -663,6 +672,12 @@ type AgentResponse struct {
 
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
+
+	// FilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
+	FilesystemMode *FocusedFilesystemMode `json:"filesystem_mode,omitempty"`
+
+	// Focused True for a branchless head that runs directly in project_path. Derived from branch_name being null; persisted without a separate kind field.
+	Focused *bool `json:"focused,omitempty"`
 
 	// GitIsolation Effective git-isolation mode for this head: "off" (the shared .git is writable in the sandbox) or "readonly" (the whole .git is bound read-only, so commits are host-mediated). See docs/git-isolation.md.
 	GitIsolation *string `json:"git_isolation,omitempty"`
@@ -2091,6 +2106,9 @@ type ErrorResponse struct {
 
 // ErrorResponseError Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
 type ErrorResponseError string
+
+// FocusedFilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
+type FocusedFilesystemMode string
 
 // FolderPickerAvailableResponse defines model for FolderPickerAvailableResponse.
 type FolderPickerAvailableResponse struct {
@@ -3574,6 +3592,9 @@ type SpawnAgentRequest struct {
 	// AgentType Agent type: claude, gemini, copilot, codex, or bash
 	AgentType *string `json:"agent_type,omitempty"`
 
+	// AllowCommits Initially authorize Hydra's guarded commit operation for a focused head. Ignored for ordinary worktree heads.
+	AllowCommits *bool `json:"allow_commits,omitempty"`
+
 	// BaseBranch Base branch to create the worktree from (defaults to current branch)
 	BaseBranch *string `json:"base_branch,omitempty"`
 
@@ -3585,6 +3606,12 @@ type SpawnAgentRequest struct {
 
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
+
+	// FilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
+	FilesystemMode *FocusedFilesystemMode `json:"filesystem_mode,omitempty"`
+
+	// Focused Run directly in the registered project's real root instead of creating a Hydra branch and linked worktree. Focused heads require structured chat mode and remain branchless for their whole life.
+	Focused *bool `json:"focused,omitempty"`
 
 	// Force With an explicit id, take over an ARCHIVED head with the same ID in this project, overwriting its archived record (the `hydra spawn --force` path). Active heads and heads in other projects still conflict.
 	Force *bool `json:"force,omitempty"`
@@ -4380,11 +4407,17 @@ type UncommittedSummary struct {
 
 // UpdateAgentRequest Patch an agent's mutable fields. Provide any subset; at least one field is required. Omitted fields are left unchanged.
 type UpdateAgentRequest struct {
+	// AllowCommits Enable or disable guarded commits for a focused head immediately. Rejected for ordinary worktree heads.
+	AllowCommits *bool `json:"allow_commits,omitempty"`
+
 	// BaseBranch New base branch for the agent. This is a metadata-only change: it updates which branch the agent is considered to be based on (used by update-from-base and the diff view) but does NOT move existing commits. Rebasing the agent's branch onto the new base, if desired, is left to the user. Must be an existing ref.
 	BaseBranch *string `json:"base_branch,omitempty"`
 
 	// ChatMode Switch the head between terminal and chat mode (Claude and Codex only; rejected for other agent types). When the value changes, a live process is relaunched and its provider conversation is resumed.
 	ChatMode *bool `json:"chat_mode,omitempty"`
+
+	// FilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
+	FilesystemMode *FocusedFilesystemMode `json:"filesystem_mode,omitempty"`
 
 	// Title New user-facing display name for the agent. Trimmed; must be non-empty if provided.
 	Title *string `json:"title,omitempty"`

@@ -55,12 +55,43 @@ func (s *Server) drainGitopsRequests(projectRoot string) {
 		if err != nil || len(reqs) == 0 {
 			continue
 		}
-		// The head's worktree + its own branch. RunGuardedOp re-checks that the
-		// worktree is on this branch, so an op can never touch main or a sibling.
+		var focused, allowCommits bool
+		if s.DB != nil {
+			agent, _ := s.DB.GetAgent(id)
+			if agent == nil {
+				continue
+			}
+			focused = agent.BranchName == ""
+			allowCommits = agent.AllowCommits
+		}
+		// An ordinary head uses its own worktree/branch. A focused head uses the
+		// real checkout but is restricted to explicitly-authorized commits, with
+		// branch and HEAD snapshots checked per request below.
 		worktree := paths.GetWorktreeDirFromProjectRoot(projectRoot, id)
 		branch := git.BranchName(id)
+		if focused {
+			worktree = projectRoot
+			branch = ""
+		}
 		var changed bool
 		for _, r := range reqs {
+			if focused {
+				if !allowCommits {
+					_ = gitq.WriteResult(dir, r.ReqID, gitq.Result{Message: "Focused commits are disabled for this chat."})
+					continue
+				}
+				if r.Op != "" && r.Op != gitq.OpCommit {
+					_ = gitq.WriteResult(dir, r.ReqID, gitq.Result{Message: "Focused chats only allow the guarded commit operation."})
+					continue
+				}
+				currentBranch, branchErr := git.GetCurrentBranch(projectRoot)
+				currentHead, headErr := git.ResolveRef(projectRoot, "HEAD")
+				if branchErr != nil || headErr != nil || r.ExpectedBranch == "" || r.ExpectedHead == "" || currentBranch != r.ExpectedBranch || currentHead != r.ExpectedHead {
+					_ = gitq.WriteResult(dir, r.ReqID, gitq.Result{Message: "Refusing focused commit: the project's branch or HEAD changed after the request was created."})
+					continue
+				}
+				branch = r.ExpectedBranch
+			}
 			ok, summary := git.RunGuardedOp(worktree, branch, r)
 			if err := gitq.WriteResult(dir, r.ReqID, gitq.Result{OK: ok, Message: summary}); err != nil {
 				continue

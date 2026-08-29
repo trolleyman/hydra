@@ -361,6 +361,23 @@ func (s *Store) UpdateAgentChatMode(id string, chatMode bool) error {
 	return errtrace.Wrap(result.Error)
 }
 
+// UpdateFocusedPermissions changes a branchless focused head's direct-directory
+// permissions. Nil fields are left unchanged so callers can toggle commit
+// authorization without restarting the filesystem sandbox.
+func (s *Store) UpdateFocusedPermissions(id string, filesystemMode *string, allowCommits *bool) error {
+	updates := map[string]any{}
+	if filesystemMode != nil {
+		updates["filesystem_mode"] = *filesystemMode
+	}
+	if allowCommits != nil {
+		updates["allow_commits"] = *allowCommits
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	return errtrace.Wrap(s.db.Model(&Agent{}).Where("id = ? AND branch_name = ?", id, "").Updates(updates).Error)
+}
+
 // SetDownstreamBranch sets the per-head downstream branch name (the name its work
 // is pushed AS; the local branch stays hydra/<id>). Metadata only.
 func (s *Store) SetDownstreamBranch(id, branch string) error {

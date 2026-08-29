@@ -273,8 +273,13 @@ type ROOverlay struct {
 type Options struct {
 	AgentType AgentType
 
-	// WorktreePath is the agent's working directory; always writable.
+	// WorktreePath is the agent's working directory. Ordinary heads use their
+	// linked worktree; focused heads use the registered project root directly.
 	WorktreePath string
+	// WorkingDirReadOnly makes WorktreePath read-only. It is the enforcement
+	// intent behind a focused head's readonly mode; false preserves the ordinary
+	// writable-worktree behavior.
+	WorkingDirReadOnly bool
 	// GitCommonDir is the repository's shared git dir (the main repo's .git),
 	// bound writable so the agent can commit from its linked worktree. Empty to
 	// skip. See git.GetCommonDir.

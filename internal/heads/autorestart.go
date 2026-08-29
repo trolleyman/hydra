@@ -104,7 +104,7 @@ func MaybeAutoRestartHead(reg *session.Registry, store *db.Store, info session.I
 			log.Printf("heads: auto-restart of %s skipped: head not found (killed since?): %v", info.ID, err)
 			return
 		}
-		if head.Worktree == nil {
+		if !head.IsFocused() && head.Worktree == nil {
 			return
 		}
 		rows, cols := LoadResumeSize(store, projectRoot, info.ID)

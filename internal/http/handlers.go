@@ -731,11 +731,13 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		netEnf = &m
 	}
 	gitIso := string(heads.EffectiveGitIsolation(h))
+	focused := h.IsFocused()
 	resp := api.AgentResponse{
 		Id:                 h.ID,
 		Title:              &title,
 		BranchName:         h.Branch,
 		WorktreePath:       h.Worktree,
+		Focused:            &focused,
 		ProjectPath:        h.ProjectPath,
 		SessionPid:         h.SessionPID,
 		SessionStatus:      h.SessionStatus,
@@ -757,6 +759,14 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		ArchivedAt:         archivedAt,
 		MergeWhenGreen:     &h.MergeWhenGreen,
 		PublishWhenGreen:   &h.PublishWhenGreen,
+	}
+	if focused {
+		mode := api.FocusedFilesystemMode(h.FilesystemMode)
+		if mode == "" {
+			mode = api.FocusedFilesystemEdit
+		}
+		resp.FilesystemMode = &mode
+		resp.AllowCommits = &h.AllowCommits
 	}
 	if h.Plan != "" {
 		resp.Plan = &h.Plan
@@ -1815,6 +1825,25 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 			Details: "chat_mode is only supported for claude and codex agents",
 		}, nil
 	}
+	focused := request.Body.Focused != nil && *request.Body.Focused
+	filesystemMode := ""
+	allowCommits := false
+	if focused {
+		if !chatMode {
+			return api.SpawnAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "focused heads require chat_mode",
+			}, nil
+		}
+		filesystemMode = string(api.FocusedFilesystemEdit)
+		if request.Body.FilesystemMode != nil {
+			filesystemMode = string(*request.Body.FilesystemMode)
+		}
+		if request.Body.AllowCommits != nil {
+			allowCommits = *request.Body.AllowCommits
+		}
+	}
 
 	var gitIsolation string
 	if request.Body.GitIsolation != nil {
@@ -1825,6 +1854,13 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	// the head pre-linked to the MR (docs/pr-adoption.md).
 	var adopt *heads.AdoptSpec
 	if request.Body.AdoptMr != nil {
+		if focused {
+			return api.SpawnAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "focused heads cannot adopt a merge request",
+			}, nil
+		}
 		spec, detail := s.resolveAdoptSpec(ctx, projectRoot, *request.Body.AdoptMr)
 		if detail != "" {
 			return api.SpawnAgent400JSONResponse{
@@ -1854,21 +1890,24 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	}
 
 	head, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:            id,
-		PrePrompt:     prePrompt,
-		Prompt:        prompt,
-		AgentType:     agentType,
-		Model:         model,
-		BaseBranch:    baseBranch,
-		Adopt:         adopt,
-		Ephemeral:     ephemeral,
-		ChatMode:      chatMode,
-		GitIsolation:  gitIsolation,
-		Replace:       force,
-		Rows:          rows,
-		Cols:          cols,
-		BackgroundCtx: s.BackgroundCtx,
-		OnTitleChange: func() { s.notifyAgentsChanged(projectRoot, false) },
+		ID:             id,
+		PrePrompt:      prePrompt,
+		Prompt:         prompt,
+		AgentType:      agentType,
+		Model:          model,
+		BaseBranch:     baseBranch,
+		Adopt:          adopt,
+		Ephemeral:      ephemeral,
+		ChatMode:       chatMode,
+		Focused:        focused,
+		FilesystemMode: filesystemMode,
+		AllowCommits:   allowCommits,
+		GitIsolation:   gitIsolation,
+		Replace:        force,
+		Rows:           rows,
+		Cols:           cols,
+		BackgroundCtx:  s.BackgroundCtx,
+		OnTitleChange:  func() { s.notifyAgentsChanged(projectRoot, false) },
 	})
 	if err != nil {
 		var exists *heads.HeadExistsError
@@ -1936,11 +1975,11 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			Details: "request body is required",
 		}, nil
 	}
-	if request.Body.Title == nil && request.Body.BaseBranch == nil && request.Body.ChatMode == nil {
+	if request.Body.Title == nil && request.Body.BaseBranch == nil && request.Body.ChatMode == nil && request.Body.FilesystemMode == nil && request.Body.AllowCommits == nil {
 		return api.UpdateAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
-			Details: "at least one field (title, base_branch or chat_mode) is required",
+			Details: "at least one mutable field is required",
 		}, nil
 	}
 
@@ -1982,6 +2021,33 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found",
 		}, nil
+	}
+	if request.Body.FilesystemMode != nil || request.Body.AllowCommits != nil {
+		if !head.IsFocused() {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "focused permissions can only be changed on a focused head",
+			}, nil
+		}
+		var mode *string
+		if request.Body.FilesystemMode != nil {
+			v := string(*request.Body.FilesystemMode)
+			mode = &v
+		}
+		if err := s.DB.UpdateFocusedPermissions(head.ID, mode, request.Body.AllowCommits); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		if mode != nil && *mode != head.FilesystemMode {
+			head.FilesystemMode = *mode
+			if s.Sessions.IsLive(head.ID) {
+				log.Printf("api: focused filesystem mode toggled to %s for %s; stopping session for sandbox switch", *mode, head.ID)
+				heads.StopSessionAndWait(s.Sessions, head.ID, 5*time.Second)
+			}
+		}
+		if request.Body.AllowCommits != nil {
+			head.AllowCommits = *request.Body.AllowCommits
+		}
 	}
 
 	if baseBranch != "" {

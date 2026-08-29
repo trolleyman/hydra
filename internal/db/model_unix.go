@@ -43,6 +43,13 @@ type Agent struct {
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	// Mutable; a change takes effect on the next session (re)launch.
 	ChatMode bool `gorm:"default:false"`
+	// FilesystemMode is meaningful only for a branchless focused head. "edit"
+	// grants direct writes to ProjectPath; "readonly" makes it read-only. Empty
+	// is retained for ordinary worktree heads.
+	FilesystemMode string
+	// AllowCommits independently authorizes Hydra's guarded commit operation for
+	// a focused head. The provider never receives direct write access to .git.
+	AllowCommits bool `gorm:"default:false"`
 
 	// Session - updated by the liveness reconciler
 	SessionPID    int    // PID of the running sandbox session, 0 if not running

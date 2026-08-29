@@ -44,6 +44,8 @@ func simAgentByID(id string) api.AgentResponse {
 // SimulationServer implements api.ServerInterface with mock data.
 type SimulationServer struct {
 	Development bool
+	focusedMu   sync.Mutex
+	focused     map[string]simFocusedPermissions
 
 	// updateMu and friends back the simulated self-update job (see UpdateServer),
 	// so the update panel - phases, streaming build log, the failure path - can
@@ -84,6 +86,11 @@ type SimulationServer struct {
 	// never show it - even mid-stream. Flipping this makes ListAgents/GetAgent
 	// report `running` for exactly as long as the turn is in flight.
 	askRunning atomic.Bool
+}
+
+type simFocusedPermissions struct {
+	mode         api.FocusedFilesystemMode
+	allowCommits bool
 }
 
 // setSimHidden records a project as hidden (or shown again) for this process.
@@ -430,6 +437,67 @@ func simAgentCodex() api.AgentResponse {
 	}
 }
 
+// simFocusedAgents exercise the shared branchless chat surface without needing
+// a real provider process or project checkout. Each reuses one of the existing
+// durable chat streams so the transcript remains as rich as the ordinary chat
+// fixtures while the surrounding layout and permissions are focused-specific.
+func simFocusedAgents() []api.AgentResponse {
+	chatMode := true
+	focused := true
+	allowCommits := true
+	disallowCommits := false
+	edit := api.FocusedFilesystemEdit
+	readonly := api.FocusedFilesystemReadonly
+	createdEdit := simNow().Add(-14 * time.Minute).Unix()
+	createdReadonly := simNow().Add(-38 * time.Minute).Unix()
+	createdWorking := simNow().Add(-3 * time.Minute).Unix()
+	return []api.AgentResponse{
+		{
+			Id: "focused-edit", Title: ptr("Tidy the release notes"), AgentType: "claude",
+			BranchName: nil, SessionPid: 1010, SessionStatus: "running", CreatedAt: &createdEdit,
+			ProjectPath: "/Users/callum/code/hydra", Prompt: simAgentChatPrompt, ChatMode: &chatMode,
+			Focused: &focused, FilesystemMode: &edit, AllowCommits: &allowCommits, Model: ptr("claude-opus-4-8"),
+			AgentStatus: &api.AgentStatusInfo{Status: api.Waiting, Timestamp: simNow().Format(time.RFC3339)},
+		},
+		{
+			Id: "focused-readonly", Title: ptr("Review the desktop architecture"), AgentType: "codex",
+			BranchName: nil, SessionPid: 1011, SessionStatus: "running", CreatedAt: &createdReadonly,
+			ProjectPath: "/Users/callum/code/hydra", Prompt: simAgentCodexPrompt, ChatMode: &chatMode,
+			Focused: &focused, FilesystemMode: &readonly, AllowCommits: &disallowCommits, Model: ptr("gpt-5.6-sol"),
+			AgentStatus: &api.AgentStatusInfo{Status: api.Finished, Timestamp: simNow().Format(time.RFC3339)},
+		},
+		{
+			Id: "focused-working", Title: ptr("Trace preview port allocation"), AgentType: "claude",
+			BranchName: nil, SessionPid: 1012, SessionStatus: "running", CreatedAt: &createdWorking,
+			ProjectPath: "/Users/callum/code/hydra", Prompt: simAgentWorkingPrompt, ChatMode: &chatMode,
+			Focused: &focused, FilesystemMode: &edit, AllowCommits: &disallowCommits, Model: ptr("claude-opus-4-8"),
+			AgentStatus: &api.AgentStatusInfo{Status: api.Running, Timestamp: simNow().Format(time.RFC3339), Activity: ptr("Reading `internal/preview/ports.go`")},
+		},
+	}
+}
+
+func (s *SimulationServer) focusedAgents() []api.AgentResponse {
+	agents := simFocusedAgents()
+	s.focusedMu.Lock()
+	defer s.focusedMu.Unlock()
+	for i := range agents {
+		if override, ok := s.focused[agents[i].Id]; ok {
+			agents[i].FilesystemMode = &override.mode
+			agents[i].AllowCommits = &override.allowCommits
+		}
+	}
+	return agents
+}
+
+func (s *SimulationServer) focusedAgent(id string) (api.AgentResponse, bool) {
+	for _, agent := range s.focusedAgents() {
+		if agent.Id == id {
+			return agent, true
+		}
+	}
+	return api.AgentResponse{}, false
+}
+
 // simAgentAskPrompt seeds the AskUserQuestion demo agent (agent-ask), whose
 // chat view is parked on a live native question card (see handleSimAskWS).
 const simAgentAskPrompt = "Refactor the config loader to support per-environment overrides."
@@ -750,6 +818,7 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			},
 		},
 	}
+	resp = append(resp, s.focusedAgents()...)
 	// Attach test-verdict chips (PLAN #68) so the sidebar shows passing/failing/
 	// running states; agent-md and agent-queued are also shown with auto-merge armed.
 	for i := range resp {
@@ -817,8 +886,24 @@ func simArchivedAgents() []api.AgentResponse {
 		}
 	}
 	// Listed newest-archived first, as the real ListArchivedAgents orders them.
+	createdAt := simNow().Add(-18 * time.Hour).Unix()
+	archivedAt := simNow().Add(-3 * time.Hour).Unix()
+	focused := true
+	chatMode := true
+	allowCommits := false
+	readonly := api.FocusedFilesystemReadonly
+	endState := "killed"
+	archivedFocused := api.AgentResponse{
+		Id: "archived-focused", Title: ptr("Audit the release workflow"), AgentType: "claude",
+		BranchName: nil, SessionStatus: "stopped", ProjectPath: "/Users/callum/code/hydra",
+		Prompt: "Review the release workflow and list the remaining manual steps.", CreatedAt: &createdAt,
+		Archived: &archived, ArchivedAt: &archivedAt, EndState: &endState, ChatMode: &chatMode,
+		Focused: &focused, FilesystemMode: &readonly, AllowCommits: &allowCommits,
+		AgentStatus: &api.AgentStatusInfo{Status: stopped, Timestamp: simNow().Format(time.RFC3339)},
+	}
 	return []api.AgentResponse{
 		mk("archived-1", "Add dark-mode toggle to settings", "claude", "hydra/feat-darkmode", "merged", "Add a dark-mode toggle to the settings page, persisted to localStorage and respecting the OS preference by default.", finished, 5, 2),
+		archivedFocused,
 		mk("archived-4", "Investigate sandbox netns isolation", "claude", "hydra/spike-netns", "killed", "Explore giving each agent its own network namespace with a rootless userspace NAT (pasta/slirp4netns) for per-agent port isolation.", stopped, 30, 4),
 		mk("archived-2", "Spike: WebSocket diff refresh", "gemini", "hydra/spike-ws", "killed", "Prototype pushing diff_refresh over the existing terminal WebSocket instead of the 20s poll, and measure the latency win.", stopped, 8, 7),
 		mk("archived-3", "Fix flaky terminal resize test", "claude", "hydra/fix-resize", "merged", "TestTerminalResize fails intermittently in CI. Track down the race and make it deterministic.", finished, 26, 25),
@@ -854,6 +939,10 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			write(a)
 			return
 		}
+	}
+	if agent, ok := s.focusedAgent(id); ok {
+		write(agent)
+		return
 	}
 	if id == "agent-1" {
 		createdAt := simNow().Add(-1 * time.Hour).Unix()
@@ -1031,7 +1120,33 @@ func (s *SimulationServer) PurgeAgent(w http.ResponseWriter, r *http.Request, pr
 }
 
 func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
+	agent, ok := s.focusedAgent(id)
+	if !ok {
+		api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
+		return
+	}
+	var body api.UpdateAgentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	mode := *agent.FilesystemMode
+	allowCommits := *agent.AllowCommits
+	if body.FilesystemMode != nil {
+		mode = *body.FilesystemMode
+	}
+	if body.AllowCommits != nil {
+		allowCommits = *body.AllowCommits
+	}
+	s.focusedMu.Lock()
+	if s.focused == nil {
+		s.focused = make(map[string]simFocusedPermissions)
+	}
+	s.focused[id] = simFocusedPermissions{mode: mode, allowCommits: allowCommits}
+	s.focusedMu.Unlock()
+	agent.FilesystemMode = &mode
+	agent.AllowCommits = &allowCommits
+	api.WriteJSON(w, http.StatusOK, agent)
 }
 
 func (s *SimulationServer) RestartAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
@@ -5546,15 +5661,15 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 
 	// The chat-mode demo agents speak the chat framing, not PTY bytes. Their
 	// bash tabs (shell=true) still get the plain simulated terminal below.
-	if agentID == "agent-chat" && r.URL.Query().Get("shell") != "true" {
+	if (agentID == "agent-chat" || agentID == "focused-edit") && r.URL.Query().Get("shell") != "true" {
 		handleSimChatWS(conn)
 		return
 	}
-	if agentID == "agent-chat-codex" && r.URL.Query().Get("shell") != "true" {
+	if (agentID == "agent-chat-codex" || agentID == "focused-readonly") && r.URL.Query().Get("shell") != "true" {
 		handleSimCodexChatWS(conn)
 		return
 	}
-	if agentID == "agent-working" && r.URL.Query().Get("shell") != "true" {
+	if (agentID == "agent-working" || agentID == "focused-working") && r.URL.Query().Get("shell") != "true" {
 		handleSimWorkingWS(conn)
 		return
 	}
