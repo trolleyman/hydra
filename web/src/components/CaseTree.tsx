@@ -478,8 +478,16 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo, onFix
           </>
         ) : null}
         <StatusGlyph status={c.status} />
-        <span className={`font-mono text-xs min-w-0 truncate ${failedish ? 'font-medium' : 'text-gray-600 dark:text-gray-400'}`}>
-          {c.name}
+        <span className="inline-flex items-baseline gap-1.5 min-w-0">
+          <span className={`font-mono text-xs font-normal min-w-0 truncate ${failedish ? '' : 'text-gray-600 dark:text-gray-400'}`}>
+            {c.name}
+          </span>
+          {!showLocation && !hasPathSeg && c.line != null && c.line > 0 ? (
+            // Keep the smaller location suffix on the test name's actual text
+            // baseline. Optical centering gets close, but different mono sizes
+            // still leave the digits visibly high beside the case name.
+            <span className="font-mono text-3xs text-gray-400 dark:text-gray-500 shrink-0">:{c.line}</span>
+          ) : null}
         </span>
         {showLocation && loc ? (
           <span className="inline-flex items-center gap-1 min-w-0 shrink-1">
@@ -496,11 +504,6 @@ export function CaseRow({ c, segs, showLocation, indent = 0, onOpenInRepo, onFix
                 off the file:line secondary here. */}
             {c.path_missing ? <MissingFileMarker /> : null}
           </span>
-        ) : !hasPathSeg && c.line != null && c.line > 0 ? (
-          // No file piece on this row (plain leaf under a file node), so show the
-          // line here - a dim ":42", also the row's open-in-repo #L target. When a
-          // file piece IS present the line already rides on it (see hasPathSeg).
-          <span className="font-mono text-3xs text-gray-400 dark:text-gray-500 shrink-0">:{c.line}</span>
         ) : null}
         <CopyButton text={copyable} title={loc ? `Copy ${loc}` : 'Copy test name'} what={loc ? 'test path' : 'test name'} />
         {onOpenInRepo && c.path && !c.path_missing ? (

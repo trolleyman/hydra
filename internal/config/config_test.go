@@ -9,6 +9,29 @@ import (
 
 func ptr(s string) *string { return &s }
 
+func TestDefaultPrePromptRequiresStructuredQuestions(t *testing.T) {
+	for _, tool := range []string{"AskUserQuestion", "request_user_input"} {
+		if !strings.Contains(DefaultPrePrompt, tool) {
+			t.Errorf("DefaultPrePrompt does not name the %s question tool", tool)
+		}
+	}
+	if !strings.Contains(DefaultPrePrompt, "Do not ask the question only in a plain chat message") {
+		t.Error("DefaultPrePrompt does not require structured questions instead of plain chat")
+	}
+}
+
+func TestDefaultPrePromptAllowsGuardedHeadCollaboration(t *testing.T) {
+	for _, want := range []string{
+		"discover live heads in this project",
+		"when messaging is enabled by policy, send them attributed messages",
+		"must not spawn, kill, merge, attach, or resume heads",
+	} {
+		if !strings.Contains(DefaultPrePrompt, want) {
+			t.Errorf("DefaultPrePrompt does not contain collaboration guardrail %q", want)
+		}
+	}
+}
+
 func TestResolveFullscreen(t *testing.T) {
 	// Unset → disabled (the safe default that forces the classic renderer).
 	if (Config{}).ResolveFullscreen("claude") {
