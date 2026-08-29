@@ -647,7 +647,10 @@ type AgentResponse struct {
 	Archived *bool `json:"archived,omitempty"`
 
 	// ArchivedAt Unix timestamp (seconds) when an archived agent was killed or merged; absent for active agents (and for a legacy archived record with no recorded archive time). The archived history list is ordered by this.
-	ArchivedAt *int64  `json:"archived_at,omitempty"`
+	ArchivedAt *int64 `json:"archived_at,omitempty"`
+
+	// AutoPush True when automatic publishing is armed. A linked head auto-pushes after it finishes without waiting for tests; a legacy explicitly armed unlinked head opens a draft MR after tests pass. See docs/non-local-integration.md
+	AutoPush   *bool   `json:"auto_push,omitempty"`
 	BaseBranch string  `json:"base_branch"`
 	BranchName *string `json:"branch_name"`
 
@@ -696,9 +699,6 @@ type AgentResponse struct {
 	PrePrompt   string  `json:"pre_prompt"`
 	ProjectPath string  `json:"project_path"`
 	Prompt      string  `json:"prompt"`
-
-	// PublishWhenGreen True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See docs/non-local-integration.md
-	PublishWhenGreen *bool `json:"publish_when_green,omitempty"`
 
 	// Review The per-head link to a forge MR/PR (docs/non-local-integration.md). Absent on an unlinked head. When present, url/id identify the MR; state (when the lifecycle watcher has run) carries the cached forge state.
 	Review *ReviewLink `json:"review,omitempty"`
@@ -3170,7 +3170,8 @@ type ReviewCommentsResponse struct {
 // ReviewConfig The raw [review] config for ONE config layer (project / user / local), as edited in the Settings scope tabs. Every field is nullable; a null field is unset at this layer and inherits the layer below (built-in defaults are applied only in the resolved ReviewConfigResponse). Which file a save writes to is chosen by the scope tab, so provider/target/etc. can live in the shared config.toml and personal overrides in config.local.toml.
 type ReviewConfig struct {
 	// Auth "cli" | "token".
-	Auth *string `json:"auth"`
+	Auth     *string `json:"auth"`
+	AutoPush *bool   `json:"auto_push"`
 
 	// DefaultAction "merge" | "create_mr".
 	DefaultAction      *string   `json:"default_action"`
@@ -3180,8 +3181,7 @@ type ReviewConfig struct {
 	ProtectedBranches  *[]string `json:"protected_branches"`
 
 	// Provider "auto" | "github" | "gitlab".
-	Provider         *string `json:"provider"`
-	PublishWhenGreen *bool   `json:"publish_when_green"`
+	Provider *string `json:"provider"`
 
 	// Publisher "forge" | "graphite".
 	Publisher          *string `json:"publisher"`
@@ -3201,6 +3201,9 @@ type ReviewConfigResponse struct {
 
 	// Authenticated Whether the forge CLI is authenticated.
 	Authenticated *bool `json:"authenticated,omitempty"`
+
+	// AutoPush Whether Hydra-created linked heads automatically push new commits. Defaults true.
+	AutoPush *bool `json:"auto_push,omitempty"`
 
 	// BrowseUrl Derived https browse URL for the repo (for the forge web link), or empty.
 	BrowseUrl *string `json:"browse_url,omitempty"`
@@ -3222,9 +3225,6 @@ type ReviewConfigResponse struct {
 
 	// ProviderSetting The raw provider setting ("auto" | "github" | "gitlab").
 	ProviderSetting *string `json:"provider_setting,omitempty"`
-
-	// PublishWhenGreen Default arming for new heads.
-	PublishWhenGreen *bool `json:"publish_when_green,omitempty"`
 
 	// Publisher PR publication backend ("forge" | "graphite").
 	Publisher          string  `json:"publisher"`
@@ -4694,9 +4694,9 @@ type PublishAgentJSONBody struct {
 	Title        *string `json:"title,omitempty"`
 }
 
-// ArmPublishWhenGreenParams defines parameters for ArmPublishWhenGreen.
-type ArmPublishWhenGreenParams struct {
-	// AcknowledgeAdopted Acknowledges that this head is working on a PR Hydra did not create, so arming means auto-pushing into someone else's PR on every green commit. Required (true) to arm an adopted head; ignored for any other head. A read-only adopted PR (no maintainer edits) is refused even with it, since no push can succeed.
+// ArmAutoPushParams defines parameters for ArmAutoPush.
+type ArmAutoPushParams struct {
+	// AcknowledgeAdopted Acknowledges that this head is working on a PR Hydra did not create, so arming means auto-pushing into someone else's PR on every commit. Required (true) to arm an adopted head; ignored for any other head. A read-only adopted PR (no maintainer edits) is refused even with it, since no push can succeed.
 	AcknowledgeAdopted *bool `form:"acknowledge_adopted,omitempty" json:"acknowledge_adopted,omitempty"`
 }
 
@@ -7229,18 +7229,18 @@ type ServerInterface interface {
 	// Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish)
 	PublishAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
+	// Disarm publish-when-green for a head
+	// (DELETE /api/projects/{project_id}/agents/{agent_id}/publish/auto-push)
+	DisarmAutoPush(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
+	// Arm automatic publishing - auto-open after tests / auto-push linked heads
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/auto-push)
+	ArmAutoPush(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params ArmAutoPushParams)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
 	PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Push the local head branch to its linked MR's downstream branch (Push to MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/push)
 	PushToMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
-	// Disarm publish-when-green for a head
-	// (DELETE /api/projects/{project_id}/agents/{agent_id}/publish/when-green)
-	DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
-	// Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
-	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/when-green)
-	ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params ArmPublishWhenGreenParams)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
 	// (DELETE /api/projects/{project_id}/agents/{agent_id}/purge)
 	PurgeAgent(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
@@ -8473,6 +8473,85 @@ func (siw *ServerInterfaceWrapper) PublishAgent(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// DisarmAutoPush operation middleware
+func (siw *ServerInterfaceWrapper) DisarmAutoPush(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DisarmAutoPush(w, r, projectId, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ArmAutoPush operation middleware
+func (siw *ServerInterfaceWrapper) ArmAutoPush(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ArmAutoPushParams
+
+	// ------------- Optional query parameter "acknowledge_adopted" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "acknowledge_adopted", r.URL.Query(), &params.AcknowledgeAdopted)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "acknowledge_adopted", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ArmAutoPush(w, r, projectId, agentId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PullFromMr operation middleware
 func (siw *ServerInterfaceWrapper) PullFromMr(w http.ResponseWriter, r *http.Request) {
 
@@ -8532,85 +8611,6 @@ func (siw *ServerInterfaceWrapper) PushToMr(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PushToMr(w, r, projectId, agentId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// DisarmPublishWhenGreen operation middleware
-func (siw *ServerInterfaceWrapper) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "project_id" -------------
-	var projectId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "agent_id" -------------
-	var agentId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DisarmPublishWhenGreen(w, r, projectId, agentId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ArmPublishWhenGreen operation middleware
-func (siw *ServerInterfaceWrapper) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	// ------------- Path parameter "project_id" -------------
-	var projectId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "agent_id" -------------
-	var agentId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
-		return
-	}
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ArmPublishWhenGreenParams
-
-	// ------------- Optional query parameter "acknowledge_adopted" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "acknowledge_adopted", r.URL.Query(), &params.AcknowledgeAdopted)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "acknowledge_adopted", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ArmPublishWhenGreen(w, r, projectId, agentId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10300,10 +10300,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/previews/{name}/start", wrapper.StartAgentPreview)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/previews/{name}/stop", wrapper.StopAgentPreview)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish", wrapper.PublishAgent)
+	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/auto-push", wrapper.DisarmAutoPush)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/auto-push", wrapper.ArmAutoPush)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/pull", wrapper.PullFromMr)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/push", wrapper.PushToMr)
-	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/when-green", wrapper.DisarmPublishWhenGreen)
-	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/publish/when-green", wrapper.ArmPublishWhenGreen)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/purge", wrapper.PurgeAgent)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/read", wrapper.MarkAgentRead)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/restart", wrapper.RestartAgent)
@@ -11400,6 +11400,86 @@ func (response PublishAgent500JSONResponse) VisitPublishAgentResponse(w http.Res
 	return json.NewEncoder(w).Encode(response)
 }
 
+type DisarmAutoPushRequestObject struct {
+	ProjectId string `json:"project_id"`
+	AgentId   string `json:"agent_id"`
+}
+
+type DisarmAutoPushResponseObject interface {
+	VisitDisarmAutoPushResponse(w http.ResponseWriter) error
+}
+
+type DisarmAutoPush204Response struct {
+}
+
+func (response DisarmAutoPush204Response) VisitDisarmAutoPushResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DisarmAutoPush404JSONResponse ErrorResponse
+
+func (response DisarmAutoPush404JSONResponse) VisitDisarmAutoPushResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DisarmAutoPush500JSONResponse ErrorResponse
+
+func (response DisarmAutoPush500JSONResponse) VisitDisarmAutoPushResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ArmAutoPushRequestObject struct {
+	ProjectId string `json:"project_id"`
+	AgentId   string `json:"agent_id"`
+	Params    ArmAutoPushParams
+}
+
+type ArmAutoPushResponseObject interface {
+	VisitArmAutoPushResponse(w http.ResponseWriter) error
+}
+
+type ArmAutoPush204Response struct {
+}
+
+func (response ArmAutoPush204Response) VisitArmAutoPushResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ArmAutoPush400JSONResponse ErrorResponse
+
+func (response ArmAutoPush400JSONResponse) VisitArmAutoPushResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ArmAutoPush404JSONResponse ErrorResponse
+
+func (response ArmAutoPush404JSONResponse) VisitArmAutoPushResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ArmAutoPush500JSONResponse ErrorResponse
+
+func (response ArmAutoPush500JSONResponse) VisitArmAutoPushResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type PullFromMrRequestObject struct {
 	ProjectId string `json:"project_id"`
 	AgentId   string `json:"agent_id"`
@@ -11493,86 +11573,6 @@ func (response PushToMr404JSONResponse) VisitPushToMrResponse(w http.ResponseWri
 type PushToMr500JSONResponse ErrorResponse
 
 func (response PushToMr500JSONResponse) VisitPushToMrResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type DisarmPublishWhenGreenRequestObject struct {
-	ProjectId string `json:"project_id"`
-	AgentId   string `json:"agent_id"`
-}
-
-type DisarmPublishWhenGreenResponseObject interface {
-	VisitDisarmPublishWhenGreenResponse(w http.ResponseWriter) error
-}
-
-type DisarmPublishWhenGreen204Response struct {
-}
-
-func (response DisarmPublishWhenGreen204Response) VisitDisarmPublishWhenGreenResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type DisarmPublishWhenGreen404JSONResponse ErrorResponse
-
-func (response DisarmPublishWhenGreen404JSONResponse) VisitDisarmPublishWhenGreenResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type DisarmPublishWhenGreen500JSONResponse ErrorResponse
-
-func (response DisarmPublishWhenGreen500JSONResponse) VisitDisarmPublishWhenGreenResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ArmPublishWhenGreenRequestObject struct {
-	ProjectId string `json:"project_id"`
-	AgentId   string `json:"agent_id"`
-	Params    ArmPublishWhenGreenParams
-}
-
-type ArmPublishWhenGreenResponseObject interface {
-	VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error
-}
-
-type ArmPublishWhenGreen204Response struct {
-}
-
-func (response ArmPublishWhenGreen204Response) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
-}
-
-type ArmPublishWhenGreen400JSONResponse ErrorResponse
-
-func (response ArmPublishWhenGreen400JSONResponse) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(400)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ArmPublishWhenGreen404JSONResponse ErrorResponse
-
-func (response ArmPublishWhenGreen404JSONResponse) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ArmPublishWhenGreen500JSONResponse ErrorResponse
-
-func (response ArmPublishWhenGreen500JSONResponse) VisitArmPublishWhenGreenResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -13250,18 +13250,18 @@ type StrictServerInterface interface {
 	// Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish)
 	PublishAgent(ctx context.Context, request PublishAgentRequestObject) (PublishAgentResponseObject, error)
+	// Disarm publish-when-green for a head
+	// (DELETE /api/projects/{project_id}/agents/{agent_id}/publish/auto-push)
+	DisarmAutoPush(ctx context.Context, request DisarmAutoPushRequestObject) (DisarmAutoPushResponseObject, error)
+	// Arm automatic publishing - auto-open after tests / auto-push linked heads
+	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/auto-push)
+	ArmAutoPush(ctx context.Context, request ArmAutoPushRequestObject) (ArmAutoPushResponseObject, error)
 	// Pull the remote downstream branch into the local head branch (Pull from MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/pull)
 	PullFromMr(ctx context.Context, request PullFromMrRequestObject) (PullFromMrResponseObject, error)
 	// Push the local head branch to its linked MR's downstream branch (Push to MR)
 	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/push)
 	PushToMr(ctx context.Context, request PushToMrRequestObject) (PushToMrResponseObject, error)
-	// Disarm publish-when-green for a head
-	// (DELETE /api/projects/{project_id}/agents/{agent_id}/publish/when-green)
-	DisarmPublishWhenGreen(ctx context.Context, request DisarmPublishWhenGreenRequestObject) (DisarmPublishWhenGreenResponseObject, error)
-	// Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
-	// (POST /api/projects/{project_id}/agents/{agent_id}/publish/when-green)
-	ArmPublishWhenGreen(ctx context.Context, request ArmPublishWhenGreenRequestObject) (ArmPublishWhenGreenResponseObject, error)
 	// Permanently delete an agent (kill it and erase every record, including its Claude session history)
 	// (DELETE /api/projects/{project_id}/agents/{agent_id}/purge)
 	PurgeAgent(ctx context.Context, request PurgeAgentRequestObject) (PurgeAgentResponseObject, error)
@@ -14208,6 +14208,61 @@ func (sh *strictHandler) PublishAgent(w http.ResponseWriter, r *http.Request, pr
 	}
 }
 
+// DisarmAutoPush operation middleware
+func (sh *strictHandler) DisarmAutoPush(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
+	var request DisarmAutoPushRequestObject
+
+	request.ProjectId = projectId
+	request.AgentId = agentId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DisarmAutoPush(ctx, request.(DisarmAutoPushRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DisarmAutoPush")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DisarmAutoPushResponseObject); ok {
+		if err := validResponse.VisitDisarmAutoPushResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ArmAutoPush operation middleware
+func (sh *strictHandler) ArmAutoPush(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params ArmAutoPushParams) {
+	var request ArmAutoPushRequestObject
+
+	request.ProjectId = projectId
+	request.AgentId = agentId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ArmAutoPush(ctx, request.(ArmAutoPushRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ArmAutoPush")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ArmAutoPushResponseObject); ok {
+		if err := validResponse.VisitArmAutoPushResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // PullFromMr operation middleware
 func (sh *strictHandler) PullFromMr(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
 	var request PullFromMrRequestObject
@@ -14255,61 +14310,6 @@ func (sh *strictHandler) PushToMr(w http.ResponseWriter, r *http.Request, projec
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PushToMrResponseObject); ok {
 		if err := validResponse.VisitPushToMrResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// DisarmPublishWhenGreen operation middleware
-func (sh *strictHandler) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
-	var request DisarmPublishWhenGreenRequestObject
-
-	request.ProjectId = projectId
-	request.AgentId = agentId
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.DisarmPublishWhenGreen(ctx, request.(DisarmPublishWhenGreenRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "DisarmPublishWhenGreen")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(DisarmPublishWhenGreenResponseObject); ok {
-		if err := validResponse.VisitDisarmPublishWhenGreenResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// ArmPublishWhenGreen operation middleware
-func (sh *strictHandler) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params ArmPublishWhenGreenParams) {
-	var request ArmPublishWhenGreenRequestObject
-
-	request.ProjectId = projectId
-	request.AgentId = agentId
-	request.Params = params
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.ArmPublishWhenGreen(ctx, request.(ArmPublishWhenGreenRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "ArmPublishWhenGreen")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(ArmPublishWhenGreenResponseObject); ok {
-		if err := validResponse.VisitArmPublishWhenGreenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

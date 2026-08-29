@@ -95,9 +95,9 @@ export type AgentResponse = {
      */
     merge_when_green?: boolean;
     /**
-     * True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See docs/non-local-integration.md
+     * True when automatic publishing is armed. A linked head auto-pushes after it finishes without waiting for tests; a legacy explicitly armed unlinked head opens a draft MR after tests pass. See docs/non-local-integration.md
      */
-    publish_when_green?: boolean;
+    auto_push?: boolean;
     /**
      * The branch name this head's work is (or will be) pushed AS on the remote. The local branch always stays hydra/<id>. Empty until set.
      */

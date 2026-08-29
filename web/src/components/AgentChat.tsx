@@ -2960,6 +2960,7 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       continue
     }
     const view = section.view
+    const file = view.languageOnly ? undefined : view.path
     // A `cat -n` brought its own numbers; a range knows where it started; a
     // plain `tail` counts back from an end nothing here knows, so it gets the
     // highlighting without the gutter.
@@ -2975,7 +2976,7 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
     const counted = view.numbered ? [] : viewLineNumbers(view, code.length)
     const nums = code.map((_, i) => own[i] || counted[i] || '')
     const html = highlightLines(code.join('\n'), langFromPath(view.path) || 'plaintext')
-    nums.forEach((num, i) => rows.push({ num, html: html[i] ?? '', file: view.path, tone: 'code' }))
+    nums.forEach((num, i) => rows.push({ num, html: html[i] ?? '', file, tone: 'code' }))
   }
   return rows
 }

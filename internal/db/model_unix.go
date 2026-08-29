@@ -148,11 +148,10 @@ type Agent struct {
 	// push affordances are disabled. Meaningless (and false) for a non-adopted head.
 	ReviewCanPush bool `gorm:"default:false"`
 
-	// PublishWhenGreen arms "publish when green" (Phase 3): once local tests pass
-	// and the agent has finished, an unlinked head auto-opens a draft MR and a
-	// linked head auto-pushes. PublishWhenGreenAt is the RFC3339 arm time.
-	PublishWhenGreen   bool `gorm:"default:false"`
-	PublishWhenGreenAt string
+	// AutoPush keeps a linked review branch synced. AutoPushAt is the RFC3339 arm
+	// time used by the finished-agent dwell check.
+	AutoPush   bool `gorm:"default:false"`
+	AutoPushAt string
 
 	CreatedAt time.Time `gorm:"autoCreateTime:false"` // set explicitly
 	UpdatedAt time.Time

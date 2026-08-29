@@ -145,6 +145,9 @@ func openPath(dbPath string) (*Store, error) {
 
 	// Migrate on the writer before opening the read pool, so the schema and the
 	// file's WAL mode are established before any reader attaches.
+	if err := migrateLegacyReviewColumns(gormDB); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("migrate legacy review columns: %w", err))
+	}
 	if err := gormDB.AutoMigrate(&Agent{}, &LegacyImport{}); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("auto migrate: %w", err))
 	}
@@ -166,6 +169,27 @@ func openPath(dbPath string) (*Store, error) {
 	readSQL.SetConnMaxLifetime(0)
 
 	return &Store{db: gormDB, read: readDB}, nil
+}
+
+// migrateLegacyReviewColumns performs the review auto-push column rename that
+// AutoMigrate cannot infer. It runs before AutoMigrate so GORM does not create
+// empty replacement columns and leave the existing values behind. Each rename
+// is independently idempotent, which also makes a partially completed migration
+// safe to resume on the next open.
+func migrateLegacyReviewColumns(db *gorm.DB) error {
+	m := db.Migrator()
+	for _, columns := range [][2]string{
+		{"publish_when_green", "auto_push"},
+		{"publish_when_green_at", "auto_push_at"},
+	} {
+		oldName, newName := columns[0], columns[1]
+		if m.HasColumn(&Agent{}, oldName) && !m.HasColumn(&Agent{}, newName) {
+			if err := m.RenameColumn(&Agent{}, oldName, newName); err != nil {
+				return errtrace.Wrap(err)
+			}
+		}
+	}
+	return nil
 }
 
 // Close closes both connection pools. Safe to call on a nil/partially-built
