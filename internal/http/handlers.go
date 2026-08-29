@@ -593,8 +593,8 @@ func (s *Server) GetProjectConfigToml(_ context.Context, request api.GetProjectC
 }
 
 // EnsureTrackRemote configures the local "hydra-agents" remote in the project's
-// repo so the user can `git checkout -t hydra-agents/<id>` and `git pull` to
-// follow a head's branch (see docs/git-isolation.md). Idempotent; backs the
+// repo and reports whether the short local branch already exists, so the UI can
+// recommend checkout rather than trying to recreate it. Idempotent; backs the
 // agent page's "check out locally" affordance.
 func (s *Server) EnsureTrackRemote(ctx context.Context, request api.EnsureTrackRemoteRequestObject) (api.EnsureTrackRemoteResponseObject, error) {
 	p := s.ProjectsManager.GetByID(request.ProjectId)
@@ -613,7 +613,10 @@ func (s *Server) EnsureTrackRemote(ctx context.Context, request api.EnsureTrackR
 			Details: err.Error(),
 		}, nil
 	}
-	return api.EnsureTrackRemote200JSONResponse{Remote: remote}, nil
+	return api.EnsureTrackRemote200JSONResponse{
+		Remote:            remote,
+		LocalBranchExists: git.LocalBranchExists(p.Path, request.Params.AgentId),
+	}, nil
 }
 
 // PreviewConfigToml reads a project's .hydra/config.toml straight off disk at an

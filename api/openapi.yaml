@@ -385,6 +385,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: agent_id
+          in: query
+          required: true
+          schema:
+            type: string
       responses:
         '200':
           description: OK
@@ -3946,13 +3951,18 @@ components:
 
     TrackRemoteResponse:
       type: object
-      required: [remote]
+      required: [remote, local_branch_exists]
       properties:
         remote:
           type: string
           description: >-
-            The configured local remote name (e.g. "hydra-agents"). Check out and
-            follow a head with `git checkout -t <remote>/<head-id>` then `git pull`.
+            The configured local remote name (e.g. "hydra-agents").
+        local_branch_exists:
+          type: boolean
+          description: >-
+            Whether the checkout already has a local branch named after the head.
+            Existing branches should be checked out directly; only a missing branch
+            should be created with `git checkout -t <remote>/<head-id>`.
 
     SetProjectIconRequest:
       type: object

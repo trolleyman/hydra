@@ -9,22 +9,26 @@ import { CopyStateIcon } from './CopyStateIcon'
 // TrackBranchButton is the small icon+chevron button in the agent header that
 // opens a popover explaining how to check out and follow this head's branch from
 // the user's own repo. On open it ensures the project's `hydra-agents` remote
-// exists (a daemon action), so the shown command is just a `git checkout -t` -
-// no long remote-setup incantation. The chevron marks it as a menu, not an action.
+// exists (a daemon action) and checks whether the short local branch already
+// exists. The chevron marks it as a menu, not an action.
 // The icon is a monitor-with-down-arrow rather than a branch glyph: the header
 // already carries git-ish marks, and the action here is "pull this onto my own
 // machine", not "look at a branch".
 export function TrackBranchButton({ projectId, agentId }: { projectId: string; agentId: string }) {
   const [remote, setRemote] = useState('hydra-agents')
+  const [localBranchExists, setLocalBranchExists] = useState(false)
   const { state, flash } = useCopyFlash()
-  const cmd = `git checkout -t ${remote}/${agentId}`
+  const cmd = localBranchExists
+    ? `git checkout ${agentId}`
+    : `git checkout -t ${remote}/${agentId}`
 
   // Set up the remote lazily when the popover opens. If it fails, the default
   // name still makes a valid command once the remote is configured by hand.
   async function ensure() {
     try {
-      const res = await api.default.ensureTrackRemote(projectId)
+      const res = await api.default.ensureTrackRemote(projectId, agentId)
       if (res?.remote) setRemote(res.remote)
+      setLocalBranchExists(res?.local_branch_exists === true)
     } catch { /* leave the default remote name */ }
   }
 
@@ -47,7 +51,9 @@ export function TrackBranchButton({ projectId, agentId }: { projectId: string; a
     >
       <SettingsGroupLabel className="mb-1.5">Check out locally</SettingsGroupLabel>
       <p className="text-2xs text-gray-500 dark:text-gray-400 mb-2 leading-snug">
-        Follow this agent's branch from your own checkout. Run it once, then <code className="font-mono">git pull</code> to update as the agent commits.
+        {localBranchExists
+          ? <>This branch already exists locally. Check it out directly, then run <code className="font-mono">git pull</code> to update as the agent commits.</>
+          : <>Follow this agent's branch from your own checkout. Run it once, then <code className="font-mono">git pull</code> to update as the agent commits.</>}
       </p>
       {/* items-start, not items-center: the command box wraps to as many lines as
           it needs, so the copy button stays level with its first line instead of

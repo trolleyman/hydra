@@ -343,8 +343,8 @@ func (s *SimulationServer) RemoveProject(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *SimulationServer) EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string) {
-	api.WriteJSON(w, http.StatusOK, api.TrackRemoteResponse{Remote: "hydra-agents"})
+func (s *SimulationServer) EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string, params api.EnsureTrackRemoteParams) {
+	api.WriteJSON(w, http.StatusOK, api.TrackRemoteResponse{Remote: "hydra-agents", LocalBranchExists: false})
 }
 
 // simAgent1Prompt is the seeded prompt for the live simulated agent (agent-1),

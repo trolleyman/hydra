@@ -4215,7 +4215,10 @@ type ToolStartedEventType string
 
 // TrackRemoteResponse defines model for TrackRemoteResponse.
 type TrackRemoteResponse struct {
-	// Remote The configured local remote name (e.g. "hydra-agents"). Check out and follow a head with `git checkout -t <remote>/<head-id>` then `git pull`.
+	// LocalBranchExists Whether the checkout already has a local branch named after the head. Existing branches should be checked out directly; only a missing branch should be created with `git checkout -t <remote>/<head-id>`.
+	LocalBranchExists bool `json:"local_branch_exists"`
+
+	// Remote The configured local remote name (e.g. "hydra-agents").
 	Remote string `json:"remote"`
 }
 
@@ -4807,6 +4810,11 @@ type GetRepositoryFileParams struct {
 type GetRepositoryTreeParams struct {
 	// Ref Git ref to read the tree from (defaults to HEAD)
 	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
+}
+
+// EnsureTrackRemoteParams defines parameters for EnsureTrackRemote.
+type EnsureTrackRemoteParams struct {
+	AgentId string `form:"agent_id" json:"agent_id"`
 }
 
 // ResolvePathParams defines parameters for ResolvePath.
@@ -7363,7 +7371,7 @@ type ServerInterface interface {
 	RestartServices(w http.ResponseWriter, r *http.Request, projectId string)
 	// Ensure the local "hydra-agents" git remote exists so the user can check out and follow head branches
 	// (POST /api/projects/{project_id}/track-remote)
-	EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string)
+	EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string, params EnsureTrackRemoteParams)
 	// Resolve a hand-typed folder path to an absolute one (expands "~" and resolves relative paths against home) and report what is there
 	// (GET /api/resolve-path)
 	ResolvePath(w http.ResponseWriter, r *http.Request, params ResolvePathParams)
@@ -10007,8 +10015,26 @@ func (siw *ServerInterfaceWrapper) EnsureTrackRemote(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params EnsureTrackRemoteParams
+
+	// ------------- Required query parameter "agent_id" -------------
+
+	if paramValue := r.URL.Query().Get("agent_id"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "agent_id"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "agent_id", r.URL.Query(), &params.AgentId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.EnsureTrackRemote(w, r, projectId)
+		siw.Handler.EnsureTrackRemote(w, r, projectId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12957,6 +12983,7 @@ func (response RestartServices404JSONResponse) VisitRestartServicesResponse(w ht
 
 type EnsureTrackRemoteRequestObject struct {
 	ProjectId string `json:"project_id"`
+	Params    EnsureTrackRemoteParams
 }
 
 type EnsureTrackRemoteResponseObject interface {
@@ -15398,10 +15425,11 @@ func (sh *strictHandler) RestartServices(w http.ResponseWriter, r *http.Request,
 }
 
 // EnsureTrackRemote operation middleware
-func (sh *strictHandler) EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string) {
+func (sh *strictHandler) EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string, params EnsureTrackRemoteParams) {
 	var request EnsureTrackRemoteRequestObject
 
 	request.ProjectId = projectId
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.EnsureTrackRemote(ctx, request.(EnsureTrackRemoteRequestObject))

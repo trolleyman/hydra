@@ -286,7 +286,8 @@ collision.)
   [Host-mediated git path](#host-mediated-git-path-readonly).
 - **Track affordance:** a "Check out locally" icon+chevron button on the agent page
   (`TrackBranchButton`) that opens a popover with `git checkout -t hydra-agents/<id>`
-  (+ copy). On open it calls the `ensureTrackRemote` daemon action
+  for a new local branch, or `git checkout <id>` when that local branch already
+  exists (+ copy). On open it calls the `ensureTrackRemote` daemon action
   (`git.EnsureTrackRemote` -> `POST /api/projects/{id}/track-remote`), which
   idempotently configures the local `hydra-agents` remote, so the shown command
   stays short.

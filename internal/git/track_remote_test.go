@@ -39,6 +39,16 @@ func TestEnsureTrackRemote(t *testing.T) {
 	if !strings.Contains(string(out), "refs/remotes/"+TrackRemoteName+"/head-1") {
 		t.Errorf("tracking ref not created: %s", out)
 	}
+	if LocalBranchExists(dir, "head-1") {
+		t.Error("remote-tracking ref was mistaken for a local branch")
+	}
+	run("branch", "head-1")
+	if !LocalBranchExists(dir, "head-1") {
+		t.Error("existing local branch was not detected")
+	}
+	if LocalBranchExists(dir, "../unsafe") {
+		t.Error("invalid branch name was accepted")
+	}
 	// Idempotent: a second call still succeeds (config overwritten, not duplicated).
 	if _, err := EnsureTrackRemote(context.Background(), dir); err != nil {
 		t.Errorf("second EnsureTrackRemote failed: %v", err)
