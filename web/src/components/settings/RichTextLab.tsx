@@ -1,10 +1,9 @@
-import { EditorContent, useEditor } from '@tiptap/react'
 import { useRef, useState } from 'react'
 import { Bold, Braces, CodeXml, Columns3, Heading1, Heading2, ImagePlus, Italic, List, ListChecks, Plus, Quote, Redo2, Rows3, Strikethrough, Table2, Trash2, Undo2 } from 'lucide-react'
 import type { Editor } from '@tiptap/core'
 import { insertAttachment, type AttachmentKind } from '../../lib/rich-editor/Attachment'
 import { inlineCodeCommands } from '../../lib/rich-editor/InlineCode'
-import { richEditorExtensions, serializeRichMarkdown } from '../../lib/rich-editor/RichEditorCore'
+import { RichComposer, type RichComposerHandle } from '../../lib/rich-editor/RichComposer'
 import { Tooltip } from '../Tooltip'
 import { HighlightedTextarea } from '../HighlightedTextarea'
 import { Markdown } from '../../lib/MarkdownRenderer'
@@ -42,10 +41,6 @@ const CODE_LANGUAGES = [
   ['typescript', 'TypeScript'],
 ] as const
 
-function markdown(editor: Editor): string {
-  return serializeRichMarkdown(editor.getJSON())
-}
-
 function ToolbarButton({ label, active = false, onClick, children }: {
   label: string
   active?: boolean
@@ -82,25 +77,8 @@ export function RichTextLab() {
   const [currentMarkdown, setCurrentMarkdown] = useState(INITIAL_MARKDOWN)
   const [revision, setRevision] = useState(0)
   const fileInput = useRef<HTMLInputElement>(null)
-  const editor = useEditor({
-    extensions: richEditorExtensions,
-    content: INITIAL_MARKDOWN,
-    contentType: 'markdown',
-    immediatelyRender: false,
-    injectCSS: false,
-    editorProps: {
-      attributes: {
-        class: 'rich-text-surface min-h-44 px-4 py-3 outline-none',
-        'aria-label': 'Rich text editor demo',
-      },
-    },
-    onUpdate: ({ editor: updated }) => {
-      const value = markdown(updated)
-      setCurrentMarkdown(value)
-      setRevision((value) => value + 1)
-    },
-    onSelectionUpdate: () => setRevision((value) => value + 1),
-  })
+  const richComposerRef = useRef<RichComposerHandle>(null)
+  const [editor, setEditor] = useState<Editor | null>(null)
 
   // `revision` also refreshes toolbar active states on selection-only changes.
   // Reading it here makes that relationship explicit to the hooks linter.
@@ -110,7 +88,6 @@ export function RichTextLab() {
 
   function updateFromOldComposer(value: string) {
     setCurrentMarkdown(value)
-    editor?.commands.setContent(value, { contentType: 'markdown', emitUpdate: false })
   }
 
   function addFiles(files: File[]) {
@@ -185,7 +162,18 @@ export function RichTextLab() {
               }}
             />
           </div>
-          <EditorContent editor={editor} />
+          <RichComposer
+            ref={richComposerRef}
+            value={currentMarkdown}
+            onChange={(value) => {
+              setCurrentMarkdown(value)
+              setRevision((revision) => revision + 1)
+            }}
+            onEditor={setEditor}
+            onSelectionChange={() => setRevision((revision) => revision + 1)}
+            ariaLabel="Rich text editor demo"
+            className="min-h-44 px-4 py-3"
+          />
         </div>
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
           Try arrows at both edges of inline code, Backspace/Delete at its boundaries, Ctrl/Cmd+B, typing <code className="font-mono">*italic*</code>, three backticks for a code block, table row/column controls, and inserting a local file.

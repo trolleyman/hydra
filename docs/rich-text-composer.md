@@ -1,7 +1,9 @@
 # Rich-text composer: Tiptap implementation plan
 
-Status: **implementation started.** The dependency/licence audit and isolated
-inline-code spike are built; production composers still use
+Status: **core and evaluation lab built; production integration in progress.**
+The schema, Markdown boundary, inline-code behaviour, attachments, blocks,
+language picker, tables and reusable controlled React adapter are built;
+production composers still use
 `HighlightedTextarea`. Replace their source-shaped Markdown highlighting with a
 structured rich-text editor that feels like writing prose, preserves Markdown as
 Hydra's interchange format, and makes files/images part of the sentence.
@@ -60,6 +62,10 @@ Completed 2026-08-29:
   an insert action, contextual row/column/delete controls and an overflow-safe
   editable table surface in the Settings lab. The lazy lab chunk is now 196.6 KB
   gzip, up 15.1 KB from the pre-table build.
+- Added a Hydra-owned controlled `RichComposer` React adapter. Its public value
+  is Markdown and its event surface does not expose ProseMirror state, while an
+  optional editor handle supports host formatting controls. The Settings lab
+  now consumes this adapter instead of constructing Tiptap directly.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -346,7 +352,8 @@ token seeds its language. Code blocks:
 - Unwrap when empty and Backspace is pressed at its start.
 - Offer "Attach as file" for a paste over the large-paste threshold.
 
-A language picker can follow after the first composer release.
+The language picker is built in the Settings lab. Production code-block polish
+still needs syntax highlighting, indentation and explicit exit/unwrap handling.
 
 ## Links and later extensions
 
@@ -360,7 +367,8 @@ to readable Markdown for agents that know nothing about structured references.
 
 A `/` menu may offer Text, Heading, List, Task list, Quote, Code block and Attach
 file, but only at the start of an empty block. Defer URL cards, remote embeds,
-tables, math, collaboration and comments inside the composer.
+math, collaboration and comments inside the composer. Tables are included in
+the initial schema and lab, with production/mobile interaction still to prove.
 
 ## Clipboard contract
 
@@ -582,8 +590,9 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
    clipboard tests pass in real Chromium. Tiptap passed the go/no-go gate.
 3. **Reusable core - IN PROGRESS.** Hydra-owned editor factory, shared extension
    registry, Markdown parser/serializer, marks, links, conservative input rules
-   and unit/browser tests are built. The React adapter, static view and narrow
-   public value/command types will land with the first production consumer.
+   and unit/browser tests are built. The controlled React adapter and narrow
+   Markdown value/event API are built. Static view and production commands
+   remain.
 4. **Attachment node/adapter - DONE.** The atomic safe-metadata node and external
    fake-tested upload registry prove cancellation on undo, restart on redo and
    path-free Markdown/JSON. React chip rendering and production upload wiring
@@ -632,7 +641,7 @@ message backend protocol.
 - A rich-document backend chat protocol.
 - Collaborative editing or multiplayer cursors.
 - Tiptap Cloud, Platform, Pro extensions, Pro UI or templates.
-- Tables, arbitrary HTML, colours, fonts, alignment or office fidelity.
+- Math, arbitrary HTML, colours, fonts, alignment or office fidelity.
 - Replacing source/config/shell editors with contenteditable.
 - Publishing a general package before two Hydra integrations prove the boundary.
 - Byte-identical Markdown after a rich edit.

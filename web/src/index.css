@@ -52,6 +52,13 @@
 .rich-text-surface {
   color: var(--color-gray-800);
 }
+.rich-text-surface.ProseMirror[data-placeholder] > p:only-child:has(> br.ProseMirror-trailingBreak)::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--color-stone-400);
+}
 
 .dark .rich-text-surface {
   color: var(--color-gray-100);
