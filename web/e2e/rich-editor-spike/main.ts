@@ -1,5 +1,5 @@
 import { TextSelection } from '@tiptap/pm/state'
-import { createInlineCodeSpike } from '../../src/lib/rich-editor/spikeEditor'
+import { createRichEditor } from '../../src/lib/rich-editor/core'
 
 const host = document.querySelector('#editor')
 if (!host) throw new Error('Missing editor host')
@@ -16,7 +16,15 @@ const initial = {
   }],
 }
 
-const editor = createInlineCodeSpike({ element: host, content: initial })
+const editor = createRichEditor({
+  element: host,
+  content: initial,
+  attributes: {
+    'aria-label': 'Rich editor behavior fixture',
+    'data-rich-editor-spike': '',
+    spellcheck: 'false',
+  },
+})
 
 const api = {
   reset(content: Record<string, unknown>) {

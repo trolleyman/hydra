@@ -29,6 +29,13 @@ Completed 2026-08-29:
 - Measured the isolated spike at 293.0 KB minified / 89.4 KB gzip. It is currently
   test-only and unreferenced by the app, so the production bundle delta is zero.
   Re-measure after the reusable core is imported and prefer a lazy composer chunk.
+- Added the reusable schema and Markdown boundary on Tiptap's beta Markdown
+  package, pinned at 3.30.5. Unit coverage now round-trips headings, lists,
+  blockquotes, fenced code, links and prose marks, including safe variable-length
+  inline-code delimiters. The browser fixture runs against this complete schema.
+- Replaced Tiptap's underscore italic input rule with Hydra's star-only rule.
+  Incoming `_italic_` remains valid Markdown, but typing identifiers and paths
+  cannot unexpectedly turn underscores into formatting.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -542,9 +549,10 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
 2. **Inline-code spike - DONE.** Paragraphs, text and `code_span` only. The
    six-position model, selection, deletion, undo, composition, pointer and
    clipboard tests pass in real Chromium. Tiptap passed the go/no-go gate.
-3. **Reusable core.** Hydra-owned API/value types, Markdown parser/serializer,
-   editable/static view registry, commands, marks, links, input rules and unit
-   tests. No composer integration.
+3. **Reusable core - IN PROGRESS.** Hydra-owned editor factory, shared extension
+   registry, Markdown parser/serializer, marks, links, conservative input rules
+   and unit/browser tests are built. The React adapter, static view and narrow
+   public value/command types will land with the first production consumer.
 4. **Attachment node/adapter.** Fake asynchronous uploader first; prove that
    reconciliation skips history and undo can cancel/restart correctly.
 5. **Block subset.** Headings 1-3, lists/tasks, blockquotes and code blocks.

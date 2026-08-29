@@ -212,3 +212,23 @@ test('typing over a cross-node selection produces one valid text run', async ({ 
   await page.keyboard.type('X')
   expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('aXb')), from: 3 })
 })
+
+test('star typing formats italic while underscore typing stays literal', async ({ page }) => {
+  await reset(page, paragraph())
+  await select(page, 1)
+  await page.keyboard.type('*safe* ')
+  expect(await snapshot(page)).toMatchObject({
+    doc: paragraph(
+      { type: 'text', marks: [{ type: 'italic' }], text: 'safe' },
+      text(' '),
+    ),
+  })
+
+  await page.keyboard.type('_LAYOUT_')
+  expect(await snapshot(page)).toMatchObject({
+    doc: paragraph(
+      { type: 'text', marks: [{ type: 'italic' }], text: 'safe' },
+      text(' _LAYOUT_'),
+    ),
+  })
+})

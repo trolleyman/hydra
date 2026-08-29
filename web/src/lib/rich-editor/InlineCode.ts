@@ -26,7 +26,32 @@ export const InlineCode = Node.create({
   renderHTML() {
     return ['code', { 'data-inline-code': '' }, 0]
   },
+
+  markdownTokenName: 'codespan',
+
+  parseMarkdown(token) {
+    return {
+      type: INLINE_CODE_NAME,
+      content: token.text ? [{ type: 'text', text: token.text }] : [],
+    }
+  },
+
+  renderMarkdown(node) {
+    return serializeInlineCode(node.content?.map((child) => child.text ?? '').join('') ?? '')
+  },
 })
+
+// CommonMark code spans use a delimiter longer than any backtick run in the
+// payload. Padding protects leading/trailing backticks and spaces while parsing
+// back to the exact inline-code text.
+export function serializeInlineCode(value: string): string {
+  const longestRun = Math.max(0, ...[...value.matchAll(/`+/g)].map((match) => match[0].length))
+  const delimiter = '`'.repeat(longestRun + 1)
+  const needsPadding = value.startsWith('`') || value.endsWith('`')
+    || (value.startsWith(' ') && value.endsWith(' ') && value.trim() !== '')
+  const body = needsPadding ? ` ${value} ` : value
+  return `${delimiter}${body}${delimiter}`
+}
 
 function inlineCodeDepth(state: EditorState): number {
   return inlineCodeDepthAt(state.selection.$from)
