@@ -808,9 +808,22 @@ body {
   animation: chat-sheet-up 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Menus, dropdowns and small portalled cards share one restrained entrance so
+   they feel attached to their trigger instead of appearing a frame at a time.
+   Keep this transform small: these surfaces are controls, not dialogs. */
+@keyframes popover-in {
+  from { opacity: 0; transform: scale(0.975); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.animate-popover-in {
+  transform-origin: var(--popover-origin, center);
+  animation: popover-in 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-chat-item-in,
   .animate-chat-sheet-up,
+  .animate-popover-in,
   .work-spark,
   .work-spark-spoke,
   .repo-file-in { animation: none; }

@@ -1814,12 +1814,13 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
         />
       </button>
       <Expandable open={open}>
-        {/* Fixed w-64 (the card's OPEN width): Expandable measures scrollHeight
+        {/* Fixed open width minus the card's two 1px borders: Expandable measures scrollHeight
             the moment it opens, while the card is still gliding out from its
             narrow chip width - without a fixed inner width the text wraps into
             a huge column, the height animates to that, then snaps back down
-            once the width lands. */}
-        <div className="w-64 max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
+            once the width lands. Matching the content box also keeps the
+            vertical scroller from acquiring a 2px horizontal overflow. */}
+        <div className="w-[calc(16rem-2px)] max-h-72 overflow-y-auto px-2.5 pb-2 space-y-1 text-xs">
           {completed.length > 0 && (
             <>
               <button
@@ -11118,7 +11119,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   {modelMenuOpen && (
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setModelMenuOpen(false)} />
-                      <div className="absolute bottom-full right-0 mb-1 z-20 w-36 rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1">
+                      <div className="absolute bottom-full right-0 mb-1 z-20 w-36 rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#30302e] shadow-lg py-1 animate-popover-in [--popover-origin:bottom_right]">
                         {(agentType === 'codex' ? CODEX_MODELS : CLAUDE_MODELS).map((m) => (
                           <button
                             key={m.id}

@@ -562,7 +562,7 @@ export const ProjectDropdown = memo(function ProjectDropdown({
         <div
           ref={menuRef}
           style={{ left: coords.left, top: coords.top, bottom: coords.bottom }}
-          className="fixed w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] max-h-[70vh] overflow-y-auto"
+          className="fixed w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] max-h-[70vh] overflow-y-auto animate-popover-in"
         >
           {projects.length > 0 && (
             <div
