@@ -4,7 +4,7 @@ import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
-import type { AgentResponse, RepositoryBranch } from '../api'
+import { FocusedFilesystemMode, type AgentResponse, type RepositoryBranch } from '../api'
 import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, ProviderIcon } from './ReviewControls'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
@@ -850,6 +850,7 @@ export function AgentDetail({
   const [generatingTitle, setGeneratingTitle] = useState(false)
   const [savingBase, setSavingBase] = useState(false)
   const [savingChatMode, setSavingChatMode] = useState(false)
+  const [savingFocusedPermissions, setSavingFocusedPermissions] = useState(false)
   // Seeded from the shared cache so a revisit renders a populated dropdown with
   // no network wait at all; null only on a cold first load of the project.
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(
@@ -1954,6 +1955,24 @@ export function AgentDetail({
   // the View-MR button, still first.
   const mrFirst = true
 
+  const updateFocusedPermissions = async (patch: { filesystem_mode?: FocusedFilesystemMode; allow_commits?: boolean }) => {
+    if (!projectId || savingFocusedPermissions) return
+    setSavingFocusedPermissions(true)
+    try {
+      const res = await runWithToast(
+        () => api.default.updateAgent(projectId, agent.id, patch),
+        { errorPrefix: 'Failed to update focused permissions' },
+      )
+      if (res.ok) {
+        updateAgentInStore(res.value)
+        onRefresh?.()
+        if (patch.filesystem_mode) setRestartSignal((n) => n + 1)
+      }
+    } finally {
+      setSavingFocusedPermissions(false)
+    }
+  }
+
   // The agent's slice of the global top bar (portalled into __root's slot,
   // after the project selector + "/"): a status dot, the name (clicking it
   // renames inline) and the adaptive action toolbar. The status pill and test
@@ -1977,7 +1996,7 @@ export function AgentDetail({
           onGenerate: generateTitle,
         }}
         actions={[
-          ...(mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
+          ...(agent.focused ? [] : mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
           { label: 'Restart', icon: <RotateCcw className="w-4 h-4" />, onClick: handleRestart, variant: 'segment', disabled: merging || killing || restarting },
@@ -2002,7 +2021,56 @@ export function AgentDetail({
       )}
       {/* Portals into the global top bar - renders nothing in place. */}
       {agentTopBar}
-      {isWide ? (
+      {agent.focused ? (
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+          <div className="shrink-0 min-h-12 px-3 sm:px-4 py-2.5 flex items-center gap-3 border-b border-gray-200 dark:border-gray-700">
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium text-gray-800 dark:text-gray-100" title={agent.project_path}>
+                {agent.project_path}
+              </div>
+            </div>
+            <div className="shrink-0 flex items-center rounded-md border border-gray-300 dark:border-gray-600 overflow-hidden">
+              <button
+                type="button"
+                disabled={savingFocusedPermissions}
+                onClick={() => void updateFocusedPermissions({ filesystem_mode: FocusedFilesystemMode.FocusedFilesystemEdit })}
+                className={`h-8 px-3 ${agent.filesystem_mode === FocusedFilesystemMode.FocusedFilesystemEdit ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300'}`}
+              >
+                <span className="optical-center">Edit</span>
+              </button>
+              <button
+                type="button"
+                disabled={savingFocusedPermissions}
+                onClick={() => void updateFocusedPermissions({ filesystem_mode: FocusedFilesystemMode.FocusedFilesystemReadonly })}
+                className={`h-8 px-3 border-l border-gray-300 dark:border-gray-600 ${agent.filesystem_mode === FocusedFilesystemMode.FocusedFilesystemReadonly ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300'}`}
+              >
+                <span className="optical-center">Read-only</span>
+              </button>
+            </div>
+            <label className="shrink-0 h-8 px-3 flex items-center gap-2 rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={agent.allow_commits === true}
+                disabled={savingFocusedPermissions}
+                onChange={(event) => void updateFocusedPermissions({ allow_commits: event.target.checked })}
+              />
+              <span className="optical-center">Allow commits</span>
+            </label>
+          </div>
+          <div className="flex-1 min-h-0 overflow-hidden px-3 sm:px-4 py-4">
+            <AgentTerminal
+              agentId={agent.id}
+              agentType={agent.agent_type}
+              projectId={projectId}
+              isEphemeral={agent.ephemeral}
+              chatMode
+              fill
+              reconnectSignal={restartSignal}
+              onRefresh={onRefresh}
+            />
+          </div>
+        </div>
+      ) : isWide ? (
         // ── Two-pane split ──────────────────────────────────────────────────
         // Left: a pane toolbar (metadata + hide-chat toggle) then collapsible
         // prompt + terminal/chat filling the height. Right: the inspector pane

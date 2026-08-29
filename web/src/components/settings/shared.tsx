@@ -4,6 +4,8 @@ import { readLocal, writeLocal } from '../../lib/storage'
 import { TopBarPortal } from '../TopBarPortal'
 import { Tooltip } from '../Tooltip'
 import { CollapseSlide } from '../CollapseSlide'
+import { InfoTooltip } from '../InfoTooltip'
+import { AutoRunMode } from '../../api'
 
 export type SettingsSection = 'all' | 'claude' | 'gemini' | 'copilot' | 'codex' | 'defaults'
 
@@ -180,5 +182,40 @@ export function EnabledToggle({ enabled, onChange }: { enabled: boolean; onChang
         {enabled ? 'Enabled' : 'Disabled'}
       </span>
     </label>
+  )
+}
+
+// Tests and artifacts share the same cache scheduling policy. Keep its labels,
+// values and explanation in one control so the two editors cannot drift.
+export function AutomaticRunsSelect({
+  value,
+  kind,
+  onChange,
+}: {
+  value?: AutoRunMode
+  kind: 'tests' | 'artifacts'
+  onChange: (value: AutoRunMode | undefined) => void
+}) {
+  const item = kind === 'tests' ? 'run' : 'generation'
+  const cached = kind === 'tests' ? 'verdicts' : 'artifacts'
+  return (
+    <div className="space-y-1">
+      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
+        Automatic runs
+        <InfoTooltip title="Automatic runs">
+          <p><strong>Always</strong> starts a missing {item} when viewed. <strong>When agent settles</strong> waits while the agent is actively working. <strong>Never</strong> only runs when you use Refresh.</p>
+          <p className="mt-1.5">Cached {cached} are still shown in every mode, and Refresh always runs immediately.</p>
+        </InfoTooltip>
+      </label>
+      <select
+        value={value ?? AutoRunMode.AutoRunAlways}
+        onChange={(e) => onChange(e.target.value === AutoRunMode.AutoRunAlways ? undefined : e.target.value as AutoRunMode)}
+        className="h-[38px] text-sm px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+      >
+        <option value={AutoRunMode.AutoRunAlways}>Always</option>
+        <option value={AutoRunMode.AutoRunSettled}>When agent settles</option>
+        <option value={AutoRunMode.AutoRunNever}>Never</option>
+      </select>
+    </div>
   )
 }

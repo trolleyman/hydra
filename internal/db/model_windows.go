@@ -42,6 +42,9 @@ type Agent struct {
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	// Mutable; a change takes effect on the next session (re)launch.
 	ChatMode bool `gorm:"default:false"`
+	// Focused direct-directory permissions. See model_unix.go for details.
+	FilesystemMode string
+	AllowCommits   bool `gorm:"default:false"`
 
 	// Session - updated by the liveness reconciler
 	SessionPID    int    // PID of the running sandbox session, 0 if not running

@@ -1,20 +1,24 @@
 package http
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/trolleyman/hydra/internal/config"
+)
 
 func TestShouldAutoRun(t *testing.T) {
 	tests := []struct {
 		name    string
-		mode    string
+		mode    config.AutoRunMode
 		running bool
 		want    bool
 	}{
 		{name: "default while running", running: true, want: true},
-		{name: "always while running", mode: "always", running: true, want: true},
-		{name: "settled while running", mode: "settled", running: true, want: false},
-		{name: "settled after run", mode: "settled", want: true},
-		{name: "never while running", mode: "never", running: true, want: false},
-		{name: "never after run", mode: "never", want: false},
+		{name: "always while running", mode: config.AutoRunAlways, running: true, want: true},
+		{name: "settled while running", mode: config.AutoRunSettled, running: true, want: false},
+		{name: "settled after run", mode: config.AutoRunSettled, want: true},
+		{name: "never while running", mode: config.AutoRunNever, running: true, want: false},
+		{name: "never after run", mode: config.AutoRunNever, want: false},
 		{name: "unknown is safe default", mode: "typo", running: true, want: true},
 	}
 	for _, tt := range tests {

@@ -120,6 +120,12 @@ func TestAgentMessagingRequiresPolicyAndIsAttributed(t *testing.T) {
 			t.Errorf("delivered content missing %q: %s", want, written)
 		}
 	}
+	if err := os.WriteFile(cfgPath, []byte("[claude.policy]\nagent_messaging = false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := s.handleAgentRequest(context.Background(), root, "source", req); res.OK || !strings.Contains(res.Message, "disabled") {
+		t.Fatalf("message after runtime disable = %+v", res)
+	}
 }
 
 func TestCollaborationChainsAndPairRateAreBounded(t *testing.T) {

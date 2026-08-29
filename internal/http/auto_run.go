@@ -2,16 +2,17 @@ package http
 
 import (
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/heads"
 )
 
 // shouldAutoRun applies the per-runner automatic-run policy. Unknown values use
 // the historical behavior so a typo cannot silently turn CI off.
-func shouldAutoRun(mode string, agentRunning bool) bool {
+func shouldAutoRun(mode config.AutoRunMode, agentRunning bool) bool {
 	switch mode {
-	case "never":
+	case config.AutoRunNever:
 		return false
-	case "settled":
+	case config.AutoRunSettled:
 		return !agentRunning
 	default:
 		return true

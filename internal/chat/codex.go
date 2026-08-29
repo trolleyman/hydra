@@ -462,6 +462,11 @@ func codexCommandDescription(command string) string {
 	}
 	first, _, _ := strings.Cut(script, "\n")
 	first = strings.TrimSpace(first)
+	// Shell expansion can consume the wrapper's closing quote (notably when a
+	// script ends in `$?`) while leaving its opening quote in Codex's recorded
+	// command. The first script line remains unambiguous, so tolerate that one
+	// unmatched wrapper quote when extracting its description.
+	first = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(first, `"`), `'`))
 	if !strings.HasPrefix(first, "#") || strings.HasPrefix(first, "#!") {
 		return ""
 	}

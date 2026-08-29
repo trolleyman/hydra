@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AdoptMRRequest } from './AdoptMRRequest';
+import type { FocusedFilesystemMode } from './FocusedFilesystemMode';
 export type SpawnAgentRequest = {
     /**
      * The prompt to give to the agent
@@ -33,6 +34,15 @@ export type SpawnAgentRequest = {
      * Drive the head via its structured protocol and render a chat view instead of a terminal (Claude and Codex only; rejected for other agent types). The prompt is delivered as the first chat turn.
      */
     chat_mode?: boolean;
+    /**
+     * Run directly in the registered project's real root instead of creating a Hydra branch and linked worktree. Focused heads require structured chat mode and remain branchless for their whole life.
+     */
+    focused?: boolean;
+    filesystem_mode?: FocusedFilesystemMode;
+    /**
+     * Initially authorize Hydra's guarded commit operation for a focused head. Ignored for ordinary worktree heads.
+     */
+    allow_commits?: boolean;
     /**
      * If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
      */

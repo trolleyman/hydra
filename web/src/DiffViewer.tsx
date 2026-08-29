@@ -83,6 +83,7 @@ import { renderCommentSource } from './lib/mentionHighlight'
 import { Markdown } from './lib/MarkdownRenderer'
 import { useCopyFlash } from './lib/useCopyFlash'
 import { CopyStateIcon } from './components/CopyStateIcon'
+import { mergeBaseInstruction } from './lib/mergeBaseInstruction'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -3134,13 +3135,13 @@ function MergeConflictButton({ diff, agent, projectId }: {
   const handleFixWithAgent = useCallback(async () => {
     setSending(true)
     const res = await runWithToast(
-      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: `Fix the merge conflicts by merging the local ${baseBranch} branch into this one (do not git fetch first), resolving the conflicts that arise.` }),
+      () => api.default.sendAgentInput(projectId ?? '', agent.id, { text: mergeBaseInstruction(agent, true) }),
       { errorPrefix: 'Failed to send fix request to agent' },
     )
     setSending(false)
     // Keep the panel open on failure so the user can retry; the toast explains why.
     if (res.ok) setOpen(false)
-  }, [projectId, agent.id, baseBranch])
+  }, [projectId, agent])
 
   // Escape closes the panel; Enter confirms (Fix with agent), mirroring the
   // footer buttons. The keyboard path bypasses the button's disabled attribute,
@@ -3349,7 +3350,7 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
       onSecondary: async () => {
         await runWithToast(
           () => api.default.sendAgentInput(projectId ?? '', agent.id, {
-            text: `Update this branch from its base by merging the local \`${baseBranch}\` branch in (do not git fetch first), resolving any conflicts that arise.`,
+            text: mergeBaseInstruction(agent, false),
             origin: 'fix_conflicts',
           }),
           { errorPrefix: 'Failed to send update request to agent' },

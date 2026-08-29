@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react'
 import { api } from '../stores/apiClient'
-import type { AgentResponse, SpawnAgentRequest, RepositoryBranch } from '../api'
+import { FocusedFilesystemMode, type AgentResponse, type SpawnAgentRequest, type RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
 import { SettingsPopover, SettingsGroupLabel, SettingsSelect } from './SettingsPopover'
 import { formatError } from '../api/format_error'
@@ -238,6 +238,12 @@ export const SpawnForm = memo(function SpawnForm({
   // show a chat view instead of a terminal. Remembered like the agent/model;
   // defaults ON when the user has never touched the toggle (only 'false' opts out).
   const [chatMode, setChatMode] = useState(readDefaultChatMode)
+  // Focused sessions run directly in the project checkout instead of creating a
+  // branch and worktree. Native desktop shells use the same spawn contract, and
+  // full Hydra exposes it here so both surfaces create identical heads.
+  const [focused, setFocused] = useState(false)
+  const [focusedFilesystemMode, setFocusedFilesystemMode] = useState(FocusedFilesystemMode.FocusedFilesystemEdit)
+  const [focusedAllowCommits, setFocusedAllowCommits] = useState(false)
   // Per-head git-isolation override ('' = use the project's policy default, so the
   // request omits git_isolation). See docs/git-isolation.md. Not persisted: a locked
   // .git is a deliberate per-spawn choice, defaulted to the project policy.
@@ -820,12 +826,17 @@ export const SpawnForm = memo(function SpawnForm({
         // Structured chat is available for Claude and Codex; send the choice
         // explicitly so turning the toggle off wins over the server-side
         // default-on, and a remembered value never leaks into another agent type.
-        ...(agentType === 'claude' || agentType === 'codex' ? { chat_mode: chatMode } : {}),
+        ...(agentType === 'claude' || agentType === 'codex' ? { chat_mode: focused || chatMode } : {}),
+        ...(focused ? {
+          focused: true,
+          filesystem_mode: focusedFilesystemMode,
+          allow_commits: focusedAllowCommits,
+        } : {}),
         // Adopting a PR takes precedence over (and ignores) the base branch: the
         // server bases the head on the PR head and its target branch.
-        ...(adopt ? { adopt_mr: { id: adopt.id } } : baseBranch ? { base_branch: baseBranch } : {}),
+        ...(!focused && (adopt ? { adopt_mr: { id: adopt.id } } : baseBranch ? { base_branch: baseBranch } : {})),
         // Omit git_isolation when '' so the server applies the project policy default.
-        ...(gitIsolation ? { git_isolation: gitIsolation } : {}),
+        ...(!focused && gitIsolation ? { git_isolation: gitIsolation } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
         rows: geom.rows,
       }
@@ -909,6 +920,9 @@ export const SpawnForm = memo(function SpawnForm({
     setBaseBranch(defaultBranch)
     setChatMode(true)
     setGitIsolation('')
+    setFocused(false)
+    setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemEdit)
+    setFocusedAllowCommits(false)
   }
 
   // Both spawn layouts collapse the per-spawn options into a single settings cog,
@@ -918,10 +932,11 @@ export const SpawnForm = memo(function SpawnForm({
   // head, so the cog always renders.
   function renderSpawnSettings() {
     const showChat = agentType === 'claude' || agentType === 'codex'
-    const adoptControl = renderAdoptControl()
+    const canFocus = showChat
+    const adoptControl = focused ? null : renderAdoptControl()
     // While adopting a PR the base branch is the PR's target, chosen server-side,
     // so the base-branch section is suppressed (mirrors renderAdoptControl).
-    const showBranch = !!branches && branches.length > 0 && !isBuiltinProject && !adopt
+    const showBranch = !!branches && branches.length > 0 && !isBuiltinProject && !adopt && !focused
     // What is set to something other than its default, in the popover's own
     // order. Everything in here is invisible once the panel closes, so the cog
     // wears the "on" look and this list becomes its tooltip - a spawn that
@@ -930,12 +945,14 @@ export const SpawnForm = memo(function SpawnForm({
     // the one remembered pick with no representation outside this panel (the
     // agent and model both show on the picker trigger beside it).
     const nonDefaults: string[] = []
+    if (focused) nonDefaults.push(`Workspace: focused (${focusedFilesystemMode})`)
+    if (focused && focusedAllowCommits) nonDefaults.push('Commits: allowed')
     if (adopt) nonDefaults.push(`Pull request: #${adopt.id}`)
     if (showBranch && baseBranch && defaultBranch && baseBranch !== defaultBranch) {
       nonDefaults.push(`Base branch: ${baseBranch}`)
     }
-    if (showChat && !chatMode) nonDefaults.push('Run mode: terminal')
-    if (gitIsolation) {
+    if (showChat && !focused && !chatMode) nonDefaults.push('Run mode: terminal')
+    if (!focused && gitIsolation) {
       nonDefaults.push(`Git isolation: ${GIT_ISOLATION_OPTS.find((o) => o.id === gitIsolation)?.label ?? gitIsolation}`)
     }
     // A two-option segmented control: a chat-mode head opens the web chat view,
@@ -961,6 +978,41 @@ export const SpawnForm = memo(function SpawnForm({
         onReset={nonDefaults.length > 0 ? resetSpawnOptions : undefined}
         resetLabel="Reset spawn options to their defaults"
       >
+        {canFocus && (
+          <>
+            <SettingsGroupLabel className="mb-1.5">Workspace</SettingsGroupLabel>
+            <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
+              <button type="button" aria-pressed={!focused} onClick={() => setFocused(false)} className={modeSegment(!focused)}>
+                branch
+              </button>
+              <button type="button" aria-pressed={focused} onClick={() => { setFocused(true); setChatMode(true); setAdopt(null) }} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(focused)}`}>
+                focused
+              </button>
+            </div>
+            {focused && (
+              <div className="mt-2 space-y-2">
+                <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
+                  <button type="button" aria-pressed={focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit} onClick={() => setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemEdit)} className={modeSegment(focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit)}>
+                    edit
+                  </button>
+                  <button type="button" aria-pressed={focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly} onClick={() => setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemReadonly)} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly)}`}>
+                    read-only
+                  </button>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={focusedAllowCommits}
+                    onChange={(e) => setFocusedAllowCommits(e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600"
+                  />
+                  Allow guarded commits
+                </label>
+              </div>
+            )}
+            <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
+          </>
+        )}
         {adoptControl && (
           <>
             <SettingsGroupLabel className="mb-1.5">Pull request</SettingsGroupLabel>
@@ -983,8 +1035,8 @@ export const SpawnForm = memo(function SpawnForm({
             <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
           </>
         )}
-        {showChat && <SettingsGroupLabel className="mb-1.5">Run mode</SettingsGroupLabel>}
-        {showChat && (
+        {showChat && !focused && <SettingsGroupLabel className="mb-1.5">Run mode</SettingsGroupLabel>}
+        {showChat && !focused && (
           <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
             <button type="button" aria-pressed={!chatMode} onClick={() => setChatMode(false)} className={modeSegment(!chatMode)}>
               <SquareTerminal className="w-3.5 h-3.5" />
@@ -996,7 +1048,7 @@ export const SpawnForm = memo(function SpawnForm({
             </button>
           </div>
         )}
-        {showChat && (
+        {showChat && !focused && (
           <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
         )}
         {/* Git isolation (per-head override; Default inherits the project policy,
@@ -1004,8 +1056,8 @@ export const SpawnForm = memo(function SpawnForm({
             popover, as a dropdown: its options carry two-line explanations that
             crowded out the other controls when listed inline. See
             docs/git-isolation.md. */}
-        <SettingsGroupLabel className="mb-1.5">Git isolation</SettingsGroupLabel>
-        <SettingsSelect
+        {!focused && <SettingsGroupLabel className="mb-1.5">Git isolation</SettingsGroupLabel>}
+        {!focused && <SettingsSelect
           label="Git isolation"
           value={gitIsolation}
           onChange={setGitIsolation}
@@ -1016,7 +1068,7 @@ export const SpawnForm = memo(function SpawnForm({
             const disabled = o.id === 'readonly' && !GIT_TOOL_AGENTS.includes(agentType)
             return { ...o, disabled, desc: disabled ? `Not available for ${agentType} (no git tools).` : o.desc }
           })}
-        />
+        />}
       </SettingsPopover>
     )
   }

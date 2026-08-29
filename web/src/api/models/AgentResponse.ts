@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AgentStatusInfo } from './AgentStatusInfo';
+import type { FocusedFilesystemMode } from './FocusedFilesystemMode';
 import type { ReviewLink } from './ReviewLink';
 import type { TestSummary } from './TestSummary';
 export type AgentResponse = {
@@ -21,6 +22,15 @@ export type AgentResponse = {
     model?: string;
     branch_name?: string | null;
     worktree_path?: string | null;
+    /**
+     * True for a branchless head that runs directly in project_path. Derived from branch_name being null; persisted without a separate kind field.
+     */
+    focused?: boolean;
+    filesystem_mode?: FocusedFilesystemMode;
+    /**
+     * Whether a focused head may request Hydra's guarded commit operation. Independent of filesystem_mode; false for ordinary heads.
+     */
+    allow_commits?: boolean;
     project_path: string;
     /**
      * PID of the running sandbox session, or 0 if not running

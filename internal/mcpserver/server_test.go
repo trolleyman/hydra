@@ -296,7 +296,7 @@ func TestAgentCollaborationTools(t *testing.T) {
 	}
 }
 
-func TestAgentMessagingHiddenWithoutOptInDep(t *testing.T) {
+func TestAgentMessagingHiddenWithoutBackingDep(t *testing.T) {
 	deps := Deps{ListAgents: func() (string, bool) { return "", true }, GetAgent: func(string) (string, bool) { return "", true }}
 	resps := runLines(t, deps, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 	for _, tl := range resps[0]["result"].(map[string]any)["tools"].([]any) {

@@ -210,7 +210,8 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// *shared* terminal, but every session here has its own dedicated PTY whose
 	// master is read only by the daemon, so there is nothing to escape to.
 
-	// Writable: the worktree is always writable; then config-driven paths.
+	// Writable: the working directory is normally writable; focused read-only
+	// sessions bind it read-only instead. Then apply config-driven paths.
 	addRWDir := func(p string) {
 		if p == "" {
 			return
@@ -219,9 +220,6 @@ func BuildSpec(opts Options) (*Spec, error) {
 			args = append(args, "--bind", p, p)
 		}
 	}
-	addRWDir(opts.WorktreePath)
-	// The worktree's git metadata lives in the main repo's common dir. How much of
-	// it is writable depends on the head's git-isolation mode (see docs/git-isolation.md).
 	addROPath := func(p string) {
 		if p == "" {
 			return
@@ -230,6 +228,13 @@ func BuildSpec(opts Options) (*Spec, error) {
 			args = append(args, "--ro-bind", p, p)
 		}
 	}
+	if opts.WorkingDirReadOnly {
+		addROPath(opts.WorktreePath)
+	} else {
+		addRWDir(opts.WorktreePath)
+	}
+	// The worktree's git metadata lives in the main repo's common dir. How much of
+	// it is writable depends on the head's git-isolation mode (see docs/git-isolation.md).
 	switch opts.GitIsolation {
 	case GitIsolationReadonly:
 		// Whole common dir read-only: the agent cannot write .git at all (no commit,
