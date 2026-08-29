@@ -5,6 +5,10 @@ the July 2026 audit of the Windows stubs and the proposed design for a Windows
 port. Companion to [macos-support.md](macos-support.md) - several work items are
 shared and are called out as such. Update the checklists as pieces land.
 
+Packaging that native runtime as a standalone Windows desktop application, with
+full Hydra and focused chat windows, is covered by
+[windows-desktop-chat.md](windows-desktop-chat.md).
+
 ## Background
 
 Hydra sandboxes heads with bubblewrap on Linux and Seatbelt on macOS. Windows

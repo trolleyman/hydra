@@ -127,9 +127,7 @@ func (s *Server) PublishAgent(ctx context.Context, request api.PublishAgentReque
 		ov.Description = b.Description
 		ov.Draft = b.Draft
 	}
-	force := request.Params.Force != nil && *request.Params.Force
-
-	updated, fail := s.publishHead(ctx, projectRoot, *head, ov, force)
+	updated, fail := s.publishHead(ctx, projectRoot, *head, ov)
 	if fail != nil {
 		if fail.badReq {
 			return api.PublishAgent400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: fail.detail}, nil
@@ -144,10 +142,11 @@ func (s *Server) PublishAgent(ctx context.Context, request api.PublishAgentReque
 }
 
 // publishHead is the shared publish core used by the HTTP handler and the
-// publish-when-green watcher: claim (publishing), local test gate (force
-// bypasses), host-side refspec push, forge.EnsureMR, store the link, refresh
-// cached state. Returns the updated head on success, else a *publishFailure.
-func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads.Head, ov publishOverrides, force bool) (*heads.Head, *publishFailure) {
+// publish-when-green watcher: claim (publishing), host-side refspec push,
+// forge.EnsureMR, store the link, refresh cached state. Returns the updated head
+// on success, else a *publishFailure. The watcher applies its test gate before
+// calling this function; a manual publish creates the review immediately.
+func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads.Head, ov publishOverrides) (*heads.Head, *publishFailure) {
 	// An adopted head is already linked to a PR Hydra did not create; opening a
 	// new MR for it would duplicate (or no-op). Push to MR is the way to send
 	// commits (docs/pr-adoption.md).
@@ -208,18 +207,6 @@ func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads
 	release := func(errMsg *string) {
 		if s.DB != nil {
 			_ = s.DB.ClearHeadStatus(head.ID, errMsg)
-		}
-	}
-
-	if !force && review.IsRequireLocalTests() {
-		if code, failing, blocked := s.testGateVerdict(projectRoot, head); blocked {
-			errMsg := "publish blocked: the head's tests are not passing (pass force=true to override)"
-			release(&errMsg)
-			f := &publishFailure{errType: code, detail: errMsg}
-			if code == api.MergeConflictErrorErrorTestsFailing {
-				f.failing = &failing
-			}
-			return nil, f
 		}
 	}
 

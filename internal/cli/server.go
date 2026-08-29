@@ -84,6 +84,12 @@ func runServer(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
+	cleanupDesktopReady, err := publishDesktopReady(tcpLn.Addr())
+	if err != nil {
+		_ = tcpLn.Close()
+		return errtrace.Wrap(err)
+	}
+	defer cleanupDesktopReady()
 	attachSelfUpdate(rt, tcpLn)
 	webURL := webURLForAddr(tcpLn.Addr())
 	if err := daemon.WriteWebURL(projectRoot, webURL); err != nil {

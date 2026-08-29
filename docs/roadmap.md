@@ -308,14 +308,18 @@ before starting. Grouped by area.
   non-nil `Worktree` as evidence that the checkout can be read or operated on.
   The shared branchless lifecycle, permission API, guarded commit path, full-Hydra
   spawn option, and chat-only React layout are built. This is the common base for
-  macOS, Windows, and Linux app branches; native webview shells, service
-  ownership, notifications, packaging, the first-message draft flow, and the
-  dedicated chrome-free route remain.
-  See [macos-desktop-chat.md](macos-desktop-chat.md) for the agreed behavior and
-  macOS implementation plan, and [linux-desktop.md](linux-desktop.md) for the
-  standalone Linux packaging, lifecycle, and distribution plan. macOS depends
-  on closing the security-critical gaps in
-  [macos-support.md](macos-support.md).
+  macOS, Windows, and Linux app branches. Initial native shells now exist for
+  AppKit/WKWebView, Windows Forms/WebView2, and GTK/WebKitGTK. The macOS and
+  Windows shells include shared-server launch handshakes and multi-window
+  foundations; the Linux shell includes user-global daemon discovery and
+  launch. All still need their respective native validation, notifications,
+  release packaging, first-message draft flow, and dedicated chrome-free route.
+  See [macos-desktop-chat.md](macos-desktop-chat.md),
+  [windows-desktop-chat.md](windows-desktop-chat.md), and
+  [linux-desktop.md](linux-desktop.md) for the platform sequences. Each app also
+  depends on closing its security-critical platform gaps in
+  [macos-support.md](macos-support.md) or [windows-support.md](windows-support.md),
+  or validating the packaged Linux sandbox described by the Linux plan.
 
 - [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
 

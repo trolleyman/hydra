@@ -309,13 +309,34 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			}
 			continue
 		}
-		info := readStatusJSON(projectRoot, a.ID)
+		// A pending request is the authoritative approval state. In particular,
+		// Codex can finish a concurrent PreToolUse status hook after the proxy has
+		// parked its connection, overwriting policy_approval with running while the
+		// request is still waiting. Derive the wait from the request so the UI always
+		// receives an agents_changed signal and can render its decision card.
+		approvalInfo := pendingApprovalStatus(projectRoot, a.ID)
+		var info *api.AgentStatusInfo
+		info = approvalInfo
+		if info == nil {
+			if statusFile := readStatusJSON(projectRoot, a.ID); statusFile != nil {
+				info = &statusFile.AgentStatusInfo
+			}
+		}
 		if info == nil || info.Timestamp == "" {
 			continue
 		}
 		agentStatus := mapAgentStatus(info.Status)
 		if agentStatus == "" {
 			continue
+		}
+
+		// Approval request timestamps can precede the provider hook write they
+		// supersede. A newly pending approval must win even then; give the DB edge a
+		// fresh timestamp so the transition is persisted. The approver's restore
+		// writes another fresh timestamp after resolution.
+		if approvalInfo != nil && (a.AgentStatus == nil || *a.AgentStatus != "needs_input") &&
+			!statusTimeAfter(info.Timestamp, a.AgentStatusTime) {
+			info.Timestamp = time.Now().Format(time.RFC3339Nano)
 		}
 
 		if statusTimeAfter(info.Timestamp, a.AgentStatusTime) {
