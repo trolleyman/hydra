@@ -2926,6 +2926,9 @@ type RepositoryBranchesResponse struct {
 
 	// Current The repository's currently checked-out branch (HEAD), or "" when detached
 	Current string `json:"current"`
+
+	// Default The repository's default base branch, independent of the currently checked-out branch
+	Default string `json:"default"`
 }
 
 // RepositoryFileResponse defines model for RepositoryFileResponse.
@@ -3627,7 +3630,7 @@ type SpawnAgentRequest struct {
 	// AllowCommits Initially authorize Hydra's guarded commit operation for a focused head. Ignored for ordinary worktree heads.
 	AllowCommits *bool `json:"allow_commits,omitempty"`
 
-	// BaseBranch Base branch to create the worktree from (defaults to current branch)
+	// BaseBranch Base branch to create the worktree from (defaults to the repository's stable default branch)
 	BaseBranch *string `json:"base_branch,omitempty"`
 
 	// ChatMode Drive the head via its structured protocol and render a chat view instead of a terminal (Claude and Codex only; rejected for other agent types). The prompt is delivered as the first chat turn.

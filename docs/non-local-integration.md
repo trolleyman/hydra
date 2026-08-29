@@ -367,8 +367,10 @@ Approving, resolving and everything else still happen on the forge.
   remote branch. It should offer "close the MR and delete the remote branch" or
   "detach - leave it open", and locally merging a head whose MR is open should
   be blocked-with-override like a failing test gate.
-- **Fetch-fresh spawn base.** `SpawnHead` still defaults to the project root's
-  current branch: no fetch-before-spawn, no `<remote>/<target>` base. This also
+- **Fetch-fresh spawn base.** The spawn UI defaults to the repository's stable
+  default branch (remote `origin/HEAD`, then `main`/`master`) rather than whichever
+  incidental branch the project checkout currently has. There is still no
+  fetch-before-spawn and no automatic `<remote>/<target>` base. This also
   caps how crisp an adopted PR's diff is.
 - **Adopting a PR into an EXISTING head.** Today adoption happens only at spawn.
   Linking a running head to a PR is mostly a matter of fetching the pseudo-ref,

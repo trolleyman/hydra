@@ -42,11 +42,12 @@ function readDesktopFocusedDraft(): boolean {
 }
 
 // The base branch to start on before the branch list has loaded, from the shared
-// cache. Same rule the real load uses (HEAD, else the first branch), so the
+// cache. The repository default is deliberately independent of HEAD: merely
+// browsing an incidental branch must not make every new head branch from it.
 // seeded pick matches what the response would have chosen and nothing jumps.
 function cachedDefaultBranch(projectId: string | null): string {
   const cached = peekBranches(projectId)
-  return cached ? cached.current || cached.branches[0]?.name || '' : ''
+  return cached ? cached.default || cached.current || cached.branches[0]?.name || '' : ''
 }
 
 // Selectable agent types with their display label. The AgentTypeOption ids line
@@ -258,8 +259,8 @@ export const SpawnForm = memo(function SpawnForm({
   const [gitIsolation, setGitIsolation] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Base branch the new agent will be created from. Defaults to the project's
-  // current branch; can be pointed at another agent's hydra/<id> branch to stack
+  // Base branch the new agent will be created from. Defaults to the repository's
+  // stable default branch; can be pointed at another agent's hydra/<id> branch to stack
   // agents on top of one another. `branches` is null until the list loads.
   // Seeded from the shared cache (lib/branchCache), so opening the spawn options
   // straight after a reload shows a populated Base branch picker instead of a
@@ -269,7 +270,7 @@ export const SpawnForm = memo(function SpawnForm({
     () => peekBranches(projectId)?.branches ?? null,
   )
   const [baseBranch, setBaseBranch] = useState(() => cachedDefaultBranch(projectId))
-  // The branch `baseBranch` was seeded with (the project's current branch). Kept
+  // The branch `baseBranch` was seeded with (the repository default). Kept
   // so the options cog can tell "still on the default" from "stacked on another
   // branch", and so Reset can put it back.
   const [defaultBranch, setDefaultBranch] = useState(() => cachedDefaultBranch(projectId))
@@ -355,7 +356,7 @@ export const SpawnForm = memo(function SpawnForm({
   }, [agentType, model])
 
   // Load the project's branches for the base-branch selector. `defaultSelection`
-  // also resets the chosen base to the current branch - done on the initial load
+  // also resets the chosen base to the repository default - done on the initial load
   // for a project, but NOT on the background refresh that fires when the dropdown
   // is opened (which must preserve whatever the user picked). The background
   // refresh keeps the cached list visible and just swaps in fresh branches, so a
@@ -383,11 +384,9 @@ export const SpawnForm = memo(function SpawnForm({
       const res = await fetchBranches(projectId)
       if (branchReqProjectRef.current !== projectId) return
       setBranches(res.branches)
-      // The default follows the project's current branch on every refresh (it
-      // can move under us), but the user's pick is only overwritten on the
-      // initial load for a project.
-      setDefaultBranch(res.current || res.branches[0]?.name || '')
-      if (defaultSelection) setBaseBranch(res.current || res.branches[0]?.name || '')
+      const stableDefault = res.default || res.current || res.branches[0]?.name || ''
+      setDefaultBranch(stableDefault)
+      if (defaultSelection) setBaseBranch(stableDefault)
     } catch {
       if (branchReqProjectRef.current === projectId && defaultSelection) setBranches(null)
     }

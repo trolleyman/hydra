@@ -4021,7 +4021,7 @@ components:
             change). Empty/omitted inherits the CLI's own default.
         base_branch:
           type: string
-          description: Base branch to create the worktree from (defaults to current branch)
+          description: Base branch to create the worktree from (defaults to the repository's stable default branch)
         adopt_mr:
           $ref: '#/components/schemas/AdoptMRRequest'
         chat_mode:
@@ -5108,11 +5108,14 @@ components:
 
     RepositoryBranchesResponse:
       type: object
-      required: [current, branches]
+      required: [current, default, branches]
       properties:
         current:
           type: string
           description: The repository's currently checked-out branch (HEAD), or "" when detached
+        default:
+          type: string
+          description: The repository's default base branch, independent of the currently checked-out branch
         branches:
           type: array
           items:

@@ -3964,6 +3964,7 @@ func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Requ
 func (s *SimulationServer) GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string) {
 	api.WriteJSON(w, http.StatusOK, api.RepositoryBranchesResponse{
 		Current: "main",
+		Default: "main",
 		Branches: []api.RepositoryBranch{
 			{Name: "hydra/add-line-numbers", IsAgent: true, IsCurrent: false},
 			{Name: "hydra/branch-selector", IsAgent: true, IsCurrent: false},
