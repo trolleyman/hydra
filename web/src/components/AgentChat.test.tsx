@@ -127,6 +127,11 @@ describe('Bash card summary comments', () => {
     expect(leadingBashComment('#!/usr/bin/env bash\necho ok')).toBe('')
     expect(leadingBashComment('echo ok\n# Explain the next command')).toBe('')
   })
+
+  it('handles Codex wrappers whose closing quote was consumed by shell expansion', () => {
+    const command = `/usr/bin/bash -lc "# Verify the merge\ngit status --short\nprintf '%s\\n' \\"'$?'`
+    expect(leadingBashComment(command)).toBe('Verify the merge')
+  })
 })
 
 async function connectedComposer(): Promise<HTMLTextAreaElement> {

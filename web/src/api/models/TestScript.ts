@@ -2,55 +2,16 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-/**
- * A per-project test-runner script whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN
- */
-export type TestScript = {
+import type { CachedRunPolicy } from './CachedRunPolicy';
+import type { SandboxedScriptDefinition } from './SandboxedScriptDefinition';
+export type TestScript = (SandboxedScriptDefinition & CachedRunPolicy & {
     /**
-     * Unique label, also used as the cache directory
+     * Unique label, also used as the cache directory.
      */
     name: string;
     /**
-     * Shell script run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
-     */
-    script: string;
-    /**
-     * How results are read - "junit" (default; parse *.xml*.json report files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse `::hydra:test:*::` markers streamed live from stdout; the accumulated cases are the report, no file needed).
+     * Result input format - junit (default) or stdout marker streaming.
      */
     type?: string | null;
-    /**
-     * Max seconds the command may run (0 = built-in default)
-     */
-    timeout_sec?: number;
-    /**
-     * Run on the host with NO sandbox - runs the diffed ref's test code; only for trusted refs (default false)
-     */
-    unsafe_host?: boolean;
-    /**
-     * Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
-     */
-    clean_ignored?: boolean;
-    /**
-     * When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
-     */
-    auto_run?: TestScript.auto_run;
-    /**
-     * Run the command under `set -eo pipefail` (absent/null or true = strict; false = run exactly as written). The verdict still comes from the parsed report, not the exit code.
-     */
-    strict?: boolean | null;
-    /**
-     * Whether the test gate runs this command (absent/null or true = enabled; false = skipped)
-     */
-    enabled?: boolean | null;
-};
-export namespace TestScript {
-    /**
-     * When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
-     */
-    export enum auto_run {
-        ALWAYS = 'always',
-        SETTLED = 'settled',
-        NEVER = 'never',
-    }
-}
+});
 

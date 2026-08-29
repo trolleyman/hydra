@@ -5769,73 +5769,78 @@ components:
           type: string
           description: Where it was found - "user" (~/.claude.json) or "project" (.mcp.json).
 
-    ArtifactScript:
+    ScriptDefinition:
       type: object
-      required: [name, script]
-      description: A per-project script that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
+      required: [script]
+      description: Fields shared by every configured command script.
       properties:
-        name:
-          type: string
-          description: Unique label, also used as the cache directory
         script:
           type: string
-          description: Shell script run via `bash -c` in the checkout directory. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
+          description: Shell script run via `bash -c`. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
+        strict:
+          type: boolean
+          nullable: true
+          description: Run under `set -eo pipefail` so a failing step propagates (absent/null or true = strict; false = run exactly as written).
+        enabled:
+          type: boolean
+          nullable: true
+          description: Whether this configured script is active (absent/null or true = enabled; false = skipped).
+
+    SandboxedScriptDefinition:
+      allOf:
+        - $ref: '#/components/schemas/ScriptDefinition'
+        - type: object
+          properties:
+            unsafe_host:
+              type: boolean
+              description: Run on the host with NO sandbox - full access to the machine and credentials (default false).
+
+    AutoRunMode:
+      type: string
+      enum: [always, settled, never]
+      x-enum-varnames: [AutoRunAlways, AutoRunSettled, AutoRunNever]
+      description: When missing cached work starts automatically.
+
+    CachedRunPolicy:
+      type: object
+      description: Execution and cache policy shared by tests and diff artifacts.
+      properties:
         timeout_sec:
           type: integer
-          description: Max seconds the command may run (0 = built-in default)
-        unsafe_host:
-          type: boolean
-          description: Run on the host with NO sandbox - full access to the machine and credentials (default false)
+          description: Max seconds the command may run (0 = built-in default).
         clean_ignored:
           type: boolean
-          description: Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
+          description: Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower, but prevents stale ignored output leaking between runs.
         auto_run:
-          type: string
-          enum: [always, settled, never]
-          description: When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
-        strict:
-          type: boolean
-          nullable: true
-          description: Run the command under `set -eo pipefail` so a failing step aborts and propagates instead of being swallowed into a success (absent/null or true = strict; false = run exactly as written)
-        enabled:
-          type: boolean
-          nullable: true
-          description: Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
+          $ref: '#/components/schemas/AutoRunMode'
+
+    ArtifactScript:
+      allOf:
+        - $ref: '#/components/schemas/SandboxedScriptDefinition'
+        - $ref: '#/components/schemas/CachedRunPolicy'
+        - type: object
+          required: [name]
+          description: A per-project script that renders visual artifacts of a checkout, shown side-by-side in the diff viewer.
+          properties:
+            name:
+              type: string
+              description: Unique label, also used as the cache directory.
     PreviewScript:
-      type: object
-      required: [name, script]
-      description: >-
-        A per-project script that boots a live, clickable preview of the app at a
-        checkout ([previews.<name>] in config.toml). Hydra proxies a dedicated port
-        to it, spawning it when its link is opened and tearing it down when idle.
-      properties:
-        name:
-          type: string
-          description: Unique label, shown in the agent page's Previews row
-        script:
-          type: string
-          description: >-
-            Shell script run via `bash -c` in the checkout directory. It must start
-            a server listening on $HYDRA_PREVIEW_ADDR and stay in the foreground.
-        unsafe_host:
-          type: boolean
-          description: Run on the host with NO sandbox - full access to the machine and credentials (default false)
-        strict:
-          type: boolean
-          nullable: true
-          description: Run the command under `set -eo pipefail` so a failing build step aborts the spawn instead of serving a half-built tree (absent/null or true = strict)
-        enabled:
-          type: boolean
-          nullable: true
-          description: Whether the preview is offered on the agent page (absent/null or true = enabled; false = hidden)
-        idle_timeout_sec:
-          type: integer
-          description: >-
-            Teardown after this long with zero in-flight proxied requests; open
-            WebSocket/long-poll connections count as in-flight (0 = default 300).
-        ready_timeout_sec:
-          type: integer
-          description: Max seconds from spawn to ready, builds included (0 = default 900)
+      allOf:
+        - $ref: '#/components/schemas/SandboxedScriptDefinition'
+        - type: object
+          required: [name]
+          description: A per-project script that boots a proxied live preview server for a checkout.
+          properties:
+            name:
+              type: string
+              description: Unique label, shown in the agent page's Previews row.
+            idle_timeout_sec:
+              type: integer
+              description: Teardown after this long with zero in-flight requests (0 = default 300).
+            ready_timeout_sec:
+              type: integer
+              description: Max seconds from spawn to ready, builds included (0 = default 900).
 
     PreviewState:
       type: string
@@ -5897,72 +5902,38 @@ components:
           description: One entry per configured server script, for the requested version
 
     ServiceScript:
-      type: object
-      required: [name, script]
-      description: A per-project long-running script the daemon supervises while the project is registered ([services.<name>] in config.toml)
-      properties:
-        name:
-          type: string
-          description: Unique label, shown in the UI and logs
-        script:
-          type: string
-          description: Shell script run via `bash -c` from the project root. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
-        host:
-          type: boolean
-          description: Run on the host with NO sandbox - needed for host devices the sandbox hides, e.g. /dev/kvm (default false)
-        max_restarts:
-          type: integer
-          nullable: true
-          description: Relaunch cap after an unexpected exit (null = default 3; 0 = never restart)
-        strict:
-          type: boolean
-          nullable: true
-          description: Run the command under `set -eo pipefail` so a failed startup step surfaces as a crash instead of a healthy process (absent/null or true = strict; false = run exactly as written)
-        enabled:
-          type: boolean
-          nullable: true
-          description: Whether the daemon supervises this service (absent/null or true = enabled; false = skipped)
+      allOf:
+        - $ref: '#/components/schemas/ScriptDefinition'
+        - type: object
+          required: [name]
+          description: A per-project long-running script supervised while the project is active.
+          properties:
+            name:
+              type: string
+              description: Unique label, shown in the UI and logs.
+            host:
+              type: boolean
+              description: Run on the host with NO sandbox - needed for host devices such as /dev/kvm (default false).
+            max_restarts:
+              type: integer
+              nullable: true
+              description: Relaunch cap after an unexpected exit (null = default 3; 0 = never restart).
 
     TestScript:
-      type: object
-      required: [name, script]
-      description: A per-project test-runner script whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN #68)
-      properties:
-        name:
-          type: string
-          description: Unique label, also used as the cache directory
-        script:
-          type: string
-          description: Shell script run via `bash -c` in the checkout directory; writes a JUnit-XML or Hydra-JSON report into $HYDRA_TEST_OUTPUT. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
-        type:
-          type: string
-          nullable: true
-          description: >-
-            How results are read - "junit" (default; parse *.xml/*.json report
-            files from $HYDRA_TEST_OUTPUT after exit) or "stdout" (parse
-            `::hydra:test:*::` markers streamed live from stdout; the
-            accumulated cases are the report, no file needed).
-        timeout_sec:
-          type: integer
-          description: Max seconds the command may run (0 = built-in default)
-        unsafe_host:
-          type: boolean
-          description: Run on the host with NO sandbox - runs the diffed ref's test code; only for trusted refs (default false)
-        clean_ignored:
-          type: boolean
-          description: Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
-        auto_run:
-          type: string
-          enum: [always, settled, never]
-          description: When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
-        strict:
-          type: boolean
-          nullable: true
-          description: Run the command under `set -eo pipefail` (absent/null or true = strict; false = run exactly as written). The verdict still comes from the parsed report, not the exit code.
-        enabled:
-          type: boolean
-          nullable: true
-          description: Whether the test gate runs this command (absent/null or true = enabled; false = skipped)
+      allOf:
+        - $ref: '#/components/schemas/SandboxedScriptDefinition'
+        - $ref: '#/components/schemas/CachedRunPolicy'
+        - type: object
+          required: [name]
+          description: A per-project test runner whose pass/fail verdict gates merge.
+          properties:
+            name:
+              type: string
+              description: Unique label, also used as the cache directory.
+            type:
+              type: string
+              nullable: true
+              description: Result input format - junit (default) or stdout marker streaming.
 
     TestStatus:
       type: string

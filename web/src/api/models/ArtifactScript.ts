@@ -2,51 +2,12 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-/**
- * A per-project script that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
- */
-export type ArtifactScript = {
+import type { CachedRunPolicy } from './CachedRunPolicy';
+import type { SandboxedScriptDefinition } from './SandboxedScriptDefinition';
+export type ArtifactScript = (SandboxedScriptDefinition & CachedRunPolicy & {
     /**
-     * Unique label, also used as the cache directory
+     * Unique label, also used as the cache directory.
      */
     name: string;
-    /**
-     * Shell script run via `bash -c` in the checkout directory. Written as `script` in config.toml; the older `command` key still parses and is migrated on save.
-     */
-    script: string;
-    /**
-     * Max seconds the command may run (0 = built-in default)
-     */
-    timeout_sec?: number;
-    /**
-     * Run on the host with NO sandbox - full access to the machine and credentials (default false)
-     */
-    unsafe_host?: boolean;
-    /**
-     * Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
-     */
-    clean_ignored?: boolean;
-    /**
-     * When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
-     */
-    auto_run?: ArtifactScript.auto_run;
-    /**
-     * Run the command under `set -eo pipefail` so a failing step aborts and propagates instead of being swallowed into a success (absent/null or true = strict; false = run exactly as written)
-     */
-    strict?: boolean | null;
-    /**
-     * Whether the diff viewer runs this script (absent/null or true = enabled; false = skipped)
-     */
-    enabled?: boolean | null;
-};
-export namespace ArtifactScript {
-    /**
-     * When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
-     */
-    export enum auto_run {
-        ALWAYS = 'always',
-        SETTLED = 'settled',
-        NEVER = 'never',
-    }
-}
+});
 
