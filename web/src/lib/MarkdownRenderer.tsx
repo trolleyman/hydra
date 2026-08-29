@@ -18,6 +18,7 @@ import { IMAGE_REFLOW_MS, markSelfReflow } from './selfReflow'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 import { ansiToHtml, ansiToText, hasAnsi } from './ansi'
 import { renderCommentMentions } from './mentionHighlight'
+import { getFileIcon } from './fileIcons'
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
 // rendered-markdown surface (chat messages, the AgentView prompt, README file
@@ -89,13 +90,46 @@ function encodePath(p: string): string {
   return p.split('/').map(encodeURIComponent).join('/')
 }
 
-const LINK_CLASS = 'text-blue-600 dark:text-blue-400 hover:underline'
+// Links should be discoverable without turning every filename in an agent's
+// explanation into a bright-blue interruption. The underline arrives on hover
+// and keyboard focus, while the resting colour stays inside the prose palette.
+const LINK_CLASS = 'text-stone-700 dark:text-stone-200 decoration-stone-400/70 underline-offset-2 hover:underline focus-visible:underline'
+
+// FileLink keeps the author's exact Markdown label in the prose, then uses the
+// tooltip for the richer file treatment shared with repository surfaces: a
+// Lucide file-kind icon, a lowlit directory and an emphasized filename.
+function FileLink({ href, path, onClick, children }: {
+  href: string
+  path: string
+  onClick: (e: React.MouseEvent<HTMLAnchorElement>) => void
+  children?: ReactNode
+}) {
+  const filename = path.split('/').pop() || path
+  const directory = path.slice(0, Math.max(0, path.length - filename.length))
+  const { Icon } = getFileIcon(filename)
+  return (
+    <Tooltip
+      width={480}
+      content={(
+        <span className="inline-flex items-center gap-1.5 font-mono">
+          <Icon className="w-3.5 h-3.5 shrink-0 opacity-60" aria-hidden="true" />
+          <span>
+            {directory && <span className="opacity-55">{directory}</span>}
+            <span>{filename}</span>
+          </span>
+        </span>
+      )}
+    >
+      <a className={LINK_CLASS} href={href} onClick={onClick}>{children}</a>
+    </Tooltip>
+  )
+}
 
 // RepoLink renders a README link. External links and in-page anchors are plain
 // anchors (external open in a new tab); a relative repo link is resolved against
 // the current file and, on a plain left-click, navigates the repository view in
 // app - while its real href lets middle/ctrl-click open it in a new tab.
-function RepoLink({ href, ctx, children }: { href?: string; ctx: RepoLinkContext; children?: ReactNode }) {
+function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ctx: RepoLinkContext; children?: ReactNode; fileChip?: boolean }) {
   const navigate = useNavigate()
   if (!href) return <a className={LINK_CLASS}>{children}</a>
   if (href.startsWith('#')) return <a className={LINK_CLASS} href={href}>{children}</a>
@@ -127,6 +161,9 @@ function RepoLink({ href, ctx, children }: { href?: string; ctx: RepoLinkContext
       params: { projectId: ctx.projectId, _splat: splat },
       hash: lineHash ? lineHash.slice(1) : undefined,
     })
+  }
+  if (fileChip && resolved) {
+    return <FileLink href={url} path={resolved} onClick={onClick}>{children}</FileLink>
   }
   return <a className={LINK_CLASS} href={url} onClick={onClick}>{children}</a>
 }
@@ -516,7 +553,7 @@ function mentionChildren(children: ReactNode, enabled: boolean): ReactNode {
   return children
 }
 
-function buildComponents(s: Style, linkCtx?: RepoLinkContext, highlightMentions = false): Components {
+function buildComponents(s: Style, variant: Variant, linkCtx?: RepoLinkContext, highlightMentions = false): Components {
   const prose = (children: ReactNode) => mentionChildren(children, highlightMentions)
   return {
     h1: ({ children }) => <h1 className={s.h1}>{prose(children)}</h1>,
@@ -538,7 +575,7 @@ function buildComponents(s: Style, linkCtx?: RepoLinkContext, highlightMentions 
     del: ({ children }) => <del className="line-through opacity-80">{prose(children)}</del>,
     a: ({ href, children }) =>
       linkCtx ? (
-        <RepoLink href={href} ctx={linkCtx}>{children}</RepoLink>
+        <RepoLink href={href} ctx={linkCtx} fileChip={variant === 'chat'}>{children}</RepoLink>
       ) : (
         <a className={LINK_CLASS} href={href} target="_blank" rel="noreferrer">{children}</a>
       ),
@@ -586,7 +623,7 @@ export interface MarkdownProps {
 // re-parses every rendered message on each keystroke, which is visibly laggy.
 export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className, hardBreaks, highlightMentions = false }: MarkdownProps): ReactNode {
   const components = useMemo(
-    () => buildComponents(STYLES[variant], linkCtx, highlightMentions),
+    () => buildComponents(STYLES[variant], variant, linkCtx, highlightMentions),
     [variant, linkCtx, highlightMentions],
   )
   // data-md-root marks the subtree as rendered markdown: copying a selection

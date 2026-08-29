@@ -6533,7 +6533,7 @@ function StepGroup({
         </span>
       )}
       {!shown && failed > 0 && (
-        <span className="shrink-0 text-red-500/80 dark:text-red-400/80">· {failed} failed</span>
+        <span className="shrink-0 text-red-500/60 dark:text-red-400/60">· {failed} failed</span>
       )}
       {/* What the group is doing right now, in the ToolCard's own words and
           colour so a folded step reads like the card it replaces.

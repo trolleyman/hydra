@@ -4851,6 +4851,8 @@ var simAskPlanMarkdown = strings.Join([]string{
 	"",
 	"### Where the layering goes",
 	"",
+	"The change starts in [load.go](internal/config/load.go).",
+	"",
 	"`Load` is the only entry point that reads config today, and every caller passes a project root. That makes it the right seam: it grows an `env` argument, reads the base file exactly as it does now, and then hands the parsed map to a new `applyEnvOverlay` before anything validates it.",
 	"",
 	"The overlay file is *optional*. A missing `config.<env>.toml` is not an error - it means the environment adds nothing, and the base config stands on its own. Only a malformed one fails the load.",
