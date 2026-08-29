@@ -185,6 +185,98 @@ describe('review composer status', () => {
   })
 })
 
+describe('question answer status', () => {
+  beforeAll(() => {
+    vi.stubGlobal('WebSocket', RecordingWebSocket)
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    sockets.length = 0
+    localStorage.clear()
+    useAgentStore.setState({ agents: [], optimistic: {} })
+  })
+
+  it('switches the agent to running as soon as a native question is answered', async () => {
+    const agentId = `agent-${++agentSeq}`
+    const onStatusUpdate = vi.fn()
+    useAgentStore.setState({
+      agents: [{ id: agentId, agent_status: { status: AgentStatus.NEEDS_INPUT } } as AgentResponse],
+    })
+    render(
+      <ChatPane
+        agentId={agentId}
+        projectId="proj"
+        active
+        reconnectAttempt={0}
+        onStatusUpdate={onStatusUpdate}
+        onDiffRefresh={vi.fn()}
+        onSelectCommit={vi.fn()}
+      />,
+    )
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => {
+      ws.emit({ type: 'replay_done' })
+      ws.emit({
+        type: 'chat_event',
+        event: {
+          seq: 1,
+          type: 'tool_started',
+          timestamp: '',
+          payload: {
+            id: 'toolu_question',
+            name: 'AskUserQuestion',
+            input: {
+              questions: [{
+                question: 'Which approach?',
+                multiSelect: false,
+                options: [{ label: 'First' }, { label: 'Second' }],
+              }],
+            },
+          },
+        },
+      })
+      ws.emit({
+        type: 'chat_event',
+        event: {
+          seq: 2,
+          type: 'interaction_requested',
+          timestamp: '',
+          payload: {
+            provider: 'claude',
+            request_id: 'request_question',
+            interaction: {
+              subtype: 'can_use_tool',
+              tool_use_id: 'toolu_question',
+              tool_name: 'AskUserQuestion',
+              input: {
+                questions: [{
+                  question: 'Which approach?',
+                  multiSelect: false,
+                  options: [{ label: 'First' }, { label: 'Second' }],
+                }],
+              },
+            },
+          },
+        },
+      })
+    })
+
+    fireEvent.click(await screen.findByText('First'))
+    const submit = screen.getByRole('button', { name: 'Submit' })
+    await waitFor(() => expect(submit).not.toBeDisabled())
+    fireEvent.click(submit)
+
+    expect(useAgentStore.getState().agents[0].agent_status?.status).toBe(AgentStatus.RUNNING)
+    expect(onStatusUpdate).toHaveBeenCalledWith(AgentStatus.RUNNING)
+  })
+})
+
 describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
   beforeAll(() => {
     vi.stubGlobal('WebSocket', FakeWebSocket)

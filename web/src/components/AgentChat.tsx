@@ -10024,6 +10024,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         },
       }),
     )
+    // The control response resumes the blocked turn just like a new user message
+    // starts one. Paint that transition immediately instead of leaving the head
+    // on needs_input until the daemon's next status event arrives.
+    if (!review) useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
+    onStatusUpdateRef.current?.(AgentStatus.RUNNING)
     return true
   }
 
