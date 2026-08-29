@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"net"
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/config"
@@ -50,5 +51,30 @@ func TestResolveWebAddrDefaultsToLocalhost(t *testing.T) {
 	}
 	if addr != defaultWebAddr {
 		t.Errorf("addr = %q, want localhost:26600", addr)
+	}
+}
+
+func TestWebURLForAddr(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		addr string
+		want string
+	}{
+		{addr: "127.0.0.1:26600", want: "http://127.0.0.1:26600"},
+		{addr: "[::1]:26600", want: "http://[::1]:26600"},
+		{addr: "0.0.0.0:26600", want: "http://127.0.0.1:26600"},
+		{addr: "[::]:26600", want: "http://127.0.0.1:26600"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.addr, func(t *testing.T) {
+			t.Parallel()
+			addr, err := net.ResolveTCPAddr("tcp", tt.addr)
+			if err != nil {
+				t.Fatalf("ResolveTCPAddr: %v", err)
+			}
+			if got := webURLForAddr(addr); got != tt.want {
+				t.Fatalf("webURLForAddr(%q) = %q, want %q", tt.addr, got, tt.want)
+			}
+		})
 	}
 }

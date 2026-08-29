@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/daemon"
 	httppkg "github.com/trolleyman/hydra/internal/http"
 	"github.com/trolleyman/hydra/internal/paths"
 )
@@ -84,7 +85,11 @@ func runServer(_ *cobra.Command, _ []string) error {
 		return errtrace.Wrap(err)
 	}
 	attachSelfUpdate(rt, tcpLn)
-	log.Printf("Server starting on http://%s", addr)
+	webURL := webURLForAddr(tcpLn.Addr())
+	if err := daemon.WriteWebURL(projectRoot, webURL); err != nil {
+		log.Printf("warn: publish server web UI address: %v", err)
+	}
+	log.Printf("Server starting on %s", webURL)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(tcpLn) }()
@@ -107,6 +112,20 @@ func runServer(_ *cobra.Command, _ []string) error {
 		}
 		return errtrace.Wrap(err)
 	}
+}
+
+// webURLForAddr turns a bound TCP address into the URL a local desktop client
+// should use. A wildcard listener is reachable through loopback, but 0.0.0.0
+// and [::] are not useful or safe destinations to publish.
+func webURLForAddr(addr net.Addr) string {
+	host, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return "http://" + addr.String()
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 // defaultWebAddr is the web UI/API bind address when HYDRA_API_ADDR is unset.

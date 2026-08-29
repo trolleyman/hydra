@@ -1,6 +1,9 @@
 package desktop
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestLocalServerURL(t *testing.T) {
 	t.Parallel()
@@ -30,5 +33,26 @@ func TestLocalServerURL(t *testing.T) {
 				t.Fatalf("localServerURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestResolveServerExplicitURL(t *testing.T) {
+	t.Parallel()
+	got, err := ResolveServer(context.Background(), "http://127.0.0.1:49152", "")
+	if err != nil {
+		t.Fatalf("ResolveServer: %v", err)
+	}
+	if want := "http://127.0.0.1:49152"; got != want {
+		t.Fatalf("ResolveServer = %q, want %q", got, want)
+	}
+}
+
+func TestResolveServerRequiresOneSource(t *testing.T) {
+	t.Parallel()
+	if _, err := ResolveServer(context.Background(), "", ""); err == nil {
+		t.Fatal("ResolveServer accepted no source")
+	}
+	if _, err := ResolveServer(context.Background(), "http://localhost:49152", t.TempDir()); err == nil {
+		t.Fatal("ResolveServer accepted both URL and project")
 	}
 }

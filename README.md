@@ -86,17 +86,16 @@ Run the server:
 mage run
 ```
 
-Build the experimental Linux desktop shell separately, then point it at a
-running local Hydra server:
+Build the experimental Linux desktop shell separately, then open a registered
+project. It reuses that project's running daemon or starts the bundled backend:
 
 ```bash
 go build -tags hydra_desktop -o hydra-desktop ./cmd/hydra-desktop
-./hydra-desktop -url http://127.0.0.1:49152
+./hydra-desktop -project /path/to/project
 ```
 
 The separate build keeps the normal `hydra` CLI free of GTK/WebKit runtime
-dependencies. Backend discovery and app-managed startup are not implemented in
-this first shell spike, so the server URL is explicit.
+dependencies. `-url http://127.0.0.1:<port>` remains available for development.
 
 Install it as a systemd --user service, so it comes up on login and survives
 your terminal closing:

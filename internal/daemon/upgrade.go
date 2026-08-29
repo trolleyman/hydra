@@ -35,6 +35,9 @@ func binaryStamp() (string, error) {
 // (it puts INVOCATION_ID in every service's environment). Older single-line info
 // files still parse, since only the first line is ever compared.
 func WriteDaemonFiles(projectRoot string) error {
+	// A previous process may have crashed without cleaning up its listener
+	// record. Do not expose that stale address while this daemon starts.
+	removeWebURL(projectRoot)
 	pp, err := pidPath(projectRoot)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -95,6 +98,7 @@ func RemoveDaemonFiles(projectRoot string) {
 	if ip, err := infoPath(projectRoot); err == nil {
 		_ = os.Remove(ip)
 	}
+	removeWebURL(projectRoot)
 }
 
 // isStale reports whether the running daemon was started from a now-replaced

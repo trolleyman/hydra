@@ -2,11 +2,18 @@
 package desktop
 
 import (
-	"braces.dev/errtrace"
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
+	"time"
+
+	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/daemon"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 // Run opens a native Hydra window connected to rawURL.
@@ -16,6 +23,54 @@ func Run(rawURL string) error {
 		return errtrace.Wrap(err)
 	}
 	return errtrace.Wrap(run(appURL.String()))
+}
+
+// ResolveServer returns the explicitly supplied loopback URL, or ensures the
+// daemon for projectRoot is running and reads the web listener it published.
+// Exactly one input must be supplied.
+func ResolveServer(ctx context.Context, rawURL, projectRoot string) (string, error) {
+	if rawURL != "" && projectRoot != "" {
+		return "", errtrace.Wrap(fmt.Errorf("url and project cannot be used together"))
+	}
+	if rawURL != "" {
+		appURL, err := localServerURL(rawURL)
+		if err != nil {
+			return "", errtrace.Wrap(err)
+		}
+		return appURL.String(), nil
+	}
+	if projectRoot == "" {
+		return "", errtrace.Wrap(fmt.Errorf("url or project is required"))
+	}
+
+	normalized, err := paths.NormalizePath(projectRoot)
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("resolve project root: %w", err))
+	}
+	if err := daemon.EnsureRunning(ctx, normalized); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+
+	// The control socket becomes ready just before the daemon publishes its TCP
+	// listener. Cover that small startup race without guessing the listener.
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if webURL, err := daemon.ReadWebURL(normalized); err == nil {
+			appURL, validateErr := localServerURL(webURL)
+			if validateErr != nil {
+				return "", errtrace.Wrap(fmt.Errorf("daemon published an unsafe web URL: %w", validateErr))
+			}
+			return appURL.String(), nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", errtrace.Wrap(fmt.Errorf("read daemon web listener: %w", err))
+		}
+		select {
+		case <-ctx.Done():
+			return "", errtrace.Wrap(fmt.Errorf("wait for daemon web listener: %w", ctx.Err()))
+		case <-ticker.C:
+		}
+	}
 }
 
 func localServerURL(rawURL string) (*url.URL, error) {

@@ -337,8 +337,10 @@ and browser without competing backend or database ownership.
 
 Status: a separately-tagged GTK 4/WebKitGTK 6 executable opens an explicit
 loopback Hydra URL without adding desktop runtime dependencies to the normal
-CLI. Backend discovery, ownership, authentication bootstrap, multi-window
-behavior, and the full shell comparison remain.
+CLI. It can also start or reuse the existing project daemon and reads the
+daemon's atomically published web listener instead of assuming a port. Protocol
+negotiation, authentication bootstrap, multi-window behavior, and the full shell
+comparison remain.
 
 ### Phase 2: add desktop window routes and lifecycle
 
