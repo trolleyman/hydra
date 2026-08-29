@@ -532,7 +532,12 @@ export function unwrapBashLoginCommand(command: string): string {
 // comment. Only a standalone first-line comment qualifies: shebangs and
 // comments later in the script are part of the command.
 export function leadingBashComment(command: string): string {
-  const firstLine = unwrapBashLoginCommand(command).split(/\r?\n/, 1)[0]?.trim() ?? ''
+  // Codex's command_execution wrapper can be shell-expanded into a command
+  // whose opening quote survives while its closing quote does not (for
+  // example when the script ends in `$?`). unwrapBashLoginCommand deliberately
+  // leaves that imperfect wrapper alone, but the first script line is still
+  // unambiguous. Discard that one wrapper quote before looking for the comment.
+  const firstLine = (unwrapBashLoginCommand(command).split(/\r?\n/, 1)[0]?.trim() ?? '').replace(/^['"]/, '').trimStart()
   if (!firstLine.startsWith('#') || firstLine.startsWith('#!')) return ''
   return firstLine.slice(1).trim()
 }
