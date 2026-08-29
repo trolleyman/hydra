@@ -416,8 +416,9 @@ development `.app` builder, background-after-last-window behavior, and guarded
 Quit path are implemented. App-launched backends now publish a one-minute,
 single-use auth bootstrap credential in their private atomic readiness record;
 the first WKWebView redeems it for the shared HttpOnly cookie without exposing
-the persistent auth key. Reused-daemon auth still needs to move to the shared
-control-socket contract. The build is ad-hoc signed rather than unsigned so the
+the persistent auth key. Reused-daemon auth and stale ownership still need to
+move to the shared, versioned control-socket and PID-bound endpoint contract now
+used by Linux. The build is ad-hoc signed rather than unsigned so the
 bundle is internally consistent. WebSocket, text-input, accessibility,
 notification, and lifecycle acceptance still require the development Mac.
 

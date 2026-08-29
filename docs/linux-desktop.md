@@ -351,7 +351,10 @@ stores. A desktop client now obtains a one-minute, single-use login credential
 over the filesystem-protected daemon socket, places it only in the URL fragment,
 and redeems it for the ordinary HttpOnly session cookie before routing starts.
 TCP clients cannot mint credentials and redemption consumes them. Multi-window
-behavior, stale-state recovery validation, and the full shell comparison remain.
+behavior and the full shell comparison remain. The daemon's web endpoint is now
+a versioned JSON ownership record tied to the authoritative live daemon PID;
+stale records are ignored during startup, unsafe/non-loopback addresses and
+unknown record protocols are rejected, and shutdown removes the record.
 
 ### Phase 2: add desktop window routes and lifecycle
 

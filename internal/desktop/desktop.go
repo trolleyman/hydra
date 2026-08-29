@@ -79,7 +79,7 @@ func ResolveServer(ctx context.Context, rawURL, projectRoot string) (string, err
 			}
 			appURL.Fragment = "desktop-bootstrap=" + url.QueryEscape(bootstrap.Token)
 			return appURL.String(), nil
-		} else if !errors.Is(err, os.ErrNotExist) {
+		} else if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, daemon.ErrStaleWebRecord) {
 			return "", errtrace.Wrap(fmt.Errorf("read daemon web listener: %w", err))
 		}
 		select {
