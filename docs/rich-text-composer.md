@@ -1,6 +1,6 @@
 # Rich-text composer: Tiptap implementation plan
 
-Status: **production integration built; release hardening in progress.**
+Status: **production integration and release hardening built.**
 The schema, Markdown boundary, inline-code behaviour, attachments, blocks,
 language picker, tables and reusable controlled React adapter are built. Active
 chat and both Spawn layouts use the structured editor for prose, while chat
@@ -116,6 +116,14 @@ Completed 2026-08-29:
 - Added `| ` at the start of an otherwise empty paragraph as a two-column table
   shortcut. It creates a header row plus one body row and places the selection
   in the first header cell; pipes elsewhere remain literal.
+- Finished release hardening. Fenced code now indents/outdents with
+  Tab/Shift+Tab, exits from its final line with ArrowDown and unwraps when empty
+  with Backspace. Focused production tables expose compact row/column/delete
+  controls with polite accessibility announcements and narrow-width scrolling.
+  The 24-case behavior fixture runs in Chromium, Firefox and WebKit (70 passing,
+  two engine-unsupported clipboard-permission checks skipped). The final lazy
+  `RichComposer` chunk is 229.48 KB minified / 75.56 KB gzip, a 0.58 KB gzip
+  increase over the pre-hardening build.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -402,9 +410,8 @@ token seeds its language. Code blocks:
 - Unwrap when empty and Backspace is pressed at its start.
 - Offer "Attach as file" for a paste over the large-paste threshold.
 
-The language picker and live syntax highlighting are built in both production
-composers and the Settings lab. Indentation and explicit exit/unwrap handling
-remain follow-up code-block polish.
+The language picker, live syntax highlighting, indentation and explicit
+exit/unwrap handling are built in production composers and the Settings lab.
 
 ## Links and later extensions
 
@@ -631,31 +638,14 @@ Use the active simulation agent page described in
 [web-agent-page.md](web-agent-page.md). Add an editor-only harness route/fixture
 for exhaustive selection cases so failures are not coupled to chat WebSockets.
 
-## Remaining work
+## Optional follow-ups
 
-The production field is usable now. The remaining first-release work is bounded
-hardening rather than another integration:
-
-1. Finish fenced-code keyboard ergonomics: Tab/Shift+Tab indentation, a
-   deliberate ArrowDown exit from the final visual line, and empty-block
-   Backspace unwrap behaviour. Cover each transition in the real-browser
-   fixture.
-2. Prove production table editing beyond insertion. Add a compact contextual
-   control for adding/removing rows and columns and deleting the table without
-   introducing a permanent formatting header. Verify keyboard traversal,
-   narrow-composer overflow and touch selection.
-3. Complete the compatibility and accessibility pass: IME in the integrated
-   composers, bidirectional text, screen-reader names/announcements, touch, and
-   Firefox/WebKit selection behaviour. Chromium remains the supported baseline
-   until this pass is complete.
-4. Re-measure the production lazy chunk, record the final bundle delta and audit
-   keyboard/pointer regressions in chat and both Spawn layouts.
-
-After that, choose follow-ups from actual use rather than expanding the first
-release. The strongest candidates are reference nodes (`@file`, `@commit`,
-`@branch`, `@agent`), a small start-of-line `/` menu, and a shared static viewer
-that can reuse more node presentation between the editor and sent bubbles. Math
-remains explicitly deferred until its Markdown boundary and renderer agree.
+The first release is complete. Choose follow-ups from actual use rather than
+expanding it speculatively. The strongest candidates are reference nodes
+(`@file`, `@commit`, `@branch`, `@agent`), a small start-of-line `/` menu, and a
+shared static viewer that can reuse more node presentation between the editor
+and sent bubbles. Math remains explicitly deferred until its Markdown boundary
+and renderer agree.
 
 Package extraction is also deferred. `RichComposer` is already a reusable
 Hydra-owned API with no ProseMirror state in its public value contract; turn it
@@ -697,9 +687,9 @@ which host hooks are genuinely general.
 8. **Spawn integration - DONE.** Compact and full-page Spawn layouts use the
    lazy adapter while the surrounding selectors retain stable callbacks and the
    existing Markdown submission contract.
-9. **Release hardening - IN PROGRESS.** Finish code-block exit/indent/unwrap,
-   production table manipulation, integrated accessibility/IME/touch checks,
-   Firefox/WebKit validation and final bundle measurement.
+9. **Release hardening - DONE.** Code-block exit/indent/unwrap, production table
+   manipulation and announcements, narrow layout, three-engine selection/IME
+   validation and final bundle measurement are complete.
 10. **Broader surfaces.** Evaluate review replies and image-pin notes separately.
 11. **Optional discovery.** Evaluate reference nodes, a start-of-line `/` menu
     and tighter static-view reuse from real production feedback.

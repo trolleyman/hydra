@@ -94,8 +94,17 @@
 .rich-text-surface .rich-code-block > select { position: absolute; top: 0.55em; right: 0.65em; z-index: 1; height: 1.65rem; border: 1px solid var(--color-gray-200); border-radius: 0.35rem; background: var(--color-white); padding: 0 1.6rem 0 0.5rem; color: var(--color-gray-600); font-family: var(--font-sans); }
 .dark .rich-text-surface .rich-code-block > select { border-color: var(--color-gray-600); background: var(--color-gray-800); color: var(--color-gray-300); }
 .rich-text-surface .rich-code-block-content { min-height: 1lh; white-space: pre-wrap; }
-.rich-text-surface .tableWrapper { margin: 0.65em 0; max-width: 100%; overflow-x: auto; border: 1px solid var(--color-gray-200); border-radius: 0.5rem; }
+.rich-text-surface .tableWrapper { position: relative; margin: 0.65em 0; max-width: 100%; overflow-x: auto; border: 1px solid var(--color-gray-200); border-radius: 0.5rem; }
 .dark .rich-text-surface .tableWrapper { border-color: var(--color-gray-700); }
+.rich-text-surface .rich-table-wrapper { padding-top: 2.35rem; }
+.rich-text-surface .rich-table-controls { position: absolute; top: 0; right: 0; left: 0; z-index: 2; display: none; min-width: max-content; align-items: center; justify-content: flex-end; gap: 0.2rem; border-bottom: 1px solid var(--color-gray-200); background: var(--color-gray-50); padding: 0.3rem; font-family: var(--font-sans); }
+.dark .rich-text-surface .rich-table-controls { border-color: var(--color-gray-700); background: var(--color-gray-800); }
+.rich-text-surface.ProseMirror-focused .rich-table-controls,
+.rich-text-surface .rich-table-wrapper:hover > .rich-table-controls { display: flex; }
+.rich-text-surface .rich-table-controls button { cursor: pointer; border-radius: 0.3rem; padding: 0.2rem 0.4rem; color: var(--color-gray-600); font-size: var(--text-2xs); line-height: 1rem; }
+.rich-text-surface .rich-table-controls button:hover, .rich-text-surface .rich-table-controls button:focus-visible { background: var(--color-gray-200); color: var(--color-gray-900); outline: none; }
+.dark .rich-text-surface .rich-table-controls button { color: var(--color-gray-300); }
+.dark .rich-text-surface .rich-table-controls button:hover, .dark .rich-text-surface .rich-table-controls button:focus-visible { background: var(--color-gray-700); color: var(--color-white); }
 .rich-text-surface table { width: 100%; min-width: 22rem; border-collapse: collapse; }
 .rich-text-surface th, .rich-text-surface td { position: relative; min-width: 6rem; border-right: 1px solid var(--color-gray-200); border-bottom: 1px solid var(--color-gray-200); padding: 0.4em 0.55em; vertical-align: top; }
 .dark .rich-text-surface th, .dark .rich-text-surface td { border-color: var(--color-gray-700); }

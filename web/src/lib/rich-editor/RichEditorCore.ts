@@ -9,6 +9,7 @@ import type { AttachmentRegistry } from './AttachmentRegistry'
 import { InlineCode, InlineCodeEditing } from './InlineCode'
 import { HighlightedCodeBlock } from './CodeBlock'
 import { TableShortcut } from './TableShortcut'
+import { InteractiveTable } from './Table'
 
 // Hydra deliberately supports *italic* as a typing convenience but not
 // _italic_. Underscores are too common in identifiers, paths and agent output.
@@ -31,8 +32,13 @@ export function createRichEditorExtensions(attachmentRegistry?: AttachmentRegist
   ConservativeItalic,
   TaskList,
   TaskItem.configure({ nested: true }),
-  TableKit.configure({ table: { resizable: false } }),
-  HighlightedCodeBlock.configure({ languagePicker: interactiveNodeViews }),
+  TableKit.configure({ table: false }),
+  InteractiveTable.configure({ resizable: false, controls: interactiveNodeViews }),
+  HighlightedCodeBlock.configure({
+    languagePicker: interactiveNodeViews,
+    enableTabIndentation: true,
+    tabSize: 2,
+  }),
   TableShortcut,
   Attachment.configure({ registry: attachmentRegistry }),
   InlineCode,
@@ -60,12 +66,13 @@ export interface RichEditorOptions {
   editable?: boolean
   attributes?: Record<string, string>
   attachmentRegistry?: AttachmentRegistry
+  interactiveNodeViews?: boolean
 }
 
 export function createRichEditor(options: RichEditorOptions = {}): Editor {
   const editor = new Editor({
     element: options.element,
-    extensions: createRichEditorExtensions(options.attachmentRegistry),
+    extensions: createRichEditorExtensions(options.attachmentRegistry, options.interactiveNodeViews),
     content: options.content ?? options.markdown ?? '',
     contentType: options.content ? 'json' : 'markdown',
     editable: options.editable ?? true,

@@ -1,5 +1,8 @@
 import { TextSelection } from '@tiptap/pm/state'
+import { createElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { createRichEditor } from '../../src/lib/rich-editor/RichEditorCore'
+import { RichComposer } from '../../src/lib/rich-editor/RichComposer'
 import '../../src/index.css'
 
 const host = document.querySelector('#editor')
@@ -62,3 +65,12 @@ declare global {
 }
 
 window.richEditorSpike = api
+
+const interactiveHost = document.querySelector('#interactive-editor')
+if (!interactiveHost) throw new Error('Missing interactive editor host')
+createRoot(interactiveHost).render(createElement(RichComposer, {
+  value: '| A | B |\n| --- | --- |\n| 1 | 2 |',
+  onChange: () => {},
+  ariaLabel: 'Interactive rich editor fixture',
+  className: 'fixture-interactive-editor',
+}))

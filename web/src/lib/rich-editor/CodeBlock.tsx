@@ -1,4 +1,4 @@
-import CodeBlock from '@tiptap/extension-code-block'
+import CodeBlock, { type CodeBlockOptions } from '@tiptap/extension-code-block'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { ReactNodeViewRenderer } from '@tiptap/react'
@@ -6,9 +6,8 @@ import type { RootContent } from 'hast'
 import { highlightTree } from '../prismHtml'
 import { CodeBlockView } from './CodeBlockView'
 
-interface HighlightedCodeBlockOptions {
+interface HighlightedCodeBlockOptions extends CodeBlockOptions {
   languagePicker: boolean
-  HTMLAttributes: Record<string, unknown>
 }
 
 function tokenDecorations(doc: Parameters<typeof DecorationSet.create>[0]): DecorationSet {
@@ -42,8 +41,7 @@ function tokenDecorations(doc: Parameters<typeof DecorationSet.create>[0]): Deco
 export const HighlightedCodeBlock = CodeBlock.extend<HighlightedCodeBlockOptions>({
   addOptions() {
     return {
-      ...this.parent?.(),
-      HTMLAttributes: this.parent?.().HTMLAttributes ?? {},
+      ...(this.parent?.() as CodeBlockOptions),
       languagePicker: false,
     }
   },

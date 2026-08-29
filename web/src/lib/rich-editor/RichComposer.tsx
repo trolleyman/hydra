@@ -1,6 +1,6 @@
 import type { Editor, JSONContent } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { createRichEditorExtensions, serializeRichMarkdown } from './RichEditorCore'
 import type { AttachmentRegistry } from './AttachmentRegistry'
 import { registerMountedEditor } from './mountedEditors'
@@ -71,6 +71,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
   // cases). Remember self-emitted values so those echoes cannot roll the live
   // document back. Values not in this bounded queue are genuinely external.
   const emittedValuesRef = useRef<string[]>([])
+  const [announcement, setAnnouncement] = useState('')
   onChangeRef.current = onChange
   onEditorRef.current = onEditor
   onKeyDownRef.current = onKeyDown
@@ -183,5 +184,23 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
     onDocumentChangeRef.current?.(editor.getJSON())
   }, [editor, value])
 
-  return <EditorContent editor={editor} />
+  useEffect(() => {
+    if (!editor) return
+    const announce = (event: Event) => {
+      const message = (event as CustomEvent<unknown>).detail
+      if (typeof message !== 'string') return
+      setAnnouncement('')
+      requestAnimationFrame(() => setAnnouncement(message))
+    }
+    const dom = editor.view.dom
+    dom.addEventListener('rich-table-announcement', announce)
+    return () => dom.removeEventListener('rich-table-announcement', announce)
+  }, [editor])
+
+  return (
+    <>
+      <EditorContent editor={editor} />
+      <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
+    </>
+  )
 })

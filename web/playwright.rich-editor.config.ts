@@ -16,9 +16,13 @@ export default defineConfig({
   use: {
     baseURL,
     headless: true,
-    launchOptions: { args: ['--no-sandbox', '--disable-dev-shm-usage'], ...proxyLaunchOptions() },
+    launchOptions: proxyLaunchOptions(),
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], launchOptions: { args: ['--no-sandbox', '--disable-dev-shm-usage'], ...proxyLaunchOptions() } } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+  ],
   webServer: {
     command: `aubx vite --config e2e/rich-editor-spike/vite.config.ts --host 127.0.0.1 --port ${port}`,
     url: baseURL,

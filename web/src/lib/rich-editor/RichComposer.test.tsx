@@ -131,4 +131,20 @@ describe('RichComposer', () => {
     await waitFor(() => expect(view.container.querySelector('.rich-code-block .token.keyword')).toHaveTextContent('const'))
     expect(ref.current!.editor!.getAttributes('codeBlock').language).toBe('typescript')
   })
+
+  it('shows accessible controls on a focused table and reshapes it', async () => {
+    const ref = createRef<RichComposerHandle>()
+    const view = render(<RichComposer ref={ref} value={'| A | B |\n| --- | --- |\n| 1 | 2 |'} onChange={() => {}} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+
+    ref.current!.editor!.commands.setTextSelection(3)
+    const toolbar = view.getByRole('toolbar', { name: 'Table controls' })
+    expect(toolbar).toBeInTheDocument()
+    fireEvent.click(view.getByRole('button', { name: 'Add row below' }))
+    expect(ref.current!.editor!.getJSON().content?.[0].content).toHaveLength(3)
+    fireEvent.click(view.getByRole('button', { name: 'Add column after' }))
+    expect(ref.current!.editor!.getJSON().content?.[0].content?.[0].content).toHaveLength(3)
+    fireEvent.click(view.getByRole('button', { name: 'Delete table' }))
+    expect(ref.current!.editor!.getJSON().content?.some((node) => node.type === 'table')).toBe(false)
+  })
 })

@@ -19,6 +19,10 @@ const code = (value = '') => value
   ? { type: 'inlineCode', content: [{ type: 'text', text: value }] }
   : { type: 'inlineCode' }
 const attachment = { type: 'attachment', attrs: { id: 'file-1', name: 'notes.txt', kind: 'text', display: 'chip' } }
+const codeBlock = (value = '') => ({
+  type: 'doc',
+  content: [{ type: 'codeBlock', attrs: { language: null }, ...(value ? { content: [text(value)] } : {}) }],
+})
 
 async function select(page: Page, from: number, to = from) {
   await page.evaluate(([start, end]) => window.richEditorSpike.select(start, end), [from, to])
@@ -56,7 +60,10 @@ test('inline code and attachments do not change the surrounding line height', as
   const withCode = await paragraphHeight()
   await reset(page, paragraph(text('before '), attachment, text(' after')))
   const withAttachment = await paragraphHeight()
-  expect({ plain, withCode, withAttachment }).toEqual({ plain: 20, withCode: 20, withAttachment: 20 })
+  // Engines round inline font metrics differently, but neither token may add a
+  // full layout pixel to the surrounding line.
+  expect(Math.abs(withCode - plain)).toBeLessThan(0.75)
+  expect(Math.abs(withAttachment - plain)).toBeLessThan(0.75)
 })
 
 test('rendered commit and file chips do not change chat line height', async ({ page }) => {
@@ -64,7 +71,8 @@ test('rendered commit and file chips do not change chat line height', async ({ p
   const heights = await page.locator('[data-token-line]').evaluateAll((lines) => Object.fromEntries(
     lines.map((line) => [line.getAttribute('data-token-line'), line.getBoundingClientRect().height]),
   ))
-  expect(heights).toEqual({ plain: 21, commit: 21, file: 21 })
+  expect(Math.abs(heights.commit - heights.plain)).toBeLessThan(0.75)
+  expect(Math.abs(heights.file - heights.plain)).toBeLessThan(0.75)
 })
 
 test('Right traverses outside, inside characters, then outside', async ({ page }) => {
@@ -114,9 +122,9 @@ test('backtick inserts, accepts text, and exits an inline code node', async ({ p
   await page.keyboard.type('`')
   expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('before '), code()), from: 9, parent: 'inlineCode' })
   const emptyCodeX = await page.locator('code[data-inline-code]').evaluate((element) => element.getBoundingClientRect().left)
-  // Chrome's text-range edge and an inline element edge differ by one device
-  // pixel, but opening the zero-width node must not reserve capsule width.
-  expect(Math.abs(emptyCodeX - beforeX)).toBeLessThanOrEqual(1.1)
+  // DOM text-range edges differ slightly by engine, but opening the zero-width
+  // node must not reserve a visible character-width capsule.
+  expect(Math.abs(emptyCodeX - beforeX)).toBeLessThan(2)
 
   await page.keyboard.type('foo')
   expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('before '), code('foo')), from: 12, parent: 'inlineCode' })
@@ -151,6 +159,36 @@ test('a code block highlights its selected language', async ({ page }) => {
   })
 })
 
+test('Tab and Shift+Tab indent code without moving browser focus', async ({ page }) => {
+  await reset(page, codeBlock('one\ntwo'))
+  await select(page, 1, 8)
+  await page.keyboard.press('Tab')
+  let state = await snapshot(page)
+  expect(state.parent).toBe('codeBlock')
+  expect((state.doc.content as Record<string, unknown>[])[0]).toEqual(codeBlock('  one\n  two').content[0])
+  await page.keyboard.press('Shift+Tab')
+  state = await snapshot(page)
+  expect(state.parent).toBe('codeBlock')
+  expect((state.doc.content as Record<string, unknown>[])[0]).toEqual(codeBlock('one\ntwo').content[0])
+})
+
+test('ArrowDown exits a final code block and empty Backspace unwraps it', async ({ page }) => {
+  await reset(page, codeBlock('value'))
+  await select(page, 6)
+  await page.keyboard.press('ArrowDown')
+  expect(await snapshot(page)).toMatchObject({
+    doc: { type: 'doc', content: [codeBlock('value').content[0], { type: 'paragraph' }] },
+    parent: 'paragraph',
+  })
+
+  await reset(page, codeBlock())
+  await select(page, 1)
+  await page.keyboard.press('Backspace')
+  const unwrapped = await snapshot(page)
+  expect(unwrapped.parent).toBe('paragraph')
+  expect((unwrapped.doc.content as Record<string, unknown>[])[0]).toEqual({ type: 'paragraph' })
+})
+
 test('pipe-space at the start of a line opens a two-column table', async ({ page }) => {
   await reset(page, paragraph())
   await select(page, 1)
@@ -164,6 +202,24 @@ test('pipe-space at the start of a line opens a two-column table', async ({ page
       { type: 'tableRow', content: [{ type: 'tableCell' }, { type: 'tableCell' }] },
     ],
   })
+})
+
+test('a focused table exposes controls, announces mutations, and scrolls narrowly', async ({ page }) => {
+  const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
+  await expect(interactive).toBeVisible()
+  await interactive.locator('th').first().click()
+  const toolbar = page.getByRole('toolbar', { name: 'Table controls' })
+  await expect(toolbar).toBeVisible()
+  await toolbar.getByRole('button', { name: 'Add row below' }).click()
+  await expect(page.getByRole('status')).toHaveText('Row added')
+  await expect(interactive.locator('tr')).toHaveCount(3)
+
+  await page.locator('#interactive-editor').evaluate((element) => { (element as HTMLElement).style.width = '240px' })
+  const geometry = await interactive.locator('.rich-table-wrapper').evaluate((element) => ({
+    client: element.clientWidth,
+    scroll: element.scrollWidth,
+  }))
+  expect(geometry.scroll).toBeGreaterThan(geometry.client)
 })
 
 test('Right exits a code capsule at the end of the paragraph', async ({ page }) => {
@@ -241,7 +297,8 @@ test('a composing backtick is left to the IME', async ({ page }) => {
   expect(await snapshot(page)).toMatchObject({ doc: paragraph(), from: 1 })
 })
 
-test('copying code contents writes literal text', async ({ page, context }) => {
+test('copying code contents writes literal text', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Playwright clipboard permissions are Chromium-only')
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await reset(page, paragraph(code('foo')))
   await select(page, 2, 5)
