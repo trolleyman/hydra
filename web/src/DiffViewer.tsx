@@ -9,6 +9,7 @@ import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewImageAnchor, ReviewThread } from './api'
+import { CommitCard, COMMIT_CARD_WIDTH, COMMIT_SHA_CHIP, commitParts } from './components/CommitCard'
 import { ReviewThreadCard, type ReviewThreadActions } from './components/ReviewThreadCard'
 import { ProviderIcon } from './components/ReviewControls'
 import { providerLabel } from './lib/forgeDisplay'
@@ -2464,19 +2465,6 @@ function diffContextBlock(path: string, hunk: DiffHunk | undefined, lineNum: num
   return `\`\`\`diff\n--- ${path}\n+++ ${path}\n${header}${rows.join('\n')}\n\`\`\`\n`
 }
 
-// ── Commit info formatting ────────────────────────────────────────────────────
-
-function formatCommitDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: 'numeric', month: 'short', day: 'numeric',
-      hour: '2-digit', minute: '2-digit',
-    })
-  } catch {
-    return iso
-  }
-}
-
 // ── Custom tooltip ────────────────────────────────────────────────────────────
 
 // Only one CustomTooltip is ever visible at a time. Showing a tooltip
@@ -2675,48 +2663,13 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
   )
 }
 
-// commitParts splits a commit message into its subject (first line) and body,
-// the way git itself treats it.
-function commitParts(message: string): { subject: string; body: string } {
-  const nl = message.indexOf('\n')
-  if (nl < 0) return { subject: message.trim(), body: '' }
-  return { subject: message.slice(0, nl).trim(), body: message.slice(nl + 1).trim() }
-}
-
-// The hover card for one commit. Only the sha stays monospace - a commit message
-// is prose, so it is rendered as markdown (bullet lists, `code`, links all show
-// up in the messages agents write) with paragraph reflow rather than a <br> per
-// source newline, since messages are hard-wrapped at ~72 columns.
 function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
-  const { subject, body } = commitParts(commit.message)
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-2xs text-gray-500 dark:text-gray-400">
-        <span className={COMMIT_SHA_CHIP}>{commit.short_sha}</span>
-        <span className="text-gray-600 dark:text-gray-300">{commit.author_name}</span>
-        <span className="text-gray-400 dark:text-gray-500">&middot;</span>
-        <span>{formatCommitDate(commit.timestamp)}</span>
-      </div>
-      {/* The subject is a plain line, not a bolded heading: it is one sentence of
-          the same prose as the body, and weighting it made the card read as a
-          document with a title rather than as a commit message. */}
-      <div className="border-t border-gray-200 pt-2 dark:border-gray-700">
-        <p className="text-sm leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>
-        {body && (
-          <Markdown
-            text={body}
-            hardBreaks={false}
-            className="mt-1.5 text-xs leading-relaxed text-gray-600 dark:text-gray-300"
-          />
-        )}
-      </div>
-    </div>
-  )
+  return <CommitCard commit={{ shortSha: commit.short_sha, message: commit.message, authorName: commit.author_name, timestamp: commit.timestamp }} />
 }
 
 // Width of the commit hover card. Wide enough for a wrapped commit body, narrow
 // enough to sit beside the 256px dropdown on a laptop screen.
-const COMMIT_TIP_WIDTH = 440
+const COMMIT_TIP_WIDTH = COMMIT_CARD_WIDTH
 
 // Width of a commit dropdown panel (the w-64 below), and the margin it keeps
 // from the window edge.
@@ -2738,9 +2691,6 @@ function menuOffset(el: HTMLElement | null): number {
 }
 
 // The short-sha chip, shared by the selector rows and the hover card header.
-const COMMIT_SHA_CHIP =
-  'font-mono text-3xs text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded shrink-0'
-
 // The label a commit selector's trigger wears: the short sha lowlit ahead of the
 // subject, the way HostName fades everything but the registrable domain. The sha
 // is the part you only reach for deliberately, so it recedes and lets the subject

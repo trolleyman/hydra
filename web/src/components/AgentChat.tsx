@@ -79,6 +79,7 @@ import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
+import { CommitCard, COMMIT_CARD_WIDTH } from './CommitCard'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
@@ -343,7 +344,7 @@ type ChatItem =
   // `seq` is the source event's log sequence - the tie-break when two commits
   // share a `ts`, so the chip list has one total order no matter what order the
   // pages that produced it arrived in.
-  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[]; mergedRef?: string }
+  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; authorName?: string; commitTimestamp?: string; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[]; mergedRef?: string }
 
 // A sub-agent (Claude Task tool) run, assembled from its sidechain events.
 // Keyed by agentId in the `subagents` map (a live line that carries only a
@@ -8549,6 +8550,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         kind: 'commit', id: st.nextId++, sha,
         shortSha: typeof payload.short_sha === 'string' ? payload.short_sha : sha.slice(0, 7),
         subject: typeof payload.subject === 'string' ? payload.subject : 'Commit',
+        authorName: typeof payload.author_name === 'string' ? payload.author_name : undefined,
+        commitTimestamp: typeof payload.timestamp === 'string' ? payload.timestamp : event.timestamp,
         ts: Date.parse(event.timestamp) || Date.now(),
         seq: Number.isFinite(event.seq) ? event.seq : undefined,
         noEntrance: !live || undefined,
@@ -10378,23 +10381,26 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         const activate = () => onSelectCommit?.(item.sha)
         return (
           <div className="flex justify-center">
-            <div
-              role={clickable ? 'button' : undefined}
-              tabIndex={clickable ? 0 : undefined}
-              onClick={clickable ? activate : undefined}
-              onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
-              className={`${COMMIT_PILL} max-w-[90%] ${clickable ? COMMIT_HOVER : ''}`}
-              title={clickable ? `Committed ${item.shortSha} - click to show this commit's diff` : `Committed ${item.shortSha}`}
+            <Tooltip
+              variant="card"
+              pin={false}
+              width={COMMIT_CARD_WIDTH}
+              content={<CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp }} />}
             >
-              <GitCommitHorizontal className="w-3 h-3 shrink-0" />
-              {/* The sha is monospace and the subject is not, so their line boxes
-                  differ and `items-center` would centre each one separately -
-                  putting two baselines in a row three words long. optical-center
-                  trims each label to its own cap-to-baseline ink, which is what
-                  then gets centred (see CLAUDE.md, "Labels beside icons"). */}
-              <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
-              <span className="truncate optical-center">{item.subject}</span>
-            </div>
+              <div
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onClick={clickable ? activate : undefined}
+                onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
+                className={`${COMMIT_PILL} max-w-full ${clickable ? COMMIT_HOVER : ''}`}
+              >
+                <GitCommitHorizontal className="w-3 h-3 shrink-0" />
+                {/* The sha is monospace and the subject is not, so their line boxes
+                    differ and `items-center` would centre each one separately. */}
+                <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
+                <span className="truncate optical-center">{item.subject}</span>
+              </div>
+            </Tooltip>
           </div>
         )
       }
