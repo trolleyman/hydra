@@ -1,7 +1,8 @@
 # Hydra for Windows and focused chat windows
 
-Status: **shared focused-session foundation built; native shell and native
-Windows runtime unbuilt.** This document adapts the product shape in
+Status: **shared focused-session foundation and initial Windows shell built;
+native validation and Windows agent runtime unbuilt.** This document adapts the
+product shape in
 [macos-desktop-chat.md](macos-desktop-chat.md) into a standalone Windows desktop
 application. It starts from the platform-neutral focused-session work already
 merged into `main`; it does not propose a second session model or a Windows-only
@@ -30,10 +31,11 @@ business logic. Browser-served Hydra remains supported.
 
 "Standalone" means the installer carries the Hydra executable and web assets,
 launches without WSL2 or a separately installed Hydra CLI, and provides normal
-Start menu, taskbar, notification, and uninstall behavior. Agent providers and
-the developer tools they invoke remain external prerequisites. Git for Windows
-is initially a prerequisite for Git and POSIX-script behavior; bundling Git or
-provider CLIs is deliberately outside the first release.
+Start menu, taskbar, notification, and uninstall behavior. The app always uses a
+bundled PortableGit distribution so its Git and POSIX-script behavior does not
+vary with host configuration. Agent providers and the other developer tools
+they invoke remain external prerequisites; provider authentication and updates
+stay with Claude Code, Codex CLI, Gemini CLI, and Copilot CLI.
 
 ## Shared implementation status
 
@@ -78,16 +80,18 @@ The native Windows port already needs a portable daemon shutdown endpoint and a
 `LockFileEx` single-instance lock. The app should consume that mechanism instead
 of adding a second desktop-only lock protocol.
 
-### WebView2 is the first spike, not yet a commitment
+### Native Windows Forms and WebView2 shell
 
-Start the native spike with a thin WebView2 shell because it is the Windows
-system webview and exposes the required multi-window, profile, notification, and
-host-bridge primitives. Do not commit the product to a framework until the spike
-passes the validation matrix below. Compare at least:
+Use a thin, self-contained .NET Windows Forms shell hosting WebView2. This
+mirrors the built macOS AppKit/WKWebView shell: each platform owns a small native
+lifecycle layer while the Go backend and React product remain shared. A single
+cross-platform desktop framework is not a goal.
 
-- a small native Win32/Windows App SDK shell hosting WebView2;
-- a maintained cross-platform Go or Rust wrapper which can expose the same
-  primitives without starting its own backend per window.
+The initial development shell is under `desktop/windows`. It launches or reuses
+one backend, shares a persistent WebView2 profile between windows, opens full and
+focused composer windows, owns notification-area lifecycle, and consumes the
+same atomic readiness protocol as `desktop/macos`. It is not yet validated on
+Windows hardware and is not an installer.
 
 The shell technology is acceptable only if it proves:
 
@@ -102,10 +106,9 @@ The shell technology is acceptable only if it proves:
   route or origin forks;
 - clean install, update, uninstall, and crash recovery.
 
-Avoid a general Node/Electron runtime unless the spike demonstrates a concrete
-need that WebView2 plus a narrow host cannot meet. Hydra already has a Go service
-and browser application; a second application runtime and update owner would be
-substantial permanent surface.
+Do not add Electron or another general cross-platform runtime. Hydra already has
+a Go service and browser application; a second product runtime and update owner
+would be substantial permanent surface.
 
 ### Backend bootstrap and authentication
 
@@ -143,7 +146,8 @@ assuming a browser can use that socket directly.
 
 ## Packaging and distribution
 
-Produce x64 and arm64 application builds once the native runtime is working.
+Target Windows 11 x64 and arm64. Produce both application builds once the native
+runtime is working.
 Use one authoritative version across the shell, bundled Go executable, embedded
 frontend, protocol handshake, and installer metadata.
 
@@ -225,14 +229,20 @@ model or duplicate the permission/commit implementation.
 
 ### Phase 1: prove a Windows shell against simulation
 
-- Build the WebView2/native-wrapper comparison and record the decision here.
-- Package the production frontend and simulation-capable Go executable.
-- Open two full windows and two focused windows in one shared webview profile.
-- Prove app commands: New full window, New chat window, Settings, and Exit.
-- Prove deep-link/notification activation, native close interception, tray
-  lifecycle, file upload/download, IME, accessibility, and terminal keys.
-- Produce an unsigned developer package; signing and automatic update wait until
-  backend ownership is stable.
+- [x] Commit to a Windows-native Windows Forms/WebView2 shell, consistent with
+      the separate AppKit/WKWebView shell on macOS.
+- [x] Add a self-contained development publish script which packages the
+      production frontend, bundled Go executable, and caller-supplied official
+      PortableGit payload for x64 or arm64.
+- [x] Share one backend and persistent WebView2 profile across full and focused
+      windows, with native new-window commands and notification-area lifecycle.
+- [ ] Open two full windows and two focused windows against simulation on real
+      Windows and prove shared cookies, storage, WebSockets, and session state.
+- [ ] Prove app commands: New full window, New chat window, Settings, and Exit.
+- [ ] Prove deep-link/notification activation, native close interception, tray
+      lifecycle, file upload/download, IME, accessibility, and terminal keys.
+- [x] Produce the source/build shape for an unsigned development package;
+      signing and automatic update wait until backend ownership is stable.
 
 This can run before the native Windows head backend exists and is the cheapest
 way to reject an unsuitable shell.
@@ -296,8 +306,7 @@ not run the Hydra UI or daemon elevated.
 
 At minimum, acceptance covers:
 
-- Windows 11 x64 and arm64, plus every older Windows version the installer
-  explicitly claims to support;
+- Windows 11 x64 and arm64;
 - packaged and unpackaged development launch, clean install, update, repair,
   uninstall, reboot, and stale-lock recovery;
 - one through many full/focused windows sharing one backend without duplicate
@@ -320,7 +329,8 @@ behavior.
 ## Deliberately deferred
 
 - A native rewrite of the React UI.
-- Bundling provider CLIs, Git, compilers, or arbitrary developer toolchains.
+- Bundling provider CLIs, compilers, or arbitrary developer toolchains. Git is
+  the deliberate exception and is app-owned.
 - Hiding WSL2 inside the desktop app as an alternate backend.
 - Machine-wide backend/service installation.
 - Microsoft Store submission before the sandbox helper and update model are
@@ -331,14 +341,10 @@ behavior.
 
 ## Open implementation questions
 
-- Does direct WebView2 hosting or a maintained wrapper best pass the native
-  spike without introducing a second runtime owner?
 - Which installer model handles the elevated sandbox helper, background
   backend, notifications, and enterprise repair most honestly?
-- Should the backend remain alive whenever the tray icon is enabled, or only
-  while work is active?
-- What is the minimum supported Windows/WebView2 runtime, and will the installer
-  bootstrap a missing runtime or stop with a download instruction?
+- Should the WebView2 Runtime be bootstrapped by the installer or treated as a
+  repairable Windows 11 prerequisite?
 - How should a CLI and desktop bundle with different versions negotiate which
   backend owns the user's database?
 - Can sandbox-user/firewall cleanup be safely offered from uninstall, or should

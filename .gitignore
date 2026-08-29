@@ -11,6 +11,9 @@
 # Locally-built hydra binary (e.g. `go build -o hydra .`); mage builds to .mage/
 /hydra
 /dist/macos/
+/dist/windows/
+/desktop/windows/bin/
+/desktop/windows/obj/
 
 # Test binary, built with `go test -c`
 *.test
