@@ -1148,6 +1148,10 @@ func toAPIArtifactScript(a config.ArtifactScript) api.ArtifactScript {
 	if a.CleanIgnored {
 		out.CleanIgnored = &a.CleanIgnored
 	}
+	if a.AutoRun != "" {
+		mode := api.ArtifactScriptAutoRun(a.AutoRun)
+		out.AutoRun = &mode
+	}
 	out.Strict = a.Strict
 	out.Enabled = a.Enabled
 	return out
@@ -1199,6 +1203,9 @@ func fromAPIArtifactScript(a api.ArtifactScript) config.ArtifactScript {
 	if a.CleanIgnored != nil {
 		out.CleanIgnored = *a.CleanIgnored
 	}
+	if a.AutoRun != nil {
+		out.AutoRun = string(*a.AutoRun)
+	}
 	out.Strict = a.Strict
 	out.Enabled = a.Enabled
 	return out
@@ -1216,6 +1223,10 @@ func toAPITestScript(t config.TestScript) api.TestScript {
 	}
 	if t.CleanIgnored {
 		out.CleanIgnored = &t.CleanIgnored
+	}
+	if t.AutoRun != "" {
+		mode := api.TestScriptAutoRun(t.AutoRun)
+		out.AutoRun = &mode
 	}
 	if t.Type != "" {
 		out.Type = &t.Type
@@ -1236,6 +1247,9 @@ func fromAPITestScript(t api.TestScript) config.TestScript {
 	}
 	if t.CleanIgnored != nil {
 		out.CleanIgnored = *t.CleanIgnored
+	}
+	if t.AutoRun != nil {
+		out.AutoRun = string(*t.AutoRun)
 	}
 	if t.Type != nil {
 		out.Type = *t.Type
@@ -1447,6 +1461,7 @@ func toAPIAgentConfig(c config.AgentConfig) api.AgentConfig {
 			McpToolsBlocked:  &p.MCPToolsBlocked,
 			McpAutoAllowRead: p.MCPAutoAllowRead,
 			StrictMcp:        p.StrictMCP,
+			AgentMessaging:   p.AgentMessaging,
 			// known_tools is not edited by the Settings UI, but must ride along in
 			// the response so a round-tripped save preserves a hand-edited value.
 			KnownTools: &p.KnownTools,
@@ -1501,7 +1516,7 @@ func fromAPIAgentConfig(a api.AgentConfig) config.AgentConfig {
 		out.Sandbox = sb
 	}
 	if a.Policy != nil {
-		p := &config.PolicyConfig{GateEnabled: a.Policy.GateEnabled, GitIsolation: a.Policy.GitIsolation, MCPAutoAllowRead: a.Policy.McpAutoAllowRead, StrictMCP: a.Policy.StrictMcp}
+		p := &config.PolicyConfig{GateEnabled: a.Policy.GateEnabled, GitIsolation: a.Policy.GitIsolation, MCPAutoAllowRead: a.Policy.McpAutoAllowRead, StrictMCP: a.Policy.StrictMcp, AgentMessaging: a.Policy.AgentMessaging}
 		if a.Policy.McpAllowed != nil {
 			p.MCPAllowed = *a.Policy.McpAllowed
 		}
@@ -2863,6 +2878,8 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 			AuthorName:  c.AuthorName,
 			AuthorEmail: c.AuthorEmail,
 			Timestamp:   c.Timestamp,
+			Additions:   c.Additions,
+			Deletions:   c.Deletions,
 		}
 	}
 	return resp, nil
@@ -3072,6 +3089,8 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 			AuthorName:  c.AuthorName,
 			AuthorEmail: c.AuthorEmail,
 			Timestamp:   c.Timestamp,
+			Additions:   c.Additions,
+			Deletions:   c.Deletions,
 		}
 	}
 

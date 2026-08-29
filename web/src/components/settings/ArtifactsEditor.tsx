@@ -153,6 +153,24 @@ export function ArtifactsEditor({
                         className="w-28 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                       />
                     </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                        Automatic runs
+                        <InfoTooltip title="Automatic runs">
+                          <p><strong>Always</strong> starts missing generations when the diff is viewed. <strong>When agent settles</strong> waits while the agent is actively working. <strong>Never</strong> only runs when you use Refresh.</p>
+                          <p className="mt-1.5">Cached artifacts are still shown in every mode, and Refresh always runs immediately.</p>
+                        </InfoTooltip>
+                      </label>
+                      <select
+                        value={a.auto_run ?? 'always'}
+                        onChange={(e) => update(index, { auto_run: e.target.value === 'always' ? undefined : e.target.value as NonNullable<ArtifactScript['auto_run']> })}
+                        className="h-[38px] text-sm px-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      >
+                        <option value="always">Always</option>
+                        <option value="settled">When agent settles</option>
+                        <option value="never">Never</option>
+                      </select>
+                    </div>
                     <label className="flex items-center gap-2 cursor-pointer h-[38px]">
                       <input
                         type="checkbox"

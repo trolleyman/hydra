@@ -9,5 +9,9 @@ export type ChatQueuedMessagePayload = {
     id?: string;
     status?: string;
     content?: Record<string, any>;
+    /**
+     * Why this message exists when the user did not type it.
+     */
+    origin?: string;
 };
 

@@ -43,6 +43,7 @@ rewritten to `script` on the next config save.
 | `name`        | yes      | Unique label, also used as the cache directory. |
 | `script`      | yes      | Shell script, run via `bash -c` in the checkout directory. Multi-line `'''` block; the older `command` key still parses and is migrated on save. |
 | `timeout_sec` | no       | Max seconds the command may run (`0` = built-in default). |
+| `auto_run`    | no       | When missing generations start: `"always"` (default), `"settled"` (wait while the agent is working), or `"never"` (Refresh only). Cached artifacts still display in every mode. |
 | `unsafe_host` | no       | Run on the host with **no sandbox** — full access to your machine and credentials. Only for audited, self-contained commands you trust against every ref you compare. Honored only when the trusted live config authorizes that exact command, so a branch cannot grant itself host access. Default `false`. |
 
 By default the command runs **inside the OS sandbox** (the same confinement

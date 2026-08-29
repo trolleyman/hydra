@@ -27,6 +27,10 @@ export type ArtifactScript = {
      */
     clean_ignored?: boolean;
     /**
+     * When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
+     */
+    auto_run?: ArtifactScript.auto_run;
+    /**
      * Run the command under `set -eo pipefail` so a failing step aborts and propagates instead of being swallowed into a success (absent/null or true = strict; false = run exactly as written)
      */
     strict?: boolean | null;
@@ -35,4 +39,14 @@ export type ArtifactScript = {
      */
     enabled?: boolean | null;
 };
+export namespace ArtifactScript {
+    /**
+     * When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
+     */
+    export enum auto_run {
+        ALWAYS = 'always',
+        SETTLED = 'settled',
+        NEVER = 'never',
+    }
+}
 

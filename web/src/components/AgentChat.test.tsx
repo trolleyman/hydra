@@ -4,7 +4,7 @@ import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planSte
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
 import { useAgentStore } from '../stores/agentStore'
-import { formatBashForDisplay } from '../lib/bashFormat'
+import { formatBashForDisplay, leadingBashComment } from '../lib/bashFormat'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 
 // The chat composer turns a pasted image into an attachment chip and (with the
@@ -114,6 +114,18 @@ describe('review checkout path display', () => {
   it('names Claude tool-result spill files without its transcript cache path', () => {
     expect(toolResultName('/home/callum/.claude/projects/-long-slug/session/tool-results/bij43gmi4.txt'))
       .toBe('bij43gmi4.txt')
+  })
+})
+
+describe('Bash card summary comments', () => {
+  it('uses Codex\'s leading shell comment as the concise summary', () => {
+    expect(leadingBashComment('# Verify the focused-head invariant and roadmap update\nrg -n "Branch == nil" docs/roadmap.md'))
+      .toBe('Verify the focused-head invariant and roadmap update')
+  })
+
+  it('does not promote shebangs or later script comments', () => {
+    expect(leadingBashComment('#!/usr/bin/env bash\necho ok')).toBe('')
+    expect(leadingBashComment('echo ok\n# Explain the next command')).toBe('')
   })
 })
 

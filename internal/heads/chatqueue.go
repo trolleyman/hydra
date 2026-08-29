@@ -343,7 +343,7 @@ func (m *ChatQueueManager) writeToStdin(id string, content json.RawMessage) bool
 func (m *ChatQueueManager) Submit(projectRoot, id string, msg QueuedMessage, queued bool) bool {
 	if queued {
 		m.queue(projectRoot, id).Enqueue(msg)
-		m.emit(id, queuedMessage(msg.ID, "queued", msg.Content))
+		m.emit(id, queuedMessage(msg.ID, "queued", msg.Content, msg.Origin))
 		m.kickIfResting(projectRoot, id)
 		return true
 	}
@@ -509,9 +509,9 @@ func (m *ChatQueueManager) OnTurnStep(id string) {
 // projection until it drains, at which point it becomes a durable user_message
 // carrying the same client id - which is what lets the browser reconcile its
 // pending bubble instead of rendering a second one.
-func queuedMessage(id, status string, content json.RawMessage) chat.QueuedMessage {
+func queuedMessage(id, status string, content json.RawMessage, origin string) chat.QueuedMessage {
 	queued := chat.QueuedMessage{}
-	queued.Id, queued.Status, queued.Content = id, status, content
+	queued.Id, queued.Status, queued.Content, queued.Origin = id, status, content, origin
 	return queued
 }
 

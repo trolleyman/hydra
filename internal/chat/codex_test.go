@@ -74,6 +74,18 @@ func TestNormalizeCodexDeltaAndRequest(t *testing.T) {
 	}
 }
 
+func TestNormalizeCodexResolvedInteractionKeepsAnswers(t *testing.T) {
+	line := []byte(`{"method":"serverRequest/resolved","params":{"method":"item/tool/requestUserInput","params":{"itemId":"call-1"},"response":{"updatedInput":{"answers":{"Which?":"A"}}}}}`)
+	got := normalizeCodex(line)
+	if len(got) != 1 || got[0].eventType() != "interaction_resolved" {
+		t.Fatalf("resolved = %+v", got)
+	}
+	raw, _ := json.Marshal(got[0].payload)
+	if !strings.Contains(string(raw), `"Which?":"A"`) {
+		t.Fatalf("resolved payload dropped answers: %s", raw)
+	}
+}
+
 func TestNormalizeCodexRichItems(t *testing.T) {
 	tests := []struct{ line, kind string }{
 		{`{"method":"item/completed","params":{"item":{"id":"f1","type":"fileChange","status":"completed","changes":[{"path":"x.go","kind":"update"}]}}}`, "tool_completed"},

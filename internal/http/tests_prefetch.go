@@ -113,6 +113,9 @@ func (s *Server) testPrefetchOnce(ctx context.Context, roots []string, lastSHA m
 			}
 			var dirs []string
 			for _, r := range runners {
+				if !shouldAutoRun(r.AutoRun, headActivelyRunning(head)) {
+					continue
+				}
 				_, _ = mgr.Prefetch(r, v)
 				if d, derr := mgr.EntryDir(r.Name, v); derr == nil {
 					dirs = append(dirs, d)

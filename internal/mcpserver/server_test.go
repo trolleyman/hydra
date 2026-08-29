@@ -263,6 +263,49 @@ func TestHeadStatusTools(t *testing.T) {
 	}
 }
 
+func TestAgentCollaborationTools(t *testing.T) {
+	var sent []string
+	deps := Deps{
+		ListAgents: func() (string, bool) { return "id=one", true },
+		GetAgent:   func(id string) (string, bool) { return "agent=" + id, true },
+		SendAgent: func(target, body, correlation, reply string) (string, bool) {
+			sent = []string{target, body, correlation, reply}
+			return "queued", true
+		},
+	}
+	resps := runLines(t, deps,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_agents","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_agent","arguments":{"id":" one "}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"send_agent_message","arguments":{"target":" two ","body":" hi ","correlation_id":"c","in_reply_to":"m"}}}`,
+	)
+	names := map[string]bool{}
+	for _, tl := range resps[0]["result"].(map[string]any)["tools"].([]any) {
+		names[tl.(map[string]any)["name"].(string)] = true
+	}
+	for _, want := range []string{"list_agents", "get_agent", "send_agent_message"} {
+		if !names[want] {
+			t.Errorf("%s not advertised: %v", want, names)
+		}
+	}
+	if got := firstText(t, resps[2]); got != "agent=one" {
+		t.Errorf("get_agent = %q", got)
+	}
+	if strings.Join(sent, "|") != "two|hi|c|m" {
+		t.Errorf("send args = %#v", sent)
+	}
+}
+
+func TestAgentMessagingHiddenWithoutOptInDep(t *testing.T) {
+	deps := Deps{ListAgents: func() (string, bool) { return "", true }, GetAgent: func(string) (string, bool) { return "", true }}
+	resps := runLines(t, deps, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	for _, tl := range resps[0]["result"].(map[string]any)["tools"].([]any) {
+		if tl.(map[string]any)["name"] == "send_agent_message" {
+			t.Fatal("send tool advertised without opt-in dep")
+		}
+	}
+}
+
 // The run tools are the only ones that spend anything, so they must stay hidden
 // unless the daemon channel that guards them is wired.
 func TestRunToolsHiddenWithoutDeps(t *testing.T) {

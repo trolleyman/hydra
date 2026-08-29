@@ -470,6 +470,8 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	// Answer heads' on-demand review refreshes, so the review tools return live
 	// forge state instead of waiting up to 30s for the tick above.
 	go server.RunReviewRequestWatcher(ctx, roots)
+	// Answer project-scoped agent discovery and guarded collaboration requests.
+	go server.RunAgentRequestWatcher(ctx, roots)
 	// Perform git write-ops for heads whose git_isolation is readonly (.git is
 	// read-only in the sandbox, so the in-sandbox git tools hand each op to the daemon).
 	go server.RunGitopsWatcher(ctx, roots)

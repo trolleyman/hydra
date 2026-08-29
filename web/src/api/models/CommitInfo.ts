@@ -25,5 +25,13 @@ export type CommitInfo = {
      * ISO 8601 timestamp of the author date
      */
     timestamp: string;
+    /**
+     * Number of lines added by the commit relative to its first parent
+     */
+    additions: number;
+    /**
+     * Number of lines removed by the commit relative to its first parent
+     */
+    deletions: number;
 };
 

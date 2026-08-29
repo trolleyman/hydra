@@ -51,7 +51,7 @@ import (
 func toAPIQueuedMessages(msgs []heads.QueuedMessage) []api.ChatQueuedMessage {
 	out := make([]api.ChatQueuedMessage, 0, len(msgs))
 	for _, m := range msgs {
-		out = append(out, api.ChatQueuedMessage{Id: m.ID, Content: m.Content})
+		out = append(out, api.ChatQueuedMessage{Id: m.ID, Content: m.Content, Origin: m.Origin})
 	}
 	return out
 }

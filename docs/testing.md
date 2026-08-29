@@ -6,6 +6,11 @@ This doc covers how Hydra ingests and renders a project's `[tests.<name>]` runne
 output. You only need it when touching `internal/tests`, the tests panel
 (`web/src`), or a project's test-runner config.
 
+Each runner may set `auto_run = "always"` (the default), `"settled"` (do not
+start a missing run while the agent is actively working), or `"never"` (only the
+Tests card's Refresh action starts it). Cached verdicts remain visible in every
+mode, and Refresh always runs immediately.
+
 ## Agent test gate - warnings
 
 A project's `[tests.<name>]` runners write a JUnit-XML or Hydra-native-JSON report into

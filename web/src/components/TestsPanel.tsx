@@ -544,6 +544,7 @@ const STATUS_LABEL: Partial<Record<TestRunResult['status'], string>> = {
   passing: 'success',
   failing: 'failure',
   errored: 'error',
+  none: 'not run',
 }
 
 function statusLabel(status: TestRunResult['status']): string {
@@ -663,7 +664,7 @@ function TestRunnerCard({ projectId, agentId, runner, filter, search, groupResul
         <StatusIcon status={runner.status} />
         {statusLabel(runner.status)}
       </span>
-      <Summary runner={runner} />
+      {runner.status !== 'none' && <Summary runner={runner} />}
       {/* Format + duration, right-aligned against the actions cluster. Inside the
           collapse button (rather than beside it) so the whole header row stays
           one click target. */}

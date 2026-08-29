@@ -563,6 +563,7 @@ func TestNamedTestsDecode(t *testing.T) {
 [tests.go]
 command = "go test ./..."
 timeout_sec = 600
+auto_run = "settled"
 
 [tests."web lint"]
 command = "eslint ."
@@ -580,7 +581,7 @@ command = "x"
 	if len(cfg.Tests) != 3 {
 		t.Fatalf("expected 3 tests, got %+v", cfg.Tests)
 	}
-	if cfg.Tests[0].Name != "go" || cfg.Tests[0].TimeoutSec != 600 {
+	if cfg.Tests[0].Name != "go" || cfg.Tests[0].TimeoutSec != 600 || cfg.Tests[0].AutoRun != "settled" {
 		t.Errorf("tests[0] mismatch: %+v", cfg.Tests[0])
 	}
 	if cfg.Tests[1].Name != "web lint" || cfg.Tests[1].Script != "eslint ." {

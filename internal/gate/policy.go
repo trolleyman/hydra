@@ -87,6 +87,9 @@ type Policy struct {
 	// here because seedHead takes the policy and needs to know whether to render
 	// that config. See config.PolicyConfig.StrictMCP.
 	StrictMCP bool `json:"strict_mcp,omitempty"`
+	// AgentMessaging exposes the write half of Hydra's collaboration tools. The
+	// daemon independently re-checks trusted config before delivering anything.
+	AgentMessaging bool `json:"agent_messaging,omitempty"`
 	// MCPToolRW maps "<server>__<tool>" to a read/write classification ("read" or
 	// "write") captured from the server-declared readOnlyHint annotation at seed
 	// time. It takes precedence over the name heuristic when present.

@@ -97,6 +97,21 @@ func TestSimChatEverySubagentHasSteps(t *testing.T) {
 	}
 }
 
+func TestSimChatIncludesAttributedAgentMessage(t *testing.T) {
+	for _, ev := range simChatLog {
+		if ev.Type != "user_message" {
+			continue
+		}
+		var payload struct {
+			Origin string `json:"origin"`
+		}
+		if json.Unmarshal(ev.Payload, &payload) == nil && payload.Origin == "agent:api-tests" {
+			return
+		}
+	}
+	t.Fatal("simulation chat has no attributed agent collaboration message")
+}
+
 // The snapshot is derived from the log, so a sub-agent that finished in the log
 // must read as finished in the snapshot - including the resumed background one,
 // whose completion is normalized BEFORE the event that introduces it.

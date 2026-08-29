@@ -14,6 +14,9 @@ func TestResolvePolicyDefaults(t *testing.T) {
 	if len(p.MCPAllowed) != 0 || len(p.MCPToolsAllowed) != 0 {
 		t.Errorf("allow-lists should default empty: %+v", p)
 	}
+	if p.IsAgentMessagingEnabled() {
+		t.Error("agent messaging should default off")
+	}
 }
 
 func TestResolvePolicyMergesDefaultsAndAgent(t *testing.T) {
@@ -81,7 +84,7 @@ func TestResolveGitIsolation(t *testing.T) {
 func TestPolicyRenderRoundTrip(t *testing.T) {
 	// The empty template documents the policy defaults (commented-out).
 	tmpl := renderConfig(nil, Config{})
-	for _, want := range []string{"[policy]", "# gate_enabled = true", "# mcp_allowed = []", "# mcp_tools_allowed = []"} {
+	for _, want := range []string{"[policy]", "# gate_enabled = true", "# mcp_allowed = []", "# mcp_tools_allowed = []", "# agent_messaging = false"} {
 		if !strings.Contains(tmpl, want) {
 			t.Errorf("template missing %q:\n%s", want, tmpl)
 		}
