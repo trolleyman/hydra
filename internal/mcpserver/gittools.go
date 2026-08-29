@@ -87,12 +87,13 @@ func gitToolDefs() []map[string]any {
 		},
 		{
 			"name":        "git_rebase",
-			"description": "Rewrite the history of YOUR branch above `base` non-interactively. Inspect first with `git log <base>..HEAD`, then pass a `plan`: one step per commit (top of `base`..HEAD to bottom), each an action (pick, reword, squash, fixup, drop) with the commit sha and, for reword/squash, a new `message`. Runs the whole plan; if a conflict stops it, resolve the files in your worktree then call git_rebase_continue (or git_rebase_abort).",
+			"description": "Rewrite the history of YOUR branch above `base` non-interactively. Inspect first with `git log <base>..HEAD`, then pass a `plan`: one step per commit (top of `base`..HEAD to bottom), each an action (pick, reword, squash, fixup, drop). Optional `onto` transplants those commits onto a different ref (the equivalent of git rebase --onto <onto> <base>). The guarded operation only moves YOUR expected head branch. If a conflict stops it, resolve the files then call git_rebase_continue (or git_rebase_abort).",
 			"inputSchema": map[string]any{
 				"type":     "object",
 				"required": []string{"base", "plan"},
 				"properties": map[string]any{
 					"base": map[string]any{"type": "string", "description": "Commit-ish below the commits to edit (e.g. \"HEAD~3\" or a sha)."},
+					"onto": map[string]any{"type": "string", "description": "Optional new parent ref for the planned commits. Omitting it rebases onto base as before."},
 					"plan": map[string]any{
 						"type":        "array",
 						"description": "Ordered steps, one per commit above base.",
@@ -221,6 +222,7 @@ func parseGitOp(name string, raw json.RawMessage) (GitOpRequest, string) {
 	case "git_rebase":
 		var a struct {
 			Base string          `json:"base"`
+			Onto string          `json:"onto"`
 			Plan []GitRebaseStep `json:"plan"`
 		}
 		_ = json.Unmarshal(raw, &a)
@@ -230,7 +232,7 @@ func parseGitOp(name string, raw json.RawMessage) (GitOpRequest, string) {
 		if len(a.Plan) == 0 {
 			return GitOpRequest{}, "git_rebase requires a non-empty \"plan\"."
 		}
-		return GitOpRequest{Op: "rebase", Base: a.Base, Plan: a.Plan}, ""
+		return GitOpRequest{Op: "rebase", Base: a.Base, Onto: a.Onto, Plan: a.Plan}, ""
 	case "git_rebase_continue":
 		return GitOpRequest{Op: "rebase_continue"}, ""
 	case "git_rebase_abort":
