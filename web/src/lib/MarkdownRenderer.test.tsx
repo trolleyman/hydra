@@ -83,6 +83,47 @@ describe('Markdown', () => {
     expect(container.querySelector('h1')!.className).toContain('text-2xl')
   })
 
+  describe('links', () => {
+    const ctx = {
+      projectId: 'p1',
+      refStr: 'hydra/a1',
+      filePath: '',
+      worktreePath: '/work/hydra',
+    }
+
+    it('renders a chat file path as a compact, neutral file chip', () => {
+      const { container } = render(
+        <Markdown text="[controller.go](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
+      )
+      const link = container.querySelector('a')!
+      expect(link).toHaveTextContent('... /controller.go')
+      expect(link).toHaveAttribute(
+        'href',
+        '/project/p1/repository/hydra/a1/-/internal/controller.go',
+      )
+      expect(link.className).not.toContain('text-blue')
+      expect(link.querySelector('svg')).not.toBeNull()
+    })
+
+    it('keeps a semantic repo link label as understated prose', () => {
+      const { container } = render(
+        <Markdown text="[the controller](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
+      )
+      const link = container.querySelector('a')!
+      expect(link).toHaveTextContent('the controller')
+      expect(link).not.toHaveTextContent('... /')
+      expect(link.className).not.toContain('text-blue')
+    })
+
+    it('keeps README file links as prose links', () => {
+      const { container } = render(
+        <Markdown text="[controller.go](internal/controller.go)" variant="doc" linkCtx={ctx} />,
+      )
+      expect(container.querySelector('a')).toHaveTextContent('controller.go')
+      expect(container.querySelector('a')).not.toHaveTextContent('... /')
+    })
+  })
+
   // What makes a code block a block is the fence, not what is inside it. This
   // used to be guessed from the content ("no language and no newline means
   // inline"), which rendered the single commonest shape an agent writes - a
