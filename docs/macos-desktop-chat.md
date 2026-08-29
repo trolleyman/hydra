@@ -420,10 +420,11 @@ the persistent auth key. App-launched backends require this authentication for
 all TCP clients even when deploy configuration has no key; an ephemeral secret
 is generated in memory for that backend lifetime. Both new and reused servers must now advertise the
 same desktop protocol in their live status response; an absent or mismatched
-value is rejected before any window opens. Reused-daemon auth and stale
-ownership still need to
-move to the shared, versioned control-socket and PID-bound endpoint contract now
-used by Linux. The build is ad-hoc signed rather than unsigned so the
+value is rejected before any window opens. The bundled CLI now performs daemon
+reuse and startup through the shared control socket, reads the versioned,
+PID-bound endpoint record, and returns a fresh bootstrap credential to AppKit;
+the fixed-port probe is gone. Older development bundles retain the private
+ready-file launch as a compatibility fallback. The build is ad-hoc signed rather than unsigned so the
 bundle is internally consistent. WebSocket, text-input, accessibility,
 notification, and lifecycle acceptance still require the development Mac.
 
@@ -499,7 +500,7 @@ active-turn close choices, and Linux bridge wiring remain.
 - Add recovery UI for backend launch failure, incompatible versions and a stale
   ownership record.
 
-Status: New Full Window/New Focused Chat commands, one-process ownership,
+Status: New Full Window/New Focused Chat commands, shared-daemon ownership,
 last-window persistence, incompatible-version refusal, backend-exit reporting,
 and active-session Quit confirmation are implemented in the initial shell.
 Frontmost-project tracking, menu-bar state, native notifications, close-window

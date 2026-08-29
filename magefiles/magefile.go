@@ -540,7 +540,22 @@ func BuildDesktopLinux() error {
 	}
 	args := append([]string{"build"}, goBuildTags(false, "hydra_desktop")...)
 	args = append(args, "-o", output, "./cmd/hydra-desktop")
-	return errtrace.Wrap(runV("go", args...))
+	if err := runV("go", args...); err != nil {
+		return errtrace.Wrap(err)
+	}
+	share := filepath.Join("dist", "linux", "share")
+	applications := filepath.Join(share, "applications")
+	icons := filepath.Join(share, "icons", "hicolor", "512x512", "apps")
+	if err := os.MkdirAll(applications, 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := os.MkdirAll(icons, 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := sh.Copy(filepath.Join(applications, "dev.hydra.desktop"), filepath.Join("desktop", "linux", "dev.hydra.desktop")); err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(sh.Copy(filepath.Join(icons, "dev.hydra.desktop.png"), filepath.Join("web", "public", "android-chrome-512x512.png")))
 }
 
 // BuildDesktopMac builds the AppKit application explicitly on macOS.

@@ -30,6 +30,18 @@ private struct ReadyRecord: Decodable {
     }
 }
 
+private struct DesktopConnectRecord: Decodable {
+    let protocolVersion: Int
+    let url: URL
+    let bootstrapToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol"
+        case url
+        case bootstrapToken = "bootstrap_token"
+    }
+}
+
 enum BackendError: LocalizedError {
     case bundledBinaryMissing
     case launchFailed(String)
@@ -78,33 +90,64 @@ final class BackendController {
     }
 
     func start(projectRoot: @escaping () -> URL?, completion: @escaping (Result<BackendStatus, Error>) -> Void) {
-        let defaultURL = URL(string: "http://127.0.0.1:26600")!
-        fetchStatus(at: defaultURL) { [weak self] result in
+        DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            switch result {
-            case .success(let status):
-                guard status.version == Self.supportedServerVersion else {
-                    DispatchQueue.main.async {
-                        completion(.failure(BackendError.incompatibleVersion(status.version ?? "unknown")))
-                    }
-                    return
-                }
-                self.baseURL = defaultURL
-                self.status = status
-                DispatchQueue.main.async { completion(.success(status)) }
-            case .failure(let error):
-                if let backendError = error as? BackendError, case .serverRefused = backendError {
-                    DispatchQueue.main.async { completion(.failure(error)) }
-                    return
-                }
-                DispatchQueue.main.async {
-                    guard let selectedRoot = projectRoot() else {
-                        completion(.failure(BackendError.launchFailed("no project was selected")))
-                        return
-                    }
+            guard let selectedRoot = projectRoot() else {
+                completion(.failure(BackendError.launchFailed("no project was selected")))
+                return
+            }
+            self.connectThroughBundledCLI(projectRoot: selectedRoot) { result in
+                switch result {
+                case .success:
+                    completion(result)
+                case .failure:
+                    // Development bundles predating the shared control command
+                    // still use the private ready-file launch path.
                     self.launchBundledBackend(projectRoot: selectedRoot, completion: completion)
                 }
             }
+        }
+    }
+
+    private func connectThroughBundledCLI(projectRoot: URL, completion: @escaping (Result<BackendStatus, Error>) -> Void) {
+        let binary = ProcessInfo.processInfo.environment["HYDRA_DESKTOP_BACKEND"].map(URL.init(fileURLWithPath:))
+            ?? Bundle.main.resourceURL?.appendingPathComponent("HydraBackend")
+        guard let binary, FileManager.default.isExecutableFile(atPath: binary.path) else {
+            completion(.failure(BackendError.bundledBinaryMissing))
+            return
+        }
+        let output = Pipe()
+        let process = Process()
+        process.executableURL = binary
+        process.arguments = ["__desktop-connect", "--project", projectRoot.path]
+        process.standardOutput = output
+        process.standardError = Pipe()
+        process.terminationHandler = { [weak self] task in
+            guard let self else { return }
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            guard task.terminationStatus == 0,
+                  let record = try? JSONDecoder().decode(DesktopConnectRecord.self, from: data),
+                  record.protocolVersion == Self.supportedDesktopProtocol,
+                  record.url.host == "127.0.0.1" || record.url.host == "localhost" || record.url.host == "::1" else {
+                DispatchQueue.main.async { completion(.failure(BackendError.invalidResponse)) }
+                return
+            }
+            self.fetchStatus(at: record.url) { result in
+                switch result {
+                case .success(let status):
+                    self.baseURL = record.url
+                    self.status = status
+                    self.bootstrapToken = record.bootstrapToken
+                    DispatchQueue.main.async { completion(.success(status)) }
+                case .failure(let error):
+                    DispatchQueue.main.async { completion(.failure(error)) }
+                }
+            }
+        }
+        do {
+            try process.run()
+        } catch {
+            completion(.failure(BackendError.launchFailed(error.localizedDescription)))
         }
     }
 

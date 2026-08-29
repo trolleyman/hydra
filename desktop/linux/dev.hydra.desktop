@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Hydra
+Comment=Run and review AI coding agents
+Exec=hydra-desktop
+Icon=dev.hydra.desktop
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true
+StartupWMClass=dev.hydra.desktop

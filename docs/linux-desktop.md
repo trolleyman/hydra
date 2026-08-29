@@ -374,7 +374,9 @@ Desktop cold-start explicitly binds `127.0.0.1:0`; the assigned port exists only
 in the private ownership record. `mage buildDesktop` and `mage runDesktop`
 dispatch by host OS; on Linux they build the frontend and tagged shell, and Run
 uses the checkout-local development database while exercising this same
-random-port path.
+random-port path. The bundled `__desktop-connect` command exposes this same
+control-socket discovery/bootstrap operation to thin native shells without
+making the filesystem-protected endpoint protocol platform-UI-specific.
 
 ### Phase 2: add desktop window routes and lifecycle
 
@@ -393,8 +395,9 @@ window action implicitly interrupts a head.
 
 ### Phase 3: integrate the Linux desktop
 
-- Add desktop entry, icons, application ID, file/directory portals, external
-  links, and notifications.
+- [x] Stage a Freedesktop desktop entry, hicolor icon, and stable application ID
+  in the explicit Linux build output.
+- Add file/directory portals and native notifications.
 - Route notification clicks and secondary activations to exact windows.
 - Add optional StatusNotifier integration without making it required.
 - Verify accessibility, IME, clipboard, drag/drop, high-DPI, multi-monitor, and

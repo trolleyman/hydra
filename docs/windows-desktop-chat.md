@@ -260,10 +260,13 @@ the persistent profile's ordinary HttpOnly cookie. App-launched backends require
 this authentication for all TCP clients even when deploy configuration has no
 key; an ephemeral secret is generated in memory for that backend lifetime. Both new and reused servers
 must now advertise the same desktop protocol in their live status response; an
-absent or mismatched value is rejected before a window opens. Reused-daemon auth still
-needs the portable Windows control endpoint from Phase 2; that port should
-consume the versioned, PID-bound web endpoint ownership record already used by
-the Linux shell rather than retaining the fixed-port probe.
+absent or mismatched value is rejected before a window opens. The shell now
+invokes the shared bundled `__desktop-connect` contract first and no longer
+probes a fixed TCP port. On Windows that command deliberately reports the
+still-unimplemented native daemon transport, so the shell falls back to its
+private ready-file launch until Phase 2 supplies the portable control endpoint.
+Once that backend lands, the same shell code will reuse its versioned, PID-bound
+endpoint and control-channel bootstrap without another discovery protocol.
 
 ### Phase 2: make the bundled backend native
 

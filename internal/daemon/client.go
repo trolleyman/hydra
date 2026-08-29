@@ -51,6 +51,17 @@ func unixHTTPClient(sock string) *http.Client {
 // Connect returns a client for the user-global daemon, auto-starting it if
 // needed and selecting or registering projectRoot for subsequent operations.
 func Connect(ctx context.Context, projectRoot string) (*Client, error) {
+	return errtrace.Wrap2(connect(ctx, projectRoot, EnsureRunning))
+}
+
+// ConnectDesktop connects to the user-global daemon and marks a newly started
+// instance as desktop-owned, which selects a random TCP port and mandatory web
+// authentication. Existing service-managed daemons are reused unchanged.
+func ConnectDesktop(ctx context.Context, projectRoot string) (*Client, error) {
+	return errtrace.Wrap2(connect(ctx, projectRoot, EnsureDesktopRunning))
+}
+
+func connect(ctx context.Context, projectRoot string, ensure func(context.Context, string) error) (*Client, error) {
 	sock, err := SocketPath(projectRoot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -74,7 +85,7 @@ func Connect(ctx context.Context, projectRoot string) (*Client, error) {
 		running = false
 	}
 	if !running {
-		if err := EnsureRunning(ctx, projectRoot); err != nil {
+		if err := ensure(ctx, projectRoot); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 	}
