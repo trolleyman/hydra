@@ -301,17 +301,22 @@ export class DefaultService {
     /**
      * Ensure the local "hydra-agents" git remote exists so the user can check out and follow head branches
      * @param projectId
+     * @param agentId
      * @returns TrackRemoteResponse OK
      * @throws ApiError
      */
     public ensureTrackRemote(
         projectId: string,
+        agentId: string,
     ): CancelablePromise<TrackRemoteResponse> {
         return this.httpRequest.request({
             method: 'POST',
             url: '/api/projects/{project_id}/track-remote',
             path: {
                 'project_id': projectId,
+            },
+            query: {
+                'agent_id': agentId,
             },
             errors: {
                 404: `Not Found`,

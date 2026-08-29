@@ -209,7 +209,7 @@ func gitOpFromMCP(req mcpserver.GitOpRequest) mcpserver.GitOpResult {
 		Mode: req.Mode, To: req.To, Unstage: req.Unstage, Confirm: req.Confirm,
 		Add:    add,
 		Commit: req.Commit,
-		Base:   req.Base, Plan: plan,
+		Base:   req.Base, Onto: req.Onto, Plan: plan,
 		Ref: req.Ref, NoFF: req.NoFF,
 		Stash: req.Stash, StashRef: req.StashRef, IncludeUntracked: req.IncludeUntracked,
 	})

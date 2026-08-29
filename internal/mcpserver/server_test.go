@@ -205,6 +205,20 @@ func TestGitCommitHiddenWhenUnwired(t *testing.T) {
 	}
 }
 
+func TestGitRebaseOntoArguments(t *testing.T) {
+	req, validation := parseGitOp("git_rebase", json.RawMessage(`{
+		"base":"old-base",
+		"onto":"main",
+		"plan":[{"commit":"abc123","action":"pick"}]
+	}`))
+	if validation != "" {
+		t.Fatalf("parseGitOp validation: %s", validation)
+	}
+	if req.Op != "rebase" || req.Base != "old-base" || req.Onto != "main" || len(req.Plan) != 1 {
+		t.Fatalf("git_rebase routed as %+v", req)
+	}
+}
+
 func TestReviewToolsHiddenWhenUnwired(t *testing.T) {
 	deps := Deps{ListAvailable: func() []Candidate { return nil }, RequestAccess: func(string) (bool, string) { return false, "" }}
 	resps := runLines(t, deps, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)

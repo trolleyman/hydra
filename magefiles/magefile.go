@@ -11,10 +11,12 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"braces.dev/errtrace"
@@ -486,12 +488,273 @@ func ensureToolsEnv() {
 	}
 }
 
+func useDevelopmentDatabase() error {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if os.Getenv("HYDRA_DB_PATH") == "" {
+		dbPath := paths.GetDBPathFromProjectRoot(projectRoot)
+		if err := os.Setenv("HYDRA_DB_PATH", dbPath); err != nil {
+			return errtrace.Wrap(err)
+		}
+		fmt.Printf("%sdev database:%s %s\n", colorDim, colorReset, displayPath(dbPath))
+	}
+	return nil
+}
+
+func useDevelopmentRuntime() error {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if os.Getenv("HYDRA_RUNTIME_NAMESPACE") == "" {
+		namespace := "checkout-dev:" + projectRoot
+		if err := os.Setenv("HYDRA_RUNTIME_NAMESPACE", namespace); err != nil {
+			return errtrace.Wrap(err)
+		}
+		fmt.Printf("%sdev runtime:%s isolated for %s\n", colorDim, colorReset, displayPath(projectRoot))
+	}
+	return nil
+}
+
 func Run() error {
 	ensureToolsEnv()
+	if err := useDevelopmentDatabase(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := useDevelopmentRuntime(); err != nil {
+		return errtrace.Wrap(err)
+	}
 	addGoBuildDeps()
 	args := append([]string{"run"}, goBuildTags(false)...)
 	args = append(args, "./", "server")
 	return errtrace.Wrap(runV("go", args...))
+}
+
+// BuildDesktop builds the native desktop application for the host platform.
+// Windows packaging requires HYDRA_PORTABLE_GIT to name an extracted official
+// PortableGit distribution of the matching architecture.
+func BuildDesktop() error {
+	switch runtime.GOOS {
+	case "linux":
+		return errtrace.Wrap(BuildDesktopLinux())
+	case "darwin":
+		return errtrace.Wrap(BuildDesktopMac())
+	case "windows":
+		return errtrace.Wrap(BuildDesktopWindows())
+	default:
+		return errtrace.Wrap(fmt.Errorf("desktop builds are unsupported on %s", runtime.GOOS))
+	}
+}
+
+// BuildDesktopLinux builds the Linux GTK/WebKitGTK application explicitly.
+func BuildDesktopLinux() error {
+	if runtime.GOOS != "linux" {
+		return errtrace.Wrap(fmt.Errorf("the Linux desktop app requires a Linux host, not %s", runtime.GOOS))
+	}
+	addGoBuildDeps()
+	output := filepath.Join("dist", "linux", "hydra-desktop")
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	args := append([]string{"build"}, goBuildTags(false, "hydra_desktop")...)
+	args = append(args, "-o", output, "./cmd/hydra-desktop")
+	if err := runV("go", args...); err != nil {
+		return errtrace.Wrap(err)
+	}
+	share := filepath.Join("dist", "linux", "share")
+	applications := filepath.Join(share, "applications")
+	icons := filepath.Join(share, "icons", "hicolor", "512x512", "apps")
+	if err := os.MkdirAll(applications, 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := os.MkdirAll(icons, 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := sh.Copy(filepath.Join(applications, "dev.hydra.desktop"), filepath.Join("desktop", "linux", "dev.hydra.desktop")); err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(sh.Copy(filepath.Join(icons, "dev.hydra.desktop.png"), filepath.Join("web", "public", "android-chrome-512x512.png")))
+}
+
+// BuildDesktopDeb builds an installable Ubuntu/Debian package for the host
+// architecture. The package uses the distro GTK/WebKitGTK runtime and leaves
+// user configuration, databases, and projects untouched on removal.
+func BuildDesktopDeb() error {
+	if runtime.GOOS != "linux" {
+		return errtrace.Wrap(fmt.Errorf("the .deb desktop package requires a Linux host, not %s", runtime.GOOS))
+	}
+	if _, err := exec.LookPath("dpkg-deb"); err != nil {
+		return errtrace.Wrap(errors.New("dpkg-deb is required to build the Linux desktop package"))
+	}
+	if err := BuildDesktopLinux(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	arch := map[string]string{"amd64": "amd64", "arm64": "arm64"}[runtime.GOARCH]
+	if arch == "" {
+		return errtrace.Wrap(fmt.Errorf("the .deb desktop package does not support %s", runtime.GOARCH))
+	}
+	version := strings.TrimPrefix(getVersion(), "v")
+	version = strings.ReplaceAll(version, "-", "+")
+	if version == "" || version == "dev" {
+		version = "0.0.0+dev"
+	} else if version[0] < '0' || version[0] > '9' {
+		version = "0.0.0+" + version
+	}
+	root := filepath.Join("dist", "linux", "deb-root")
+	if err := os.RemoveAll(root); err != nil {
+		return errtrace.Wrap(err)
+	}
+	paths := []string{
+		filepath.Join(root, "DEBIAN"),
+		filepath.Join(root, "usr", "bin"),
+		filepath.Join(root, "usr", "share", "applications"),
+		filepath.Join(root, "usr", "share", "icons", "hicolor", "512x512", "apps"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	control := fmt.Sprintf("Package: hydra-desktop\nVersion: %s\nSection: devel\nPriority: optional\nArchitecture: %s\nMaintainer: Hydra contributors\nDepends: libgtk-4-1, libwebkitgtk-6.0-4\nDescription: Desktop application for Hydra AI orchestration\n Run and review AI coding agents from a native Linux application.\n", version, arch)
+	if err := os.WriteFile(filepath.Join(root, "DEBIAN", "control"), []byte(control), 0o644); err != nil {
+		return errtrace.Wrap(err)
+	}
+	files := [][2]string{
+		{filepath.Join("dist", "linux", "hydra-desktop"), filepath.Join(root, "usr", "bin", "hydra-desktop")},
+		{filepath.Join("desktop", "linux", "dev.hydra.desktop"), filepath.Join(root, "usr", "share", "applications", "dev.hydra.desktop")},
+		{filepath.Join("web", "public", "android-chrome-512x512.png"), filepath.Join(root, "usr", "share", "icons", "hicolor", "512x512", "apps", "dev.hydra.desktop.png")},
+	}
+	for _, file := range files {
+		if err := sh.Copy(file[1], file[0]); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	output := filepath.Join("dist", "linux", fmt.Sprintf("hydra-desktop_%s_%s.deb", version, arch))
+	return errtrace.Wrap(runV("dpkg-deb", "--build", "--root-owner-group", root, output))
+}
+
+// BuildDesktopMac builds the AppKit application explicitly on macOS.
+func BuildDesktopMac() error {
+	if runtime.GOOS != "darwin" {
+		return errtrace.Wrap(fmt.Errorf("the macOS desktop app requires a macOS host, not %s", runtime.GOOS))
+	}
+	return errtrace.Wrap(runV("bash", "desktop/macos/build-app.sh"))
+}
+
+// BuildDesktopWindows builds the Windows Forms/WebView2 application. The target
+// architecture follows the host; HYDRA_PORTABLE_GIT supplies the matching Git.
+func BuildDesktopWindows() error {
+	portableGit := os.Getenv("HYDRA_PORTABLE_GIT")
+	if portableGit == "" {
+		return errtrace.Wrap(errors.New("set HYDRA_PORTABLE_GIT to an extracted official PortableGit directory"))
+	}
+	powerShell := "powershell"
+	if _, err := exec.LookPath("pwsh"); err == nil {
+		powerShell = "pwsh"
+	}
+	targetRuntime := "win-x64"
+	if runtime.GOARCH == "arm64" {
+		targetRuntime = "win-arm64"
+	}
+	return errtrace.Wrap(runV(powerShell, "-NoProfile", "-File", "desktop/windows/build-app.ps1",
+		"-Runtime", targetRuntime, "-PortableGitDirectory", portableGit))
+}
+
+// BuildDesktopAll is the common target for every leg of the desktop build matrix.
+// Native UI toolchains are host-only, so each Linux/macOS/Windows runner builds
+// and validates its own artifact rather than cross-compiling the other two.
+func BuildDesktopAll() error {
+	return errtrace.Wrap(BuildDesktop())
+}
+
+// RunDesktop builds and runs the native desktop application for the host using
+// the production runtime and OS-standard user database.
+func RunDesktop() error {
+	ensureToolsEnv()
+	if err := BuildDesktop(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(runDesktop(false))
+}
+
+// RunDesktopLocal builds and runs the native desktop application with the
+// checkout-local database and runtime used by mage run.
+func RunDesktopLocal() error {
+	ensureToolsEnv()
+	if err := useDevelopmentDatabase(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := useDevelopmentRuntime(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := BuildDesktop(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(runDesktop(true))
+}
+
+func runDesktop(local bool) error {
+	switch runtime.GOOS {
+	case "linux":
+		binary := filepath.Join(".", "dist", "linux", "hydra-desktop")
+		if local {
+			return errtrace.Wrap(runDesktopLinuxDevelopment(binary))
+		}
+		return errtrace.Wrap(runV(binary))
+	case "darwin":
+		// Execute the bundle binary so local mode's database and runtime namespace
+		// reach the bundled backend. LaunchServices does not reliably preserve a
+		// terminal process's environment.
+		return errtrace.Wrap(runV(filepath.Join(".", "dist", "macos", "Hydra.app", "Contents", "MacOS", "Hydra")))
+	case "windows":
+		targetRuntime := "win-x64"
+		if runtime.GOARCH == "arm64" {
+			targetRuntime = "win-arm64"
+		}
+		return errtrace.Wrap(runV(filepath.Join("dist", "windows", targetRuntime, "Hydra", "Hydra.exe")))
+	default:
+		return errtrace.Wrap(fmt.Errorf("desktop apps are unsupported on %s", runtime.GOOS))
+	}
+}
+
+// runDesktopLinuxDevelopment keeps Mage alive across Ctrl+C so it can stop the
+// detached daemon in this run's HYDRA_RUNTIME_NAMESPACE. The hidden stop command
+// inherits that namespace and only stops a desktop-managed daemon. It therefore
+// leaves both the global daemon and an existing mage run daemon untouched.
+func runDesktopLinuxDevelopment(binary string) error {
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	cmd := exec.Command(binary)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	var runErr error
+	select {
+	case runErr = <-done:
+	case <-ctx.Done():
+		_ = cmd.Process.Signal(os.Interrupt)
+		select {
+		case runErr = <-done:
+		case <-time.After(5 * time.Second):
+			_ = cmd.Process.Kill()
+			runErr = <-done
+		}
+	}
+	cleanup := exec.Command(binary, "__stop-daemon")
+	cleanup.Stdout = os.Stdout
+	cleanup.Stderr = os.Stderr
+	cleanupErr := cleanup.Run()
+	if ctx.Err() != nil && runErr != nil {
+		runErr = nil
+	}
+	return errtrace.Wrap(errors.Join(runErr, cleanupErr))
 }
 
 func Build() {

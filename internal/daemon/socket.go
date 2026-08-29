@@ -5,7 +5,6 @@ package daemon
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,14 +12,28 @@ import (
 	"braces.dev/errtrace"
 )
 
+const runtimeNamespaceEnv = "HYDRA_RUNTIME_NAMESPACE"
+
 // runtimeDir returns a per-user directory for hydra runtime files (the control
 // socket, lock, daemon log). It prefers XDG_RUNTIME_DIR, then TMPDIR, then /tmp.
 func runtimeDir() string {
 	if rt := os.Getenv("XDG_RUNTIME_DIR"); rt != "" {
-		return filepath.Join(rt, "hydra")
+		return namespacedRuntimeDir(filepath.Join(rt, "hydra"))
 	}
 	base := os.TempDir()
-	return filepath.Join(base, fmt.Sprintf("hydra-%d", os.Getuid()))
+	return namespacedRuntimeDir(filepath.Join(base, fmt.Sprintf("hydra-%d", os.Getuid())))
+}
+
+// namespacedRuntimeDir gives development and test instances their own complete
+// daemon control plane. Hashing the caller-supplied namespace keeps it opaque
+// and prevents path separators or traversal from escaping the runtime directory.
+func namespacedRuntimeDir(base string) string {
+	namespace := os.Getenv(runtimeNamespaceEnv)
+	if namespace == "" {
+		return base
+	}
+	sum := sha256.Sum256([]byte(namespace))
+	return filepath.Join(base, fmt.Sprintf("instance-%x", sum[:8]))
 }
 
 // ensureRuntimeDir creates the runtime dir with 0700 perms and returns it.
@@ -34,55 +47,49 @@ func ensureRuntimeDir() (string, error) {
 	return dir, nil
 }
 
-// projectKey returns a short stable hash of the (normalized) project root, used
-// to name the socket/lock/log so each project gets its own daemon.
-func projectKey(projectRoot string) string {
-	sum := sha256.Sum256([]byte(projectRoot))
-	return hex.EncodeToString(sum[:])[:16]
-}
-
-// SocketPath returns the unix socket path for the project's daemon.
-func SocketPath(projectRoot string) (string, error) {
+// SocketPath returns the user-global daemon socket. projectRoot is retained in
+// the signature for callers compiled against the former per-project contract.
+func SocketPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".sock"), nil
+	return filepath.Join(dir, "daemon.sock"), nil
 }
 
-// lockPath returns the single-instance lock path for the project's daemon.
-func lockPath(projectRoot string) (string, error) {
+// lockPath returns the single-instance lock path for the user-global daemon.
+func lockPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".lock"), nil
+	return filepath.Join(dir, "daemon.lock"), nil
 }
 
 // logPath returns the daemon's log file path for the project.
-func logPath(projectRoot string) (string, error) {
+func logPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".log"), nil
+	return filepath.Join(dir, "daemon.log"), nil
 }
 
 // pidPath returns the file holding the running daemon's PID.
-func pidPath(projectRoot string) (string, error) {
+func pidPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".pid"), nil
+	return filepath.Join(dir, "daemon.pid"), nil
 }
 
 // infoPath returns the file holding the running daemon's binary stamp, used to
 // detect when the on-disk hydra binary has been replaced (an upgrade).
-func infoPath(projectRoot string) (string, error) {
+func infoPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".info"), nil
+	return filepath.Join(dir, "daemon.info"), nil
 }

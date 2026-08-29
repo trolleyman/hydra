@@ -11,6 +11,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -82,7 +83,11 @@ func runDaemon(_ *cobra.Command, _ []string) error {
 		} else if tcpLn, err := webListener(addr); err != nil {
 			log.Printf("warn: daemon: web UI listen %s failed: %v", addr, err)
 		} else {
-			log.Printf("daemon: web UI on http://%s", addr)
+			webURL := webURLForAddr(tcpLn.Addr())
+			if err := daemon.WriteWebURL(projectRoot, webURL); err != nil {
+				log.Printf("warn: publish daemon web UI address: %v", err)
+			}
+			log.Printf("daemon: web UI on %s", webURL)
 			attachSelfUpdate(rt, tcpLn)
 			go func() { _ = srv.Serve(tcpLn) }()
 		}

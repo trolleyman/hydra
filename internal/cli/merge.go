@@ -38,7 +38,7 @@ var mergeCmd = &cobra.Command{
 			return errtrace.Wrap(err)
 		}
 
-		store, err := db.Open(projectRoot)
+		store, err := db.OpenGlobal(projectRoot)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}

@@ -1,9 +1,10 @@
 # Windows support: current state and implementation plan
 
-Status: **planning**. Nothing below has been implemented yet; this doc records
-the July 2026 audit of the Windows stubs and the proposed design for a Windows
-port. Companion to [macos-support.md](macos-support.md) - several work items are
-shared and are called out as such. Update the checklists as pieces land.
+Status: **native backend planning; desktop shell partially implemented**. The
+Windows Forms/WebView2 application and packaging scaffold live under
+`desktop/windows`, but the ConPTY, daemon transport, and sandbox files audited
+below remain explicit unsupported stubs. Companion to
+[macos-support.md](macos-support.md) - several work items are shared.
 
 Packaging that native runtime as a standalone Windows desktop application, with
 full Hydra and focused chat windows, is covered by

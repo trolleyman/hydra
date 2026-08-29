@@ -12,9 +12,10 @@ it becomes an architectural commitment.
 The macOS sandbox itself is covered by [macos-support.md](macos-support.md).
 Structured provider chat is covered by [chat-mode.md](chat-mode.md). This plan
 builds on both and does not replace either.
-The standalone Windows application is planned separately in
-[windows-desktop-chat.md](windows-desktop-chat.md); both plans branch from the
-same shared focused-session foundation.
+The standalone Windows and Linux applications are planned separately in
+[windows-desktop-chat.md](windows-desktop-chat.md) and
+[linux-desktop.md](linux-desktop.md); all three plans branch from the same shared
+focused-session foundation.
 
 ## Shared implementation status
 
@@ -275,7 +276,8 @@ that tests the difficult parts with the existing production frontend:
 - native notification permission and click routing;
 - popup/context-menu behavior;
 - accessibility and text input, including IME;
-- app activation, deep links and menu commands;
+- app activation, the shared [`hydra://` grammar](desktop-deep-links.md), and
+  menu commands;
 - bundling and launching the Go service;
 - development against Vite without changing production routing.
 
@@ -410,10 +412,33 @@ for input without becoming a second session-management UI.
   the runtime shape is stable.
 
 Status: the thin Swift/AppKit shell, shared multi-window WebKit configuration,
-existing-server probe, bundled-backend launch, OS-assigned port handshake,
-development `.app` builder, background-after-last-window behavior, and guarded
-Quit path are implemented. The build is ad-hoc signed rather than unsigned so
-the bundle is internally consistent. WebSocket, text-input, accessibility,
+control-socket daemon reuse/startup, PID-bound random-port discovery, private
+ready-file compatibility fallback, development `.app` builder,
+background-after-last-window behavior, and guarded
+Quit path are implemented. App-launched backends now publish a one-minute,
+single-use auth bootstrap credential in their private atomic readiness record;
+the first WKWebView redeems it for the shared HttpOnly cookie without exposing
+the persistent auth key. App-launched backends require this authentication for
+all TCP clients even when deploy configuration has no key; an ephemeral secret
+is generated in memory for that backend lifetime. Protocol 3 carries version,
+build, project, and protocol compatibility metadata in the trusted control-socket
+or private ready-file response. AppKit does not query protected `/api/status`
+over TCP before the webview redeems its credential. The bundled CLI now performs daemon
+reuse and startup through the shared control socket, reads the versioned,
+PID-bound endpoint record, and returns a fresh bootstrap credential to AppKit;
+the fixed-port probe is gone. It also returns the selected project ID, so the
+first focused window opens the folder chosen by the user rather than the
+daemon's boot project. Older development bundles retain the private ready-file
+launch only when the bundled CLI does not recognise `__desktop-connect`;
+connection, authentication, and compatibility failures are surfaced without
+starting a competing backend. Quit-time running-session checks use the trusted
+control socket rather than an unauthenticated native HTTP client. Native navigation compares the
+complete scheme/host/effective-port origin; every other HTTP(S) origin opens in
+the system browser and non-web origins are blocked from the privileged webview.
+The WebKit script bridge uses a weak proxy and is removed during window close,
+so a closed window does not remain retained by its user-content controller.
+The build is ad-hoc signed rather than unsigned so the
+bundle is internally consistent. WebSocket, text-input, accessibility,
 notification, and lifecycle acceptance still require the development Mac.
 
 This phase makes no focused-session backend changes. It prevents a large product
@@ -443,8 +468,8 @@ refactor from depending on an untested desktop wrapper.
   possible.
 
 Status: the stored model, branchless lifecycle, shared spawn API, watcher skips,
-and existing chat protocol reuse are built. First-submit draft creation and
-backend-derived capability fields remain.
+existing chat protocol reuse, first-submit creation, and backend-derived native
+sandbox capability fields are built.
 
 ### Phase 3: enforce permissions and guarded commits
 
@@ -470,9 +495,18 @@ built. OS-specific sandbox validation and the concurrent-editor warning remain.
   browser-safe fallback dialog for development.
 - Make every focused conversation discoverable and openable from full Hydra.
 
-Status: the reusable chat-only layout and its permission controls are built on
-the existing agent route. The empty draft flow, dedicated chrome-free route,
-history/project controls, switching behavior, and native close bridge remain.
+Status: the reusable chat-only layout and its permission controls are built. A
+dedicated `/focused/<project>` route now opens the empty focused composer and
+creates the branchless session only when its first prompt is submitted; the
+resulting agent route retains the chrome-free desktop presentation across
+reloads. The compact window now has project and live focused-history selectors,
+New Chat/Full Hydra actions, and a transport-neutral bridge used by AppKit and
+WebView2 with browser fallbacks. Stop-and-switch behavior remains. Linux now
+consumes the shared new-window and close operations too. Live and loaded
+archived focused history share the selector.
+AppKit and WebView2 now offer Stop and close,
+Close and keep running, and Cancel for an active focused turn; stopping happens
+through the authenticated page before native code permits the close.
 
 ### Phase 5: desktop lifecycle and notifications
 
@@ -483,22 +517,55 @@ history/project controls, switching behavior, and native close bridge remain.
 - Add recovery UI for backend launch failure, incompatible versions and a stale
   ownership record.
 
-Status: New Full Window/New Focused Chat commands, one-process ownership,
+Status: New Full Window/New Focused Chat commands, shared-daemon ownership,
 last-window persistence, incompatible-version refusal, backend-exit reporting,
 and active-session Quit confirmation are implemented in the initial shell.
-Frontmost-project tracking, menu-bar state, native notifications, close-window
-active-turn confirmation, and richer stale-ownership recovery remain.
+Frontmost-project tracking, menu-bar state, native notifications, and richer
+stale-ownership recovery remain.
 
 ### Phase 6: distribution
 
 - Produce universal or separate arm64/amd64 builds as appropriate.
-- Define application support, cache, logs and database locations using macOS
-  conventions without breaking existing CLI users.
+- [x] Put the shared agent/history database under
+  `~/Library/Application Support/Hydra/db.sqlite3`, with transactional import
+  from retained project-local databases for desktop and CLI users.
+- Define the remaining application support, cache, and log locations using
+  macOS conventions without breaking existing CLI users.
 - Sign and notarize the app and bundled executable.
 - Add an update mechanism only after service ownership and active-session
   behavior are proven; reuse the existing verified atomic update design where
   it fits.
 - Document migration between CLI Hydra and `Hydra.app` installations.
+
+## Remaining macOS work
+
+In priority order:
+
+1. Complete and validate the macOS security backend: provider config/gate/MCP
+   delivery, per-head temporary storage, focused read-only/edit Seatbelt rules,
+   and a real hard-network implementation. Do not advertise a network posture
+   which currently degrades to network-off as equivalent.
+2. Finish focused lifecycle: Stop and switch / Keep running / Cancel when
+   changing project, frontmost-project tracking, concurrent-editor warning, and
+   richer stale/backend-failure recovery.
+3. Add native notifications and activation routing for questions, approvals,
+   completion, failure, and backend exit; add menu-bar state only as an optional
+   convenience, not as the only reopen/quit path.
+4. Run the native acceptance matrix on supported Intel and Apple Silicon Macs:
+   shared cookies/WebSockets, IME, VoiceOver/keyboard navigation,
+   Retina/non-Retina and multi-display restore, Spaces/full screen, uploads,
+   clipboard, external links, sleep/wake, and lifecycle behavior.
+5. Define all support/cache/log locations, produce universal or paired
+   arm64/amd64 artifacts, sign every executable, notarize and staple the app,
+   and test Gatekeeper from a quarantined download.
+6. Implement coordinated signed updates with active-head deferral, readiness
+   rollback, database compatibility, downgrade refusal, CLI coexistence,
+   repair/uninstall-with-data-preserved, and clean-VM upgrade tests from the last
+   released version.
+
+Items 4-6 require macOS builders, real target-OS execution, and release signing
+credentials. Their detailed acceptance criteria are in
+[desktop-native-validation.md](desktop-native-validation.md).
 
 ## Validation
 
@@ -535,6 +602,10 @@ Run the normal project checks (`mage build`, frontend lint/typecheck and Go
 tests), then validate Seatbelt and the signed app on real macOS hardware. Native
 window, notification, text-input and lifecycle behavior cannot be accepted from
 cross-compilation alone.
+
+Use [desktop-native-validation.md](desktop-native-validation.md) for the exact
+IME, accessibility, notification, multiple-display, and upgrade test scope and
+the automation/manual boundary.
 
 ## Deliberately deferred
 

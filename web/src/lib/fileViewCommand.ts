@@ -1,5 +1,5 @@
 // A shell command an agent runs to LOOK at a file - `sed -n 40,110p f`,
-// `cat f`, `head -50 f`, `tail -n +200 f` - is a Read by another name. Every
+// `cat f`, `nl -ba f`, `head -50 f`, `tail -n +200 f` - is a Read by another name. Every
 // agent reaches for one (Codex reads files this way exclusively), and its output
 // reached the chat card as an anonymous wall of terminal text: no highlighting,
 // no line numbers, no clue which file it came from without re-reading the
@@ -217,6 +217,16 @@ export function parseView(words: string[], raw: string): FileView | null {
     // the bytes printed.
     if (files.length !== 1 || flags.some((f) => f !== '-n' && f !== '--number')) return null
     return { ...base, path: files[0], start: 1, end: null, numbered: flags.length > 0 }
+  }
+
+  if (tool === 'nl') {
+    const files = args.filter(isOperand)
+    const flags = args.filter((a) => !isOperand(a))
+    // GNU/BSD nl differ in their defaults for blank lines, and flags can change
+    // the separator or number format. Accept only the common spelling agents use
+    // to number every line with nl's standard tab separator.
+    if (files.length !== 1 || flags.length !== 1 || (flags[0] !== '-ba' && flags[0] !== '--body-numbering=a')) return null
+    return { ...base, path: files[0], start: 1, end: null, numbered: true }
   }
 
   if (tool === 'git') {

@@ -66,12 +66,20 @@ internal sealed class HydraApplicationContext : ApplicationContext
         OpenWindow(HydraWindowKind.Full);
     }
 
-    internal void OpenWindow(HydraWindowKind kind)
+    internal void OpenWindow(HydraWindowKind kind, string? projectId = null)
     {
-        var window = new HydraForm(kind, backend, webViewEnvironment, this);
+        var window = new HydraForm(kind, backend, webViewEnvironment, this, projectId);
         windows.Add(window);
         window.FormClosed += (_, _) => windows.Remove(window);
         window.Show();
+    }
+
+    internal void SetActiveProject(string projectId)
+    {
+        if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            Application.UserAppDataRegistry.SetValue("LastProjectId", projectId);
+        }
     }
 
     internal async Task ExitAsync()

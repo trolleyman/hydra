@@ -35,6 +35,9 @@ func binaryStamp() (string, error) {
 // (it puts INVOCATION_ID in every service's environment). Older single-line info
 // files still parse, since only the first line is ever compared.
 func WriteDaemonFiles(projectRoot string) error {
+	// A previous process may have crashed without cleaning up its listener
+	// record. Do not expose that stale address while this daemon starts.
+	removeWebURL(projectRoot)
 	pp, err := pidPath(projectRoot)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -53,6 +56,8 @@ func WriteDaemonFiles(projectRoot string) error {
 	body := stamp
 	if os.Getenv("INVOCATION_ID") != "" {
 		body += "\nmanaged=systemd"
+	} else if os.Getenv("HYDRA_DESKTOP_SERVICE") == "1" {
+		body += "\nmanaged=desktop"
 	}
 	return errtrace.Wrap(os.WriteFile(ip, []byte(body), 0o600))
 }
@@ -70,7 +75,7 @@ func readDaemonInfo(projectRoot string) (stamp string, serviceManaged bool, ok b
 	}
 	lines := strings.Split(string(data), "\n")
 	for _, l := range lines[1:] {
-		if strings.TrimSpace(l) == "managed=systemd" {
+		if strings.HasPrefix(strings.TrimSpace(l), "managed=") {
 			serviceManaged = true
 		}
 	}
@@ -87,6 +92,27 @@ func IsServiceManaged(projectRoot string) bool {
 	return managed
 }
 
+// IsDesktopManaged reports whether the running daemon in the selected runtime
+// namespace was started by a desktop app. Development launchers use this to
+// clean up only a daemon they own, leaving an attached foreground mage run
+// process alive.
+func IsDesktopManaged(projectRoot string) bool {
+	ip, err := infoPath(projectRoot)
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(ip)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n")[1:] {
+		if strings.TrimSpace(line) == "managed=desktop" {
+			return true
+		}
+	}
+	return false
+}
+
 // removeDaemonFiles cleans up the PID/info files at shutdown.
 func RemoveDaemonFiles(projectRoot string) {
 	if pp, err := pidPath(projectRoot); err == nil {
@@ -95,6 +121,7 @@ func RemoveDaemonFiles(projectRoot string) {
 	if ip, err := infoPath(projectRoot); err == nil {
 		_ = os.Remove(ip)
 	}
+	removeWebURL(projectRoot)
 }
 
 // isStale reports whether the running daemon was started from a now-replaced

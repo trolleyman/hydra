@@ -2926,6 +2926,9 @@ type RepositoryBranchesResponse struct {
 
 	// Current The repository's currently checked-out branch (HEAD), or "" when detached
 	Current string `json:"current"`
+
+	// Default The repository's default base branch, independent of the currently checked-out branch
+	Default string `json:"default"`
 }
 
 // RepositoryFileResponse defines model for RepositoryFileResponse.
@@ -3627,7 +3630,7 @@ type SpawnAgentRequest struct {
 	// AllowCommits Initially authorize Hydra's guarded commit operation for a focused head. Ignored for ordinary worktree heads.
 	AllowCommits *bool `json:"allow_commits,omitempty"`
 
-	// BaseBranch Base branch to create the worktree from (defaults to current branch)
+	// BaseBranch Base branch to create the worktree from (defaults to the repository's stable default branch)
 	BaseBranch *string `json:"base_branch,omitempty"`
 
 	// ChatMode Drive the head via its structured protocol and render a chat view instead of a terminal (Claude and Codex only; rejected for other agent types). The prompt is delivered as the first chat turn.
@@ -3666,6 +3669,9 @@ type SpawnAgentRequest struct {
 
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
+	// BuildId Backend build identity displayed in compatibility errors.
+	BuildId *string `json:"build_id,omitempty"`
+
 	// CanRestart Whether the server can restart itself in place (re-exec). False on platforms without exec.
 	CanRestart *bool `json:"can_restart,omitempty"`
 
@@ -3675,11 +3681,23 @@ type StatusResponse struct {
 	// DefaultProjectId Project ID of the default (CWD) project
 	DefaultProjectId *string `json:"default_project_id,omitempty"`
 
+	// DesktopProtocol Native desktop shell compatibility protocol.
+	DesktopProtocol *int `json:"desktop_protocol,omitempty"`
+
 	// Development Whether the server is being served out of a Hydra source checkout, which is what enables developer affordances such as the Chrome DevTools workspace endpoint.
 	Development *bool `json:"development,omitempty"`
 
 	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`
+
+	// RuntimeOs Host operating system reported by the backend.
+	RuntimeOs *string `json:"runtime_os,omitempty"`
+
+	// SandboxAvailable Whether the native sandbox backend required for ordinary heads is available.
+	SandboxAvailable *bool `json:"sandbox_available,omitempty"`
+
+	// SandboxDetail Why native sandboxing is unavailable or degraded.
+	SandboxDetail *string `json:"sandbox_detail"`
 
 	// SandboxError Error message if the sandbox backend is unavailable or misconfigured
 	SandboxError *string `json:"sandbox_error"`
@@ -4200,7 +4218,10 @@ type ToolStartedEventType string
 
 // TrackRemoteResponse defines model for TrackRemoteResponse.
 type TrackRemoteResponse struct {
-	// Remote The configured local remote name (e.g. "hydra-agents"). Check out and follow a head with `git checkout -t <remote>/<head-id>` then `git pull`.
+	// LocalBranchExists Whether the checkout already has a local branch named after the head. Existing branches should be checked out directly; only a missing branch should be created with `git checkout -t <remote>/<head-id>`.
+	LocalBranchExists bool `json:"local_branch_exists"`
+
+	// Remote The configured local remote name (e.g. "hydra-agents").
 	Remote string `json:"remote"`
 }
 
@@ -4792,6 +4813,11 @@ type GetRepositoryFileParams struct {
 type GetRepositoryTreeParams struct {
 	// Ref Git ref to read the tree from (defaults to HEAD)
 	Ref *string `form:"ref,omitempty" json:"ref,omitempty"`
+}
+
+// EnsureTrackRemoteParams defines parameters for EnsureTrackRemote.
+type EnsureTrackRemoteParams struct {
+	AgentId string `form:"agent_id" json:"agent_id"`
 }
 
 // ResolvePathParams defines parameters for ResolvePath.
@@ -7348,7 +7374,7 @@ type ServerInterface interface {
 	RestartServices(w http.ResponseWriter, r *http.Request, projectId string)
 	// Ensure the local "hydra-agents" git remote exists so the user can check out and follow head branches
 	// (POST /api/projects/{project_id}/track-remote)
-	EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string)
+	EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string, params EnsureTrackRemoteParams)
 	// Resolve a hand-typed folder path to an absolute one (expands "~" and resolves relative paths against home) and report what is there
 	// (GET /api/resolve-path)
 	ResolvePath(w http.ResponseWriter, r *http.Request, params ResolvePathParams)
@@ -9992,8 +10018,26 @@ func (siw *ServerInterfaceWrapper) EnsureTrackRemote(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params EnsureTrackRemoteParams
+
+	// ------------- Required query parameter "agent_id" -------------
+
+	if paramValue := r.URL.Query().Get("agent_id"); paramValue != "" {
+
+	} else {
+		siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "agent_id"})
+		return
+	}
+
+	err = runtime.BindQueryParameter("form", true, true, "agent_id", r.URL.Query(), &params.AgentId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.EnsureTrackRemote(w, r, projectId)
+		siw.Handler.EnsureTrackRemote(w, r, projectId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12942,6 +12986,7 @@ func (response RestartServices404JSONResponse) VisitRestartServicesResponse(w ht
 
 type EnsureTrackRemoteRequestObject struct {
 	ProjectId string `json:"project_id"`
+	Params    EnsureTrackRemoteParams
 }
 
 type EnsureTrackRemoteResponseObject interface {
@@ -15383,10 +15428,11 @@ func (sh *strictHandler) RestartServices(w http.ResponseWriter, r *http.Request,
 }
 
 // EnsureTrackRemote operation middleware
-func (sh *strictHandler) EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string) {
+func (sh *strictHandler) EnsureTrackRemote(w http.ResponseWriter, r *http.Request, projectId string, params EnsureTrackRemoteParams) {
 	var request EnsureTrackRemoteRequestObject
 
 	request.ProjectId = projectId
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.EnsureTrackRemote(ctx, request.(EnsureTrackRemoteRequestObject))

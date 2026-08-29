@@ -7,6 +7,14 @@ checkout or each other.
 It consists of a Go backend and a React frontend. The frontend is bundled into the binary, so it can be shipped as a
 single binary.
 
+Hydra stores agent and conversation history in one user-scoped database shared
+by CLI, browser-server, and desktop clients. Its native locations are
+`$XDG_STATE_HOME/hydra/db.sqlite3` on Linux (falling back to
+`~/.local/state/hydra`), `~/Library/Application Support/Hydra/db.sqlite3` on
+macOS, and `%LOCALAPPDATA%\Hydra\db.sqlite3` on Windows. Project-local
+`.hydra/local` directories continue to hold worktrees, caches, artifacts, logs,
+and other project-specific runtime files.
+
 ```shellsession
 $ hydra help
 Hydra is an AI agent orchestrator.
@@ -60,6 +68,13 @@ Use "hydra [command] --help" for more information about a command.
 - [aube](https://github.com/jdx/aube) (preferred) or [npm](https://www.npmjs.com/) (fallback; ships with Node) - see below
 - Git
 
+Building the experimental standalone Linux desktop shell additionally requires
+GTK 4 and WebKitGTK 6 development files. On Ubuntu 24.04 and derivatives:
+
+```bash
+sudo apt install libwebkitgtk-6.0-dev
+```
+
 Use [aube](https://github.com/jdx/aube) for frontend package installs and
 `package.json` scripts when it is on your `PATH`; fall back to **npm** when aube
 is unavailable. Mage follows the same preference. Both read and write the same
@@ -78,6 +93,56 @@ Run the server:
 ```bash
 mage run
 ```
+
+Build the experimental Linux desktop shell separately, then open a registered
+project. It reuses the user-global daemon or starts the bundled backend:
+
+```bash
+go build -tags hydra_desktop -o hydra-desktop ./cmd/hydra-desktop
+./hydra-desktop -project /path/to/project
+```
+
+For normal development, build or build-and-run the native app for the current
+operating system:
+
+```bash
+mage buildDesktop
+mage runDesktop
+mage runDesktopLocal
+```
+
+Installed desktop builds can be activated with constrained `hydra://` links;
+see [Desktop deep links](docs/desktop-deep-links.md) for the supported grammar,
+examples, platform status, and security rules.
+
+`buildDesktop` selects the current host. Release builders and platform-specific
+development can select explicitly with `mage buildDesktopLinux`,
+`mage buildDesktopMac`, or `mage buildDesktopWindows`; `mage buildDesktopAll`
+invokes the complete native build matrix and therefore belongs on an
+orchestrator with matching platform builders/toolchains.
+
+`mage runDesktop` behaves like an installed app: it uses the stable production
+runtime socket and OS-standard global database. `mage run` and
+`mage runDesktopLocal` instead use the checkout-local development database and
+the same checkout-specific runtime socket, so they can intentionally share one
+development backend. A directly launched desktop build also uses production
+state unless development environment variables are explicitly supplied. Runtime
+sockets stay in the OS runtime directory rather than persistent database storage;
+on Linux these are
+`$XDG_RUNTIME_DIR/hydra/daemon.sock` for production and a checkout-keyed child of
+`$XDG_RUNTIME_DIR/hydra/` for development. The desktop backend uses an OS-assigned
+loopback port. Windows builds additionally require `HYDRA_PORTABLE_GIT` to point
+at an extracted official PortableGit distribution.
+On Linux, closing `mage runDesktopLocal` or pressing Ctrl+C stops a detached
+desktop daemon in that checkout's namespace, but leaves an existing `mage run`
+daemon alive.
+
+The separate build keeps the normal `hydra` CLI free of GTK/WebKit runtime
+dependencies. The project flag is optional; without it the app opens the global
+service in Hydra's built-in Chat project. `-url http://127.0.0.1:<port>` remains
+available for shell development. Ctrl+N opens another native window sharing the
+same WebKit profile and backend. External HTTP(S) links open in the system
+browser; cross-origin redirects and non-web schemes are blocked in the WebView.
 
 Install it as a systemd --user service, so it comes up on login and survives
 your terminal closing:

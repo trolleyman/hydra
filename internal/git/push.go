@@ -176,6 +176,16 @@ func EnsureTrackRemote(ctx context.Context, projectRoot string) (string, error) 
 	return TrackRemoteName, nil
 }
 
+// LocalBranchExists reports whether name is an exact local branch. It uses the
+// full ref namespace so a same-named tag or remote-tracking ref cannot match.
+func LocalBranchExists(projectRoot, name string) bool {
+	if ValidateRef(name) != nil {
+		return false
+	}
+	_, err := gitOutput(projectRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+name)
+	return err == nil
+}
+
 // RemoteURL returns the fetch URL configured for remote, or "" if it has none.
 func RemoteURL(projectRoot, remote string) string {
 	if remote == "" {

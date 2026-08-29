@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, HydraWindowControllerDelegate {
     private let backend = BackendController()
     private let processPool = WKProcessPool()
     private var windows: [HydraWindowController] = []
@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         alert.runModal()
     }
 
-    private func openWindow(kind: HydraWindowKind) {
+    private func openWindow(kind: HydraWindowKind, projectID: String? = nil) {
         guard let baseURL = backend.baseURL else { return }
         let configuration = WKWebViewConfiguration()
         configuration.processPool = processPool
@@ -90,8 +90,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let controller = HydraWindowController(
             kind: kind,
             baseURL: baseURL,
-            defaultProjectID: backend.status?.defaultProjectId,
-            configuration: configuration
+            defaultProjectID: projectID ?? backend.status?.defaultProjectId,
+            bootstrapToken: backend.takeBootstrapToken(),
+            configuration: configuration,
+            desktopDelegate: self
         )
         controller.window?.delegate = self
         windows.append(controller)
@@ -99,9 +101,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func desktopWindowRequested(_ kind: HydraWindowKind, projectID: String?) {
+        openWindow(kind: kind, projectID: projectID)
+    }
+
+    func desktopWindowActivatedProject(_ projectID: String) {
+        UserDefaults.standard.set(projectID, forKey: "HydraLastProjectID")
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
+        windows.first(where: { $0.window === window })?.prepareForClose()
         windows.removeAll { $0.window === window }
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard windows.first(where: { $0.window === sender })?.activeTurn == true else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Close this window?"
+        alert.informativeText = "This agent is still working. Closing the window leaves it running in the background."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Close and Keep Running")
+        alert.addButton(withTitle: "Stop and Close")
+        let answer = alert.runModal()
+        if answer == .alertThirdButtonReturn {
+            windows.first(where: { $0.window === sender })?.requestStopAndClose()
+            return false
+        }
+        return answer == .alertSecondButtonReturn
     }
 
     private func chooseProjectRootIfNeeded() -> URL? {

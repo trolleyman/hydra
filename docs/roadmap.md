@@ -316,16 +316,26 @@ before starting. Grouped by area.
   non-nil `Worktree` as evidence that the checkout can be read or operated on.
   The shared branchless lifecycle, permission API, guarded commit path, full-Hydra
   spawn option, and chat-only React layout are built. This is the common base for
-  macOS, Windows, and Linux app branches. The initial macOS AppKit/WKWebView
-  shell, shared-server discovery/launch handshake, multi-window ownership, and
-  development `.app` packaging are built but still need on-device validation.
-  The Windows-native WebView2 shell, native notifications, packaging, the
-  first-message draft flow, and the dedicated chrome-free route remain.
-  See [macos-desktop-chat.md](macos-desktop-chat.md) for the macOS sequence and
-  [windows-desktop-chat.md](windows-desktop-chat.md) for the standalone Windows
-  shell, packaging, lifecycle, and release plan. Each app depends on closing its
-  security-critical platform gaps in [macos-support.md](macos-support.md) or
-  [windows-support.md](windows-support.md).
+  macOS, Windows, and Linux app branches. Initial native shells now exist for
+  AppKit/WKWebView, Windows Forms/WebView2, and GTK/WebKitGTK. The macOS and
+  Windows shells include shared-server launch handshakes and multi-window
+  foundations; the Linux shell includes user-global daemon discovery and
+  launch. All still need their respective native validation, notifications,
+  and release packaging. The shared dedicated focused route and first-message
+  creation flow are built; project/history switching and the native lifecycle
+  bridge remain.
+  See [macos-desktop-chat.md](macos-desktop-chat.md),
+  [windows-desktop-chat.md](windows-desktop-chat.md), and
+  [linux-desktop.md](linux-desktop.md) for the platform sequences. Each app also
+  depends on closing its security-critical platform gaps in
+  [macos-support.md](macos-support.md) or [windows-support.md](windows-support.md),
+  or validating the packaged Linux sandbox described by the Linux plan. Linux
+  now has native menus and safe-close prompts, native notifications with exact
+  conversation routing, GTK folder selection, constrained deep links, JSON
+  diagnostics, and a `mage buildDesktopDeb` preview target. The remaining Linux
+  work is real GNOME/KDE, Wayland/X11, IME, accessibility, multi-monitor,
+  notification activation, install/upgrade/removal, and packaged-sandbox test
+  coverage.
 
 - [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
 

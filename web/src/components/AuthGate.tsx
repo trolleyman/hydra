@@ -41,6 +41,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
     // inline so that async boundary is visible to the setState-in-effect rule.
     void (async () => {
       try {
+        // Native shells receive a one-time token through the trusted daemon
+        // control channel and place it in the URL fragment. Fragments are never
+        // sent in HTTP requests. Remove it from browser history before redeeming
+        // it for the same HttpOnly cookie used by the normal login flow.
+        const fragment = new URLSearchParams(window.location.hash.slice(1))
+        const desktopBootstrap = fragment.get('desktop-bootstrap')
+        if (desktopBootstrap) {
+          window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+          await fetch('/api/auth/desktop-redeem', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: desktopBootstrap }),
+          })
+        }
         const res = await fetch('/api/auth/status', { credentials: 'include' })
         if (!res.ok) {
           // Endpoint should always be reachable; if not, fail open and let the app

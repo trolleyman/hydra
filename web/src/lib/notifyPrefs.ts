@@ -19,18 +19,20 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { StorageKeys, readLocal, writeLocal, singleFieldStorage } from './storage'
 import { DEFAULT_ICON_URL } from './projectIconUrl'
+import { dismissNativeNotification, hasNativeNotifications, showNativeNotification } from './desktopBridge'
 
 // The browser's Notification.permission, plus a synthetic 'unsupported' for
 // environments without the API at all (some mobile/embedded webviews).
 export type NotifyPermission = NotificationPermission | 'unsupported'
 
 export function notificationsSupported(): boolean {
-  return typeof window !== 'undefined' && 'Notification' in window
+  return typeof window !== 'undefined' && (hasNativeNotifications() || 'Notification' in window)
 }
 
 // The live OS permission for this origin (re-read on demand; the user can change
 // it in browser settings behind our back).
 export function currentPermission(): NotifyPermission {
+  if (hasNativeNotifications()) return 'granted'
   if (!notificationsSupported()) return 'unsupported'
   return Notification.permission
 }
@@ -71,6 +73,10 @@ export const useNotifyStore = create<NotifyState>()(
         }
         if (!notificationsSupported()) {
           set({ enabled: false, permission: 'unsupported' })
+          return
+        }
+        if (hasNativeNotifications()) {
+          set({ permission: 'granted', enabled: true })
           return
         }
         let perm = Notification.permission
@@ -127,6 +133,7 @@ function forgetNotification(tag: string, n: Notification): void {
 // doesn't support the API. Callers use this when the condition that raised the
 // notification clears, so a stale prompt doesn't linger after it's moot.
 export function dismissNotification(tag: string): void {
+  if (dismissNativeNotification(tag)) return
   const entry = liveNotifications.get(tag)
   if (!entry) return
   if (entry.timer !== undefined) clearTimeout(entry.timer)
@@ -166,9 +173,16 @@ export function fireNotification(opts: {
   onClick: () => void
   autoDismissMs?: number
   icon?: string
+  url?: string
 }): void {
   const { enabled, permission } = useNotifyStore.getState()
   if (!enabled || permission !== 'granted' || !notificationsSupported()) return
+  if (showNativeNotification({
+    title: opts.title,
+    body: opts.body,
+    tag: opts.tag,
+    url: opts.url ?? window.location.origin + window.location.pathname,
+  })) return
   let n: Notification
   try {
     n = new Notification(opts.title, {

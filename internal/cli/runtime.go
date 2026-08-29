@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -31,6 +32,8 @@ import (
 	hydratests "github.com/trolleyman/hydra/internal/tests"
 )
 
+const desktopAuthKeyEnv = "HYDRA_DESKTOP_AUTH_KEY"
+
 // runtime bundles the long-lived server state shared by `hydra server` and the
 // `hydra __daemon` process: the session registry, DB, HTTP handler, and the
 // background pollers (already started).
@@ -43,6 +46,7 @@ type daemonRuntime struct {
 	previews    *preview.Manager
 	projectRoot string
 	deploy      config.DeployConfig
+	auth        *httppkg.Authenticator
 }
 
 // chatContextResolver maps a chat SESSION id to the project root, working
@@ -95,11 +99,13 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		log.Printf("Log: %s (set HYDRA_LOG_HTTP=1 for a line per HTTP request)", p)
 	}
 
-	store, err := db.Open(projectRoot)
+	store, err := db.OpenGlobal(projectRoot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	log.Printf("Database: %s", paths.GetDBPathFromProjectRoot(projectRoot))
+	if dbPath, pathErr := db.GlobalPath(); pathErr == nil {
+		log.Printf("Database: %s", dbPath)
+	}
 
 	reg := session.NewRegistry()
 	reg.SetOnExit(func(info session.Info) {
@@ -411,14 +417,13 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	}
 	sandbox.SweepOrphanScopes()
 
-	// Resume heads that were running before a restart (best-effort), clear out
-	// any ephemeral artifact checkouts left behind by a crash mid-generation, and
+	// Clear out any ephemeral artifact checkouts left behind by a crash
+	// mid-generation, and
 	// migrate any cache still in the old flat key layout to the current
 	// commit/<sha> & worktree/<hash> layout. Only touch projects that already have
 	// an artifacts dir, so we don't create empty ones in projects that never
 	// generated artifacts.
 	for _, root := range roots() {
-		resumeHeadsOnBoot(reg, store, root)
 		if _, err := os.Stat(paths.GetArtifactsDirFromProjectRoot(root)); err == nil {
 			mgr := artifactReg.Manager(root)
 			if n := mgr.MigrateLegacyLayout(); n > 0 {
@@ -433,13 +438,28 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		}
 	}
 
-	// Immediate first poller cycles before accepting requests.
+	// Run the status-file poller once before accepting requests. Head resume is
+	// deliberately NOT on this startup path: one unavailable provider/sandbox
+	// helper can consume its full timeout per head, which previously prevented the
+	// daemon from publishing its control socket and made desktop startup fail even
+	// though the daemon was healthy.
 	for _, root := range roots() {
-		heads.ReconcileLivenessOnce(reg, store, root, eventHub)
 		heads.RunJSONStatusPollerOnce(store, root)
 	}
 
-	go heads.RunLivenessReconciler(ctx, reg, store, roots, eventHub)
+	// Recover running heads in the background after the runtime has been built.
+	// Start liveness reconciliation only after recovery finishes; running it first
+	// would mark every not-yet-resumed DB session stopped. Requests may arrive in
+	// parallel, so resumeHeadsOnBoot rechecks the live registry before each head.
+	go func() {
+		for _, root := range roots() {
+			resumeHeadsOnBoot(reg, store, root)
+		}
+		for _, root := range roots() {
+			heads.ReconcileLivenessOnce(reg, store, root, eventHub)
+		}
+		heads.RunLivenessReconciler(ctx, reg, store, roots, eventHub)
+	}()
 	// On a head transitioning into a resting status (finished/waiting/needs_input)
 	// the agent has stopped editing, so pre-generate its diff artifacts at once
 	// rather than waiting for the periodic worktree-settle sweep below. Run in its
@@ -496,8 +516,31 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	desktopOwned := os.Getenv("HYDRA_DESKTOP_SERVICE") == "1" || os.Getenv(desktopReadyFileEnv) != ""
+	if desktopOwned {
+		// A native webview is authenticated through a one-time credential from the
+		// trusted control channel. Do not retain the ordinary localhost exemption:
+		// unrelated browsers and loopback applications must not inherit desktop
+		// access merely because they run on the same machine.
+		deployCfg.RequireLocalAuth = true
+		if inherited := os.Getenv(desktopAuthKeyEnv); inherited != "" {
+			deployCfg.AuthKey = inherited
+		} else if deployCfg.AuthKey == "" {
+			deployCfg.AuthKey, err = config.GenerateAuthKey()
+			if err != nil {
+				return nil, errtrace.Wrap(fmt.Errorf("generate desktop daemon auth key: %w", err))
+			}
+			// Self-update re-execs this process with its environment intact. Preserve
+			// the ephemeral key so existing webview cookies remain authenticated.
+			if err := os.Setenv(desktopAuthKeyEnv, deployCfg.AuthKey); err != nil {
+				return nil, errtrace.Wrap(fmt.Errorf("preserve desktop daemon auth key: %w", err))
+			}
+		}
+	}
 	auth := httppkg.NewAuthenticator(deployCfg.AuthKey, deployCfg.RequireLocalAuth)
 	switch {
+	case desktopOwned:
+		log.Printf("Auth: desktop-owned TCP listener requires a control-channel bootstrap credential")
 	case auth.Enabled() && deployCfg.RequireLocalAuth:
 		log.Printf("Auth: every request (localhost included) requires the key in %s", paths.GetDeployConfigPath(projectRoot))
 	case auth.Enabled():
@@ -532,6 +575,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		previews:    previewMgr,
 		projectRoot: projectRoot,
 		deploy:      deployCfg,
+		auth:        auth,
 	}, nil
 }
 
@@ -541,6 +585,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 // records the daemon pid/stamp, and serves the socket in the background.
 // Returns a cleanup function to run on shutdown.
 func serveUnixSocket(ctx context.Context, srv *http.Server, projectRoot string) (func(), error) {
+	if err := daemon.RefuseLegacyDaemons(ctx); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
 	if err := daemon.StopDaemon(ctx, projectRoot); err != nil {
 		return nil, errtrace.Wrap(err)
 	}

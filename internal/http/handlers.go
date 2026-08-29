@@ -25,6 +25,7 @@ import (
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/desktopcontract"
 	"github.com/trolleyman/hydra/internal/events"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -542,6 +543,16 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		}, nil
 	}
 
+	// Import the project-local history before publishing the project through the
+	// manager. Clients can never observe an empty project and create new global
+	// heads ahead of its delayed legacy import.
+	if err := s.DB.ImportLegacyProject(projectPath); err != nil {
+		return api.AddProject500JSONResponse{
+			Code:    500,
+			Error:   api.ErrorResponseErrorInternalError,
+			Details: "failed to import existing Hydra history: " + err.Error(),
+		}, nil
+	}
 	p, err := s.ProjectsManager.AddProject(projectPath)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -582,8 +593,8 @@ func (s *Server) GetProjectConfigToml(_ context.Context, request api.GetProjectC
 }
 
 // EnsureTrackRemote configures the local "hydra-agents" remote in the project's
-// repo so the user can `git checkout -t hydra-agents/<id>` and `git pull` to
-// follow a head's branch (see docs/git-isolation.md). Idempotent; backs the
+// repo and reports whether the short local branch already exists, so the UI can
+// recommend checkout rather than trying to recreate it. Idempotent; backs the
 // agent page's "check out locally" affordance.
 func (s *Server) EnsureTrackRemote(ctx context.Context, request api.EnsureTrackRemoteRequestObject) (api.EnsureTrackRemoteResponseObject, error) {
 	p := s.ProjectsManager.GetByID(request.ProjectId)
@@ -602,7 +613,10 @@ func (s *Server) EnsureTrackRemote(ctx context.Context, request api.EnsureTrackR
 			Details: err.Error(),
 		}, nil
 	}
-	return api.EnsureTrackRemote200JSONResponse{Remote: remote}, nil
+	return api.EnsureTrackRemote200JSONResponse{
+		Remote:            remote,
+		LocalBranchExists: git.LocalBranchExists(p.Path, request.Params.AgentId),
+	}, nil
 }
 
 // PreviewConfigToml reads a project's .hydra/config.toml straight off disk at an
@@ -887,6 +901,14 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api.GetStatusResponseObject, error) {
 	status := "OK"
 	v := version
+	desktopProtocol := desktopcontract.Protocol
+	buildID := version
+	runtimeOS := runtime.GOOS
+	sandboxAvailable, sandboxReason := sandbox.Available()
+	var sandboxDetail *string
+	if sandboxReason != "" {
+		sandboxDetail = &sandboxReason
+	}
 	uptime := float32(time.Since(s.StartTime).Seconds())
 	projectRoot := s.ProjectRoot
 	defaultProjectID := s.DefaultProject.ID
@@ -904,6 +926,11 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		Status:           &status,
 		SandboxError:     sandboxErr,
 		Version:          &v,
+		DesktopProtocol:  &desktopProtocol,
+		BuildId:          &buildID,
+		RuntimeOs:        &runtimeOS,
+		SandboxAvailable: &sandboxAvailable,
+		SandboxDetail:    sandboxDetail,
 		UptimeSeconds:    &uptime,
 		ProjectRoot:      &projectRoot,
 		DefaultProjectId: &defaultProjectID,

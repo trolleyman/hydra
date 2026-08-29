@@ -26,7 +26,7 @@ export type SpawnAgentRequest = {
      */
     model?: string;
     /**
-     * Base branch to create the worktree from (defaults to current branch)
+     * Base branch to create the worktree from (defaults to the repository's stable default branch)
      */
     base_branch?: string;
     adopt_mr?: AdoptMRRequest;

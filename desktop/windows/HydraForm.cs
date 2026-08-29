@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -13,13 +14,21 @@ internal enum HydraWindowKind
 internal sealed class HydraForm : Form
 {
     private readonly HydraApplicationContext application;
+    private readonly WebView2 webView;
     private bool allowClose;
+    private bool activeTurn;
+
+    private static bool IsSameOrigin(Uri left, Uri right) =>
+        left.Scheme.Equals(right.Scheme, StringComparison.OrdinalIgnoreCase) &&
+        left.Host.Equals(right.Host, StringComparison.OrdinalIgnoreCase) &&
+        left.Port == right.Port;
 
     internal HydraForm(
         HydraWindowKind kind,
         BackendController backend,
         CoreWebView2Environment webViewEnvironment,
-        HydraApplicationContext application)
+        HydraApplicationContext application,
+        string? requestedProjectId = null)
     {
         this.application = application;
         Text = kind == HydraWindowKind.Full ? "Hydra" : "Hydra - Focused chat";
@@ -38,7 +47,7 @@ internal sealed class HydraForm : Form
         MainMenuStrip = menu;
         Controls.Add(menu);
 
-        var webView = new WebView2 { Dock = DockStyle.Fill };
+        webView = new WebView2 { Dock = DockStyle.Fill };
         Controls.Add(webView);
         webView.BringToFront();
         Shown += async (_, _) =>
@@ -46,8 +55,12 @@ internal sealed class HydraForm : Form
             await webView.EnsureCoreWebView2Async(webViewEnvironment);
             webView.CoreWebView2.NavigationStarting += (_, args) =>
             {
-                if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var target) ||
-                    target.Host.Equals(backend.BaseUrl!.Host, StringComparison.OrdinalIgnoreCase))
+                if (!Uri.TryCreate(args.Uri, UriKind.Absolute, out var target))
+                {
+                    args.Cancel = true;
+                    return;
+                }
+                if (IsSameOrigin(target, backend.BaseUrl!))
                 {
                     return;
                 }
@@ -60,7 +73,7 @@ internal sealed class HydraForm : Form
             webView.CoreWebView2.NewWindowRequested += (_, args) =>
             {
                 if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var target) &&
-                    !target.Host.Equals(backend.BaseUrl!.Host, StringComparison.OrdinalIgnoreCase) &&
+                    !IsSameOrigin(target, backend.BaseUrl!) &&
                     target.Scheme is "http" or "https")
                 {
                     Process.Start(new ProcessStartInfo(target.AbsoluteUri) { UseShellExecute = true });
@@ -71,10 +84,51 @@ internal sealed class HydraForm : Form
                 }
                 args.Handled = true;
             };
-            var path = kind == HydraWindowKind.Focused && backend.Status?.DefaultProjectId is { } project
-                ? $"/project/{Uri.EscapeDataString(project)}/?new_focused=1"
+            webView.CoreWebView2.WebMessageReceived += (_, args) =>
+            {
+                try
+                {
+                    using var message = JsonDocument.Parse(args.WebMessageAsJson);
+                    var root = message.RootElement;
+                    if (!root.TryGetProperty("type", out var typeElement)) return;
+                    var type = typeElement.GetString();
+                    var projectId = root.TryGetProperty("projectId", out var projectElement) ? projectElement.GetString() : null;
+                    switch (type)
+                    {
+                        case "new-full-window":
+                            application.OpenWindow(HydraWindowKind.Full);
+                            break;
+                        case "new-focused-window":
+                            application.OpenWindow(HydraWindowKind.Focused, projectId);
+                            break;
+                        case "active-project" when projectId is not null:
+                            application.SetActiveProject(projectId);
+                            break;
+                        case "window-state":
+                            activeTurn = root.TryGetProperty("activeTurn", out var activeElement) && activeElement.GetBoolean();
+                            break;
+                        case "close-window":
+                            if (root.TryGetProperty("force", out var forceElement) && forceElement.GetBoolean()) activeTurn = false;
+                            Close();
+                            break;
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Ignore malformed/unrecognised page messages. Navigation is
+                    // origin-restricted, so only Hydra content reaches this bridge.
+                }
+            };
+            var focusedProject = requestedProjectId ?? backend.Status?.DefaultProjectId;
+            var path = kind == HydraWindowKind.Focused && focusedProject is { } project
+                ? $"/focused/{Uri.EscapeDataString(project)}"
                 : "/";
-            webView.Source = new Uri(backend.BaseUrl!, path);
+            var target = new UriBuilder(new Uri(backend.BaseUrl!, path));
+            if (backend.TakeBootstrapToken() is { } token)
+            {
+                target.Fragment = "desktop-bootstrap=" + Uri.EscapeDataString(token);
+            }
+            webView.Source = target.Uri;
         };
     }
 
@@ -82,6 +136,23 @@ internal sealed class HydraForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs eventArgs)
     {
+        if (!allowClose && eventArgs.CloseReason == CloseReason.UserClosing && activeTurn)
+        {
+            var answer = MessageBox.Show(
+                "This agent is still working. Choose Yes to stop it and close, No to close while leaving it running, or Cancel to stay.",
+                "Close this window?",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Warning);
+            if (answer == DialogResult.Yes)
+            {
+                eventArgs.Cancel = true;
+                _ = webView.CoreWebView2.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('hydra-desktop-command',{detail:{type:'stop-and-close'}}))");
+            }
+            else if (answer == DialogResult.Cancel)
+            {
+                eventArgs.Cancel = true;
+            }
+        }
         if (!allowClose && eventArgs.CloseReason == CloseReason.ApplicationExitCall)
         {
             eventArgs.Cancel = true;

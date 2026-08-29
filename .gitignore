@@ -12,6 +12,7 @@
 /hydra
 /dist/macos/
 /dist/windows/
+/dist/linux/
 /desktop/windows/bin/
 /desktop/windows/obj/
 

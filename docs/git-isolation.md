@@ -124,7 +124,12 @@ own own-branch guard, so they're safe on codex/gemini without it.
   unstage paths. The uncommit primitive.
 - **`git_revert`** / **`git_cherry_pick`** - new commit; abort on conflict.
 - **`git_rebase`** - plan-based non-interactive history edit (`pick`/`reword`/`squash`/
-  `fixup`/`drop`, translated to a todo + `exec git commit --amend`). Leaves the rebase
+  `fixup`/`drop`, translated to a todo + `exec git commit --amend`). Optional `onto`
+  transplants that exact plan onto a different ref (`git rebase --onto` semantics)
+  while the own-branch guard still pins the operation to this head's branch. It does
+  not change Hydra's stored base-branch metadata; that needs a future atomic
+  `change_base_branch` operation rather than making raw history editing mutate UI
+  state as a side effect. Leaves the rebase
   in progress on conflict; **`git_rebase_continue`** / **`git_rebase_abort`** drive it
   from there (they validate the in-progress rebase's `head-name` is the head's branch,
   since HEAD is detached mid-rebase).
@@ -286,7 +291,8 @@ collision.)
   [Host-mediated git path](#host-mediated-git-path-readonly).
 - **Track affordance:** a "Check out locally" icon+chevron button on the agent page
   (`TrackBranchButton`) that opens a popover with `git checkout -t hydra-agents/<id>`
-  (+ copy). On open it calls the `ensureTrackRemote` daemon action
+  for a new local branch, or `git checkout <id>` when that local branch already
+  exists (+ copy). On open it calls the `ensureTrackRemote` daemon action
   (`git.EnsureTrackRemote` -> `POST /api/projects/{id}/track-remote`), which
   idempotently configures the local `hydra-agents` remote, so the shown command
   stays short.

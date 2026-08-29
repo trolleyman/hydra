@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Net;
-using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 
 namespace HydraDesktop;
@@ -8,48 +7,114 @@ namespace HydraDesktop;
 internal sealed record BackendStatus(
     [property: JsonPropertyName("version")] string? Version,
     [property: JsonPropertyName("project_root")] string? ProjectRoot,
-    [property: JsonPropertyName("default_project_id")] string? DefaultProjectId);
+    [property: JsonPropertyName("default_project_id")] string? DefaultProjectId,
+    [property: JsonPropertyName("desktop_protocol")] int? DesktopProtocol,
+    [property: JsonPropertyName("build_id")] string? BuildId);
 
 internal sealed record ReadyRecord(
     [property: JsonPropertyName("protocol")] int Protocol,
     [property: JsonPropertyName("url")] Uri Url,
-    [property: JsonPropertyName("pid")] int Pid);
+    [property: JsonPropertyName("pid")] int Pid,
+    [property: JsonPropertyName("bootstrap_token")] string BootstrapToken,
+    [property: JsonPropertyName("version")] string? Version,
+    [property: JsonPropertyName("project_root")] string? ProjectRoot,
+    [property: JsonPropertyName("default_project_id")] string? DefaultProjectId,
+    [property: JsonPropertyName("build_id")] string? BuildId);
+
+internal sealed record DesktopConnectRecord(
+    [property: JsonPropertyName("protocol")] int Protocol,
+    [property: JsonPropertyName("url")] Uri Url,
+    [property: JsonPropertyName("bootstrap_token")] string BootstrapToken,
+    [property: JsonPropertyName("version")] string? Version,
+    [property: JsonPropertyName("project_root")] string? ProjectRoot,
+    [property: JsonPropertyName("default_project_id")] string? DefaultProjectId,
+    [property: JsonPropertyName("build_id")] string? BuildId,
+    [property: JsonPropertyName("selected_project_id")] string? SelectedProjectId);
+
+internal sealed record DesktopActiveRecord([property: JsonPropertyName("active")] bool Active);
 
 internal sealed class BackendController : IDisposable
 {
-    private const int SupportedDesktopProtocol = 1;
-    private const string SupportedServerVersion = "0.1.0";
-    private readonly HttpClient client = new() { Timeout = TimeSpan.FromSeconds(1.5) };
+    private const int SupportedDesktopProtocol = 3;
     private Process? process;
     private StreamWriter? log;
     private string? readyFile;
+    private string? selectedProjectRoot;
 
     internal Uri? BaseUrl { get; private set; }
     internal BackendStatus? Status { get; private set; }
     internal bool OwnsProcess => process is { HasExited: false };
+    internal string? BootstrapToken { get; private set; }
+
+    internal string? TakeBootstrapToken()
+    {
+        var token = BootstrapToken;
+        BootstrapToken = null;
+        return token;
+    }
 
     internal async Task StartAsync(Func<string?> chooseProject)
     {
-        var defaultUrl = new Uri("http://127.0.0.1:26600");
-        try
-        {
-            var status = await FetchStatusAsync(defaultUrl);
-            EnsureVersion(status);
-            BaseUrl = defaultUrl;
-            Status = status;
-            return;
-        }
-        catch (HttpRequestException error) when (error.StatusCode is null)
-        {
-            // Nothing is listening at the conventional CLI address.
-        }
-
         var project = chooseProject();
         if (string.IsNullOrWhiteSpace(project))
         {
             throw new InvalidOperationException("No project was selected.");
         }
-        await LaunchBundledBackendAsync(project);
+        selectedProjectRoot = project;
+        if (!await ConnectThroughBundledCliAsync(project))
+        {
+            await LaunchBundledBackendAsync(project);
+        }
+    }
+
+    private async Task<bool> ConnectThroughBundledCliAsync(string projectRoot)
+    {
+        var resources = Path.Combine(AppContext.BaseDirectory, "Resources");
+        var binary = Environment.GetEnvironmentVariable("HYDRA_DESKTOP_BACKEND")
+            ?? Path.Combine(resources, "HydraBackend.exe");
+        if (!File.Exists(binary)) return false;
+        var start = new ProcessStartInfo(binary)
+        {
+            WorkingDirectory = projectRoot,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        start.ArgumentList.Add("__desktop-connect");
+        start.ArgumentList.Add("--project");
+        start.ArgumentList.Add(projectRoot);
+        AddBundledGit(start, resources);
+        using var connector = Process.Start(start);
+        if (connector is null) throw new InvalidOperationException("The bundled desktop connector could not be started.");
+        var output = await connector.StandardOutput.ReadToEndAsync();
+        var errors = await connector.StandardError.ReadToEndAsync();
+        await connector.WaitForExitAsync();
+        if (connector.ExitCode != 0)
+        {
+            if (errors.Contains("unknown command", StringComparison.OrdinalIgnoreCase) && errors.Contains("__desktop-connect", StringComparison.Ordinal)) return false;
+            throw new InvalidOperationException($"The bundled desktop connector failed: {errors.Trim()}");
+        }
+        DesktopConnectRecord? record;
+        try
+        {
+            record = System.Text.Json.JsonSerializer.Deserialize<DesktopConnectRecord>(output);
+        }
+        catch (System.Text.Json.JsonException error)
+        {
+            throw new InvalidDataException("The bundled desktop connector returned invalid data.", error);
+        }
+        if (record is null || record.Protocol != SupportedDesktopProtocol ||
+            !IPAddress.TryParse(record.Url.Host, out var address) || !IPAddress.IsLoopback(address))
+        {
+            throw new InvalidDataException("The bundled desktop connector returned an incompatible or unsafe endpoint.");
+        }
+        var status = new BackendStatus(record.Version, record.ProjectRoot, record.SelectedProjectId ?? record.DefaultProjectId, record.Protocol, record.BuildId);
+        EnsureVersion(status);
+        BaseUrl = record.Url;
+        Status = status;
+        BootstrapToken = record.BootstrapToken;
+        return true;
     }
 
     internal void StopOwnedBackend()
@@ -72,23 +137,32 @@ internal sealed class BackendController : IDisposable
 
     internal async Task<bool> HasActiveSessionsAsync()
     {
-        if (BaseUrl is null)
+        if (selectedProjectRoot is null)
         {
             return false;
         }
         try
         {
-            var projects = await client.GetFromJsonAsync<List<ProjectRecord>>(new Uri(BaseUrl, "/api/projects")) ?? [];
-            foreach (var project in projects)
+            var resources = Path.Combine(AppContext.BaseDirectory, "Resources");
+            var binary = Environment.GetEnvironmentVariable("HYDRA_DESKTOP_BACKEND") ?? Path.Combine(resources, "HydraBackend.exe");
+            var start = new ProcessStartInfo(binary)
             {
-                var id = Uri.EscapeDataString(project.Id);
-                var agents = await client.GetFromJsonAsync<List<AgentRecord>>(new Uri(BaseUrl, $"/api/projects/{id}/agents")) ?? [];
-                if (agents.Any(agent => agent.SessionStatus == "running"))
-                {
-                    return true;
-                }
-            }
-            return false;
+                WorkingDirectory = selectedProjectRoot,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            start.ArgumentList.Add("__desktop-active");
+            start.ArgumentList.Add("--project");
+            start.ArgumentList.Add(selectedProjectRoot);
+            AddBundledGit(start, resources);
+            using var check = Process.Start(start);
+            if (check is null) return true;
+            var output = await check.StandardOutput.ReadToEndAsync();
+            await check.WaitForExitAsync();
+            if (check.ExitCode != 0) return true;
+            return System.Text.Json.JsonSerializer.Deserialize<DesktopActiveRecord>(output)?.Active ?? true;
         }
         catch
         {
@@ -125,10 +199,7 @@ internal sealed class BackendController : IDisposable
         };
         start.Environment["HYDRA_API_ADDR"] = "127.0.0.1:0";
         start.Environment["HYDRA_DESKTOP_READY_FILE"] = readyFile;
-        var gitRoot = Path.Combine(resources, "Git");
-        start.Environment["PATH"] = string.Join(Path.PathSeparator,
-            Path.Combine(gitRoot, "cmd"), Path.Combine(gitRoot, "bin"), start.Environment["PATH"]);
-        start.Environment["HYDRA_BUNDLED_GIT"] = Path.Combine(gitRoot, "cmd", "git.exe");
+        AddBundledGit(start, resources);
 
         process = new Process { StartInfo = start, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, eventArgs) => { if (eventArgs.Data is not null) log?.WriteLine(eventArgs.Data); };
@@ -158,15 +229,24 @@ internal sealed class BackendController : IDisposable
                 {
                     throw new InvalidOperationException("The bundled backend advertised a non-loopback address.");
                 }
-                var status = await FetchStatusAsync(record.Url);
+                var status = new BackendStatus(record.Version, record.ProjectRoot, record.DefaultProjectId, record.Protocol, record.BuildId);
                 EnsureVersion(status);
                 BaseUrl = record.Url;
                 Status = status;
+                BootstrapToken = record.BootstrapToken;
                 return;
             }
             await Task.Delay(50);
         }
         throw new TimeoutException($"The Hydra backend did not become ready. See {logPath}.");
+    }
+
+    private static void AddBundledGit(ProcessStartInfo start, string resources)
+    {
+        var gitRoot = Path.Combine(resources, "Git");
+        start.Environment["PATH"] = string.Join(Path.PathSeparator,
+            Path.Combine(gitRoot, "cmd"), Path.Combine(gitRoot, "bin"), start.Environment["PATH"]);
+        start.Environment["HYDRA_BUNDLED_GIT"] = Path.Combine(gitRoot, "cmd", "git.exe");
     }
 
     private static async Task<ReadyRecord> ReadReadyRecordAsync(string path)
@@ -176,31 +256,17 @@ internal sealed class BackendController : IDisposable
             ?? throw new InvalidDataException("The backend readiness record is invalid.");
     }
 
-    private async Task<BackendStatus> FetchStatusAsync(Uri baseUrl)
-    {
-        using var response = await client.GetAsync(new Uri(baseUrl, "/api/status"));
-        if (response.StatusCode != HttpStatusCode.OK)
-        {
-            throw new InvalidOperationException($"A server on Hydra's address refused the app (HTTP {(int)response.StatusCode}).");
-        }
-        return await response.Content.ReadFromJsonAsync<BackendStatus>()
-            ?? throw new InvalidDataException("The Hydra backend returned an invalid status response.");
-    }
-
     private static void EnsureVersion(BackendStatus status)
     {
-        if (status.Version != SupportedServerVersion)
+        if (status.DesktopProtocol != SupportedDesktopProtocol)
         {
-            throw new InvalidOperationException($"Hydra server version {status.Version ?? "unknown"} is incompatible with this app.");
+            throw new InvalidOperationException($"Hydra desktop protocol {status.DesktopProtocol ?? 0} is incompatible with this app.");
         }
     }
 
     public void Dispose()
     {
         StopOwnedBackend();
-        client.Dispose();
     }
 
-    private sealed record ProjectRecord([property: JsonPropertyName("id")] string Id);
-    private sealed record AgentRecord([property: JsonPropertyName("session_status")] string? SessionStatus);
 }

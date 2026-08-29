@@ -10,6 +10,26 @@ export type StatusResponse = {
     sandbox_error?: string | null;
     version?: string;
     /**
+     * Native desktop shell compatibility protocol.
+     */
+    desktop_protocol?: number;
+    /**
+     * Backend build identity displayed in compatibility errors.
+     */
+    build_id?: string;
+    /**
+     * Host operating system reported by the backend.
+     */
+    runtime_os?: string;
+    /**
+     * Whether the native sandbox backend required for ordinary heads is available.
+     */
+    sandbox_available?: boolean;
+    /**
+     * Why native sandboxing is unavailable or degraded.
+     */
+    sandbox_detail?: string | null;
+    /**
      * Seconds since the server started
      */
     uptime_seconds?: number;

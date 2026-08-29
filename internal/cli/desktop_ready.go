@@ -8,24 +8,27 @@ import (
 	"path/filepath"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/desktopcontract"
 )
 
-const (
-	desktopReadyFileEnv = "HYDRA_DESKTOP_READY_FILE"
-	desktopProtocol     = 1
-)
+const desktopReadyFileEnv = "HYDRA_DESKTOP_READY_FILE"
 
 type desktopReadyRecord struct {
-	Protocol int    `json:"protocol"`
-	URL      string `json:"url"`
-	PID      int    `json:"pid"`
+	Protocol       int    `json:"protocol"`
+	URL            string `json:"url"`
+	PID            int    `json:"pid"`
+	BootstrapToken string `json:"bootstrap_token"`
+	Version        string `json:"version"`
+	ProjectRoot    string `json:"project_root"`
+	DefaultProject string `json:"default_project_id"`
+	BuildID        string `json:"build_id"`
 }
 
 // publishDesktopReady atomically tells a native desktop parent which address
 // an OS-assigned listener actually received. It is dormant for ordinary server
 // launches. The parent provides a unique, user-private path and watches its
 // containing directory, so a partial JSON write must never become visible.
-func publishDesktopReady(addr net.Addr) (func(), error) {
+func publishDesktopReady(addr net.Addr, authToken, projectRoot, defaultProject string) (func(), error) {
 	path := os.Getenv(desktopReadyFileEnv)
 	if path == "" {
 		return func() {}, nil
@@ -53,9 +56,14 @@ func publishDesktopReady(addr net.Addr) (func(), error) {
 		return nil, errtrace.Wrap(fmt.Errorf("desktop ready: set permissions: %w", err))
 	}
 	record := desktopReadyRecord{
-		Protocol: desktopProtocol,
-		URL:      "http://" + addr.String(),
-		PID:      os.Getpid(),
+		Protocol:       desktopcontract.Protocol,
+		URL:            "http://" + addr.String(),
+		PID:            os.Getpid(),
+		BootstrapToken: authToken,
+		Version:        Version,
+		ProjectRoot:    projectRoot,
+		DefaultProject: defaultProject,
+		BuildID:        Version,
 	}
 	if err := json.NewEncoder(tmp).Encode(record); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("desktop ready: encode: %w", err))

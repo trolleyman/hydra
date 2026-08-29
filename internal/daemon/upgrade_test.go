@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -81,5 +82,85 @@ func TestStopDaemonClearsStaleFilesWhenNothingAnswers(t *testing.T) {
 	pp, _ := pidPath(projectRoot)
 	if _, err := os.Stat(pp); !os.IsNotExist(err) {
 		t.Errorf("pidfile still present, want it cleared")
+	}
+}
+
+func TestRuntimePathsAreUserGlobal(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv(runtimeNamespaceEnv, "")
+	first, err := SocketPath("/projects/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := SocketPath("/projects/two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("SocketPath differs by project: %q != %q", first, second)
+	}
+}
+
+func TestRuntimeNamespaceIsolatesDaemonFiles(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv(runtimeNamespaceEnv, "development checkout one")
+	first, err := SocketPath("/projects/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(runtimeNamespaceEnv, "development checkout two")
+	second, err := SocketPath("/projects/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("SocketPath did not change with runtime namespace: %q", first)
+	}
+	if filepath.Dir(filepath.Dir(first)) != filepath.Dir(filepath.Dir(second)) {
+		t.Fatalf("namespaced paths escaped their shared Hydra runtime directory: %q, %q", first, second)
+	}
+}
+
+func TestRuntimeNamespaceCannotTraverse(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", base)
+	t.Setenv(runtimeNamespaceEnv, "../../outside")
+	sock, err := SocketPath("/projects/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantParent := filepath.Join(base, "hydra")
+	if filepath.Dir(filepath.Dir(sock)) != wantParent {
+		t.Fatalf("SocketPath escaped runtime directory: %q", sock)
+	}
+}
+
+func TestDesktopDaemonIsManaged(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("HYDRA_DESKTOP_SERVICE", "1")
+	root := t.TempDir()
+	if err := WriteDaemonFiles(root); err != nil {
+		t.Fatal(err)
+	}
+	if !IsServiceManaged(root) {
+		t.Fatal("desktop daemon was not recorded as managed")
+	}
+	if !IsDesktopManaged(root) {
+		t.Fatal("desktop daemon was not recorded as desktop-managed")
+	}
+}
+
+func TestSystemdDaemonIsNotDesktopManaged(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("INVOCATION_ID", "test-service")
+	root := t.TempDir()
+	if err := WriteDaemonFiles(root); err != nil {
+		t.Fatal(err)
+	}
+	if !IsServiceManaged(root) {
+		t.Fatal("systemd daemon was not recorded as managed")
+	}
+	if IsDesktopManaged(root) {
+		t.Fatal("systemd daemon was recorded as desktop-managed")
 	}
 }

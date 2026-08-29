@@ -17,13 +17,14 @@ import { resetProjectView } from '../../lib/projectView'
 // address because the agent diff shows every changed file on one route.
 export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
   component: AgentPage,
-  validateSearch: (search: Record<string, unknown>): { comment?: number; line?: string } => {
-    const out: { comment?: number; line?: string } = {}
+  validateSearch: (search: Record<string, unknown>): { comment?: number; line?: string; desktop?: 'focused' } => {
+    const out: { comment?: number; line?: string; desktop?: 'focused' } = {}
     const raw = Number(search.comment)
     if (Number.isInteger(raw) && raw > 0) out.comment = raw
     // Validated by shape on read (parseLineParam), not here: an unparseable value
     // should leave the URL alone rather than be silently dropped from it.
     if (typeof search.line === 'string' && search.line) out.line = search.line
+    if (search.desktop === 'focused') out.desktop = 'focused'
     return out
   },
 })

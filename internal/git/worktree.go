@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -64,6 +65,43 @@ func ListBranches(projectRoot string) ([]string, error) {
 		}
 	}
 	return branches, nil
+}
+
+// DefaultBranch returns the stable branch new work should normally start from,
+// independent of whichever incidental branch the project checkout is on.
+func DefaultBranch(projectRoot string, branches []string, current string) string {
+	has := func(want string) bool { return slices.Contains(branches, want) }
+	if remote, err := gitOutput(projectRoot, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		if name, ok := strings.CutPrefix(remote, "origin/"); ok && has(name) {
+			return name
+		}
+	}
+	for _, conventional := range []string{"main", "master"} {
+		if has(conventional) {
+			return conventional
+		}
+	}
+	if current != "" && !IsAgentBranch(current) && has(current) {
+		return current
+	}
+	for _, name := range branches {
+		if !IsAgentBranch(name) {
+			return name
+		}
+	}
+	return current
+}
+
+// GetDefaultBranch discovers the repository default for callers that do not
+// already have the branch list. It only falls back to current for an
+// unconventional local-only repository with no remote/default convention.
+func GetDefaultBranch(projectRoot string) (string, error) {
+	branches, err := ListBranches(projectRoot)
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	current, _ := GetCurrentBranch(projectRoot)
+	return DefaultBranch(projectRoot, branches, current), nil
 }
 
 // CreateWorktree runs `git worktree add -b <branchName> <path> <baseBranch>`.

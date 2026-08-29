@@ -128,7 +128,10 @@ and `web/src/DiffViewer.tsx`):
   stays inside one code block copies the raw code, no fence.
 - Per-agent view state lives in `web/src/lib/agentViewPrefs.ts`: a sharded
   localStorage store keyed per project+agent, 30-day TTL (terminal height, page
-  scrollTop, collapsed diff files, bash tabs, tests-panel view toggles).
+  scrollTop, collapsed diff files, bash tabs, tests-panel view toggles, and the
+  chat Plan disclosure). Switching through Chat, Review and Bash tabs preserves
+  whether the Plan is open, and the panel waits for a measured pane width before
+  mounting so it does not briefly lay itself out at an impossible width.
 - `web/src/lib/storage.ts` is the `StorageKeys` registry. The left sidebar's
   state is two independent flags in the zustand `useSidebarStore`
   (`web/src/lib/sidebar.ts`): a persisted desktop `desktopCollapsed` preference

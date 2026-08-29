@@ -42,6 +42,7 @@ import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
+import { closeDesktopWindow, onDesktopCommand, openFocusedWindow, openFullWindow, postDesktopMessage } from '../lib/desktopBridge'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -262,7 +263,12 @@ function RootLayout() {
   } else if (!selectedAgentId && (composerAgentType === 'claude' || composerAgentType === 'codex')) {
     lastUsageAgentType.current = composerAgentType
   }
-  const usageAgentType = lastUsageAgentType.current
+  // On an agent route, wait for that agent record before mounting the usage
+  // indicator. Otherwise the initial empty store briefly mounts the Claude
+  // default and launches a Claude quota probe even when the selected head is
+  // Codex; the correct Codex indicator replaces it a moment later, but the
+  // needless Claude process and parse warning have already happened.
+  const usageAgentType = selectedAgentId && !selectedAgentType ? null : lastUsageAgentType.current
   // Narrow slices of the agent store, so the layout re-renders only when one of
   // THESE derived values changes - not on every ~1/s agent refresh. The live
   // agent list itself lives in <AgentSidebarList>, which owns its own
@@ -278,6 +284,9 @@ function RootLayout() {
     return a ? a.title || a.id : undefined
   })
   const currentProjectUnread = useAgentStore((s) => s.agents.reduce((n, a) => n + (a.has_unread_changes ? 1 : 0), 0))
+  const allLiveAgents = useAgentStore((s) => s.agents)
+  const allArchivedAgents = useAgentStore((s) => s.archived)
+  const desktopRuntimeStatus = useProjectStore((s) => s.systemStatus)
 
   // Record every project you land on (via dropdown, switcher, direct nav, or
   // boot restore) so the Ctrl+` switcher can order by last-visited.
@@ -436,7 +445,7 @@ function RootLayout() {
   // Paint the selected project's icon into the tab, so one-tab-per-project
   // setups are tellable apart (matches the OS notification icon).
   useProjectFavicon(currentProjectId)
-  const { refetchStatus, canRestart, canUpdate, spawnedAt } = useSystemStatus()
+  const { refetchStatus, canRestart, canUpdate, version, spawnedAt } = useSystemStatus()
 
   // Auto-clear an agent's unread dot when it's the one currently open AND the
   // page is actually in front of the user. Covers both opening an unread agent
@@ -864,6 +873,97 @@ function RootLayout() {
   // on mobile it stays as a true toggle.
   const sidebarVisible = isDesktopViewport ? !desktopCollapsed : mobileSidebarOpen
 
+  // Focused native windows deliberately omit the full repository/agent chrome.
+  // The draft owns a dedicated route; after first submit the normal agent route
+  // carries this presentation marker so reloads preserve the compact window.
+  const focusedDesktopWindow = location.pathname.startsWith('/focused/') ||
+    new URLSearchParams(window.location.search).get('desktop') === 'focused'
+
+  const focusedHistory = [...allLiveAgents, ...allArchivedAgents].filter((agent) => agent.focused && !agent.ephemeral)
+
+  useEffect(() => {
+    if (!focusedDesktopWindow || !currentProjectId) return
+    postDesktopMessage({ type: 'active-project', projectId: currentProjectId })
+  }, [focusedDesktopWindow, currentProjectId])
+
+  useEffect(() => {
+    if (!focusedDesktopWindow) return
+    const agent = selectedAgentId ? allLiveAgents.find((candidate) => candidate.id === selectedAgentId) : undefined
+    postDesktopMessage({
+      type: 'window-state',
+      projectId: currentProjectId ?? undefined,
+      agentId: selectedAgentId,
+      activeTurn: agent?.session_status === 'running',
+    })
+  }, [focusedDesktopWindow, currentProjectId, selectedAgentId, allLiveAgents])
+
+  useEffect(() => {
+    if (!focusedDesktopWindow || !currentProjectId || !selectedAgentId) return
+    return onDesktopCommand((command) => {
+      if (command.type !== 'stop-and-close') return
+      void api.default.killAgent(currentProjectId, selectedAgentId)
+        .then(() => postDesktopMessage({ type: 'close-window', force: true }))
+        .catch((error) => useToastStore.getState().show({
+          type: 'error',
+          message: `Could not stop the agent: ${error instanceof Error ? error.message : String(error)}`,
+        }))
+    })
+  }, [focusedDesktopWindow, currentProjectId, selectedAgentId])
+
+  if (focusedDesktopWindow) {
+    return (
+      <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
+        <header className="shrink-0 h-12 px-3 flex items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+          {desktopRuntimeStatus?.sandbox_available === false && (
+            <Tooltip content={desktopRuntimeStatus.sandbox_detail ?? 'Native sandboxing is unavailable'}>
+              <span className="shrink-0 rounded-md bg-red-50 dark:bg-red-950/40 px-2 py-1 text-xs text-red-700 dark:text-red-300">
+                Sandbox unavailable
+              </span>
+            </Tooltip>
+          )}
+          <select
+            aria-label="Project"
+            value={currentProjectId ?? ''}
+            onChange={(event) => navigate({ to: '/focused/$projectId', params: { projectId: event.target.value } })}
+            className="h-8 min-w-0 max-w-64 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 text-sm"
+          >
+            {visibleProjects(projects, currentProjectId ?? null).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+          </select>
+          <select
+            aria-label="Focused chat history"
+            value={selectedAgentId ?? ''}
+            onChange={(event) => {
+              const agentId = event.target.value
+              if (!currentProjectId) return
+              if (!agentId) {
+                navigate({ to: '/focused/$projectId', params: { projectId: currentProjectId } })
+                return
+              }
+              navigate({
+                to: '/project/$projectId/agent/$agentId',
+                params: { projectId: currentProjectId, agentId },
+                search: { desktop: 'focused' },
+              })
+            }}
+            className="h-8 min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 text-sm"
+          >
+            <option value="">New focused chat</option>
+            {focusedHistory.map((agent) => <option key={agent.id} value={agent.id}>{agent.title || agent.id}</option>)}
+          </select>
+          <button type="button" onClick={() => openFocusedWindow(currentProjectId ?? undefined)} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">New chat</button>
+          <button type="button" onClick={openFullWindow} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">Full Hydra</button>
+          <button type="button" onClick={closeDesktopWindow} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">Close</button>
+        </header>
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          <Outlet />
+        </div>
+        <Dialog />
+        <Toaster />
+        <KeyboardShortcutsModal />
+      </div>
+    )
+  }
+
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
       {/* Global top bar: sidebar toggle (while hidden), project icon + selector,
@@ -1196,7 +1296,7 @@ function RootLayout() {
             {/* The right half, as one group: usage strip + settings, neither of
                 which may shrink - see above. */}
             <div className="flex shrink-0 items-center gap-1.5">
-              <ClaudeUsageIndicator key={usageAgentType} agentType={usageAgentType} />
+              {usageAgentType && <ClaudeUsageIndicator key={usageAgentType} agentType={usageAgentType} />}
             {(() => {
               const settingsActive = /\/settings(\/|$)/.test(location.pathname)
               const cls = settingsActive
@@ -1206,7 +1306,14 @@ function RootLayout() {
               // deselects Settings and returns to the project page (or the root
               // when no project is selected).
               return (
-                <Tooltip content={settingsActive ? 'Close settings' : 'Settings'}>
+                <Tooltip
+                  content={
+                    <>
+                      <div>{settingsActive ? 'Close settings' : 'Settings'}</div>
+                      {version && <div className="font-mono text-gray-500 dark:text-gray-400">Server {version}</div>}
+                    </>
+                  }
+                >
                   {settingsActive ? (
                     <button
                       type="button"

@@ -138,7 +138,7 @@ func TestGuardedRebaseSquash(t *testing.T) {
 	shaB := run("rev-parse", "HEAD")
 
 	// Squash B into A, keeping A's message: pick A, fixup B.
-	ok, msg := GuardedRebase(dir, "hydra/test", base, []gitq.RebaseStep{
+	ok, msg := GuardedRebase(dir, "hydra/test", base, "", []gitq.RebaseStep{
 		{Commit: shaA, Action: "pick"},
 		{Commit: shaB, Action: "fixup"},
 	})
@@ -155,6 +155,33 @@ func TestGuardedRebaseSquash(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "b.txt")); err != nil {
 		t.Errorf("b.txt missing after squash")
+	}
+}
+
+func TestGuardedRebaseOntoMovesOnlyExpectedBranch(t *testing.T) {
+	dir, run := opRepo(t)
+	oldBase := run("rev-parse", "HEAD")
+	write(t, dir, "agent.txt", "agent\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "agent work")
+	agentCommit := run("rev-parse", "HEAD")
+
+	run("checkout", "-q", "-b", "main", oldBase)
+	write(t, dir, "main.txt", "main\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "main work")
+	newBase := run("rev-parse", "HEAD")
+	run("checkout", "-q", "hydra/test")
+
+	ok, msg := GuardedRebase(dir, "hydra/test", oldBase, "main", []gitq.RebaseStep{{Commit: agentCommit, Action: "pick"}})
+	if !ok {
+		t.Fatalf("rebase onto failed: %s", msg)
+	}
+	if parent := run("rev-parse", "HEAD~1"); parent != newBase {
+		t.Errorf("rebased parent = %s, want main %s", parent, newBase)
+	}
+	if branch := run("branch", "--show-current"); branch != "hydra/test" {
+		t.Errorf("rebase moved branch %q, want hydra/test", branch)
 	}
 }
 

@@ -90,7 +90,11 @@ Your checkout is a disposable, detached copy of the head's branch. You have no b
 
 The head keeps working while you are idle, and your checkout is moved forward to its branch tip between your turns, silently and without telling you. So anything you read in an earlier turn may be from an older commit: check the current HEAD and re-read a file before relying on what you remember of it.
 
-Review the diff between the base branch and this checkout's HEAD. Correctness first, then anything that would fail in production, then clarity. Say plainly when something is fine; do not manufacture findings. Prefer a few specific, located observations over an exhaustive list - the person reading you can only act on so many.`
+Review the diff between the base branch and this checkout's HEAD. Correctness first, then anything that would fail in production, then clarity. Say plainly when something is fine; do not manufacture findings. Prefer a few specific, located observations over an exhaustive list - the person reading you can only act on so many.
+
+Start the review immediately when this session opens. Read the current diff, and raise each actionable issue with the add_review_comment tool at the most relevant changed line. Use your response for a concise review summary, not as a substitute for comments. If there are no actionable issues, say so plainly and do not add comments.`
+
+const reviewOpeningPrompt = `Review the current diff now. Raise each actionable issue as a review comment with add_review_comment, then give me a concise summary.`
 
 // ReviewCheckoutRef is the ref a head's reviewer should be looking at: its branch
 // tip. Committed work only - the checkout is a commit, so uncommitted changes in
@@ -308,5 +312,9 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 			return "", errtrace.Wrap(err)
 		}
 	}
+	// A chat-mode CLI starts idle and waits for stdin; a system prompt describes
+	// the role but does not itself create a turn. Opening Review is an explicit
+	// request to perform a review, so submit that first turn automatically.
+	nudgeResumedChatAgent(reg, id, reviewOpeningPrompt)
 	return id, nil
 }

@@ -32,7 +32,7 @@ func RunGuardedOp(worktree, expectedBranch string, req gitq.Request) (ok bool, s
 	case gitq.OpAdd:
 		return GuardedAdd(worktree, expectedBranch, req.Add)
 	case gitq.OpRebase:
-		return GuardedRebase(worktree, expectedBranch, req.Base, req.Plan)
+		return GuardedRebase(worktree, expectedBranch, req.Base, req.Onto, req.Plan)
 	case gitq.OpRebaseContinue:
 		return GuardedRebaseContinue(worktree, expectedBranch)
 	case gitq.OpRebaseAbort:
@@ -664,7 +664,7 @@ func gitApplyCached(worktree, patch string) error {
 // reword / squash-with-new-message), so no interactive editor is needed. On
 // conflict the rebase is LEFT in progress and the agent is told to resolve +
 // git_rebase_continue (or git_rebase_abort).
-func GuardedRebase(worktree, expectedBranch, base string, plan []gitq.RebaseStep) (ok bool, summary string) {
+func GuardedRebase(worktree, expectedBranch, base, onto string, plan []gitq.RebaseStep) (ok bool, summary string) {
 	cur, ok, msg := ensureOwnBranch(worktree, expectedBranch)
 	if !ok {
 		return false, msg
@@ -742,7 +742,14 @@ func GuardedRebase(worktree, expectedBranch, base string, plan []gitq.RebaseStep
 		return false, "internal error writing the rebase plan: " + err.Error()
 	}
 
-	cmd := exec.Command("git", "-C", worktree, "rebase", "-i", base)
+	args := []string{"-C", worktree, "rebase", "-i"}
+	target := base
+	if strings.TrimSpace(onto) != "" {
+		args = append(args, "--onto", onto)
+		target = onto
+	}
+	args = append(args, base)
+	cmd := exec.Command("git", args...)
 	cmd.Env = append(os.Environ(),
 		// Replace git's generated todo with ours; accept squash's combined message.
 		"GIT_SEQUENCE_EDITOR=cp "+shellSingleQuote(todoPath),
@@ -756,7 +763,7 @@ func GuardedRebase(worktree, expectedBranch, base string, plan []gitq.RebaseStep
 		return false, "Rebase could not start: " + firstNonEmpty(strings.TrimSpace(string(out)), err.Error())
 	}
 	newHash, _ := gitOutput(worktree, "rev-parse", "--short", "HEAD")
-	return true, fmt.Sprintf("Rebased %s onto %s; HEAD is now %s.", cur, base, newHash)
+	return true, fmt.Sprintf("Rebased %s onto %s; HEAD is now %s.", cur, target, newHash)
 }
 
 // GuardedRebaseContinue resumes an in-progress rebase (after conflicts were

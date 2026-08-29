@@ -42,9 +42,11 @@ describe('parseView', () => {
     expect([view("sed -n '3p;9p' a.go")].map((v) => [v?.start, v?.end])).toEqual([[3, 9]])
   })
 
-  it('reads cat, head and tail', () => {
+  it('reads cat, nl, head and tail', () => {
     expect([view('cat a.go')].map((v) => [v?.start, v?.end, v?.numbered])).toEqual([[1, null, false]])
     expect([view('cat -n a.go')].map((v) => [v?.start, v?.end, v?.numbered])).toEqual([[1, null, true]])
+    expect([view('nl -ba a.go')].map((v) => [v?.start, v?.end, v?.numbered])).toEqual([[1, null, true]])
+    expect([view('nl --body-numbering=a a.go')].map((v) => [v?.start, v?.end, v?.numbered])).toEqual([[1, null, true]])
     expect([view('head -n 50 a.go')].map((v) => [v?.start, v?.end])).toEqual([[1, 50]])
     expect([view('head -50 a.go')].map((v) => [v?.start, v?.end])).toEqual([[1, 50]])
     expect([view('head a.go')].map((v) => [v?.start, v?.end])).toEqual([[1, 10]])
@@ -92,6 +94,7 @@ describe('parseView', () => {
     expect(view('cat a.go b.go')).toBeNull()
     // A `cat` flag that rewrites the bytes it prints.
     expect(view('cat -A a.go')).toBeNull()
+    expect(view('nl -bt a.go')).toBeNull()
     // Not a read at all.
     expect(view('go test ./...')).toBeNull()
   })

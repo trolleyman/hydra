@@ -62,6 +62,9 @@ export type AgentViewPrefs = {
   chatRichDraft?: { version: 1; document: JSONContent }
   // Split layout: whether the working pane's prompt disclosure is collapsed.
   promptCollapsed?: boolean
+  // Floating chat Plan panel disclosure state. This belongs to the agent view,
+  // so switching through Review/Bash tabs must not reset it.
+  planOpen?: boolean
   // Per-file "viewed" review state: path → the head blob sha the file had when it
   // was last marked viewed. A file counts as viewed iff this equals its current
   // head_blob_sha, so it auto-reverts to unviewed the moment the agent changes it
@@ -96,6 +99,7 @@ export function loadAgentViewPrefs(projectId: string | null, agentId: string): A
     chatAttachments: stored.chatAttachments,
     chatRichDraft: stored.chatRichDraft?.version === 1 ? stored.chatRichDraft : undefined,
     promptCollapsed: stored.promptCollapsed,
+    planOpen: stored.planOpen,
     viewedFiles: stored.viewedFiles,
   }
 }

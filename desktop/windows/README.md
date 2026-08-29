@@ -32,11 +32,16 @@ For shell development without rebuilding the bundled Go executable, set
 
 ## Current behavior
 
-- The app probes `127.0.0.1:26600` and attaches to a compatible Hydra server.
-- Otherwise it asks for an initial project, starts the bundled backend on an
-  OS-assigned loopback port, and waits for its atomic readiness record.
+- The shell first invokes the shared bundled control command. Until the native
+  Windows daemon transport is implemented, that command fails closed and the
+  shell falls back to launching its private backend on an OS-assigned loopback
+  port with an atomic readiness record. There is no fixed-port probe.
+- WebView2 redeems a one-minute, single-use bootstrap token for the persistent
+  profile's HttpOnly session cookie.
 - Every window shares one backend and one persistent WebView2 user-data folder.
 - Ctrl+N opens a full window. Ctrl+Shift+N opens the focused project composer.
+- Focused windows expose project and live/loaded archived history controls plus
+  Stop and close / Close and keep running / Cancel for an active turn.
 - Closing every window leaves the notification-area icon and app-owned backend
   alive. Its menu can open a new full/focused window or exit Hydra.
 - Exit stops an app-owned backend after confirming when sessions are active. A
@@ -58,3 +63,7 @@ Windows session backend and sandbox remain release gates in
   IME, paste, upload, external links, accessibility, and per-monitor DPI.
 - Verify active-session Exit confirmation and whole backend process-tree exit.
 - Verify last-window, notification-area reopen, and explicit Exit behavior.
+
+Follow [desktop-native-validation.md](../../docs/desktop-native-validation.md)
+for the detailed IME, accessibility, notification, multi-display/DPI, and
+upgrade acceptance gates.
