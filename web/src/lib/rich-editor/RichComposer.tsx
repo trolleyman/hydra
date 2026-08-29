@@ -63,6 +63,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
   const onPasteRef = useRef(onPaste)
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onDocumentChangeRef = useRef(onDocumentChange)
+  const literalPasteRef = useRef(false)
   onChangeRef.current = onChange
   onEditorRef.current = onEditor
   onKeyDownRef.current = onKeyDown
@@ -91,11 +92,27 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
         ...(placeholder ? { 'data-placeholder': placeholder } : {}),
       },
       handleKeyDown: (_view, event): boolean => {
+        if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'v') {
+          literalPasteRef.current = true
+          setTimeout(() => { literalPasteRef.current = false }, 0)
+          return false
+        }
         if (!onKeyDownRef.current || !editor) return false
         const markdown = serializeRichMarkdown(editor.getJSON())
         return onKeyDownRef.current(event, { editor, markdown, empty: markdown.trim() === '' }) === true
       },
-      handlePaste: (_view, event): boolean => !!editor && onPasteRef.current?.(event, editor) === true,
+      handlePaste: (_view, event): boolean => {
+        if (!editor) return false
+        if (literalPasteRef.current) {
+          literalPasteRef.current = false
+          event.preventDefault()
+          return editor.commands.insertContent({
+            type: 'text',
+            text: event.clipboardData?.getData('text/plain') ?? '',
+          })
+        }
+        return onPasteRef.current?.(event, editor) === true
+      },
     },
     onUpdate: ({ editor: updated }) => {
       const document = updated.getJSON()

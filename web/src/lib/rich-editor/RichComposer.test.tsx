@@ -1,4 +1,4 @@
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RichComposer, type RichComposerHandle } from './RichComposer'
 import { createRef } from 'react'
@@ -62,5 +62,61 @@ describe('RichComposer', () => {
 
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
     expect(ref.current!.editor!.getJSON().content?.[0].content?.[1].type).toBe('attachment')
+  })
+
+  it('uses only plain text for Ctrl+Shift+V, even when files and HTML are present', async () => {
+    const ref = createRef<RichComposerHandle>()
+    const onPaste = vi.fn(() => true)
+    const { getByRole } = render(<RichComposer ref={ref} value="" onChange={() => {}} onPaste={onPaste} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+    const textbox = getByRole('textbox')
+    fireEvent.keyDown(textbox, { key: 'v', ctrlKey: true, shiftKey: true })
+    fireEvent.paste(textbox, {
+      clipboardData: {
+        files: [new File(['image'], 'image.png', { type: 'image/png' })],
+        getData: (type: string) => type === 'text/plain' ? '<b>literal</b>' : '<b>formatted</b>',
+        types: ['Files', 'text/html', 'text/plain'],
+      },
+    })
+    expect(ref.current!.editor!.getText()).toBe('<b>literal</b>')
+    expect(onPaste).not.toHaveBeenCalled()
+  })
+
+  it('keeps supported structure from ordinary HTML paste and drops source styling', async () => {
+    const ref = createRef<RichComposerHandle>()
+    const { getByRole } = render(<RichComposer ref={ref} value="" onChange={() => {}} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+    fireEvent.paste(getByRole('textbox'), {
+      clipboardData: {
+        files: [],
+        getData: (type: string) => type === 'text/html'
+          ? '<h2 style="color:red" class="source"><strong>Safe</strong></h2><script>bad()</script>'
+          : type === 'text/plain' ? 'Safe' : '',
+        types: ['text/html', 'text/plain'],
+      },
+    })
+    const heading = ref.current!.editor!.getJSON().content?.find((node) => node.type === 'heading')
+    expect(heading).toMatchObject({
+      type: 'heading',
+      attrs: expect.objectContaining({ level: 2 }),
+      content: [{ type: 'text', text: 'Safe', marks: [{ type: 'bold' }] }],
+    })
+    expect(ref.current!.editor!.view.dom.innerHTML).not.toMatch(/style=|class="source"|script|bad\(\)/)
+  })
+
+  it('turns a URL pasted over selected prose into a link', async () => {
+    const ref = createRef<RichComposerHandle>()
+    const changed = vi.fn()
+    const { getByRole } = render(<RichComposer ref={ref} value="label" onChange={changed} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+    ref.current!.editor!.commands.setTextSelection({ from: 1, to: 6 })
+    fireEvent.paste(getByRole('textbox'), {
+      clipboardData: {
+        files: [],
+        getData: (type: string) => type === 'text/plain' ? 'https://example.com/docs' : '',
+        types: ['text/plain'],
+      },
+    })
+    expect(changed).toHaveBeenLastCalledWith('[label](https://example.com/docs)')
   })
 })

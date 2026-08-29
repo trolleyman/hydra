@@ -86,6 +86,11 @@ Completed 2026-08-29:
   commit-shaped hashes get a commit chip, and repository links whose visible
   label is the filename/path get a navigable file chip. The composer, copied
   Markdown and submission value remain literal.
+- Hardened production paste semantics. Files retain first refusal during normal
+  paste, supported HTML structure is accepted through the schema while source
+  styling/scripts are discarded, and URL-over-selection creates a link.
+  Ctrl/Cmd+Shift+V bypasses files and HTML and inserts the clipboard's plain
+  text literally.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
