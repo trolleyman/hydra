@@ -11,6 +11,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -87,6 +88,31 @@ func WriteAgentStatus(projectDir, id string, status *api.AgentStatusInfo) error 
 	// this must keep the same inode. The brief truncate window a concurrent reader
 	// could catch is absorbed by readStatusJSONBytes, which retries a torn read.
 	return errtrace.Wrap(os.WriteFile(path, data, 0644))
+}
+
+// pendingApprovalStatus derives the user-visible wait from the approval request
+// files themselves. Those files are the authoritative state of a parked call:
+// provider hooks may concurrently rewrite status.json to "running" after the
+// daemon or gate wrote policy_approval (Codex runs its PreToolUse status hook
+// late enough to hit this race). The request remains pending, so hiding the card
+// because of that lossy status side channel leaves the connection parked with no
+// way for the user to answer it.
+func pendingApprovalStatus(projectRoot, id string) *api.AgentStatusInfo {
+	reqs, err := gate.ListRequests(paths.GetApprovalsDirFromProjectRoot(projectRoot, id))
+	if err != nil || len(reqs) == 0 {
+		return nil
+	}
+	req := reqs[len(reqs)-1]
+	nt := gate.NotificationPolicyApproval
+	msg := req.Summary
+	event := "policy_approval"
+	return &api.AgentStatusInfo{
+		Status:           api.NeedsInput,
+		Event:            &event,
+		Timestamp:        req.TS,
+		LastMessage:      &msg,
+		NotificationType: &nt,
+	}
 }
 
 // onStateRemoved is notified with the id whose per-head state has just been
