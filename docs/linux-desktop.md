@@ -382,8 +382,9 @@ making the filesystem-protected endpoint protocol platform-UI-specific.
 
 - [x] Add the shared dedicated chrome-free focused route and immediate draft
   flow described by the macOS plan.
-- Wire the shared lifecycle bridge into WebKitGTK. AppKit and WebView2 already
-  consume its new-window, close-request, and active-project messages.
+- [x] Wire the shared lifecycle bridge into WebKitGTK for New Full Window, New
+  Focused Chat, and close requests. AppKit and WebView2 additionally consume
+  active-project and active-turn lifecycle messages.
 - Add native New Window/New Chat commands, project handoff, deep links, and
   active-window close confirmation.
 - Implement explicit Quit semantics for app-launched, service-owned, and

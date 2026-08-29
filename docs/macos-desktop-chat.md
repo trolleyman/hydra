@@ -488,8 +488,10 @@ creates the branchless session only when its first prompt is submitted; the
 resulting agent route retains the chrome-free desktop presentation across
 reloads. The compact window now has project and live focused-history selectors,
 New Chat/Full Hydra actions, and a transport-neutral bridge used by AppKit and
-WebView2 with browser fallbacks. Stop-and-switch behavior, archived history,
-and Linux bridge wiring remain. AppKit and WebView2 now offer Stop and close,
+WebView2 with browser fallbacks. Stop-and-switch behavior remains. Linux now
+consumes the shared new-window and close operations too. Live and loaded
+archived focused history share the selector.
+AppKit and WebView2 now offer Stop and close,
 Close and keep running, and Cancel for an active focused turn; stopping happens
 through the authenticated page before native code permits the close.
 

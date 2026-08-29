@@ -280,6 +280,7 @@ function RootLayout() {
   })
   const currentProjectUnread = useAgentStore((s) => s.agents.reduce((n, a) => n + (a.has_unread_changes ? 1 : 0), 0))
   const allLiveAgents = useAgentStore((s) => s.agents)
+  const allArchivedAgents = useAgentStore((s) => s.archived)
   const desktopRuntimeStatus = useProjectStore((s) => s.systemStatus)
 
   // Record every project you land on (via dropdown, switcher, direct nav, or
@@ -873,7 +874,7 @@ function RootLayout() {
   const focusedDesktopWindow = location.pathname.startsWith('/focused/') ||
     new URLSearchParams(window.location.search).get('desktop') === 'focused'
 
-  const focusedHistory = allLiveAgents.filter((agent) => agent.focused && !agent.ephemeral)
+  const focusedHistory = [...allLiveAgents, ...allArchivedAgents].filter((agent) => agent.focused && !agent.ephemeral)
 
   useEffect(() => {
     if (!focusedDesktopWindow || !currentProjectId) return

@@ -15,6 +15,45 @@ typedef struct {
 	GUri *origin;
 } HydraDesktop;
 
+typedef struct {
+	HydraDesktop *desktop;
+	GtkWidget *window;
+} HydraWindow;
+
+static void hydra_open_window_at(HydraDesktop *desktop, const char *uri);
+
+static void hydra_script_message(WebKitUserContentManager *manager, JSCValue *value, gpointer data) {
+	HydraWindow *window = (HydraWindow *)data;
+	JSCValue *type_value = jsc_value_object_get_property(value, "type");
+	char *type = jsc_value_to_string(type_value);
+	g_object_unref(type_value);
+	if (g_strcmp0(type, "new-full-window") == 0) {
+		hydra_open_window_at(window->desktop, window->desktop->uri);
+	} else if (g_strcmp0(type, "new-focused-window") == 0) {
+		JSCValue *project_value = jsc_value_object_get_property(value, "projectId");
+		if (jsc_value_is_string(project_value)) {
+			char *project = jsc_value_to_string(project_value);
+			char *escaped = g_uri_escape_string(project, NULL, FALSE);
+			const char *scheme = g_uri_get_scheme(window->desktop->origin);
+			const char *host = g_uri_get_host(window->desktop->origin);
+			int port = g_uri_get_port(window->desktop->origin);
+			char *uri = g_strdup_printf("%s://%s:%d/focused/%s", scheme, host, port, escaped);
+			hydra_open_window_at(window->desktop, uri);
+			g_free(uri);
+			g_free(escaped);
+			g_free(project);
+		}
+		g_object_unref(project_value);
+	} else if (g_strcmp0(type, "close-window") == 0) {
+		gtk_window_close(GTK_WINDOW(window->window));
+	}
+	g_free(type);
+}
+
+static void hydra_window_destroy(GtkWidget *widget, gpointer data) {
+	g_free(data);
+}
+
 static gboolean hydra_same_origin(HydraDesktop *desktop, const char *candidate) {
 	GUri *uri = g_uri_parse(candidate, G_URI_FLAGS_NONE, NULL);
 	if (uri == NULL) return FALSE;
@@ -47,27 +86,35 @@ static gboolean hydra_decide_policy(WebKitWebView *web_view, WebKitPolicyDecisio
 	return TRUE;
 }
 
-static void hydra_open_window(HydraDesktop *desktop) {
+static void hydra_open_window_at(HydraDesktop *desktop, const char *uri) {
 	GtkApplication *app = desktop->app;
 	GtkWidget *window = gtk_application_window_new(app);
 	gtk_window_set_title(GTK_WINDOW(window), "Hydra");
 	gtk_window_set_default_size(GTK_WINDOW(window), 1280, 820);
 
 	WebKitWebView *web_view = WEBKIT_WEB_VIEW(webkit_web_view_new());
+	HydraWindow *state = g_new0(HydraWindow, 1);
+	state->desktop = desktop;
+	state->window = window;
+	WebKitUserContentManager *manager = webkit_web_view_get_user_content_manager(web_view);
+	g_signal_connect(manager, "script-message-received::hydra", G_CALLBACK(hydra_script_message), state);
+	webkit_user_content_manager_register_script_message_handler(manager, "hydra", NULL);
+	g_signal_connect(window, "destroy", G_CALLBACK(hydra_window_destroy), state);
 	g_signal_connect(web_view, "decide-policy", G_CALLBACK(hydra_decide_policy), desktop);
 	gtk_window_set_child(GTK_WINDOW(window), GTK_WIDGET(web_view));
-	webkit_web_view_load_uri(web_view, desktop->uri);
+	webkit_web_view_load_uri(web_view, uri);
 	gtk_window_present(GTK_WINDOW(window));
 }
 
 static void hydra_activate(GtkApplication *app, gpointer data) {
 	HydraDesktop *desktop = (HydraDesktop *)data;
 	desktop->app = app;
-	hydra_open_window(desktop);
+	hydra_open_window_at(desktop, desktop->uri);
 }
 
 static void hydra_new_window(GSimpleAction *action, GVariant *parameter, gpointer data) {
-	hydra_open_window((HydraDesktop *)data);
+	HydraDesktop *desktop = (HydraDesktop *)data;
+	hydra_open_window_at(desktop, desktop->uri);
 }
 
 static int hydra_desktop_run(const char *uri) {
