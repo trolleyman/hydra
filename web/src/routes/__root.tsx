@@ -1045,7 +1045,7 @@ function RootLayout() {
                         constantly). Branch fills the left; dirty/ahead-behind
                         chips and Sync sit right. When clean and in sync it
                         reads "up to date" instead of emptying. */}
-                    <div className="px-2.5 mt-0.5 pb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="min-h-7 px-2.5 mt-0.5 pb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                       <GitBranch className="w-3.5 h-3.5 shrink-0" />
                       <span className="font-mono truncate" title={pushStatus?.branch || undefined}>
                         {pushStatus ? (pushStatus.branch || 'detached') : '...'}

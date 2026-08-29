@@ -1107,7 +1107,7 @@ const ArtifactSetCard = memo(function ArtifactSetCard({ set, mode, scale, spans,
                 {/* click-away backdrop */}
                 <div className="fixed inset-0 z-[9998]" onClick={() => setRegenMenuOpen(false)} />
                 <div
-                  className="fixed z-[9999] w-52 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg py-1 text-xs"
+                  className="fixed z-[9999] w-52 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg py-1 text-xs animate-popover-in"
                   style={{ left: regenCoords.left, top: regenCoords.top }}
                 >
                   {/* The main button already regenerates both sides; the menu is

@@ -139,7 +139,7 @@ export function UncommittedChip({
         <div
           ref={menuRef}
           style={{ left: coords.left, top: coords.top, bottom: coords.bottom }}
-          className="fixed w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] p-3 space-y-2"
+          className="fixed w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] p-3 space-y-2 animate-popover-in"
         >
           <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
             Uncommitted changes in the project checkout

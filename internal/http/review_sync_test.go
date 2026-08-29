@@ -67,7 +67,7 @@ func armedHead(projectRoot string) heads.Head {
 		ID: "h1", ProjectPath: projectRoot, Branch: &branch,
 		DownstreamBranch: "feat/h1",
 		ReviewID:         "1", ReviewURL: "https://forge/mr/1", ReviewProvider: "github",
-		PublishWhenGreen: true,
+		AutoPush: true,
 	}
 }
 
@@ -77,15 +77,15 @@ func armedHead(projectRoot string) heads.Head {
 func TestAutoPublishKeepsArmAndPushesEachCommit(t *testing.T) {
 	projectRoot, store, git := syncFixture(t)
 	head := armedHead(projectRoot)
-	if err := store.CreateAgent(&db.Agent{ID: "h1", ProjectPath: projectRoot, PublishWhenGreen: true}); err != nil {
+	if err := store.CreateAgent(&db.Agent{ID: "h1", ProjectPath: projectRoot, AutoPush: true}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	s := &Server{DB: store}
 
 	// Already in sync: a no-op that must not disarm and must not touch the remote.
 	before := git("rev-parse", "refs/remotes/origin/feat/h1")
-	s.autoPublish(context.Background(), projectRoot, head)
-	if a, _ := store.GetAgent("h1"); a == nil || !a.PublishWhenGreen {
+	s.autoPush(context.Background(), projectRoot, head)
+	if a, _ := store.GetAgent("h1"); a == nil || !a.AutoPush {
 		t.Fatalf("an in-sync head must stay armed, got %+v", a)
 	}
 	if after := git("rev-parse", "refs/remotes/origin/feat/h1"); after != before {
@@ -98,11 +98,11 @@ func TestAutoPublishKeepsArmAndPushesEachCommit(t *testing.T) {
 	}
 	git("commit", "-qam", "more work")
 	local := git("rev-parse", "HEAD")
-	s.autoPublish(context.Background(), projectRoot, head)
+	s.autoPush(context.Background(), projectRoot, head)
 	if got := git("rev-parse", "refs/remotes/origin/feat/h1"); got != local {
 		t.Errorf("remote at %s, want the new local tip %s", got, local)
 	}
-	if a, _ := store.GetAgent("h1"); a == nil || !a.PublishWhenGreen {
+	if a, _ := store.GetAgent("h1"); a == nil || !a.AutoPush {
 		t.Fatalf("a successful push must NOT consume the arm, got %+v", a)
 	}
 }
@@ -111,24 +111,24 @@ func TestAutoPublishKeepsArmAndPushesEachCommit(t *testing.T) {
 // 30s forever.
 func TestAutoPublishDisarmsOnFailure(t *testing.T) {
 	projectRoot, store, _ := syncFixture(t)
-	if err := store.CreateAgent(&db.Agent{ID: "h1", ProjectPath: projectRoot, PublishWhenGreen: true}); err != nil {
+	if err := store.CreateAgent(&db.Agent{ID: "h1", ProjectPath: projectRoot, AutoPush: true}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	head := armedHead(projectRoot)
 	head.DownstreamBranch = "" // linked, but there is nowhere to push it
-	(&Server{DB: store}).autoPublish(context.Background(), projectRoot, head)
-	if a, _ := store.GetAgent("h1"); a == nil || a.PublishWhenGreen {
+	(&Server{DB: store}).autoPush(context.Background(), projectRoot, head)
+	if a, _ := store.GetAgent("h1"); a == nil || a.AutoPush {
 		t.Errorf("a failed push must disarm, got %+v", a)
 	}
 }
 
 // Pushing into a PR Hydra did not create must be a deliberate act - but once the
-// user HAS deliberately armed it (ArmPublishWhenGreen refuses to arm an adopted
+// user HAS deliberately armed it (ArmAutoPush refuses to arm an adopted
 // head without acknowledge_adopted, and spawn never arms one from config), the
 // watcher must honour it like any other armed head.
 func TestAutoPublishPushesExplicitlyArmedAdoptedPR(t *testing.T) {
 	projectRoot, store, git := syncFixture(t)
-	if err := store.CreateAgent(&db.Agent{ID: "h1", ProjectPath: projectRoot, PublishWhenGreen: true}); err != nil {
+	if err := store.CreateAgent(&db.Agent{ID: "h1", ProjectPath: projectRoot, AutoPush: true}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "a.txt"), []byte("four\n"), 0o644); err != nil {
@@ -140,12 +140,12 @@ func TestAutoPublishPushesExplicitlyArmedAdoptedPR(t *testing.T) {
 	head := armedHead(projectRoot)
 	head.ReviewAdopted = true
 	head.ReviewCanPush = true
-	(&Server{DB: store}).autoPublish(context.Background(), projectRoot, head)
+	(&Server{DB: store}).autoPush(context.Background(), projectRoot, head)
 
 	if got := git("rev-parse", "refs/remotes/origin/feat/h1"); got != local {
 		t.Errorf("armed adopted PR not pushed: remote at %s, want %s", got, local)
 	}
-	if a, _ := store.GetAgent("h1"); a == nil || !a.PublishWhenGreen {
+	if a, _ := store.GetAgent("h1"); a == nil || !a.AutoPush {
 		t.Errorf("a successful push must not consume the arm, got %+v", a)
 	}
 }
@@ -156,7 +156,7 @@ func TestAutoPublishPushesExplicitlyArmedAdoptedPR(t *testing.T) {
 // its can-push status was known.
 func TestAutoPublishDisarmsReadOnlyAdoptedPR(t *testing.T) {
 	projectRoot, store, git := syncFixture(t)
-	if err := store.CreateAgent(&db.Agent{ID: "h1", ProjectPath: projectRoot, PublishWhenGreen: true}); err != nil {
+	if err := store.CreateAgent(&db.Agent{ID: "h1", ProjectPath: projectRoot, AutoPush: true}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "a.txt"), []byte("four\n"), 0o644); err != nil {
@@ -168,12 +168,12 @@ func TestAutoPublishDisarmsReadOnlyAdoptedPR(t *testing.T) {
 	head := armedHead(projectRoot)
 	head.ReviewAdopted = true
 	head.ReviewCanPush = false
-	(&Server{DB: store}).autoPublish(context.Background(), projectRoot, head)
+	(&Server{DB: store}).autoPush(context.Background(), projectRoot, head)
 
 	if after := git("rev-parse", "refs/remotes/origin/feat/h1"); after != before {
 		t.Errorf("read-only PR was pushed to: %s -> %s", before, after)
 	}
-	if a, _ := store.GetAgent("h1"); a == nil || a.PublishWhenGreen {
+	if a, _ := store.GetAgent("h1"); a == nil || a.AutoPush {
 		t.Errorf("read-only adopted head should be disarmed, got %+v", a)
 	}
 }

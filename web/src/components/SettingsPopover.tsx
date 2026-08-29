@@ -178,7 +178,7 @@ export function SettingsPopover({
         <div
           ref={measureRef}
           style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, width: fitContent ? 'max-content' : pos.width, maxWidth: pos.width }}
-          className="relative z-[100] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3"
+          className="relative z-[100] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 animate-popover-in"
         >
           {/* Absolute, so it costs the stacked controls no vertical room: the
               panel's first row is a short group label, which it sits beside. */}
@@ -318,7 +318,7 @@ export function SettingsSelect({
           data-portal-menu
           role="listbox"
           style={{ left: pos.left, top: pos.top, bottom: pos.bottom, width }}
-          className="fixed max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] py-1"
+          className="fixed max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-[9999] py-1 animate-popover-in"
         >
           {options.map((o) => (
             <button

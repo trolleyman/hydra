@@ -27,7 +27,7 @@ const reviewPollInterval = 30 * time.Second
 //   - refreshes the cached MR state on the head (state/CI/approvals/discussions);
 //   - detects a remote merge -> fetches, fast-forwards the local target branch,
 //     archives the head as "merged" and tears it down (the code has landed);
-//   - auto-publishes / auto-pushes armed publish-when-green heads once green.
+//   - auto-publishes armed unlinked heads once green and auto-pushes linked heads.
 //
 // See docs/non-local-integration.md. Unlinked heads cost nothing (they aren't polled).
 func (s *Server) RunReviewWatcher(ctx context.Context) {
@@ -39,7 +39,7 @@ func (s *Server) RunReviewWatcher(ctx context.Context) {
 			return
 		case <-t.C:
 			s.pollLinkedReviews(ctx)
-			s.checkPublishWhenGreen(ctx)
+			s.checkAutoPush(ctx)
 		}
 	}
 }
@@ -236,21 +236,20 @@ func (s *Server) handleRemoteMerge(ctx context.Context, projectRoot, headID stri
 	s.notifyAgentsChanged(projectRoot, true)
 }
 
-// checkPublishWhenGreen auto-publishes/pushes armed heads once their local tests
-// are green and the agent has finished, mirroring the merge-when-green watcher
-// . An unlinked armed head auto-opens a DRAFT MR; a linked one auto-pushes
-// (plain push only - never auto-force).
+// checkAutoPush handles automatic review syncing. Linked heads auto-push
+// after the agent finishes without waiting for tests. An explicitly armed,
+// unlinked head retains the old behavior and opens a draft MR once tests pass.
 //
 // The arm is STICKY: it survives a successful publish/push, so an armed head
 // keeps its MR in sync for the rest of its life rather than syncing once and
 // going quiet. That is the whole point of arming it - a commit the agent makes
 // after the MR opens is exactly the commit that used to sit there unnoticed. It
-// is consumed only on failure (so a broken push can't loop) - see autoPublish.
-func (s *Server) checkPublishWhenGreen(ctx context.Context) {
-	if s.DB == nil || s.Tests == nil {
+// is consumed only on failure (so a broken push can't loop) - see autoPush.
+func (s *Server) checkAutoPush(ctx context.Context) {
+	if s.DB == nil {
 		return
 	}
-	armed, err := s.DB.ArmedPublishWhenGreen()
+	armed, err := s.DB.AutoPushHeads()
 	if err != nil || len(armed) == 0 {
 		return
 	}
@@ -260,13 +259,13 @@ func (s *Server) checkPublishWhenGreen(ctx context.Context) {
 		if err != nil || head == nil || head.Branch == nil {
 			continue
 		}
-		if !s.headTestsGreen(projectRoot, *head) {
+		if !head.IsLinked() && (s.Tests == nil || !s.headTestsGreen(projectRoot, *head)) {
 			continue
 		}
 		if !headFinishedFor(a, autoMergeFinishedDwell, time.Now()) {
 			continue
 		}
-		s.autoPublish(ctx, projectRoot, *head)
+		s.autoPush(ctx, projectRoot, *head)
 	}
 }
 
@@ -303,7 +302,7 @@ func (s *Server) headTestsGreen(projectRoot string, head heads.Head) bool {
 	return passing == len(runners)
 }
 
-// autoPublish publishes or pushes an armed head. Unlinked -> draft MR (via
+// autoPush publishes or pushes an armed head. Unlinked -> draft MR (via
 // publishHead); linked -> plain push (via pushHeadToMR). Reuses the shared cores
 // so the claim/gate/link logic stays in one place.
 //
@@ -313,14 +312,14 @@ func (s *Server) headTestsGreen(projectRoot string, head heads.Head) bool {
 // retrying every 30s forever. A linked head with nothing to push does neither -
 // it is a no-op, so an idle armed head costs one local rev-list per tick and no
 // network at all.
-func (s *Server) autoPublish(ctx context.Context, projectRoot string, head heads.Head) {
+func (s *Server) autoPush(ctx context.Context, projectRoot string, head heads.Head) {
 	// An adopted head can only be armed through an explicit acknowledgement
-	// (ArmPublishWhenGreen; never from the `[review] publish_when_green` default at
+	// (ArmAutoPush; never from the `[review] auto_push` default at
 	// spawn), so an armed one here means the user asked for exactly this and we
 	// push. What stays unconditional is a read-only PR: no push to it can ever
 	// succeed, so disarm rather than re-log every tick (docs/pr-adoption.md).
 	if head.ReviewAdopted && !head.ReviewCanPush {
-		_ = s.DB.SetPublishWhenGreen(head.ID, false, "")
+		_ = s.DB.SetAutoPush(head.ID, false, "")
 		log.Printf("review watcher: disarming auto-publish for adopted head %s (read-only PR: no maintainer-edit access)", head.ID)
 		return
 	}
@@ -344,13 +343,13 @@ func (s *Server) autoPublish(ctx context.Context, projectRoot string, head heads
 			}
 		}
 		if err := s.pushHeadToMR(ctx, projectRoot, head); err != nil {
-			_ = s.DB.SetPublishWhenGreen(head.ID, false, "")
+			_ = s.DB.SetAutoPush(head.ID, false, "")
 			log.Printf("warn: auto-publish push for %s failed (sync-when-green disarmed): %v", head.ID, err)
 		}
 	} else {
 		draft := true
 		if _, fail := s.publishHead(ctx, projectRoot, head, publishOverrides{Draft: &draft}); fail != nil {
-			_ = s.DB.SetPublishWhenGreen(head.ID, false, "")
+			_ = s.DB.SetAutoPush(head.ID, false, "")
 			log.Printf("warn: auto-publish for %s failed (publish-when-green disarmed): %s", head.ID, fail.detail)
 		}
 	}

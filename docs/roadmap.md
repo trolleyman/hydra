@@ -319,11 +319,13 @@ before starting. Grouped by area.
   macOS, Windows, and Linux app branches. The initial macOS AppKit/WKWebView
   shell, shared-server discovery/launch handshake, multi-window ownership, and
   development `.app` packaging are built but still need on-device validation.
-  Native notifications, menu-bar state, signing/notarization, the first-message
-  draft flow, and the dedicated chrome-free route remain.
-  See [macos-desktop-chat.md](macos-desktop-chat.md) for the agreed behavior,
-  sandbox invariants and staged implementation plan. Depends on closing the
-  security-critical gaps in [macos-support.md](macos-support.md).
+  The Windows-native WebView2 shell, native notifications, packaging, the
+  first-message draft flow, and the dedicated chrome-free route remain.
+  See [macos-desktop-chat.md](macos-desktop-chat.md) for the macOS sequence and
+  [windows-desktop-chat.md](windows-desktop-chat.md) for the standalone Windows
+  shell, packaging, lifecycle, and release plan. Each app depends on closing its
+  security-critical platform gaps in [macos-support.md](macos-support.md) or
+  [windows-support.md](windows-support.md).
 
 - [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
 

@@ -29,7 +29,7 @@ export type ReviewConfig = {
     squash?: boolean | null;
     delete_remote_branch?: boolean | null;
     require_local_tests?: boolean | null;
-    publish_when_green?: boolean | null;
+    auto_push?: boolean | null;
     protected_branches?: Array<string> | null;
 };
 

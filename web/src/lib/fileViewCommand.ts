@@ -48,6 +48,10 @@ export interface FileView {
   // The step as written, for a caller that wants to name what produced the
   // lines it is holding.
   command: string
+  // Several adjacent reads had no recoverable boundary, but every path names
+  // the same language. The renderer may colour the combined stretch from this
+  // view's extension, but must not attribute its rows to this one path.
+  languageOnly?: boolean
 }
 
 // parseSedRange reads the one accepted sed script: a print of a contiguous line

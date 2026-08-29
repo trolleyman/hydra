@@ -161,7 +161,7 @@ export function TagScopeFilter({
       {open && coords && createPortal(
         <div
           ref={panelRef}
-          className="fixed w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-[9999] overflow-hidden text-left"
+          className="fixed w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-[9999] overflow-hidden text-left animate-popover-in"
           style={{ left: coords.left, top: coords.top }}
         >
           {/* Fixed header: "all" left, "clear" right. Always present (regardless

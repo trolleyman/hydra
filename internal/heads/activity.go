@@ -35,11 +35,18 @@ func enrichAgentStatus(projectRoot, id string, info *api.AgentStatusInfo) {
 		return
 	}
 
-	// The security gate writes notification_type=policy_approval into status.json
-	// when it parks a tool call (so the UI shows the approval card). The JSON
-	// status poller persists only the status string, not this side channel, so
-	// computeAgentStatus loses it - recover it straight from status.json here.
-	if info.NotificationType == nil {
+	// The pending request is authoritative even if a provider hook raced and
+	// overwrote status.json after the call parked. This also makes a direct GET
+	// surface the card before the status poller's next tick.
+	if pending := pendingApprovalStatus(projectRoot, id); pending != nil {
+		info.Status = pending.Status
+		info.Event = pending.Event
+		info.Timestamp = pending.Timestamp
+		info.LastMessage = pending.LastMessage
+		info.NotificationType = pending.NotificationType
+	} else if info.NotificationType == nil {
+		// The JSON status poller persists only the status string, not this side
+		// channel, so recover a non-raced policy wait straight from status.json.
 		if s := ReadAgentStatus(projectRoot, id); s != nil && s.NotificationType != nil {
 			info.NotificationType = s.NotificationType
 		}

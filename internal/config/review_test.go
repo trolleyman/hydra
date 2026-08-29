@@ -40,6 +40,23 @@ func TestResolveProviderExplicitWins(t *testing.T) {
 	}
 }
 
+func TestReviewAutoPushDefaultsOnAndCanBeDisabled(t *testing.T) {
+	if !(&ReviewConfig{}).IsAutoPush() {
+		t.Fatal("automatic pushes should default on for newly linked MRs")
+	}
+	off := false
+	if (&ReviewConfig{AutoPush: &off}).IsAutoPush() {
+		t.Fatal("explicit auto_push=false should disable automatic pushes")
+	}
+	if (&ReviewConfig{PublishWhenGreen: &off}).IsAutoPush() {
+		t.Fatal("legacy publish_when_green=false should remain compatible")
+	}
+	lines := strings.Join(reviewFieldLines(ReviewConfig{PublishWhenGreen: &off}), "\n")
+	if !strings.Contains(lines, "auto_push = false") || strings.Contains(lines, "publish_when_green") {
+		t.Fatalf("legacy setting should render canonically as auto_push, got:\n%s", lines)
+	}
+}
+
 func TestBrowseURL(t *testing.T) {
 	cases := []struct {
 		url, want string

@@ -15,7 +15,7 @@ import (
 func (r ReviewConfig) isEmpty() bool {
 	return r.Provider == nil && r.Publisher == nil && r.Remote == nil && r.Auth == nil &&
 		r.DefaultAction == nil && r.PushBranchTemplate == nil && r.IssuePattern == nil && r.Draft == nil && r.Squash == nil &&
-		r.DeleteRemoteBranch == nil && r.RequireLocalTests == nil && r.PublishWhenGreen == nil &&
+		r.DeleteRemoteBranch == nil && r.RequireLocalTests == nil && r.AutoPush == nil && r.PublishWhenGreen == nil &&
 		len(r.ProtectedBranches) == 0
 }
 
@@ -45,7 +45,7 @@ func reviewFieldLines(r ReviewConfig) []string {
 	addBool("squash", r.Squash)
 	addBool("delete_remote_branch", r.DeleteRemoteBranch)
 	addBool("require_local_tests", r.RequireLocalTests)
-	addBool("publish_when_green", r.PublishWhenGreen)
+	addBool("auto_push", firstBool(r.AutoPush, r.PublishWhenGreen))
 	if len(r.ProtectedBranches) > 0 {
 		quoted := make([]string, len(r.ProtectedBranches))
 		for i, b := range r.ProtectedBranches {
@@ -105,9 +105,11 @@ type ReviewConfig struct {
 	// DefaultAction picks the primary button on a head: "merge" (local, as today) or
 	// "create_mr". The other action stays one click away. Default "merge".
 	DefaultAction *string `toml:"default_action"`
-	// PublishWhenGreen arms new heads to auto-create/update a DRAFT MR once local
-	// tests pass and the agent has finished (the publish analog of merge-when-green).
-	// Per-head overridable in the spawn form. nil = off.
+	// AutoPush controls whether a head Hydra publishes automatically keeps its
+	// linked MR branch in sync. nil = on.
+	AutoPush *bool `toml:"auto_push"`
+	// PublishWhenGreen is the deprecated pre-auto_push spelling. It is accepted on
+	// read and rewritten as auto_push whenever Hydra renders the config.
 	PublishWhenGreen *bool `toml:"publish_when_green"`
 	// ProtectedBranches, when a direct LOCAL merge targets one of these, triggers a
 	// warning (the server would reject the push anyway). nil/empty = no warning.
@@ -202,9 +204,26 @@ func (r *ReviewConfig) GetPushBranchTemplate() string {
 	return *r.PushBranchTemplate
 }
 
-// IsPublishWhenGreen reports whether new heads are armed to publish-when-green.
-func (r *ReviewConfig) IsPublishWhenGreen() bool {
-	return r != nil && r.PublishWhenGreen != nil && *r.PublishWhenGreen
+// IsAutoPush reports whether newly linked heads automatically push.
+func (r *ReviewConfig) IsAutoPush() bool {
+	return r == nil || firstBool(r.AutoPush, r.PublishWhenGreen) == nil || *firstBool(r.AutoPush, r.PublishWhenGreen)
+}
+
+// AutoPushSetting returns the explicitly configured canonical or legacy value.
+func (r *ReviewConfig) AutoPushSetting() *bool {
+	if r == nil {
+		return nil
+	}
+	return firstBool(r.AutoPush, r.PublishWhenGreen)
+}
+
+func firstBool(values ...*bool) *bool {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 // IsDraft reports whether MRs open as draft by default (default true).
@@ -263,8 +282,9 @@ func (r *ReviewConfig) Merge(other ReviewConfig) {
 	if other.DefaultAction != nil {
 		r.DefaultAction = other.DefaultAction
 	}
-	if other.PublishWhenGreen != nil {
-		r.PublishWhenGreen = other.PublishWhenGreen
+	if value := firstBool(other.AutoPush, other.PublishWhenGreen); value != nil {
+		r.AutoPush = value
+		r.PublishWhenGreen = nil
 	}
 	if other.ProtectedBranches != nil {
 		r.ProtectedBranches = unionStrings(r.ProtectedBranches, other.ProtectedBranches)

@@ -45,7 +45,6 @@ export function CommitStats({ additions, deletions }: { additions?: number; dele
 }
 
 export function CommitCard({ commit }: { commit: CommitCardCommit }) {
-  const { subject, body } = commitParts(commit.message)
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between gap-3">
@@ -58,14 +57,11 @@ export function CommitCard({ commit }: { commit: CommitCardCommit }) {
         <CommitStats additions={commit.additions} deletions={commit.deletions} />
       </div>
       <div className="border-t border-gray-200 pt-2 dark:border-gray-700">
-        <p className="text-sm leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>
-        {body && (
-          <Markdown
-            text={body}
-            hardBreaks={false}
-            className="mt-1.5 text-xs leading-relaxed text-gray-600 dark:text-gray-300"
-          />
-        )}
+        <Markdown
+          text={commit.message}
+          hardBreaks={false}
+          className="text-xs leading-relaxed text-gray-700 dark:text-gray-200"
+        />
       </div>
     </div>
   )

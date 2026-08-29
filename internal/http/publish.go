@@ -259,6 +259,14 @@ func (s *Server) publishHead(ctx context.Context, projectRoot string, head heads
 			release(nil)
 			return nil, &publishFailure{badReq: true, detail: err.Error()}
 		}
+		// A Hydra-created MR stays synced by default. Arm only after linking, so
+		// this default can never create an MR without an explicit publish action.
+		if review.IsAutoPush() {
+			if err := s.DB.SetAutoPush(head.ID, true, time.Now().UTC().Format(time.RFC3339)); err != nil {
+				release(nil)
+				return nil, &publishFailure{badReq: true, detail: err.Error()}
+			}
+		}
 	}
 	release(nil)
 	s.refreshReviewState(pubCtx, projectRoot, head.ID, provider, remote, mr.ID)
@@ -474,7 +482,7 @@ func (s *Server) resolveReviewConfigResponse(projectRoot string) api.ReviewConfi
 		Squash:             ptr(review.IsSquash()),
 		DeleteRemoteBranch: ptr(review.IsDeleteRemoteBranch()),
 		RequireLocalTests:  ptr(review.IsRequireLocalTests()),
-		PublishWhenGreen:   ptr(review.IsPublishWhenGreen()),
+		AutoPush:           ptr(review.IsAutoPush()),
 		ProtectedBranches:  &review.ProtectedBranches,
 	}
 	// The provider itself is detected from the remote URL above - no forge CLI
@@ -557,9 +565,9 @@ func warmAuthStatus(provider string) {
 	}()
 }
 
-// adoptedArmRefusal decides whether arming publish-when-green on this head must be
+// adoptedArmRefusal decides whether arming automatic pushes on this head must be
 // refused, and with what wording. Arming an ADOPTED PR means pushing into someone
-// else's PR on every green commit: allowed, but never implicitly - the caller has
+// else's PR on every commit: allowed, but never implicitly - the caller has
 // to acknowledge it, which is what the UI's warning dialog collects
 // (docs/pr-adoption.md). A read-only PR is refused whatever the caller says, since
 // no push to it can succeed and the arm would only fail later, out of sight.
@@ -571,13 +579,13 @@ func adoptedArmRefusal(head heads.Head, acknowledged bool) (detail string, refus
 		return "this PR is read-only: its author has not enabled maintainer edits, so nothing can be pushed to it automatically", true
 	}
 	if !acknowledged {
-		return "this head is working on a PR Hydra did not create: pass acknowledge_adopted=true to confirm you want every green commit pushed into it", true
+		return "this head is working on a PR Hydra did not create: pass acknowledge_adopted=true to confirm you want every commit pushed into it", true
 	}
 	return "", false
 }
 
-// ArmPublishWhenGreen arms publish-when-green for a head.
-func (s *Server) ArmPublishWhenGreen(ctx context.Context, request api.ArmPublishWhenGreenRequestObject) (api.ArmPublishWhenGreenResponseObject, error) {
+// ArmAutoPush enables automatic pushes for a linked head.
+func (s *Server) ArmAutoPush(ctx context.Context, request api.ArmAutoPushRequestObject) (api.ArmAutoPushResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -587,34 +595,34 @@ func (s *Server) ArmPublishWhenGreen(ctx context.Context, request api.ArmPublish
 		return nil, errtrace.Wrap(err)
 	}
 	if head == nil || head.Branch == nil {
-		return api.ArmPublishWhenGreen404JSONResponse{Code: 404, Error: api.ErrorResponseErrorNotFound, Details: "agent not found"}, nil
+		return api.ArmAutoPush404JSONResponse{Code: 404, Error: api.ErrorResponseErrorNotFound, Details: "agent not found"}, nil
 	}
 	ack := request.Params.AcknowledgeAdopted != nil && *request.Params.AcknowledgeAdopted
 	if detail, refused := adoptedArmRefusal(*head, ack); refused {
-		return api.ArmPublishWhenGreen400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: detail}, nil
+		return api.ArmAutoPush400JSONResponse{Code: 400, Error: api.ErrorResponseErrorBadRequest, Details: detail}, nil
 	}
 	if s.DB != nil {
-		if err := s.DB.SetPublishWhenGreen(head.ID, true, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		if err := s.DB.SetAutoPush(head.ID, true, time.Now().UTC().Format(time.RFC3339)); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 	}
 	s.notifyAgentsChanged(projectRoot, true)
-	return api.ArmPublishWhenGreen204Response{}, nil
+	return api.ArmAutoPush204Response{}, nil
 }
 
-// DisarmPublishWhenGreen clears the publish-when-green intent for a head.
-func (s *Server) DisarmPublishWhenGreen(ctx context.Context, request api.DisarmPublishWhenGreenRequestObject) (api.DisarmPublishWhenGreenResponseObject, error) {
+// DisarmAutoPush disables automatic pushes for a head.
+func (s *Server) DisarmAutoPush(ctx context.Context, request api.DisarmAutoPushRequestObject) (api.DisarmAutoPushResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	if s.DB != nil {
-		if err := s.DB.SetPublishWhenGreen(request.AgentId, false, ""); err != nil {
+		if err := s.DB.SetAutoPush(request.AgentId, false, ""); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 	}
 	s.notifyAgentsChanged(projectRoot, true)
-	return api.DisarmPublishWhenGreen204Response{}, nil
+	return api.DisarmAutoPush204Response{}, nil
 }
 
 // linkedHead resolves a head and asserts it is linked to an MR with a branch and

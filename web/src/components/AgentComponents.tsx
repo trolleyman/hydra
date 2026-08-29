@@ -168,12 +168,13 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
             {agentStatusBadge(agent.agent_status.status).label}
           </Badge>
         )}
-        {/* Test verdict chip (PLAN #68): passing/failing/running/errored/stale.
+        {/* Test verdict chip (PLAN #68): passing/failing/running/errored.
             Hidden while the head's tip is still the base commit (at_base): that
             verdict is inherited from the base, not the agent's own work, so a
             green "passed" here is just misleading noise. The agent detail view
-            still shows it. */}
-        {!archived && !agent.tests?.at_base && <TestVerdictChip tests={agent.tests} variant="xs" />}
+            still shows it. A stale verdict is omitted here too: the sidebar has
+            no room to explain it, while the detailed test surfaces do. */}
+        {!archived && !agent.tests?.at_base && agent.tests?.status !== 'stale' && <TestVerdictChip tests={agent.tests} variant="xs" />}
         {!archived && agent.merge_when_green ? (
           <Clock className="w-3 h-3 text-green-600 dark:text-green-400 shrink-0" aria-label="auto-merge armed" />
         ) : null}

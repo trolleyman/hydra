@@ -23,7 +23,7 @@ const SCOPE_FILE: Record<'project' | 'local' | 'user', string> = {
 // the page is on). Every field is optional: leave it inherited and it falls
 // through to the layer below (project -> built-in defaults). So provider /
 // target / branch template naturally live in the shared Project config, while
-// personal tweaks (publish-when-green) go under the Local tab. The section is a
+// personal tweaks (automatic pushes) go under the Local tab. The section is a
 // collapsible card (collapsed by default) since most people rarely touch it.
 export function ReviewSection({
   review,
@@ -112,10 +112,7 @@ export function ReviewSection({
               <Bool label="Request squash on merge" value={r.squash} effective={resolved?.squash} onChange={(v) => set('squash', v)} />
               <Bool label="Delete source branch on merge" value={r.delete_remote_branch} effective={resolved?.delete_remote_branch} onChange={(v) => set('delete_remote_branch', v)} />
               <Bool label="Gate publish on local tests" value={r.require_local_tests} effective={resolved?.require_local_tests} onChange={(v) => set('require_local_tests', v)} />
-              {/* The config key stays publish_when_green; the label doesn't say
-                  so, because "green" is the code's word for a passing test gate
-                  and means nothing in a settings row. */}
-              <Bool label="New heads open and update their MR on their own, once tests pass" value={r.publish_when_green} effective={resolved?.publish_when_green} onChange={(v) => set('publish_when_green', v)} />
+              <Bool label="Automatically push new commits after linking an MR" value={r.auto_push} effective={resolved?.auto_push} onChange={(v) => set('auto_push', v)} />
             </div>
           </Row>
           {resolved && (

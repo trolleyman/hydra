@@ -98,7 +98,7 @@ const LIST_ROW_PLACEHOLDER = 'placeholder-gray-300 dark:placeholder-gray-600'
 // content of the line, and it is exactly what a lookalike hides.
 const renderHostEntry = (value: string) => <HostName host={value} />
 
-function PathListEditor({
+export function PathListEditor({
   paths,
   onChange,
   placeholder,
@@ -114,17 +114,30 @@ function PathListEditor({
   // have nothing to highlight and stay plain inputs.
   renderValue?: (value: string) => ReactNode
 }) {
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([])
+  const addAfter = (index: number) => {
+    const next = [...paths]
+    next.splice(index + 1, 0, '')
+    onChange(next)
+    requestAnimationFrame(() => inputRefs.current[index + 1]?.focus())
+  }
   return (
     <div className="space-y-2 pt-0.5">
       {paths.map((p, index) => (
         <div key={index} className="flex items-center gap-2">
           {renderValue ? (
             <HighlightedInput
+              ref={(el) => { inputRefs.current[index] = el }}
               value={p}
               onChange={(e) => {
                 const next = [...paths]
                 next[index] = e.target.value
                 onChange(next)
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return
+                e.preventDefault()
+                addAfter(index)
               }}
               placeholder={placeholder}
               spellCheck={false}
@@ -134,12 +147,18 @@ function PathListEditor({
             />
           ) : (
             <input
+              ref={(el) => { inputRefs.current[index] = el }}
               type="text"
               value={p}
               onChange={(e) => {
                 const next = [...paths]
                 next[index] = e.target.value
                 onChange(next)
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return
+                e.preventDefault()
+                addAfter(index)
               }}
               placeholder={placeholder}
               spellCheck={false}
@@ -172,7 +191,7 @@ function PathListEditor({
 // Kept as numbers on the wire; number inputs so a partial edit can't corrupt the
 // list. A row being typed (empty/0) is held as 0 and dropped by the backend's
 // out-of-range filter.
-function PortListEditor({
+export function PortListEditor({
   ports,
   onChange,
   placeholder,
@@ -183,11 +202,19 @@ function PortListEditor({
   placeholder?: string
   addLabel?: string
 }) {
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([])
+  const addAfter = (index: number) => {
+    const next = [...ports]
+    next.splice(index + 1, 0, 0)
+    onChange(next)
+    requestAnimationFrame(() => inputRefs.current[index + 1]?.focus())
+  }
   return (
     <div className="space-y-2 pt-0.5">
       {ports.map((p, index) => (
         <div key={index} className="flex items-center gap-2">
           <input
+            ref={(el) => { inputRefs.current[index] = el }}
             type="number"
             min={1}
             max={65535}
@@ -196,6 +223,11 @@ function PortListEditor({
               const next = [...ports]
               next[index] = e.target.valueAsNumber || 0
               onChange(next)
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return
+              e.preventDefault()
+              addAfter(index)
             }}
             placeholder={placeholder}
             className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-600 font-mono shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
