@@ -187,7 +187,7 @@ func (s *Server) getCollaborationAgent(ctx context.Context, projectRoot, sourceI
 		testStatus = tests.Status
 	}
 	fmt.Fprintf(&b, "- tests: %s\n- review comments: %d open, %d unread\n- merge when green: %t\n- publish when green: %t",
-		testStatus, openCommentCount(projectRoot, h.ID), unreadCommentCount(projectRoot, h.ID), h.MergeWhenGreen, h.PublishWhenGreen)
+		testStatus, openCommentCount(projectRoot, h.ID), unreadCommentCount(projectRoot, h.ID), h.MergeWhenGreen, h.AutoPush)
 	return agentq.Result{OK: true, Message: b.String()}
 }
 

@@ -1238,18 +1238,18 @@ func (s *SimulationServer) SetDownstreamBranch(w http.ResponseWriter, r *http.Re
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
-func (s *SimulationServer) ArmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.ArmPublishWhenGreenParams) {
+func (s *SimulationServer) ArmAutoPush(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.ArmAutoPushParams) {
 	// Mirror the real gate so the adopted-PR warning dialog is exercisable in the
 	// simulation: agent-3 is the adopted fixture, and arming it without the
 	// acknowledgement is the 400 the dialog exists to prevent.
 	if id == "agent-3" && (params.AcknowledgeAdopted == nil || !*params.AcknowledgeAdopted) {
-		api.WriteError(w, http.StatusBadRequest, "this head is working on a PR Hydra did not create: pass acknowledge_adopted=true to confirm you want every green commit pushed into it")
+		api.WriteError(w, http.StatusBadRequest, "this head is working on a PR Hydra did not create: pass acknowledge_adopted=true to confirm you want every commit pushed into it")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *SimulationServer) DisarmPublishWhenGreen(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+func (s *SimulationServer) DisarmAutoPush(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1270,7 +1270,7 @@ func (s *SimulationServer) GetReviewConfig(w http.ResponseWriter, r *http.Reques
 		Squash:             ptr(true),
 		DeleteRemoteBranch: ptr(true),
 		RequireLocalTests:  ptr(true),
-		PublishWhenGreen:   ptr(false),
+		AutoPush:           ptr(true),
 		ProtectedBranches:  &[]string{"main"},
 	})
 }

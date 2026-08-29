@@ -1413,24 +1413,24 @@ export class DefaultService {
         });
     }
     /**
-     * Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
-     * Arms "publish when green" (docs/non-local-integration.md): once local tests settle passing and the agent has finished, an unlinked head auto-opens a draft MR and a linked head auto-pushes (plain push only). Idempotent. Arming an ADOPTED PR - one Hydra did not create - additionally requires acknowledge_adopted=true, since it starts pushing into someone else's PR (docs/pr-adoption.md); without it such a head is refused with a 400.
+     * Arm automatic publishing - auto-open after tests / auto-push linked heads
+     * Arms automatic publishing (legacy operation name): after the agent has finished, an unlinked head auto-opens a draft MR once local tests pass, while a linked head auto-pushes without waiting for tests (plain push only). Idempotent. Arming an ADOPTED PR - one Hydra did not create - additionally requires acknowledge_adopted=true, since it starts pushing into someone else's PR (docs/pr-adoption.md); without it such a head is refused with a 400.
      *
      * @param projectId
      * @param agentId
-     * @param acknowledgeAdopted Acknowledges that this head is working on a PR Hydra did not create, so arming means auto-pushing into someone else's PR on every green commit. Required (true) to arm an adopted head; ignored for any other head. A read-only adopted PR (no maintainer edits) is refused even with it, since no push can succeed.
+     * @param acknowledgeAdopted Acknowledges that this head is working on a PR Hydra did not create, so arming means auto-pushing into someone else's PR on every commit. Required (true) to arm an adopted head; ignored for any other head. A read-only adopted PR (no maintainer edits) is refused even with it, since no push can succeed.
      *
      * @returns void
      * @throws ApiError
      */
-    public armPublishWhenGreen(
+    public armAutoPush(
         projectId: string,
         agentId: string,
         acknowledgeAdopted?: boolean,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'POST',
-            url: '/api/projects/{project_id}/agents/{agent_id}/publish/when-green',
+            url: '/api/projects/{project_id}/agents/{agent_id}/publish/auto-push',
             path: {
                 'project_id': projectId,
                 'agent_id': agentId,
@@ -1452,13 +1452,13 @@ export class DefaultService {
      * @returns void
      * @throws ApiError
      */
-    public disarmPublishWhenGreen(
+    public disarmAutoPush(
         projectId: string,
         agentId: string,
     ): CancelablePromise<void> {
         return this.httpRequest.request({
             method: 'DELETE',
-            url: '/api/projects/{project_id}/agents/{agent_id}/publish/when-green',
+            url: '/api/projects/{project_id}/agents/{agent_id}/publish/auto-push',
             path: {
                 'project_id': projectId,
                 'agent_id': agentId,
