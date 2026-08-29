@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
@@ -92,9 +93,21 @@ The head keeps working while you are idle, and your checkout is moved forward to
 
 Review the diff between the base branch and this checkout's HEAD. Correctness first, then anything that would fail in production, then clarity. Say plainly when something is fine; do not manufacture findings. Prefer a few specific, located observations over an exhaustive list - the person reading you can only act on so many.
 
-Start the review immediately when this session opens. Read the current diff, and raise each actionable issue with the add_review_comment tool at the most relevant changed line. Use your response for a concise review summary, not as a substitute for comments. If there are no actionable issues, say so plainly and do not add comments.`
+When this is a new conversation, start the review immediately. Read the current diff, and raise each actionable issue with the add_review_comment tool at the most relevant changed line. Use your response for a concise review summary, not as a substitute for comments. If there are no actionable issues, say so plainly and do not add comments. When an existing conversation is resumed, wait for a new user message instead of automatically reviewing again.`
 
 const reviewOpeningPrompt = `Review the current diff now. Raise each actionable issue as a review comment with add_review_comment, then give me a concise summary.`
+
+func reviewConversationID(projectRoot, id, worktreePath, home string, agentType sandbox.AgentType) string {
+	switch agentType {
+	case sandbox.AgentTypeClaude:
+		dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktreePath))
+		return claudestream.LatestSessionID(dir)
+	case sandbox.AgentTypeCodex:
+		return readCodexSlotConversationID(projectRoot, id)
+	default:
+		return ""
+	}
+}
 
 // ReviewCheckoutRef is the ref a head's reviewer should be looking at: its branch
 // tip. Committed work only - the checkout is a commit, so uncommitted changes in
@@ -272,7 +285,9 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		return "", errtrace.Wrap(err)
 	}
 
-	argv, err := sandbox.AgentArgv(agentType, false, reviewSystemPrompt, "", "", true, "", seed.MCPConfigPath)
+	conversationID := reviewConversationID(projectRoot, id, worktreePath, home, agentType)
+	resuming := conversationID != ""
+	argv, err := sandbox.AgentArgv(agentType, resuming, reviewSystemPrompt, "", "", true, conversationID, seed.MCPConfigPath)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -306,15 +321,19 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		return "", errtrace.Wrap(err)
 	}
 	if agentType == sandbox.AgentTypeCodex {
-		conversationID := readCodexSlotConversationID(projectRoot, id)
 		if err := startCodexChatController(reg, nil, projectRoot, id, worktreePath, "", conversationID, ""); err != nil {
 			StopSessionAndWait(reg, id, 5*time.Second)
 			return "", errtrace.Wrap(err)
 		}
 	}
-	// A chat-mode CLI starts idle and waits for stdin; a system prompt describes
-	// the role but does not itself create a turn. Opening Review is an explicit
-	// request to perform a review, so submit that first turn automatically.
-	nudgeResumedChatAgent(reg, id, reviewOpeningPrompt)
+	// A fresh chat-mode CLI starts idle and waits for stdin; a system prompt
+	// describes the role but does not itself create a turn. The first-ever open is
+	// an explicit request to review, so submit that turn automatically. A revived
+	// reviewer already has a conversation and must remain idle until the user or a
+	// mention addresses it - nudging it here would pay for and publish a duplicate
+	// review every time its tab reattached after a close or daemon restart.
+	if !resuming {
+		nudgeResumedChatAgent(reg, id, reviewOpeningPrompt)
+	}
 	return id, nil
 }

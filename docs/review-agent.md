@@ -17,11 +17,11 @@ Two halves that only work together:
    `internal/reviewstore/comments.go`, `internal/http/review_comments.go`,
    `reviewq.OpComments` / `OpAddComment`, `web/src/lib/reviewComments.ts`.
 
-Opening the Review tab starts a review turn immediately. The reviewer reads the
-current base-to-head diff, records actionable findings with `add_review_comment`
-at the relevant changed lines, and uses its response for the summary. A review
-session therefore opens as an active review, not an empty chat waiting for the
-human to repeat what the tab is for.
+Opening the Review tab for the first time starts a review turn immediately. The
+reviewer reads the current base-to-head diff, records actionable findings with
+`add_review_comment` at the relevant changed lines, and uses its response for the
+summary. Reopening or reviving an existing reviewer restores its conversation
+but leaves it idle; it does not automatically re-review or duplicate its findings.
 
 The second was the more valuable half, and building it fixed the existing
 "Comment to agent" flow as a side effect: that used to format a markdown blob and

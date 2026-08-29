@@ -64,6 +64,39 @@ func TestCodexReviewConversationIDPersistsAcrossRestarts(t *testing.T) {
 	}
 }
 
+func TestReviewConversationIDDetectsClaudeTranscript(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	worktree := paths.GetReviewCheckoutDirFromProjectRoot(root, "h1")
+	dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktree))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := reviewConversationID(root, ReviewSessionID("h1"), worktree, home, sandbox.AgentTypeClaude); got != "" {
+		t.Fatalf("missing Claude conversation ID = %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "review-session.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := reviewConversationID(root, ReviewSessionID("h1"), worktree, home, sandbox.AgentTypeClaude); got != "review-session" {
+		t.Fatalf("Claude conversation ID = %q, want review-session", got)
+	}
+}
+
+func TestReviewConversationIDDetectsCodexThread(t *testing.T) {
+	root := t.TempDir()
+	id := ReviewSessionID("h1")
+	if got := reviewConversationID(root, id, "/review", "/home", sandbox.AgentTypeCodex); got != "" {
+		t.Fatalf("missing Codex conversation ID = %q", got)
+	}
+	if err := writeCodexSlotConversationID(root, id, "thread-123"); err != nil {
+		t.Fatal(err)
+	}
+	if got := reviewConversationID(root, id, "/review", "/home", sandbox.AgentTypeCodex); got != "thread-123" {
+		t.Fatalf("Codex conversation ID = %q, want thread-123", got)
+	}
+}
+
 // The reviewer's whole purpose is that it cannot write to the repo. The MCP
 // block list is one of the two enforcement layers (the other is
 // GitIsolationReadonly at the OS level), so it must cover every host-mediated git
