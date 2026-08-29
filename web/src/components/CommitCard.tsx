@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import { Markdown } from '../lib/MarkdownRenderer'
 
 /* eslint-disable react-refresh/only-export-components -- the card's formatting and style tokens are deliberately shared with its callers */
@@ -8,6 +7,8 @@ export interface CommitCardCommit {
   message: string
   authorName?: string
   timestamp?: string
+  additions?: number
+  deletions?: number
 }
 
 export function formatCommitDate(iso: string): string {
@@ -33,7 +34,17 @@ export const COMMIT_SHA_CHIP =
 
 // Shared by commit selectors and transcript chips so a commit always opens the
 // same author/date/message card, wherever the user encounters it.
-export function CommitCard({ commit, corner }: { commit: CommitCardCommit; corner?: ReactNode }) {
+export function CommitStats({ additions, deletions }: { additions?: number; deletions?: number }) {
+  if (additions == null || deletions == null) return null
+  return (
+    <span className="flex shrink-0 items-baseline gap-1 font-mono text-2xs" aria-label={`${additions} lines added, ${deletions} lines removed`}>
+      <span className="text-green-600 dark:text-green-400">+{additions}</span>
+      <span className="text-red-600 dark:text-red-400">-{deletions}</span>
+    </span>
+  )
+}
+
+export function CommitCard({ commit }: { commit: CommitCardCommit }) {
   const { subject, body } = commitParts(commit.message)
   return (
     <div className="space-y-2">
@@ -44,7 +55,7 @@ export function CommitCard({ commit, corner }: { commit: CommitCardCommit; corne
           {commit.authorName && commit.timestamp && <span className="text-gray-400 dark:text-gray-500">&middot;</span>}
           {commit.timestamp && <span>{formatCommitDate(commit.timestamp)}</span>}
         </div>
-        {corner}
+        <CommitStats additions={commit.additions} deletions={commit.deletions} />
       </div>
       <div className="border-t border-gray-200 pt-2 dark:border-gray-700">
         <p className="text-sm leading-snug text-gray-800 break-words dark:text-gray-100">{subject}</p>

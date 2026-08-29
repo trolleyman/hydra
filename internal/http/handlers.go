@@ -2863,6 +2863,8 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 			AuthorName:  c.AuthorName,
 			AuthorEmail: c.AuthorEmail,
 			Timestamp:   c.Timestamp,
+			Additions:   c.Additions,
+			Deletions:   c.Deletions,
 		}
 	}
 	return resp, nil
@@ -3072,6 +3074,8 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 			AuthorName:  c.AuthorName,
 			AuthorEmail: c.AuthorEmail,
 			Timestamp:   c.Timestamp,
+			Additions:   c.Additions,
+			Deletions:   c.Deletions,
 		}
 	}
 

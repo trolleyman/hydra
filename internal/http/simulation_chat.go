@@ -224,6 +224,7 @@ func simCommit(sha, shortSHA, subject, ts string) simNorm {
 		"sha": sha, "short_sha": shortSHA, "subject": subject,
 		"author_name": "Agent Claude", "author_email": "claude@hydra.ai",
 		"timestamp": ts,
+		"additions": 49, "deletions": 9,
 	}}.at(ts)
 }
 

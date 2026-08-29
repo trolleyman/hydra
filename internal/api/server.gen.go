@@ -1145,11 +1145,16 @@ type ChatClientMessageType string
 
 // ChatCommitCreatedPayload A commit the reconciler observed. Sequenced in the same log as the tool output that produced it, so the chip cannot render before its cause.
 type ChatCommitCreatedPayload struct {
+	// Additions Number of lines added by the commit relative to its first parent
+	Additions   int    `json:"additions,omitempty"`
 	AuthorEmail string `json:"author_email,omitempty"`
 	AuthorName  string `json:"author_name,omitempty"`
 
 	// CausalItemId The tool call that produced it, when one is known.
-	CausalItemId  string             `json:"causal_item_id,omitempty"`
+	CausalItemId string `json:"causal_item_id,omitempty"`
+
+	// Deletions Number of lines removed by the commit relative to its first parent
+	Deletions     int                `json:"deletions,omitempty"`
 	Head          string             `json:"head,omitempty"`
 	IsMerge       bool               `json:"is_merge,omitempty"`
 	MergedCommits []ChatMergedCommit `json:"merged_commits,omitempty"`
@@ -1280,11 +1285,16 @@ type ChatItemDeltaPayload struct {
 
 // ChatMergedCommit One commit a merge brought in, previewed in the merge chip.
 type ChatMergedCommit struct {
+	// Additions Number of lines added by the commit relative to its first parent
+	Additions  int    `json:"additions,omitempty"`
 	AuthorName string `json:"author_name,omitempty"`
-	Sha        string `json:"sha,omitempty"`
-	ShortSha   string `json:"short_sha,omitempty"`
-	Subject    string `json:"subject,omitempty"`
-	Timestamp  string `json:"timestamp,omitempty"`
+
+	// Deletions Number of lines removed by the commit relative to its first parent
+	Deletions int    `json:"deletions,omitempty"`
+	Sha       string `json:"sha,omitempty"`
+	ShortSha  string `json:"short_sha,omitempty"`
+	Subject   string `json:"subject,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // ChatMessagesRetractedPayload A safety retry evicted blocks the provider had already streamed. The client must drop these ids or the flagged text lingers.
@@ -1705,8 +1715,13 @@ type CommitCreatedEventType string
 
 // CommitInfo defines model for CommitInfo.
 type CommitInfo struct {
+	// Additions Number of lines added by the commit relative to its first parent
+	Additions   int    `json:"additions"`
 	AuthorEmail string `json:"author_email"`
 	AuthorName  string `json:"author_name"`
+
+	// Deletions Number of lines removed by the commit relative to its first parent
+	Deletions int `json:"deletions"`
 
 	// Message Full commit message
 	Message string `json:"message"`

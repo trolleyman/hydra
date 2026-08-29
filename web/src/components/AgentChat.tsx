@@ -45,7 +45,6 @@ import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../l
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 import { useAgentStore } from '../stores/agentStore'
-import { api } from '../stores/apiClient'
 import { Markdown, type RepoLinkContext } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, leadingBashComment, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
@@ -80,7 +79,7 @@ import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
-import { CommitCard, COMMIT_CARD_WIDTH } from './CommitCard'
+import { CommitCard, CommitStats, COMMIT_CARD_WIDTH } from './CommitCard'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
@@ -156,7 +155,7 @@ interface ChatProps {
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
 // One commit dragged in by a merge, shown in the merge chip's expanded list.
-interface MergedCommit { sha: string; shortSha: string; subject: string }
+interface MergedCommit { sha: string; shortSha: string; subject: string; additions?: number; deletions?: number }
 
 // mergeFieldsFromPayload pulls the merge annotation off a commit_created payload
 // (see chat.annotateMerge). Absent on ordinary commits and on merges recorded
@@ -174,6 +173,8 @@ function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitCh
       sha,
       shortSha: typeof m.short_sha === 'string' ? m.short_sha : sha.slice(0, 7),
       subject: typeof m.subject === 'string' ? m.subject : '',
+      additions: typeof m.additions === 'number' ? m.additions : undefined,
+      deletions: typeof m.deletions === 'number' ? m.deletions : undefined,
     })
   }
   const mergedCount = typeof payload.merged_count === 'number' ? payload.merged_count : merged.length
@@ -203,44 +204,6 @@ export function mergeChipLabel(subject: string, count: number, mergedRef?: strin
 // the padding gives back what the trim removed rather than leaving the chip shorter.
 const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-[3px] text-2xs text-stone-500 dark:text-stone-400 select-none'
 const COMMIT_HOVER = 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors'
-
-interface CommitStats { additions: number; deletions: number }
-
-// Cards mount only while their tooltip is open. Keep settled results outside the
-// component so revisiting a commit is instant and never repeats the git diff.
-const commitStatsCache = new Map<string, CommitStats | null>()
-
-function CommitChangeStats({ projectId, agentId, sha }: { projectId: string | null; agentId: string; sha: string }) {
-  const key = `${projectId ?? ''}\0${agentId}\0${sha}`
-  const [stats, setStats] = useState<CommitStats | null | undefined>(() => commitStatsCache.get(key))
-
-  useEffect(() => {
-    if (!projectId || stats !== undefined) return
-    let live = true
-    api.default.getAgentDiffFiles(projectId, agentId, `${sha}^`, sha, false)
-      .then((diff) => {
-        const next = diff.files.reduce<CommitStats>((sum, file) => ({
-          additions: sum.additions + file.additions,
-          deletions: sum.deletions + file.deletions,
-        }), { additions: 0, deletions: 0 })
-        commitStatsCache.set(key, next)
-        if (live) setStats(next)
-      })
-      .catch(() => {
-        commitStatsCache.set(key, null)
-        if (live) setStats(null)
-      })
-    return () => { live = false }
-  }, [agentId, key, projectId, sha, stats])
-
-  if (!stats) return null
-  return (
-    <span className="flex shrink-0 items-baseline gap-1 font-mono text-2xs" aria-label={`${stats.additions} lines added, ${stats.deletions} lines removed`}>
-      <span className="text-green-600 dark:text-green-400">+{stats.additions}</span>
-      <span className="text-red-600 dark:text-red-400">-{stats.deletions}</span>
-    </span>
-  )
-}
 
 // MergeCommitChip renders a merge as a single pill that expands to list the commits
 // it dragged in. Its own useState survives row re-renders (the row is memo'd on the
@@ -280,6 +243,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
               <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
               <span className="truncate optical-center">{m.subject}</span>
+              <CommitStats additions={m.additions} deletions={m.deletions} />
             </div>
           ))}
           {shown < count && (
@@ -383,7 +347,7 @@ type ChatItem =
   // `seq` is the source event's log sequence - the tie-break when two commits
   // share a `ts`, so the chip list has one total order no matter what order the
   // pages that produced it arrived in.
-  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; authorName?: string; commitTimestamp?: string; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[]; mergedRef?: string }
+  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; authorName?: string; commitTimestamp?: string; additions?: number; deletions?: number; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[]; mergedRef?: string }
 
 // A sub-agent (Claude Task tool) run, assembled from its sidechain events.
 // Keyed by agentId in the `subagents` map (a live line that carries only a
@@ -8591,6 +8555,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         subject: typeof payload.subject === 'string' ? payload.subject : 'Commit',
         authorName: typeof payload.author_name === 'string' ? payload.author_name : undefined,
         commitTimestamp: typeof payload.timestamp === 'string' ? payload.timestamp : event.timestamp,
+        additions: typeof payload.additions === 'number' ? payload.additions : undefined,
+        deletions: typeof payload.deletions === 'number' ? payload.deletions : undefined,
         ts: Date.parse(event.timestamp) || Date.now(),
         seq: Number.isFinite(event.seq) ? event.seq : undefined,
         noEntrance: !live || undefined,
@@ -10425,10 +10391,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               pin={false}
               width={COMMIT_CARD_WIDTH}
               content={
-                <CommitCard
-                  commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp }}
-                  corner={<CommitChangeStats projectId={projectId} agentId={agentId} sha={item.sha} />}
-                />
+                <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
               }
             >
               <div

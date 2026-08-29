@@ -1970,6 +1970,8 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
 				Timestamp:   "2026-07-09T18:05:30Z",
+				Additions:   49,
+				Deletions:   9,
 			},
 			{
 				Sha:         "cafebabe0123456789abcdef0123456789abcdef",
@@ -1979,6 +1981,8 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
 				Timestamp:   "2026-07-09T18:01:30Z",
+				Additions:   34,
+				Deletions:   6,
 			},
 		}
 		api.WriteJSON(w, http.StatusOK, resp)
@@ -2846,13 +2850,6 @@ func synthContextLine(ext string, oldN, newN int) api.DiffLine {
 }
 
 func (s *SimulationServer) GetAgentDiffFiles(w http.ResponseWriter, r *http.Request, projectId string, id string, params api.GetAgentDiffFilesParams) {
-	if id == "agent-chat" && params.HeadRef != nil && *params.HeadRef == "beefcafe0123456789abcdef0123456789abcdef" {
-		api.WriteJSON(w, http.StatusOK, api.DiffResponse{Files: []api.DiffFile{
-			{Path: "internal/upload/retry.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 31, Deletions: 7},
-			{Path: "internal/upload/retry_test.go", ChangeType: api.DiffFileChangeTypeModified, Additions: 18, Deletions: 2},
-		}})
-		return
-	}
 	if id == "agent-1" {
 		resp := api.DiffResponse{
 			Files: []api.DiffFile{

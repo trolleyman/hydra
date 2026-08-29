@@ -9,7 +9,7 @@ import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewImageAnchor, ReviewThread } from './api'
-import { CommitCard, COMMIT_CARD_WIDTH, COMMIT_SHA_CHIP, commitParts } from './components/CommitCard'
+import { CommitCard, CommitStats, COMMIT_CARD_WIDTH, COMMIT_SHA_CHIP, commitParts } from './components/CommitCard'
 import { ReviewThreadCard, type ReviewThreadActions } from './components/ReviewThreadCard'
 import { ProviderIcon } from './components/ReviewControls'
 import { providerLabel } from './lib/forgeDisplay'
@@ -2664,16 +2664,16 @@ function CustomTooltip({ content, children, side = 'bottom', className = 'w-full
 }
 
 function CommitTooltipContent({ commit }: { commit: CommitInfo }) {
-  return <CommitCard commit={{ shortSha: commit.short_sha, message: commit.message, authorName: commit.author_name, timestamp: commit.timestamp }} />
+  return <CommitCard commit={{ shortSha: commit.short_sha, message: commit.message, authorName: commit.author_name, timestamp: commit.timestamp, additions: commit.additions, deletions: commit.deletions }} />
 }
 
 // Width of the commit hover card. Wide enough for a wrapped commit body, narrow
 // enough to sit beside the 256px dropdown on a laptop screen.
 const COMMIT_TIP_WIDTH = COMMIT_CARD_WIDTH
 
-// Width of a commit dropdown panel (the w-64 below), and the margin it keeps
+// Width of a commit dropdown panel (the w-80 below), and the margin it keeps
 // from the window edge.
-const COMMIT_MENU_WIDTH = 256
+const COMMIT_MENU_WIDTH = 320
 const COMMIT_MENU_PAD = 8
 
 // Where a dropdown panel sits, as a px offset from its trigger's left edge (the
@@ -2773,7 +2773,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
       </button>
 
       {open && (
-        <div style={{ left: offset }} className="absolute top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
+        <div style={{ left: offset }} className="absolute top-full mt-1 w-80 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
           {/* Latest commit at top */}
           {commits.length > 0 && (
             <div className="py-1 border-b border-gray-100 dark:border-gray-700">
@@ -2816,7 +2816,8 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
                           made a top-aligned chip sit a couple of px low against
                           the (larger) subject text next to it. */}
                       <span className={COMMIT_SHA_CHIP}>{c.short_sha}</span>
-                      <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
+                      <span className="min-w-0 flex-1 text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
+                      <CommitStats additions={c.additions} deletions={c.deletions} />
                       {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 self-center" />}
                     </button>
                   </CustomTooltip>
@@ -2903,7 +2904,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
       </button>
 
       {open && (
-        <div style={{ left: offset }} className="absolute top-full mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
+        <div style={{ left: offset }} className="absolute top-full mt-1 w-80 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
           <div className="py-1 border-b border-gray-100 dark:border-gray-700">
             <button
               onClick={() => { onChange({ type: 'uncommitted' }); setOpen(false) }}
@@ -2942,7 +2943,8 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
                       }`}
                   >
                     <span className={COMMIT_SHA_CHIP}>{c.short_sha}</span>
-                    <span className="text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
+                    <span className="min-w-0 flex-1 text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
+                    <CommitStats additions={c.additions} deletions={c.deletions} />
                     {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 self-center" />}
                   </button>
                 </CustomTooltip>
