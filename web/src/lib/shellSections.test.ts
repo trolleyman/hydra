@@ -575,7 +575,7 @@ describe('splitScriptOutput', () => {
       'internal/http/handlers.go:110:// usage',
     ].join('\n')
     expect(splitScriptOutput(steps(script), output)?.map((s) => [s.kind, s.lines])).toEqual([
-      ['plain', ['export function A() {}', 'const root = true']],
+      ['view', ['export function A() {}', 'const root = true']],
       ['matches', [
         'web/src/components/A.tsx:1:export function A() {}',
         'internal/http/handlers.go:110:// usage',
@@ -583,10 +583,45 @@ describe('splitScriptOutput', () => {
     ])
   })
 
+  it('keeps the language when adjacent shortened reads use the same language', () => {
+    // This is the shape left when the Bash result is truncated at the front:
+    // neither Go read reached its requested bound, so their boundary and line
+    // numbers are unknowable. Their common language is still certain.
+    const script = [
+      "sed -n '1,1260p' internal/db/globalpath.go",
+      "sed -n '1,1220p' internal/db/db.go",
+      "rg -n 'func .*Run' magefiles/Magefile.go internal/db --glob '*.go'",
+    ].join('\n')
+    const output = [
+      '\treturn errtrace.Wrap(firstErr)',
+      '}',
+      'magefiles/Magefile.go:184:func (m *Mage) Run() error {',
+    ].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([
+      ['view', ['\treturn errtrace.Wrap(firstErr)', '}']],
+      ['matches', ['magefiles/Magefile.go:184:func (m *Mage) Run() error {']],
+    ])
+    expect(sections?.[0]).toMatchObject({
+      view: { path: 'internal/db/globalpath.go', start: null, end: null, numbered: false, languageOnly: true },
+    })
+  })
+
+  it('leaves adjacent shortened reads plain when their languages differ', () => {
+    const script = "sed -n '1,100p' a.go\nsed -n '1,100p' b.ts\nrg -n x c.go"
+    const sections = splitScriptOutput(steps(script), 'package a\nconst b = 1\nc.go:1:x')
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([
+      ['plain', ['package a', 'const b = 1']],
+      ['matches', ['c.go:1:x']],
+    ])
+  })
+
   it('falls back to plain text where it cannot tell the producers apart', () => {
-    // Two open-ended reads back to back have no boundary between them.
+    // Two open-ended reads back to back have no boundary between them, but a
+    // shared language is still safe to keep (without claiming either path).
     const sections = splitScriptOutput(steps('cat a.go\ncat b.go'), 'a1\nb1')
-    expect(sections).toBeNull()
+    expect(sections?.map((s) => [s.kind, s.lines])).toEqual([['view', ['a1', 'b1']]])
+    expect(sections?.[0]).toMatchObject({ view: { languageOnly: true } })
     // ... but a bounded one still splits.
     const split = splitScriptOutput(steps('head -1 a.go\ncat b.go'), 'a1\nb1')
     expect(split?.map((s) => [s.kind, s.lines])).toEqual([['view', ['a1']], ['view', ['b1']]])
@@ -825,7 +860,7 @@ describe('splitScriptOutput', () => {
   })
 
   it('has nothing to say about output it cannot attribute', () => {
-    expect(splitScriptOutput(steps('cat a.go\ncat b.go'), 'x\ny')).toBeNull()
+    expect(splitScriptOutput(steps('cat a.go\ncat b.ts'), 'x\ny')).toBeNull()
     expect(splitScriptOutput(steps('cat a.go'), '  \n')).toBeNull()
   })
 })

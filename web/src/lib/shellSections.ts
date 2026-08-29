@@ -37,6 +37,7 @@
 import { hasAnsi, stripAnsi } from './ansi'
 import { CWD_RESET, EXIT_STATUS, NO_OUTPUT } from './buildOutput'
 import type { DiskTool } from './diskOutput'
+import { langFromPath } from './fileKind'
 import type { SearchSummary } from './searchSummary'
 import {
   parseBannerView, parseSedRange, parseView, viewLimit,
@@ -1416,6 +1417,27 @@ interface Distribution {
   // saying so is what keeps a self-identifying neighbour (most often a trailing
   // `rg -n`) from being thrown away along with them.
   plain: Set<number>
+  languageOnly: Set<number>
+}
+
+// All of these producers read source in one known language. Their boundary may
+// be lost (most often because the result was truncated at the front), but
+// colouring the combined text is still certain even though paths and gutters
+// are not.
+function commonViewLanguage(producers: ScriptStep[]): string | null {
+  if (producers.length < 2 || producers.some((p) => p.kind !== 'view')) return null
+  const languages = producers.map((p) => langFromPath((p as Extract<ScriptStep, { kind: 'view' }>).view.path))
+  return languages[0] && languages.every((lang) => lang === languages[0]) ? languages[0] : null
+}
+
+function languageOnlyDistribution(producers: ScriptStep[], slice: string[]): Distribution | null {
+  if (!commonViewLanguage(producers)) return null
+  return {
+    parts: producers.map((_, i) => i === 0 ? slice : []),
+    pinned: producers.map(() => false),
+    plain: new Set(),
+    languageOnly: new Set([0]),
+  }
 }
 
 // distribute hands a stretch of output to the producers that ran inside it.
@@ -1433,7 +1455,7 @@ interface Distribution {
 // count - see searchExtent.
 function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySet<ScriptStep>): Distribution | null {
   if (producers.length === 0) return null
-  if (producers.length === 1) return { parts: [slice], pinned: [true], plain: new Set() }
+  if (producers.length === 1) return { parts: [slice], pinned: [true], plain: new Set(), languageOnly: new Set() }
 
   // Peel a search-shaped suffix before using any file-view limit. A sed range is
   // an UPPER bound, not an exact count: a range past the end of the file emits
@@ -1448,10 +1470,12 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
     const parts = producers.map(() => [] as string[])
     const pinned = producers.map(() => false)
     const plain = new Set<number>()
+    const languageOnly = new Set<number>()
     if (before) {
       before.parts.forEach((part, i) => { parts[i] = part })
       before.pinned.forEach((p, i) => { pinned[i] = p })
       before.plain.forEach((i) => plain.add(i))
+      before.languageOnly.forEach((i) => languageOnly.add(i))
     } else {
       // Several consecutive reads with no headings between them have no
       // recoverable boundary at all. Their combined output goes on the first
@@ -1463,7 +1487,7 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
     // Every line of a search says which file and line it is; nothing about it is
     // counted from where the section starts.
     pinned[last] = true
-    return { parts, pinned, plain }
+    return { parts, pinned, plain, languageOnly }
   }
 
   const out: string[][] = producers.map(() => [])
@@ -1477,7 +1501,7 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   // one its maximum from the left is exactly the false boundary this module
   // exists not to draw.
   const capped = bounds.reduce<number | null>((sum, b) => (sum == null || b == null ? null : sum + b), 0)
-  if (capped != null && slice.length < capped) return null
+  if (capped != null && slice.length < capped) return languageOnlyDistribution(producers, slice)
   // Whether the counts leave no room for a producer to have fallen short of its
   // range: every one of them bounded, and the bounds adding up to exactly what
   // came back. Short of that, a `sed -n 1,20p f` prints twenty lines or however
@@ -1530,7 +1554,7 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   }
   // More than one producer with no bound of its own leaves a boundary nothing
   // in the script pins down - the common case, and why those separators matter.
-  if (head < tail) return null
+  if (head < tail) return languageOnlyDistribution(producers, slice)
   // What is left in the middle goes to that one open-ended producer. When every
   // producer was bounded there is no such gap, and any surplus (an error, a
   // banner) rides with the last one that could have printed something the script
@@ -1548,6 +1572,7 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
     parts: out,
     pinned: producers.map((_, i) => exact.every((e, j) => j >= i || e)),
     plain: new Set(),
+    languageOnly: new Set(),
   }
 }
 
@@ -1603,7 +1628,7 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
       pending = []
       return
     }
-    const { parts, pinned, plain } = split
+    const { parts, pinned, plain, languageOnly } = split
     // The parts partition the slice in order, so walking them keeps each one's
     // offset into the output - which is what pairs it with its raw lines.
     let at = start
@@ -1628,7 +1653,9 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
         // printed one line more or fewer (see Distribution.pinned). So an
         // unpinned view keeps its language and gives up its gutter, rather than
         // numbering a file's lines from a start that is a guess.
-        const view = pinned[i] ? step.view : { ...step.view, start: null, end: null, ranges: undefined }
+        const view = pinned[i]
+          ? step.view
+          : { ...step.view, start: null, end: null, ranges: undefined, ...(languageOnly.has(i) && { numbered: false, languageOnly: true }) }
         sections.push({ kind: 'view', view, lines: part, raw: rawPart })
       } else if (step.kind === 'echo' && part.length <= (limit ?? 0)) {
         // The script says what these lines are, so they render as the string it
