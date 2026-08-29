@@ -57,9 +57,9 @@ export type ReviewConfigResponse = {
     delete_remote_branch?: boolean;
     require_local_tests?: boolean;
     /**
-     * Default arming for new heads.
+     * Whether Hydra-created linked heads automatically push new commits. Defaults true.
      */
-    publish_when_green?: boolean;
+    auto_push?: boolean;
     protected_branches?: Array<string>;
 };
 

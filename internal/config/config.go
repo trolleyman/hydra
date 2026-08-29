@@ -3970,7 +3970,7 @@ func reviewExampleLines() []string {
 		"# squash = true                # request squash-on-merge",
 		"# delete_remote_branch = true  # tell the forge to delete on merge",
 		"# require_local_tests = true   # gate Publish on local [[tests]] like merge is",
-		"# publish_when_green = false   # arm new heads to auto-open a draft MR when green",
+		"# auto_push = true             # automatically push after an MR is linked",
 		`# protected_branches = ["main"] # warn before a direct LOCAL merge into these`,
 	}
 }

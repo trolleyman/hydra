@@ -2106,17 +2106,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/projects/{project_id}/agents/{agent_id}/publish/when-green:
+  /api/projects/{project_id}/agents/{agent_id}/publish/auto-push:
     post:
-      summary: Arm publish-when-green - auto-open a draft MR / auto-push when tests settle passing
+      summary: Arm automatic publishing - auto-open after tests / auto-push linked heads
       description: >
-        Arms "publish when green" (docs/non-local-integration.md): once local tests
-        settle passing and the agent has finished, an unlinked head auto-opens a
-        draft MR and a linked head auto-pushes (plain push only). Idempotent.
+        Arms automatic publishing (legacy operation name): after the agent has
+        finished, an unlinked head auto-opens a draft MR once local tests pass,
+        while a linked head auto-pushes without waiting for tests (plain push
+        only). Idempotent.
         Arming an ADOPTED PR - one Hydra did not create - additionally requires
         acknowledge_adopted=true, since it starts pushing into someone else's PR
         (docs/pr-adoption.md); without it such a head is refused with a 400.
-      operationId: armPublishWhenGreen
+      operationId: armAutoPush
       parameters:
         - in: path
           name: project_id
@@ -2131,7 +2132,7 @@ paths:
           required: false
           description: >
             Acknowledges that this head is working on a PR Hydra did not create, so
-            arming means auto-pushing into someone else's PR on every green commit.
+            arming means auto-pushing into someone else's PR on every commit.
             Required (true) to arm an adopted head; ignored for any other head. A
             read-only adopted PR (no maintainer edits) is refused even with it, since
             no push can succeed.
@@ -2159,7 +2160,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
       summary: Disarm publish-when-green for a head
-      operationId: disarmPublishWhenGreen
+      operationId: disarmAutoPush
       parameters:
         - in: path
           name: project_id
@@ -4269,9 +4270,9 @@ components:
         merge_when_green:
           type: boolean
           description: True when auto-merge is armed (the head will merge once its tests settle passing). See PLAN #68.
-        publish_when_green:
+        auto_push:
           type: boolean
-          description: True when publish-when-green is armed (the head auto-opens a draft MR / auto-pushes once its tests settle passing and it finishes). See docs/non-local-integration.md
+          description: True when automatic publishing is armed. A linked head auto-pushes after it finishes without waiting for tests; a legacy explicitly armed unlinked head opens a draft MR after tests pass. See docs/non-local-integration.md
         downstream_branch:
           type: string
           description: The branch name this head's work is (or will be) pushed AS on the remote. The local branch always stays hydra/<id>. Empty until set.
@@ -4763,9 +4764,9 @@ components:
           type: boolean
         require_local_tests:
           type: boolean
-        publish_when_green:
+        auto_push:
           type: boolean
-          description: Default arming for new heads.
+          description: Whether Hydra-created linked heads automatically push new commits. Defaults true.
         protected_branches:
           type: array
           items: { type: string }
@@ -4817,7 +4818,7 @@ components:
         require_local_tests:
           type: boolean
           nullable: true
-        publish_when_green:
+        auto_push:
           type: boolean
           nullable: true
         protected_branches:

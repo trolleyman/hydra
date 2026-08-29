@@ -758,7 +758,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		EndState:           endState,
 		ArchivedAt:         archivedAt,
 		MergeWhenGreen:     &h.MergeWhenGreen,
-		PublishWhenGreen:   &h.PublishWhenGreen,
+		AutoPush:           &h.AutoPush,
 	}
 	if focused {
 		mode := api.FocusedFilesystemMode(h.FilesystemMode)
@@ -1328,7 +1328,7 @@ func toAPIReviewConfig(r *config.ReviewConfig) *api.ReviewConfig {
 		Squash:             r.Squash,
 		DeleteRemoteBranch: r.DeleteRemoteBranch,
 		RequireLocalTests:  r.RequireLocalTests,
-		PublishWhenGreen:   r.PublishWhenGreen,
+		AutoPush:           r.AutoPushSetting(),
 	}
 	if r.ProtectedBranches != nil {
 		pb := append([]string(nil), r.ProtectedBranches...)
@@ -1354,7 +1354,7 @@ func fromAPIReviewConfig(r *api.ReviewConfig) *config.ReviewConfig {
 		Squash:             r.Squash,
 		DeleteRemoteBranch: r.DeleteRemoteBranch,
 		RequireLocalTests:  r.RequireLocalTests,
-		PublishWhenGreen:   r.PublishWhenGreen,
+		AutoPush:           r.AutoPush,
 	}
 	if r.ProtectedBranches != nil {
 		out.ProtectedBranches = append([]string(nil), *r.ProtectedBranches...)

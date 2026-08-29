@@ -102,9 +102,9 @@ type Agent struct {
 	ReviewStateTime    string
 	ReviewAdopted      bool `gorm:"default:false"`
 	ReviewPushURL      string
-	ReviewCanPush      bool `gorm:"default:false"`
-	PublishWhenGreen   bool `gorm:"default:false"`
-	PublishWhenGreenAt string
+	ReviewCanPush      bool   `gorm:"default:false"`
+	AutoPush           bool   `gorm:"column:publish_when_green;default:false"`
+	AutoPushAt         string `gorm:"column:publish_when_green_at"`
 
 	CreatedAt time.Time `gorm:"autoCreateTime:false"` // set explicitly
 	UpdatedAt time.Time

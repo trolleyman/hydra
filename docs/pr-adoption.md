@@ -259,13 +259,13 @@ opening the cog.
 - **Never force-push an adopted head.** The `--force-with-lease` path in `PushRefspec`
   is safe for a branch we own; on someone else's PR it must be opt-in and loud. Plain
   FF push only by default.
-- **`publish_when_green` must default off** for adopted heads, but it is *arrivable at*
+- **`auto_push` must default off** for adopted heads, but it is *arrivable at*
   on purpose. `autoPublish` (`review_watcher.go`) would otherwise auto-push any linked
   armed head, and auto-pushing into someone else's PR by default is rude. The rule is
   therefore "never implicitly", not "never":
-  - `SpawnHead` skips the `[review] publish_when_green` arm when `opts.Adopt != nil` - a
+  - adoption skips the `[review] auto_push` default - a
     project-wide default is not a decision about one particular foreign PR.
-  - `ArmPublishWhenGreen` refuses an adopted head with a 400 unless the caller passes
+  - `ArmAutoPush` refuses an adopted head with a 400 unless the caller passes
     `acknowledge_adopted=true` (`adoptedArmRefusal` in `publish.go`). The acknowledgement
     is what makes it deliberate, and it lives in the API so a non-UI client can't skip it.
   - A **read-only** adopted PR (no maintainer edits) is refused even with the
