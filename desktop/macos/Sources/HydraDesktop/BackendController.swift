@@ -4,11 +4,15 @@ struct BackendStatus: Decodable {
     let version: String?
     let projectRoot: String?
     let defaultProjectId: String?
+    let desktopProtocol: Int?
+    let buildId: String?
 
     enum CodingKeys: String, CodingKey {
         case version
         case projectRoot = "project_root"
         case defaultProjectId = "default_project_id"
+        case desktopProtocol = "desktop_protocol"
+        case buildId = "build_id"
     }
 }
 
@@ -245,7 +249,14 @@ final class BackendController {
     }
 
     private func fetchStatus(at baseURL: URL, completion: @escaping (Result<BackendStatus, Error>) -> Void) {
-        fetchJSON(path: "/api/status", at: baseURL, completion: completion)
+        fetchJSON(path: "/api/status", at: baseURL) { (result: Result<BackendStatus, Error>) in
+            switch result {
+            case .success(let status) where status.desktopProtocol != Self.supportedDesktopProtocol:
+                completion(.failure(BackendError.incompatibleProtocol(status.desktopProtocol ?? 0)))
+            default:
+                completion(result)
+            }
+        }
     }
 
     private func fetchJSON<T: Decodable>(path: String, at baseURL: URL, completion: @escaping (Result<T, Error>) -> Void) {

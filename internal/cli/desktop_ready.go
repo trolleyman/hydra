@@ -8,12 +8,10 @@ import (
 	"path/filepath"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/desktopcontract"
 )
 
-const (
-	desktopReadyFileEnv = "HYDRA_DESKTOP_READY_FILE"
-	desktopProtocol     = 2
-)
+const desktopReadyFileEnv = "HYDRA_DESKTOP_READY_FILE"
 
 type desktopReadyRecord struct {
 	Protocol       int    `json:"protocol"`
@@ -54,7 +52,7 @@ func publishDesktopReady(addr net.Addr, authToken string) (func(), error) {
 		return nil, errtrace.Wrap(fmt.Errorf("desktop ready: set permissions: %w", err))
 	}
 	record := desktopReadyRecord{
-		Protocol:       desktopProtocol,
+		Protocol:       desktopcontract.Protocol,
 		URL:            "http://" + addr.String(),
 		PID:            os.Getpid(),
 		BootstrapToken: authToken,

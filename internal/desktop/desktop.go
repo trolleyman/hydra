@@ -13,6 +13,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/daemon"
+	"github.com/trolleyman/hydra/internal/desktopcontract"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
 )
@@ -61,6 +62,17 @@ func ResolveServer(ctx context.Context, rawURL, projectRoot string) (string, err
 	client, err := daemon.Connect(ctx, selectedRoot)
 	if err != nil {
 		return "", errtrace.Wrap(err)
+	}
+	status, err := client.Status(ctx)
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("read desktop backend compatibility: %w", err))
+	}
+	if status.DesktopProtocol == nil || *status.DesktopProtocol != desktopcontract.Protocol {
+		got := 0
+		if status.DesktopProtocol != nil {
+			got = *status.DesktopProtocol
+		}
+		return "", errtrace.Wrap(fmt.Errorf("desktop backend protocol %d is incompatible with shell protocol %d", got, desktopcontract.Protocol))
 	}
 	bootstrap, err := client.IssueDesktopBootstrap(ctx)
 	if err != nil {

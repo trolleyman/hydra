@@ -3718,6 +3718,12 @@ components:
         version:
           type: string
           example: "1.0.0"
+        desktop_protocol:
+          type: integer
+          description: Native desktop shell compatibility protocol.
+        build_id:
+          type: string
+          description: Backend build identity displayed in compatibility errors.
         uptime_seconds:
           type: number
           format: float

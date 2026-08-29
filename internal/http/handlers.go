@@ -25,6 +25,7 @@ import (
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/desktopcontract"
 	"github.com/trolleyman/hydra/internal/events"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
@@ -887,6 +888,8 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api.GetStatusResponseObject, error) {
 	status := "OK"
 	v := version
+	desktopProtocol := desktopcontract.Protocol
+	buildID := version
 	uptime := float32(time.Since(s.StartTime).Seconds())
 	projectRoot := s.ProjectRoot
 	defaultProjectID := s.DefaultProject.ID
@@ -904,6 +907,8 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		Status:           &status,
 		SandboxError:     sandboxErr,
 		Version:          &v,
+		DesktopProtocol:  &desktopProtocol,
+		BuildId:          &buildID,
 		UptimeSeconds:    &uptime,
 		ProjectRoot:      &projectRoot,
 		DefaultProjectId: &defaultProjectID,

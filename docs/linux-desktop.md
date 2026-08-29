@@ -355,6 +355,10 @@ behavior and the full shell comparison remain. The daemon's web endpoint is now
 a versioned JSON ownership record tied to the authoritative live daemon PID;
 stale records are ignored during startup, unsafe/non-loopback addresses and
 unknown record protocols are rejected, and shutdown removes the record.
+Every live `/api/status` response also advertises the shared desktop protocol
+and backend build identity. Linux refuses to attach when the protocol is absent
+or different, so compatibility is checked for reused daemons as well as newly
+launched ones.
 The GTK shell also supports repeated application activation and Ctrl+N as
 native multi-window actions against the same application/backend. WebKit policy
 keeps same-origin Hydra navigation embedded, opens clicked external HTTP(S)

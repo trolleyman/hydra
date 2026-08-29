@@ -3666,6 +3666,9 @@ type SpawnAgentRequest struct {
 
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
+	// BuildId Backend build identity displayed in compatibility errors.
+	BuildId *string `json:"build_id,omitempty"`
+
 	// CanRestart Whether the server can restart itself in place (re-exec). False on platforms without exec.
 	CanRestart *bool `json:"can_restart,omitempty"`
 
@@ -3674,6 +3677,9 @@ type StatusResponse struct {
 
 	// DefaultProjectId Project ID of the default (CWD) project
 	DefaultProjectId *string `json:"default_project_id,omitempty"`
+
+	// DesktopProtocol Native desktop shell compatibility protocol.
+	DesktopProtocol *int `json:"desktop_protocol,omitempty"`
 
 	// Development Whether the server is being served out of a Hydra source checkout, which is what enables developer affordances such as the Chrome DevTools workspace endpoint.
 	Development *bool `json:"development,omitempty"`

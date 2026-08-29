@@ -10,6 +10,14 @@ export type StatusResponse = {
     sandbox_error?: string | null;
     version?: string;
     /**
+     * Native desktop shell compatibility protocol.
+     */
+    desktop_protocol?: number;
+    /**
+     * Backend build identity displayed in compatibility errors.
+     */
+    build_id?: string;
+    /**
      * Seconds since the server started
      */
     uptime_seconds?: number;

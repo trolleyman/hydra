@@ -8,7 +8,9 @@ namespace HydraDesktop;
 internal sealed record BackendStatus(
     [property: JsonPropertyName("version")] string? Version,
     [property: JsonPropertyName("project_root")] string? ProjectRoot,
-    [property: JsonPropertyName("default_project_id")] string? DefaultProjectId);
+    [property: JsonPropertyName("default_project_id")] string? DefaultProjectId,
+    [property: JsonPropertyName("desktop_protocol")] int? DesktopProtocol,
+    [property: JsonPropertyName("build_id")] string? BuildId);
 
 internal sealed record ReadyRecord(
     [property: JsonPropertyName("protocol")] int Protocol,
@@ -199,6 +201,10 @@ internal sealed class BackendController : IDisposable
 
     private static void EnsureVersion(BackendStatus status)
     {
+        if (status.DesktopProtocol != SupportedDesktopProtocol)
+        {
+            throw new InvalidOperationException($"Hydra desktop protocol {status.DesktopProtocol ?? 0} is incompatible with this app.");
+        }
         if (status.Version != SupportedServerVersion)
         {
             throw new InvalidOperationException($"Hydra server version {status.Version ?? "unknown"} is incompatible with this app.");

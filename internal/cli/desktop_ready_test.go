@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/trolleyman/hydra/internal/desktopcontract"
 )
 
 func TestPublishDesktopReady(t *testing.T) {
@@ -23,7 +25,7 @@ func TestPublishDesktopReady(t *testing.T) {
 	if err := json.Unmarshal(data, &record); err != nil {
 		t.Fatal(err)
 	}
-	if record.Protocol != desktopProtocol || record.URL != "http://127.0.0.1:43123" || record.PID != os.Getpid() || record.BootstrapToken != "one-time-token" {
+	if record.Protocol != desktopcontract.Protocol || record.URL != "http://127.0.0.1:43123" || record.PID != os.Getpid() || record.BootstrapToken != "one-time-token" {
 		t.Fatalf("ready record = %+v", record)
 	}
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
