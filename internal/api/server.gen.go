@@ -1433,13 +1433,19 @@ type ChatQueuedMessage struct {
 
 	// Id The client-generated id, used to reconcile the pending bubble.
 	Id string `json:"id"`
+
+	// Origin Why this message exists when the user did not type it.
+	Origin string `json:"origin,omitempty"`
 }
 
 // ChatQueuedMessagePayload A message the daemon is holding because a turn was running. It lives in the queue projection only; when it drains it becomes a durable user_message carrying the same id.
 type ChatQueuedMessagePayload struct {
 	Content json.RawMessage `json:"content,omitempty"`
 	Id      string          `json:"id,omitempty"`
-	Status  string          `json:"status,omitempty"`
+
+	// Origin Why this message exists when the user did not type it.
+	Origin string `json:"origin,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 // ChatQueuedState defines model for ChatQueuedState.
@@ -2509,6 +2515,9 @@ type PlanUpdatedEventType string
 
 // PolicyConfig Per-agent security-gate policy. The decision-capable gate can deny (or park for approval) tool calls even under skip-permissions.
 type PolicyConfig struct {
+	// AgentMessaging Allow this head to send attributed messages to other live heads in the same project. Agent discovery remains read-only and available when this is off. null = off (the default).
+	AgentMessaging *bool `json:"agent_messaging"`
+
 	// GateEnabled Enable the decision-capable gate (default true when unset).
 	GateEnabled *bool `json:"gate_enabled"`
 

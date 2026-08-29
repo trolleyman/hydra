@@ -11,6 +11,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/spf13/cobra"
+	"github.com/trolleyman/hydra/internal/agentq"
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/gitq"
@@ -78,7 +79,48 @@ func runMCPServer(agentType string, stdin io.Reader, stdout io.Writer) error {
 		deps.RunTests = func(runner string) (string, bool) { return runFromMCP(reviewq.OpRunTests, runner) }
 		deps.RunArtifacts = func(name string) (string, bool) { return runFromMCP(reviewq.OpRunArtifacts, name) }
 	}
+	if os.Getenv("HYDRA_AGENT_REQ_DIR") != "" {
+		deps.ListAgents = listAgentsFromMCP
+		deps.GetAgent = getAgentFromMCP
+		if os.Getenv("HYDRA_AGENT_MESSAGING") == "1" {
+			deps.SendAgent = sendAgentFromMCP
+		}
+	}
 	return errtrace.Wrap(mcpserver.Run(deps, stdin, stdout))
+}
+
+func listAgentsFromMCP() (string, bool) {
+	return agentRoundTrip(agentq.Request{Op: agentq.OpList})
+}
+
+func getAgentFromMCP(id string) (string, bool) {
+	return agentRoundTrip(agentq.Request{Op: agentq.OpGet, Target: id})
+}
+
+func sendAgentFromMCP(target, body, correlationID, inReplyTo string) (string, bool) {
+	return agentRoundTrip(agentq.Request{Op: agentq.OpMessage, Target: target, Body: body, CorrelationID: correlationID, InReplyTo: inReplyTo})
+}
+
+func agentRoundTrip(req agentq.Request) (string, bool) {
+	dir := os.Getenv("HYDRA_AGENT_REQ_DIR")
+	if dir == "" {
+		return "Hydra agent collaboration is not available in this session.", false
+	}
+	req.ReqID = strconv.FormatInt(time.Now().UnixNano(), 10)
+	req.TS = time.Now().Format(time.RFC3339Nano)
+	if err := agentq.WriteRequest(dir, req); err != nil {
+		return "Hydra could not be reached (" + err.Error() + ").", false
+	}
+	deadline := time.Now().Add(reviewRefreshWait)
+	for {
+		if res, ok, err := agentq.ReadResult(dir, req.ReqID); err == nil && ok {
+			return res.Message, res.OK
+		}
+		if time.Now().After(deadline) {
+			return "Hydra did not answer the agent request in time. Do not repeat a message blindly; ask the user to check the daemon.", false
+		}
+		time.Sleep(reviewRefreshPoll)
+	}
 }
 
 // hostRunFromMCP backs the host_run MCP tool: it parks the approval and blocks
