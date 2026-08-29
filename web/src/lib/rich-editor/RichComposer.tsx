@@ -1,4 +1,4 @@
-import type { Editor } from '@tiptap/core'
+import type { Editor, JSONContent } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { createRichEditorExtensions, serializeRichMarkdown } from './RichEditorCore'
@@ -19,6 +19,8 @@ export interface RichComposerKeyContext {
 export interface RichComposerProps {
   value: string
   onChange: (markdown: string) => void
+  initialDocument?: JSONContent
+  onDocumentChange?: (document: JSONContent) => void
   onEditor?: (editor: Editor | null) => void
   onSelectionChange?: (editor: Editor) => void
   onKeyDown?: (event: KeyboardEvent, context: RichComposerKeyContext) => boolean | void
@@ -42,6 +44,8 @@ export interface RichComposerProps {
 export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(function RichComposer({
   value,
   onChange,
+  initialDocument,
+  onDocumentChange,
   onEditor,
   onSelectionChange,
   onKeyDown,
@@ -58,16 +62,22 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
   const onKeyDownRef = useRef(onKeyDown)
   const onPasteRef = useRef(onPaste)
   const onSelectionChangeRef = useRef(onSelectionChange)
+  const onDocumentChangeRef = useRef(onDocumentChange)
   onChangeRef.current = onChange
   onEditorRef.current = onEditor
   onKeyDownRef.current = onKeyDown
   onPasteRef.current = onPaste
   onSelectionChangeRef.current = onSelectionChange
+  onDocumentChangeRef.current = onDocumentChange
+
+  const restoredDocument = initialDocument && serializeRichMarkdown(initialDocument) === value
+    ? initialDocument
+    : undefined
 
   const editor: Editor | null = useEditor({
     extensions: createRichEditorExtensions(attachmentRegistry),
-    content: value,
-    contentType: 'markdown',
+    content: restoredDocument ?? value,
+    contentType: restoredDocument ? 'json' : 'markdown',
     immediatelyRender: false,
     injectCSS: false,
     editable,
@@ -87,7 +97,11 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
       },
       handlePaste: (_view, event): boolean => !!editor && onPasteRef.current?.(event, editor) === true,
     },
-    onUpdate: ({ editor: updated }) => onChangeRef.current(serializeRichMarkdown(updated.getJSON())),
+    onUpdate: ({ editor: updated }) => {
+      const document = updated.getJSON()
+      onDocumentChangeRef.current?.(document)
+      onChangeRef.current(serializeRichMarkdown(document))
+    },
     onSelectionUpdate: ({ editor: updated }) => onSelectionChangeRef.current?.(updated),
   })
 
@@ -120,6 +134,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
     const current = serializeRichMarkdown(editor.getJSON())
     if (current === value) return
     editor.commands.setContent(value, { contentType: 'markdown', emitUpdate: false })
+    onDocumentChangeRef.current?.(editor.getJSON())
   }, [editor, value])
 
   return <EditorContent editor={editor} />

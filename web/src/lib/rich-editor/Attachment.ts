@@ -1,4 +1,5 @@
 import { Node, type Editor } from '@tiptap/core'
+import { closeHistory } from '@tiptap/pm/history'
 import type { AttachmentRegistry } from './AttachmentRegistry'
 
 export const ATTACHMENT_NAME = 'attachment'
@@ -71,6 +72,18 @@ export const Attachment = Node.create<AttachmentOptions>({
       dom.contentEditable = 'false'
       dom.setAttribute('role', 'group')
 
+      if (node.attrs.kind === 'image' && node.attrs.display === 'thumbnail') {
+        const previewUrl = registry.previewUrl(String(node.attrs.id))
+        if (previewUrl) {
+          const preview = document.createElement('img')
+          preview.className = 'composer-attachment-preview'
+          preview.src = previewUrl
+          preview.alt = ''
+          preview.draggable = false
+          dom.append(preview)
+        }
+      }
+
       const name = document.createElement('span')
       name.className = 'composer-attachment-name'
       name.textContent = String(node.attrs.name)
@@ -117,7 +130,10 @@ export const Attachment = Node.create<AttachmentOptions>({
 })
 
 export function insertAttachment(editor: Editor, attachment: ComposerAttachment): boolean {
-  return editor.commands.insertContent({ type: ATTACHMENT_NAME, attrs: attachment })
+  editor.view.dispatch(closeHistory(editor.state.tr))
+  const inserted = editor.commands.insertContent({ type: ATTACHMENT_NAME, attrs: attachment })
+  if (inserted) editor.view.dispatch(closeHistory(editor.state.tr))
+  return inserted
 }
 
 export function attachmentIds(editor: Editor): Set<string> {
@@ -126,4 +142,21 @@ export function attachmentIds(editor: Editor): Set<string> {
     if (node.type.name === ATTACHMENT_NAME && typeof node.attrs.id === 'string') ids.add(node.attrs.id)
   })
   return ids
+}
+
+// Restore a legacy attachment at its old [filename] marker when possible. A
+// draft created before structured documents has no exact node position, so the
+// readable marker is the best lossless migration anchor; otherwise append it.
+export function restoreAttachment(editor: Editor, attachment: ComposerAttachment): boolean {
+  if (attachmentIds(editor).has(attachment.id)) return true
+  const marker = `[${attachment.name}]`
+  let range: { from: number; to: number } | undefined
+  editor.state.doc.descendants((node, pos) => {
+    if (range || !node.isText || !node.text) return
+    const offset = node.text.indexOf(marker)
+    if (offset >= 0) range = { from: pos + offset, to: pos + offset + marker.length }
+  })
+  const content = { type: ATTACHMENT_NAME, attrs: attachment }
+  if (range) return editor.commands.insertContentAt(range, content)
+  return editor.commands.insertContentAt(editor.state.doc.content.size, content)
 }

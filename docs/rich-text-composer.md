@@ -76,6 +76,12 @@ Completed 2026-08-29:
   disabled state, spellcheck and focus restoration remain intact. A leading
   `!` switches to the existing Bash-highlighted source textarea; returning to
   normal text switches back without losing the draft or caret.
+- Moved production attachments into the rich document. Image nodes show a local
+  thumbnail while uploading; other files remain compact inline chips. A single
+  document transaction now controls the chip and its Markdown marker, with an
+  explicit history boundary so undo preserves earlier typing. Versioned JSON
+  drafts retain node positions across reloads, while older Markdown drafts are
+  migrated at their existing `[filename]` markers.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -604,21 +610,20 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
    Markdown value/event API are built. Static view and production commands
    remain.
 4. **Attachment node/adapter - DONE.** The atomic safe-metadata node and external
-   fake-tested upload registry prove cancellation on undo, restart on redo and
-   path-free Markdown/JSON. React chip rendering and production upload wiring
-   belong to chat integration.
+   upload registry cancel on undo, restart on redo and keep paths out of
+   Markdown/JSON. Production upload wiring, inline chips/thumbnails, retry,
+   removal and versioned draft restoration are built.
 5. **Block subset - DONE.** Headings 1-3, bullet/ordered/task lists,
    blockquotes, fenced code and hard breaks are registered and round-trip tested.
 5a. **Settings evaluation lab - DONE.** The structured editor, old composer and
     rendered chat Markdown are live-synchronized for hands-on comparison without
     saving or sending data.
-6. **Chat integration - IN PROGRESS.** The active-agent composer now uses the
+6. **Chat integration - DONE.** The active-agent composer now uses the
    lazy rich adapter for normal messages and retains the source textarea for
    shell mode. Send, queue recall, uploads, paste markers, drafts, resizing,
    disabled states, spellcheck, focus return and combined text/attachment undo
-   have component and real-Chromium coverage. Moving the existing external
-   attachment row into inline document NodeViews remains before this phase is
-   complete.
+   have component and real-Chromium coverage. Attachments live at their document
+   positions as inline NodeViews and still submit the existing path manifest.
 7. **Static user-message view and send transition.** Preserve the rich snapshot
    on optimistic rows, morph composer content into immediate/queued bubbles and
    reconcile the daemon echo in place.

@@ -73,6 +73,8 @@ import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import type { RichComposerHandle, RichComposerKeyContext } from '../lib/rich-editor/RichComposer'
+import { AttachmentRegistry } from '../lib/rich-editor/AttachmentRegistry'
+import { restoreAttachment, type ComposerAttachment } from '../lib/rich-editor/Attachment'
 import { applyEdit, enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
@@ -114,6 +116,25 @@ import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordD
 import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from '../lib/whitespaceMarks'
 
 const RichComposer = lazy(() => import('../lib/rich-editor/RichComposer').then((module) => ({ default: module.RichComposer })))
+
+function composerAttachment(attachment: Attachment): ComposerAttachment {
+  const lower = attachment.filename.toLowerCase()
+  const kind: ComposerAttachment['kind'] = attachment.previewUrl
+    ? 'image'
+    : lower.endsWith('.pdf')
+      ? 'pdf'
+      : /\.(txt|md|log|csv|json|ya?ml)$/.test(lower)
+        ? 'text'
+        : /\.(zip|tar|tgz|gz|bz2|xz|7z)$/.test(lower)
+          ? 'archive'
+          : 'file'
+  return {
+    id: String(attachment.id),
+    name: attachment.filename,
+    kind,
+    display: attachment.previewUrl ? 'thumbnail' : 'chip',
+  }
+}
 import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommentsText'
 import { CommentLink } from './CommentLink'
@@ -6881,6 +6902,27 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const input = present.prompt
   const shellComposer = input.startsWith('!')
   const attachments = present.attachments
+  const [initialRichDocument] = useState(() => loadAgentViewPrefs(projectId, stateId).chatRichDraft?.document)
+  const richDocumentRef = useRef(initialRichDocument)
+  const [richAttachmentIds, setRichAttachmentIds] = useState<Set<string>>(
+    () => new Set(initialComposer.current!.attachments.map((attachment) => String(attachment.id))),
+  )
+  const restoredAttachmentIdsRef = useRef(new Set<string>())
+  const attachmentRegistry = useMemo(() => new AttachmentRegistry(async (file, id, signal) => {
+    const uploaded = await uploadFile(projectId, file, signal)
+    reconcile(Number(id), { path: uploaded.path, uploading: false })
+    return { path: uploaded.path }
+  }), [projectId, reconcile])
+
+  useEffect(() => attachmentRegistry.subscribe(() => {
+    for (const attachment of attachmentsRef.current) {
+      const state = attachmentRegistry.get(String(attachment.id))
+      if (state?.status === 'failed') reconcile(attachment.id, { uploading: false, error: formatError(state.error) })
+    }
+  }), [attachmentRegistry, reconcile])
+  const documentAttachments = useMemo(() => shellComposer
+    ? attachments
+    : attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id))), [attachments, richAttachmentIds, shellComposer])
   const inputRef = useRef(input)
   useEffect(() => {
     inputRef.current = input
@@ -9541,6 +9583,22 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     [projectId, stateId],
   )
 
+  const syncAttachmentsIntoDocument = useCallback((editor = richComposerRef.current?.editor) => {
+    if (!editor || shellComposer) return
+    for (const attachment of attachmentsRef.current) {
+      const metadata = composerAttachment(attachment)
+      if (attachment.path) attachmentRegistry.registerUploaded(metadata, { path: attachment.path }, attachment.previewUrl)
+      if (!restoredAttachmentIdsRef.current.has(metadata.id)) {
+        restoreAttachment(editor, metadata)
+        restoredAttachmentIdsRef.current.add(metadata.id)
+      }
+    }
+  }, [attachmentRegistry, shellComposer])
+
+  useEffect(() => {
+    syncAttachmentsIntoDocument()
+  }, [attachments, syncAttachmentsIntoDocument])
+
   // requestOlderHistory asks the daemon for the batch older than the current
   // oldest line, when the user scrolls near the top (item 25).
   function requestOlderHistory() {
@@ -9646,7 +9704,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Save the composer text (debounced) so a half-written message survives an
   // agent switch or reload. Sending clears input, which persists as "no draft".
   useEffect(() => {
-    const t = setTimeout(() => patchAgentViewPrefs(projectId, stateId, { chatDraft: input || undefined }), 300)
+    const t = setTimeout(() => patchAgentViewPrefs(projectId, stateId, {
+      chatDraft: input || undefined,
+      chatRichDraft: input && richDocumentRef.current
+        ? { version: 1, document: richDocumentRef.current }
+        : undefined,
+    }), 300)
     return () => clearTimeout(t)
   }, [input, projectId, stateId])
 
@@ -9658,8 +9721,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Mirror to the per-agent caches so a switch away - or a reload - restores
     // them. Running on every change (rather than only on unmount) is what makes
     // the reload case work: a reload tears the page down without unmounting.
-    saveChatAttachments(projectId, stateId, attachments)
-  }, [attachments, projectId, stateId])
+    saveChatAttachments(projectId, stateId, documentAttachments)
+  }, [attachments, documentAttachments, projectId, stateId])
   // Every preview object URL minted this session. We can't revoke on remove (an
   // undo can bring the chip back) or on unmount (the attachments are stashed to
   // the cache and restored on return), so URLs live until a send consumes the
@@ -9702,10 +9765,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const objectUrl = URL.createObjectURL(file)
       objectUrlsRef.current.add(objectUrl)
       const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, url: objectUrl, previewUrl: isImageFile(file) ? objectUrl : undefined, size: file.size, uploading: true }
+      const editor = richComposerRef.current?.editor
+      // The registry inserts fresh rich attachments itself. Mark them before
+      // committing the legacy upload manifest so the migration effect cannot
+      // race it and append a second node at the end of the document.
+      if (editor && !shellComposer) restoredAttachmentIdsRef.current.add(String(id))
       commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
-      uploadFile(projectId, file)
-        .then((res) => reconcile(id, { path: res.path, uploading: false }))
-        .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
+      if (editor && !shellComposer) {
+        attachmentRegistry.add(editor, composerAttachment(chip), file, chip.previewUrl)
+      } else {
+        uploadFile(projectId, file)
+          .then((res) => reconcile(id, { path: res.path, uploading: false }))
+          .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
+      }
       names.push(file.name || 'pasted-image')
     }
     return names
@@ -9755,7 +9827,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const names = addFiles(files)
     // With the preference on, also reference the pasted attachments in the
     // message text via "[filename]" markers at the caret.
-    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+    if ((shellComposer || !richComposerRef.current?.editor) && pasteMarkers && names.length > 0) insertPasteMarkers(names)
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -9765,12 +9837,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   const isFileDrag = (dt: DataTransfer | null) => !!dt && Array.from(dt.types).includes('Files')
 
-  const uploading = attachments.some((a) => a.uploading)
-  const readyAttachments = attachments.filter((a) => a.path && !a.error)
+  const uploading = documentAttachments.some((a) => a.uploading)
+  const readyAttachments = documentAttachments.filter((a) => a.path && !a.error)
   // Every attachment is openable, in chip order - the lightbox navigates this list
   // and each chip opens at its own index (see lib/attachmentLightbox).
-  const openable = openableAttachments(attachments)
-  const lightboxItems = attachmentLightboxItems(attachments)
+  const openable = openableAttachments(documentAttachments)
+  const lightboxItems = attachmentLightboxItems(documentAttachments)
   const canSend = connected && !uploading && (!!input.trim() || readyAttachments.length > 0)
 
   // A pin placed on a picture in the lightbox, arriving as text for this
@@ -10165,19 +10237,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
 
   function onRichComposerKeyDown(e: KeyboardEvent, context: RichComposerKeyContext): boolean {
-    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
-      const key = e.key.toLowerCase()
-      if (key === 'z') {
-        e.preventDefault()
-        restoreSnapshot(e.shiftKey ? redo() : undo())
-        return true
-      }
-      if (key === 'y' && !e.shiftKey) {
-        e.preventDefault()
-        restoreSnapshot(redo())
-        return true
-      }
-    }
+    // Tiptap owns rich-document undo/redo, including inline attachment nodes.
+    // The explicit snapshot history remains for the dedicated shell textarea.
     if (slashMatches.length > 0) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
@@ -11113,16 +11174,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             }`}
           >
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
-            <AttachmentChips
-              attachments={attachments}
-              size="sm"
-              className="px-3 pt-2.5"
-              onRemove={removeAttachment}
-              onOpen={(id, origin) => {
-                setLightboxOrigin(origin)
-                setLightboxIndex(openable.findIndex((a) => a.id === id))
-              }}
-            />
+            {shellComposer && (
+              <AttachmentChips
+                attachments={attachments}
+                size="sm"
+                className="px-3 pt-2.5"
+                onRemove={removeAttachment}
+                onOpen={(id, origin) => {
+                  setLightboxOrigin(origin)
+                  setLightboxIndex(openable.findIndex((a) => a.id === id))
+                }}
+              />
+            )}
             {shellComposer ? (
               <HighlightedTextarea
                 ref={textareaRef}
@@ -11146,6 +11209,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   <RichComposer
                     ref={richComposerRef}
                     value={input}
+                    initialDocument={initialRichDocument}
+                    onDocumentChange={(document) => {
+                      richDocumentRef.current = document
+                      const ids = new Set<string>()
+                      const visit = (node: typeof document) => {
+                        if (node.type === 'attachment' && typeof node.attrs?.id === 'string') ids.add(node.attrs.id)
+                        node.content?.forEach(visit)
+                      }
+                      visit(document)
+                      setRichAttachmentIds(ids)
+                    }}
+                    onEditor={(editor) => { if (editor) syncAttachmentsIntoDocument(editor) }}
+                    attachmentRegistry={attachmentRegistry}
                     onChange={handleRichInputChange}
                     onKeyDown={onRichComposerKeyDown}
                     onPaste={(event) => {

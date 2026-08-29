@@ -14,13 +14,14 @@ import type { UploadResponse } from './models/UploadResponse'
 // absolute host path (readable by the agent), `filename` the sanitized on-disk name.
 export type UploadResult = UploadResponse
 
-export async function uploadFile(projectId: string | null, file: File): Promise<UploadResult> {
+export async function uploadFile(projectId: string | null, file: File, signal?: AbortSignal): Promise<UploadResult> {
   const form = new FormData()
   form.append('file', file, file.name || 'paste')
   const pid = projectId ? encodeURIComponent(projectId) : '_'
   const res = await fetch(`/api/projects/${pid}/uploads`, {
     method: 'POST',
     body: form,
+    signal,
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')

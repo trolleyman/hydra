@@ -14,7 +14,8 @@ export type AttachmentUploadState =
 
 interface RegistryEntry {
   attachment: ComposerAttachment
-  file: File
+  file?: File
+  previewUrl?: string
   state: AttachmentUploadState
   controller?: AbortController
   generation: number
@@ -39,6 +40,25 @@ export class AttachmentRegistry {
 
   attachment(id: string): ComposerAttachment | undefined {
     return this.entries.get(id)?.attachment
+  }
+
+  previewUrl(id: string): string | undefined {
+    return this.entries.get(id)?.previewUrl
+  }
+
+  registerUploaded(attachment: ComposerAttachment, uploaded: UploadedAttachment, previewUrl?: string): void {
+    const existing = this.entries.get(attachment.id)
+    if (existing) {
+      if (existing.state.status === 'uploaded' && existing.state.uploaded.path === uploaded.path && existing.previewUrl === previewUrl) return
+      existing.controller?.abort()
+      existing.controller = undefined
+      existing.attachment = attachment
+      existing.previewUrl = previewUrl
+      existing.state = { status: 'uploaded', uploaded }
+    } else {
+      this.entries.set(attachment.id, { attachment, previewUrl, state: { status: 'uploaded', uploaded }, generation: 0 })
+    }
+    this.emit()
   }
 
   retry(id: string): boolean {
@@ -66,9 +86,9 @@ export class AttachmentRegistry {
     return [...present].some((id) => this.entries.get(id)?.state.status === 'uploading')
   }
 
-  add(editor: Editor, attachment: ComposerAttachment, file: File): boolean {
+  add(editor: Editor, attachment: ComposerAttachment, file: File, previewUrl?: string): boolean {
     if (this.entries.has(attachment.id)) throw new Error(`Duplicate attachment id: ${attachment.id}`)
-    this.entries.set(attachment.id, { attachment, file, state: { status: 'idle' }, generation: 0 })
+    this.entries.set(attachment.id, { attachment, file, previewUrl, state: { status: 'idle' }, generation: 0 })
     const inserted = insertAttachment(editor, attachment)
     if (!inserted) this.entries.delete(attachment.id)
     this.reconcile(editor)
@@ -108,6 +128,7 @@ export class AttachmentRegistry {
   }
 
   private start(id: string, entry: RegistryEntry): void {
+    if (!entry.file) return
     const controller = new AbortController()
     const generation = ++entry.generation
     entry.controller = controller

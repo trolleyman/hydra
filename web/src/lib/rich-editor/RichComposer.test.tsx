@@ -38,4 +38,29 @@ describe('RichComposer', () => {
       expect.objectContaining({ markdown: 'draft', empty: false }),
     )
   })
+
+  it('restores a structured draft without reparsing its attachment as text', async () => {
+    const ref = createRef<RichComposerHandle>()
+    render(
+      <RichComposer
+        ref={ref}
+        value="Before [cat.png] after"
+        initialDocument={{
+          type: 'doc',
+          content: [{
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Before ' },
+              { type: 'attachment', attrs: { id: 'cat', name: 'cat.png', kind: 'image', display: 'chip' } },
+              { type: 'text', text: ' after' },
+            ],
+          }],
+        }}
+        onChange={() => {}}
+      />,
+    )
+
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+    expect(ref.current!.editor!.getJSON().content?.[0].content?.[1].type).toBe('attachment')
+  })
 })

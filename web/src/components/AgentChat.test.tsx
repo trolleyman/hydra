@@ -300,22 +300,18 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
   afterAll(() => vi.unstubAllGlobals())
   afterEach(() => localStorage.clear())
 
-  it('undoes a pasted image: first Ctrl+Z drops the marker, second drops the chip', async () => {
+  it('undoes a pasted image as one structured document step', async () => {
     renderChat()
     const ta = await connectedComposer()
 
     fireEvent.paste(ta, imagePasteEvent())
 
-    // The paste both inserts a "[image1.png]" marker and stages an image chip.
+    // The attachment is one inline document node. Its Markdown serialization
+    // remains the readable marker sent to the agent.
     await screen.findByLabelText('Remove image1.png')
     expect(composerValue(ta)).toBe('[image1.png]')
 
-    // First Ctrl+Z: the marker is gone but the chip remains (two distinct steps).
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(composerValue(ta)).toBe('')
-    expect(screen.getByLabelText('Remove image1.png')).toBeInTheDocument()
-
-    // Second Ctrl+Z: the chip is gone too - back to an empty composer.
+    // One undo removes both its visible chip and serialized marker.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
     expect(composerValue(ta)).toBe('')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
@@ -328,15 +324,12 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     fireEvent.paste(ta, imagePasteEvent())
     await screen.findByLabelText('Remove image1.png')
 
-    // Undo the whole paste (marker, then chip).
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
+    // Undo and redo the single inline attachment node.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
 
-    // Redo brings the chip back, then the marker.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true, shiftKey: true })
     expect(screen.getByLabelText('Remove image1.png')).toBeInTheDocument()
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true, shiftKey: true })
     expect(composerValue(ta)).toBe('[image1.png]')
   })
 
@@ -354,9 +347,7 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     await screen.findByLabelText('Remove image1.png')
     expect(composerValue(ta)).toBe('look at this [image1.png]')
 
-    // Undo marker, then chip - the typed text survives.
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(composerValue(ta)).toBe('look at this ')
+    // The attachment has its own history boundary, so typed text survives.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
     expect(composerValue(ta)).toBe('look at this ')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()

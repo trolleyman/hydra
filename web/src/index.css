@@ -108,6 +108,7 @@
 .rich-text-surface a { color: var(--color-blue-600); text-decoration: underline; }
 .dark .rich-text-surface a { color: var(--color-blue-400); }
 .rich-text-surface span[data-composer-attachment] { display: inline-flex; align-items: center; margin: 0 0.15em; border: 1px solid var(--color-blue-200); border-radius: 999px; background: var(--color-blue-50); padding: 0.1em 0.55em; color: var(--color-blue-700); font-size: 0.9em; }
+.rich-text-surface .composer-attachment-preview { width: 1.6em; height: 1.6em; margin: -0.1em 0.4em -0.1em -0.55em; border-radius: 999px 0 0 999px; object-fit: cover; }
 .dark .rich-text-surface span[data-composer-attachment] { border-color: rgb(96 165 250 / 0.35); background: rgb(59 130 246 / 0.12); color: var(--color-blue-300); }
 .rich-text-surface span[data-composer-attachment][data-upload-state="failed"] { border-color: var(--color-red-300); background: var(--color-red-50); color: var(--color-red-700); }
 .dark .rich-text-surface span[data-composer-attachment][data-upload-state="failed"] { border-color: var(--color-red-800); background: rgb(127 29 29 / 0.2); color: var(--color-red-300); }
