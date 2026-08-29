@@ -2,6 +2,8 @@ module github.com/trolleyman/hydra
 
 go 1.25.0
 
+toolchain go1.27.0
+
 require (
 	braces.dev/errtrace v0.4.0
 	github.com/BurntSushi/toml v1.6.0
