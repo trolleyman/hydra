@@ -38,7 +38,7 @@ export function useSystemStatus(): SystemStatus {
     setSystemStatus(status)
     setCanRestart(status.can_restart ?? false)
     setCanUpdate(status.can_update ?? false)
-    setVersion(status.version ?? status.build_id ?? null)
+    setVersion(status.version ?? null)
     if (status.uptime_seconds != null && spawnedAt.current === null) {
       spawnedAt.current = Date.now() - status.uptime_seconds * 1000
       setTick((n) => n + 1) // one render to mount the self-ticking <Uptime> label
