@@ -100,6 +100,9 @@ diff viewer ──GET .../agents/{id}/review/threads──▶ daemon
   authenticated, network down, rate limit - the response falls back to the cache
   with `stale: true` and the reason, so the diff still shows the conversation
   instead of implying there is none.
+- The Changes toolbar's Refresh action refreshes these live threads as well as
+  the diff. It is the explicit way to pick up a forge reply without remounting
+  the agent page.
 - Local notes are merged per thread, sorted by time, after the forge notes.
   A note whose thread has vanished from the forge is dropped rather than shown
   floating.

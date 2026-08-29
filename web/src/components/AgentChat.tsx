@@ -1179,6 +1179,10 @@ function summarizeToolInput(input: unknown, name = ''): { text: string; prose: b
     const reply = typeof obj.reply_to === 'number' ? `#${obj.reply_to}` : ''
     return { text: reply || `${path}${line}`, prose: false }
   }
+  if (name === 'mcp__hydra__resolve_review_comments' && Array.isArray(obj.numbers)) {
+    const numbers = obj.numbers.filter((number): number is number => typeof number === 'number')
+    return { text: numbers.length > 0 ? `#${numbers.join(', #')}` : '', prose: false }
+  }
   if (name === 'ToolSearch' && typeof obj.query === 'string') return summarizeToolSearchQuery(obj.query)
   const gitTool = /^mcp__hydra__(git_.+)$/.exec(name)
   if (gitTool) {
@@ -1354,6 +1358,7 @@ const HYDRA_TOOL_LABELS: Record<string, string> = {
   generate_artifacts: 'Retry artifacts',
   get_review_comments: 'Review comments',
   add_review_comment: 'Add review comment',
+  resolve_review_comments: 'Resolve review comments',
   get_review_status: 'Review status',
   reply_to_review_comment: 'Reply to review comment',
   list_available_mcp_servers: 'Available integrations',
@@ -1370,6 +1375,7 @@ const HYDRA_SUMMARY_ONLY_TOOLS = new Set([
   'mcp__hydra__request_mcp_server',
   'mcp__hydra__reply_to_review_comment',
   'mcp__hydra__add_review_comment',
+  'mcp__hydra__resolve_review_comments',
 ])
 
 function humanizeToolName(name: string): string {
@@ -1731,7 +1737,7 @@ function useChipWidth(): [React.RefObject<HTMLDivElement | null>, number | null]
 // on every keystroke. The plan only changes on a TodoWrite (stable `todos`
 // identity between those), and the layout flags are stable while typing, so the
 // panel - and its chip-width measurement - skips the per-keystroke churn.
-const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { todos: TodoItem[]; narrow: boolean; paired: boolean; fadeIn: boolean }) {
+const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn, savedOpen, onOpenChange }: { todos: TodoItem[]; narrow: boolean; paired: boolean; fadeIn: boolean; savedOpen?: boolean; onOpenChange: (open: boolean) => void }) {
   // Frozen at mount: fade in only when the plan APPEARS live (a first
   // TodoWrite mid-conversation), not on every reload's replay.
   const [animateIn] = useState(fadeIn)
@@ -1751,7 +1757,7 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
   // Default collapsed when the pane is too narrow to sit a card alongside the
   // transcript, or when every item is checked off (a finished plan is just
   // noise expanded).
-  const [open, setOpen] = useState(!narrow && !allDone)
+  const [open, setOpen] = useState(savedOpen ?? (!narrow && !allDone))
   // Follow the narrow/wide flip and the all-done flip (collapse when it gets
   // tight or the plan completes, re-open when it widens or work resumes) while
   // still letting the user toggle in between - a render-phase sync like the
@@ -1800,7 +1806,11 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn }: { t
           // doesn't leave the reopened card empty. Reset on the way OPEN, not
           // on close - reshuffling the body mid-close animation shows.
           if (!open) setShowDone(allDone)
-          setOpen((o) => !o)
+          setOpen((o) => {
+            const next = !o
+            onOpenChange(next)
+            return next
+          })
         }}
         className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left cursor-pointer text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
       >
@@ -2112,9 +2122,10 @@ function separatorHtml(text: string, markers: string[]): string | null {
   const wanted = new Set(markers.flatMap((m) => m.split('\n')).map((l) => l.trimEnd()).filter(Boolean))
   const plain = stripAnsi(text).split('\n')
   // What a compiler or a test runner said, for the (very common) card whose
-  // whole output is a build log - see lib/buildOutput. Only over lines the
-  // terminal did NOT colour itself: where it did, its colours are better
-  // informed than any shape read off the text.
+  // whole output is a build log - see lib/buildOutput. Semantic highlighting
+  // wins on the lines it recognises; ANSI remains the fallback for everything
+  // else. Many test runners colour their whole stream uniformly, which conveys
+  // less than Hydra distinguishing verdict, package and location.
   const built = buildOutputSpans(plain)
   if (wanted.size === 0 && !built) return null
   // The ANSI is rendered first and then cut at the newlines, so a colour that
@@ -2129,7 +2140,7 @@ function separatorHtml(text: string, markers: string[]): string | null {
       return `<span class="token string">${escapeText(line)}</span>`
     }
     const spans = built?.[i]
-    if (spans && !hasAnsi(raw[i]) && spans.some((sp) => sp.cls !== '')) {
+    if (spans && spans.some((sp) => sp.cls !== '')) {
       found = true
       return spans.map((sp) => (sp.cls ? `<span class="${sp.cls}">${escapeText(sp.text)}</span>` : escapeText(sp.text))).join('')
     }
@@ -2904,31 +2915,28 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       // What a tool said about ITSELF, in the colours an error takes: the
       // subject at full strength, the reason as the verdict, the tool that is
       // talking behind them both (lib/buildOutput's diagnosticSpans). Unless the
-      // tool coloured the line itself, in which case that is better informed
-      // than any shape read off the text - the same rule the plain stretches
-      // below follow.
+      // tool coloured the line itself. Semantic diagnostics take precedence;
+      // ANSI is retained for a line whose shape we do not understand.
       const raw = section.raw
       const ansi = raw ? splitHighlightedLines(ansiToHtml(raw.join('\n'))) : null
       const coloured = ansi && ansi.length === section.lines.length ? ansi : null
       section.lines.forEach((line, i) => {
-        if (coloured && raw && hasAnsi(raw[i])) rows.push({ num: '', html: coloured[i], tone: 'plain' })
-        else rows.push({ num: '', html: '', spans: diagnosticSpans(line), tone: 'plain' })
+        const spans = diagnosticSpans(line)
+        if (spans.some((sp) => sp.cls !== '')) rows.push({ num: '', html: '', spans, tone: 'plain' })
+        else if (coloured && raw && hasAnsi(raw[i])) rows.push({ num: '', html: coloured[i], tone: 'plain' })
+        else rows.push({ num: '', html: '', spans, tone: 'plain' })
       })
       continue
     }
     if (section.kind === 'plain') {
       // Three answers, in the order of who knows most about the line.
-      //
-      // The TERMINAL knows best: where a tool coloured a line itself, that
-      // colour is better informed than any shape read off the text, and it is
-      // the only structure such a stretch has.
-      //
-      // Failing that: is this a compiler, a linter or a test runner talking?
+      // Is this a compiler, a linter or a test runner talking?
       // That is answered by the LINE and not by the command, because the command
       // that printed it (`mage build`, `make`, `npm run lint`) is unknowable -
       // see lib/buildOutput.
       //
-      // Failing both, it is the plain terminal text it arrived as.
+      // Failing that, preserve ANSI emitted by the terminal. Failing both, it
+      // is the plain terminal text it arrived as.
       const raw = section.raw
       const ansi = raw ? splitHighlightedLines(ansiToHtml(raw.join('\n'))) : null
       // Splitting the rendered ANSI must give one entry per line; a mismatch
@@ -2937,13 +2945,13 @@ function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       const built = buildOutputSpans(section.lines)
       const escaped = highlightLines(section.lines.join('\n'), 'plaintext')
       section.lines.forEach((_, i) => {
-        if (coloured && raw && hasAnsi(raw[i])) {
-          rows.push({ num: '', html: coloured[i], tone: 'plain' })
-          return
-        }
         const spans = built?.[i]
         if (spans && spans.some((sp) => sp.cls !== '')) {
           rows.push({ num: '', html: '', spans, tone: 'plain' })
+          return
+        }
+        if (coloured && raw && hasAnsi(raw[i])) {
+          rows.push({ num: '', html: coloured[i], tone: 'plain' })
           return
         }
         rows.push({ num: '', html: escaped[i] ?? '', tone: 'plain' })
@@ -10774,12 +10782,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         )}
         {/* Current plan (item 17): the agent's latest TodoWrite. Main view
             only - it is the main agent's plan. */}
-        {planVisible && (
+        {planVisible && paneWidth > 0 && (
           <PlanPanel
             todos={todos}
             narrow={paneWidth > 0 && paneWidth < 560}
             paired={hasSubagents}
             fadeIn={liveUiRef.current}
+            savedOpen={loadAgentViewPrefs(projectId, stateId).planOpen}
+            onOpenChange={(open) => patchAgentViewPrefs(projectId, stateId, { planOpen: open })}
           />
         )}
         {/* [overflow-anchor:none]: the browser's scroll anchoring would adjust

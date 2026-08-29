@@ -4945,7 +4945,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const refreshBtn = (
     <Tooltip content="Refresh">
       <button
-        onClick={() => setRefreshKey((k) => k + 1)}
+        onClick={() => {
+          setRefreshKey((k) => k + 1)
+          void refreshThreads()
+        }}
         disabled={loadingDiff}
         className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
       >
