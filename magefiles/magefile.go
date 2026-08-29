@@ -11,10 +11,12 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"braces.dev/errtrace"
@@ -679,7 +681,7 @@ func RunDesktop() error {
 	}
 	switch runtime.GOOS {
 	case "linux":
-		return errtrace.Wrap(runV(filepath.Join(".", "dist", "linux", "hydra-desktop")))
+		return errtrace.Wrap(runDesktopLinuxDevelopment(filepath.Join(".", "dist", "linux", "hydra-desktop")))
 	case "darwin":
 		// Execute the bundle binary so the checkout-local database and runtime
 		// namespace reach the app and its bundled backend. LaunchServices does not
@@ -694,6 +696,44 @@ func RunDesktop() error {
 	default:
 		return errtrace.Wrap(fmt.Errorf("desktop apps are unsupported on %s", runtime.GOOS))
 	}
+}
+
+// runDesktopLinuxDevelopment keeps Mage alive across Ctrl+C so it can stop the
+// detached daemon in this run's HYDRA_RUNTIME_NAMESPACE. The hidden stop command
+// inherits that namespace, so it cannot address the global or another checkout's
+// daemon even if those are running at the same time.
+func runDesktopLinuxDevelopment(binary string) error {
+	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	cmd := exec.Command(binary)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	var runErr error
+	select {
+	case runErr = <-done:
+	case <-ctx.Done():
+		_ = cmd.Process.Signal(os.Interrupt)
+		select {
+		case runErr = <-done:
+		case <-time.After(5 * time.Second):
+			_ = cmd.Process.Kill()
+			runErr = <-done
+		}
+	}
+	cleanup := exec.Command(binary, "__stop-daemon")
+	cleanup.Stdout = os.Stdout
+	cleanup.Stderr = os.Stderr
+	cleanupErr := cleanup.Run()
+	if ctx.Err() != nil && runErr != nil {
+		runErr = nil
+	}
+	return errtrace.Wrap(errors.Join(runErr, cleanupErr))
 }
 
 func Build() {

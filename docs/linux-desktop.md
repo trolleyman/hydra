@@ -379,6 +379,9 @@ running a development desktop cannot attach to or restart another Hydra daemon
 for the same OS user. The bundled `__desktop-connect` command exposes this same
 control-socket discovery/bootstrap operation to thin native shells without
 making the filesystem-protected endpoint protocol platform-UI-specific.
+When the Linux app launched by `mage runDesktop` closes or the command receives
+Ctrl+C, Mage stops the detached daemon in that exact development runtime
+namespace. Global, legacy-layout, and other checkout namespaces are untouched.
 
 ### Phase 2: add desktop window routes and lifecycle
 

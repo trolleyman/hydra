@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/trolleyman/hydra/internal/cli"
+	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/desktop"
 )
 
@@ -18,6 +19,19 @@ func main() {
 	// own daemon without a second Hydra installation.
 	if len(os.Args) > 1 && os.Args[1] == "__daemon" {
 		cli.Run()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "__stop-daemon" {
+		if os.Getenv("HYDRA_RUNTIME_NAMESPACE") == "" {
+			fmt.Fprintln(os.Stderr, "hydra-desktop: refusing development daemon cleanup without HYDRA_RUNTIME_NAMESPACE")
+			os.Exit(1)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := daemon.StopDaemon(ctx, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "hydra-desktop: stop development daemon: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
