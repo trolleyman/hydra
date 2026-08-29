@@ -1,12 +1,12 @@
 # Rich-text composer: Tiptap implementation plan
 
-Status: **core and evaluation lab built; production integration in progress.**
+Status: **production integration built; release hardening in progress.**
 The schema, Markdown boundary, inline-code behaviour, attachments, blocks,
-language picker, tables and reusable controlled React adapter are built;
-production composers still use
-`HighlightedTextarea`. Replace their source-shaped Markdown highlighting with a
-structured rich-text editor that feels like writing prose, preserves Markdown as
-Hydra's interchange format, and makes files/images part of the sentence.
+language picker, tables and reusable controlled React adapter are built. Active
+chat and both Spawn layouts use the structured editor for prose, while chat
+retains `HighlightedTextarea` for its deliberately separate `!` shell mode.
+Markdown remains Hydra's interchange format and files/images can live at their
+document positions.
 
 The proposed foundation is the open-source Tiptap editor on ProseMirror. Tiptap
 is an implementation detail, not Hydra's public editor API. The first build step
@@ -631,6 +631,37 @@ Use the active simulation agent page described in
 [web-agent-page.md](web-agent-page.md). Add an editor-only harness route/fixture
 for exhaustive selection cases so failures are not coupled to chat WebSockets.
 
+## Remaining work
+
+The production field is usable now. The remaining first-release work is bounded
+hardening rather than another integration:
+
+1. Finish fenced-code keyboard ergonomics: Tab/Shift+Tab indentation, a
+   deliberate ArrowDown exit from the final visual line, and empty-block
+   Backspace unwrap behaviour. Cover each transition in the real-browser
+   fixture.
+2. Prove production table editing beyond insertion. Add a compact contextual
+   control for adding/removing rows and columns and deleting the table without
+   introducing a permanent formatting header. Verify keyboard traversal,
+   narrow-composer overflow and touch selection.
+3. Complete the compatibility and accessibility pass: IME in the integrated
+   composers, bidirectional text, screen-reader names/announcements, touch, and
+   Firefox/WebKit selection behaviour. Chromium remains the supported baseline
+   until this pass is complete.
+4. Re-measure the production lazy chunk, record the final bundle delta and audit
+   keyboard/pointer regressions in chat and both Spawn layouts.
+
+After that, choose follow-ups from actual use rather than expanding the first
+release. The strongest candidates are reference nodes (`@file`, `@commit`,
+`@branch`, `@agent`), a small start-of-line `/` menu, and a shared static viewer
+that can reuse more node presentation between the editor and sent bubbles. Math
+remains explicitly deferred until its Markdown boundary and renderer agree.
+
+Package extraction is also deferred. `RichComposer` is already a reusable
+Hydra-owned API with no ProseMirror state in its public value contract; turn it
+into a workspace or external package only after another product surface proves
+which host hooks are genuinely general.
+
 ## Build order and gates
 
 1. **Dependency/licence audit - DONE.** Pinned only the required MIT packages;
@@ -639,11 +670,11 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
 2. **Inline-code spike - DONE.** Paragraphs, text and `code_span` only. The
    six-position model, selection, deletion, undo, composition, pointer and
    clipboard tests pass in real Chromium. Tiptap passed the go/no-go gate.
-3. **Reusable core - IN PROGRESS.** Hydra-owned editor factory, shared extension
+3. **Reusable core - DONE.** Hydra-owned editor factory, shared extension
    registry, Markdown parser/serializer, marks, links, conservative input rules
    and unit/browser tests are built. The controlled React adapter and narrow
-   Markdown value/event API are built. Static view and production commands
-   remain.
+   Markdown value/event API are built; Tiptap and ProseMirror state stay behind
+   that boundary.
 4. **Attachment node/adapter - DONE.** The atomic safe-metadata node and external
    upload registry cancel on undo, restart on redo and keep paths out of
    Markdown/JSON. Production upload wiring, inline chips/thumbnails, retry,
@@ -666,11 +697,14 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
 8. **Spawn integration - DONE.** Compact and full-page Spawn layouts use the
    lazy adapter while the surrounding selectors retain stable callbacks and the
    existing Markdown submission contract.
-9. **Polish/discovery.** Formatting menu, attachment display toggles, optional
-   `/` menu and accessible announcements.
+9. **Release hardening - IN PROGRESS.** Finish code-block exit/indent/unwrap,
+   production table manipulation, integrated accessibility/IME/touch checks,
+   Firefox/WebKit validation and final bundle measurement.
 10. **Broader surfaces.** Evaluate review replies and image-pin notes separately.
-11. **Extraction decision.** After two production consumers, audit Hydra imports
-    and extract a workspace package only if there is a real reuse case.
+11. **Optional discovery.** Evaluate reference nodes, a start-of-line `/` menu
+    and tighter static-view reuse from real production feedback.
+12. **Extraction decision.** Audit Hydra imports and extract a workspace or
+    external package only when a non-chat consumer proves the host boundary.
 
 Every phase leaves plain Markdown submission working. Do not add a parallel rich
 message backend protocol.
