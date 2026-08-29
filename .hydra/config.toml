@@ -452,7 +452,18 @@ else
 fi
 
 echo "::hydra:progress:: Installing web dependencies"
-$PM install
+if ! $PM install; then
+  # Warm runner slots retain node_modules between commits. If aube's freshness
+  # state outlives one of its linked package directories, a normal install can
+  # fail while creating bins (for example tsc -> a missing TypeScript package).
+  # Force materialisation once; a real resolution/download failure still exits.
+  if [ "$PM" = aube ]; then
+    echo "::hydra:progress:: Repairing web dependency links"
+    aube install --force
+  else
+    exit 1
+  fi
+fi
 
 # Specs first - the merge is already blocked when they fail, so the lint and
 # typecheck passes below only run once they pass.
@@ -504,7 +515,16 @@ else
 fi
 
 echo "::hydra:progress:: Installing e2e dependencies"
-$PM install
+if ! $PM install; then
+  # See tests.web: cached aube state can survive a missing package directory in
+  # a warm test slot. One forced install repairs the materialised link tree.
+  if [ "$PM" = aube ]; then
+    echo "::hydra:progress:: Repairing e2e dependency links"
+    aube install --force
+  else
+    exit 1
+  fi
+fi
 
 # serve.ts builds a hydra binary and runs it with --simulation, so web/dist must
 # exist first.
