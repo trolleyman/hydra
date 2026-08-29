@@ -20,6 +20,18 @@ func TestDefaultPrePromptRequiresStructuredQuestions(t *testing.T) {
 	}
 }
 
+func TestDefaultPrePromptAllowsGuardedHeadCollaboration(t *testing.T) {
+	for _, want := range []string{
+		"discover live heads in this project",
+		"when messaging is enabled by policy, send them attributed messages",
+		"must not spawn, kill, merge, attach, or resume heads",
+	} {
+		if !strings.Contains(DefaultPrePrompt, want) {
+			t.Errorf("DefaultPrePrompt does not contain collaboration guardrail %q", want)
+		}
+	}
+}
+
 func TestResolveFullscreen(t *testing.T) {
 	// Unset → disabled (the safe default that forces the classic renderer).
 	if (Config{}).ResolveFullscreen("claude") {
