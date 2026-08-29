@@ -46,7 +46,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- To stop a background process you started, kill it by the PID you captured (`kill \"$PID\"`, where `PID=$!` right after you launch it) or by its port (`fuser -k <port>/tcp`). Do NOT use `pkill`/`killall` or any other kill-by-name/pattern: they match against each process's whole command line, so a generic pattern will also match your OWN agent process (its entire system prompt rides in the `--append-system-prompt` argv) and co-tenant sandboxed processes - killing your own session.\n" +
 	"- Don't reach out and drive host-OS applications or devices - e.g. the host's Google Chrome, Android `adb`, system services, or other users' processes. If you need a browser or similar tool, use a project-local/bundled one inside your worktree. Keep your effects confined to the sandbox + worktree.\n" +
 	"- Do NOT try to escape, weaken, or probe the sandbox (e.g. remounting paths, reading masked credentials, disabling seccomp, or reaching blocked hosts). The sandbox is a security boundary - treat it as fixed.\n" +
-	"- Do NOT operate Hydra itself. You are a head running *inside* Hydra; you must not spawn, kill, merge, attach, or resume heads, run the `hydra` CLI or `hydrad` daemon, or talk to its control socket (the sole exception is the `mcp__hydra__host_run` escape hatch described below). Managing heads is the user's job, not yours - even if a task seems to call for it, stop and ask the user.\n" +
+	"- Use the dedicated Hydra collaboration tools to discover live heads in this project and, when messaging is enabled by policy, send them attributed messages. Do not use those tools to infer authority beyond discovery and messaging. You must not spawn, kill, merge, attach, or resume heads, run the `hydra` CLI or `hydrad` daemon, or talk to its control socket (the sole exception is the `mcp__hydra__host_run` escape hatch described below). Head lifecycle management is the user's job - even if a task seems to call for it, stop and ask the user.\n" +
 	"- If you need something the environment does not provide - a system/global tool installed, a path made writable, network access, etc. - STOP and ask the user to change it for you. Do not work around it.\n" +
 	"- LAST-RESORT sandbox escape hatch: if a task genuinely cannot proceed inside the sandbox, you can ask the user to run ONE command on the host (outside the sandbox, in your worktree) with the `mcp__hydra__host_run` tool, passing `command` and `why`. This pops an approval card in the UI showing your `why` above the command; nothing runs unless the user allows it, and an unanswered request is denied after 5 minutes. Treat this as EXTREMELY RARE - almost everything belongs inside the sandbox. Prefer editing config.toml (writable_paths, network, etc.) or just asking the user in chat; reach for it only when there is no in-sandbox way to proceed, expect most requests to be denied, and never use it to routinely work around the sandbox boundary.\n" +
 	"  - `command` is run on the host as `bash -lc <command>` in your worktree, and is passed through VERBATIM - no shell of yours touches it - so pipes, redirection and `&&` work as written and need no extra quoting.\n" +
@@ -70,6 +70,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"Two sections are the exception - `[tests.<name>]` and `[artifacts.<name>]` are read from the *ref being compared* (your branch's own config.toml/worktree), so editing them, or the scripts they run (a test command, the screenshots generator), takes effect on your branch without merging. Only `unsafe_host` stays gated by the trusted root config (a branch can't grant itself host access), and the root config can still disable a named runner/artifact; sandboxed commands otherwise run exactly as your branch defines them.\n" +
 	"\n" +
 	"## Workflow\n" +
+	"- When you need to ask the user a question, use the agent's native structured question tool (for example, `AskUserQuestion` or `request_user_input`) when one is available. Do not ask the question only in a plain chat message. If no structured question tool is available, ask in chat instead.\n" +
 	"- As you work, commit your progress at logical points. If you have the `mcp__hydra__git_commit` tool, commit with it (raw `git commit` in the shell is blocked for you): it stages and commits your changes onto your own branch inside your worktree, so a commit can never land on the main repo or another branch. Read-only git (`status`/`diff`/`log`) and `git add` still work.\n" +
 	"- Once you have finished the task, make a final commit capturing all remaining changes (via `mcp__hydra__git_commit` if you have it).\n" +
 	"- Do *not* use git push or git pull.\n" +
@@ -381,11 +382,24 @@ type ServiceScript struct {
 
 // IsEnabled reports whether the service should be supervised. An absent flag
 // (nil) means enabled, for backward compatibility with pre-flag configs.
-func (s ServiceScript) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
+func (s ServiceScript) IsEnabled() bool { return scriptFlagEnabled(s.Enabled) }
 
 // IsStrict reports whether the command runs under `set -eo pipefail`. An absent
 // flag (nil) means strict, so a failed startup step surfaces rather than hiding.
-func (s ServiceScript) IsStrict() bool { return s.Strict == nil || *s.Strict }
+func (s ServiceScript) IsStrict() bool { return scriptFlagEnabled(s.Strict) }
+
+// scriptFlagEnabled is the shared absent-means-on rule for enabled and strict
+// across services, artifacts, previews and tests.
+func scriptFlagEnabled(flag *bool) bool { return flag == nil || *flag }
+
+// AutoRunMode is the cache scheduling policy shared by tests and artifacts.
+type AutoRunMode string
+
+const (
+	AutoRunAlways  AutoRunMode = "always"
+	AutoRunSettled AutoRunMode = "settled"
+	AutoRunNever   AutoRunMode = "never"
+)
 
 // DefaultServiceMaxRestarts is the restart cap applied when a service does not
 // set max_restarts.
@@ -466,7 +480,7 @@ type ArtifactScript struct {
 	// "always" (or empty) preserves the historical behavior, "settled" waits
 	// until the agent is no longer actively working, and "never" requires an
 	// explicit refresh. Cached generations are returned in every mode.
-	AutoRun string `toml:"auto_run"`
+	AutoRun AutoRunMode `toml:"auto_run"`
 	// Enabled gates whether the diff viewer runs this script. nil or true means
 	// active; false means it is skipped entirely. nil is the default so configs
 	// written before this flag keep their artifacts running. Like unsafe_host,
@@ -509,11 +523,11 @@ const ArtifactTypeServer = "server"
 
 // IsEnabled reports whether the artifact script should run. An absent flag (nil)
 // means enabled, for backward compatibility with pre-flag configs.
-func (a ArtifactScript) IsEnabled() bool { return a.Enabled == nil || *a.Enabled }
+func (a ArtifactScript) IsEnabled() bool { return scriptFlagEnabled(a.Enabled) }
 
 // IsStrict reports whether the command runs under `set -eo pipefail`. An absent
 // flag (nil) means strict, so a failing step surfaces rather than being swallowed.
-func (a ArtifactScript) IsStrict() bool { return a.Strict == nil || *a.Strict }
+func (a ArtifactScript) IsStrict() bool { return scriptFlagEnabled(a.Strict) }
 
 // IsServer reports whether this entry is a legacy type = "server" artifact, i.e.
 // a preview written in the pre-[previews.<name>] syntax. Only the decode-time
@@ -588,11 +602,11 @@ type PreviewScript struct {
 
 // IsEnabled reports whether the preview should be offered. An absent flag (nil)
 // means enabled, for backward compatibility with pre-flag configs.
-func (p PreviewScript) IsEnabled() bool { return p.Enabled == nil || *p.Enabled }
+func (p PreviewScript) IsEnabled() bool { return scriptFlagEnabled(p.Enabled) }
 
 // IsStrict reports whether the command runs under `set -eo pipefail`. An absent
 // flag (nil) means strict, so a failing build step surfaces as a failed spawn.
-func (p PreviewScript) IsStrict() bool { return p.Strict == nil || *p.Strict }
+func (p PreviewScript) IsStrict() bool { return scriptFlagEnabled(p.Strict) }
 
 // previewFromArtifact converts a legacy type = "server" artifact into the
 // PreviewScript it now means. The artifact-only fields (timeout_sec,
@@ -731,7 +745,7 @@ type TestScript struct {
 	CleanIgnored bool `toml:"clean_ignored"`
 	// AutoRun controls when a missing test run starts automatically. See
 	// ArtifactScript.AutoRun for the accepted values and cache behavior.
-	AutoRun string `toml:"auto_run"`
+	AutoRun AutoRunMode `toml:"auto_run"`
 	// Enabled gates whether the test gate runs this command. nil or true means
 	// active; false skips it entirely. nil is the default for backward compat.
 	Enabled *bool `toml:"enabled"`
@@ -755,11 +769,11 @@ type TestScript struct {
 
 // IsEnabled reports whether the test runner should run. An absent flag (nil)
 // means enabled, for backward compatibility with pre-flag configs.
-func (t TestScript) IsEnabled() bool { return t.Enabled == nil || *t.Enabled }
+func (t TestScript) IsEnabled() bool { return scriptFlagEnabled(t.Enabled) }
 
 // IsStrict reports whether the command runs under `set -eo pipefail`. An absent
 // flag (nil) means strict.
-func (t TestScript) IsStrict() bool { return t.Strict == nil || *t.Strict }
+func (t TestScript) IsStrict() bool { return scriptFlagEnabled(t.Strict) }
 
 // IsStreaming reports whether results are parsed live from stdout markers
 // (type = "stdout") rather than from report files after exit.
@@ -2840,7 +2854,7 @@ func artifactFieldLines(a ArtifactScript) []string {
 		out = append(out, "clean_ignored = true")
 	}
 	if a.AutoRun != "" && a.AutoRun != "always" {
-		out = append(out, "auto_run = "+tomlStringValue(a.AutoRun))
+		out = append(out, "auto_run = "+tomlStringValue(string(a.AutoRun)))
 	}
 	if a.Strict != nil && !*a.Strict {
 		out = append(out, "strict = false")
@@ -3151,7 +3165,7 @@ func testFieldLines(t TestScript) []string {
 		out = append(out, "clean_ignored = true")
 	}
 	if t.AutoRun != "" && t.AutoRun != "always" {
-		out = append(out, "auto_run = "+tomlStringValue(t.AutoRun))
+		out = append(out, "auto_run = "+tomlStringValue(string(t.AutoRun)))
 	}
 	if t.Strict != nil && !*t.Strict {
 		out = append(out, "strict = false")

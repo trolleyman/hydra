@@ -127,6 +127,11 @@ describe('Bash card summary comments', () => {
     expect(leadingBashComment('#!/usr/bin/env bash\necho ok')).toBe('')
     expect(leadingBashComment('echo ok\n# Explain the next command')).toBe('')
   })
+
+  it('handles Codex wrappers whose closing quote was consumed by shell expansion', () => {
+    const command = `/usr/bin/bash -lc "# Verify the merge\ngit status --short\nprintf '%s\\n' \\"'$?'`
+    expect(leadingBashComment(command)).toBe('Verify the merge')
+  })
 })
 
 async function connectedComposer(): Promise<HTMLTextAreaElement> {
@@ -177,6 +182,98 @@ describe('review composer status', () => {
     act(() => sockets[0].emit({ type: 'status', status: AgentStatus.FINISHED }))
     await screen.findByRole('button', { name: 'Send message' })
     expect(useAgentStore.getState().agents[0].agent_status?.status).toBe(AgentStatus.RUNNING)
+  })
+})
+
+describe('question answer status', () => {
+  beforeAll(() => {
+    vi.stubGlobal('WebSocket', RecordingWebSocket)
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    sockets.length = 0
+    localStorage.clear()
+    useAgentStore.setState({ agents: [], optimistic: {} })
+  })
+
+  it('switches the agent to running as soon as a native question is answered', async () => {
+    const agentId = `agent-${++agentSeq}`
+    const onStatusUpdate = vi.fn()
+    useAgentStore.setState({
+      agents: [{ id: agentId, agent_status: { status: AgentStatus.NEEDS_INPUT } } as AgentResponse],
+    })
+    render(
+      <ChatPane
+        agentId={agentId}
+        projectId="proj"
+        active
+        reconnectAttempt={0}
+        onStatusUpdate={onStatusUpdate}
+        onDiffRefresh={vi.fn()}
+        onSelectCommit={vi.fn()}
+      />,
+    )
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => {
+      ws.emit({ type: 'replay_done' })
+      ws.emit({
+        type: 'chat_event',
+        event: {
+          seq: 1,
+          type: 'tool_started',
+          timestamp: '',
+          payload: {
+            id: 'toolu_question',
+            name: 'AskUserQuestion',
+            input: {
+              questions: [{
+                question: 'Which approach?',
+                multiSelect: false,
+                options: [{ label: 'First' }, { label: 'Second' }],
+              }],
+            },
+          },
+        },
+      })
+      ws.emit({
+        type: 'chat_event',
+        event: {
+          seq: 2,
+          type: 'interaction_requested',
+          timestamp: '',
+          payload: {
+            provider: 'claude',
+            request_id: 'request_question',
+            interaction: {
+              subtype: 'can_use_tool',
+              tool_use_id: 'toolu_question',
+              tool_name: 'AskUserQuestion',
+              input: {
+                questions: [{
+                  question: 'Which approach?',
+                  multiSelect: false,
+                  options: [{ label: 'First' }, { label: 'Second' }],
+                }],
+              },
+            },
+          },
+        },
+      })
+    })
+
+    fireEvent.click(await screen.findByText('First'))
+    const submit = screen.getByRole('button', { name: 'Submit' })
+    await waitFor(() => expect(submit).not.toBeDisabled())
+    fireEvent.click(submit)
+
+    expect(useAgentStore.getState().agents[0].agent_status?.status).toBe(AgentStatus.RUNNING)
+    expect(onStatusUpdate).toHaveBeenCalledWith(AgentStatus.RUNNING)
   })
 })
 

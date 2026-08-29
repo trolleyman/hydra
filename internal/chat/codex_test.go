@@ -231,10 +231,11 @@ func TestNormalizeCodexCommandAsBash(t *testing.T) {
 
 func TestCodexCommandDescription(t *testing.T) {
 	tests := map[string]string{
-		"# Inspect usage\nrg -n usage internal":                            "Inspect usage",
-		`/usr/bin/bash -lc "# Run focused tests` + "\n" + `go test ./..."`: "Run focused tests",
-		"#!/usr/bin/env bash\n# Build\nmage build":                         "",
-		"echo ok\n# This is too late":                                      "",
+		"# Inspect usage\nrg -n usage internal":                                                         "Inspect usage",
+		`/usr/bin/bash -lc "# Run focused tests` + "\n" + `go test ./..."`:                              "Run focused tests",
+		`/usr/bin/bash -lc "# Verify the merge` + "\n" + `git status` + "\n" + `printf '%s\\n' \\"'$?'`: "Verify the merge",
+		"#!/usr/bin/env bash\n# Build\nmage build":                                                      "",
+		"echo ok\n# This is too late":                                                                   "",
 	}
 	for command, want := range tests {
 		if got := codexCommandDescription(command); got != want {

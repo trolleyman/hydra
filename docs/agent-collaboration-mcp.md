@@ -85,9 +85,10 @@ Enforce limits in the daemon, not only in tool descriptions:
 1. **Built:** daemon-side `list_agents` and `get_agent`, with same-project live
    head filtering and metadata redaction tests.
 2. **Built:** the separate `agentq` request channel and
-   `send_agent_message`, guarded by `policy.agent_messaging`. Chat-mode delivery
-   uses the durable queue; stopped, non-chat, self, oversized, and unknown
-   targets are rejected.
+   `send_agent_message`, guarded at delivery time by `policy.agent_messaging`.
+   Policy changes take effect without restarting the calling head. Chat-mode
+   delivery uses the durable queue; stopped, non-chat, self, oversized, and
+   unknown targets are rejected.
 3. **Built:** `agent:<source-id>` origin metadata in queued and durable events,
    a sender marker in chat, 4 KiB message and four-item recipient queue caps,
    six messages per chain, and six messages per pair per ten minutes. The
