@@ -95,34 +95,30 @@ function encodePath(p: string): string {
 // and keyboard focus, while the resting colour stays inside the prose palette.
 const LINK_CLASS = 'text-stone-700 dark:text-stone-200 decoration-stone-400/70 underline-offset-2 hover:underline focus-visible:underline'
 
-function nodeText(node: ReactNode): string | null {
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (!Array.isArray(node)) return null
-  const parts = node.map(nodeText)
-  return parts.every((part) => part != null) ? parts.join('') : null
-}
-
-// FileLink gives agent-authored source paths the same visual vocabulary as the
-// repository and diff trees. The quiet leading "... /" says that a path was
-// shortened; the tooltip carries the complete repo-relative path.
-function FileLink({ href, path, onClick }: {
+// FileLink keeps the author's exact Markdown label in the prose, then uses the
+// tooltip for the richer file treatment shared with repository surfaces: a
+// Lucide file-kind icon, a lowlit directory and an emphasized filename.
+function FileLink({ href, path, onClick, children }: {
   href: string
   path: string
   onClick: (e: React.MouseEvent<HTMLAnchorElement>) => void
+  children?: ReactNode
 }) {
   const filename = path.split('/').pop() || path
+  const directory = path.slice(0, Math.max(0, path.length - filename.length))
   const { Icon } = getFileIcon(filename)
   return (
-    <Tooltip content={path} width={480}>
-      <a
-        className="inline-flex items-center gap-1 rounded border border-stone-300/70 dark:border-stone-600/70 bg-stone-100/70 dark:bg-white/[0.05] px-1.5 py-0.5 align-middle text-stone-700 dark:text-stone-200 hover:bg-stone-200/70 dark:hover:bg-white/[0.09] transition-colors"
-        href={href}
-        onClick={onClick}
-      >
-        <Icon className="w-[1em] h-[1em] shrink-0 text-stone-400 dark:text-stone-500" aria-hidden="true" />
-        <span className="text-stone-400 dark:text-stone-500" data-copy-skip="">... /</span>
-        <span>{filename}</span>
-      </a>
+    <Tooltip
+      width={480}
+      content={(
+        <span className="inline-flex items-center gap-1.5 font-mono">
+          <Icon className="w-3.5 h-3.5 shrink-0 opacity-60" aria-hidden="true" />
+          {directory && <span className="opacity-55">{directory}</span>}
+          <span>{filename}</span>
+        </span>
+      )}
+    >
+      <a className={LINK_CLASS} href={href} onClick={onClick}>{children}</a>
     </Tooltip>
   )
 }
@@ -164,14 +160,8 @@ function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ct
       hash: lineHash ? lineHash.slice(1) : undefined,
     })
   }
-  const label = nodeText(children)
-  const filename = resolved.split('/').pop() || resolved
-  // Only collapse labels that already present themselves as paths. A semantic
-  // link such as "configuration guide" keeps its authored words and remains a
-  // normal understated link.
-  const pathLikeLabel = label === filename || label === path || label === resolved || label === href
-  if (fileChip && resolved && pathLikeLabel) {
-    return <FileLink href={url} path={resolved} onClick={onClick} />
+  if (fileChip && resolved) {
+    return <FileLink href={url} path={resolved} onClick={onClick}>{children}</FileLink>
   }
   return <a className={LINK_CLASS} href={url} onClick={onClick}>{children}</a>
 }

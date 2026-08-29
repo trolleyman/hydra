@@ -91,27 +91,28 @@ describe('Markdown', () => {
       worktreePath: '/work/hydra',
     }
 
-    it('renders a chat file path as a compact, neutral file chip', () => {
+    it('keeps a chat file link label exact and neutral', () => {
       const { container } = render(
         <Markdown text="[controller.go](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
       )
       const link = container.querySelector('a')!
-      expect(link).toHaveTextContent('... /controller.go')
+      expect(link).toHaveTextContent('controller.go')
+      expect(link.textContent).toBe('controller.go')
       expect(link).toHaveAttribute(
         'href',
         '/project/p1/repository/hydra/a1/-/internal/controller.go',
       )
       expect(link.className).not.toContain('text-blue')
-      expect(link.querySelector('svg')).not.toBeNull()
+      expect(link.querySelector('svg')).toBeNull()
     })
 
-    it('keeps a semantic repo link label as understated prose', () => {
+    it('also keeps a semantic repo link label as understated prose', () => {
       const { container } = render(
         <Markdown text="[the controller](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
       )
       const link = container.querySelector('a')!
       expect(link).toHaveTextContent('the controller')
-      expect(link).not.toHaveTextContent('... /')
+      expect(link.textContent).toBe('the controller')
       expect(link.className).not.toContain('text-blue')
     })
 
