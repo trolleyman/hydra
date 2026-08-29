@@ -291,6 +291,25 @@ before starting. Grouped by area.
 
 ## Chat mode
 
+- [ ] **macOS app with full Hydra and focused direct-directory chat windows.**
+  Ship one `Hydra.app` with one shared local backend and two window types: the
+  existing full interface and a clean structured-chat window. Focused chats run
+  directly in a registered project's real root, support enforced Edit/Read-only
+  mode plus an independent guarded-commit toggle, persist in Hydra history, and
+  remain openable from full Hydra. A chat never changes directory: switching
+  project stops or backgrounds the current agent and creates a new chat.
+
+  Reuse the existing `Head` model without a stored kind. The invariant is
+  `Branch == nil` means focused, while `Worktree == nil` only means there is no
+  live Hydra checkout and can also describe an archived or degraded normal head.
+  Archived normal heads retain their historical branch name; archived focused
+  heads remain branchless, so `Archived` plus `IsFocused()` distinguishes both.
+  Do not put a derived, nonexistent worktree path on archived heads: callers use
+  non-nil `Worktree` as evidence that the checkout can be read or operated on.
+  See [macos-desktop-chat.md](macos-desktop-chat.md) for the agreed behavior,
+  sandbox invariants and staged implementation plan. Depends on closing the
+  security-critical gaps in [macos-support.md](macos-support.md).
+
 - [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
 
 ## Deployment

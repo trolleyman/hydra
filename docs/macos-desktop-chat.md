@@ -242,42 +242,53 @@ above and leaves the backend/frontend architecture intact.
 
 ## Backend model
 
-Do not represent focused chat as a normal `Head` with fake nil branch/worktree
-fields. Current head creation, diff polling, merge, preview, tests and archival
-all carry assumptions that a live head owns a linked Git worktree. The built-in
-chat project deliberately uses a real repository and worktree for the same
-reason; focused chat has different semantics and should name them directly.
-
-Introduce an explicit session/workspace distinction in persistence and APIs.
-One possible shape is:
+Represent focused chat with the existing `Head` and agent record. Do not add a
+general session `kind` merely to distinguish it. Instead, make this invariant
+explicit and central:
 
 ```text
-Session
-  id
-  project_path
-  kind: head | focused
-  working_directory
-  agent_type
-  conversation_id
-  chat_mode
-  filesystem_mode: edit | readonly
-  allow_commits
-  title
-  lifecycle/status fields
-
-Head fields (only kind=head)
-  branch
-  base_branch
-  worktree
-  merge/review/publish fields
+Branch == nil                         focused head, live or archived
+Branch != nil && Worktree != nil      normal head with a live checkout
+Branch != nil && Worktree == nil      normal head without a live checkout
+Archived                              orthogonal lifecycle state
 ```
 
-This need not begin as a large database normalization. A discriminating `kind`
-plus focused-specific fields on the existing agent record may be the safest
-migration, provided every branch/worktree consumer explicitly rejects or skips
-focused sessions. The API should expose capabilities derived by the backend
+`Branch` is the head's branch identity and may be historical: an archived normal
+head retains its branch name even though teardown deleted the physical branch.
+`Worktree` means a checkout currently exists on disk. Its candidate path is
+deterministic, but a derived path must not be placed in `Worktree` after deletion
+because existing consumers treat non-nil as permission to read, diff, run in or
+remove that directory.
+
+Consequently, `Worktree == nil` never identifies a focused head by itself. It
+also describes archived normal heads and live normal heads whose checkout is
+missing. Classifying either as focused would dangerously redirect work into the
+real project root. Use central helpers rather than scattered nullable checks:
+
+```go
+func (h Head) IsFocused() bool { return h.Branch == nil }
+
+func (h Head) WorkingDir() string {
+    if h.IsFocused() {
+        return h.ProjectPath
+    }
+    if h.Worktree != nil {
+        return *h.Worktree
+    }
+    return ""
+}
+```
+
+This naturally distinguishes archived focused heads (`Archived && IsFocused()`)
+from archived normal heads (`Archived && !IsFocused()`). Ordinary spawn must
+always persist its branch name before the head becomes visible, and tests must
+protect that invariant. Focused-specific permissions can be ordinary fields on
+the existing agent record (`filesystem_mode`, `allow_commits`); they do not
+require a discriminator or a new table.
+
+The API should expose `focused` and capabilities derived by the backend
 (`can_diff`, `can_merge`, `can_commit`, `can_change_mode`) rather than making the
-browser reconstruct them from nullable fields.
+browser reconstruct behavior from nullable fields.
 
 Focused session launch should share the existing pieces after directory
 selection:
@@ -370,7 +381,8 @@ refactor from depending on an untested desktop wrapper.
 
 ### Phase 2: introduce focused sessions
 
-- Add the persisted session kind and focused permission fields.
+- Add `Head.IsFocused`, `Head.WorkingDir`, focused permission fields and the
+  branchless-head invariants. No stored session-kind field is needed.
 - Add API capabilities and create/list/get/interrupt/resume endpoints.
 - Split head spawning so common provider/sandbox/session startup can launch from
   either a worktree spec or a focused-directory spec.
