@@ -52,6 +52,10 @@ type Head struct {
 	Ephemeral     bool
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	ChatMode bool
+	// FilesystemMode and AllowCommits apply to focused heads (Branch == nil).
+	// Ordinary heads retain their existing worktree and git-isolation policy.
+	FilesystemMode string
+	AllowCommits   bool
 	// GitIsolation is the head's per-head git-isolation override (off/readonly;
 	// "" = agent-type policy default). See docs/git-isolation.md.
 	GitIsolation string
@@ -99,6 +103,25 @@ func (h Head) IsLinked() bool { return h.ReviewID != "" || h.ReviewURL != "" }
 
 // IsAdopted reports whether this head is working on a PR/MR Hydra did not create.
 func (h Head) IsAdopted() bool { return h.ReviewAdopted }
+
+// IsFocused reports whether this head runs directly in its registered project
+// directory rather than in a Hydra-created branch and linked worktree.
+// Branchlessness is the persisted focused-head discriminator. Worktree nil is
+// not: archived and degraded ordinary heads also have no live worktree.
+func (h Head) IsFocused() bool { return h.Branch == nil }
+
+// WorkingDir returns the directory the provider should run in. A focused head
+// deliberately uses the real project root; an ordinary head requires its live
+// linked worktree. Empty means there is no runnable checkout.
+func (h Head) WorkingDir() string {
+	if h.IsFocused() {
+		return h.ProjectPath
+	}
+	if h.Worktree != nil {
+		return *h.Worktree
+	}
+	return ""
+}
 
 // ListHeads returns all Hydra heads from the DB, cross-referenced with live
 // session state from the registry (best-effort; nil registry is allowed).
@@ -154,6 +177,8 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			GitIsolation:     a.GitIsolation,
 			Ephemeral:        a.Ephemeral,
 			ChatMode:         a.ChatMode,
+			FilesystemMode:   a.FilesystemMode,
+			AllowCommits:     a.AllowCommits,
 			CreatedAt:        a.CreatedAt.Unix(),
 			AgentStatus:      computeAgentStatus(&a),
 			HasUnreadChanges: a.HasUnreadChanges,
@@ -344,6 +369,8 @@ func archivedHead(a *db.Agent) Head {
 		GitIsolation:   a.GitIsolation,
 		Ephemeral:      a.Ephemeral,
 		ChatMode:       a.ChatMode,
+		FilesystemMode: a.FilesystemMode,
+		AllowCommits:   a.AllowCommits,
 		CreatedAt:      a.CreatedAt.Unix(),
 		AgentStatus:    archivedAgentStatus(a),
 		Archived:       true,

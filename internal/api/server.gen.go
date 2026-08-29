@@ -243,6 +243,12 @@ const (
 	ErrorResponseErrorUnauthorized  ErrorResponseError = "unauthorized"
 )
 
+// Defines values for FocusedFilesystemMode.
+const (
+	FocusedFilesystemEdit     FocusedFilesystemMode = "edit"
+	FocusedFilesystemReadonly FocusedFilesystemMode = "readonly"
+)
+
 // Defines values for HeadChangedEventType.
 const (
 	HeadChanged HeadChangedEventType = "head_changed"
@@ -627,6 +633,9 @@ type AgentResponse struct {
 	AgentStatus *AgentStatusInfo `json:"agent_status,omitempty"`
 	AgentType   string           `json:"agent_type"`
 
+	// AllowCommits Whether a focused head may request Hydra's guarded commit operation. Independent of filesystem_mode; false for ordinary heads.
+	AllowCommits *bool `json:"allow_commits,omitempty"`
+
 	// Archived True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only - they have no live session or worktree.
 	Archived *bool `json:"archived,omitempty"`
 
@@ -649,6 +658,12 @@ type AgentResponse struct {
 
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
+
+	// FilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
+	FilesystemMode *FocusedFilesystemMode `json:"filesystem_mode,omitempty"`
+
+	// Focused True for a branchless head that runs directly in project_path. Derived from branch_name being null; persisted without a separate kind field.
+	Focused *bool `json:"focused,omitempty"`
 
 	// GitIsolation Effective git-isolation mode for this head: "off" (the shared .git is writable in the sandbox) or "readonly" (the whole .git is bound read-only, so commits are host-mediated). See docs/git-isolation.md.
 	GitIsolation *string `json:"git_isolation,omitempty"`
@@ -2050,6 +2065,9 @@ type ErrorResponse struct {
 
 // ErrorResponseError Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
 type ErrorResponseError string
+
+// FocusedFilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
+type FocusedFilesystemMode string
 
 // FolderPickerAvailableResponse defines model for FolderPickerAvailableResponse.
 type FolderPickerAvailableResponse struct {

@@ -4104,6 +4104,14 @@ components:
         - errored
       description: "The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit \"the agent is blocked on you\" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer \"gone quiet\" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event."
 
+    FocusedFilesystemMode:
+      type: string
+      enum: [edit, readonly]
+      x-enum-varnames: [FocusedFilesystemEdit, FocusedFilesystemReadonly]
+      description: >-
+        Filesystem posture for a focused branchless head. Edit writes directly
+        into the registered project root; readonly makes that root read-only.
+
     AgentStatusInfo:
       type: object
       required: [status, timestamp]
@@ -4153,6 +4161,19 @@ components:
         worktree_path:
           type: string
           nullable: true
+        focused:
+          type: boolean
+          description: >-
+            True for a branchless head that runs directly in project_path.
+            Derived from branch_name being null; persisted without a separate
+            kind field.
+        filesystem_mode:
+          $ref: '#/components/schemas/FocusedFilesystemMode'
+        allow_commits:
+          type: boolean
+          description: >-
+            Whether a focused head may request Hydra's guarded commit operation.
+            Independent of filesystem_mode; false for ordinary heads.
         project_path:
           type: string
         session_pid:

@@ -731,11 +731,13 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		netEnf = &m
 	}
 	gitIso := string(heads.EffectiveGitIsolation(h))
+	focused := h.IsFocused()
 	resp := api.AgentResponse{
 		Id:                 h.ID,
 		Title:              &title,
 		BranchName:         h.Branch,
 		WorktreePath:       h.Worktree,
+		Focused:            &focused,
 		ProjectPath:        h.ProjectPath,
 		SessionPid:         h.SessionPID,
 		SessionStatus:      h.SessionStatus,
@@ -757,6 +759,14 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		ArchivedAt:         archivedAt,
 		MergeWhenGreen:     &h.MergeWhenGreen,
 		PublishWhenGreen:   &h.PublishWhenGreen,
+	}
+	if focused {
+		mode := api.FocusedFilesystemMode(h.FilesystemMode)
+		if mode == "" {
+			mode = api.FocusedFilesystemEdit
+		}
+		resp.FilesystemMode = &mode
+		resp.AllowCommits = &h.AllowCommits
 	}
 	if h.Plan != "" {
 		resp.Plan = &h.Plan

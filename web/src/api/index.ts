@@ -108,6 +108,7 @@ export type { DiffHunk } from './models/DiffHunk';
 export { DiffLine } from './models/DiffLine';
 export type { DiffResponse } from './models/DiffResponse';
 export { ErrorResponse } from './models/ErrorResponse';
+export { FocusedFilesystemMode } from './models/FocusedFilesystemMode';
 export type { FolderPickerAvailableResponse } from './models/FolderPickerAvailableResponse';
 export type { FolderPickerOpenResponse } from './models/FolderPickerOpenResponse';
 export type { GeneratedTitleResponse } from './models/GeneratedTitleResponse';
