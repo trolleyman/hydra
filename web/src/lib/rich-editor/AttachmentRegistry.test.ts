@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createRichEditor } from './core'
+import { createRichEditor } from './RichEditorCore'
 import { AttachmentRegistry, type UploadedAttachment } from './AttachmentRegistry'
 
 const attachment = { id: 'image-1', name: 'cat.png', kind: 'image', display: 'chip' } as const

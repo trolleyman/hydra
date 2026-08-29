@@ -4,7 +4,7 @@ import { Bold, Braces, CodeXml, Heading1, Heading2, ImagePlus, Italic, List, Lis
 import type { Editor } from '@tiptap/core'
 import { insertAttachment, type AttachmentKind } from '../../lib/rich-editor/Attachment'
 import { inlineCodeCommands } from '../../lib/rich-editor/InlineCode'
-import { richEditorExtensions, serializeRichMarkdown } from '../../lib/rich-editor/core'
+import { richEditorExtensions, serializeRichMarkdown } from '../../lib/rich-editor/RichEditorCore'
 import { Tooltip } from '../Tooltip'
 import { HighlightedTextarea } from '../HighlightedTextarea'
 import { Markdown } from '../../lib/MarkdownRenderer'

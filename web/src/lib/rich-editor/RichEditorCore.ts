@@ -1,0 +1,70 @@
+import { Editor, markInputRule, type JSONContent } from '@tiptap/core'
+import { Italic, starInputRegex } from '@tiptap/extension-italic'
+import { TaskItem, TaskList } from '@tiptap/extension-list'
+import { Markdown, MarkdownManager } from '@tiptap/markdown'
+import StarterKit from '@tiptap/starter-kit'
+import { Attachment } from './Attachment'
+import type { AttachmentRegistry } from './AttachmentRegistry'
+import { InlineCode, InlineCodeEditing } from './InlineCode'
+
+// Hydra deliberately supports *italic* as a typing convenience but not
+// _italic_. Underscores are too common in identifiers, paths and agent output.
+const ConservativeItalic = Italic.extend({
+  addInputRules() {
+    return [markInputRule({ find: starInputRegex, type: this.type })]
+  },
+})
+
+export const richEditorExtensions = [
+  StarterKit.configure({
+    code: false,
+    heading: { levels: [1, 2, 3] },
+    horizontalRule: false,
+    italic: false,
+    underline: false,
+  }),
+  ConservativeItalic,
+  TaskList,
+  TaskItem.configure({ nested: true }),
+  Attachment,
+  InlineCode,
+  InlineCodeEditing,
+  Markdown,
+]
+
+const markdownManager = new MarkdownManager({ extensions: richEditorExtensions })
+
+export function parseRichMarkdown(markdown: string): JSONContent {
+  return markdownManager.parse(markdown)
+}
+
+export function serializeRichMarkdown(document: JSONContent): string {
+  return markdownManager.serialize(document)
+}
+
+export interface RichEditorOptions {
+  element?: Element
+  markdown?: string
+  content?: JSONContent
+  editable?: boolean
+  attributes?: Record<string, string>
+  attachmentRegistry?: AttachmentRegistry
+}
+
+export function createRichEditor(options: RichEditorOptions = {}): Editor {
+  const editor = new Editor({
+    element: options.element,
+    extensions: richEditorExtensions,
+    content: options.content ?? options.markdown ?? '',
+    contentType: options.content ? 'json' : 'markdown',
+    editable: options.editable ?? true,
+    injectCSS: false,
+    autofocus: false,
+    editorProps: { attributes: options.attributes ?? {} },
+  })
+  if (options.attachmentRegistry) {
+    const unbind = options.attachmentRegistry.bind(editor)
+    editor.on('destroy', unbind)
+  }
+  return editor
+}
