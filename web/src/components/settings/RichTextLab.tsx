@@ -4,6 +4,7 @@ import type { Editor } from '@tiptap/core'
 import { insertAttachment, type AttachmentKind } from '../../lib/rich-editor/Attachment'
 import { inlineCodeCommands } from '../../lib/rich-editor/InlineCode'
 import { RichComposer, type RichComposerHandle } from '../../lib/rich-editor/RichComposer'
+import { CODE_LANGUAGES } from '../../lib/rich-editor/codeLanguages'
 import { Tooltip } from '../Tooltip'
 import { HighlightedTextarea } from '../HighlightedTextarea'
 import { Markdown } from '../../lib/MarkdownRenderer'
@@ -26,20 +27,6 @@ Try **bold**, *italic*, ~~strike~~, links, lists and the unusual \`inline code\`
 | :--- | ---: |
 | Editor | Structured |
 | Boundary | Markdown |`
-
-const CODE_LANGUAGES = [
-  ['', 'Plain text'],
-  ['bash', 'Bash'],
-  ['css', 'CSS'],
-  ['go', 'Go'],
-  ['html', 'HTML'],
-  ['javascript', 'JavaScript'],
-  ['json', 'JSON'],
-  ['markdown', 'Markdown'],
-  ['python', 'Python'],
-  ['sql', 'SQL'],
-  ['typescript', 'TypeScript'],
-] as const
 
 function ToolbarButton({ label, active = false, onClick, children }: {
   label: string

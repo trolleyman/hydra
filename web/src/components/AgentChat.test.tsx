@@ -352,6 +352,22 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     expect(composerValue(ta)).toBe('look at this ')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
   })
+
+  it('shows a contextual language selector while the caret is in a code block', async () => {
+    renderChat()
+    const composer = await connectedComposer()
+    const editor = editorForRichComposer(composer)!
+    editor.commands.setContent('```javascript\nconst x = 1\n```', { contentType: 'markdown' })
+    editor.commands.setTextSelection(2)
+
+    const language = await screen.findByRole('combobox', { name: 'Code block language' })
+    expect(language).toHaveValue('javascript')
+    fireEvent.change(language, { target: { value: 'typescript' } })
+    expect(editor.getAttributes('codeBlock').language).toBe('typescript')
+
+    editor.commands.setContent('ordinary text', { contentType: 'markdown' })
+    await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Code block language' })).toBeNull())
+  })
 })
 
 // A streamed reply and the settled message it becomes have to be the SAME row.

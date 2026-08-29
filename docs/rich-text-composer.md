@@ -96,6 +96,10 @@ Completed 2026-08-29:
   commit/file chips stay within chat's existing 21px line box. Real-Chromium
   assertions guard both heights so tokenization cannot make surrounding prose
   jump vertically.
+- Added production code-block language selection without adding a formatting
+  header. A compact selector appears in the existing composer footer only while
+  the caret is inside a fenced code block, and updates that block's Markdown
+  info string.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
