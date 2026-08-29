@@ -11,6 +11,9 @@ it becomes an architectural commitment.
 The macOS sandbox itself is covered by [macos-support.md](macos-support.md).
 Structured provider chat is covered by [chat-mode.md](chat-mode.md). This plan
 builds on both and does not replace either.
+The standalone Windows application is planned separately in
+[windows-desktop-chat.md](windows-desktop-chat.md); both plans branch from the
+same shared focused-session foundation.
 
 ## Shared implementation status
 
