@@ -239,7 +239,9 @@ What remains, because each does a genuinely different job:
   database. A desktop-started backend asks the OS for a free loopback port and
   publishes the result; it does not depend on port 26600 being available.
   Windows packaging takes its required PortableGit directory from
-  `HYDRA_PORTABLE_GIT`.
+  `HYDRA_PORTABLE_GIT`. `mage buildDesktopLinux`, `buildDesktopMac`, and
+  `buildDesktopWindows` select a platform explicitly; `buildDesktopAll` is the
+  release-matrix entry point and requires matching native platform builders.
 - `mage devFast` - Vite HMR in front of the Go API. Hot-module-replacement is
   faster than any rebuild loop and is a different mechanism, not a duplicate.
 - `mage demo` - simulation mode. `runSimulationServer` (`internal/cli/server.go`)

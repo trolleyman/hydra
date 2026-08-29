@@ -110,6 +110,12 @@ mage buildDesktop
 mage runDesktop
 ```
 
+`buildDesktop` selects the current host. Release builders and platform-specific
+development can select explicitly with `mage buildDesktopLinux`,
+`mage buildDesktopMac`, or `mage buildDesktopWindows`; `mage buildDesktopAll`
+invokes the complete native build matrix and therefore belongs on an
+orchestrator with matching platform builders/toolchains.
+
 This uses the checkout-local development database and an OS-assigned loopback
 port when running. Installed desktop builds continue to use the OS-standard
 global database. Windows builds additionally require `HYDRA_PORTABLE_GIT` to

@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, HydraWindowControllerDelegate {
     private let backend = BackendController()
     private let processPool = WKProcessPool()
     private var windows: [HydraWindowController] = []
@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         alert.runModal()
     }
 
-    private func openWindow(kind: HydraWindowKind) {
+    private func openWindow(kind: HydraWindowKind, projectID: String? = nil) {
         guard let baseURL = backend.baseURL else { return }
         let configuration = WKWebViewConfiguration()
         configuration.processPool = processPool
@@ -90,14 +90,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let controller = HydraWindowController(
             kind: kind,
             baseURL: baseURL,
-            defaultProjectID: backend.status?.defaultProjectId,
+            defaultProjectID: projectID ?? backend.status?.defaultProjectId,
             bootstrapToken: backend.takeBootstrapToken(),
-            configuration: configuration
+            configuration: configuration,
+            desktopDelegate: self
         )
         controller.window?.delegate = self
         windows.append(controller)
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func desktopWindowRequested(_ kind: HydraWindowKind, projectID: String?) {
+        openWindow(kind: kind, projectID: projectID)
+    }
+
+    func desktopWindowActivatedProject(_ projectID: String) {
+        UserDefaults.standard.set(projectID, forKey: "HydraLastProjectID")
     }
 
     func windowWillClose(_ notification: Notification) {

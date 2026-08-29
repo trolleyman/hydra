@@ -485,8 +485,10 @@ Status: the reusable chat-only layout and its permission controls are built. A
 dedicated `/focused/<project>` route now opens the empty focused composer and
 creates the branchless session only when its first prompt is submitted; the
 resulting agent route retains the chrome-free desktop presentation across
-reloads. History/project controls, switching behavior, and the native close
-bridge remain.
+reloads. The compact window now has project and live focused-history selectors,
+New Chat/Full Hydra actions, and a transport-neutral bridge used by AppKit and
+WebView2 with browser fallbacks. Stop-and-switch behavior, archived history,
+active-turn close choices, and Linux bridge wiring remain.
 
 ### Phase 5: desktop lifecycle and notifications
 

@@ -42,6 +42,7 @@ import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
+import { closeDesktopWindow, openFocusedWindow, openFullWindow, postDesktopMessage } from '../lib/desktopBridge'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -278,6 +279,7 @@ function RootLayout() {
     return a ? a.title || a.id : undefined
   })
   const currentProjectUnread = useAgentStore((s) => s.agents.reduce((n, a) => n + (a.has_unread_changes ? 1 : 0), 0))
+  const allLiveAgents = useAgentStore((s) => s.agents)
 
   // Record every project you land on (via dropdown, switcher, direct nav, or
   // boot restore) so the Ctrl+` switcher can order by last-visited.
@@ -870,9 +872,57 @@ function RootLayout() {
   const focusedDesktopWindow = location.pathname.startsWith('/focused/') ||
     new URLSearchParams(window.location.search).get('desktop') === 'focused'
 
+  const focusedHistory = allLiveAgents.filter((agent) => agent.focused && !agent.ephemeral)
+
+  useEffect(() => {
+    if (!focusedDesktopWindow || !currentProjectId) return
+    postDesktopMessage({ type: 'active-project', projectId: currentProjectId })
+  }, [focusedDesktopWindow, currentProjectId])
+
+  useEffect(() => {
+    if (!focusedDesktopWindow) return
+    const agent = selectedAgentId ? allLiveAgents.find((candidate) => candidate.id === selectedAgentId) : undefined
+    postDesktopMessage({
+      type: 'window-state',
+      projectId: currentProjectId ?? undefined,
+      agentId: selectedAgentId,
+      activeTurn: agent?.session_status === 'running',
+    })
+  }, [focusedDesktopWindow, currentProjectId, selectedAgentId, allLiveAgents])
+
   if (focusedDesktopWindow) {
     return (
       <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
+        <header className="shrink-0 h-12 px-3 flex items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+          <select
+            aria-label="Project"
+            value={currentProjectId ?? ''}
+            onChange={(event) => navigate({ to: '/focused/$projectId', params: { projectId: event.target.value } })}
+            className="h-8 min-w-0 max-w-64 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 text-sm"
+          >
+            {visibleProjects(projects, currentProjectId ?? null).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+          </select>
+          <select
+            aria-label="Focused chat history"
+            value={selectedAgentId ?? ''}
+            onChange={(event) => {
+              const agentId = event.target.value
+              if (!agentId || !currentProjectId) return
+              navigate({
+                to: '/project/$projectId/agent/$agentId',
+                params: { projectId: currentProjectId, agentId },
+                search: { desktop: 'focused' },
+              })
+            }}
+            className="h-8 min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 text-sm"
+          >
+            <option value="">New focused chat</option>
+            {focusedHistory.map((agent) => <option key={agent.id} value={agent.id}>{agent.title || agent.id}</option>)}
+          </select>
+          <button type="button" onClick={() => openFocusedWindow(currentProjectId ?? undefined)} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">New chat</button>
+          <button type="button" onClick={openFullWindow} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">Full Hydra</button>
+          <button type="button" onClick={closeDesktopWindow} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">Close</button>
+        </header>
         <div className="flex-1 flex min-h-0 overflow-hidden">
           <Outlet />
         </div>

@@ -219,8 +219,10 @@ it is not the runtime hidden inside the standalone app.
 - [x] Land the dedicated focused route and first-message creation flow.
 - Land the project and history switcher, backend capabilities, and semantic
   notification events.
-- Define the small native bridge messages for new window, close request,
-  notification state, active project, app version, and app activation.
+- Define the remaining native bridge messages for notification state, app
+  version, and app activation. New-window, close-request, active-project, and
+  active-turn state messages are defined; AppKit and WebView2 consume the window
+  and project operations.
 - Keep the bridge transport replaceable so macOS and Windows shells implement
   the same semantics without sharing native code.
 - Add browser fallbacks for every bridge-dependent action used in development.

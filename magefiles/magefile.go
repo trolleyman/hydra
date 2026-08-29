@@ -518,34 +518,69 @@ func Run() error {
 func BuildDesktop() error {
 	switch runtime.GOOS {
 	case "linux":
-		addGoBuildDeps()
-		output := filepath.Join("dist", "linux", "hydra-desktop")
-		if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
-			return errtrace.Wrap(err)
-		}
-		args := append([]string{"build"}, goBuildTags(false, "hydra_desktop")...)
-		args = append(args, "-o", output, "./cmd/hydra-desktop")
-		return errtrace.Wrap(runV("go", args...))
+		return errtrace.Wrap(BuildDesktopLinux())
 	case "darwin":
-		return errtrace.Wrap(runV("bash", "desktop/macos/build-app.sh"))
+		return errtrace.Wrap(BuildDesktopMac())
 	case "windows":
-		portableGit := os.Getenv("HYDRA_PORTABLE_GIT")
-		if portableGit == "" {
-			return errtrace.Wrap(errors.New("set HYDRA_PORTABLE_GIT to an extracted official PortableGit directory"))
-		}
-		powerShell := "powershell"
-		if _, err := exec.LookPath("pwsh"); err == nil {
-			powerShell = "pwsh"
-		}
-		targetRuntime := "win-x64"
-		if runtime.GOARCH == "arm64" {
-			targetRuntime = "win-arm64"
-		}
-		return errtrace.Wrap(runV(powerShell, "-NoProfile", "-File", "desktop/windows/build-app.ps1",
-			"-Runtime", targetRuntime, "-PortableGitDirectory", portableGit))
+		return errtrace.Wrap(BuildDesktopWindows())
 	default:
 		return errtrace.Wrap(fmt.Errorf("desktop builds are unsupported on %s", runtime.GOOS))
 	}
+}
+
+// BuildDesktopLinux builds the Linux GTK/WebKitGTK application explicitly.
+func BuildDesktopLinux() error {
+	if runtime.GOOS != "linux" {
+		return errtrace.Wrap(fmt.Errorf("the Linux desktop app requires a Linux host, not %s", runtime.GOOS))
+	}
+	addGoBuildDeps()
+	output := filepath.Join("dist", "linux", "hydra-desktop")
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	args := append([]string{"build"}, goBuildTags(false, "hydra_desktop")...)
+	args = append(args, "-o", output, "./cmd/hydra-desktop")
+	return errtrace.Wrap(runV("go", args...))
+}
+
+// BuildDesktopMac builds the AppKit application explicitly on macOS.
+func BuildDesktopMac() error {
+	if runtime.GOOS != "darwin" {
+		return errtrace.Wrap(fmt.Errorf("the macOS desktop app requires a macOS host, not %s", runtime.GOOS))
+	}
+	return errtrace.Wrap(runV("bash", "desktop/macos/build-app.sh"))
+}
+
+// BuildDesktopWindows builds the Windows Forms/WebView2 application. The target
+// architecture follows the host; HYDRA_PORTABLE_GIT supplies the matching Git.
+func BuildDesktopWindows() error {
+	portableGit := os.Getenv("HYDRA_PORTABLE_GIT")
+	if portableGit == "" {
+		return errtrace.Wrap(errors.New("set HYDRA_PORTABLE_GIT to an extracted official PortableGit directory"))
+	}
+	powerShell := "powershell"
+	if _, err := exec.LookPath("pwsh"); err == nil {
+		powerShell = "pwsh"
+	}
+	targetRuntime := "win-x64"
+	if runtime.GOARCH == "arm64" {
+		targetRuntime = "win-arm64"
+	}
+	return errtrace.Wrap(runV(powerShell, "-NoProfile", "-File", "desktop/windows/build-app.ps1",
+		"-Runtime", targetRuntime, "-PortableGitDirectory", portableGit))
+}
+
+// BuildDesktopAll builds every native desktop application. Native UI toolchains
+// make this a release-orchestrator target: each platform-specific target must be
+// run on its matching builder, so a single ordinary host reports that limitation
+// instead of pretending to cross-build an untestable app bundle.
+func BuildDesktopAll() error {
+	for _, build := range []func() error{BuildDesktopLinux, BuildDesktopMac, BuildDesktopWindows} {
+		if err := build(); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	return nil
 }
 
 // RunDesktop builds and runs the native desktop application for the host

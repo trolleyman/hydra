@@ -6,12 +6,19 @@ enum HydraWindowKind {
     case focused
 }
 
-final class HydraWindowController: NSWindowController, WKNavigationDelegate {
+protocol HydraWindowControllerDelegate: AnyObject {
+    func desktopWindowRequested(_ kind: HydraWindowKind, projectID: String?)
+    func desktopWindowActivatedProject(_ projectID: String)
+}
+
+final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKScriptMessageHandler {
     private let baseURL: URL
     private let webView: WKWebView
+    private weak var desktopDelegate: HydraWindowControllerDelegate?
 
-    init(kind: HydraWindowKind, baseURL: URL, defaultProjectID: String?, bootstrapToken: String?, configuration: WKWebViewConfiguration) {
+    init(kind: HydraWindowKind, baseURL: URL, defaultProjectID: String?, bootstrapToken: String?, configuration: WKWebViewConfiguration, desktopDelegate: HydraWindowControllerDelegate) {
         self.baseURL = baseURL
+        self.desktopDelegate = desktopDelegate
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         let size = kind == .full ? NSSize(width: 1380, height: 900) : NSSize(width: 940, height: 780)
         let window = NSWindow(
@@ -25,6 +32,7 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate {
         window.tabbingMode = .preferred
         window.contentView = webView
         super.init(window: window)
+        configuration.userContentController.add(self, name: "hydra")
         webView.navigationDelegate = self
         webView.allowsMagnification = true
 
@@ -44,6 +52,27 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "hydra")
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "hydra", let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
+        let projectID = body["projectId"] as? String
+        switch type {
+        case "new-full-window":
+            desktopDelegate?.desktopWindowRequested(.full, projectID: nil)
+        case "new-focused-window":
+            desktopDelegate?.desktopWindowRequested(.focused, projectID: projectID)
+        case "active-project":
+            if let projectID { desktopDelegate?.desktopWindowActivatedProject(projectID) }
+        case "close-window":
+            window?.performClose(nil)
+        default:
+            break
+        }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

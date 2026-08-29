@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -19,7 +20,8 @@ internal sealed class HydraForm : Form
         HydraWindowKind kind,
         BackendController backend,
         CoreWebView2Environment webViewEnvironment,
-        HydraApplicationContext application)
+        HydraApplicationContext application,
+        string? requestedProjectId = null)
     {
         this.application = application;
         Text = kind == HydraWindowKind.Full ? "Hydra" : "Hydra - Focused chat";
@@ -71,7 +73,39 @@ internal sealed class HydraForm : Form
                 }
                 args.Handled = true;
             };
-            var path = kind == HydraWindowKind.Focused && backend.Status?.DefaultProjectId is { } project
+            webView.CoreWebView2.WebMessageReceived += (_, args) =>
+            {
+                try
+                {
+                    using var message = JsonDocument.Parse(args.WebMessageAsJson);
+                    var root = message.RootElement;
+                    if (!root.TryGetProperty("type", out var typeElement)) return;
+                    var type = typeElement.GetString();
+                    var projectId = root.TryGetProperty("projectId", out var projectElement) ? projectElement.GetString() : null;
+                    switch (type)
+                    {
+                        case "new-full-window":
+                            application.OpenWindow(HydraWindowKind.Full);
+                            break;
+                        case "new-focused-window":
+                            application.OpenWindow(HydraWindowKind.Focused, projectId);
+                            break;
+                        case "active-project" when projectId is not null:
+                            application.SetActiveProject(projectId);
+                            break;
+                        case "close-window":
+                            Close();
+                            break;
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Ignore malformed/unrecognised page messages. Navigation is
+                    // origin-restricted, so only Hydra content reaches this bridge.
+                }
+            };
+            var focusedProject = requestedProjectId ?? backend.Status?.DefaultProjectId;
+            var path = kind == HydraWindowKind.Focused && focusedProject is { } project
                 ? $"/focused/{Uri.EscapeDataString(project)}"
                 : "/";
             var target = new UriBuilder(new Uri(backend.BaseUrl!, path));
