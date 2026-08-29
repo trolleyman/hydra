@@ -1,8 +1,8 @@
 # macOS support: current state and implementation plan
 
-Status: **planning**. Nothing below has been implemented yet; this doc records
-the July 2026 audit of the darwin backend and the agreed design for closing the
-gaps. Update the checklists as pieces land.
+Status: **partially implemented**. The core Seatbelt backend described under
+"What works" is present; the phases below track the remaining provider-config,
+temporary-storage, hard-network, and real-hardware validation gaps.
 
 ## Background
 

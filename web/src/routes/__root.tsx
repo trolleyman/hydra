@@ -280,6 +280,7 @@ function RootLayout() {
   })
   const currentProjectUnread = useAgentStore((s) => s.agents.reduce((n, a) => n + (a.has_unread_changes ? 1 : 0), 0))
   const allLiveAgents = useAgentStore((s) => s.agents)
+  const desktopRuntimeStatus = useProjectStore((s) => s.systemStatus)
 
   // Record every project you land on (via dropdown, switcher, direct nav, or
   // boot restore) so the Ctrl+` switcher can order by last-visited.
@@ -894,6 +895,13 @@ function RootLayout() {
     return (
       <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
         <header className="shrink-0 h-12 px-3 flex items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+          {desktopRuntimeStatus?.sandbox_available === false && (
+            <Tooltip content={desktopRuntimeStatus.sandbox_detail ?? 'Native sandboxing is unavailable'}>
+              <span className="shrink-0 rounded-md bg-red-50 dark:bg-red-950/40 px-2 py-1 text-xs text-red-700 dark:text-red-300">
+                Sandbox unavailable
+              </span>
+            </Tooltip>
+          )}
           <select
             aria-label="Project"
             value={currentProjectId ?? ''}

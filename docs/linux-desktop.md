@@ -419,6 +419,11 @@ and X11.
 Exit criterion: the package makes the same security claims as a tested CLI
 installation, and refuses or clearly labels unavailable hard-mode features.
 
+Status: `/api/status` now reports the host OS plus native sandbox availability
+and its diagnostic reason. Focused desktop windows visibly warn when the
+sandbox backend is unavailable. Fine-grained namespace, cgroup, portal,
+notification, and webview-runtime probes remain.
+
 ### Phase 5: package a preview
 
 - Produce reproducible amd64 and arm64 archives and an AppImage preview.

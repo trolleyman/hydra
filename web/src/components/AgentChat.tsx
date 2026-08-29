@@ -3989,7 +3989,7 @@ const ToolCard = memo(function ToolCard({
             <LoaderCircle className="w-3 h-3 shrink-0 self-center animate-spin text-violet-500/80 dark:text-violet-400/80" />
           )}
           {isPathSummary ? (
-            <span className="truncate">
+            <span className="truncate text-stone-400 dark:text-stone-500">
               {summaryPaths.map((path, index) => <span key={`${path}:${index}`}>{index > 0 && <span className="text-stone-400 dark:text-stone-500">, </span>}<LowlitPath path={path} /></span>)}
             </span>
           ) : (

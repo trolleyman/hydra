@@ -3725,6 +3725,16 @@ components:
         build_id:
           type: string
           description: Backend build identity displayed in compatibility errors.
+        runtime_os:
+          type: string
+          description: Host operating system reported by the backend.
+        sandbox_available:
+          type: boolean
+          description: Whether the native sandbox backend required for ordinary heads is available.
+        sandbox_detail:
+          type: string
+          nullable: true
+          description: Why native sandboxing is unavailable or degraded.
         uptime_seconds:
           type: number
           format: float

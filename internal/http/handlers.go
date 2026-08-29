@@ -890,6 +890,12 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	v := version
 	desktopProtocol := desktopcontract.Protocol
 	buildID := version
+	runtimeOS := runtime.GOOS
+	sandboxAvailable, sandboxReason := sandbox.Available()
+	var sandboxDetail *string
+	if sandboxReason != "" {
+		sandboxDetail = &sandboxReason
+	}
 	uptime := float32(time.Since(s.StartTime).Seconds())
 	projectRoot := s.ProjectRoot
 	defaultProjectID := s.DefaultProject.ID
@@ -909,6 +915,9 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		Version:          &v,
 		DesktopProtocol:  &desktopProtocol,
 		BuildId:          &buildID,
+		RuntimeOs:        &runtimeOS,
+		SandboxAvailable: &sandboxAvailable,
+		SandboxDetail:    sandboxDetail,
 		UptimeSeconds:    &uptime,
 		ProjectRoot:      &projectRoot,
 		DefaultProjectId: &defaultProjectID,

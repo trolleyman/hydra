@@ -3687,6 +3687,15 @@ type StatusResponse struct {
 	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`
 
+	// RuntimeOs Host operating system reported by the backend.
+	RuntimeOs *string `json:"runtime_os,omitempty"`
+
+	// SandboxAvailable Whether the native sandbox backend required for ordinary heads is available.
+	SandboxAvailable *bool `json:"sandbox_available,omitempty"`
+
+	// SandboxDetail Why native sandboxing is unavailable or degraded.
+	SandboxDetail *string `json:"sandbox_detail"`
+
 	// SandboxError Error message if the sandbox backend is unavailable or misconfigured
 	SandboxError *string `json:"sandbox_error"`
 	Status       *string `json:"status,omitempty"`
