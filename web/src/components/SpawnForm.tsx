@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, memo } from 'react'
+import { useState, useRef, useEffect, useCallback, memo, lazy, Suspense } from 'react'
 import { api } from '../stores/apiClient'
 import { FocusedFilesystemMode, type AgentResponse, type SpawnAgentRequest, type RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
@@ -13,7 +13,7 @@ import { Kbd } from './Kbd'
 import { Lightbox } from './Lightbox'
 import { AttachmentChips } from './AttachmentChips'
 import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
-import { HighlightedTextarea } from './HighlightedTextarea'
+import type { RichComposerHandle } from '../lib/rich-editor/RichComposer'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
@@ -30,8 +30,10 @@ import { Badge } from './Badge'
 import type { ReviewRef } from '../api/models/ReviewRef'
 import { type AgentTypeOption, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
 import { fetchBranches, peekBranches } from '../lib/branchCache'
+import type { Editor } from '@tiptap/core'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+const RichComposer = lazy(() => import('../lib/rich-editor/RichComposer').then((module) => ({ default: module.RichComposer })))
 
 // Native desktop focused windows land on the ordinary project route for the
 // first implementation phase, but ask its composer to start in focused mode.
@@ -315,7 +317,6 @@ export const SpawnForm = memo(function SpawnForm({
   // handleKeyDown) so the paste it triggers inserts literally instead of being
   // attached. Read-and-cleared by the next handlePaste; a timer clears it too in
   // case no paste follows (e.g. an empty clipboard), so it can't go stale.
-  const literalPasteRef = useRef(false)
   // Whether pasting an attachment also inserts its "[filename]" marker (a
   // Browser preference, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
@@ -408,7 +409,9 @@ export const SpawnForm = memo(function SpawnForm({
     void refreshBranches(false)
   }, [refreshBranches])
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const richComposerRef = useRef<RichComposerHandle>(null)
+  const promptElementRef = useRef<HTMLElement | null>(null)
+  const promptScrollCleanupRef = useRef<(() => void) | null>(null)
   // The resizable element is the whole card (textarea + footer), so the drag
   // grip sits at the bottom-right of the entire box rather than just the
   // textarea. We persist/restore the card's height for compact mode.
@@ -488,7 +491,7 @@ export const SpawnForm = memo(function SpawnForm({
   }
 
   useEffect(() => {
-    if (!compact) textareaRef.current?.focus()
+    if (!compact) richComposerRef.current?.focus()
   }, [compact])
 
   // Spawning blurs the composer: the textarea is disabled while the request is
@@ -501,13 +504,13 @@ export const SpawnForm = memo(function SpawnForm({
   useEffect(() => {
     if (loading || !refocusRef.current) return
     refocusRef.current = false
-    const ta = textareaRef.current
-    if (!ta || ta.disabled) return
+    const promptElement = promptElementRef.current
+    if (!promptElement || promptElement.getAttribute('contenteditable') !== 'true') return
     // Don't steal focus if the user moved on during the spawn (clicked another
     // control, or a navigation focused something on the new agent's page).
     const active = document.activeElement
     if (active && active !== document.body && !cardRef.current?.contains(active)) return
-    ta.focus()
+    richComposerRef.current?.focus()
   }, [loading])
 
   // Persist the in-progress prompt as a per-project draft so it survives page
@@ -515,6 +518,19 @@ export const SpawnForm = memo(function SpawnForm({
   // distinct keys so their drafts never bleed into one another.
   const draftKey = projectId ? promptDraftKey(projectId, compact) : null
   const scrollKey = projectId ? promptScrollKey(projectId, compact) : null
+  const bindPromptEditor = useCallback((editor: Editor | null) => {
+    promptScrollCleanupRef.current?.()
+    promptScrollCleanupRef.current = null
+    promptElementRef.current = editor?.view.dom ?? null
+    if (!editor) return
+    const element = editor.view.dom
+    const onScroll = (event: Event) => {
+      if (scrollKey) writeLocal(scrollKey, String((event.currentTarget as HTMLElement).scrollTop))
+    }
+    element.addEventListener('scroll', onScroll)
+    promptScrollCleanupRef.current = () => element.removeEventListener('scroll', onScroll)
+    if (!compact) editor.commands.focus()
+  }, [compact, scrollKey])
 
   // Restore the project's saved scroll position on mount / project change. The
   // draft text itself is loaded alongside the attachments (and the history
@@ -524,7 +540,7 @@ export const SpawnForm = memo(function SpawnForm({
   useEffect(() => {
     const saved = scrollKey ? Number(readLocal(scrollKey)) || 0 : 0
     const raf = requestAnimationFrame(() => {
-      if (textareaRef.current) textareaRef.current.scrollTop = saved
+      if (promptElementRef.current) promptElementRef.current.scrollTop = saved
     })
     return () => cancelAnimationFrame(raf)
   }, [draftKey, scrollKey])
@@ -533,9 +549,9 @@ export const SpawnForm = memo(function SpawnForm({
   // post-edit caret so undo/redo can restore it, and mirrors the draft to
   // localStorage like before.
   function handlePromptChange(value: string) {
-    const ta = textareaRef.current
-    const selStart = ta?.selectionStart ?? value.length
-    const selEnd = ta?.selectionEnd ?? value.length
+    const selection = richComposerRef.current?.editor?.state.selection
+    const selStart = selection?.from ?? value.length
+    const selEnd = selection?.to ?? value.length
     commit((prev) => makeSnapshot(value, prev.attachments, selStart, selEnd), true)
     if (draftKey) writeLocal(draftKey, value || null)
   }
@@ -553,17 +569,12 @@ export const SpawnForm = memo(function SpawnForm({
           const next = appendToComposer(prev.prompt, formatAnnotation(note))
           return makeSnapshot(next, prev.attachments, next.length, next.length)
         }, false)
-        requestAnimationFrame(() => textareaRef.current?.focus())
+        requestAnimationFrame(() => richComposerRef.current?.focus())
       },
     })
     return () => registerPinTargets({ annotate: null })
   }, [registerPinTargets, commit])
 
-  // Persist the textarea's scroll offset so it travels with the draft when
-  // switching projects (saved live on scroll; restored by the load effect above).
-  function handlePromptScroll(e: React.UIEvent<HTMLTextAreaElement>) {
-    if (scrollKey) writeLocal(scrollKey, String(e.currentTarget.scrollTop))
-  }
 
   // Per-project attachments + image counter, swapped in/out as the project (or
   // layout) changes so each box keeps its own - just like the text draft. See
@@ -679,9 +690,9 @@ export const SpawnForm = memo(function SpawnForm({
   // step. The text before the caret decides whether they need a leading space;
   // they never carry a trailing one, so the caret stays against the "]".
   function insertPasteMarkers(names: string[]) {
-    const ta = textareaRef.current
-    const start = ta?.selectionStart ?? prompt.length
-    const end = ta?.selectionEnd ?? prompt.length
+    const selection = richComposerRef.current?.editor?.state.selection
+    const start = Math.max(0, Math.min(prompt.length, (selection?.from ?? prompt.length) - 1))
+    const end = Math.max(start, Math.min(prompt.length, (selection?.to ?? prompt.length) - 1))
     const insert = pasteMarkerText(names, prompt.slice(0, start))
     const caret = start + insert.length
     const nextPrompt = prompt.slice(0, start) + insert + prompt.slice(end)
@@ -691,9 +702,7 @@ export const SpawnForm = memo(function SpawnForm({
     )
     if (draftKey) writeLocal(draftKey, nextPrompt || null)
     requestAnimationFrame(() => {
-      if (!ta) return
-      ta.focus()
-      ta.selectionStart = ta.selectionEnd = caret
+      richComposerRef.current?.focus(caret + 1)
     })
   }
 
@@ -715,12 +724,7 @@ export const SpawnForm = memo(function SpawnForm({
     setLightboxIndex(openableAttachments(attachmentsRef.current).findIndex((a) => a.id === id))
   }, [])
 
-  function handlePaste(e: React.ClipboardEvent) {
-    // Consume the "paste literally" flag a Ctrl/Cmd+Shift+V keystroke set, so
-    // it never lingers for a later paste.
-    const literal = literalPasteRef.current
-    literalPasteRef.current = false
-
+  function handlePaste(e: { clipboardData: DataTransfer | null; preventDefault(): void }) {
     // Pasted files (screenshots, copied files) keep their upload behavior -
     // plus, with the preference on, "[filename]" markers at the caret so the
     // prompt references them explicitly.
@@ -731,10 +735,6 @@ export const SpawnForm = memo(function SpawnForm({
       if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
       return
     }
-
-    // A Shift-held paste means "paste for real" - let the browser insert the
-    // text as-is, never attaching it.
-    if (literal) return
 
     // Small pastes go straight into the box like normal.
     const text = getClipboardText(e.clipboardData)
@@ -749,9 +749,9 @@ export const SpawnForm = memo(function SpawnForm({
       // is stripped too, with the caret adjusted when it sat before it.
       e.preventDefault()
       const insert = last.lang ? fenceCode(text, last.lang) : text
-      const ta = textareaRef.current
-      let start = ta?.selectionStart ?? prompt.length
-      let end = ta?.selectionEnd ?? prompt.length
+      const selection = richComposerRef.current?.editor?.state.selection
+      let start = Math.max(0, Math.min(prompt.length, (selection?.from ?? prompt.length) - 1))
+      let end = Math.max(start, Math.min(prompt.length, (selection?.to ?? prompt.length) - 1))
       const stripped = stripPasteMarker(prompt, last.filename)
       if (stripped) {
         if (stripped.index < start) start = Math.max(stripped.index, start - stripped.length)
@@ -774,9 +774,7 @@ export const SpawnForm = memo(function SpawnForm({
       )
       if (draftKey) writeLocal(draftKey, nextPrompt || null)
       requestAnimationFrame(() => {
-        if (!ta) return
-        ta.focus()
-        ta.selectionStart = ta.selectionEnd = caret
+        richComposerRef.current?.focus(caret + 1)
       })
       lastPasteRef.current = null
       return
@@ -1085,53 +1083,24 @@ export const SpawnForm = memo(function SpawnForm({
     )
   }
 
-  // Restore a snapshot returned by undo/redo: re-mirror the draft and put the
-  // caret back where it was when that snapshot was current (after the controlled
-  // value commits to the DOM, hence the rAF).
-  function restoreSnapshot(snap: ReturnType<typeof undo>) {
-    if (!snap) return
-    if (draftKey) writeLocal(draftKey, snap.prompt || null)
-    const ta = textareaRef.current
-    requestAnimationFrame(() => {
-      if (!ta) return
-      ta.focus()
-      ta.selectionStart = snap.selStart
-      ta.selectionEnd = snap.selEnd
-    })
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) {
+  function handleRichKeyDown(e: KeyboardEvent): boolean {
     const mod = e.metaKey || e.ctrlKey
     if (mod && e.key === 'Enter') {
       e.preventDefault()
       handleSubmit(e as unknown as React.FormEvent)
+      return true
     }
-    // Undo/redo over the composer's own history (text + attachments). Only on the
-    // prompt textarea - the agent-id field keeps its native per-field undo. Our
-    // stack drives these because pastes-turned-chips call preventDefault, so the
-    // browser's textarea undo never recorded them. Cmd/Ctrl+Z undo, +Shift redo,
-    // and Ctrl+Y redo (Windows convention).
-    if (e.currentTarget === textareaRef.current && mod && !e.altKey) {
+    if (mod && !e.altKey) {
       const key = e.key.toLowerCase()
-      if (key === 'z') {
+      const snapshot = key === 'z' ? (e.shiftKey ? redo() : undo()) : key === 'y' && !e.shiftKey ? redo() : null
+      if (snapshot) {
         e.preventDefault()
-        restoreSnapshot(e.shiftKey ? redo() : undo())
-        return
-      }
-      if (key === 'y' && !e.shiftKey) {
-        e.preventDefault()
-        restoreSnapshot(redo())
-        return
+        if (draftKey) writeLocal(draftKey, snapshot.prompt || null)
+        requestAnimationFrame(() => richComposerRef.current?.focus(snapshot.selStart + 1))
+        return true
       }
     }
-    // Ctrl/Cmd+Shift+V ("paste as plain text") should paste for real, not
-    // attach. The paste event carries no modifier state, so flag it here on the
-    // keystroke that triggers it (the flag is consumed by the paste that
-    // follows; a timer clears it if none does, so it can't go stale).
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'v' || e.key === 'V')) {
-      literalPasteRef.current = true
-      setTimeout(() => { literalPasteRef.current = false }, 1000)
-    }
+    return false
   }
 
   const submitKeys = isMac ? ['⌘', '↵'] : ['Ctrl', 'Enter']
@@ -1156,22 +1125,27 @@ export const SpawnForm = memo(function SpawnForm({
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
         <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
           <div ref={cardRef} className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[128px]">
-            <HighlightedTextarea
-              ref={textareaRef}
-              value={prompt}
-              onChange={(e) => handlePromptChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onScroll={handlePromptScroll}
-              onPaste={handlePaste}
+            <div
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
-              placeholder={disabled ? 'Select a project first...' : 'Describe a task...'}
-              rows={3}
-              disabled={loading || disabled}
-              wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
-              textClassName="px-3 pt-2.5 pb-1 text-xs leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
-            />
+              className={`w-full flex-1 min-h-0 overflow-hidden ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+            >
+              <Suspense fallback={<div className="h-full px-3 pt-2.5 text-xs text-gray-400">Loading editor...</div>}>
+                <RichComposer
+                  ref={richComposerRef}
+                  value={prompt}
+                  onChange={handlePromptChange}
+                  onEditor={bindPromptEditor}
+                  onKeyDown={handleRichKeyDown}
+                  onPaste={(event) => { handlePaste(event); return event.defaultPrevented }}
+                  placeholder={disabled ? 'Select a project first...' : 'Describe a task...'}
+                  editable={!loading && !disabled}
+                  ariaLabel="Describe a task"
+                  className="h-full overflow-y-auto px-3 pt-2.5 pb-1 text-xs leading-relaxed text-gray-800 placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500"
+                />
+              </Suspense>
+            </div>
             {renderAttachments('sm')}
             <div className="flex items-center justify-between px-2 pb-2 gap-1.5 shrink-0">
               <div className="flex items-center gap-1 min-w-0 flex-1">
@@ -1231,23 +1205,28 @@ export const SpawnForm = memo(function SpawnForm({
           {/* Gradient border card */}
           <div className="relative rounded-2xl p-[1.5px] bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-600 animate-gradient shadow-2xl shadow-blue-500/20">
             <div ref={cardRef} className="rounded-[14px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[180px]">
-              {/* Prompt textarea */}
-              <HighlightedTextarea
-                ref={textareaRef}
-                value={prompt}
-                onChange={(e) => handlePromptChange(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onScroll={handlePromptScroll}
-                onPaste={handlePaste}
+              {/* Prompt editor */}
+              <div
                 onDrop={handleDrop}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}
-                placeholder="Describe what you need..."
-                rows={6}
-                disabled={loading}
-                wrapperClassName={`w-full flex-1 min-h-0 ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
-                textClassName="px-4 pt-4 pb-2 text-sm leading-relaxed placeholder-gray-400 dark:placeholder-gray-500 disabled:opacity-50"
-              />
+                className={`w-full flex-1 min-h-0 overflow-hidden ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
+              >
+                <Suspense fallback={<div className="h-full px-4 pt-4 text-sm text-gray-400">Loading editor...</div>}>
+                  <RichComposer
+                    ref={richComposerRef}
+                    value={prompt}
+                    onChange={handlePromptChange}
+                    onEditor={bindPromptEditor}
+                    onKeyDown={handleRichKeyDown}
+                    onPaste={(event) => { handlePaste(event); return event.defaultPrevented }}
+                    placeholder="Describe what you need..."
+                    editable={!loading}
+                    ariaLabel="Describe what you need"
+                    className="h-full overflow-y-auto px-4 pt-4 pb-2 text-sm leading-relaxed text-gray-800 placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500"
+                  />
+                </Suspense>
+              </div>
 
               {renderAttachments('md')}
 

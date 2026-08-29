@@ -64,6 +64,13 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onDocumentChangeRef = useRef(onDocumentChange)
   const literalPasteRef = useRef(false)
+  const pendingUpdateRef = useRef<{ document: JSONContent; markdown: string } | null>(null)
+  const updateQueuedRef = useRef(false)
+  // React may render an earlier controlled-value echo after the editor has
+  // already produced a newer transaction (fast typing and IME are the common
+  // cases). Remember self-emitted values so those echoes cannot roll the live
+  // document back. Values not in this bounded queue are genuinely external.
+  const emittedValuesRef = useRef<string[]>([])
   onChangeRef.current = onChange
   onEditorRef.current = onEditor
   onKeyDownRef.current = onKeyDown
@@ -116,8 +123,25 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
     },
     onUpdate: ({ editor: updated }) => {
       const document = updated.getJSON()
-      onDocumentChangeRef.current?.(document)
-      onChangeRef.current(serializeRichMarkdown(document))
+      const markdown = serializeRichMarkdown(document)
+      emittedValuesRef.current.push(markdown)
+      if (emittedValuesRef.current.length > 32) emittedValuesRef.current.shift()
+      // Let ProseMirror finish appended transactions (notably the inline-code
+      // boundary selection) before a controlled parent render can run. Each DOM
+      // input event still flushes before the next event, while synchronous
+      // transactions are coalesced to their final document.
+      pendingUpdateRef.current = { document, markdown }
+      if (!updateQueuedRef.current) {
+        updateQueuedRef.current = true
+        queueMicrotask(() => {
+          updateQueuedRef.current = false
+          const pending = pendingUpdateRef.current
+          pendingUpdateRef.current = null
+          if (!pending) return
+          onDocumentChangeRef.current?.(pending.document)
+          onChangeRef.current(pending.markdown)
+        })
+      }
     },
     onSelectionUpdate: ({ editor: updated }) => onSelectionChangeRef.current?.(updated),
   })
@@ -148,6 +172,11 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
 
   useEffect(() => {
     if (!editor) return
+    const echoed = emittedValuesRef.current.indexOf(value)
+    if (echoed >= 0) {
+      emittedValuesRef.current.splice(0, echoed + 1)
+      return
+    }
     const current = serializeRichMarkdown(editor.getJSON())
     if (current === value) return
     editor.commands.setContent(value, { contentType: 'markdown', emitUpdate: false })

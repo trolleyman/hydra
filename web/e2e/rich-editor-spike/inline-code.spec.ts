@@ -100,16 +100,16 @@ test('Left traverses the same positions in reverse', async ({ page }) => {
 })
 
 test('backtick inserts, accepts text, and exits an inline code node', async ({ page }) => {
-  await reset(page, paragraph())
-  await select(page, 1)
+  await reset(page, paragraph(text('before ')))
+  await select(page, 8)
   await page.keyboard.type('`')
-  expect(await snapshot(page)).toMatchObject({ doc: paragraph(code()), from: 2, parent: 'inlineCode' })
+  expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('before '), code()), from: 9, parent: 'inlineCode' })
 
   await page.keyboard.type('foo')
-  expect(await snapshot(page)).toMatchObject({ doc: paragraph(code('foo')), from: 5, parent: 'inlineCode' })
+  expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('before '), code('foo')), from: 12, parent: 'inlineCode' })
 
   await page.keyboard.type('`')
-  expect(await snapshot(page)).toMatchObject({ doc: paragraph(code('foo')), from: 6, parent: 'paragraph' })
+  expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('before '), code('foo')), from: 13, parent: 'paragraph' })
   await expect(page.locator('code[data-inline-code]')).toHaveText('foo')
 })
 

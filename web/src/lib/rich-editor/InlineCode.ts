@@ -246,7 +246,24 @@ export const InlineCodeEditing = Extension.create({
         props: {
           handleTextInput(view, _from, _to, text) {
             const { state } = view
-            if (!state.selection.empty || inlineCodeDepth(state) >= 0) return false
+            if (!state.selection.empty) return false
+            const depth = inlineCodeDepth(state)
+            if (depth >= 0) {
+              // Empty inline nodes have two DOM positions at the same visual
+              // point. Chrome can remap its native insertion to the paragraph
+              // side even while ProseMirror's logical selection is inside the
+              // capsule. Insert against that logical selection explicitly.
+              const parent = state.selection.$from.node(depth)
+              if (parent.content.size === 0) {
+                const from = state.selection.$from.before(depth)
+                const replacement = parent.type.create(parent.attrs, state.schema.text(text))
+                const tr = state.tr.replaceWith(from, state.selection.$from.after(depth), replacement)
+                view.dispatch(setCaret(tr, from + 1 + text.length))
+              } else {
+                view.dispatch(state.tr.insertText(text, state.selection.from).scrollIntoView())
+              }
+              return true
+            }
             const { $from } = state.selection
             // Chrome can paint an outside selection at the adjacent code DOM
             // edge, then report typed input as if it belonged inside the node.
@@ -263,6 +280,21 @@ export const InlineCodeEditing = Extension.create({
             // the browser, including a composing backtick.
             if (event.isComposing) return false
             if (event.key === '`' && !event.altKey) return backtick(editor)
+            const depth = inlineCodeDepth(editor.state)
+            if (event.key.length === 1
+              && !event.metaKey && !event.ctrlKey && !event.altKey
+              && depth >= 0
+              && editor.state.selection.$from.node(depth).content.size === 0) {
+              // Intercept the first character before Chrome's DOM observer can
+              // fold the preceding prose space into an empty inline node.
+              const $from = editor.state.selection.$from
+              const from = $from.before(depth)
+              const parent = $from.node(depth)
+              const replacement = parent.type.create(parent.attrs, editor.state.schema.text(event.key))
+              const tr = editor.state.tr.replaceWith(from, $from.after(depth), replacement)
+              editor.view.dispatch(setCaret(tr, from + 2))
+              return true
+            }
             if (event.key === 'ArrowRight' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
               return arrowRight(editor)
             }

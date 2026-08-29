@@ -14,7 +14,7 @@ describe('RichComposer', () => {
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
     const editor = ref.current!.editor!
     editor.chain().setTextSelection(editor.state.doc.content.size).toggleBold().insertContent(' world').run()
-    expect(changed).toHaveBeenLastCalledWith('Hello **world**')
+    await waitFor(() => expect(changed).toHaveBeenLastCalledWith('Hello **world**'))
     const localChangeCount = changed.mock.calls.length
 
     view.rerender(<RichComposer ref={ref} value="## External" onChange={changed} />)
@@ -117,6 +117,6 @@ describe('RichComposer', () => {
         types: ['text/plain'],
       },
     })
-    expect(changed).toHaveBeenLastCalledWith('[label](https://example.com/docs)')
+    await waitFor(() => expect(changed).toHaveBeenLastCalledWith('[label](https://example.com/docs)'))
   })
 })

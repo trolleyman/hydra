@@ -11292,7 +11292,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   onChange={(event) => {
                     const editor = richComposerRef.current?.editor
                     if (!editor) return
-                    editor.chain().focus().updateAttributes('codeBlock', { language: event.target.value || null }).run()
+                    editor.commands.updateAttributes('codeBlock', { language: event.target.value || null })
                     syncActiveCodeBlock(editor)
                   }}
                   className="h-7 rounded-md border border-stone-200 bg-white px-1.5 text-2xs text-stone-600 dark:border-white/10 dark:bg-[#30302e] dark:text-stone-300"

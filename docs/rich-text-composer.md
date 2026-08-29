@@ -104,6 +104,10 @@ Completed 2026-08-29:
   composer's screen position and animate the optimistic user bubble from it;
   reduced-motion users get an instant handoff. The daemon echo settles the same
   client-id-keyed row in place, so it cannot duplicate or restart the motion.
+- Reused the lazy rich adapter in both Spawn layouts. Spawn keeps its existing
+  Markdown request boundary, per-project drafts, large-paste/file workflow,
+  combined prompt/attachment history, resizing and submit shortcuts while
+  gaining the same marks, inline code, blocks and tables as production chat.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -650,8 +654,9 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
    Markdown recognizes commit and file tokens without changing source. Immediate
    and queued messages fly from the composer into a client-id-keyed optimistic
    bubble, and the daemon echo reconciles that same row in place.
-8. **Spawn integration.** Reuse the adapter in compact/full layouts and ensure
-   surrounding selectors do not rerender on every editor transaction.
+8. **Spawn integration - DONE.** Compact and full-page Spawn layouts use the
+   lazy adapter while the surrounding selectors retain stable callbacks and the
+   existing Markdown submission contract.
 9. **Polish/discovery.** Formatting menu, attachment display toggles, optional
    `/` menu and accessible announcements.
 10. **Broader surfaces.** Evaluate review replies and image-pin notes separately.
