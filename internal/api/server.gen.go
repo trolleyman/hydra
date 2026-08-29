@@ -3548,6 +3548,9 @@ type SpawnAgentRequest struct {
 	// AgentType Agent type: claude, gemini, copilot, codex, or bash
 	AgentType *string `json:"agent_type,omitempty"`
 
+	// AllowCommits Initially authorize Hydra's guarded commit operation for a focused head. Ignored for ordinary worktree heads.
+	AllowCommits *bool `json:"allow_commits,omitempty"`
+
 	// BaseBranch Base branch to create the worktree from (defaults to current branch)
 	BaseBranch *string `json:"base_branch,omitempty"`
 
@@ -3559,6 +3562,12 @@ type SpawnAgentRequest struct {
 
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
+
+	// FilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
+	FilesystemMode *FocusedFilesystemMode `json:"filesystem_mode,omitempty"`
+
+	// Focused Run directly in the registered project's real root instead of creating a Hydra branch and linked worktree. Focused heads require structured chat mode and remain branchless for their whole life.
+	Focused *bool `json:"focused,omitempty"`
 
 	// Force With an explicit id, take over an ARCHIVED head with the same ID in this project, overwriting its archived record (the `hydra spawn --force` path). Active heads and heads in other projects still conflict.
 	Force *bool `json:"force,omitempty"`

@@ -140,10 +140,12 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	result := make([]Head, 0, len(dbAgents))
 	for _, a := range dbAgents {
-		worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, a.ID)
 		var worktree *string
-		if _, err := os.Stat(worktreePath); err == nil {
-			worktree = &worktreePath
+		if a.BranchName != "" {
+			worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, a.ID)
+			if _, err := os.Stat(worktreePath); err == nil {
+				worktree = &worktreePath
+			}
 		}
 
 		var branch *string
@@ -413,6 +415,12 @@ type SpawnHeadOptions struct {
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	// The task prompt is delivered as the first stdin user message, not argv.
 	ChatMode bool
+	// Focused runs the structured provider directly in projectRoot without
+	// creating a branch or linked worktree. Branchlessness is persisted as the
+	// focused-head discriminator.
+	Focused        bool
+	FilesystemMode string
+	AllowCommits   bool
 	// GitIsolation overrides the agent-type policy's git_isolation default for this
 	// head (off/readonly; empty = use the policy default). See
 	// docs/git-isolation.md. Persisted on the agent so resume applies the same mode.
@@ -458,8 +466,9 @@ type AdoptSpec struct {
 	Review *mcpserver.ReviewFile
 }
 
-// SpawnHead creates a new git worktree, branch, and sandbox session for an agent.
-// Returns the newly created Head.
+// SpawnHead creates a sandbox session for an agent. Ordinary heads receive a
+// new Git branch and linked worktree; focused heads run directly in projectRoot
+// and persist an empty branch name.
 func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, projectRoot string, opts SpawnHeadOptions) (*Head, error) {
 	norm, err := paths.NormalizePath(projectRoot)
 	if err == nil {
@@ -470,6 +479,23 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	if opts.AgentType == "" {
 		opts.AgentType = sandbox.AgentTypeClaude
+	}
+	if opts.Focused {
+		if !opts.ChatMode {
+			return nil, errtrace.Wrap(errors.New("focused heads require chat mode"))
+		}
+		if opts.AgentType != sandbox.AgentTypeClaude && opts.AgentType != sandbox.AgentTypeCodex {
+			return nil, errtrace.Wrap(errors.New("focused heads require a structured chat provider"))
+		}
+		if opts.Adopt != nil {
+			return nil, errtrace.Wrap(errors.New("focused heads cannot adopt a merge request"))
+		}
+		if opts.FilesystemMode == "" {
+			opts.FilesystemMode = string(api.FocusedFilesystemEdit)
+		}
+		if opts.FilesystemMode != string(api.FocusedFilesystemEdit) && opts.FilesystemMode != string(api.FocusedFilesystemReadonly) {
+			return nil, errtrace.Wrap(fmt.Errorf("unknown focused filesystem mode %q", opts.FilesystemMode))
+		}
 	}
 	// Resolve the head ID. Auto-generated IDs are derived from the prompt and
 	// uniquified against the whole shared DB (IDs are a global primary key
@@ -506,7 +532,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			}
 			replacing = true
 		}
-		if !replacing && (git.BranchExists(projectRoot, git.BranchName(opts.ID)) || headWorktreeExists(projectRoot, opts.ID)) {
+		if !opts.Focused && !replacing && (git.BranchExists(projectRoot, git.BranchName(opts.ID)) || headWorktreeExists(projectRoot, opts.ID)) {
 			return nil, errtrace.Wrap(&HeadExistsError{ID: opts.ID})
 		}
 	}
@@ -535,8 +561,12 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// sandbox - and especially the pre-spawn script - runs against the same layout
 	// a real agent sees: HYDRA_WORKTREE distinct from HYDRA_PROJECT_ROOT, never the
 	// project root itself. The worktree/branch are torn down when the test closes.
-	branchName := git.BranchName(opts.ID)
-	worktreePath := paths.GetWorktreeDirFromProjectRoot(projectRoot, opts.ID)
+	branchName := ""
+	worktreePath := projectRoot
+	if !opts.Focused {
+		branchName = git.BranchName(opts.ID)
+		worktreePath = paths.GetWorktreeDirFromProjectRoot(projectRoot, opts.ID)
+	}
 
 	opts.PrePrompt = strings.NewReplacer(
 		"<branch>", branchName,
@@ -556,20 +586,22 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	if store != nil {
 		agent := &db.Agent{
-			ID:            opts.ID,
-			ProjectPath:   projectRoot,
-			BranchName:    branchName,
-			BaseBranch:    baseBranch,
-			GitIsolation:  opts.GitIsolation,
-			AgentType:     string(opts.AgentType),
-			PrePrompt:     opts.PrePrompt,
-			Prompt:        opts.Prompt,
-			Title:         title,
-			Ephemeral:     opts.Ephemeral,
-			ChatMode:      opts.ChatMode,
-			SessionStatus: "pending",
-			HeadStatus:    "idle",
-			CreatedAt:     now,
+			ID:             opts.ID,
+			ProjectPath:    projectRoot,
+			BranchName:     branchName,
+			BaseBranch:     baseBranch,
+			GitIsolation:   opts.GitIsolation,
+			AgentType:      string(opts.AgentType),
+			PrePrompt:      opts.PrePrompt,
+			Prompt:         opts.Prompt,
+			Title:          title,
+			Ephemeral:      opts.Ephemeral,
+			ChatMode:       opts.ChatMode,
+			FilesystemMode: opts.FilesystemMode,
+			AllowCommits:   opts.AllowCommits,
+			SessionStatus:  "pending",
+			HeadStatus:     "idle",
+			CreatedAt:      now,
 		}
 		// Arm publish/sync-when-green from the project's [review] config, so the
 		// Settings toggle ("Arm publish-when-green on new heads") actually applies to
@@ -577,7 +609,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		// an adopted PR: pushing into someone else's PR must be deliberate, which is
 		// the same rule ArmPublishWhenGreen enforces (docs/pr-adoption.md).
 		// config.Load is cached, so this re-read costs nothing.
-		if opts.Adopt == nil {
+		if !opts.Focused && opts.Adopt == nil {
 			if spawnCfg, err := config.Load(projectRoot); err == nil && spawnCfg.Review.IsPublishWhenGreen() {
 				agent.PublishWhenGreen = true
 				agent.PublishWhenGreenAt = now.UTC().Format(time.RFC3339)
@@ -623,16 +655,23 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// Resolve the git-isolation mode up front (drives the sandbox .git bind below).
 	cfg, _ := config.Load(projectRoot)
 	gitIso := resolveGitIsolation(cfg, string(opts.AgentType), opts.GitIsolation)
+	if opts.Focused {
+		// The provider may edit working files but never writes the real checkout's
+		// Git metadata. Focused commits are separately authorized and mediated.
+		gitIso = sandbox.GitIsolationReadonly
+	}
 	// worktreeBase is baseBranch for a normal spawn, or the fetched PR-head ref for
 	// an adopted head (see opts.Adopt handling above).
-	if err := git.CreateWorktree(projectRoot, worktreePath, branchName, worktreeBase); err != nil {
-		if store != nil {
-			// Hard-delete: an aborted spawn never really existed, and a
-			// soft-deleted tombstone would reserve the ID forever.
-			_ = store.HardDeleteAgent(opts.ID)
+	if !opts.Focused {
+		if err := git.CreateWorktree(projectRoot, worktreePath, branchName, worktreeBase); err != nil {
+			if store != nil {
+				// Hard-delete: an aborted spawn never really existed, and a
+				// soft-deleted tombstone would reserve the ID forever.
+				_ = store.HardDeleteAgent(opts.ID)
+			}
+			RemoveAgentStatusFiles(projectRoot, opts.ID)
+			return nil, errtrace.Wrap(err)
 		}
-		RemoveAgentStatusFiles(projectRoot, opts.ID)
-		return nil, errtrace.Wrap(err)
 	}
 
 	currentUser, err := user.Current()
@@ -714,26 +753,27 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	env = append(env, egressEnv...)
 
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
-		AgentType:      opts.AgentType,
-		WorktreePath:   worktreePath,
-		GitCommonDir:   commonDirForSandbox(projectRoot, gitIso),
-		GitIsolation:   gitIso,
-		Home:           home,
-		TmpDir:         ensureHeadTmpDir(projectRoot, opts.ID),
-		WritablePaths:  append(writable, seed.WritablePaths...),
-		MaskedPaths:    sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-		RestoreRO:      restore,
-		Network:        net,
-		Binds:          seed.Binds,
-		ROOverlays:     seed.ROOverlays,
-		CowMounts:      cowMounts,
-		Env:            env,
-		Argv:           argv,
-		StdioPipes:     opts.ChatMode,
-		PreSpawnScript: preSpawn,
-		EgressWrap:     egressWrap,
-		HardenGUI:      true,
-		Seccomp:        true,
+		AgentType:          opts.AgentType,
+		WorktreePath:       worktreePath,
+		WorkingDirReadOnly: opts.Focused && opts.FilesystemMode == string(api.FocusedFilesystemReadonly),
+		GitCommonDir:       commonDirForSandbox(projectRoot, gitIso),
+		GitIsolation:       gitIso,
+		Home:               home,
+		TmpDir:             ensureHeadTmpDir(projectRoot, opts.ID),
+		WritablePaths:      append(writable, seed.WritablePaths...),
+		MaskedPaths:        sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
+		RestoreRO:          restore,
+		Network:            net,
+		Binds:              seed.Binds,
+		ROOverlays:         seed.ROOverlays,
+		CowMounts:          cowMounts,
+		Env:                env,
+		Argv:               argv,
+		StdioPipes:         opts.ChatMode,
+		PreSpawnScript:     preSpawn,
+		EgressWrap:         egressWrap,
+		HardenGUI:          true,
+		Seccomp:            true,
 	})
 	if err != nil {
 		spawnFail(store, projectRoot, opts.ID, setStatus, fmt.Errorf("start session: %w", err))
@@ -777,30 +817,37 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		generateTitleAsync(bgCtx, store, projectRoot, opts.ID, opts.AgentType, opts.Prompt, opts.OnTitleChange)
 	}
 
-	return &Head{
-		ID:            opts.ID,
-		Title:         title,
-		Branch:        &branchName,
-		Worktree:      &worktreePath,
-		ProjectPath:   projectRoot,
-		SessionPID:    pid,
-		SessionStatus: "running",
-		AgentType:     opts.AgentType,
-		PrePrompt:     opts.PrePrompt,
-		Prompt:        opts.Prompt,
-		BaseBranch:    baseBranch,
-		GitIsolation:  opts.GitIsolation,
-		Ephemeral:     opts.Ephemeral,
-		ChatMode:      opts.ChatMode,
-		AgentStatus:   initialStatus,
-		CreatedAt:     now.Unix(),
-	}, nil
+	head := &Head{
+		ID:             opts.ID,
+		Title:          title,
+		ProjectPath:    projectRoot,
+		SessionPID:     pid,
+		SessionStatus:  "running",
+		AgentType:      opts.AgentType,
+		PrePrompt:      opts.PrePrompt,
+		Prompt:         opts.Prompt,
+		BaseBranch:     baseBranch,
+		GitIsolation:   opts.GitIsolation,
+		Ephemeral:      opts.Ephemeral,
+		ChatMode:       opts.ChatMode,
+		FilesystemMode: opts.FilesystemMode,
+		AllowCommits:   opts.AllowCommits,
+		AgentStatus:    initialStatus,
+		CreatedAt:      now.Unix(),
+	}
+	if !opts.Focused {
+		head.Branch = &branchName
+		head.Worktree = &worktreePath
+	}
+	return head, nil
 }
 
 // spawnCleanup tears down a partially-created head after an early failure.
 func spawnCleanup(store *db.Store, projectRoot string, opts SpawnHeadOptions, worktreePath, branchName string) {
-	_ = git.RemoveWorktree(projectRoot, worktreePath)
-	_ = git.DeleteBranch(projectRoot, branchName)
+	if !opts.Focused {
+		_ = git.RemoveWorktree(projectRoot, worktreePath)
+		_ = git.DeleteBranch(projectRoot, branchName)
+	}
 	if store != nil {
 		// Hard-delete: an aborted spawn never really existed, and a soft-deleted
 		// tombstone would reserve the ID forever.
@@ -1285,6 +1332,9 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// Re-apply the head's persisted git-isolation override (empty = policy default),
 	// so a resume after a daemon restart keeps the same .git lockdown.
 	gitIso := resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)
+	if head.IsFocused() {
+		gitIso = sandbox.GitIsolationReadonly
+	}
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, launchPrePrompt, resolveGatePolicy(cfg, string(head.AgentType)), gitIso)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -1330,26 +1380,27 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
-		AgentType:      head.AgentType,
-		WorktreePath:   worktreePath,
-		GitCommonDir:   commonDirForSandbox(projectRoot, gitIso),
-		GitIsolation:   gitIso,
-		Home:           home,
-		TmpDir:         ensureHeadTmpDir(projectRoot, head.ID),
-		WritablePaths:  append(writable, seed.WritablePaths...),
-		MaskedPaths:    sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
-		RestoreRO:      restore,
-		Network:        net,
-		Binds:          seed.Binds,
-		ROOverlays:     seed.ROOverlays,
-		CowMounts:      cowMounts,
-		Env:            env,
-		Argv:           argv,
-		StdioPipes:     head.ChatMode,
-		PreSpawnScript: preSpawn,
-		EgressWrap:     egressWrap,
-		HardenGUI:      true,
-		Seccomp:        true,
+		AgentType:          head.AgentType,
+		WorktreePath:       worktreePath,
+		WorkingDirReadOnly: head.IsFocused() && head.FilesystemMode == string(api.FocusedFilesystemReadonly),
+		GitCommonDir:       commonDirForSandbox(projectRoot, gitIso),
+		GitIsolation:       gitIso,
+		Home:               home,
+		TmpDir:             ensureHeadTmpDir(projectRoot, head.ID),
+		WritablePaths:      append(writable, seed.WritablePaths...),
+		MaskedPaths:        sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
+		RestoreRO:          restore,
+		Network:            net,
+		Binds:              seed.Binds,
+		ROOverlays:         seed.ROOverlays,
+		CowMounts:          cowMounts,
+		Env:                env,
+		Argv:               argv,
+		StdioPipes:         head.ChatMode,
+		PreSpawnScript:     preSpawn,
+		EgressWrap:         egressWrap,
+		HardenGUI:          true,
+		Seccomp:            true,
 	})
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -1439,6 +1490,18 @@ func ResumeArchivedHead(ctx context.Context, reg *session.Registry, store *db.St
 	}
 	if a.ProjectPath != projectRoot {
 		return nil, errtrace.Wrap(fmt.Errorf("archived agent %q belongs to a different project", id))
+	}
+	if a.BranchName == "" {
+		if err := store.UnarchiveAgent(id); err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("unarchive focused agent: %w", err))
+		}
+		head := archivedHead(a)
+		head.Archived = false
+		head.EndState = ""
+		if err := ResumeHead(reg, store, projectRoot, head, rows, cols); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		return errtrace.Wrap2(GetHeadByID(ctx, reg, store, projectRoot, id))
 	}
 
 	// Already back on disk - a double-resume, or a raced revive won first. Nothing

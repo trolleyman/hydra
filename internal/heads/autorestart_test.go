@@ -78,7 +78,7 @@ func autoRestartFixture(t *testing.T, id string) (*session.Registry, *db.Store, 
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	if err := store.CreateAgent(&db.Agent{ID: id, ProjectPath: root, AgentType: "claude"}); err != nil {
+	if err := store.CreateAgent(&db.Agent{ID: id, ProjectPath: root, BranchName: "hydra/" + id, AgentType: "claude"}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(paths.GetWorktreesDirFromProjectRoot(root), id), 0o755); err != nil {
@@ -100,6 +100,28 @@ func waitForRestarts(t *testing.T, c *restartCapture, want int) {
 }
 
 func TestMaybeAutoRestartHead(t *testing.T) {
+	t.Run("focused head restarts without a worktree", func(t *testing.T) {
+		root := t.TempDir()
+		store, err := db.Open(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		if err := store.CreateAgent(&db.Agent{ID: "focused", ProjectPath: root, AgentType: "claude", ChatMode: true, FilesystemMode: "edit"}); err != nil {
+			t.Fatal(err)
+		}
+		reg := session.NewRegistry()
+		c := captureRestarts(t)
+		MaybeAutoRestartHead(reg, store, session.Info{ID: "focused"})
+		waitForRestarts(t, c, 1)
+		c.mu.Lock()
+		head := c.calls[0]
+		c.mu.Unlock()
+		if !head.IsFocused() || head.WorkingDir() != root {
+			t.Fatalf("restarted with wrong focused head: %+v", head)
+		}
+	})
+
 	t.Run("unexpected exit restarts", func(t *testing.T) {
 		reg, store, root := autoRestartFixture(t, "head-restart")
 		c := captureRestarts(t)

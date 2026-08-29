@@ -1810,6 +1810,25 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 			Details: "chat_mode is only supported for claude and codex agents",
 		}, nil
 	}
+	focused := request.Body.Focused != nil && *request.Body.Focused
+	filesystemMode := ""
+	allowCommits := false
+	if focused {
+		if !chatMode {
+			return api.SpawnAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "focused heads require chat_mode",
+			}, nil
+		}
+		filesystemMode = string(api.FocusedFilesystemEdit)
+		if request.Body.FilesystemMode != nil {
+			filesystemMode = string(*request.Body.FilesystemMode)
+		}
+		if request.Body.AllowCommits != nil {
+			allowCommits = *request.Body.AllowCommits
+		}
+	}
 
 	var gitIsolation string
 	if request.Body.GitIsolation != nil {
@@ -1820,6 +1839,13 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	// the head pre-linked to the MR (docs/pr-adoption.md).
 	var adopt *heads.AdoptSpec
 	if request.Body.AdoptMr != nil {
+		if focused {
+			return api.SpawnAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "focused heads cannot adopt a merge request",
+			}, nil
+		}
 		spec, detail := s.resolveAdoptSpec(ctx, projectRoot, *request.Body.AdoptMr)
 		if detail != "" {
 			return api.SpawnAgent400JSONResponse{
@@ -1849,21 +1875,24 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	}
 
 	head, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:            id,
-		PrePrompt:     prePrompt,
-		Prompt:        prompt,
-		AgentType:     agentType,
-		Model:         model,
-		BaseBranch:    baseBranch,
-		Adopt:         adopt,
-		Ephemeral:     ephemeral,
-		ChatMode:      chatMode,
-		GitIsolation:  gitIsolation,
-		Replace:       force,
-		Rows:          rows,
-		Cols:          cols,
-		BackgroundCtx: s.BackgroundCtx,
-		OnTitleChange: func() { s.notifyAgentsChanged(projectRoot, false) },
+		ID:             id,
+		PrePrompt:      prePrompt,
+		Prompt:         prompt,
+		AgentType:      agentType,
+		Model:          model,
+		BaseBranch:     baseBranch,
+		Adopt:          adopt,
+		Ephemeral:      ephemeral,
+		ChatMode:       chatMode,
+		Focused:        focused,
+		FilesystemMode: filesystemMode,
+		AllowCommits:   allowCommits,
+		GitIsolation:   gitIsolation,
+		Replace:        force,
+		Rows:           rows,
+		Cols:           cols,
+		BackgroundCtx:  s.BackgroundCtx,
+		OnTitleChange:  func() { s.notifyAgentsChanged(projectRoot, false) },
 	})
 	if err != nil {
 		var exists *heads.HeadExistsError
