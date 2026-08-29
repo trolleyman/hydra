@@ -15,6 +15,7 @@ internal sealed class HydraForm : Form
 {
     private readonly HydraApplicationContext application;
     private bool allowClose;
+    private bool activeTurn;
 
     internal HydraForm(
         HydraWindowKind kind,
@@ -93,6 +94,9 @@ internal sealed class HydraForm : Form
                         case "active-project" when projectId is not null:
                             application.SetActiveProject(projectId);
                             break;
+                        case "window-state":
+                            activeTurn = root.TryGetProperty("activeTurn", out var activeElement) && activeElement.GetBoolean();
+                            break;
                         case "close-window":
                             Close();
                             break;
@@ -121,6 +125,18 @@ internal sealed class HydraForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs eventArgs)
     {
+        if (!allowClose && eventArgs.CloseReason == CloseReason.UserClosing && activeTurn)
+        {
+            var answer = MessageBox.Show(
+                "This agent is still working. Closing the window leaves it running in the background.",
+                "Close this window?",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Warning);
+            if (answer != DialogResult.OK)
+            {
+                eventArgs.Cancel = true;
+            }
+        }
         if (!allowClose && eventArgs.CloseReason == CloseReason.ApplicationExitCall)
         {
             eventArgs.Cancel = true;

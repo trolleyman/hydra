@@ -488,8 +488,10 @@ creates the branchless session only when its first prompt is submitted; the
 resulting agent route retains the chrome-free desktop presentation across
 reloads. The compact window now has project and live focused-history selectors,
 New Chat/Full Hydra actions, and a transport-neutral bridge used by AppKit and
-WebView2 with browser fallbacks. Stop-and-switch behavior, archived history,
-active-turn close choices, and Linux bridge wiring remain.
+WebView2 with browser fallbacks. Stop-and-switch behavior, stop-and-close,
+archived history, and Linux bridge wiring remain. AppKit and
+WebView2 now intercept an active-turn close and require explicit confirmation to
+leave the agent running in the background.
 
 ### Phase 5: desktop lifecycle and notifications
 
@@ -503,8 +505,8 @@ active-turn close choices, and Linux bridge wiring remain.
 Status: New Full Window/New Focused Chat commands, shared-daemon ownership,
 last-window persistence, incompatible-version refusal, backend-exit reporting,
 and active-session Quit confirmation are implemented in the initial shell.
-Frontmost-project tracking, menu-bar state, native notifications, close-window
-active-turn confirmation, and richer stale-ownership recovery remain.
+Frontmost-project tracking, menu-bar state, native notifications, the
+stop-and-close close choice, and richer stale-ownership recovery remain.
 
 ### Phase 6: distribution
 

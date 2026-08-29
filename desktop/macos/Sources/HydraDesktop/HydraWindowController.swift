@@ -15,6 +15,7 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
     private let baseURL: URL
     private let webView: WKWebView
     private weak var desktopDelegate: HydraWindowControllerDelegate?
+    private(set) var activeTurn = false
 
     init(kind: HydraWindowKind, baseURL: URL, defaultProjectID: String?, bootstrapToken: String?, configuration: WKWebViewConfiguration, desktopDelegate: HydraWindowControllerDelegate) {
         self.baseURL = baseURL
@@ -68,6 +69,8 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
             desktopDelegate?.desktopWindowRequested(.focused, projectID: projectID)
         case "active-project":
             if let projectID { desktopDelegate?.desktopWindowActivatedProject(projectID) }
+        case "window-state":
+            activeTurn = body["activeTurn"] as? Bool ?? false
         case "close-window":
             window?.performClose(nil)
         default:

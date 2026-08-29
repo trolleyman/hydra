@@ -114,6 +114,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         windows.removeAll { $0.window === window }
     }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard windows.first(where: { $0.window === sender })?.activeTurn == true else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Close this window?"
+        alert.informativeText = "This agent is still working. Closing the window leaves it running in the background."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Close and Keep Running")
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
     private func chooseProjectRootIfNeeded() -> URL? {
         let defaults = UserDefaults.standard
         if let saved = defaults.string(forKey: "HydraLastProject"),
