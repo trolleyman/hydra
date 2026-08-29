@@ -1274,6 +1274,9 @@ export function AgentDetail({
   async function armMerge() {
     try {
       await api.default.armMergeWhenGreen(projectId ?? '', agent.id)
+      // Arming starts any missing test runs server-side. Refresh immediately so
+      // a previously "not run" runner repaints as running without a manual reload.
+      onRefresh?.()
       // Same agent-transition card as the status-update toasts, but text-only
       // (no status pill - "queued" isn't a status the agent is in yet) and with
       // the emerald "merge queued" Clock in place of the bot tile.
@@ -1689,9 +1692,10 @@ export function AgentDetail({
     setPublishing(true)
     setPublishError(null)
     try {
-      const updated = await api.default.publishAgent(projectId ?? '', agent.id, undefined, body)
+      const updated = await api.default.publishAgent(projectId ?? '', agent.id, body)
       updateAgentInStore(updated)
-      useToastStore.getState().show({ message: 'MR published', type: 'success' })
+      const noun = reviewConfig?.provider === 'github' ? 'PR' : 'MR'
+      useToastStore.getState().show({ message: `${noun} published`, type: 'success' })
       setShowCreateMR(false)
     } catch (err) {
       setPublishError(formatError(err))
@@ -1857,7 +1861,7 @@ export function AgentDetail({
   // note (docs/pr-adoption.md).
   const adoptedPR = agent.review?.adopted === true
   const readOnlyPR = adoptedPR && agent.review?.can_push === false
-  const mrNoun = adoptedPR ? 'PR' : 'MR'
+  const mrNoun = (agent.review?.provider ?? reviewConfig?.provider) === 'github' ? 'PR' : 'MR'
   const canPushToMR = linked && !readOnlyPR
   const leadWithPush = canPushToMR && ahead > 0
   const viewMRItem = {
@@ -1875,29 +1879,24 @@ export function AgentDetail({
     tone: 'neutral' as const,
     disabled: busy || publishing,
   }
-  // One armed state with two faces: before the MR exists it opens a draft one,
-  // after it keeps pushing. Same flag, so the label follows whichever the head is
-  // about to do rather than inventing a second toggle. Worded like the merge
-  // button's "Queue merge" - "publish-when-green" is the code's name for this,
-  // and it means nothing to someone reading a menu.
+  // Once linked, the arm keeps pushing every new green commit. Manual review
+  // creation is immediate and deliberately has no queued alternative.
   const syncWhenGreenItem = agent.publish_when_green
     ? {
-        label: linked ? 'Stop pushing automatically' : 'Cancel queued MR',
-        description: linked ? `New commits will no longer go to the ${mrNoun} on their own.` : 'No MR will be opened automatically.',
+        label: 'Stop pushing automatically',
+        description: `New commits will no longer go to the ${mrNoun} on their own.`,
         icon: <Clock className="w-4 h-4" />,
         onClick: () => void disarmPublish(),
         tone: 'neutral' as const,
         disabled: busy,
       }
     : {
-        label: linked ? 'Push automatically' : 'Queue MR',
+        label: 'Push automatically',
         // An adopted PR says whose it is and that it will ask first, so the menu
         // itself carries the warning rather than springing the dialog unannounced.
         description: adoptedPR
           ? "Pushes each new commit to this PR on its own, once tests pass. It isn't yours, so this asks first."
-          : linked
-            ? `Pushes each new commit to the ${mrNoun} on its own, once tests pass.`
-            : 'Opens a draft MR on its own once tests pass, then keeps it up to date.',
+          : `Pushes each new commit to the ${mrNoun} on its own, once tests pass.`,
         icon: <Clock className="w-4 h-4" />,
         onClick: adoptedPR ? confirmArmAdoptedPublish : () => void armPublish(),
         tone: 'emerald' as const,
@@ -1906,7 +1905,7 @@ export function AgentDetail({
   // A read-only PR can't be pushed to at all, by hand or automatically, so it gets
   // no arm toggle - the lock note above already says why. Disarming stays offered
   // whatever the head is, so a stale arm can always be cleared.
-  const publishWhenGreenItems = readOnlyPR && !agent.publish_when_green ? [] : [syncWhenGreenItem]
+  const publishWhenGreenItems = !linked || (readOnlyPR && !agent.publish_when_green) ? [] : [syncWhenGreenItem]
   const respondItem = {
     label: 'Respond to review comments',
     description: 'Ask the agent to fetch and address the unresolved review comments.',
@@ -1938,7 +1937,7 @@ export function AgentDetail({
           ] as AgentTopBarMenuItem[],
         }
       : {
-          label: 'Create MR',
+          label: `Create ${mrNoun}`,
           // The FORGE mark, not a generic lucide one: this button opens the
           // "Create merge request" dialog, which leads with the same mark, and
           // the two wearing different glyphs for one action was the giveaway
@@ -1949,7 +1948,6 @@ export function AgentDetail({
           onClick: () => void openCreateMR(),
           variant: 'blue',
           disabled: busy || publishing,
-          menu: [syncWhenGreenItem] as AgentTopBarMenuItem[],
         }
   // Create MR (blue) always leads, to the left of Merge; once linked it becomes
   // the View-MR button, still first.

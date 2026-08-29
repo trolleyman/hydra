@@ -555,10 +555,9 @@ export class DefaultService {
     }
     /**
      * Publish a Hydra agent's branch as a forge MR/PR (create or update the link)
-     * Host-side, by the daemon, with the user's own credentials (docs/non-local-integration.md). Claims the head (publishing), runs the local test gate (like merge; force bypasses), pushes hydra/<id> to the downstream branch on the remote, then creates the MR/PR if none exists. The local branch is untouched. Idempotent: re-publishing pushes again and the MR follows. Returns the updated agent with its review link.
+     * Host-side, by the daemon, with the user's own credentials (docs/non-local-integration.md). Claims the head (publishing), pushes hydra/<id> to the downstream branch on the remote, then creates the MR/PR if none exists. The local branch is untouched. Idempotent: re-publishing pushes again and the MR follows. Returns the updated agent with its review link.
      * @param projectId
      * @param agentId
-     * @param force Bypass the local test gate (same semantics as merge's force).
      * @param requestBody
      * @returns AgentResponse Published (returns the updated agent with its review link).
      * @throws ApiError
@@ -566,7 +565,6 @@ export class DefaultService {
     public publishAgent(
         projectId: string,
         agentId: string,
-        force?: boolean,
         requestBody?: {
             /**
              * Branch name to push AS. Defaults to the head's downstream_branch (seeded from review.push_branch_template).
@@ -591,9 +589,6 @@ export class DefaultService {
             path: {
                 'project_id': projectId,
                 'agent_id': agentId,
-            },
-            query: {
-                'force': force,
             },
             body: requestBody,
             mediaType: 'application/json',
