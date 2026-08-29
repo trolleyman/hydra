@@ -27,6 +27,14 @@ type Client struct {
 	ProjectID string
 }
 
+// DesktopBootstrap is a short-lived credential issued only over the trusted
+// daemon control socket. A desktop webview redeems it for the normal auth
+// cookie, so require_local_auth works without exposing the persistent key.
+type DesktopBootstrap struct {
+	Token            string `json:"token"`
+	ExpiresInSeconds int    `json:"expires_in_seconds"`
+}
+
 // unixHTTPClient returns an HTTP client whose connections always go to sock.
 func unixHTTPClient(sock string) *http.Client {
 	return &http.Client{
@@ -160,6 +168,19 @@ func (c *Client) Status(ctx context.Context) (*api.StatusResponse, error) {
 		return nil, errtrace.Wrap(err)
 	}
 	return &st, nil
+}
+
+// IssueDesktopBootstrap obtains a single-use web login credential through the
+// filesystem-protected control socket.
+func (c *Client) IssueDesktopBootstrap(ctx context.Context) (*DesktopBootstrap, error) {
+	var bootstrap DesktopBootstrap
+	if err := c.do(ctx, http.MethodPost, "/api/auth/desktop-bootstrap", struct{}{}, &bootstrap); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if bootstrap.Token == "" || bootstrap.ExpiresInSeconds <= 0 {
+		return nil, errtrace.Wrap(fmt.Errorf("daemon returned an invalid desktop bootstrap credential"))
+	}
+	return &bootstrap, nil
 }
 
 // ListAgents returns the agents for the default project.

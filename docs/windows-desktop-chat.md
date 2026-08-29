@@ -250,6 +250,12 @@ model or duplicate the permission/commit implementation.
 This can run before the native Windows head backend exists and is the cheapest
 way to reject an unsuitable shell.
 
+Status: an app-launched protocol-2 backend now includes a one-minute,
+single-use auth bootstrap credential in its private atomic readiness record.
+The first WebView2 window places it only in the URL fragment and redeems it for
+the persistent profile's ordinary HttpOnly cookie. Reused-daemon auth still
+needs the portable Windows control endpoint from Phase 2.
+
 ### Phase 2: make the bundled backend native
 
 Complete Phase 1 of [windows-support.md](windows-support.md):
@@ -293,6 +299,10 @@ not run the Hydra UI or daemon elevated.
 - Surface concurrent edit-mode sessions and the active sandbox strength.
 
 ### Phase 5: sign, install, and update
+
+The shared agent/history database location is already implemented as
+`%LOCALAPPDATA%\Hydra\db.sqlite3`, including transactional import from retained
+project-local databases. Installer and native-runtime validation remain.
 
 - Choose the packaging model from the Phase 1/installer spike and document the
   rejected option.

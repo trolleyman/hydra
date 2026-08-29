@@ -58,8 +58,13 @@ func ResolveServer(ctx context.Context, rawURL, projectRoot string) (string, err
 	if err := daemon.EnsureDesktopRunning(ctx, chatProject.Path); err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	if _, err := daemon.Connect(ctx, selectedRoot); err != nil {
+	client, err := daemon.Connect(ctx, selectedRoot)
+	if err != nil {
 		return "", errtrace.Wrap(err)
+	}
+	bootstrap, err := client.IssueDesktopBootstrap(ctx)
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("authenticate desktop webview: %w", err))
 	}
 
 	// The control socket becomes ready just before the daemon publishes its TCP
@@ -72,6 +77,7 @@ func ResolveServer(ctx context.Context, rawURL, projectRoot string) (string, err
 			if validateErr != nil {
 				return "", errtrace.Wrap(fmt.Errorf("daemon published an unsafe web URL: %w", validateErr))
 			}
+			appURL.Fragment = "desktop-bootstrap=" + url.QueryEscape(bootstrap.Token)
 			return appURL.String(), nil
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return "", errtrace.Wrap(fmt.Errorf("read daemon web listener: %w", err))

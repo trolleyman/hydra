@@ -88,6 +88,13 @@ func OpenGlobal(legacyProjectRoot string) (*Store, error) {
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	// An explicit path is used by isolated development commands such as
+	// `mage run`. It is already the caller's chosen database, so importing the
+	// project-local legacy database into itself would be both unnecessary and
+	// unsafe.
+	if os.Getenv(pathEnvironment) != "" {
+		return store, nil
+	}
 
 	roots := []string{legacyProjectRoot}
 	if manager, managerErr := projects.NewManager(); managerErr == nil {

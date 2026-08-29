@@ -74,7 +74,12 @@ internal sealed class HydraForm : Form
             var path = kind == HydraWindowKind.Focused && backend.Status?.DefaultProjectId is { } project
                 ? $"/project/{Uri.EscapeDataString(project)}/?new_focused=1"
                 : "/";
-            webView.Source = new Uri(backend.BaseUrl!, path);
+            var target = new UriBuilder(new Uri(backend.BaseUrl!, path));
+            if (backend.TakeBootstrapToken() is { } token)
+            {
+                target.Fragment = "desktop-bootstrap=" + Uri.EscapeDataString(token);
+            }
+            webView.Source = target.Uri;
         };
     }
 

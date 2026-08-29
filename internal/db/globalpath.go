@@ -10,9 +10,18 @@ import (
 	"braces.dev/errtrace"
 )
 
+const pathEnvironment = "HYDRA_DB_PATH"
+
 // GlobalPath returns Hydra's user-scoped database path using the native state
 // location for the current platform.
 func GlobalPath() (string, error) {
+	if override := strings.TrimSpace(os.Getenv(pathEnvironment)); override != "" {
+		path, err := filepath.Abs(override)
+		if err != nil {
+			return "", errtrace.Wrap(fmt.Errorf("resolve %s: %w", pathEnvironment, err))
+		}
+		return path, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", errtrace.Wrap(fmt.Errorf("get home directory: %w", err))

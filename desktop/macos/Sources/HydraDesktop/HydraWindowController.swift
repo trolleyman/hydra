@@ -10,7 +10,7 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate {
     private let baseURL: URL
     private let webView: WKWebView
 
-    init(kind: HydraWindowKind, baseURL: URL, defaultProjectID: String?, configuration: WKWebViewConfiguration) {
+    init(kind: HydraWindowKind, baseURL: URL, defaultProjectID: String?, bootstrapToken: String?, configuration: WKWebViewConfiguration) {
         self.baseURL = baseURL
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         let size = kind == .full ? NSSize(width: 1380, height: 900) : NSSize(width: 940, height: 780)
@@ -35,7 +35,11 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate {
         } else {
             path = "/"
         }
-        webView.load(URLRequest(url: URL(string: path, relativeTo: baseURL)!))
+        var target = URLComponents(url: URL(string: path, relativeTo: baseURL)!, resolvingAgainstBaseURL: true)!
+        if let bootstrapToken {
+            target.fragment = "desktop-bootstrap=" + bootstrapToken
+        }
+        webView.load(URLRequest(url: target.url!))
     }
 
     required init?(coder: NSCoder) {

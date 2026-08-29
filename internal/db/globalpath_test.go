@@ -1,6 +1,7 @@
 package db
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -31,6 +32,18 @@ func TestGlobalPathByPlatform(t *testing.T) {
 				t.Fatalf("globalPath = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGlobalPathOverride(t *testing.T) {
+	override := filepath.Join(t.TempDir(), "development.sqlite3")
+	t.Setenv(pathEnvironment, override)
+	got, err := GlobalPath()
+	if err != nil {
+		t.Fatalf("GlobalPath: %v", err)
+	}
+	if got != override {
+		t.Fatalf("GlobalPath = %q, want %q", got, override)
 	}
 }
 

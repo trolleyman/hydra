@@ -488,6 +488,17 @@ func ensureToolsEnv() {
 
 func Run() error {
 	ensureToolsEnv()
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if os.Getenv("HYDRA_DB_PATH") == "" {
+		dbPath := paths.GetDBPathFromProjectRoot(projectRoot)
+		if err := os.Setenv("HYDRA_DB_PATH", dbPath); err != nil {
+			return errtrace.Wrap(err)
+		}
+		fmt.Printf("%sdev database:%s %s\n", colorDim, colorReset, displayPath(dbPath))
+	}
 	addGoBuildDeps()
 	args := append([]string{"run"}, goBuildTags(false)...)
 	args = append(args, "./", "server")

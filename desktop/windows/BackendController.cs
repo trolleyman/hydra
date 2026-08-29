@@ -13,11 +13,12 @@ internal sealed record BackendStatus(
 internal sealed record ReadyRecord(
     [property: JsonPropertyName("protocol")] int Protocol,
     [property: JsonPropertyName("url")] Uri Url,
-    [property: JsonPropertyName("pid")] int Pid);
+    [property: JsonPropertyName("pid")] int Pid,
+    [property: JsonPropertyName("bootstrap_token")] string BootstrapToken);
 
 internal sealed class BackendController : IDisposable
 {
-    private const int SupportedDesktopProtocol = 1;
+    private const int SupportedDesktopProtocol = 2;
     private const string SupportedServerVersion = "0.1.0";
     private readonly HttpClient client = new() { Timeout = TimeSpan.FromSeconds(1.5) };
     private Process? process;
@@ -27,6 +28,14 @@ internal sealed class BackendController : IDisposable
     internal Uri? BaseUrl { get; private set; }
     internal BackendStatus? Status { get; private set; }
     internal bool OwnsProcess => process is { HasExited: false };
+    internal string? BootstrapToken { get; private set; }
+
+    internal string? TakeBootstrapToken()
+    {
+        var token = BootstrapToken;
+        BootstrapToken = null;
+        return token;
+    }
 
     internal async Task StartAsync(Func<string?> chooseProject)
     {
@@ -162,6 +171,7 @@ internal sealed class BackendController : IDisposable
                 EnsureVersion(status);
                 BaseUrl = record.Url;
                 Status = status;
+                BootstrapToken = record.BootstrapToken;
                 return;
             }
             await Task.Delay(50);

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // okHandler is a trivial next-handler that records whether it was reached.
@@ -198,6 +199,70 @@ func TestLoginSetsCookieAndAuthenticates(t *testing.T) {
 	r.AddCookie(cookie)
 	if !auth.authenticated(r) {
 		t.Fatal("cookie set by login does not authenticate")
+	}
+}
+
+func TestDesktopBootstrapIsSocketOnlyAndSingleUse(t *testing.T) {
+	auth := NewAuthenticator("open-sesame", true)
+	mux := http.NewServeMux()
+	auth.RegisterRoutes(mux)
+
+	// Even a loopback TCP client cannot mint a desktop credential.
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, postJSON("/api/auth/desktop-bootstrap", "127.0.0.1:9", `{}`))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("TCP bootstrap returned %d, want 403", w.Code)
+	}
+
+	// The filesystem-protected control socket can mint one.
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, postJSON("/api/auth/desktop-bootstrap", "", `{}`))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("socket bootstrap returned %d, want 201", w.Code)
+	}
+	var issued struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &issued); err != nil || issued.Token == "" {
+		t.Fatalf("decode bootstrap response: token=%q err=%v", issued.Token, err)
+	}
+
+	redeem := func() *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		body := `{"token":"` + issued.Token + `"}`
+		mux.ServeHTTP(response, postJSON("/api/auth/desktop-redeem", "127.0.0.1:9", body))
+		return response
+	}
+	w = redeem()
+	if w.Code != http.StatusOK {
+		t.Fatalf("redeem returned %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if len(w.Result().Cookies()) != 1 || w.Result().Cookies()[0].Name != authCookieName {
+		t.Fatal("redeem did not establish the ordinary auth cookie")
+	}
+	if second := redeem(); second.Code != http.StatusUnauthorized {
+		t.Fatalf("second redeem returned %d, want 401", second.Code)
+	}
+}
+
+func TestDesktopBootstrapExpires(t *testing.T) {
+	auth := NewAuthenticator("key", true)
+	now := time.Unix(100, 0)
+	auth.now = func() time.Time { return now }
+	mux := http.NewServeMux()
+	auth.RegisterRoutes(mux)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, postJSON("/api/auth/desktop-bootstrap", "", `{}`))
+	var issued struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &issued)
+	now = now.Add(desktopBootstrapLifetime)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, postJSON("/api/auth/desktop-redeem", "127.0.0.1:9", `{"token":"`+issued.Token+`"}`))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expired redeem returned %d, want 401", w.Code)
 	}
 }
 

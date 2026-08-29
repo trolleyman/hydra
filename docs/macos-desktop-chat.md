@@ -413,8 +413,12 @@ for input without becoming a second session-management UI.
 Status: the thin Swift/AppKit shell, shared multi-window WebKit configuration,
 existing-server probe, bundled-backend launch, OS-assigned port handshake,
 development `.app` builder, background-after-last-window behavior, and guarded
-Quit path are implemented. The build is ad-hoc signed rather than unsigned so
-the bundle is internally consistent. WebSocket, text-input, accessibility,
+Quit path are implemented. App-launched backends now publish a one-minute,
+single-use auth bootstrap credential in their private atomic readiness record;
+the first WKWebView redeems it for the shared HttpOnly cookie without exposing
+the persistent auth key. Reused-daemon auth still needs to move to the shared
+control-socket contract. The build is ad-hoc signed rather than unsigned so the
+bundle is internally consistent. WebSocket, text-input, accessibility,
 notification, and lifecycle acceptance still require the development Mac.
 
 This phase makes no focused-session backend changes. It prevents a large product
@@ -493,8 +497,11 @@ active-turn confirmation, and richer stale-ownership recovery remain.
 ### Phase 6: distribution
 
 - Produce universal or separate arm64/amd64 builds as appropriate.
-- Define application support, cache, logs and database locations using macOS
-  conventions without breaking existing CLI users.
+- [x] Put the shared agent/history database under
+  `~/Library/Application Support/Hydra/db.sqlite3`, with transactional import
+  from retained project-local databases for desktop and CLI users.
+- Define the remaining application support, cache, and log locations using
+  macOS conventions without breaking existing CLI users.
 - Sign and notarize the app and bundled executable.
 - Add an update mechanism only after service ownership and active-session
   behavior are proven; reuse the existing verified atomic update design where

@@ -16,11 +16,13 @@ private struct ReadyRecord: Decodable {
     let protocolVersion: Int
     let url: URL
     let pid: Int
+    let bootstrapToken: String
 
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case url
         case pid
+        case bootstrapToken = "bootstrap_token"
     }
 }
 
@@ -54,16 +56,22 @@ enum BackendError: LocalizedError {
 }
 
 final class BackendController {
-    static let supportedDesktopProtocol = 1
+    static let supportedDesktopProtocol = 2
     static let supportedServerVersion = "0.1.0"
 
     private(set) var baseURL: URL?
     private(set) var status: BackendStatus?
     private(set) var ownsProcess = false
+    private var bootstrapToken: String?
 
     private var process: Process?
     private var logHandle: FileHandle?
     private var readyFile: URL?
+
+    func takeBootstrapToken() -> String? {
+        defer { bootstrapToken = nil }
+        return bootstrapToken
+    }
 
     func start(projectRoot: @escaping () -> URL?, completion: @escaping (Result<BackendStatus, Error>) -> Void) {
         let defaultURL = URL(string: "http://127.0.0.1:26600")!
@@ -221,6 +229,7 @@ final class BackendController {
                             }
                             self.baseURL = record.url
                             self.status = status
+                            self.bootstrapToken = record.bootstrapToken
                             DispatchQueue.main.async { completion(.success(status)) }
                         case .failure(let error):
                             DispatchQueue.main.async { completion(.failure(error)) }

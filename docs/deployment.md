@@ -229,7 +229,10 @@ itself, and `HYDRA_API_ADDR` covers exposing a port.
 
 What remains, because each does a genuinely different job:
 
-- `mage run` - foreground, for debugging the daemon itself.
+- `mage run` - foreground, for debugging the daemon itself. It explicitly uses
+  the checkout's ignored `.hydra/local/db.sqlite3`, keeping development history
+  isolated from the OS-standard user-global database used by installed CLI and
+  desktop builds. Set `HYDRA_DB_PATH` to override that development location.
 - `mage devFast` - Vite HMR in front of the Go API. Hot-module-replacement is
   faster than any rebuild loop and is a different mechanism, not a duplicate.
 - `mage demo` - simulation mode. `runSimulationServer` (`internal/cli/server.go`)

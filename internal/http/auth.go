@@ -1,13 +1,18 @@
 package http
 
 import (
+	"braces.dev/errtrace"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 // authCookieName is the cookie the web login screen sets once a remote client
@@ -33,13 +38,23 @@ type Authenticator struct {
 	key          string // the configured shared secret ("" disables auth)
 	token        string // hex(sha256(key)); the cookie value, so the raw key isn't stored client-side
 	requireLocal bool   // gate loopback TCP peers as well as remote ones
+	mu           sync.Mutex
+	bootstrap    map[[sha256.Size]byte]time.Time
+	now          func() time.Time
 }
+
+const desktopBootstrapLifetime = time.Minute
 
 // NewAuthenticator builds an Authenticator for the given key. An empty key
 // disables authentication. requireLocal additionally gates loopback clients (a
 // no-op when the key is empty, since there is then nothing to check).
 func NewAuthenticator(key string, requireLocal bool) *Authenticator {
-	a := &Authenticator{key: key, requireLocal: requireLocal}
+	a := &Authenticator{
+		key:          key,
+		requireLocal: requireLocal,
+		bootstrap:    make(map[[sha256.Size]byte]time.Time),
+		now:          time.Now,
+	}
 	if key != "" {
 		sum := sha256.Sum256([]byte(key))
 		a.token = hex.EncodeToString(sum[:])
@@ -176,6 +191,80 @@ func (a *Authenticator) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/status", a.handleStatus)
 	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", a.handleLogout)
+	mux.HandleFunc("POST /api/auth/desktop-bootstrap", a.handleDesktopBootstrap)
+	mux.HandleFunc("POST /api/auth/desktop-redeem", a.handleDesktopRedeem)
+}
+
+// handleDesktopBootstrap issues a short-lived, single-use credential to a
+// desktop shell over the filesystem-protected daemon control socket. TCP peers
+// cannot mint credentials, including loopback peers that are otherwise trusted.
+func (a *Authenticator) handleDesktopBootstrap(w http.ResponseWriter, r *http.Request) {
+	if !isLocalSocket(r) {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{
+			"error":   "forbidden",
+			"details": "desktop bootstrap credentials are issued only over the daemon control socket",
+		})
+		return
+	}
+	token, expiresIn, err := a.IssueDesktopBootstrap()
+	if err != nil {
+		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "generate desktop bootstrap credential"})
+		return
+	}
+	writeJSONResponse(w, http.StatusCreated, map[string]any{
+		"token":              token,
+		"expires_in_seconds": int(expiresIn.Seconds()),
+	})
+}
+
+// IssueDesktopBootstrap creates a credential for a trusted in-process caller,
+// such as the atomic readiness record used by a native shell that launched the
+// backend itself. Network callers must use handleDesktopBootstrap, which
+// additionally enforces the control-socket boundary.
+func (a *Authenticator) IssueDesktopBootstrap() (string, time.Duration, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", 0, errtrace.Wrap(err)
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	digest := sha256.Sum256([]byte(token))
+	now := a.now()
+	a.mu.Lock()
+	for candidate, expires := range a.bootstrap {
+		if !expires.After(now) {
+			delete(a.bootstrap, candidate)
+		}
+	}
+	a.bootstrap[digest] = now.Add(desktopBootstrapLifetime)
+	a.mu.Unlock()
+	return token, desktopBootstrapLifetime, nil
+}
+
+// handleDesktopRedeem exchanges a bootstrap credential for the ordinary
+// HttpOnly auth cookie. The credential is consumed before its result is
+// returned, so retries and concurrent redemption attempts fail safely.
+func (a *Authenticator) handleDesktopRedeem(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	digest := sha256.Sum256([]byte(strings.TrimSpace(body.Token)))
+	now := a.now()
+	a.mu.Lock()
+	expires, ok := a.bootstrap[digest]
+	delete(a.bootstrap, digest)
+	a.mu.Unlock()
+	if !ok || !expires.After(now) {
+		writeJSONResponse(w, http.StatusUnauthorized, map[string]string{
+			"error":   "unauthorized",
+			"details": "invalid or expired desktop bootstrap credential",
+		})
+		return
+	}
+	if a.Enabled() {
+		a.setAuthCookie(w, r, a.token, 30*24*60*60)
+	}
+	writeJSONResponse(w, http.StatusOK, map[string]bool{"authenticated": true})
 }
 
 // handleStatus tells the web client whether it must show a login screen.
@@ -215,16 +304,20 @@ func (a *Authenticator) handleLogin(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	a.setAuthCookie(w, r, a.token, 30*24*60*60)
+	writeJSONResponse(w, http.StatusOK, map[string]bool{"authenticated": true})
+}
+
+func (a *Authenticator) setAuthCookie(w http.ResponseWriter, r *http.Request, value string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCookieName,
-		Value:    a.token,
+		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   r.TLS != nil,
-		MaxAge:   30 * 24 * 60 * 60, // 30 days
+		MaxAge:   maxAge,
 	})
-	writeJSONResponse(w, http.StatusOK, map[string]bool{"authenticated": true})
 }
 
 // handleLogout clears the auth cookie.

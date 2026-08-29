@@ -43,6 +43,7 @@ type daemonRuntime struct {
 	previews    *preview.Manager
 	projectRoot string
 	deploy      config.DeployConfig
+	auth        *httppkg.Authenticator
 }
 
 // chatContextResolver maps a chat SESSION id to the project root, working
@@ -534,6 +535,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		previews:    previewMgr,
 		projectRoot: projectRoot,
 		deploy:      deployCfg,
+		auth:        auth,
 	}, nil
 }
 

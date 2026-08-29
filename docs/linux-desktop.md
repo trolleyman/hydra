@@ -347,8 +347,11 @@ CLI. Daemon ownership and the SQLite agent/history store are now user-global;
 the shell starts or reuses that service and reads its atomically published web
 listener instead of assuming a port. The global database uses each platform's
 native state location and transactionally imports retained project-local legacy
-stores. Protocol negotiation, authentication bootstrap, multi-window behavior,
-and the full shell comparison remain.
+stores. A desktop client now obtains a one-minute, single-use login credential
+over the filesystem-protected daemon socket, places it only in the URL fragment,
+and redeems it for the ordinary HttpOnly session cookie before routing starts.
+TCP clients cannot mint credentials and redemption consumes them. Multi-window
+behavior, stale-state recovery validation, and the full shell comparison remain.
 
 ### Phase 2: add desktop window routes and lifecycle
 

@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             kind: kind,
             baseURL: baseURL,
             defaultProjectID: backend.status?.defaultProjectId,
+            bootstrapToken: backend.takeBootstrapToken(),
             configuration: configuration
         )
         controller.window?.delegate = self
