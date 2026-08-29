@@ -10,12 +10,12 @@ import (
 	"braces.dev/errtrace"
 )
 
-func webPath(projectRoot string) (string, error) {
+func webPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".web"), nil
+	return filepath.Join(dir, "daemon.web"), nil
 }
 
 // WriteWebURL atomically publishes the HTTP listener belonging to a project's

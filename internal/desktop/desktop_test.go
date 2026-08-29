@@ -47,11 +47,8 @@ func TestResolveServerExplicitURL(t *testing.T) {
 	}
 }
 
-func TestResolveServerRequiresOneSource(t *testing.T) {
+func TestResolveServerRejectsURLAndProjectTogether(t *testing.T) {
 	t.Parallel()
-	if _, err := ResolveServer(context.Background(), "", ""); err == nil {
-		t.Fatal("ResolveServer accepted no source")
-	}
 	if _, err := ResolveServer(context.Background(), "http://localhost:49152", t.TempDir()); err == nil {
 		t.Fatal("ResolveServer accepted both URL and project")
 	}

@@ -4,8 +4,6 @@
 package daemon
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,55 +32,49 @@ func ensureRuntimeDir() (string, error) {
 	return dir, nil
 }
 
-// projectKey returns a short stable hash of the (normalized) project root, used
-// to name the socket/lock/log so each project gets its own daemon.
-func projectKey(projectRoot string) string {
-	sum := sha256.Sum256([]byte(projectRoot))
-	return hex.EncodeToString(sum[:])[:16]
-}
-
-// SocketPath returns the unix socket path for the project's daemon.
-func SocketPath(projectRoot string) (string, error) {
+// SocketPath returns the user-global daemon socket. projectRoot is retained in
+// the signature for callers compiled against the former per-project contract.
+func SocketPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".sock"), nil
+	return filepath.Join(dir, "daemon.sock"), nil
 }
 
-// lockPath returns the single-instance lock path for the project's daemon.
-func lockPath(projectRoot string) (string, error) {
+// lockPath returns the single-instance lock path for the user-global daemon.
+func lockPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".lock"), nil
+	return filepath.Join(dir, "daemon.lock"), nil
 }
 
 // logPath returns the daemon's log file path for the project.
-func logPath(projectRoot string) (string, error) {
+func logPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".log"), nil
+	return filepath.Join(dir, "daemon.log"), nil
 }
 
 // pidPath returns the file holding the running daemon's PID.
-func pidPath(projectRoot string) (string, error) {
+func pidPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".pid"), nil
+	return filepath.Join(dir, "daemon.pid"), nil
 }
 
 // infoPath returns the file holding the running daemon's binary stamp, used to
 // detect when the on-disk hydra binary has been replaced (an upgrade).
-func infoPath(projectRoot string) (string, error) {
+func infoPath(_ string) (string, error) {
 	dir, err := ensureRuntimeDir()
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
-	return filepath.Join(dir, projectKey(projectRoot)+".info"), nil
+	return filepath.Join(dir, "daemon.info"), nil
 }

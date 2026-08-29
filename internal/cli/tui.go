@@ -26,7 +26,7 @@ func runTUI(_ *cobra.Command, _ []string) error {
 		return errtrace.Wrap(err)
 	}
 
-	store, err := db.Open(projectRoot)
+	store, err := db.OpenGlobal(projectRoot)
 	if err != nil {
 		return errtrace.Wrap(err)
 	}

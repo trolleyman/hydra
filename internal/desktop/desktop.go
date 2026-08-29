@@ -14,6 +14,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/projects"
 )
 
 // Run opens a native Hydra window connected to rawURL.
@@ -39,15 +40,25 @@ func ResolveServer(ctx context.Context, rawURL, projectRoot string) (string, err
 		}
 		return appURL.String(), nil
 	}
-	if projectRoot == "" {
-		return "", errtrace.Wrap(fmt.Errorf("url or project is required"))
-	}
-
-	normalized, err := paths.NormalizePath(projectRoot)
+	manager, err := projects.NewManager()
 	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("resolve project root: %w", err))
+		return "", errtrace.Wrap(err)
 	}
-	if err := daemon.EnsureRunning(ctx, normalized); err != nil {
+	chatProject, err := manager.EnsureChatProject()
+	if err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("prepare global desktop service: %w", err))
+	}
+	selectedRoot := chatProject.Path
+	if projectRoot != "" {
+		selectedRoot, err = paths.NormalizePath(projectRoot)
+		if err != nil {
+			return "", errtrace.Wrap(fmt.Errorf("resolve project root: %w", err))
+		}
+	}
+	if err := daemon.EnsureDesktopRunning(ctx, chatProject.Path); err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	if _, err := daemon.Connect(ctx, selectedRoot); err != nil {
 		return "", errtrace.Wrap(err)
 	}
 
@@ -56,7 +67,7 @@ func ResolveServer(ctx context.Context, rawURL, projectRoot string) (string, err
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if webURL, err := daemon.ReadWebURL(normalized); err == nil {
+		if webURL, err := daemon.ReadWebURL(chatProject.Path); err == nil {
 			appURL, validateErr := localServerURL(webURL)
 			if validateErr != nil {
 				return "", errtrace.Wrap(fmt.Errorf("daemon published an unsafe web URL: %w", validateErr))

@@ -2,10 +2,13 @@ package db
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"braces.dev/errtrace"
 	"github.com/glebarez/sqlite"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/projects"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -53,8 +56,8 @@ func pragmas(queryOnly bool) string {
 	return p
 }
 
-// Open opens (or creates) the SQLite database at <projectRoot>/.hydra/local/state/db.sqlite3,
-// enables WAL mode, and runs AutoMigrate to ensure the schema is current.
+// Open opens a legacy project-local database. It remains available for isolated
+// tests and migration; production clients use OpenGlobal.
 func Open(projectRoot string) (*Store, error) {
 	// Move a pre-existing flat .hydra/<dir> layout under .hydra/local first, so the
 	// DB (and worktrees etc.) are found at their new home rather than recreated empty.
@@ -67,8 +70,48 @@ func Open(projectRoot string) (*Store, error) {
 		return nil, errtrace.Wrap(fmt.Errorf("create state dir: %w", err))
 	}
 
-	dbPath := paths.GetDBPathFromProjectRoot(projectRoot)
+	return errtrace.Wrap2(openPath(paths.GetDBPathFromProjectRoot(projectRoot)))
+}
 
+// OpenGlobal opens Hydra's user-scoped database and imports any legacy
+// project-local databases registered on this machine. legacyProjectRoot is
+// included even if it has not reached projects.json yet.
+func OpenGlobal(legacyProjectRoot string) (*Store, error) {
+	dbPath, err := GlobalPath()
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+		return nil, errtrace.Wrap(fmt.Errorf("create global state directory: %w", err))
+	}
+	store, err := openPath(dbPath)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+
+	roots := []string{legacyProjectRoot}
+	if manager, managerErr := projects.NewManager(); managerErr == nil {
+		for _, project := range manager.ListProjects() {
+			roots = append(roots, project.Path)
+		}
+	}
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		if err := paths.MigrateHydraLayout(root); err != nil {
+			_ = store.Close()
+			return nil, errtrace.Wrap(fmt.Errorf("prepare legacy database in %s: %w", root, err))
+		}
+	}
+	if err := store.ImportLegacy(roots); err != nil {
+		_ = store.Close()
+		return nil, errtrace.Wrap(err)
+	}
+	return store, nil
+}
+
+func openPath(dbPath string) (*Store, error) {
 	gormCfg := &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)}
 
 	// Writer: a single serialised connection. SQLite permits only one writer at a
@@ -95,7 +138,7 @@ func Open(projectRoot string) (*Store, error) {
 
 	// Migrate on the writer before opening the read pool, so the schema and the
 	// file's WAL mode are established before any reader attaches.
-	if err := gormDB.AutoMigrate(&Agent{}); err != nil {
+	if err := gormDB.AutoMigrate(&Agent{}, &LegacyImport{}); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("auto migrate: %w", err))
 	}
 

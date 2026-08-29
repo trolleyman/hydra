@@ -176,10 +176,16 @@ by desktop and CLI builds:
 - user-installed binaries and desktop files: XDG data locations, without
   assuming `~/.local/bin` is on the graphical session's `PATH`.
 
-Existing installations use project-scoped configuration and runtime paths.
-Inventory those paths before implementation and define idempotent migration or
-compatibility lookup. The desktop app must not create a second database merely
-because it launched without a project working directory.
+The agent/history SQLite database is user-global on every platform: under the
+Linux state directory above, `~/Library/Application Support/Hydra` on macOS,
+and `%LOCALAPPDATA%\Hydra` on Windows. CLI, browser-server, and desktop builds
+open the same store. Project-local `.hydra/local` remains the home of worktrees,
+caches, artifacts, tests, logs, and per-head sidecars.
+
+On first open, Hydra transactionally imports agent rows from every registered
+legacy project database. Conflicting agent IDs with different data abort the
+whole import, completed source paths are recorded for idempotency, and legacy
+database files are never changed or deleted automatically.
 
 ### Provider and tool discovery
 
@@ -337,10 +343,12 @@ and browser without competing backend or database ownership.
 
 Status: a separately-tagged GTK 4/WebKitGTK 6 executable opens an explicit
 loopback Hydra URL without adding desktop runtime dependencies to the normal
-CLI. It can also start or reuse the existing project daemon and reads the
-daemon's atomically published web listener instead of assuming a port. Protocol
-negotiation, authentication bootstrap, multi-window behavior, and the full shell
-comparison remain.
+CLI. Daemon ownership and the SQLite agent/history store are now user-global;
+the shell starts or reuses that service and reads its atomically published web
+listener instead of assuming a port. The global database uses each platform's
+native state location and transactionally imports retained project-local legacy
+stores. Protocol negotiation, authentication bootstrap, multi-window behavior,
+and the full shell comparison remain.
 
 ### Phase 2: add desktop window routes and lifecycle
 

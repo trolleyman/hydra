@@ -83,3 +83,30 @@ func TestStopDaemonClearsStaleFilesWhenNothingAnswers(t *testing.T) {
 		t.Errorf("pidfile still present, want it cleared")
 	}
 }
+
+func TestRuntimePathsAreUserGlobal(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	first, err := SocketPath("/projects/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := SocketPath("/projects/two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("SocketPath differs by project: %q != %q", first, second)
+	}
+}
+
+func TestDesktopDaemonIsManaged(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("HYDRA_DESKTOP_SERVICE", "1")
+	root := t.TempDir()
+	if err := WriteDaemonFiles(root); err != nil {
+		t.Fatal(err)
+	}
+	if !IsServiceManaged(root) {
+		t.Fatal("desktop daemon was not recorded as managed")
+	}
+}

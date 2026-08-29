@@ -95,11 +95,13 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		log.Printf("Log: %s (set HYDRA_LOG_HTTP=1 for a line per HTTP request)", p)
 	}
 
-	store, err := db.Open(projectRoot)
+	store, err := db.OpenGlobal(projectRoot)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
-	log.Printf("Database: %s", paths.GetDBPathFromProjectRoot(projectRoot))
+	if dbPath, pathErr := db.GlobalPath(); pathErr == nil {
+		log.Printf("Database: %s", dbPath)
+	}
 
 	reg := session.NewRegistry()
 	reg.SetOnExit(func(info session.Info) {

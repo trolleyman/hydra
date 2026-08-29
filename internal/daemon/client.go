@@ -14,6 +14,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/gorilla/websocket"
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/paths"
 )
 
 // baseURL is a placeholder host; the transport always dials the unix socket.
@@ -39,7 +40,8 @@ func unixHTTPClient(sock string) *http.Client {
 	}
 }
 
-// Connect returns a client for the project's daemon, auto-starting it if needed.
+// Connect returns a client for the user-global daemon, auto-starting it if
+// needed and selecting or registering projectRoot for subsequent operations.
 func Connect(ctx context.Context, projectRoot string) (*Client, error) {
 	sock, err := SocketPath(projectRoot)
 	if err != nil {
@@ -51,15 +53,12 @@ func Connect(ctx context.Context, projectRoot string) (*Client, error) {
 	// Auto-upgrade: if the running daemon was started from a now-replaced
 	// binary, drain + restart it so the new code takes effect. Heads are
 	// resumed on the new daemon's boot.
-	// A service-managed daemon is not ours to evict: SIGTERMing it and spawning
-	// a detached replacement would leave systemd's unit inactive with an
-	// unsupervised daemon running behind it. Say so and keep talking to the one
-	// that is there - it is only running older code, which is a smaller problem
-	// than two daemons fighting over one socket.
+	// A managed daemon is not ours to evict: replacing a systemd- or
+	// desktop-owned process behind its manager's back can create two owners.
 	if running && isStale(projectRoot) && IsServiceManaged(projectRoot) {
 		fmt.Fprintln(os.Stderr,
-			"note: the running hydra daemon is service-managed and was started from an older binary.\n"+
-				"      Use the web UI's update button, or `systemctl --user restart hydra`, to pick this one up.")
+			"note: the running hydra daemon is managed by the desktop app or a service manager\n"+
+				"      and was started from a different binary; keeping the managed daemon running.")
 	} else if running && isStale(projectRoot) {
 		if err := StopDaemon(ctx, projectRoot); err != nil {
 			return nil, errtrace.Wrap(err)
@@ -72,15 +71,36 @@ func Connect(ctx context.Context, projectRoot string) (*Client, error) {
 		}
 	}
 
-	st, err := c.Status(ctx)
-	if err != nil {
+	if _, err := c.Status(ctx); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("daemon status: %w", err))
 	}
-	if st.DefaultProjectId == nil {
-		return nil, errtrace.Errorf("daemon did not report a default project")
+	if err := c.selectProject(ctx, projectRoot); err != nil {
+		return nil, errtrace.Wrap(err)
 	}
-	c.ProjectID = *st.DefaultProjectId
 	return c, nil
+}
+
+func (c *Client) selectProject(ctx context.Context, projectRoot string) error {
+	normalized, err := paths.NormalizePath(projectRoot)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	var registered []api.ProjectInfo
+	if err := c.do(ctx, http.MethodGet, "/api/projects", nil, &registered); err != nil {
+		return errtrace.Wrap(err)
+	}
+	for _, project := range registered {
+		if paths.ComparePaths(project.Path, normalized) {
+			c.ProjectID = project.Id
+			return nil
+		}
+	}
+	var added api.ProjectInfo
+	if err := c.do(ctx, http.MethodPost, "/api/projects", api.AddProjectRequest{Path: normalized}, &added); err != nil {
+		return errtrace.Wrap(fmt.Errorf("register project with global daemon: %w", err))
+	}
+	c.ProjectID = added.Id
+	return nil
 }
 
 // ping reports whether the daemon answers /health.

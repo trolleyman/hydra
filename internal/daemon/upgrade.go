@@ -56,6 +56,8 @@ func WriteDaemonFiles(projectRoot string) error {
 	body := stamp
 	if os.Getenv("INVOCATION_ID") != "" {
 		body += "\nmanaged=systemd"
+	} else if os.Getenv("HYDRA_DESKTOP_SERVICE") == "1" {
+		body += "\nmanaged=desktop"
 	}
 	return errtrace.Wrap(os.WriteFile(ip, []byte(body), 0o600))
 }
@@ -73,7 +75,7 @@ func readDaemonInfo(projectRoot string) (stamp string, serviceManaged bool, ok b
 	}
 	lines := strings.Split(string(data), "\n")
 	for _, l := range lines[1:] {
-		if strings.TrimSpace(l) == "managed=systemd" {
+		if strings.HasPrefix(strings.TrimSpace(l), "managed=") {
 			serviceManaged = true
 		}
 	}

@@ -13,10 +13,21 @@ import (
 	"braces.dev/errtrace"
 )
 
-// EnsureRunning starts the project's daemon if it is not already answering its
-// socket. It serializes concurrent callers with a file lock and waits for the
-// new daemon to become ready.
+// EnsureRunning starts the user-global daemon if it is not already answering
+// its socket. projectRoot becomes the default project only on a cold start. It
+// serializes concurrent callers with a file lock and waits for readiness.
 func EnsureRunning(ctx context.Context, projectRoot string) error {
+	return errtrace.Wrap(ensureRunning(ctx, projectRoot, nil))
+}
+
+// EnsureDesktopRunning starts a daemon marked as owned by the desktop app.
+// Compatible CLI binaries attach to it instead of evicting it merely because
+// their executable stamps differ.
+func EnsureDesktopRunning(ctx context.Context, projectRoot string) error {
+	return errtrace.Wrap(ensureRunning(ctx, projectRoot, []string{"HYDRA_DESKTOP_SERVICE=1"}))
+}
+
+func ensureRunning(ctx context.Context, projectRoot string, extraEnv []string) error {
 	sock, err := SocketPath(projectRoot)
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -60,6 +71,7 @@ func EnsureRunning(ctx context.Context, projectRoot string) error {
 	defer logFile.Close()
 
 	cmd := exec.Command(exe, "__daemon", "--project", projectRoot)
+	cmd.Env = append(os.Environ(), extraEnv...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

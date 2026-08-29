@@ -7,6 +7,14 @@ checkout or each other.
 It consists of a Go backend and a React frontend. The frontend is bundled into the binary, so it can be shipped as a
 single binary.
 
+Hydra stores agent and conversation history in one user-scoped database shared
+by CLI, browser-server, and desktop clients. Its native locations are
+`$XDG_STATE_HOME/hydra/db.sqlite3` on Linux (falling back to
+`~/.local/state/hydra`), `~/Library/Application Support/Hydra/db.sqlite3` on
+macOS, and `%LOCALAPPDATA%\Hydra\db.sqlite3` on Windows. Project-local
+`.hydra/local` directories continue to hold worktrees, caches, artifacts, logs,
+and other project-specific runtime files.
+
 ```shellsession
 $ hydra help
 Hydra is an AI agent orchestrator.
@@ -87,7 +95,7 @@ mage run
 ```
 
 Build the experimental Linux desktop shell separately, then open a registered
-project. It reuses that project's running daemon or starts the bundled backend:
+project. It reuses the user-global daemon or starts the bundled backend:
 
 ```bash
 go build -tags hydra_desktop -o hydra-desktop ./cmd/hydra-desktop
@@ -95,7 +103,9 @@ go build -tags hydra_desktop -o hydra-desktop ./cmd/hydra-desktop
 ```
 
 The separate build keeps the normal `hydra` CLI free of GTK/WebKit runtime
-dependencies. `-url http://127.0.0.1:<port>` remains available for development.
+dependencies. The project flag is optional; without it the app opens the global
+service in Hydra's built-in Chat project. `-url http://127.0.0.1:<port>` remains
+available for development.
 
 Install it as a systemd --user service, so it comes up on login and survives
 your terminal closing:

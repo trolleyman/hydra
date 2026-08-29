@@ -8,6 +8,12 @@ build succeeded.
 There is one build flavour - minified, with source maps, precompressed - and one
 way to run the server. The restart button *is* the deploy.
 
+The service uses Hydra's user-global SQLite database, shared with CLI and
+desktop clients. It lives in `$XDG_STATE_HOME/hydra/db.sqlite3` on Linux,
+`~/Library/Application Support/Hydra/db.sqlite3` on macOS, and
+`%LOCALAPPDATA%\Hydra\db.sqlite3` on Windows. On first open, registered legacy
+project-local databases are imported transactionally and retained unchanged.
+
 ## What this is, and isn't
 
 This is not a deployment in the classic sense: the machine keeps the source

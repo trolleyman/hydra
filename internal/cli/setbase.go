@@ -36,7 +36,7 @@ with git from the head's worktree, e.g.:
 			return errtrace.Wrap(err)
 		}
 
-		store, err := db.Open(projectRoot)
+		store, err := db.OpenGlobal(projectRoot)
 		if err != nil {
 			return errtrace.Wrap(err)
 		}

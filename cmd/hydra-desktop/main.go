@@ -21,7 +21,7 @@ func main() {
 	}
 
 	url := flag.String("url", "", "local Hydra server URL")
-	project := flag.String("project", "", "project root whose Hydra daemon should be opened")
+	project := flag.String("project", "", "project root to select after opening Hydra")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
