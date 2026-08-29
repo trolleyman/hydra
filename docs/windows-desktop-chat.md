@@ -236,6 +236,9 @@ model or duplicate the permission/commit implementation.
       PortableGit payload for x64 or arm64.
 - [x] Share one backend and persistent WebView2 profile across full and focused
       windows, with native new-window commands and notification-area lifecycle.
+- [x] Restore and compile the Windows Forms/WebView2 project from Linux with the
+      .NET 8 SDK and Windows targeting enabled; real-Windows runtime validation
+      remains required below.
 - [ ] Open two full windows and two focused windows against simulation on real
       Windows and prove shared cookies, storage, WebSockets, and session state.
 - [ ] Prove app commands: New full window, New chat window, Settings, and Exit.
