@@ -451,6 +451,11 @@ type ArtifactScript struct {
 	// build artifacts leaking between commits): it trades the warm cache for a
 	// guaranteed-pristine tree. Default false.
 	CleanIgnored bool `toml:"clean_ignored"`
+	// AutoRun controls when a missing artifact generation starts automatically:
+	// "always" (or empty) preserves the historical behavior, "settled" waits
+	// until the agent is no longer actively working, and "never" requires an
+	// explicit refresh. Cached generations are returned in every mode.
+	AutoRun string `toml:"auto_run"`
 	// Enabled gates whether the diff viewer runs this script. nil or true means
 	// active; false means it is skipped entirely. nil is the default so configs
 	// written before this flag keep their artifacts running. Like unsafe_host,
@@ -713,6 +718,9 @@ type TestScript struct {
 	// caches) before each run - `git clean -fdx` instead of the default `-fd`.
 	// Leave false to keep caches warm between runs. Default false.
 	CleanIgnored bool `toml:"clean_ignored"`
+	// AutoRun controls when a missing test run starts automatically. See
+	// ArtifactScript.AutoRun for the accepted values and cache behavior.
+	AutoRun string `toml:"auto_run"`
 	// Enabled gates whether the test gate runs this command. nil or true means
 	// active; false skips it entirely. nil is the default for backward compat.
 	Enabled *bool `toml:"enabled"`
@@ -1861,6 +1869,9 @@ func patchArtifactScript(b, o ArtifactScript) ArtifactScript {
 	if o.CleanIgnored {
 		b.CleanIgnored = true
 	}
+	if o.AutoRun != "" {
+		b.AutoRun = o.AutoRun
+	}
 	if o.Enabled != nil {
 		b.Enabled = o.Enabled
 	}
@@ -1947,6 +1958,9 @@ func patchTestScript(b, o TestScript) TestScript {
 	}
 	if o.CleanIgnored {
 		b.CleanIgnored = true
+	}
+	if o.AutoRun != "" {
+		b.AutoRun = o.AutoRun
 	}
 	if o.Enabled != nil {
 		b.Enabled = o.Enabled
@@ -2691,6 +2705,8 @@ func artifactsDocLines() []string {
 		docPrefix + "                a pristine checkout (git clean -fdx) instead of the default that keeps",
 		docPrefix + "                dependency/build caches warm (-fd). Slower; set true only if stale",
 		docPrefix + "                ignored output can leak between commits (default false).",
+		docPrefix + `   auto_run     "always" (default), "settled" (wait while agent works), or "never"`,
+		docPrefix + "                (Refresh only). Cached artifacts still display in every mode.",
 		docPrefix + "   strict       run the command under `set -eo pipefail` so a failing step aborts",
 		docPrefix + "                and propagates instead of being swallowed (default true; set false",
 		docPrefix + "                to run the command exactly as written).",
@@ -2800,6 +2816,9 @@ func artifactFieldLines(a ArtifactScript) []string {
 	}
 	if a.CleanIgnored {
 		out = append(out, "clean_ignored = true")
+	}
+	if a.AutoRun != "" && a.AutoRun != "always" {
+		out = append(out, "auto_run = "+tomlStringValue(a.AutoRun))
 	}
 	if a.Strict != nil && !*a.Strict {
 		out = append(out, "strict = false")
@@ -3032,6 +3051,8 @@ func testsDocLines() []string {
 		docPrefix + "   unsafe_host  run on the host with NO sandbox - runs the diffed ref's test code;",
 		docPrefix + "                only for trusted refs (default false).",
 		docPrefix + "   clean_ignored  also delete git-ignored files before each run (default false).",
+		docPrefix + `   auto_run     "always" (default), "settled" (wait while agent works), or "never"`,
+		docPrefix + "                (Refresh only). Cached verdicts still display in every mode.",
 		docPrefix + "   strict       run the command under `set -eo pipefail` (default true). Note: a",
 		docPrefix + "                runner exiting non-zero because tests FAILED is a valid verdict,",
 		docPrefix + "                not a strict abort - strict only governs the shell pipeline.",
@@ -3106,6 +3127,9 @@ func testFieldLines(t TestScript) []string {
 	}
 	if t.CleanIgnored {
 		out = append(out, "clean_ignored = true")
+	}
+	if t.AutoRun != "" && t.AutoRun != "always" {
+		out = append(out, "auto_run = "+tomlStringValue(t.AutoRun))
 	}
 	if t.Strict != nil && !*t.Strict {
 		out = append(out, "strict = false")

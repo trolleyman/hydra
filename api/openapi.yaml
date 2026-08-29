@@ -5735,6 +5735,10 @@ components:
         clean_ignored:
           type: boolean
           description: Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
+        auto_run:
+          type: string
+          enum: [always, settled, never]
+          description: When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
         strict:
           type: boolean
           nullable: true
@@ -5893,6 +5897,10 @@ components:
         clean_ignored:
           type: boolean
           description: Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
+        auto_run:
+          type: string
+          enum: [always, settled, never]
+          description: When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
         strict:
           type: boolean
           nullable: true

@@ -62,6 +62,13 @@ const (
 	Stdout ArtifactLogLineStream = "stdout"
 )
 
+// Defines values for ArtifactScriptAutoRun.
+const (
+	ArtifactScriptAutoRunAlways  ArtifactScriptAutoRun = "always"
+	ArtifactScriptAutoRunNever   ArtifactScriptAutoRun = "never"
+	ArtifactScriptAutoRunSettled ArtifactScriptAutoRun = "settled"
+)
+
 // Defines values for ArtifactSetStatus.
 const (
 	ArtifactSetStatusError      ArtifactSetStatus = "error"
@@ -462,6 +469,13 @@ const (
 	TestCasePassed  TestCaseStatus = "passed"
 	TestCaseSkipped TestCaseStatus = "skipped"
 	TestCaseWarning TestCaseStatus = "warning"
+)
+
+// Defines values for TestScriptAutoRun.
+const (
+	TestScriptAutoRunAlways  TestScriptAutoRun = "always"
+	TestScriptAutoRunNever   TestScriptAutoRun = "never"
+	TestScriptAutoRunSettled TestScriptAutoRun = "settled"
 )
 
 // Defines values for TestStatus.
@@ -868,6 +882,9 @@ type ArtifactLogResponse struct {
 
 // ArtifactScript A per-project script that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
 type ArtifactScript struct {
+	// AutoRun When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
+	AutoRun *ArtifactScriptAutoRun `json:"auto_run,omitempty"`
+
 	// CleanIgnored Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
 
@@ -889,6 +906,9 @@ type ArtifactScript struct {
 	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false)
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
 }
+
+// ArtifactScriptAutoRun When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
+type ArtifactScriptAutoRun string
 
 // ArtifactSet defines model for ArtifactSet.
 type ArtifactSet struct {
@@ -3820,6 +3840,9 @@ type TestRunResult struct {
 
 // TestScript A per-project test-runner script whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN
 type TestScript struct {
+	// AutoRun When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
+	AutoRun *TestScriptAutoRun `json:"auto_run,omitempty"`
+
 	// CleanIgnored Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
 
@@ -3844,6 +3867,9 @@ type TestScript struct {
 	// UnsafeHost Run on the host with NO sandbox - runs the diffed ref's test code; only for trusted refs (default false)
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
 }
+
+// TestScriptAutoRun When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
+type TestScriptAutoRun string
 
 // TestStatus running = a run is in flight; passing/failing/errored = settled verdict; stale = a cached verdict exists but predates the current commit; none = no tests configured or never run. (A per-runner TestRunResult only ever uses running/passing/failing/errored; stale/none are head-summary states.)
 type TestStatus string

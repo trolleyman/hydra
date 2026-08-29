@@ -58,18 +58,41 @@ func (s *Server) GetAgentArtifacts(ctx context.Context, request api.GetAgentArti
 		plan.invalidateSide(*request.Params.Refresh, side)
 	}
 
-	return api.GetAgentArtifacts200JSONResponse(api.ArtifactsResponse{Scripts: plan.buildSets(s, request.ProjectId)}), nil
+	force := ""
+	if request.Params.Refresh != nil {
+		force = *request.Params.Refresh
+	}
+	return api.GetAgentArtifacts200JSONResponse(api.ArtifactsResponse{Scripts: plan.buildSets(s, request.ProjectId, force)}), nil
 }
 
 // artifactPlan captures everything needed to (re)build the artifact sets for one
 // comparison: the manager, the two resolved versions, and the per-side scripts
 // indexed by name. Shared by the HTTP poll handler and the WS streaming handler.
 type artifactPlan struct {
-	mgr         *artifacts.Manager
-	left, right artifacts.Version
-	names       []string
-	leftByName  map[string]config.ArtifactScript
-	rightByName map[string]config.ArtifactScript
+	mgr          *artifacts.Manager
+	left, right  artifacts.Version
+	names        []string
+	leftByName   map[string]config.ArtifactScript
+	rightByName  map[string]config.ArtifactScript
+	agentRunning bool
+}
+
+// artifactMeta returns cached/in-flight state in every mode, but starts missing
+// work only when the runner's policy permits it or the user explicitly refreshes.
+// A deferred miss is represented as an empty ready side, which keeps the card
+// available (and its Refresh control usable) without inventing a generation.
+func artifactMeta(mgr *artifacts.Manager, spec config.ArtifactScript, v artifacts.Version, agentRunning, force bool) (artifacts.Meta, error) {
+	if force || shouldAutoRun(spec.AutoRun, agentRunning) {
+		return errtrace.Wrap2(mgr.Get(spec, v))
+	}
+	meta, ok, err := mgr.Peek(spec.Name, v)
+	if err != nil {
+		return artifacts.Meta{}, errtrace.Wrap(err)
+	}
+	if ok {
+		return meta, nil
+	}
+	return artifacts.Meta{Script: spec.Name, Status: artifacts.StatusReady}, nil
 }
 
 // resolveArtifactPlan resolves the comparison's two versions and the artifact
@@ -151,7 +174,7 @@ func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, param
 	}
 	sort.Strings(names)
 
-	return &artifactPlan{mgr: mgr, left: left, right: right, names: names, leftByName: leftByName, rightByName: rightByName}, nil
+	return &artifactPlan{mgr: mgr, left: left, right: right, names: names, leftByName: leftByName, rightByName: rightByName, agentRunning: headActivelyRunning(head)}, nil
 }
 
 // specsFor returns the (possibly nil) left and right specs for one script name.
@@ -186,9 +209,9 @@ func (p *artifactPlan) staleableDirs() []string {
 }
 
 // buildSet generates/loads one script (by name) and folds it into the API shape.
-func (p *artifactPlan) buildSet(s *Server, projectID, name string) api.ArtifactSet {
+func (p *artifactPlan) buildSet(s *Server, projectID, name string, force bool) api.ArtifactSet {
 	leftSpec, rightSpec := p.specsFor(name)
-	return s.buildArtifactSet(projectID, name, leftSpec, rightSpec, p.mgr, p.left, p.right)
+	return s.buildArtifactSet(projectID, name, leftSpec, rightSpec, p.mgr, p.left, p.right, p.agentRunning, force)
 }
 
 // metasFor returns both sides' current metas for one script, kicking off (or
@@ -200,12 +223,12 @@ func (p *artifactPlan) buildSet(s *Server, projectID, name string) api.ArtifactS
 func (p *artifactPlan) metasFor(name string) (left, right artifacts.Meta) {
 	leftSpec, rightSpec := p.specsFor(name)
 	if leftSpec != nil {
-		left, _ = p.mgr.Get(*leftSpec, p.left)
+		left, _ = artifactMeta(p.mgr, *leftSpec, p.left, p.agentRunning, false)
 	} else {
 		left = artifacts.Meta{Status: artifacts.StatusReady}
 	}
 	if rightSpec != nil {
-		right, _ = p.mgr.Get(*rightSpec, p.right)
+		right, _ = artifactMeta(p.mgr, *rightSpec, p.right, p.agentRunning, false)
 	} else {
 		right = artifacts.Meta{Status: artifacts.StatusReady}
 	}
@@ -213,10 +236,10 @@ func (p *artifactPlan) metasFor(name string) (left, right artifacts.Meta) {
 }
 
 // buildSets builds every script's set, in stable name order.
-func (p *artifactPlan) buildSets(s *Server, projectID string) []api.ArtifactSet {
+func (p *artifactPlan) buildSets(s *Server, projectID, forceName string) []api.ArtifactSet {
 	sets := make([]api.ArtifactSet, 0, len(p.names))
 	for _, name := range p.names {
-		sets = append(sets, p.buildSet(s, projectID, name))
+		sets = append(sets, p.buildSet(s, projectID, name, name == forceName))
 	}
 	return sets
 }
@@ -363,18 +386,18 @@ func hostKey(name, command, kind string) string {
 // and folds them into the API representation. Either side's spec may be nil when
 // the script is defined on only one version (added or removed on the branch); a
 // nil side contributes no files, so its counterparts surface as added/removed.
-func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *config.ArtifactScript, mgr *artifacts.Manager, left, right artifacts.Version) api.ArtifactSet {
+func (s *Server) buildArtifactSet(projectID, name string, leftSpec, rightSpec *config.ArtifactScript, mgr *artifacts.Manager, left, right artifacts.Version, agentRunning, force bool) api.ArtifactSet {
 	set := api.ArtifactSet{Name: name, Files: []api.ArtifactFile{}}
 
 	var leftMeta, rightMeta artifacts.Meta
 	var lerr, rerr error
 	if leftSpec != nil {
-		leftMeta, lerr = mgr.Get(*leftSpec, left)
+		leftMeta, lerr = artifactMeta(mgr, *leftSpec, left, agentRunning, force)
 	} else {
 		leftMeta = artifacts.Meta{Status: artifacts.StatusReady}
 	}
 	if rightSpec != nil {
-		rightMeta, rerr = mgr.Get(*rightSpec, right)
+		rightMeta, rerr = artifactMeta(mgr, *rightSpec, right, agentRunning, force)
 	} else {
 		rightMeta = artifacts.Meta{Status: artifacts.StatusReady}
 	}

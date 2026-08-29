@@ -31,6 +31,10 @@ export type TestScript = {
      */
     clean_ignored?: boolean;
     /**
+     * When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
+     */
+    auto_run?: TestScript.auto_run;
+    /**
      * Run the command under `set -eo pipefail` (absent/null or true = strict; false = run exactly as written). The verdict still comes from the parsed report, not the exit code.
      */
     strict?: boolean | null;
@@ -39,4 +43,14 @@ export type TestScript = {
      */
     enabled?: boolean | null;
 };
+export namespace TestScript {
+    /**
+     * When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
+     */
+    export enum auto_run {
+        ALWAYS = 'always',
+        SETTLED = 'settled',
+        NEVER = 'never',
+    }
+}
 

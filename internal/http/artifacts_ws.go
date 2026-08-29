@@ -139,7 +139,7 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 
 	// Initial snapshot. buildSets triggers any needed generations, after which the
 	// subscription delivers their progress.
-	if err := writeMsg(api.ArtifactsSnapshotFrame{Type: api.ArtifactsSnapshotFrameTypeSnapshot, Scripts: plan.buildSets(s, projectID)}); err != nil {
+	if err := writeMsg(api.ArtifactsSnapshotFrame{Type: api.ArtifactsSnapshotFrameTypeSnapshot, Scripts: plan.buildSets(s, projectID, "")}); err != nil {
 		return
 	}
 
@@ -170,7 +170,7 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 			// and its progress streams back via the subscription. An optional side
 			// ("left"/"right") restarts just that side, keeping the other cached.
 			plan.invalidateSide(msg.Script, string(msg.Side))
-			set := plan.buildSet(s, projectID, msg.Script)
+			set := plan.buildSet(s, projectID, msg.Script, true)
 			_ = writeMsg(api.ArtifactsSetFrame{Type: api.Set, Set: set})
 		}
 	}()
@@ -231,7 +231,7 @@ func (s *Server) streamArtifacts(ctx context.Context, conn *safeConn, projectRoo
 					return
 				}
 			case "settled":
-				set := plan.buildSet(s, projectID, ref.script)
+				set := plan.buildSet(s, projectID, ref.script, false)
 				if err := writeMsg(api.ArtifactsSetFrame{Type: api.Set, Set: set}); err != nil {
 					return
 				}

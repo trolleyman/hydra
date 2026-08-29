@@ -196,7 +196,11 @@ func (s *Server) GetAgentTests(ctx context.Context, request api.GetAgentTestsReq
 		_ = mgr.Invalidate(*request.Params.Refresh, v)
 	}
 
-	out := s.buildTestRunners(request.ProjectId, mgr, runners, v)
+	force := ""
+	if request.Params.Refresh != nil {
+		force = *request.Params.Refresh
+	}
+	out := s.buildTestRunners(request.ProjectId, mgr, runners, v, headActivelyRunning(head), force)
 	return api.GetAgentTests200JSONResponse(api.TestsResponse{Runners: out}), nil
 }
 
