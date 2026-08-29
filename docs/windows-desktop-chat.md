@@ -310,6 +310,12 @@ not run the Hydra UI or daemon elevated.
   notifications to the right window; suppress them for a frontmost conversation.
 - Surface concurrent edit-mode sessions and the active sandbox strength.
 
+Status: the shared bridge reports the selected head's live-turn state and the
+Windows and macOS shells now offer Stop and close, Close and keep running, and
+Cancel. Stop is issued by the authenticated web session and the native window
+closes only after it succeeds. Draft project/history controls cover live focused
+heads; archived history and Stop-and-switch project changes remain.
+
 ### Phase 5: sign, install, and update
 
 The shared agent/history database location is already implemented as

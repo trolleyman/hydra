@@ -72,10 +72,15 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
         case "window-state":
             activeTurn = body["activeTurn"] as? Bool ?? false
         case "close-window":
+            if body["force"] as? Bool == true { activeTurn = false }
             window?.performClose(nil)
         default:
             break
         }
+    }
+
+    func requestStopAndClose() {
+        webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('hydra-desktop-command',{detail:{type:'stop-and-close'}}))")
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

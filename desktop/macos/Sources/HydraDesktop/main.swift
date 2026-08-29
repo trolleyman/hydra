@@ -121,7 +121,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         alert.informativeText = "This agent is still working. Closing the window leaves it running in the background."
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Close and Keep Running")
-        return alert.runModal() == .alertSecondButtonReturn
+        alert.addButton(withTitle: "Stop and Close")
+        let answer = alert.runModal()
+        if answer == .alertThirdButtonReturn {
+            windows.first(where: { $0.window === sender })?.requestStopAndClose()
+            return false
+        }
+        return answer == .alertSecondButtonReturn
     }
 
     private func chooseProjectRootIfNeeded() -> URL? {

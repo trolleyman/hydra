@@ -3,7 +3,9 @@ export type DesktopMessage =
   | { type: 'new-focused-window'; projectId?: string }
   | { type: 'active-project'; projectId: string }
   | { type: 'window-state'; projectId?: string; agentId?: string; activeTurn: boolean }
-  | { type: 'close-window' }
+  | { type: 'close-window'; force?: boolean }
+
+export type DesktopCommand = { type: 'stop-and-close' }
 
 interface DesktopWindow extends Window {
   webkit?: { messageHandlers?: { hydra?: { postMessage: (message: DesktopMessage) => void } } }
@@ -43,4 +45,10 @@ export function openFocusedWindow(projectId?: string): void {
 
 export function closeDesktopWindow(): void {
   if (!postDesktopMessage({ type: 'close-window' })) window.close()
+}
+
+export function onDesktopCommand(handler: (command: DesktopCommand) => void): () => void {
+  const listener = (event: Event) => handler((event as CustomEvent<DesktopCommand>).detail)
+  window.addEventListener('hydra-desktop-command', listener)
+  return () => window.removeEventListener('hydra-desktop-command', listener)
 }

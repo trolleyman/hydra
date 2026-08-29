@@ -14,6 +14,7 @@ internal enum HydraWindowKind
 internal sealed class HydraForm : Form
 {
     private readonly HydraApplicationContext application;
+    private readonly WebView2 webView;
     private bool allowClose;
     private bool activeTurn;
 
@@ -41,7 +42,7 @@ internal sealed class HydraForm : Form
         MainMenuStrip = menu;
         Controls.Add(menu);
 
-        var webView = new WebView2 { Dock = DockStyle.Fill };
+        webView = new WebView2 { Dock = DockStyle.Fill };
         Controls.Add(webView);
         webView.BringToFront();
         Shown += async (_, _) =>
@@ -98,6 +99,7 @@ internal sealed class HydraForm : Form
                             activeTurn = root.TryGetProperty("activeTurn", out var activeElement) && activeElement.GetBoolean();
                             break;
                         case "close-window":
+                            if (root.TryGetProperty("force", out var forceElement) && forceElement.GetBoolean()) activeTurn = false;
                             Close();
                             break;
                     }
@@ -128,11 +130,16 @@ internal sealed class HydraForm : Form
         if (!allowClose && eventArgs.CloseReason == CloseReason.UserClosing && activeTurn)
         {
             var answer = MessageBox.Show(
-                "This agent is still working. Closing the window leaves it running in the background.",
+                "This agent is still working. Choose Yes to stop it and close, No to close while leaving it running, or Cancel to stay.",
                 "Close this window?",
-                MessageBoxButtons.OKCancel,
+                MessageBoxButtons.YesNoCancel,
                 MessageBoxIcon.Warning);
-            if (answer != DialogResult.OK)
+            if (answer == DialogResult.Yes)
+            {
+                eventArgs.Cancel = true;
+                _ = webView.CoreWebView2.ExecuteScriptAsync("window.dispatchEvent(new CustomEvent('hydra-desktop-command',{detail:{type:'stop-and-close'}}))");
+            }
+            else if (answer == DialogResult.Cancel)
             {
                 eventArgs.Cancel = true;
             }

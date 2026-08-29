@@ -42,7 +42,7 @@ import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
-import { closeDesktopWindow, openFocusedWindow, openFullWindow, postDesktopMessage } from '../lib/desktopBridge'
+import { closeDesktopWindow, onDesktopCommand, openFocusedWindow, openFullWindow, postDesktopMessage } from '../lib/desktopBridge'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -890,6 +890,19 @@ function RootLayout() {
       activeTurn: agent?.session_status === 'running',
     })
   }, [focusedDesktopWindow, currentProjectId, selectedAgentId, allLiveAgents])
+
+  useEffect(() => {
+    if (!focusedDesktopWindow || !currentProjectId || !selectedAgentId) return
+    return onDesktopCommand((command) => {
+      if (command.type !== 'stop-and-close') return
+      void api.default.killAgent(currentProjectId, selectedAgentId)
+        .then(() => postDesktopMessage({ type: 'close-window', force: true }))
+        .catch((error) => useToastStore.getState().show({
+          type: 'error',
+          message: `Could not stop the agent: ${error instanceof Error ? error.message : String(error)}`,
+        }))
+    })
+  }, [focusedDesktopWindow, currentProjectId, selectedAgentId])
 
   if (focusedDesktopWindow) {
     return (
