@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { QuestionCard, deriveAnswered } from './AgentChat'
+import { QuestionCard, deriveAnswered, toProviderEvents } from './AgentChat'
 
 // An answer to an AskUserQuestion can carry a free-text note ALONGSIDE the
 // picked option ("Postgres, but keep the schema in one file"), which is a
@@ -27,7 +27,36 @@ const trigger = (label: string) =>
   rows()[rowIndex(label)].querySelector('button[aria-label="Add a note"]') as HTMLElement
 const noteBox = () => screen.getByLabelText('Note to go with your answer')
 
+it('replays a persisted Codex answer as a settled question result', () => {
+  const events = toProviderEvents({
+    type: 'interaction_resolved',
+    seq: 3,
+    timestamp: '2026-08-29T17:00:00Z',
+    payload: {
+      interaction: {
+        method: 'item/tool/requestUserInput',
+        params: { itemId: 'call-1', questions: [{ question: 'Which database?' }] },
+        response: { updatedInput: { answers: { 'Which database?': 'SQLite' } } },
+      },
+    },
+  } as never)
+
+  expect(events).toHaveLength(1)
+  expect(events[0].type).toBe('user')
+  expect(events[0].message?.content[0]).toMatchObject({
+    type: 'tool_result',
+    tool_use_id: 'call-1',
+    content: expect.stringContaining('"Which database?"="SQLite"'),
+  })
+})
+
 describe('QuestionCard notes', () => {
+  it('does not offer a redundant note on the free-text Other answer', () => {
+    render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
+
+    expect(rows()[rows().length - 1].querySelector('button[aria-label="Add a note"]')).toBeNull()
+  })
+
   it('deselects a single-select option when it is clicked again', () => {
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
 
@@ -68,28 +97,20 @@ describe('QuestionCard notes', () => {
     expect(onSubmit).toHaveBeenCalledWith({ 'Which database?': 'SQLite' }, {})
   })
 
-  // The CLI records a note with no pick as `"<q>"=(no option selected) notes: ...`,
-  // so a note left behind after the pick that prompted it was taken away still
-  // answers the question - gating Submit on a selection would refuse to send
-  // something the CLI handles.
-  it('accepts a note on its own as an answer', () => {
+  it('discards a named option note when switching to Other', () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={onSubmit} />)
 
     fireEvent.click(screen.getByText('Postgres'))
     fireEvent.click(trigger('Postgres'))
     fireEvent.change(noteBox(), { target: { value: 'neither - use the file store' } })
-    // Selecting "Other" takes the pick away in a single-select, leaving the
-    // note as the only thing said - and an empty "Other" contributes no label.
     fireEvent.click(screen.getByRole('button', { name: 'Select Other' }))
 
     const submit = screen.getByRole('button', { name: 'Submit' })
-    expect(submit).not.toBeDisabled()
+    expect(submit).toBeDisabled()
+    fireEvent.change(screen.getByPlaceholderText('Other...'), { target: { value: 'neither - use the file store' } })
     fireEvent.click(submit)
-    expect(onSubmit).toHaveBeenCalledWith(
-      { 'Which database?': '' },
-      { 'Which database?': { notes: 'neither - use the file store' } },
-    )
+    expect(onSubmit).toHaveBeenCalledWith({ 'Which database?': 'neither - use the file store' }, {})
   })
 })
 
@@ -116,9 +137,10 @@ describe('QuestionCard note placement', () => {
     fireEvent.click(screen.getByText('SQLite'))
     expect(notedRow()).toBe(rowIndex('SQLite'))
 
-    // Selecting "Other" carries the note into the "Other" row.
+    // Other is itself free text, so selecting it drops the named option's note
+    // instead of creating a second, redundant free-text field.
     fireEvent.focus(screen.getByPlaceholderText('Other...'))
-    expect(notedRow()).toBe(rows().length - 1)
+    expect(notedRow()).toBe(-1)
   })
 
   // Closing has to clear the text: a note kept in state but out of sight would

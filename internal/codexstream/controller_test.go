@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"braces.dev/errtrace"
@@ -270,8 +271,9 @@ func TestControllerReadsHistoryBeforeQueuedResumeTurn(t *testing.T) {
 
 func TestControllerRespondsToUserInputRequest(t *testing.T) {
 	var sent []map[string]any
+	var history [][]byte
 	needsInput, activity := 0, 0
-	c := New(Options{OnNeedsInput: func() { needsInput++ }, OnActivity: func() { activity++ }, Send: func(line []byte) error {
+	c := New(Options{OnNeedsInput: func() { needsInput++ }, OnActivity: func() { activity++ }, OnHistoryLine: func(line []byte) { history = append(history, line) }, Send: func(line []byte) error {
 		var value map[string]any
 		_ = json.Unmarshal(line, &value)
 		sent = append(sent, value)
@@ -292,6 +294,9 @@ func TestControllerRespondsToUserInputRequest(t *testing.T) {
 	}
 	if activity != 1 {
 		t.Fatalf("activity callbacks after answer = %d, want 1", activity)
+	}
+	if len(history) != 1 || !strings.Contains(string(history[0]), `"answers":{"Which?":"A, B"}`) {
+		t.Fatalf("answer history = %q", history)
 	}
 }
 

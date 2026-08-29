@@ -907,6 +907,54 @@ export function toProviderEvents(ev: ChatEventUnion, showEmptyReasoning = false)
       }
       return []
     }
+    case 'interaction_resolved': {
+      const p = ev.payload
+      const interaction = (p.interaction ?? {}) as Record<string, unknown>
+      if (interaction.method !== 'item/tool/requestUserInput') return []
+      const params = interaction.params && typeof interaction.params === 'object'
+        ? interaction.params as Record<string, unknown>
+        : {}
+      const response = interaction.response && typeof interaction.response === 'object'
+        ? interaction.response as Record<string, unknown>
+        : {}
+      const updated = response.updatedInput && typeof response.updatedInput === 'object'
+        ? response.updatedInput as Record<string, unknown>
+        : {}
+      const answers = updated.answers && typeof updated.answers === 'object'
+        ? updated.answers as Record<string, unknown>
+        : {}
+      const annotations = updated.annotations && typeof updated.annotations === 'object'
+        ? updated.annotations as Record<string, unknown>
+        : {}
+      const questions = Array.isArray(params.questions) ? params.questions : []
+      const parts: string[] = []
+      let noted = false
+      for (const raw of questions) {
+        if (!raw || typeof raw !== 'object') continue
+        const question = (raw as Record<string, unknown>).question
+        if (typeof question !== 'string') continue
+        const answer = typeof answers[question] === 'string' ? answers[question] as string : ''
+        const annotation = annotations[question]
+        const note = annotation && typeof annotation === 'object' && typeof (annotation as Record<string, unknown>).notes === 'string'
+          ? (annotation as Record<string, unknown>).notes as string
+          : ''
+        if (!answer && !note) continue
+        let part = `${JSON.stringify(question)}=${answer ? JSON.stringify(answer) : NO_OPTION_PICKED}`
+        if (note) {
+          part += NOTE_MARKER + note
+          noted = true
+        }
+        parts.push(part)
+      }
+      if (parts.length === 0) return []
+      const result = noted
+        ? `The user answered: ${parts.join(', ')}. Read the answers carefully - they may request clarification, changes, or that you not proceed - and follow what they actually say.`
+        : `Your questions have been answered: ${parts.join(', ')}. You can now continue with these answers in mind.`
+      const toolID = typeof params.itemId === 'string' ? params.itemId : ''
+      return toolID
+        ? [{ ...providerBase(ev, {}), type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: toolID, content: result, synthetic: true }] } }]
+        : []
+    }
     case 'turn_completed':
     case 'turn_failed': {
       // Compatibility for logs written before cancellation got its own event
@@ -5455,7 +5503,10 @@ export function QuestionCard({
     setOtherSel((prev) => prev.map((v, i) => (i === qi ? next : v)))
     if (next && !specs[qi].multiSelect) {
       setSelected((prev) => prev.map((s, i) => (i === qi ? new Set<number>() : s)))
-      moveNote(qi, noteKey('other'))
+      // Other is already a free-text answer, so it has no second free-text
+      // note. Drop a named option's note rather than carrying it into a hidden
+      // field that the user can no longer inspect.
+      setNotes((prev) => prev.map((m, i) => (i === qi ? {} : m)))
     }
   }
 
@@ -5737,8 +5788,6 @@ export function QuestionCard({
                     />
                   </div>
                   </div>
-                  {noteTrigger(qi, 'other')}
-                  {noteBody(qi, 'other')}
                 </div>
               )
             })()

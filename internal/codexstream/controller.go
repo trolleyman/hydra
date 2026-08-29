@@ -518,8 +518,23 @@ func (c *Controller) Respond(raw json.RawMessage) error {
 		ID     json.RawMessage `json:"id"`
 		Result any             `json:"result"`
 	}{ID: request.id, Result: result})
-	if err == nil && request.method == "item/tool/requestUserInput" && c.opts.OnActivity != nil {
-		c.opts.OnActivity()
+	if err == nil && request.method == "item/tool/requestUserInput" {
+		// App-server's serverRequest/resolved notification does not include the
+		// answer. Record Hydra's outgoing response as a synthetic resolved event
+		// so a replay can restore the choices on the question card.
+		if c.opts.OnHistoryLine != nil {
+			line, _ := json.Marshal(map[string]any{
+				"method": "serverRequest/resolved",
+				"params": map[string]any{
+					"method": request.method, "request_id": json.RawMessage(request.id),
+					"params": json.RawMessage(request.params), "response": envelope.Response,
+				},
+			})
+			c.opts.OnHistoryLine(line)
+		}
+		if c.opts.OnActivity != nil {
+			c.opts.OnActivity()
+		}
 	}
 	return errtrace.Wrap(err)
 }

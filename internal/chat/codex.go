@@ -150,7 +150,10 @@ func normalizeCodex(line []byte) []eventSpec {
 		return []eventSpec{{payload: failed}}
 	case "serverRequest/resolved":
 		resolved := &InteractionResolved{}
-		resolved.Interaction, _ = json.Marshal(params)
+		// Keep the whole provider payload. Hydra's synthetic question-answer
+		// resolution carries the submitted answers alongside the original request,
+		// and a typed params projection would silently discard both.
+		resolved.Interaction = append(json.RawMessage(nil), msg.Params...)
 		return []eventSpec{{payload: resolved}}
 	case "item/started", "item/completed":
 		var item codexItem
