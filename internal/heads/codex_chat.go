@@ -57,6 +57,20 @@ func startCodexChatController(reg *session.Registry, store *db.Store, projectRoo
 				log.Printf("warn: mark Codex item activity running for %s: %v", id, err)
 			}
 		},
+		OnNeedsInput: func() {
+			ts := time.Now().Format(time.RFC3339Nano)
+			event := "request_user_input"
+			info := &api.AgentStatusInfo{Status: api.NeedsInput, Event: &event, Timestamp: ts}
+			if err := WriteAgentStatus(projectRoot, id, info); err != nil {
+				log.Printf("warn: mark Codex user-input request for %s: %v", id, err)
+				return
+			}
+			if store != nil {
+				if err := store.UpdateAgentStatus(id, string(api.NeedsInput), ts, true); err != nil {
+					log.Printf("warn: persist Codex user-input request for %s: %v", id, err)
+				}
+			}
+		},
 		OnStep: func() {
 			reg.ChatStep(id)
 		},

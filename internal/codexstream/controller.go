@@ -27,6 +27,7 @@ type Options struct {
 	OnModel        func(string)
 	OnTurnStart    func(string)
 	OnActivity     func()
+	OnNeedsInput   func()
 	OnStep         func()
 	OnTurnEnd      func(string)
 	OnHistoryLine  func([]byte)
@@ -242,6 +243,9 @@ func (c *Controller) OnLine(line []byte) {
 		c.mu.Lock()
 		c.requests[key] = pendingRequest{id: append(json.RawMessage(nil), msg.ID...), method: msg.Method, params: append(json.RawMessage(nil), msg.Params...)}
 		c.mu.Unlock()
+		if msg.Method == "item/tool/requestUserInput" && c.opts.OnNeedsInput != nil {
+			c.opts.OnNeedsInput()
+		}
 	}
 }
 
@@ -510,10 +514,14 @@ func (c *Controller) Respond(raw json.RawMessage) error {
 	} else {
 		result["decision"] = "decline"
 	}
-	return errtrace.Wrap(c.sendMessage(struct {
+	err := c.sendMessage(struct {
 		ID     json.RawMessage `json:"id"`
 		Result any             `json:"result"`
-	}{ID: request.id, Result: result}))
+	}{ID: request.id, Result: result})
+	if err == nil && request.method == "item/tool/requestUserInput" && c.opts.OnActivity != nil {
+		c.opts.OnActivity()
+	}
+	return errtrace.Wrap(err)
 }
 
 func (c *Controller) fail(err error) {
