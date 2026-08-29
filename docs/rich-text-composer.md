@@ -36,6 +36,10 @@ Completed 2026-08-29:
 - Replaced Tiptap's underscore italic input rule with Hydra's star-only rule.
   Incoming `_italic_` remains valid Markdown, but typing identifiers and paths
   cannot unexpectedly turn underscores into formatting.
+- Added the atomic attachment node and external upload registry. Files, upload
+  state and resolved paths never enter the document or Markdown. Document
+  presence drives upload lifecycle, so undo aborts an in-flight upload and redo
+  restarts it; asynchronous reconciliation adds no history transaction.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -553,8 +557,10 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
    registry, Markdown parser/serializer, marks, links, conservative input rules
    and unit/browser tests are built. The React adapter, static view and narrow
    public value/command types will land with the first production consumer.
-4. **Attachment node/adapter.** Fake asynchronous uploader first; prove that
-   reconciliation skips history and undo can cancel/restart correctly.
+4. **Attachment node/adapter - DONE.** The atomic safe-metadata node and external
+   fake-tested upload registry prove cancellation on undo, restart on redo and
+   path-free Markdown/JSON. React chip rendering and production upload wiring
+   belong to chat integration.
 5. **Block subset.** Headings 1-3, lists/tasks, blockquotes and code blocks.
 6. **Chat integration.** Preserve send, queue recall, shell mode, uploads, large
    paste, drafts, resizing/auto-grow, disabled states and focus return. Migrate

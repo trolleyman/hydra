@@ -1,5 +1,5 @@
 import { Extension, Node, type Editor, type Range } from '@tiptap/core'
-import { closeHistory, undo, redo, history } from '@tiptap/pm/history'
+import { closeHistory } from '@tiptap/pm/history'
 import { Plugin, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state'
 import type { ResolvedPos } from '@tiptap/pm/model'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
@@ -221,7 +221,6 @@ export const InlineCodeEditing = Extension.create({
   addProseMirrorPlugins() {
     const editor = this.editor
     return [
-      history(),
       new Plugin({
         props: {
           handleKeyDown(_view, event) {
@@ -281,11 +280,4 @@ export const InlineCodeEditing = Extension.create({
     ]
   },
 
-  addKeyboardShortcuts() {
-    return {
-      'Mod-z': () => undo(this.editor.state, this.editor.view.dispatch),
-      'Mod-Shift-z': () => redo(this.editor.state, this.editor.view.dispatch),
-      'Mod-y': () => redo(this.editor.state, this.editor.view.dispatch),
-    }
-  },
 })
