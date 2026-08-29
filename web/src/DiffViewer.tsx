@@ -5336,9 +5336,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         <div className="flex items-center gap-2 shrink-0">
           {/* "Submit review" - shown only once the user has queued at least one
               "Add to review" comment for this agent. */}
-          {/* Compact comment pager. Position/total answers where navigation will
-              go; the open count answers how much review remains. They are kept
-              separate because resolved comments stay navigable. */}
+          {/* Compact comment pager. Position/total covers every comment, including
+              resolved comments; the separated open count shows work remaining. */}
           {commentStops.length > 0 && (
             <div
               className="flex h-6 items-center gap-0.5 rounded-md border border-stone-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] px-1 select-none"
@@ -5348,6 +5347,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               <span className="optical-center min-w-6 text-center text-3xs tabular-nums text-stone-500 dark:text-stone-400">
                 {commentPosition ?? '-'} / {commentStops.length}
               </span>
+              <span className="mx-0.5 h-3 w-px bg-stone-200 dark:bg-white/10" aria-hidden />
               <span className={`optical-center text-3xs tabular-nums ${openComments.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                 {openComments.length} open
               </span>
