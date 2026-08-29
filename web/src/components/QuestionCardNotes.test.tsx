@@ -28,6 +28,21 @@ const trigger = (label: string) =>
 const noteBox = () => screen.getByLabelText('Note to go with your answer')
 
 describe('QuestionCard notes', () => {
+  it('deselects a single-select option when it is clicked again', () => {
+    render(<QuestionCard specs={SPECS} disabled={false} onSubmit={() => true} />)
+
+    const postgres = screen.getByText('Postgres')
+    const submit = screen.getByRole('button', { name: 'Submit' })
+    fireEvent.click(postgres)
+    expect(submit).not.toBeDisabled()
+
+    fireEvent.click(postgres)
+    expect(submit).toBeDisabled()
+
+    fireEvent.click(screen.getByText('SQLite'))
+    expect(submit).not.toBeDisabled()
+  })
+
   it('sends a note alongside the picked option, in annotations', () => {
     const onSubmit = vi.fn(() => true)
     render(<QuestionCard specs={SPECS} disabled={false} onSubmit={onSubmit} />)

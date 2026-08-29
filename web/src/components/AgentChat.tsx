@@ -5429,8 +5429,9 @@ export function QuestionCard({
           if (next.has(oi)) next.delete(oi)
           else next.add(oi)
         } else {
+          const wasSelected = next.has(oi)
           next.clear()
-          next.add(oi)
+          if (!wasSelected) next.add(oi)
         }
         return next
       }),
