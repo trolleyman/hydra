@@ -82,6 +82,10 @@ Completed 2026-08-29:
   explicit history boundary so undo preserves earlier typing. Versioned JSON
   drafts retain node positions across reloads, while older Markdown drafts are
   migrated at their existing `[filename]` markers.
+- Added presentation-only tokens to rendered chat Markdown: backtick-wrapped
+  commit-shaped hashes get a commit chip, and repository links whose visible
+  label is the filename/path get a navigable file chip. The composer, copied
+  Markdown and submission value remain literal.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -624,9 +628,10 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
    disabled states, spellcheck, focus return and combined text/attachment undo
    have component and real-Chromium coverage. Attachments live at their document
    positions as inline NodeViews and still submit the existing path manifest.
-7. **Static user-message view and send transition.** Preserve the rich snapshot
-   on optimistic rows, morph composer content into immediate/queued bubbles and
-   reconcile the daemon echo in place.
+7. **Static user-message view and send transition - IN PROGRESS.** Rendered chat
+   Markdown now recognizes commit and file tokens without changing source.
+   Preserve the rich snapshot on optimistic rows, morph composer content into
+   immediate/queued bubbles and reconcile the daemon echo in place.
 8. **Spawn integration.** Reuse the adapter in compact/full layouts and ensure
    surrounding selectors do not rerender on every editor transaction.
 9. **Polish/discovery.** Formatting menu, attachment display toggles, optional
