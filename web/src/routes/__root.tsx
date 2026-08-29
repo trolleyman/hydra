@@ -864,6 +864,25 @@ function RootLayout() {
   // on mobile it stays as a true toggle.
   const sidebarVisible = isDesktopViewport ? !desktopCollapsed : mobileSidebarOpen
 
+  // Focused native windows deliberately omit the full repository/agent chrome.
+  // The draft owns a dedicated route; after first submit the normal agent route
+  // carries this presentation marker so reloads preserve the compact window.
+  const focusedDesktopWindow = location.pathname.startsWith('/focused/') ||
+    new URLSearchParams(window.location.search).get('desktop') === 'focused'
+
+  if (focusedDesktopWindow) {
+    return (
+      <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          <Outlet />
+        </div>
+        <Dialog />
+        <Toaster />
+        <KeyboardShortcutsModal />
+      </div>
+    )
+  }
+
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
       {/* Global top bar: sidebar toggle (while hidden), project icon + selector,

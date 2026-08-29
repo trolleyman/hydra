@@ -378,7 +378,7 @@ random-port path.
 
 ### Phase 2: add desktop window routes and lifecycle
 
-- Finish the shared dedicated chrome-free focused route and immediate draft
+- [x] Add the shared dedicated chrome-free focused route and immediate draft
   flow described by the macOS plan.
 - Add native New Window/New Chat commands, project handoff, deep links, and
   active-window close confirmation.

@@ -313,7 +313,9 @@ before starting. Grouped by area.
   Windows shells include shared-server launch handshakes and multi-window
   foundations; the Linux shell includes user-global daemon discovery and
   launch. All still need their respective native validation, notifications,
-  release packaging, first-message draft flow, and dedicated chrome-free route.
+  and release packaging. The shared dedicated focused route and first-message
+  creation flow are built; project/history switching and the native lifecycle
+  bridge remain.
   See [macos-desktop-chat.md](macos-desktop-chat.md),
   [windows-desktop-chat.md](windows-desktop-chat.md), and
   [linux-desktop.md](linux-desktop.md) for the platform sequences. Each app also

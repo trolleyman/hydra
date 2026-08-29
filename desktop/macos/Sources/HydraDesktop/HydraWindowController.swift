@@ -31,7 +31,7 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate {
         let path: String
         if kind == .focused, let defaultProjectID {
             let encoded = defaultProjectID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? defaultProjectID
-            path = "/project/\(encoded)/?new_focused=1"
+            path = "/focused/\(encoded)"
         } else {
             path = "/"
         }

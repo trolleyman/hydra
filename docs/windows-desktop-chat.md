@@ -216,8 +216,9 @@ it is not the runtime hidden inside the standalone app.
 
 ### Phase 0: freeze the shared desktop contract
 
-- Land the dedicated focused route, first-message draft API/flow, project and
-  history switcher, backend capabilities, and semantic notification events.
+- [x] Land the dedicated focused route and first-message creation flow.
+- Land the project and history switcher, backend capabilities, and semantic
+  notification events.
 - Define the small native bridge messages for new window, close request,
   notification state, active project, app version, and app activation.
 - Keep the bridge transport replaceable so macOS and Windows shells implement

@@ -72,7 +72,7 @@ internal sealed class HydraForm : Form
                 args.Handled = true;
             };
             var path = kind == HydraWindowKind.Focused && backend.Status?.DefaultProjectId is { } project
-                ? $"/project/{Uri.EscapeDataString(project)}/?new_focused=1"
+                ? $"/focused/{Uri.EscapeDataString(project)}"
                 : "/";
             var target = new UriBuilder(new Uri(backend.BaseUrl!, path));
             if (backend.TakeBootstrapToken() is { } token)

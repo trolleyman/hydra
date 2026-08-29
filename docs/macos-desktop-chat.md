@@ -481,9 +481,12 @@ built. OS-specific sandbox validation and the concurrent-editor warning remain.
   browser-safe fallback dialog for development.
 - Make every focused conversation discoverable and openable from full Hydra.
 
-Status: the reusable chat-only layout and its permission controls are built on
-the existing agent route. The empty draft flow, dedicated chrome-free route,
-history/project controls, switching behavior, and native close bridge remain.
+Status: the reusable chat-only layout and its permission controls are built. A
+dedicated `/focused/<project>` route now opens the empty focused composer and
+creates the branchless session only when its first prompt is submitted; the
+resulting agent route retains the chrome-free desktop presentation across
+reloads. History/project controls, switching behavior, and the native close
+bridge remain.
 
 ### Phase 5: desktop lifecycle and notifications
 

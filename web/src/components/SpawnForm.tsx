@@ -230,12 +230,14 @@ export const SpawnForm = memo(function SpawnForm({
   onAgentTypeChange,
   compact = false,
   disabled = false,
+  focusedOnly = false,
 }: {
   projectId: string | null
   onSpawned?: (agent: AgentResponse) => void
   onAgentTypeChange?: (agentType: AgentTypeOption) => void
   compact?: boolean
   disabled?: boolean
+  focusedOnly?: boolean
 }) {
   const [agentType, setAgentType] = useState<AgentTypeOption>(readDefaultAgentType)
   // Model alias for the CLI's --model flag ('' = the CLI's own default). Seeded
@@ -245,11 +247,11 @@ export const SpawnForm = memo(function SpawnForm({
   // Chat mode: drive Claude or Codex via its structured protocol and
   // show a chat view instead of a terminal. Remembered like the agent/model;
   // defaults ON when the user has never touched the toggle (only 'false' opts out).
-  const [chatMode, setChatMode] = useState(() => readDesktopFocusedDraft() || readDefaultChatMode())
+  const [chatMode, setChatMode] = useState(() => focusedOnly || readDesktopFocusedDraft() || readDefaultChatMode())
   // Focused sessions run directly in the project checkout instead of creating a
   // branch and worktree. Native desktop shells use the same spawn contract, and
   // full Hydra exposes it here so both surfaces create identical heads.
-  const [focused, setFocused] = useState(readDesktopFocusedDraft)
+  const [focused, setFocused] = useState(() => focusedOnly || readDesktopFocusedDraft())
   const [focusedFilesystemMode, setFocusedFilesystemMode] = useState(FocusedFilesystemMode.FocusedFilesystemEdit)
   const [focusedAllowCommits, setFocusedAllowCommits] = useState(false)
   // Per-head git-isolation override ('' = use the project's policy default, so the
