@@ -146,7 +146,10 @@ describe('Bash card summary comments', () => {
 })
 
 async function connectedComposer(): Promise<HTMLElement> {
-  const composer = await screen.findByRole('textbox')
+  // RichComposer is a production lazy chunk. Under the full parallel test run,
+  // transforming that chunk can exceed Testing Library's 1s default even
+  // though the websocket and editor mount normally.
+  const composer = await screen.findByRole('textbox', {}, { timeout: 5_000 })
   await waitFor(() => expect(composer).toHaveAttribute('contenteditable', 'true'))
   return composer
 }
