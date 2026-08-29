@@ -373,8 +373,11 @@ native Wayland/X11 validation.
 Desktop cold-start explicitly binds `127.0.0.1:0`; the assigned port exists only
 in the private ownership record. `mage buildDesktop` and `mage runDesktop`
 dispatch by host OS; on Linux they build the frontend and tagged shell, and Run
-uses the checkout-local development database while exercising this same
-random-port path. The bundled `__desktop-connect` command exposes this same
+uses the checkout-local development database and a worktree-specific daemon
+runtime namespace while exercising this same random-port path. The namespace
+isolates the socket, lock, PID, ownership metadata, listener record, and log, so
+running a development desktop cannot attach to or restart another Hydra daemon
+for the same OS user. The bundled `__desktop-connect` command exposes this same
 control-socket discovery/bootstrap operation to thin native shells without
 making the filesystem-protected endpoint protocol platform-UI-specific.
 

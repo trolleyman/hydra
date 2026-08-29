@@ -501,6 +501,21 @@ func useDevelopmentDatabase() error {
 	return nil
 }
 
+func useDevelopmentRuntime() error {
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if os.Getenv("HYDRA_RUNTIME_NAMESPACE") == "" {
+		namespace := "desktop-dev:" + projectRoot
+		if err := os.Setenv("HYDRA_RUNTIME_NAMESPACE", namespace); err != nil {
+			return errtrace.Wrap(err)
+		}
+		fmt.Printf("%sdev runtime:%s isolated for %s\n", colorDim, colorReset, displayPath(projectRoot))
+	}
+	return nil
+}
+
 func Run() error {
 	ensureToolsEnv()
 	if err := useDevelopmentDatabase(); err != nil {
@@ -605,6 +620,9 @@ func RunDesktop() error {
 	if err := useDevelopmentDatabase(); err != nil {
 		return errtrace.Wrap(err)
 	}
+	if err := useDevelopmentRuntime(); err != nil {
+		return errtrace.Wrap(err)
+	}
 	if err := BuildDesktop(); err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -612,7 +630,10 @@ func RunDesktop() error {
 	case "linux":
 		return errtrace.Wrap(runV(filepath.Join(".", "dist", "linux", "hydra-desktop")))
 	case "darwin":
-		return errtrace.Wrap(runV("open", "-W", filepath.Join("dist", "macos", "Hydra.app")))
+		// Execute the bundle binary so the checkout-local database and runtime
+		// namespace reach the app and its bundled backend. LaunchServices does not
+		// reliably preserve a terminal process's environment.
+		return errtrace.Wrap(runV(filepath.Join(".", "dist", "macos", "Hydra.app", "Contents", "MacOS", "Hydra")))
 	case "windows":
 		targetRuntime := "win-x64"
 		if runtime.GOARCH == "arm64" {

@@ -4,6 +4,7 @@
 package daemon
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,14 +12,28 @@ import (
 	"braces.dev/errtrace"
 )
 
+const runtimeNamespaceEnv = "HYDRA_RUNTIME_NAMESPACE"
+
 // runtimeDir returns a per-user directory for hydra runtime files (the control
 // socket, lock, daemon log). It prefers XDG_RUNTIME_DIR, then TMPDIR, then /tmp.
 func runtimeDir() string {
 	if rt := os.Getenv("XDG_RUNTIME_DIR"); rt != "" {
-		return filepath.Join(rt, "hydra")
+		return namespacedRuntimeDir(filepath.Join(rt, "hydra"))
 	}
 	base := os.TempDir()
-	return filepath.Join(base, fmt.Sprintf("hydra-%d", os.Getuid()))
+	return namespacedRuntimeDir(filepath.Join(base, fmt.Sprintf("hydra-%d", os.Getuid())))
+}
+
+// namespacedRuntimeDir gives development and test instances their own complete
+// daemon control plane. Hashing the caller-supplied namespace keeps it opaque
+// and prevents path separators or traversal from escaping the runtime directory.
+func namespacedRuntimeDir(base string) string {
+	namespace := os.Getenv(runtimeNamespaceEnv)
+	if namespace == "" {
+		return base
+	}
+	sum := sha256.Sum256([]byte(namespace))
+	return filepath.Join(base, fmt.Sprintf("instance-%x", sum[:8]))
 }
 
 // ensureRuntimeDir creates the runtime dir with 0700 perms and returns it.

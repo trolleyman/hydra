@@ -236,8 +236,13 @@ What remains, because each does a genuinely different job:
 - `mage buildDesktop` / `mage runDesktop` - dispatch to the native desktop app
   for the host OS: GTK/WebKitGTK on Linux, AppKit/WKWebView on macOS, and Windows
   Forms/WebView2 on Windows. Run uses the same checkout-local development
-  database. A desktop-started backend asks the OS for a free loopback port and
-  publishes the result; it does not depend on port 26600 being available.
+  database and a worktree-specific daemon runtime namespace (socket, lock, PID,
+  ownership metadata, listener record, and log). It can therefore run beside an
+  installed or development Hydra daemon without attaching to it, restarting it,
+  or resuming its heads. On macOS the development target executes the app bundle
+  binary directly so this environment reaches the bundled backend. A
+  desktop-started backend asks the OS for a free loopback port and publishes the
+  result; it does not depend on port 26600 being available.
   Windows packaging takes its required PortableGit directory from
   `HYDRA_PORTABLE_GIT`. `mage buildDesktopLinux`, `buildDesktopMac`, and
   `buildDesktopWindows` select a platform explicitly; `buildDesktopAll` is the
