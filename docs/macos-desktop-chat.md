@@ -11,6 +11,8 @@ it becomes an architectural commitment.
 The macOS sandbox itself is covered by [macos-support.md](macos-support.md).
 Structured provider chat is covered by [chat-mode.md](chat-mode.md). This plan
 builds on both and does not replace either.
+The corresponding packaging and lifecycle plan for a standalone Linux app is
+[linux-desktop.md](linux-desktop.md).
 
 ## Shared implementation status
 

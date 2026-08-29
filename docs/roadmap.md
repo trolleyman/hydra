@@ -311,9 +311,11 @@ before starting. Grouped by area.
   macOS, Windows, and Linux app branches; native webview shells, service
   ownership, notifications, packaging, the first-message draft flow, and the
   dedicated chrome-free route remain.
-  See [macos-desktop-chat.md](macos-desktop-chat.md) for the agreed behavior,
-  sandbox invariants and staged implementation plan. Depends on closing the
-  security-critical gaps in [macos-support.md](macos-support.md).
+  See [macos-desktop-chat.md](macos-desktop-chat.md) for the agreed behavior and
+  macOS implementation plan, and [linux-desktop.md](linux-desktop.md) for the
+  standalone Linux packaging, lifecycle, and distribution plan. macOS depends
+  on closing the security-critical gaps in
+  [macos-support.md](macos-support.md).
 
 - [ ] **Mic / voice input.** Dictation button in the composer like the Claude app.
 
