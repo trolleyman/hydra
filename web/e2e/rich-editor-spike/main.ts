@@ -36,6 +36,9 @@ const api = {
     editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, to)))
     editor.view.focus()
   },
+  setCodeLanguage(language: string) {
+    editor.commands.updateAttributes('codeBlock', { language: language || null })
+  },
   snapshot() {
     const selection = window.getSelection()
     const anchor = selection?.anchorNode

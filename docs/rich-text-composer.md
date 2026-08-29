@@ -96,10 +96,10 @@ Completed 2026-08-29:
   commit/file chips stay within chat's existing 21px line box. Real-Chromium
   assertions guard both heights so tokenization cannot make surrounding prose
   jump vertically.
-- Added production code-block language selection without adding a formatting
-  header. A compact selector appears in the existing composer footer only while
-  the caret is inside a fenced code block, and updates that block's Markdown
-  info string.
+- Added code-block language selection without adding a formatting header. Each
+  fenced block owns a compact selector in its top-right corner; changing it
+  updates the Markdown info string and live Prism decorations in the editable
+  code. The shared highlighter keeps editable and rendered token colours aligned.
 - Added the composer-to-message handoff. Immediate and queued sends capture the
   composer's screen position and animate the optimistic user bubble from it;
   reduced-motion users get an instant handoff. The daemon echo settles the same
@@ -108,6 +108,14 @@ Completed 2026-08-29:
   Markdown request boundary, per-project drafts, large-paste/file workflow,
   combined prompt/attachment history, resizing and submit shortcuts while
   gaining the same marks, inline code, blocks and tables as production chat.
+- Fixed the follow-up production polish: the Settings lab now mounts instead of
+  waiting on its own editor callback, outer document margins no longer move the
+  first composer line, an empty code capsule has a visible overlaid minimum size
+  without reserving layout width, and provider-assigned echo ids reconcile with
+  the existing optimistic user bubble by text fallback.
+- Added `| ` at the start of an otherwise empty paragraph as a two-column table
+  shortcut. It creates a header row plus one body row and places the selection
+  in the first header cell; pipes elsewhere remain literal.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -394,8 +402,9 @@ token seeds its language. Code blocks:
 - Unwrap when empty and Backspace is pressed at its start.
 - Offer "Attach as file" for a paste over the large-paste threshold.
 
-The language picker is built in the Settings lab. Production code-block polish
-still needs syntax highlighting, indentation and explicit exit/unwrap handling.
+The language picker and live syntax highlighting are built in both production
+composers and the Settings lab. Indentation and explicit exit/unwrap handling
+remain follow-up code-block polish.
 
 ## Links and later extensions
 

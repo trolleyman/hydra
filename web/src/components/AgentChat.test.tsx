@@ -7,6 +7,16 @@ import { useAgentStore } from '../stores/agentStore'
 import { formatBashForDisplay, leadingBashComment } from '../lib/bashFormat'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 import { editorForRichComposer } from '../lib/rich-editor/mountedEditors'
+import { optimisticEchoIndex } from '../lib/optimisticEcho'
+
+describe('optimistic user echo reconciliation', () => {
+  const pending = [{ clientId: 'client-send-id', text: 'same message' }]
+
+  it('prefers the client send id and falls back when a provider returns its own message id', () => {
+    expect(optimisticEchoIndex(pending, 'client-send-id', 'same message')).toBe(0)
+    expect(optimisticEchoIndex(pending, 'provider-transcript-id', 'same message')).toBe(0)
+  })
+})
 
 // The chat composer turns a pasted image into an attachment chip and (with the
 // paste-markers preference on) a "[filename]" marker in the text. Both mutations

@@ -7,6 +7,8 @@ import StarterKit from '@tiptap/starter-kit'
 import { Attachment } from './Attachment'
 import type { AttachmentRegistry } from './AttachmentRegistry'
 import { InlineCode, InlineCodeEditing } from './InlineCode'
+import { HighlightedCodeBlock } from './CodeBlock'
+import { TableShortcut } from './TableShortcut'
 
 // Hydra deliberately supports *italic* as a typing convenience but not
 // _italic_. Underscores are too common in identifiers, paths and agent output.
@@ -16,10 +18,11 @@ const ConservativeItalic = Italic.extend({
   },
 })
 
-export function createRichEditorExtensions(attachmentRegistry?: AttachmentRegistry) {
+export function createRichEditorExtensions(attachmentRegistry?: AttachmentRegistry, interactiveNodeViews = false) {
   return [
   StarterKit.configure({
     code: false,
+    codeBlock: false,
     heading: { levels: [1, 2, 3] },
     horizontalRule: false,
     italic: false,
@@ -29,6 +32,8 @@ export function createRichEditorExtensions(attachmentRegistry?: AttachmentRegist
   TaskList,
   TaskItem.configure({ nested: true }),
   TableKit.configure({ table: { resizable: false } }),
+  HighlightedCodeBlock.configure({ languagePicker: interactiveNodeViews }),
+  TableShortcut,
   Attachment.configure({ registry: attachmentRegistry }),
   InlineCode,
   InlineCodeEditing,

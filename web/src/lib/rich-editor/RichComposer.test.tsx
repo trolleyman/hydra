@@ -119,4 +119,16 @@ describe('RichComposer', () => {
     })
     await waitFor(() => expect(changed).toHaveBeenLastCalledWith('[label](https://example.com/docs)'))
   })
+
+  it('renders the language picker inside a code block and applies highlighting', async () => {
+    const ref = createRef<RichComposerHandle>()
+    const view = render(<RichComposer ref={ref} value={'```\nconst answer = 1\n```'} onChange={() => {}} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+
+    fireEvent.change(view.getByRole('combobox', { name: 'Code block language' }), {
+      target: { value: 'typescript' },
+    })
+    await waitFor(() => expect(view.container.querySelector('.rich-code-block .token.keyword')).toHaveTextContent('const'))
+    expect(ref.current!.editor!.getAttributes('codeBlock').language).toBe('typescript')
+  })
 })

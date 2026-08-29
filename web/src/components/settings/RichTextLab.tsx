@@ -71,8 +71,6 @@ export function RichTextLab() {
   // Reading it here makes that relationship explicit to the hooks linter.
   void revision
 
-  if (!editor) return <div className="py-8 text-xs text-gray-500">Loading rich text editor...</div>
-
   function updateFromOldComposer(value: string) {
     setCurrentMarkdown(value)
   }
@@ -99,6 +97,7 @@ export function RichTextLab() {
       >
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-white/10 dark:bg-gray-800">
           <div className="flex flex-wrap items-center gap-0.5 border-b border-gray-200 px-2 py-1.5 dark:border-white/10">
+            {editor ? <>
             <ToolbarButton label="Undo" onClick={() => editor.chain().focus().undo().run()}><Undo2 className="h-4 w-4" /></ToolbarButton>
             <ToolbarButton label="Redo" onClick={() => editor.chain().focus().redo().run()}><Redo2 className="h-4 w-4" /></ToolbarButton>
             <span className="mx-1 h-5 w-px bg-gray-200 dark:bg-white/10" />
@@ -148,6 +147,7 @@ export function RichTextLab() {
                 event.target.value = ''
               }}
             />
+            </> : <span className="px-2 py-1 text-xs text-gray-500">Loading editor...</span>}
           </div>
           <RichComposer
             ref={richComposerRef}

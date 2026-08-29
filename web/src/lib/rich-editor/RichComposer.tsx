@@ -83,7 +83,7 @@ export const RichComposer = forwardRef<RichComposerHandle, RichComposerProps>(fu
     : undefined
 
   const editor: Editor | null = useEditor({
-    extensions: createRichEditorExtensions(attachmentRegistry),
+    extensions: createRichEditorExtensions(attachmentRegistry, true),
     content: restoredDocument ?? value,
     contentType: restoredDocument ? 'json' : 'markdown',
     immediatelyRender: false,

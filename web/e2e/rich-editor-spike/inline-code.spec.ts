@@ -37,6 +37,7 @@ declare global {
     richEditorSpike: {
       reset: (content: Record<string, unknown>) => void
       select: (from: number, to?: number) => void
+      setCodeLanguage: (language: string) => void
       snapshot: () => SpikeSnapshot
     }
   }
@@ -102,8 +103,20 @@ test('Left traverses the same positions in reverse', async ({ page }) => {
 test('backtick inserts, accepts text, and exits an inline code node', async ({ page }) => {
   await reset(page, paragraph(text('before ')))
   await select(page, 8)
+  const beforeX = await page.locator('[data-rich-editor-spike] p').evaluate((element) => {
+    const range = document.createRange()
+    const textNode = element.firstChild!
+    const end = textNode.textContent?.length ?? 0
+    range.setStart(textNode, end)
+    range.setEnd(textNode, end)
+    return range.getBoundingClientRect().right
+  })
   await page.keyboard.type('`')
   expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('before '), code()), from: 9, parent: 'inlineCode' })
+  const emptyCodeX = await page.locator('code[data-inline-code]').evaluate((element) => element.getBoundingClientRect().left)
+  // Chrome's text-range edge and an inline element edge differ by one device
+  // pixel, but opening the zero-width node must not reserve capsule width.
+  expect(Math.abs(emptyCodeX - beforeX)).toBeLessThanOrEqual(1.1)
 
   await page.keyboard.type('foo')
   expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('before '), code('foo')), from: 12, parent: 'inlineCode' })
@@ -122,6 +135,34 @@ test('three backticks open a code block', async ({ page }) => {
   expect((state.doc.content as Record<string, unknown>[])[0]).toEqual({
     type: 'codeBlock',
     attrs: { language: null },
+  })
+})
+
+test('a code block highlights its selected language', async ({ page }) => {
+  await reset(page, paragraph())
+  await select(page, 1)
+  await page.keyboard.type('```')
+  await page.keyboard.type('const answer = 1')
+  await page.evaluate(() => window.richEditorSpike.setCodeLanguage('typescript'))
+  const keyword = page.locator('[data-rich-editor-spike] .token.keyword')
+  await expect(keyword, await page.locator('[data-rich-editor-spike]').innerHTML()).toHaveText('const')
+  expect(((await snapshot(page)).doc.content as Record<string, unknown>[])[0]).toMatchObject({
+    type: 'codeBlock', attrs: { language: 'typescript' },
+  })
+})
+
+test('pipe-space at the start of a line opens a two-column table', async ({ page }) => {
+  await reset(page, paragraph())
+  await select(page, 1)
+  await page.keyboard.type('| ')
+  const state = await snapshot(page)
+  expect(state).toMatchObject({ parent: 'paragraph', from: 4 })
+  expect((state.doc.content as Record<string, unknown>[])[0]).toMatchObject({
+    type: 'table',
+    content: [
+      { type: 'tableRow', content: [{ type: 'tableHeader' }, { type: 'tableHeader' }] },
+      { type: 'tableRow', content: [{ type: 'tableCell' }, { type: 'tableCell' }] },
+    ],
   })
 })
 

@@ -75,10 +75,10 @@ import { HighlightedTextarea } from './HighlightedTextarea'
 import type { RichComposerHandle, RichComposerKeyContext } from '../lib/rich-editor/RichComposer'
 import { AttachmentRegistry } from '../lib/rich-editor/AttachmentRegistry'
 import { restoreAttachment, type ComposerAttachment } from '../lib/rich-editor/Attachment'
-import { CODE_LANGUAGES } from '../lib/rich-editor/codeLanguages'
 import { applyEdit, enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
+import { optimisticEchoIndex } from '../lib/optimisticEcho'
 import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
@@ -7062,10 +7062,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const richComposerRef = useRef<RichComposerHandle>(null)
   const richComposerHostRef = useRef<HTMLDivElement>(null)
-  const [activeCodeBlockLanguage, setActiveCodeBlockLanguage] = useState<string | null>(null)
-  const syncActiveCodeBlock = useCallback((editor: RichComposerHandle['editor']) => {
-    setActiveCodeBlockLanguage(editor?.isActive('codeBlock') ? String(editor.getAttributes('codeBlock').language ?? '') : null)
-  }, [])
   const focusComposer = useCallback((position: 'start' | 'end' | number = 'end') => {
     if (inputRef.current.startsWith('!')) {
       const textarea = textareaRef.current
@@ -8202,8 +8198,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // confirm that copy (clear its sending flag) instead of rendering a
       // duplicate. The echo can arrive after the turn's response, so relying on
       // it for placement would put the user message below its own reply.
-      const oi = optimisticTextsRef.current.findIndex((pending) =>
-        (clientId !== '' && pending.clientId === clientId) || (clientId === '' && pending.text === text))
+      const oi = optimisticEchoIndex(optimisticTextsRef.current, clientId, text)
+      // Some providers echo a transcript/message UUID rather than the client
+      // send UUID. Fall back to the pending text in that case; without this the
+      // acknowledged turn is appended beside its optimistic twin.
       if (oi >= 0) {
         markTurnStart()
         const optimisticText = optimisticTextsRef.current[oi].text
@@ -8212,7 +8210,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           let j = -1
           for (let k = prev.length - 1; k >= 0; k--) {
             const it = prev[k]
-            if (it.kind === 'user' && it.sending && (clientId ? it.clientId === clientId : it.text === optimisticText)) {
+            if (it.kind === 'user' && it.sending
+              && ((clientId !== '' && it.clientId === clientId) || it.text === optimisticText)) {
               j = k
               break
             }
@@ -11252,9 +11251,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     }}
                     onEditor={(editor) => {
                       if (editor) syncAttachmentsIntoDocument(editor)
-                      syncActiveCodeBlock(editor)
                     }}
-                    onSelectionChange={syncActiveCodeBlock}
                     attachmentRegistry={attachmentRegistry}
                     onChange={handleRichInputChange}
                     onKeyDown={onRichComposerKeyDown}
@@ -11285,21 +11282,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   <Plus className="w-4 h-4" />
                 </button>
               </Tooltip>
-              {activeCodeBlockLanguage !== null && (
-                <select
-                  aria-label="Code block language"
-                  value={activeCodeBlockLanguage}
-                  onChange={(event) => {
-                    const editor = richComposerRef.current?.editor
-                    if (!editor) return
-                    editor.commands.updateAttributes('codeBlock', { language: event.target.value || null })
-                    syncActiveCodeBlock(editor)
-                  }}
-                  className="h-7 rounded-md border border-stone-200 bg-white px-1.5 text-2xs text-stone-600 dark:border-white/10 dark:bg-[#30302e] dark:text-stone-300"
-                >
-                  {CODE_LANGUAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              )}
               {/* This group holds three runs of text at three different sizes -
                   "Enter to queue" at 10px, the context percentage at 11px, the
                   model name at 12px - plus two icon buttons. Plain items-center
