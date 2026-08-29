@@ -349,7 +349,7 @@ func (s *Server) autoPublish(ctx context.Context, projectRoot string, head heads
 		}
 	} else {
 		draft := true
-		if _, fail := s.publishHead(ctx, projectRoot, head, publishOverrides{Draft: &draft}, false); fail != nil {
+		if _, fail := s.publishHead(ctx, projectRoot, head, publishOverrides{Draft: &draft}); fail != nil {
 			_ = s.DB.SetPublishWhenGreen(head.ID, false, "")
 			log.Printf("warn: auto-publish for %s failed (publish-when-green disarmed): %s", head.ID, fail.detail)
 		}
