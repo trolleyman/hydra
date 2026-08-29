@@ -79,6 +79,7 @@ import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
+import { CommitCard, CommitStats, COMMIT_CARD_WIDTH } from './CommitCard'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
@@ -154,7 +155,7 @@ interface ChatProps {
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
 // One commit dragged in by a merge, shown in the merge chip's expanded list.
-interface MergedCommit { sha: string; shortSha: string; subject: string }
+interface MergedCommit { sha: string; shortSha: string; subject: string; additions?: number; deletions?: number }
 
 // mergeFieldsFromPayload pulls the merge annotation off a commit_created payload
 // (see chat.annotateMerge). Absent on ordinary commits and on merges recorded
@@ -172,6 +173,8 @@ function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitCh
       sha,
       shortSha: typeof m.short_sha === 'string' ? m.short_sha : sha.slice(0, 7),
       subject: typeof m.subject === 'string' ? m.subject : '',
+      additions: typeof m.additions === 'number' ? m.additions : undefined,
+      deletions: typeof m.deletions === 'number' ? m.deletions : undefined,
     })
   }
   const mergedCount = typeof payload.merged_count === 'number' ? payload.merged_count : merged.length
@@ -240,6 +243,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
               <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
               <span className="truncate optical-center">{m.subject}</span>
+              <CommitStats additions={m.additions} deletions={m.deletions} />
             </div>
           ))}
           {shown < count && (
@@ -343,7 +347,7 @@ type ChatItem =
   // `seq` is the source event's log sequence - the tie-break when two commits
   // share a `ts`, so the chip list has one total order no matter what order the
   // pages that produced it arrived in.
-  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[]; mergedRef?: string }
+  | { kind: 'commit'; id: number; sha: string; shortSha: string; subject: string; authorName?: string; commitTimestamp?: string; additions?: number; deletions?: number; ts: number; seq?: number; noEntrance?: boolean; isMerge?: boolean; mergedCount?: number; merged?: MergedCommit[]; mergedRef?: string }
 
 // A sub-agent (Claude Task tool) run, assembled from its sidechain events.
 // Keyed by agentId in the `subagents` map (a live line that carries only a
@@ -443,6 +447,7 @@ interface PendingSend {
   clientId: string
   text: string
   queued: boolean
+  origin?: string
 }
 
 // Minimal shapes of the stream-json events the reducer consumes. Everything
@@ -1906,6 +1911,18 @@ const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
     label: 'Sent by Hydra',
     why: 'Hydra sent this on your behalf rather than you typing it.',
   },
+}
+
+function automatedOrigin(origin?: string): { label: string; why: string } | null {
+  if (!origin) return null
+  if (origin.startsWith('agent:')) {
+    const id = origin.slice('agent:'.length)
+    return {
+      label: `Sent by agent ${id}`,
+      why: `Hydra agent ${id} sent this through the project-scoped collaboration tool. The message is attributed and subject to Hydra's conversation limits.`,
+    }
+  }
+  return AUTOMATED_ORIGIN[origin] ?? AUTOMATED_ORIGIN.unknown
 }
 
 // Quiet code/output panels inside tool cards.
@@ -5886,7 +5903,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
   if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
-  const auto = origin ? AUTOMATED_ORIGIN[origin] ?? AUTOMATED_ORIGIN.unknown : null
+  const auto = automatedOrigin(origin)
   return (
     <div className="flex flex-col items-end gap-1">
       {/* An automated turn is still YOUR side of the conversation - it acts on
@@ -7940,17 +7957,17 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // any queued bubble the server still lists, and add server-queued messages
     // we don't have (on reconnect, local pending was reset, so this restores the
     // whole queue - item 21's survive-navigation guarantee).
-    const reconcileQueue = (messages: { id?: string; content?: unknown }[]) => {
+    const reconcileQueue = (messages: { id?: string; content?: unknown; origin?: string }[]) => {
       const server = messages
-        .filter((m): m is { id: string; content?: unknown } => typeof m.id === 'string')
-        .map((m) => ({ clientId: m.id, text: contentText(m.content) }))
+        .filter((m): m is { id: string; content?: unknown; origin?: string } => typeof m.id === 'string')
+        .map((m) => ({ clientId: m.id, text: contentText(m.content), origin: m.origin }))
       const serverIds = new Set(server.map((s) => s.clientId))
       setPendingSends((prev) => {
         const kept = prev.filter((p) => !p.queued || serverIds.has(p.clientId))
         const keptIds = new Set(kept.map((p) => p.clientId))
         const added = server
           .filter((s) => !keptIds.has(s.clientId))
-          .map((s) => ({ id: sendSeqRef.current++, clientId: s.clientId, text: s.text, queued: true }))
+          .map((s) => ({ id: sendSeqRef.current++, clientId: s.clientId, text: s.text, queued: true, origin: s.origin }))
         return [...kept, ...added]
       })
     }
@@ -8549,6 +8566,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         kind: 'commit', id: st.nextId++, sha,
         shortSha: typeof payload.short_sha === 'string' ? payload.short_sha : sha.slice(0, 7),
         subject: typeof payload.subject === 'string' ? payload.subject : 'Commit',
+        authorName: typeof payload.author_name === 'string' ? payload.author_name : undefined,
+        commitTimestamp: typeof payload.timestamp === 'string' ? payload.timestamp : event.timestamp,
+        additions: typeof payload.additions === 'number' ? payload.additions : undefined,
+        deletions: typeof payload.deletions === 'number' ? payload.deletions : undefined,
         ts: Date.parse(event.timestamp) || Date.now(),
         seq: Number.isFinite(event.seq) ? event.seq : undefined,
         noEntrance: !live || undefined,
@@ -10378,23 +10399,28 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         const activate = () => onSelectCommit?.(item.sha)
         return (
           <div className="flex justify-center">
-            <div
-              role={clickable ? 'button' : undefined}
-              tabIndex={clickable ? 0 : undefined}
-              onClick={clickable ? activate : undefined}
-              onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
-              className={`${COMMIT_PILL} max-w-[90%] ${clickable ? COMMIT_HOVER : ''}`}
-              title={clickable ? `Committed ${item.shortSha} - click to show this commit's diff` : `Committed ${item.shortSha}`}
+            <Tooltip
+              variant="card"
+              pin={false}
+              width={COMMIT_CARD_WIDTH}
+              content={
+                <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
+              }
             >
-              <GitCommitHorizontal className="w-3 h-3 shrink-0" />
-              {/* The sha is monospace and the subject is not, so their line boxes
-                  differ and `items-center` would centre each one separately -
-                  putting two baselines in a row three words long. optical-center
-                  trims each label to its own cap-to-baseline ink, which is what
-                  then gets centred (see CLAUDE.md, "Labels beside icons"). */}
-              <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
-              <span className="truncate optical-center">{item.subject}</span>
-            </div>
+              <div
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onClick={clickable ? activate : undefined}
+                onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
+                className={`${COMMIT_PILL} max-w-full ${clickable ? COMMIT_HOVER : ''}`}
+              >
+                <GitCommitHorizontal className="w-3 h-3 shrink-0" />
+                {/* The sha is monospace and the subject is not, so their line boxes
+                    differ and `items-center` would centre each one separately. */}
+                <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
+                <span className="truncate optical-center">{item.subject}</span>
+              </div>
+            </Tooltip>
           </div>
         )
       }
@@ -10848,7 +10874,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       is sent (a real user bubble) - and rendered the same way, so
                       image thumbnails / attachment chips show here too, not raw
                       upload paths (dimmed while it waits). */}
-                  <ChatUserMessage text={p.text} dimmed projectId={projectId} linkCtx={chatLinkCtx} />
+                  <ChatUserMessage text={p.text} dimmed origin={p.origin} projectId={projectId} linkCtx={chatLinkCtx} />
                   {/* Discard button (item 52): drops the queued message from the
                       server queue. A floating chip overhanging the bubble's
                       top-right corner (revealed on hover so the resting stack

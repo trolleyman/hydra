@@ -62,6 +62,13 @@ const (
 	Stdout ArtifactLogLineStream = "stdout"
 )
 
+// Defines values for ArtifactScriptAutoRun.
+const (
+	ArtifactScriptAutoRunAlways  ArtifactScriptAutoRun = "always"
+	ArtifactScriptAutoRunNever   ArtifactScriptAutoRun = "never"
+	ArtifactScriptAutoRunSettled ArtifactScriptAutoRun = "settled"
+)
+
 // Defines values for ArtifactSetStatus.
 const (
 	ArtifactSetStatusError      ArtifactSetStatus = "error"
@@ -468,6 +475,13 @@ const (
 	TestCasePassed  TestCaseStatus = "passed"
 	TestCaseSkipped TestCaseStatus = "skipped"
 	TestCaseWarning TestCaseStatus = "warning"
+)
+
+// Defines values for TestScriptAutoRun.
+const (
+	TestScriptAutoRunAlways  TestScriptAutoRun = "always"
+	TestScriptAutoRunNever   TestScriptAutoRun = "never"
+	TestScriptAutoRunSettled TestScriptAutoRun = "settled"
 )
 
 // Defines values for TestStatus.
@@ -883,6 +897,9 @@ type ArtifactLogResponse struct {
 
 // ArtifactScript A per-project script that renders visual artifacts (e.g. screenshots) of a checkout, shown side-by-side in the diff viewer
 type ArtifactScript struct {
+	// AutoRun When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
+	AutoRun *ArtifactScriptAutoRun `json:"auto_run,omitempty"`
+
 	// CleanIgnored Also delete git-ignored files (e.g. node_modules) before each run - a pristine checkout (git clean -fdx) instead of the default that keeps caches warm (-fd). Slower; only if stale ignored output can leak between commits (default false)
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
 
@@ -904,6 +921,9 @@ type ArtifactScript struct {
 	// UnsafeHost Run on the host with NO sandbox - full access to the machine and credentials (default false)
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
 }
+
+// ArtifactScriptAutoRun When missing generations start automatically - always (default), only after the agent settles, or never. Cached output still displays and Refresh always runs.
+type ArtifactScriptAutoRun string
 
 // ArtifactSet defines model for ArtifactSet.
 type ArtifactSet struct {
@@ -1160,11 +1180,16 @@ type ChatClientMessageType string
 
 // ChatCommitCreatedPayload A commit the reconciler observed. Sequenced in the same log as the tool output that produced it, so the chip cannot render before its cause.
 type ChatCommitCreatedPayload struct {
+	// Additions Number of lines added by the commit relative to its first parent
+	Additions   int    `json:"additions,omitempty"`
 	AuthorEmail string `json:"author_email,omitempty"`
 	AuthorName  string `json:"author_name,omitempty"`
 
 	// CausalItemId The tool call that produced it, when one is known.
-	CausalItemId  string             `json:"causal_item_id,omitempty"`
+	CausalItemId string `json:"causal_item_id,omitempty"`
+
+	// Deletions Number of lines removed by the commit relative to its first parent
+	Deletions     int                `json:"deletions,omitempty"`
 	Head          string             `json:"head,omitempty"`
 	IsMerge       bool               `json:"is_merge,omitempty"`
 	MergedCommits []ChatMergedCommit `json:"merged_commits,omitempty"`
@@ -1295,11 +1320,16 @@ type ChatItemDeltaPayload struct {
 
 // ChatMergedCommit One commit a merge brought in, previewed in the merge chip.
 type ChatMergedCommit struct {
+	// Additions Number of lines added by the commit relative to its first parent
+	Additions  int    `json:"additions,omitempty"`
 	AuthorName string `json:"author_name,omitempty"`
-	Sha        string `json:"sha,omitempty"`
-	ShortSha   string `json:"short_sha,omitempty"`
-	Subject    string `json:"subject,omitempty"`
-	Timestamp  string `json:"timestamp,omitempty"`
+
+	// Deletions Number of lines removed by the commit relative to its first parent
+	Deletions int    `json:"deletions,omitempty"`
+	Sha       string `json:"sha,omitempty"`
+	ShortSha  string `json:"short_sha,omitempty"`
+	Subject   string `json:"subject,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // ChatMessagesRetractedPayload A safety retry evicted blocks the provider had already streamed. The client must drop these ids or the flagged text lingers.
@@ -1428,13 +1458,19 @@ type ChatQueuedMessage struct {
 
 	// Id The client-generated id, used to reconcile the pending bubble.
 	Id string `json:"id"`
+
+	// Origin Why this message exists when the user did not type it.
+	Origin string `json:"origin,omitempty"`
 }
 
 // ChatQueuedMessagePayload A message the daemon is holding because a turn was running. It lives in the queue projection only; when it drains it becomes a durable user_message carrying the same id.
 type ChatQueuedMessagePayload struct {
 	Content json.RawMessage `json:"content,omitempty"`
 	Id      string          `json:"id,omitempty"`
-	Status  string          `json:"status,omitempty"`
+
+	// Origin Why this message exists when the user did not type it.
+	Origin string `json:"origin,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 // ChatQueuedState defines model for ChatQueuedState.
@@ -1720,8 +1756,13 @@ type CommitCreatedEventType string
 
 // CommitInfo defines model for CommitInfo.
 type CommitInfo struct {
+	// Additions Number of lines added by the commit relative to its first parent
+	Additions   int    `json:"additions"`
 	AuthorEmail string `json:"author_email"`
 	AuthorName  string `json:"author_name"`
+
+	// Deletions Number of lines removed by the commit relative to its first parent
+	Deletions int `json:"deletions"`
 
 	// Message Full commit message
 	Message string `json:"message"`
@@ -2507,6 +2548,9 @@ type PlanUpdatedEventType string
 
 // PolicyConfig Per-agent security-gate policy. The decision-capable gate can deny (or park for approval) tool calls even under skip-permissions.
 type PolicyConfig struct {
+	// AgentMessaging Allow this head to send attributed messages to other live heads in the same project. Agent discovery remains read-only and available when this is off. null = off (the default).
+	AgentMessaging *bool `json:"agent_messaging"`
+
 	// GateEnabled Enable the decision-capable gate (default true when unset).
 	GateEnabled *bool `json:"gate_enabled"`
 
@@ -3847,6 +3891,9 @@ type TestRunResult struct {
 
 // TestScript A per-project test-runner script whose pass/fail verdict gates the merge button ([tests.<name>] in config.toml, PLAN
 type TestScript struct {
+	// AutoRun When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
+	AutoRun *TestScriptAutoRun `json:"auto_run,omitempty"`
+
 	// CleanIgnored Also delete git-ignored files before each run (git clean -fdx instead of -fd); slower (default false)
 	CleanIgnored *bool `json:"clean_ignored,omitempty"`
 
@@ -3871,6 +3918,9 @@ type TestScript struct {
 	// UnsafeHost Run on the host with NO sandbox - runs the diffed ref's test code; only for trusted refs (default false)
 	UnsafeHost *bool `json:"unsafe_host,omitempty"`
 }
+
+// TestScriptAutoRun When missing runs start automatically - always (default), only after the agent settles, or never. Cached verdicts still display and Refresh always runs.
+type TestScriptAutoRun string
 
 // TestStatus running = a run is in flight; passing/failing/errored = settled verdict; stale = a cached verdict exists but predates the current commit; none = no tests configured or never run. (A per-runner TestRunResult only ever uses running/passing/failing/errored; stale/none are head-summary states.)
 type TestStatus string

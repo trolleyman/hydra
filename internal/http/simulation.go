@@ -2085,6 +2085,8 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
 				Timestamp:   "2026-07-09T18:05:30Z",
+				Additions:   49,
+				Deletions:   9,
 			},
 			{
 				Sha:         "cafebabe0123456789abcdef0123456789abcdef",
@@ -2094,6 +2096,8 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
 				Timestamp:   "2026-07-09T18:01:30Z",
+				Additions:   34,
+				Deletions:   6,
 			},
 		}
 		api.WriteJSON(w, http.StatusOK, resp)
@@ -4805,6 +4809,7 @@ func handleSimCodexChatWS(conn *safeConn) {
 type simQueuedMsg struct {
 	ID      string          `json:"id"`
 	Content json.RawMessage `json:"content"`
+	Origin  string          `json:"origin,omitempty"`
 }
 
 // The sim's cross-connection chat message queue: a process-lifetime stand-in for
@@ -4854,7 +4859,7 @@ func sendSimQueueFrame(conn *safeConn, id string) {
 	// shape the schema forbids - an empty queue is [], never null.
 	msgs := make([]api.ChatQueuedMessage, 0, len(simQueueList(id)))
 	for _, m := range simQueueList(id) {
-		msgs = append(msgs, api.ChatQueuedMessage{Id: m.ID, Content: m.Content})
+		msgs = append(msgs, api.ChatQueuedMessage{Id: m.ID, Content: m.Content, Origin: m.Origin})
 	}
 	writeFrame(conn, api.ChatQueueFrame{Type: api.Queue, Messages: msgs})
 }

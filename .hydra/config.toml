@@ -190,6 +190,8 @@ allowed_hosts = ["cdn.playwright.dev", "storage.googleapis.com", "code.claude.co
 ##                a pristine checkout (git clean -fdx) instead of the default that keeps
 ##                dependency/build caches warm (-fd). Slower; set true only if stale
 ##                ignored output can leak between commits (default false).
+##   auto_run     "always" (default), "settled" (wait while agent works), or "never"
+##                (Refresh only). Cached artifacts still display in every mode.
 ##   strict       run the command under `set -eo pipefail` so a failing step aborts
 ##                and propagates instead of being swallowed (default true; set false
 ##                to run the command exactly as written).
@@ -345,6 +347,8 @@ ready_timeout_sec = 900
 ##   unsafe_host  run on the host with NO sandbox - runs the diffed ref's test code;
 ##                only for trusted refs (default false).
 ##   clean_ignored  also delete git-ignored files before each run (default false).
+##   auto_run     "always" (default), "settled" (wait while agent works), or "never"
+##                (Refresh only). Cached verdicts still display in every mode.
 ##   strict       run the command under `set -eo pipefail` (default true). Note: a
 ##                runner exiting non-zero because tests FAILED is a valid verdict,
 ##                not a strict abort - strict only governs the shell pipeline.

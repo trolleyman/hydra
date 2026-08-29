@@ -39,6 +39,10 @@ export type PolicyConfig = {
      */
     strict_mcp?: boolean | null;
     /**
+     * Allow this head to send attributed messages to other live heads in the same project. Agent discovery remains read-only and available when this is off. null = off (the default).
+     */
+    agent_messaging?: boolean | null;
+    /**
      * Extra tool names the gate treats as safe, extending its built-in known-tool set. Not edited by the Settings UI; carried in responses so a round-tripped save preserves a hand-edited value.
      */
     known_tools?: Array<string> | null;

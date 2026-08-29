@@ -120,7 +120,7 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 
 	// Initial snapshot. buildTestRunners triggers any needed runs, after which the
 	// subscription delivers their progress/log/settle.
-	if err := writeMsg(api.TestsSnapshotFrame{Type: api.TestsSnapshotFrameTypeSnapshot, Runners: s.buildTestRunners(projectID, mgr, runners, v)}); err != nil {
+	if err := writeMsg(api.TestsSnapshotFrame{Type: api.TestsSnapshotFrameTypeSnapshot, Runners: s.buildTestRunners(projectID, mgr, runners, v, headActivelyRunning(head), "")}); err != nil {
 		return
 	}
 
@@ -217,10 +217,21 @@ func (s *Server) streamTests(ctx context.Context, conn *safeConn, projectRoot, p
 
 // buildTestRunners runs (or returns the cached verdict for) each runner and maps
 // it into the API shape - the snapshot equivalent of GetAgentTests's loop.
-func (s *Server) buildTestRunners(projectID string, mgr *hydratests.Manager, runners []config.TestScript, v hydratests.Version) []api.TestRunResult {
+func (s *Server) buildTestRunners(projectID string, mgr *hydratests.Manager, runners []config.TestScript, v hydratests.Version, agentRunning bool, forceRunner string) []api.TestRunResult {
 	out := make([]api.TestRunResult, 0, len(runners))
 	for _, rspec := range runners {
-		rep, err := mgr.Get(rspec, v)
+		var rep hydratests.Report
+		var err error
+		if forceRunner == rspec.Name || shouldAutoRun(rspec.AutoRun, agentRunning) {
+			rep, err = mgr.Get(rspec, v)
+		} else if cached, ok, peekErr := mgr.Peek(rspec.Name, v); peekErr != nil {
+			err = peekErr
+		} else if ok {
+			rep = cached
+		} else {
+			out = append(out, api.TestRunResult{Name: rspec.Name, Status: api.TestStatusNone})
+			continue
+		}
 		if err != nil {
 			out = append(out, api.TestRunResult{Name: rspec.Name, Status: api.TestStatusErrored, Error: ptr(err.Error())})
 			continue

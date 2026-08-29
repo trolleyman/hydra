@@ -130,10 +130,10 @@ func (st *artifactPrefetchState) pruneTo(live map[string]struct{}) {
 func (p *artifactPlan) prefetch() {
 	for _, name := range p.names {
 		leftSpec, rightSpec := p.specsFor(name)
-		if leftSpec != nil {
+		if leftSpec != nil && shouldAutoRun(leftSpec.AutoRun, p.agentRunning) {
 			_, _ = p.mgr.Prefetch(*leftSpec, p.left)
 		}
-		if rightSpec != nil {
+		if rightSpec != nil && shouldAutoRun(rightSpec.AutoRun, p.agentRunning) {
 			_, _ = p.mgr.Prefetch(*rightSpec, p.right)
 		}
 	}

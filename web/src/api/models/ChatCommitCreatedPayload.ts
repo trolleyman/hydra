@@ -13,6 +13,14 @@ export type ChatCommitCreatedPayload = {
     author_name?: string;
     author_email?: string;
     timestamp?: string;
+    /**
+     * Number of lines added by the commit relative to its first parent
+     */
+    additions?: number;
+    /**
+     * Number of lines removed by the commit relative to its first parent
+     */
+    deletions?: number;
     head?: string;
     /**
      * The tool call that produced it, when one is known.
