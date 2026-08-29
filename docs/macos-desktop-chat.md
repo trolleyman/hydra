@@ -416,7 +416,9 @@ development `.app` builder, background-after-last-window behavior, and guarded
 Quit path are implemented. App-launched backends now publish a one-minute,
 single-use auth bootstrap credential in their private atomic readiness record;
 the first WKWebView redeems it for the shared HttpOnly cookie without exposing
-the persistent auth key. Both new and reused servers must now advertise the
+the persistent auth key. App-launched backends require this authentication for
+all TCP clients even when deploy configuration has no key; an ephemeral secret
+is generated in memory for that backend lifetime. Both new and reused servers must now advertise the
 same desktop protocol in their live status response; an absent or mismatched
 value is rejected before any window opens. Reused-daemon auth and stale
 ownership still need to

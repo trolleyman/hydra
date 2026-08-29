@@ -102,6 +102,19 @@ go build -tags hydra_desktop -o hydra-desktop ./cmd/hydra-desktop
 ./hydra-desktop -project /path/to/project
 ```
 
+For normal development, build or build-and-run the native app for the current
+operating system:
+
+```bash
+mage buildDesktop
+mage runDesktop
+```
+
+This uses the checkout-local development database and an OS-assigned loopback
+port when running. Installed desktop builds continue to use the OS-standard
+global database. Windows builds additionally require `HYDRA_PORTABLE_GIT` to
+point at an extracted official PortableGit distribution.
+
 The separate build keeps the normal `hydra` CLI free of GTK/WebKit runtime
 dependencies. The project flag is optional; without it the app opens the global
 service in Hydra's built-in Chat project. `-url http://127.0.0.1:<port>` remains

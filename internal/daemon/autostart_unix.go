@@ -24,7 +24,14 @@ func EnsureRunning(ctx context.Context, projectRoot string) error {
 // Compatible CLI binaries attach to it instead of evicting it merely because
 // their executable stamps differ.
 func EnsureDesktopRunning(ctx context.Context, projectRoot string) error {
-	return errtrace.Wrap(ensureRunning(ctx, projectRoot, []string{"HYDRA_DESKTOP_SERVICE=1"}))
+	return errtrace.Wrap(ensureRunning(ctx, projectRoot, desktopDaemonEnv()))
+}
+
+func desktopDaemonEnv() []string {
+	return []string{
+		"HYDRA_DESKTOP_SERVICE=1",
+		"HYDRA_API_ADDR=127.0.0.1:0",
+	}
 }
 
 func ensureRunning(ctx context.Context, projectRoot string, extraEnv []string) error {

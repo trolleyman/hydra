@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -499,8 +500,24 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
+	desktopOwned := os.Getenv("HYDRA_DESKTOP_SERVICE") == "1" || os.Getenv(desktopReadyFileEnv) != ""
+	if desktopOwned {
+		// A native webview is authenticated through a one-time credential from the
+		// trusted control channel. Do not retain the ordinary localhost exemption:
+		// unrelated browsers and loopback applications must not inherit desktop
+		// access merely because they run on the same machine.
+		deployCfg.RequireLocalAuth = true
+		if deployCfg.AuthKey == "" {
+			deployCfg.AuthKey, err = config.GenerateAuthKey()
+			if err != nil {
+				return nil, errtrace.Wrap(fmt.Errorf("generate desktop daemon auth key: %w", err))
+			}
+		}
+	}
 	auth := httppkg.NewAuthenticator(deployCfg.AuthKey, deployCfg.RequireLocalAuth)
 	switch {
+	case desktopOwned:
+		log.Printf("Auth: desktop-owned TCP listener requires a control-channel bootstrap credential")
 	case auth.Enabled() && deployCfg.RequireLocalAuth:
 		log.Printf("Auth: every request (localhost included) requires the key in %s", paths.GetDeployConfigPath(projectRoot))
 	case auth.Enabled():

@@ -253,7 +253,9 @@ way to reject an unsuitable shell.
 Status: an app-launched protocol-2 backend now includes a one-minute,
 single-use auth bootstrap credential in its private atomic readiness record.
 The first WebView2 window places it only in the URL fragment and redeems it for
-the persistent profile's ordinary HttpOnly cookie. Both new and reused servers
+the persistent profile's ordinary HttpOnly cookie. App-launched backends require
+this authentication for all TCP clients even when deploy configuration has no
+key; an ephemeral secret is generated in memory for that backend lifetime. Both new and reused servers
 must now advertise the same desktop protocol in their live status response; an
 absent or mismatched value is rejected before a window opens. Reused-daemon auth still
 needs the portable Windows control endpoint from Phase 2; that port should

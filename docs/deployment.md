@@ -233,6 +233,13 @@ What remains, because each does a genuinely different job:
   the checkout's ignored `.hydra/local/db.sqlite3`, keeping development history
   isolated from the OS-standard user-global database used by installed CLI and
   desktop builds. Set `HYDRA_DB_PATH` to override that development location.
+- `mage buildDesktop` / `mage runDesktop` - dispatch to the native desktop app
+  for the host OS: GTK/WebKitGTK on Linux, AppKit/WKWebView on macOS, and Windows
+  Forms/WebView2 on Windows. Run uses the same checkout-local development
+  database. A desktop-started backend asks the OS for a free loopback port and
+  publishes the result; it does not depend on port 26600 being available.
+  Windows packaging takes its required PortableGit directory from
+  `HYDRA_PORTABLE_GIT`.
 - `mage devFast` - Vite HMR in front of the Go API. Hot-module-replacement is
   faster than any rebuild loop and is a different mechanism, not a duplicate.
 - `mage demo` - simulation mode. `runSimulationServer` (`internal/cli/server.go`)

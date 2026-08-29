@@ -486,8 +486,7 @@ func ensureToolsEnv() {
 	}
 }
 
-func Run() error {
-	ensureToolsEnv()
+func useDevelopmentDatabase() error {
 	projectRoot, err := paths.GetProjectRootFromCwd()
 	if err != nil {
 		return errtrace.Wrap(err)
@@ -499,10 +498,80 @@ func Run() error {
 		}
 		fmt.Printf("%sdev database:%s %s\n", colorDim, colorReset, displayPath(dbPath))
 	}
+	return nil
+}
+
+func Run() error {
+	ensureToolsEnv()
+	if err := useDevelopmentDatabase(); err != nil {
+		return errtrace.Wrap(err)
+	}
 	addGoBuildDeps()
 	args := append([]string{"run"}, goBuildTags(false)...)
 	args = append(args, "./", "server")
 	return errtrace.Wrap(runV("go", args...))
+}
+
+// BuildDesktop builds the native desktop application for the host platform.
+// Windows packaging requires HYDRA_PORTABLE_GIT to name an extracted official
+// PortableGit distribution of the matching architecture.
+func BuildDesktop() error {
+	switch runtime.GOOS {
+	case "linux":
+		addGoBuildDeps()
+		output := filepath.Join("dist", "linux", "hydra-desktop")
+		if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+			return errtrace.Wrap(err)
+		}
+		args := append([]string{"build"}, goBuildTags(false, "hydra_desktop")...)
+		args = append(args, "-o", output, "./cmd/hydra-desktop")
+		return errtrace.Wrap(runV("go", args...))
+	case "darwin":
+		return errtrace.Wrap(runV("bash", "desktop/macos/build-app.sh"))
+	case "windows":
+		portableGit := os.Getenv("HYDRA_PORTABLE_GIT")
+		if portableGit == "" {
+			return errtrace.Wrap(errors.New("set HYDRA_PORTABLE_GIT to an extracted official PortableGit directory"))
+		}
+		powerShell := "powershell"
+		if _, err := exec.LookPath("pwsh"); err == nil {
+			powerShell = "pwsh"
+		}
+		targetRuntime := "win-x64"
+		if runtime.GOARCH == "arm64" {
+			targetRuntime = "win-arm64"
+		}
+		return errtrace.Wrap(runV(powerShell, "-NoProfile", "-File", "desktop/windows/build-app.ps1",
+			"-Runtime", targetRuntime, "-PortableGitDirectory", portableGit))
+	default:
+		return errtrace.Wrap(fmt.Errorf("desktop builds are unsupported on %s", runtime.GOOS))
+	}
+}
+
+// RunDesktop builds and runs the native desktop application for the host
+// platform with checkout-local database state.
+func RunDesktop() error {
+	ensureToolsEnv()
+	if err := useDevelopmentDatabase(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := BuildDesktop(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	switch runtime.GOOS {
+	case "linux":
+		return errtrace.Wrap(runV(filepath.Join(".", "dist", "linux", "hydra-desktop")))
+	case "darwin":
+		return errtrace.Wrap(runV("open", "-W", filepath.Join("dist", "macos", "Hydra.app")))
+	case "windows":
+		targetRuntime := "win-x64"
+		if runtime.GOARCH == "arm64" {
+			targetRuntime = "win-arm64"
+		}
+		return errtrace.Wrap(runV(filepath.Join("dist", "windows", targetRuntime, "Hydra", "Hydra.exe")))
+	default:
+		return errtrace.Wrap(fmt.Errorf("desktop apps are unsupported on %s", runtime.GOOS))
+	}
 }
 
 func Build() {

@@ -266,6 +266,34 @@ func TestDesktopBootstrapExpires(t *testing.T) {
 	}
 }
 
+func TestDesktopBootstrapAuthenticatesOtherwiseUntrustedLoopback(t *testing.T) {
+	auth := NewAuthenticator("ephemeral-desktop-key", true)
+	mux := http.NewServeMux()
+	auth.RegisterRoutes(mux)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, postJSON("/api/auth/desktop-bootstrap", "", `{}`))
+	var issued struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &issued)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, postJSON("/api/auth/desktop-redeem", "127.0.0.1:9", `{"token":"`+issued.Token+`"}`))
+	if w.Code != http.StatusOK || len(w.Result().Cookies()) != 1 {
+		t.Fatalf("desktop redemption did not establish a loopback credential: status=%d cookies=%d", w.Code, len(w.Result().Cookies()))
+	}
+
+	withoutCookie := req(http.MethodGet, "/api/projects", "127.0.0.1:9")
+	if auth.Authorized(withoutCookie) {
+		t.Fatal("desktop auth trusted an unrelated loopback client")
+	}
+	withCookie := req(http.MethodGet, "/api/projects", "127.0.0.1:9")
+	withCookie.AddCookie(w.Result().Cookies()[0])
+	if !auth.Authorized(withCookie) {
+		t.Fatal("redeemed desktop cookie did not authenticate loopback client")
+	}
+}
+
 func TestStatusReportsRequirement(t *testing.T) {
 	auth := NewAuthenticator("k", false)
 

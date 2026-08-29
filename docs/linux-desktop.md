@@ -350,7 +350,12 @@ native state location and transactionally imports retained project-local legacy
 stores. A desktop client now obtains a one-minute, single-use login credential
 over the filesystem-protected daemon socket, places it only in the URL fragment,
 and redeems it for the ordinary HttpOnly session cookie before routing starts.
-TCP clients cannot mint credentials and redemption consumes them. Multi-window
+TCP clients cannot mint credentials and redemption consumes them. A
+desktop-owned backend always removes the localhost trust exemption and creates
+an ephemeral auth secret when deploy configuration has none, so an unrelated
+browser or loopback application cannot use its API. Like any per-user Unix
+socket, this does not claim to exclude a hostile process already running as the
+same OS user. Multi-window
 behavior and the full shell comparison remain. The daemon's web endpoint is now
 a versioned JSON ownership record tied to the authoritative live daemon PID;
 stale records are ignored during startup, unsafe/non-loopback addresses and
@@ -365,6 +370,11 @@ keeps same-origin Hydra navigation embedded, opens clicked external HTTP(S)
 links with the system handler, and blocks cross-origin redirects and non-web
 schemes. Shared cookie/storage behavior and window-manager lifecycle still need
 native Wayland/X11 validation.
+Desktop cold-start explicitly binds `127.0.0.1:0`; the assigned port exists only
+in the private ownership record. `mage buildDesktop` and `mage runDesktop`
+dispatch by host OS; on Linux they build the frontend and tagged shell, and Run
+uses the checkout-local development database while exercising this same
+random-port path.
 
 ### Phase 2: add desktop window routes and lifecycle
 
