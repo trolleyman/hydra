@@ -47,7 +47,7 @@ import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 import { useAgentStore } from '../stores/agentStore'
 import { Markdown, type RepoLinkContext } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
-import { dropNoopCd, formatBashForDisplay, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
+import { dropNoopCd, formatBashForDisplay, leadingBashComment, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { FILE_BANNER, viewLineNumbers } from '../lib/fileViewCommand'
 import { buildOutputSpans, diagnosticSpans } from '../lib/buildOutput'
 import { isJsonOutput } from '../lib/jsonOutput'
@@ -3720,7 +3720,9 @@ const ToolCard = memo(function ToolCard({
       : ''
     : isBash && typeof input?.description === 'string'
       ? (input.description as string)
-      : ''
+      : isBash
+        ? leadingBashComment(command)
+        : ''
 
   // A shell script says a great deal about its own output. The constant `echo`s
   // an agent puts between its steps mark where each command's output begins, and
@@ -3843,8 +3845,9 @@ const ToolCard = memo(function ToolCard({
   const openRecipientChat = openSub && recipientId ? () => openSub(recipientId) : undefined
   const recipientName = recipientLabel || (messageTo ? messageTo.slice(0, 8) : 'agent')
 
-  // A Bash header shows the human description when the agent provided one (the
-  // script itself lives in the expanded card); a memory Read shows "memory
+  // A Bash header shows the human description when the agent provided one, or
+  // Codex's leading summary comment (the script itself lives in the expanded
+  // card); a memory Read shows "memory
   // <name>"; other tools show their primary argument, worktree-relative and
   // home-collapsed.
   const summarized = summarizeToolInput(input, item.name)
