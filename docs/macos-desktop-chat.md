@@ -1,6 +1,7 @@
 # Hydra for macOS and focused chat windows
 
-Status: **shared focused-session foundation built; native shells unbuilt.** This
+Status: **shared focused-session foundation and initial macOS shell built; native
+validation pending.** This
 document records the agreed product shape and staged implementation plan for
 packaging Hydra as a desktop app and adding a focused, directory-backed chat
 experience. The backend, API, and React work described in "Shared implementation
@@ -11,6 +12,9 @@ it becomes an architectural commitment.
 The macOS sandbox itself is covered by [macos-support.md](macos-support.md).
 Structured provider chat is covered by [chat-mode.md](chat-mode.md). This plan
 builds on both and does not replace either.
+The standalone Windows application is planned separately in
+[windows-desktop-chat.md](windows-desktop-chat.md); both plans branch from the
+same shared focused-session foundation.
 
 ## Shared implementation status
 
@@ -32,13 +36,22 @@ The cross-platform base now includes:
 - simulation fixtures for editable, read-only, actively working, and archived
   focused chats, including mutable permission controls for browser testing.
 
-This is the intended branch point for platform agents. Native app lifecycle,
-webview windows, service discovery/ownership, notification bridges, packaging,
-signing, and OS-specific sandbox completion are not part of this shared base.
+This is the intended branch point for platform agents. Native notification
+bridges, signing, and OS-specific sandbox completion are not part of this shared
+base.
 The immediate empty draft, separate chrome-free window route, history/project
 switcher, native close confirmation, and concurrent-editor warning also remain
 to be built. Today a focused head is created by submitting Hydra's existing
 spawn composer, then opens in the shared chat-only layout.
+
+The macOS branch now also contains an AppKit/WKWebView development shell under
+`desktop/macos`. It reuses a compatible server on the default loopback address
+or launches the bundled backend once on an OS-assigned port, using an atomic
+readiness record to discover the URL. Full and focused windows share WebKit
+state and one backend. The focused window currently opens the ordinary project
+composer with Focused/Edit selected; it does not yet provide the immediate
+untitled composer or chrome-free route. See `desktop/macos/README.md` for build
+and hardware validation instructions.
 
 ## Product in one sentence
 
@@ -396,6 +409,13 @@ for input without becoming a second session-management UI.
 - Add a developer-only unsigned `.app` build; defer signing/notarization until
   the runtime shape is stable.
 
+Status: the thin Swift/AppKit shell, shared multi-window WebKit configuration,
+existing-server probe, bundled-backend launch, OS-assigned port handshake,
+development `.app` builder, background-after-last-window behavior, and guarded
+Quit path are implemented. The build is ad-hoc signed rather than unsigned so
+the bundle is internally consistent. WebSocket, text-input, accessibility,
+notification, and lifecycle acceptance still require the development Mac.
+
 This phase makes no focused-session backend changes. It prevents a large product
 refactor from depending on an untested desktop wrapper.
 
@@ -462,6 +482,12 @@ history/project controls, switching behavior, and native close bridge remain.
 - Implement last-window, background-work and explicit-Quit behavior.
 - Add recovery UI for backend launch failure, incompatible versions and a stale
   ownership record.
+
+Status: New Full Window/New Focused Chat commands, one-process ownership,
+last-window persistence, incompatible-version refusal, backend-exit reporting,
+and active-session Quit confirmation are implemented in the initial shell.
+Frontmost-project tracking, menu-bar state, native notifications, close-window
+active-turn confirmation, and richer stale-ownership recovery remain.
 
 ### Phase 6: distribution
 

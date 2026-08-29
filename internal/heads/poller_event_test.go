@@ -9,6 +9,7 @@ import (
 	"github.com/trolleyman/hydra/internal/api"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/events"
+	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/paths"
 )
 
@@ -115,6 +116,77 @@ func TestPollerEventsOnlyOnRenderedChange(t *testing.T) {
 	pollJSONStatusOnce(store, root, deb, hub, nil)
 	if !hadAgentsEvent(sub) {
 		t.Fatal("running→needs_input transition did not emit agents_changed")
+	}
+}
+
+// TestPollerPendingApprovalWinsProviderStatus covers the Codex race where the
+// proxy parks an unknown host, then Codex's concurrent PreToolUse status hook
+// overwrites policy_approval with a newer "running" status. The request file is
+// the durable fact that needs an answer, so it must still drive needs_input and
+// an agents_changed event.
+func TestPollerPendingApprovalWinsProviderStatus(t *testing.T) {
+	root := t.TempDir()
+	store, err := db.Open(root)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	const id = "codex-head"
+	if err := store.UpsertAgent(&db.Agent{ID: id, ProjectPath: root, AgentType: "codex", SessionStatus: "running"}); err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	hub := events.NewHub()
+	sub := hub.Subscribe(root)
+	t.Cleanup(sub.Close)
+	deb := newUnreadDebouncer()
+	base := time.Date(2026, 8, 29, 18, 0, 0, 0, time.UTC)
+
+	// The provider's newer running write lands first in the DB.
+	writeAgentStatusJSON(t, root, id, api.Running, "PreToolUse", base.Add(2*time.Second).Format(time.RFC3339Nano))
+	pollJSONStatusOnce(store, root, deb, hub, nil)
+	_ = sub.Drain()
+
+	// The request was actually created earlier, matching the observed race.
+	dir := paths.GetApprovalsDirFromProjectRoot(root, id)
+	if err := gate.WriteRequest(dir, gate.Request{
+		ReqID: "egress-race", Tool: "egress", Kind: "egress", Target: "dot.net",
+		Summary: "wants to connect to \"dot.net\"", TS: base.Add(time.Second).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("write approval: %v", err)
+	}
+	pollJSONStatusOnce(store, root, deb, hub, nil)
+	if !hadAgentsEvent(sub) {
+		t.Fatal("pending approval did not emit agents_changed")
+	}
+	agents, err := store.ListAgents(root)
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	if agents[0].AgentStatus == nil || *agents[0].AgentStatus != "needs_input" {
+		t.Fatalf("status = %v, want needs_input from pending request", agents[0].AgentStatus)
+	}
+
+	// Direct API enrichment also preserves the policy_approval discriminator,
+	// independent of what status.json currently says.
+	info := &api.AgentStatusInfo{Status: api.Running}
+	enrichAgentStatus(root, id, info)
+	if info.Status != api.NeedsInput || info.NotificationType == nil || *info.NotificationType != gate.NotificationPolicyApproval {
+		t.Fatalf("enriched approval status = %+v", info)
+	}
+
+	// Once the request resolves, a later provider status can move the head back.
+	if err := gate.WriteDecision(dir, "egress-race", gate.DecisionFile{Decision: gate.Allow}); err != nil {
+		t.Fatalf("write decision: %v", err)
+	}
+	writeAgentStatusJSON(t, root, id, api.Running, "PostToolUse", time.Now().Add(time.Second).Format(time.RFC3339Nano))
+	pollJSONStatusOnce(store, root, deb, hub, nil)
+	agents, err = store.ListAgents(root)
+	if err != nil {
+		t.Fatalf("list agents after resolution: %v", err)
+	}
+	if agents[0].AgentStatus == nil || *agents[0].AgentStatus != "running" {
+		t.Fatalf("resolved status = %v, want running", agents[0].AgentStatus)
 	}
 }
 
