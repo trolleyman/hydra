@@ -237,7 +237,8 @@ What remains, because each does a genuinely different job:
 - `mage buildDesktop` / `mage runDesktop` / `mage runDesktopLocal` - dispatch to
   the native desktop app for the host OS: GTK/WebKitGTK on Linux,
   AppKit/WKWebView on macOS, and Windows Forms/WebView2 on Windows. `runDesktop`
-  uses production state, matching a directly launched or installed build.
+  uses production state, matching a directly launched or installed build, and
+  clears development runtime/database variables inherited from its terminal.
   `runDesktopLocal` uses the same checkout-local development database and
   worktree-specific daemon runtime namespace as `mage run` (socket, lock, PID,
   ownership metadata, listener record, and log). It can therefore run beside an

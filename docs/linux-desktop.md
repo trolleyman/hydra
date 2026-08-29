@@ -373,13 +373,16 @@ Desktop cold-start explicitly binds `127.0.0.1:0`; the assigned port exists only
 in the private ownership record. `mage buildDesktop` and `mage runDesktop`
 dispatch by host OS; on Linux they build the frontend and tagged shell.
 `mage runDesktop` deliberately behaves like an installed app, using the stable
-production socket and global database. `mage runDesktopLocal` uses the
+production socket and global database. It clears inherited development runtime,
+database, and listener variables, including when launched from a terminal opened
+inside a development Hydra. `mage runDesktopLocal` uses the
 checkout-local development database and a worktree-specific daemon runtime
 namespace while exercising this same random-port path. `mage run` uses that same
 development namespace, so the two local commands can deliberately share a
-backend. A directly launched build has no development namespace and therefore
-also selects the stable production socket and global database instead of
-attaching based on whichever daemon happened to start first. The namespace
+backend. A directly launched Linux build defaults to production mode as well;
+the local mode marker is supplied only by `runDesktopLocal`. It therefore selects
+the stable production socket and global database instead of attaching based on
+whichever daemon happened to start first. The namespace
 isolates the socket, lock, PID, ownership metadata, listener record, and log, so
 running a development desktop cannot attach to or restart another Hydra daemon
 for the same OS user. The bundled `__desktop-connect` command exposes this same

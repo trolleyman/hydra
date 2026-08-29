@@ -13,6 +13,23 @@ import (
 	"github.com/trolleyman/hydra/internal/desktop"
 )
 
+const desktopLocalEnv = "HYDRA_DESKTOP_LOCAL"
+
+func useProductionEnvironmentByDefault() {
+	if os.Getenv(desktopLocalEnv) == "1" {
+		return
+	}
+	for _, key := range []string{
+		"HYDRA_DB_PATH",
+		"HYDRA_RUNTIME_NAMESPACE",
+		"HYDRA_API_ADDR",
+		"HYDRA_DESKTOP_SERVICE",
+		"HYDRA_DESKTOP_READY_FILE",
+	} {
+		_ = os.Unsetenv(key)
+	}
+}
+
 func main() {
 	// daemon.EnsureRunning starts os.Executable with this hidden command. Carry
 	// the ordinary backend entrypoint in the desktop binary so it can manage its
@@ -37,6 +54,7 @@ func main() {
 		}
 		return
 	}
+	useProductionEnvironmentByDefault()
 
 	url := flag.String("url", "", "local Hydra server URL")
 	project := flag.String("project", "", "project root to select after opening Hydra")

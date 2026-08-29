@@ -122,11 +122,14 @@ invokes the complete native build matrix and therefore belongs on an
 orchestrator with matching platform builders/toolchains.
 
 `mage runDesktop` behaves like an installed app: it uses the stable production
-runtime socket and OS-standard global database. `mage run` and
+runtime socket and OS-standard global database. It actively clears inherited
+development database, runtime, and listener variables, so this remains true when
+it is invoked from a terminal opened by a development Hydra. `mage run` and
 `mage runDesktopLocal` instead use the checkout-local development database and
 the same checkout-specific runtime socket, so they can intentionally share one
-development backend. A directly launched desktop build also uses production
-state unless development environment variables are explicitly supplied. Runtime
+development backend. A directly launched Linux desktop build also defaults to
+production state; local mode requires the marker supplied by `runDesktopLocal`.
+Runtime
 sockets stay in the OS runtime directory rather than persistent database storage;
 on Linux these are
 `$XDG_RUNTIME_DIR/hydra/daemon.sock` for production and a checkout-keyed child of

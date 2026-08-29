@@ -518,6 +518,25 @@ func useDevelopmentRuntime() error {
 	return nil
 }
 
+const desktopLocalEnv = "HYDRA_DESKTOP_LOCAL"
+
+func useProductionDesktopRuntime() error {
+	for _, key := range []string{
+		"HYDRA_DB_PATH",
+		"HYDRA_RUNTIME_NAMESPACE",
+		"HYDRA_API_ADDR",
+		"HYDRA_DESKTOP_SERVICE",
+		"HYDRA_DESKTOP_READY_FILE",
+		desktopLocalEnv,
+	} {
+		if err := os.Unsetenv(key); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	fmt.Printf("%sdesktop runtime:%s production user state\n", colorDim, colorReset)
+	return nil
+}
+
 func Run() error {
 	ensureToolsEnv()
 	if err := useDevelopmentDatabase(); err != nil {
@@ -673,6 +692,9 @@ func BuildDesktopAll() error {
 // the production runtime and OS-standard user database.
 func RunDesktop() error {
 	ensureToolsEnv()
+	if err := useProductionDesktopRuntime(); err != nil {
+		return errtrace.Wrap(err)
+	}
 	if err := BuildDesktop(); err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -687,6 +709,9 @@ func RunDesktopLocal() error {
 		return errtrace.Wrap(err)
 	}
 	if err := useDevelopmentRuntime(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := os.Setenv(desktopLocalEnv, "1"); err != nil {
 		return errtrace.Wrap(err)
 	}
 	if err := BuildDesktop(); err != nil {
