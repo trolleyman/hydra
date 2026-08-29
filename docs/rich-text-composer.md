@@ -1,14 +1,43 @@
 # Rich-text composer: Tiptap implementation plan
 
-Status: **proposed, unbuilt.** Replace the prompt textarea's source-shaped
-Markdown highlighting with a structured rich-text editor. The editor should feel
-like writing prose, preserve Markdown as Hydra's interchange format, and make
-files and images part of the sentence instead of a separate pile of chips.
+Status: **implementation started.** The dependency/licence audit and isolated
+inline-code spike are built; production composers still use
+`HighlightedTextarea`. Replace their source-shaped Markdown highlighting with a
+structured rich-text editor that feels like writing prose, preserves Markdown as
+Hydra's interchange format, and makes files/images part of the sentence.
 
 The proposed foundation is the open-source Tiptap editor on ProseMirror. Tiptap
 is an implementation detail, not Hydra's public editor API. The first build step
 is a bounded spike: prove the unusual inline-code caret semantics before the rest
 of the composer is moved onto it.
+
+## Implementation progress
+
+Completed 2026-08-29:
+
+- Pinned `@tiptap/core`, `@tiptap/react` and `@tiptap/pm` at 3.30.5. All three
+  declare MIT, as do all 13 resolved `prosemirror-*` packages. No paid Tiptap
+  package is present. Add the distributable licence notice when editor code first
+  enters the production bundle.
+- Built the isolated `code_span` as a content-bearing inline node plus a boundary
+  plugin. Tiptap is a viable foundation; the go/no-go gate is green.
+- Added pure command tests and a dedicated real-Chromium Playwright fixture. The
+  browser suite covers six-position traversal in both directions, Shift+Arrow,
+  all deletion/unwrap edges, empty removal, partial/whole/cross-node selections,
+  selection wrapping, structural undo, pointer padding, IME suppression, raw
+  code copy and joined-emoji graphemes.
+- Measured the isolated spike at 293.0 KB minified / 89.4 KB gzip. It is currently
+  test-only and unreferenced by the app, so the production bundle delta is zero.
+  Re-measure after the reusable core is imported and prefer a lazy composer chunk.
+
+The spike found two browser facts now captured in the design. Chrome does not
+natively walk through a content-bearing inline node, so the plugin owns every
+Left/Right grapheme step. It also maps the inside-start DOM caret to the node's
+left outer edge (and the outside-after caret to its right inner edge) even though
+ProseMirror's logical positions remain distinct. An active-node decoration makes
+inside/outside visible without inserting zero-width sentinel characters. Pair
+insertion also needs an explicit history boundary so undo clears typed content
+before removing the empty capsule.
 
 ## Why change it
 
@@ -507,11 +536,12 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
 
 ## Build order and gates
 
-1. **Dependency/licence audit.** Pin only required MIT Tiptap/ProseMirror
-   packages, record notices and measure the production bundle.
-2. **Inline-code spike.** Paragraphs, text and `code_span` only. Browser-test the
-   six-position model, selection, deletion, undo, composition and clipboard.
-   This is the Tiptap go/no-go gate.
+1. **Dependency/licence audit - DONE.** Pinned only the required MIT packages;
+   recorded the versions/audit above and measured the isolated bundle. The
+   production notice waits until production actually distributes the code.
+2. **Inline-code spike - DONE.** Paragraphs, text and `code_span` only. The
+   six-position model, selection, deletion, undo, composition, pointer and
+   clipboard tests pass in real Chromium. Tiptap passed the go/no-go gate.
 3. **Reusable core.** Hydra-owned API/value types, Markdown parser/serializer,
    editable/static view registry, commands, marks, links, input rules and unit
    tests. No composer integration.
