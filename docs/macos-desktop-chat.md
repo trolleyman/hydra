@@ -29,6 +29,8 @@ The cross-platform base now includes:
 - a focused option in the normal spawn UI and a shared chat-only agent layout
   with edit/read-only and commit controls. The layout does not mount the diff,
   tests, artifacts, previews, publish, merge, or review inspector.
+- simulation fixtures for editable, read-only, actively working, and archived
+  focused chats, including mutable permission controls for browser testing.
 
 This is the intended branch point for platform agents. Native app lifecycle,
 webview windows, service discovery/ownership, notification bridges, packaging,
