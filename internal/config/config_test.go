@@ -9,6 +9,17 @@ import (
 
 func ptr(s string) *string { return &s }
 
+func TestDefaultPrePromptRequiresStructuredQuestions(t *testing.T) {
+	for _, tool := range []string{"AskUserQuestion", "request_user_input"} {
+		if !strings.Contains(DefaultPrePrompt, tool) {
+			t.Errorf("DefaultPrePrompt does not name the %s question tool", tool)
+		}
+	}
+	if !strings.Contains(DefaultPrePrompt, "Do not ask the question only in a plain chat message") {
+		t.Error("DefaultPrePrompt does not require structured questions instead of plain chat")
+	}
+}
+
 func TestResolveFullscreen(t *testing.T) {
 	// Unset → disabled (the safe default that forces the classic renderer).
 	if (Config{}).ResolveFullscreen("claude") {
