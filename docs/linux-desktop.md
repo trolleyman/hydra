@@ -1,6 +1,7 @@
 # Hydra as a standalone Linux app
 
-Status: **plan; shared focused-session foundation built, Linux shell unbuilt.**
+Status: **implementation started; shared focused-session foundation and first
+Linux WebKitGTK shell spike built.**
 This document adapts the desktop product defined in
 [macos-desktop-chat.md](macos-desktop-chat.md) to Linux. The shared backend, API,
 and React base is already the branch point for platform work: focused heads are
@@ -333,6 +334,11 @@ desktop shell will call and the remaining shared gaps it depends on.
 
 Exit criterion: the selected unsigned development app can coexist with the CLI
 and browser without competing backend or database ownership.
+
+Status: a separately-tagged GTK 4/WebKitGTK 6 executable opens an explicit
+loopback Hydra URL without adding desktop runtime dependencies to the normal
+CLI. Backend discovery, ownership, authentication bootstrap, multi-window
+behavior, and the full shell comparison remain.
 
 ### Phase 2: add desktop window routes and lifecycle
 

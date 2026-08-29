@@ -60,6 +60,13 @@ Use "hydra [command] --help" for more information about a command.
 - [npm](https://www.npmjs.com/) (ships with Node) or, optionally, [aube](https://github.com/jdx/aube) - see below
 - Git
 
+Building the experimental standalone Linux desktop shell additionally requires
+GTK 4 and WebKitGTK 6 development files. On Ubuntu 24.04 and derivatives:
+
+```bash
+sudo apt install libwebkitgtk-6.0-dev
+```
+
 The frontend's package installs and `package.json` scripts run through **npm** by
 default, since it ships with Node and needs no extra setup. If [aube](https://github.com/jdx/aube)
 is on your `PATH`, `mage` uses it instead for a faster install - it reads and
@@ -78,6 +85,18 @@ Run the server:
 ```bash
 mage run
 ```
+
+Build the experimental Linux desktop shell separately, then point it at a
+running local Hydra server:
+
+```bash
+go build -tags hydra_desktop -o hydra-desktop ./cmd/hydra-desktop
+./hydra-desktop -url http://127.0.0.1:49152
+```
+
+The separate build keeps the normal `hydra` CLI free of GTK/WebKit runtime
+dependencies. Backend discovery and app-managed startup are not implemented in
+this first shell spike, so the server URL is explicit.
 
 Install it as a systemd --user service, so it comes up on login and survives
 your terminal closing:
