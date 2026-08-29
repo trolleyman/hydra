@@ -411,8 +411,9 @@ for input without becoming a second session-management UI.
   the runtime shape is stable.
 
 Status: the thin Swift/AppKit shell, shared multi-window WebKit configuration,
-existing-server probe, bundled-backend launch, OS-assigned port handshake,
-development `.app` builder, background-after-last-window behavior, and guarded
+control-socket daemon reuse/startup, PID-bound random-port discovery, private
+ready-file compatibility fallback, development `.app` builder,
+background-after-last-window behavior, and guarded
 Quit path are implemented. App-launched backends now publish a one-minute,
 single-use auth bootstrap credential in their private atomic readiness record;
 the first WKWebView redeems it for the shared HttpOnly cookie without exposing
@@ -455,8 +456,8 @@ refactor from depending on an untested desktop wrapper.
   possible.
 
 Status: the stored model, branchless lifecycle, shared spawn API, watcher skips,
-and existing chat protocol reuse are built. First-submit draft creation and
-backend-derived capability fields remain.
+existing chat protocol reuse, first-submit creation, and backend-derived native
+sandbox capability fields are built.
 
 ### Phase 3: enforce permissions and guarded commits
 
@@ -524,6 +525,36 @@ stale-ownership recovery remain.
   it fits.
 - Document migration between CLI Hydra and `Hydra.app` installations.
 
+## Remaining macOS work
+
+In priority order:
+
+1. Complete and validate the macOS security backend: provider config/gate/MCP
+   delivery, per-head temporary storage, focused read-only/edit Seatbelt rules,
+   and a real hard-network implementation. Do not advertise a network posture
+   which currently degrades to network-off as equivalent.
+2. Finish focused lifecycle: Stop and switch / Keep running / Cancel when
+   changing project, frontmost-project tracking, concurrent-editor warning, and
+   richer stale/backend-failure recovery.
+3. Add native notifications and activation routing for questions, approvals,
+   completion, failure, and backend exit; add menu-bar state only as an optional
+   convenience, not as the only reopen/quit path.
+4. Run the native acceptance matrix on supported Intel and Apple Silicon Macs:
+   shared cookies/WebSockets, IME, VoiceOver/keyboard navigation,
+   Retina/non-Retina and multi-display restore, Spaces/full screen, uploads,
+   clipboard, external links, sleep/wake, and lifecycle behavior.
+5. Define all support/cache/log locations, produce universal or paired
+   arm64/amd64 artifacts, sign every executable, notarize and staple the app,
+   and test Gatekeeper from a quarantined download.
+6. Implement coordinated signed updates with active-head deferral, readiness
+   rollback, database compatibility, downgrade refusal, CLI coexistence,
+   repair/uninstall-with-data-preserved, and clean-VM upgrade tests from the last
+   released version.
+
+Items 4-6 require macOS builders, real target-OS execution, and release signing
+credentials. Their detailed acceptance criteria are in
+[desktop-native-validation.md](desktop-native-validation.md).
+
 ## Validation
 
 Backend tests must cover:
@@ -559,6 +590,10 @@ Run the normal project checks (`mage build`, frontend lint/typecheck and Go
 tests), then validate Seatbelt and the signed app on real macOS hardware. Native
 window, notification, text-input and lifecycle behavior cannot be accepted from
 cross-compilation alone.
+
+Use [desktop-native-validation.md](desktop-native-validation.md) for the exact
+IME, accessibility, notification, multiple-display, and upgrade test scope and
+the automation/manual boundary.
 
 ## Deliberately deferred
 

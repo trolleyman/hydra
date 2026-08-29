@@ -314,7 +314,7 @@ Status: the shared bridge reports the selected head's live-turn state and the
 Windows and macOS shells now offer Stop and close, Close and keep running, and
 Cancel. Stop is issued by the authenticated web session and the native window
 closes only after it succeeds. Draft project/history controls cover live focused
-heads; archived history and Stop-and-switch project changes remain.
+heads plus loaded archived history; Stop-and-switch project changes remain.
 
 ### Phase 5: sign, install, and update
 
@@ -332,6 +332,40 @@ project-local databases. Installer and native-runtime validation remain.
 - Test upgrade, downgrade refusal, repair, uninstall-with-data, and complete
   cleanup on clean Windows VMs plus a representative enterprise-restricted VM.
 - Document migration and coexistence with a CLI installation and with WSL2.
+
+## Remaining Windows work
+
+In priority order:
+
+1. Build the native runtime foundation: ConPTY create/resize/attach, shell and
+   script resolution, a user-scoped AF_UNIX control endpoint, `LockFileEx`
+   ownership, detached autostart, explicit shutdown, stale-lock recovery,
+   per-head temp/config paths, and whole-tree process teardown.
+2. Replace the private readiness fallback with the now-wired shared
+   `__desktop-connect` path once that transport exists, then prove CLI/desktop
+   coexistence, auth bootstrap, version rejection, and backend recovery.
+3. Build native confinement: signed elevated setup/repair helper, sandbox-user
+   pool, restricted tokens, ACL grants/denies and cleanup, job objects, private
+   desktop, provider configuration, and fail-closed off/advisory/unrestricted/
+   hard network modes. The ordinary app and backend must never run elevated.
+4. Finish focused lifecycle and native integration: Stop and switch / Keep
+   running / Cancel, frontmost-project tracking, concurrent-editor warning,
+   notification routing/suppression, activation/deep links, setup diagnostics,
+   download/upload handling, tray-only and fully-exited activation.
+5. Run the Windows 11 x64/arm64 native matrix: WebView2 profile and WebSockets,
+   IME and terminal keys, Narrator/keyboard navigation (plus NVDA where
+   supported), per-monitor DPI and multi-display restore, dark/high-contrast
+   modes, clipboard/uploads, reboot, Remote Desktop, GPO/AV/elevation denial,
+   missing Git/WebView/provider, and damaged firewall recovery.
+6. Select and document an installer, build and sign x64/arm64 shell/backend/
+   helper/installer artifacts, then implement coordinated signed updates with
+   active-head deferral, readiness rollback, database compatibility, downgrade
+   refusal, repair, uninstall cleanup with user data preserved, and clean plus
+   enterprise-restricted VM upgrades from the last release.
+
+Items 5-6 require Windows builders/VMs or hardware, WebView2, and release code-
+signing infrastructure. Their detailed acceptance criteria are in
+[desktop-native-validation.md](desktop-native-validation.md).
 
 ## Validation matrix
 
@@ -356,6 +390,10 @@ Run `mage build`, frontend lint/typecheck, `go test ./...`, Windows cross-builds
 and Windows-native integration tests. A green Linux cross-build is necessary but
 cannot accept WebView, ConPTY, ACL, firewall, notification, installer, or update
 behavior.
+
+Use [desktop-native-validation.md](desktop-native-validation.md) for the exact
+IME, accessibility, notification, multiple-display/DPI, and upgrade test scope
+and the automation/manual boundary.
 
 ## Deliberately deferred
 
