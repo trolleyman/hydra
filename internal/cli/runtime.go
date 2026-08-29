@@ -417,14 +417,13 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	}
 	sandbox.SweepOrphanScopes()
 
-	// Resume heads that were running before a restart (best-effort), clear out
-	// any ephemeral artifact checkouts left behind by a crash mid-generation, and
+	// Clear out any ephemeral artifact checkouts left behind by a crash
+	// mid-generation, and
 	// migrate any cache still in the old flat key layout to the current
 	// commit/<sha> & worktree/<hash> layout. Only touch projects that already have
 	// an artifacts dir, so we don't create empty ones in projects that never
 	// generated artifacts.
 	for _, root := range roots() {
-		resumeHeadsOnBoot(reg, store, root)
 		if _, err := os.Stat(paths.GetArtifactsDirFromProjectRoot(root)); err == nil {
 			mgr := artifactReg.Manager(root)
 			if n := mgr.MigrateLegacyLayout(); n > 0 {
@@ -439,13 +438,28 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		}
 	}
 
-	// Immediate first poller cycles before accepting requests.
+	// Run the status-file poller once before accepting requests. Head resume is
+	// deliberately NOT on this startup path: one unavailable provider/sandbox
+	// helper can consume its full timeout per head, which previously prevented the
+	// daemon from publishing its control socket and made desktop startup fail even
+	// though the daemon was healthy.
 	for _, root := range roots() {
-		heads.ReconcileLivenessOnce(reg, store, root, eventHub)
 		heads.RunJSONStatusPollerOnce(store, root)
 	}
 
-	go heads.RunLivenessReconciler(ctx, reg, store, roots, eventHub)
+	// Recover running heads in the background after the runtime has been built.
+	// Start liveness reconciliation only after recovery finishes; running it first
+	// would mark every not-yet-resumed DB session stopped. Requests may arrive in
+	// parallel, so resumeHeadsOnBoot rechecks the live registry before each head.
+	go func() {
+		for _, root := range roots() {
+			resumeHeadsOnBoot(reg, store, root)
+		}
+		for _, root := range roots() {
+			heads.ReconcileLivenessOnce(reg, store, root, eventHub)
+		}
+		heads.RunLivenessReconciler(ctx, reg, store, roots, eventHub)
+	}()
 	// On a head transitioning into a resting status (finished/waiting/needs_input)
 	// the agent has stopped editing, so pre-generate its diff artifacts at once
 	// rather than waiting for the periodic worktree-settle sweep below. Run in its

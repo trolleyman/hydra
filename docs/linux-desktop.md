@@ -382,6 +382,10 @@ making the filesystem-protected endpoint protocol platform-UI-specific.
 When the Linux app launched by `mage runDesktop` closes or the command receives
 Ctrl+C, Mage stops the detached daemon in that exact development runtime
 namespace. Global, legacy-layout, and other checkout namespaces are untouched.
+Daemon control and web listeners become ready before best-effort recovery of
+previously running heads. Slow or broken provider/sandbox recovery therefore
+appears in the daemon log without making the desktop report a false startup
+timeout.
 
 ### Phase 2: add desktop window routes and lifecycle
 
