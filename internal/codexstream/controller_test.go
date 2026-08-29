@@ -1,10 +1,13 @@
 package codexstream
 
 import (
-	"braces.dev/errtrace"
 	"encoding/json"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
+
+	"braces.dev/errtrace"
 )
 
 func TestControllerFreshThreadAndInitialTurn(t *testing.T) {
@@ -268,13 +271,18 @@ func TestControllerReadsHistoryBeforeQueuedResumeTurn(t *testing.T) {
 
 func TestControllerRespondsToUserInputRequest(t *testing.T) {
 	var sent []map[string]any
-	c := New(Options{Send: func(line []byte) error {
+	var history [][]byte
+	needsInput, activity := 0, 0
+	c := New(Options{OnNeedsInput: func() { needsInput++ }, OnActivity: func() { activity++ }, OnHistoryLine: func(line []byte) { history = append(history, line) }, Send: func(line []byte) error {
 		var value map[string]any
 		_ = json.Unmarshal(line, &value)
 		sent = append(sent, value)
 		return nil
 	}})
 	c.OnLine([]byte(`{"id":42,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","question":"Which?"}]}}`))
+	if needsInput != 1 || activity != 0 {
+		t.Fatalf("request callbacks: needsInput=%d activity=%d, want 1/0", needsInput, activity)
+	}
 	response := json.RawMessage(`{"request_id":"42","response":{"behavior":"allow","updatedInput":{"answers":{"Which?":"A, B"}}}}`)
 	if err := c.Respond(response); err != nil {
 		t.Fatal(err)
@@ -283,6 +291,28 @@ func TestControllerRespondsToUserInputRequest(t *testing.T) {
 	answers := result["answers"].(map[string]any)
 	if _, ok := answers["q1"]; !ok {
 		t.Fatalf("response = %+v", sent[0])
+	}
+	if activity != 1 {
+		t.Fatalf("activity callbacks after answer = %d, want 1", activity)
+	}
+	if len(history) != 1 || !strings.Contains(string(history[0]), `"answers":{"Which?":"A, B"}`) {
+		t.Fatalf("answer history = %q", history)
+	}
+}
+
+func TestControllerFailedUserInputResponseStaysNeedsInput(t *testing.T) {
+	activity := 0
+	c := New(Options{
+		OnActivity: func() { activity++ },
+		Send:       func([]byte) error { return errtrace.Wrap(errors.New("send failed")) },
+	})
+	c.OnLine([]byte(`{"id":42,"method":"item/tool/requestUserInput","params":{"questions":[]}}`))
+	err := c.Respond(json.RawMessage(`{"request_id":"42","response":{"behavior":"allow","updatedInput":{}}}`))
+	if err == nil {
+		t.Fatal("Respond succeeded, want send error")
+	}
+	if activity != 0 {
+		t.Fatalf("activity callbacks = %d, want 0 after failed answer", activity)
 	}
 }
 

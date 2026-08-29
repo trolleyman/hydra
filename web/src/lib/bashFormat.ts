@@ -527,6 +527,16 @@ export function unwrapBashLoginCommand(command: string): string {
   return current
 }
 
+// Codex shell calls do not carry Claude's `description` field. Its tool
+// convention instead puts the human-readable step label in a leading shell
+// comment. Only a standalone first-line comment qualifies: shebangs and
+// comments later in the script are part of the command.
+export function leadingBashComment(command: string): string {
+  const firstLine = unwrapBashLoginCommand(command).split(/\r?\n/, 1)[0]?.trim() ?? ''
+  if (!firstLine.startsWith('#') || firstLine.startsWith('#!')) return ''
+  return firstLine.slice(1).trim()
+}
+
 // stripLineContinuations drops the trailing `\` from a `\`-newline pair so a
 // multi-line script reads as plain lines instead of carrying the escape noise.
 // The line break itself is kept (bash would join the lines, but the author wrote
