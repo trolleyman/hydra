@@ -176,6 +176,54 @@ command = "drop"
 	}
 }
 
+func TestSeededInstructionFilesArePerSession(t *testing.T) {
+	projectRoot, home := t.TempDir(), t.TempDir()
+	for _, dir := range []string{".codex", ".copilot", ".gemini"} {
+		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Force Gemini onto its context-file fallback instead of probing a host CLI.
+	t.Setenv("PATH", "")
+	tests := []struct {
+		name      string
+		agentType sandbox.AgentType
+		target    string
+	}{
+		{"codex", sandbox.AgentTypeCodex, path.Join(home, ".codex", "AGENTS.md")},
+		{"copilot", sandbox.AgentTypeCopilot, path.Join(home, ".copilot", "copilot-instructions.md")},
+		{"gemini", sandbox.AgentTypeGemini, path.Join(home, ".gemini", "GEMINI.md")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seed := func(id, prompt string) *seedResult {
+				worktree := filepath.Join(projectRoot, "wt", id)
+				if err := os.MkdirAll(worktree, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				res, err := seedHead(projectRoot, id, tt.agentType, worktree, home, prompt, gate.Policy{}, sandbox.GitIsolationOff)
+				if err != nil {
+					t.Fatalf("seedHead(%s): %v", id, err)
+				}
+				return res
+			}
+
+			headSource := bindSource(t, seed("head", "author instructions"), tt.target)
+			reviewSource := bindSource(t, seed(ReviewSessionID("head"), reviewSystemPrompt), tt.target)
+			if headSource == reviewSource {
+				t.Fatalf("head and review slot share instruction source %q", headSource)
+			}
+			headData, err := os.ReadFile(headSource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(headData), "author instructions") || strings.Contains(string(headData), reviewSystemPrompt) {
+				t.Fatalf("head instructions were clobbered by reviewer: %s", headData)
+			}
+		})
+	}
+}
+
 func bindForTarget(res *seedResult, target string) *sandbox.Bind {
 	for i := range res.Binds {
 		if res.Binds[i].Target == target {

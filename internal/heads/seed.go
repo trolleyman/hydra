@@ -306,7 +306,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		res.Binds = append(res.Binds, sandbox.Bind{Source: settingsHost, Target: path.Join(home, ".gemini", "settings.json")})
 
 		if prePrompt != "" {
-			if err := seedGeminiPrePrompt(res, cacheDir, home, prePrompt); err != nil {
+			if err := seedGeminiPrePrompt(res, cacheDir, id, home, prePrompt); err != nil {
 				return nil, errtrace.Wrap(err)
 			}
 		}
@@ -329,7 +329,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		// home-dir custom instructions (~/.copilot/copilot-instructions.md),
 		// merged over the host's.
 		if prePrompt != "" {
-			instrHost := filepath.Join(cacheDir, "copilot-instructions.md")
+			instrHost := filepath.Join(cacheDir, id+"-copilot-instructions.md")
 			content := combineInstructions(prePrompt, readHostFile(filepath.Join(home, ".copilot", "copilot-instructions.md")))
 			if err := os.WriteFile(instrHost, content, 0644); err != nil {
 				return nil, errtrace.Wrap(err)
@@ -343,7 +343,7 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		// the global ~/.codex/AGENTS.md (merged over the host's), which applies to
 		// every Codex session regardless of the repo's own AGENTS.md.
 		if prePrompt != "" {
-			agentsHost := filepath.Join(cacheDir, "codex-AGENTS.md")
+			agentsHost := filepath.Join(cacheDir, id+"-codex-AGENTS.md")
 			content := combineInstructions(prePrompt, readHostFile(filepath.Join(home, ".codex", "AGENTS.md")))
 			if err := os.WriteFile(agentsHost, content, 0644); err != nil {
 				return nil, errtrace.Wrap(err)
@@ -517,7 +517,7 @@ func seedGatePolicy(res *seedResult, cacheDir, id, projectRoot, worktreePath, ho
 // "default + our rules". If the default can't be captured (e.g. gemini is not
 // authenticated, or offline), fall back to seeding the pre-prompt as a GEMINI.md
 // context file, which is loaded as instructional context instead.
-func seedGeminiPrePrompt(res *seedResult, cacheDir, home, prePrompt string) error {
+func seedGeminiPrePrompt(res *seedResult, cacheDir, id, home, prePrompt string) error {
 	// Never let Gemini write its default system prompt into the read-only
 	// `.hydra/local/cache` inside the sandbox (EROFS crash). We capture the default
 	// ourselves on the host below; the agent only ever reads via GEMINI_SYSTEM_MD.
@@ -525,7 +525,7 @@ func seedGeminiPrePrompt(res *seedResult, cacheDir, home, prePrompt string) erro
 
 	if dflt := geminiDefaultSystemPrompt(cacheDir); dflt != "" {
 		combined := strings.TrimRight(dflt, "\n") + "\n\n" + prePrompt + "\n"
-		sysHost := filepath.Join(cacheDir, "gemini-system.md")
+		sysHost := filepath.Join(cacheDir, id+"-gemini-system.md")
 		if err := os.WriteFile(sysHost, []byte(combined), 0644); err != nil {
 			return errtrace.Wrap(err)
 		}
@@ -536,7 +536,7 @@ func seedGeminiPrePrompt(res *seedResult, cacheDir, home, prePrompt string) erro
 	}
 
 	// Fallback: GEMINI.md context file, merged over the host's global one.
-	ctxHost := filepath.Join(cacheDir, "gemini-context.md")
+	ctxHost := filepath.Join(cacheDir, id+"-gemini-context.md")
 	content := combineInstructions(prePrompt, readHostFile(filepath.Join(home, ".gemini", "GEMINI.md")))
 	if err := os.WriteFile(ctxHost, content, 0644); err != nil {
 		return errtrace.Wrap(err)
