@@ -148,10 +148,10 @@ type Agent struct {
 	// push affordances are disabled. Meaningless (and false) for a non-adopted head.
 	ReviewCanPush bool `gorm:"default:false"`
 
-	// AutoPush keeps a linked review branch synced. The explicit column names
-	// preserve existing databases created under the former setting name.
-	AutoPush   bool   `gorm:"column:publish_when_green;default:false"`
-	AutoPushAt string `gorm:"column:publish_when_green_at"`
+	// AutoPush keeps a linked review branch synced. AutoPushAt is the RFC3339 arm
+	// time used by the finished-agent dwell check.
+	AutoPush   bool `gorm:"default:false"`
+	AutoPushAt string
 
 	CreatedAt time.Time `gorm:"autoCreateTime:false"` // set explicitly
 	UpdatedAt time.Time

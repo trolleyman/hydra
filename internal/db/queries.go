@@ -438,9 +438,9 @@ func (s *Store) LinkedReviewHeads() ([]Agent, error) {
 
 // SetAutoPush enables or disables automatic pushes for a head.
 func (s *Store) SetAutoPush(id string, armed bool, armedAt string) error {
-	updates := map[string]any{"publish_when_green": armed, "publish_when_green_at": armedAt}
+	updates := map[string]any{"auto_push": armed, "auto_push_at": armedAt}
 	if !armed {
-		updates["publish_when_green_at"] = ""
+		updates["auto_push_at"] = ""
 	}
 	result := s.db.Model(&Agent{}).Where("id = ?", id).Updates(updates)
 	return errtrace.Wrap(result.Error)
@@ -449,7 +449,7 @@ func (s *Store) SetAutoPush(id string, armed bool, armedAt string) error {
 // AutoPushHeads returns active heads with automatic pushes enabled.
 func (s *Store) AutoPushHeads() ([]Agent, error) {
 	var agents []Agent
-	result := s.reader().Where("publish_when_green = ?", true).Find(&agents)
+	result := s.reader().Where("auto_push = ?", true).Find(&agents)
 	return agents, errtrace.Wrap(result.Error)
 }
 
