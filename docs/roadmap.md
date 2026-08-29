@@ -291,7 +291,7 @@ before starting. Grouped by area.
 
 ## Chat mode
 
-- [ ] **macOS app with full Hydra and focused direct-directory chat windows.**
+- [ ] **Desktop apps with full Hydra and focused direct-directory chat windows.**
   Ship one `Hydra.app` with one shared local backend and two window types: the
   existing full interface and a clean structured-chat window. Focused chats run
   directly in a registered project's real root, support enforced Edit/Read-only
@@ -306,6 +306,11 @@ before starting. Grouped by area.
   heads remain branchless, so `Archived` plus `IsFocused()` distinguishes both.
   Do not put a derived, nonexistent worktree path on archived heads: callers use
   non-nil `Worktree` as evidence that the checkout can be read or operated on.
+  The shared branchless lifecycle, permission API, guarded commit path, full-Hydra
+  spawn option, and chat-only React layout are built. This is the common base for
+  macOS, Windows, and Linux app branches; native webview shells, service
+  ownership, notifications, packaging, the first-message draft flow, and the
+  dedicated chrome-free route remain.
   See [macos-desktop-chat.md](macos-desktop-chat.md) for the agreed behavior,
   sandbox invariants and staged implementation plan. Depends on closing the
   security-critical gaps in [macos-support.md](macos-support.md).

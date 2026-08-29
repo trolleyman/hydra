@@ -192,6 +192,18 @@ func runGitOp(req gitq.Request) gitq.Result {
 // gitOpViaDaemon submits req to the daemon's gitops watcher and blocks for the
 // result over the writable gitq dir + polling.
 func gitOpViaDaemon(dir string, req gitq.Request) gitq.Result {
+	// A branchless focused head sets HYDRA_BRANCH empty and works in the real
+	// project checkout. Capture both identities at request time so the daemon can
+	// refuse a commit if the user changes branch or advances HEAD in the gap.
+	if os.Getenv("HYDRA_BRANCH") == "" {
+		workdir := os.Getenv("HYDRA_WORKTREE")
+		if branch, err := git.GetCurrentBranch(workdir); err == nil {
+			req.ExpectedBranch = branch
+		}
+		if head, err := git.ResolveRef(workdir, "HEAD"); err == nil {
+			req.ExpectedHead = head
+		}
+	}
 	req.ReqID = strconv.FormatInt(time.Now().UnixNano(), 10)
 	req.TS = time.Now().Format(time.RFC3339Nano)
 	if err := gitq.WriteRequest(dir, req); err != nil {

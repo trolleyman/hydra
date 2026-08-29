@@ -1960,11 +1960,11 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			Details: "request body is required",
 		}, nil
 	}
-	if request.Body.Title == nil && request.Body.BaseBranch == nil && request.Body.ChatMode == nil {
+	if request.Body.Title == nil && request.Body.BaseBranch == nil && request.Body.ChatMode == nil && request.Body.FilesystemMode == nil && request.Body.AllowCommits == nil {
 		return api.UpdateAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
-			Details: "at least one field (title, base_branch or chat_mode) is required",
+			Details: "at least one mutable field is required",
 		}, nil
 	}
 
@@ -2006,6 +2006,33 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found",
 		}, nil
+	}
+	if request.Body.FilesystemMode != nil || request.Body.AllowCommits != nil {
+		if !head.IsFocused() {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "focused permissions can only be changed on a focused head",
+			}, nil
+		}
+		var mode *string
+		if request.Body.FilesystemMode != nil {
+			v := string(*request.Body.FilesystemMode)
+			mode = &v
+		}
+		if err := s.DB.UpdateFocusedPermissions(head.ID, mode, request.Body.AllowCommits); err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		if mode != nil && *mode != head.FilesystemMode {
+			head.FilesystemMode = *mode
+			if s.Sessions.IsLive(head.ID) {
+				log.Printf("api: focused filesystem mode toggled to %s for %s; stopping session for sandbox switch", *mode, head.ID)
+				heads.StopSessionAndWait(s.Sessions, head.ID, 5*time.Second)
+			}
+		}
+		if request.Body.AllowCommits != nil {
+			head.AllowCommits = *request.Body.AllowCommits
+		}
 	}
 
 	if baseBranch != "" {

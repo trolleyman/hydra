@@ -1,14 +1,42 @@
 # Hydra for macOS and focused chat windows
 
-Status: **proposed, unbuilt.** This document records the agreed product shape
-and a staged implementation plan for packaging Hydra as a macOS app and adding
-a focused, directory-backed chat experience. It deliberately does not select a
-webview framework yet; that choice needs a small native proof of concept on a
-Mac before it becomes an architectural commitment.
+Status: **shared focused-session foundation built; native shells unbuilt.** This
+document records the agreed product shape and staged implementation plan for
+packaging Hydra as a desktop app and adding a focused, directory-backed chat
+experience. The backend, API, and React work described in "Shared implementation
+status" is deliberately platform-neutral so macOS, Windows, and Linux shells can
+branch from it. A webview framework still needs a native proof of concept before
+it becomes an architectural commitment.
 
 The macOS sandbox itself is covered by [macos-support.md](macos-support.md).
 Structured provider chat is covered by [chat-mode.md](chat-mode.md). This plan
 builds on both and does not replace either.
+
+## Shared implementation status
+
+The cross-platform base now includes:
+
+- focused heads represented by `Branch == nil`, with edit/read-only and guarded
+  commit permissions stored on the ordinary agent record;
+- branchless spawn, list, archive, autorestart, and exact resume paths which run
+  in the registered project root and never create or delete a Hydra worktree;
+- a platform-neutral API for creating focused sessions and changing their
+  permissions;
+- read-only working-directory sandbox input shared by the Linux, Darwin, and
+  Windows backends (with enforcement implemented by the non-stub backends);
+- guarded focused commits which capture and revalidate both branch and HEAD,
+  while rejecting every other host-mediated Git mutation;
+- a focused option in the normal spawn UI and a shared chat-only agent layout
+  with edit/read-only and commit controls. The layout does not mount the diff,
+  tests, artifacts, previews, publish, merge, or review inspector.
+
+This is the intended branch point for platform agents. Native app lifecycle,
+webview windows, service discovery/ownership, notification bridges, packaging,
+signing, and OS-specific sandbox completion are not part of this shared base.
+The immediate empty draft, separate chrome-free window route, history/project
+switcher, native close confirmation, and concurrent-editor warning also remain
+to be built. Today a focused head is created by submitting Hydra's existing
+spawn composer, then opens in the shared chat-only layout.
 
 ## Product in one sentence
 
@@ -286,9 +314,9 @@ protect that invariant. Focused-specific permissions can be ordinary fields on
 the existing agent record (`filesystem_mode`, `allow_commits`); they do not
 require a discriminator or a new table.
 
-The API should expose `focused` and capabilities derived by the backend
-(`can_diff`, `can_merge`, `can_commit`, `can_change_mode`) rather than making the
-browser reconstruct behavior from nullable fields.
+The API exposes `focused` directly. It should grow backend-derived capabilities
+(`can_diff`, `can_merge`, `can_commit`, `can_change_mode`) as new focused actions
+are added rather than making each client reconstruct them from nullable fields.
 
 Focused session launch should share the existing pieces after directory
 selection:
@@ -392,6 +420,10 @@ refactor from depending on an untested desktop wrapper.
 - Reuse the existing chat event store and WebSocket protocol unchanged wherever
   possible.
 
+Status: the stored model, branchless lifecycle, shared spawn API, watcher skips,
+and existing chat protocol reuse are built. First-submit draft creation and
+backend-derived capability fields remain.
+
 ### Phase 3: enforce permissions and guarded commits
 
 - Implement distinct read-only and edit sandbox profiles for focused sessions.
@@ -400,6 +432,10 @@ refactor from depending on an untested desktop wrapper.
 - Implement the focused commit operation with project/branch/HEAD validation and
   no other Git mutation tools.
 - Surface concurrent editors and stale commit failures clearly.
+
+Status: the shared permission contract, controlled stop/resume on a filesystem
+mode change, immediate commit authorization, and branch/HEAD guarded commit are
+built. OS-specific sandbox validation and the concurrent-editor warning remain.
 
 ### Phase 4: build the focused web route
 
@@ -411,6 +447,10 @@ refactor from depending on an untested desktop wrapper.
 - Add close-window active-turn confirmation through the native bridge, with a
   browser-safe fallback dialog for development.
 - Make every focused conversation discoverable and openable from full Hydra.
+
+Status: the reusable chat-only layout and its permission controls are built on
+the existing agent route. The empty draft flow, dedicated chrome-free route,
+history/project controls, switching behavior, and native close bridge remain.
 
 ### Phase 5: desktop lifecycle and notifications
 

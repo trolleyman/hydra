@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { FocusedFilesystemMode } from './FocusedFilesystemMode';
 /**
  * Patch an agent's mutable fields. Provide any subset; at least one field is required. Omitted fields are left unchanged.
  */
@@ -18,5 +19,10 @@ export type UpdateAgentRequest = {
      * Switch the head between terminal and chat mode (Claude and Codex only; rejected for other agent types). When the value changes, a live process is relaunched and its provider conversation is resumed.
      */
     chat_mode?: boolean;
+    filesystem_mode?: FocusedFilesystemMode;
+    /**
+     * Enable or disable guarded commits for a focused head immediately. Rejected for ordinary worktree heads.
+     */
+    allow_commits?: boolean;
 };
 
