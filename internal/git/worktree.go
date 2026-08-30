@@ -165,6 +165,25 @@ func ResolveRef(projectRoot, ref string) (string, error) {
 	return errtrace.Wrap2(gitOutput(projectRoot, "rev-parse", ref+"^{commit}"))
 }
 
+// RefExists reports whether ref resolves to a commit. A missing ref is an
+// expected false result; failures to invoke Git or inspect the repository remain
+// errors so callers do not mistake a broken repository for a stale URL.
+func RefExists(projectRoot, ref string) (bool, error) {
+	if err := ValidateRef(ref); err != nil {
+		return false, errtrace.Wrap(err)
+	}
+	cmd := exec.Command("git", "-C", projectRoot, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, errtrace.Wrap(fmt.Errorf("git rev-parse %s: %w", ref, err))
+}
+
 // ShowFile returns the contents of a repo-relative path as it exists at ref
 // (`git show ref:path`). It returns (nil, nil) when the path does not exist at
 // that ref, so callers can distinguish "absent" from a genuine git error.

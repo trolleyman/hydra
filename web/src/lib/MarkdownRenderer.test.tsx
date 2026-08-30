@@ -149,6 +149,25 @@ describe('Markdown', () => {
         vi.useRealTimers()
       }
     })
+
+    it('opens an absolute focused-checkout path at the project HEAD', () => {
+      const { container } = render(
+        <Markdown
+          text="[agent guide](/home/callum/code/hydra/docs/agent-guide.md)"
+          linkCtx={{
+            projectId: 'p1',
+            agentId: 'focused-1',
+            refStr: 'HEAD',
+            filePath: '',
+            worktreePath: '/home/callum/code/hydra',
+          }}
+        />,
+      )
+      expect(container.querySelector('a')).toHaveAttribute(
+        'href',
+        '/project/p1/repository/HEAD/-/docs/agent-guide.md',
+      )
+    })
   })
 
   // What makes a code block a block is the fence, not what is inside it. This

@@ -5,8 +5,8 @@ import { formatBytes } from '../lib/formatBytes'
 import { getLanguage } from '../lib/language'
 import { fetchBranches, peekBranches } from '../lib/branchCache'
 import { api } from '../stores/apiClient'
-import { formatError } from '../api/format_error'
-import { ApiError } from '../api'
+import { apiErrorBody, formatError } from '../api/format_error'
+import { ApiError, ErrorResponse } from '../api'
 import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../api'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
@@ -655,6 +655,20 @@ function FileNotFound({ path, refStr }: { path: string; refStr: string }) {
   )
 }
 
+function RevisionNotFound({ refStr }: { refStr: string }) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
+      <FileQuestion className="w-12 h-12 text-gray-300 dark:text-gray-600" />
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Revision not found</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500">
+          The branch or commit <span className="font-mono break-all">{refStr}</span> is not available in this repository.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 // ── File path label ───────────────────────────────────────────────────────────
 
 // FilePathLabel renders the selected file's path in the content header, the same
@@ -761,6 +775,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   const [fileLoading, setFileLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
+  const [revisionNotFound, setRevisionNotFound] = useState(false)
 
   // ── Branch-compare diff view ──────────────────────────────────────────────
   // Picking a compare branch (head) diffs it against the browsed ref (base),
@@ -972,6 +987,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     setPrevRefFetchKey(refFetchKey)
     setTreeLoading(true)
     setTreeError(null)
+    setRevisionNotFound(false)
     setArtifactScripts(null)
   }
 
@@ -991,7 +1007,15 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         if (target) ancestorsOf(target).forEach((p) => next.add(p))
         setExpanded(next)
       })
-      .catch((err) => { if (!cancelled) setTreeError(formatError(err)) })
+      .catch((err) => {
+        if (cancelled) return
+        if (err instanceof ApiError && err.status === 404 && apiErrorBody(err)?.error === ErrorResponse.error.NOT_FOUND) {
+          setRevisionNotFound(true)
+          setTreeError(null)
+        } else {
+          setTreeError(formatError(err))
+        }
+      })
       .finally(() => { if (!cancelled) setTreeLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1027,6 +1051,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
       setFileLoading(true)
       setError(null)
       setNotFound(false)
+      setRevisionNotFound(false)
     }
   }
   useEffect(() => {
@@ -1039,8 +1064,10 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
         setFile(null)
         // A missing path gets its own "File not found" page; other failures fall
         // back to the inline error message.
-        if (err instanceof ApiError && err.status === 404) setNotFound(true)
-        else setError(formatError(err))
+        if (err instanceof ApiError && err.status === 404) {
+          if (apiErrorBody(err)?.error === ErrorResponse.error.NOT_FOUND) setRevisionNotFound(true)
+          else setNotFound(true)
+        } else setError(formatError(err))
       })
       .finally(() => { if (!cancelled) setFileLoading(false) })
     return () => { cancelled = true }
@@ -1448,6 +1475,8 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
             <div className="flex items-center justify-center py-8 text-gray-400">
               <LoaderCircle className="w-4 h-4 animate-spin" />
             </div>
+          ) : revisionNotFound ? (
+            <div className="px-3 py-4 text-xs text-gray-400 dark:text-gray-500 text-center">Revision not found</div>
           ) : treeError ? (
             <div className="px-3 py-4 text-xs text-red-500 text-center">{treeError}</div>
           ) : displayTree.length === 0 ? (
@@ -1640,6 +1669,8 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
               refQuery={queryRef}
               scriptName={artifactScript}
             />
+          ) : revisionNotFound ? (
+            <RevisionNotFound refStr={refStr} />
           ) : notFound && viewPath ? (
             <FileNotFound path={viewPath} refStr={refStr} />
           ) : error ? (

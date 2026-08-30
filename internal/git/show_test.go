@@ -83,6 +83,33 @@ func TestShowFile(t *testing.T) {
 	}
 }
 
+func TestRefExists(t *testing.T) {
+	dir := gitInit(t)
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "-C", dir, "add", "README.md")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "-C", dir, "commit", "-qm", "first")
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	exists, err := RefExists(dir, "HEAD")
+	if err != nil || !exists {
+		t.Fatalf("RefExists(HEAD) = %v, %v, want true, nil", exists, err)
+	}
+	exists, err = RefExists(dir, "hydra/missing")
+	if err != nil || exists {
+		t.Fatalf("RefExists(missing) = %v, %v, want false, nil", exists, err)
+	}
+}
+
 func TestCheckoutBranchPreservesDirtyTreeProtection(t *testing.T) {
 	dir := gitInit(t)
 	run := func(args ...string) {

@@ -41,7 +41,7 @@ import {
 } from 'lucide-react'
 import { SiGit } from '@icons-pack/react-simple-icons'
 import { Link } from '@tanstack/react-router'
-import { AgentStatus, type ChatEventUnion, type ChatFrame } from '../api'
+import { AgentStatus, type AgentResponse, type ChatEventUnion, type ChatFrame } from '../api'
 import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../lib/chatEvents'
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
@@ -6760,6 +6760,14 @@ const SettledMessages = memo(
     a.subagents === b.subagents,
 )
 
+// A regular head browses the isolated branch it owns. A focused head is
+// deliberately branchless and works in the registered project checkout, so its
+// links follow that checkout's HEAD instead of inventing a hydra/<id> ref that
+// Git cannot resolve.
+export function agentChatRepositoryRef(agent: Pick<AgentResponse, 'branch_name'> | undefined): string {
+  return agent?.branch_name ?? 'HEAD'
+}
+
 export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onReviewCommentsChanged, onSelectCommit, review }: ChatProps) {
   // The key for everything this pane stores per CONVERSATION rather than per
   // head: the composer draft and its attachments, the composer height, the
@@ -7106,18 +7114,18 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       return agent.focused ? agent.project_path : agent.worktree_path ?? null
     },
   )
-  const branchName = useAgentStore(
-    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
-  )
+  const repositoryRef = useAgentStore((s) => agentChatRepositoryRef(
+    s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId),
+  ))
   // memo'd: <Markdown> is memo'd on its props, so a fresh object each render
   // would re-parse every rendered message on every keystroke in the composer.
   // agentId lets a markdown image resolve against this head's files.
   const chatLinkCtx = useMemo(
     () =>
       projectId
-        ? { projectId, agentId, refStr: branchName, filePath: '', worktreePath: worktreePath ?? undefined }
+        ? { projectId, agentId, refStr: repositoryRef, filePath: '', worktreePath: worktreePath ?? undefined }
         : undefined,
-    [projectId, agentId, branchName, worktreePath],
+    [projectId, agentId, repositoryRef, worktreePath],
   )
   // The server-persisted plan (AgentResponse.plan). On a fresh browser, this is
   // the only copy of the plan; seed it into localStorage (only when local is

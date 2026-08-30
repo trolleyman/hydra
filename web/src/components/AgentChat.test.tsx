@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
+import { ChatPane, agentChatRepositoryRef, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
 import { useAgentStore } from '../stores/agentStore'
@@ -128,6 +128,16 @@ describe('review checkout path display', () => {
   it('names Claude tool-result spill files without its transcript cache path', () => {
     expect(toolResultName('/home/callum/.claude/projects/-long-slug/session/tool-results/bij43gmi4.txt'))
       .toBe('bij43gmi4.txt')
+  })
+})
+
+describe('chat repository links', () => {
+  it('uses the owned branch for a worktree head', () => {
+    expect(agentChatRepositoryRef({ branch_name: 'hydra/feature' })).toBe('hydra/feature')
+  })
+
+  it('uses the project checkout for a branchless focused head', () => {
+    expect(agentChatRepositoryRef({ branch_name: null })).toBe('HEAD')
   })
 })
 

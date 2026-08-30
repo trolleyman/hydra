@@ -170,7 +170,8 @@ an optional shortcut, but must not be the only indication or control.
   stale request fails rather than committing onto a branch the user changed in
   another application.
 - A focused session never creates or owns a branch, so commit language and UI
-  must not imply that Hydra will merge or archive it.
+  must not imply that Hydra will merge or archive it. File links from its chat
+  resolve relative to the project root and browse the checkout's current HEAD.
 
 The commit toggle changes authorization, not the filesystem sandbox, and should
 not require a provider restart. Turning it off must affect the next tool request
