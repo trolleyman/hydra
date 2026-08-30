@@ -226,6 +226,9 @@ runtime paths, executable discovery, updates, and sandbox helper behavior.
 ### Windows, menus, and deep links
 
 - Register a desktop entry and stable application ID.
+- Use `org.trolleyman.hydra` as the GTK application ID and keep it identical to
+  the desktop-entry basename so Wayland and X11 associate every Hydra window
+  with the installed Hydra icon.
 - Support New Full Window, New Chat Window, Settings, and Quit from the
   application menu and desktop actions where the environment exposes them.
 - Treat single-instance activation as a request delivered to the existing app,
@@ -364,11 +367,14 @@ and backend build identity. Linux refuses to attach when the protocol is absent
 or different, so compatibility is checked for reused daemons as well as newly
 launched ones.
 The GTK shell also supports repeated application activation and Ctrl+N as
-native multi-window actions against the same application/backend. WebKit policy
-keeps same-origin Hydra navigation embedded, opens clicked external HTTP(S)
-links with the system handler, and blocks cross-origin redirects and non-web
-schemes. Shared cookie/storage behavior and window-manager lifecycle still need
-native Wayland/X11 validation.
+native multi-window actions against the same application/backend. Its WebKit
+profile is persistent under the selected Hydra state root, so browser-local
+preferences such as the last project and model survive an app restart while
+checkout-local development runs remain isolated from the installed app. WebKit
+policy keeps same-origin Hydra navigation embedded, opens clicked external
+HTTP(S) links with the system handler, and blocks cross-origin redirects and
+non-web schemes. Window-manager lifecycle still needs native Wayland/X11
+validation.
 Desktop cold-start explicitly binds `127.0.0.1:0`; the assigned port exists only
 in the private ownership record. `mage buildDesktop` and `mage runDesktop`
 dispatch by host OS; on Linux they build the frontend and tagged shell.
@@ -420,9 +426,9 @@ timeout.
   waiting heads may retain a reusable sandbox process without triggering the
   guard, and closing a secondary window never offers to stop its shared head.
 - [x] Make close and Quit copy follow backend ownership. Installed persistent
-  backends can leave agents running; command-owned Mage desktop runs say that
-  closing the last window stops the backend and use a single Close and stop
-  action. Dialog titles report the number of active agents.
+  backends leave agents running when a window closes. Command-owned Mage desktop
+  runs explain that closing the last window stops the backend. Dialog titles
+  report the number of active agents.
 - Keep browser-safe dialogs and navigation paths for every essential action.
 
 Exit criterion: windows at full and chat routes support the agreed lifecycle,

@@ -95,6 +95,7 @@ import { useImageCommentStore } from '../stores/imageCommentStore'
 // classifier, so the lightbox's text viewer highlights by the same table.
 import { langFromPath } from '../lib/fileKind'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
+import { CLAUDE_MODELS, CODEX_MODELS } from '../lib/agentModels'
 import { loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
@@ -1960,27 +1961,6 @@ const PANEL_CLASS =
 // The send button's terracotta accent.
 const ACCENT_BG = 'bg-[#c96442] hover:bg-[#b55535]'
 
-// Claude models offered by the in-chat model dropdown. Sent verbatim to the
-// CLI's set_model control request, so these must be aliases (or full model ids)
-// it accepts. The two Opus versions use full ids rather than the bare `opus`
-// alias so they map to distinct labels in modelDisplayLabel's substring match
-// (bare `opus` is a substring of both claude-opus-5 and claude-opus-4-8).
-const CLAUDE_MODELS = [
-  { id: 'fable', label: 'Fable' },
-  { id: 'claude-opus-5', label: 'Opus 5' },
-  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { id: 'sonnet', label: 'Sonnet' },
-  { id: 'haiku', label: 'Haiku' },
-]
-const CODEX_MODELS = [
-  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
-  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
-  { id: 'gpt-5.5', label: 'GPT-5.5' },
-  { id: 'gpt-5.4', label: 'GPT-5.4' },
-  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-]
-
 // Effective context window (tokens) for a model, used to turn a turn's prompt
 // size into a "context left" percentage (item 40). Opus, Sonnet and Fable all
 // expose a 1M window; only Haiku is 200k. A flat 200k constant (the old value)
@@ -2751,9 +2731,7 @@ interface ScriptOutputRow {
   // The file this line's NUMBER counts in, when the script named one. A
   // sectioned script's gutter is several files' numbering stacked in one column
   // - the numbers restart, and nothing on the row says at which file - so the
-  // gutter cell carries it as a tooltip. (A native title, deliberately: this is
-  // one element per output line, which is exactly the long-list case the
-  // tooltip convention in CLAUDE.md keeps native.)
+  // gutter cell carries it in a tooltip.
   file?: string
   // 'code' is a line of some file, 'marker' a separator the script echoed, and
   // 'plain' output nothing could be said about.
@@ -3029,15 +3007,23 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
         {rows.map((row, i) => (
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
-            {gutter && (
+            {gutter && (row.file ? (
+              <Tooltip
+                content={<FilePathLabel path={row.file} nativeTitle={false} />}
+                align="left"
+                className="min-h-4"
+              >
+                <span
+                  data-copy-skip
+                  className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
+                >{row.num}</span>
+              </Tooltip>
+            ) : (
               <span
                 data-copy-skip
-                // Plain non-interactive text in a long list: native title is the
-                // right tool here (see the tooltip conventions in CLAUDE.md).
-                title={row.file ? (row.num ? `${row.file}:${row.num}` : row.file) : undefined}
                 className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
-              >{row.file && row.num ? `${row.file}:${row.num}` : row.num}</span>
-            )}
+              >{row.num}</span>
+            ))}
             <span
               data-copy-line
               className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}

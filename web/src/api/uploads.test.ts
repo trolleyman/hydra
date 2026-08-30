@@ -1,5 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { extractFiles, hasFilePayload } from './uploads'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { OpenAPI } from './core/OpenAPI'
+import { extractFiles, hasFilePayload, uploadFile } from './uploads'
+
+afterEach(() => {
+  OpenAPI.BASE = ''
+  OpenAPI.CREDENTIALS = 'include'
+  vi.unstubAllGlobals()
+})
+
+describe('uploadFile', () => {
+  it('uses the generated client API origin instead of the page origin', async () => {
+    OpenAPI.BASE = 'https://api.example.test'
+    OpenAPI.CREDENTIALS = 'same-origin'
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ path: '/uploads/x.png', filename: 'x.png' })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await uploadFile('hydra', new File(['png'], 'image.png', { type: 'image/png' }))
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.test/api/projects/hydra/uploads',
+      expect.objectContaining({ method: 'POST', credentials: 'same-origin' }),
+    )
+  })
+})
 
 describe('file drag payloads', () => {
   it('recognises WebKit file items without a Files type', () => {

@@ -17,8 +17,6 @@ export type DesktopMessage =
   | { type: 'pick-folder'; requestId: string }
   | { type: 'keep-running'; enabled: boolean }
 
-export type DesktopCommand = { type: 'stop-and-close' }
-
 interface DesktopImagePaste {
   base64: string
   mediaType: string
@@ -51,6 +49,14 @@ export function hasDesktopBridge(): boolean {
   if (typeof window === 'undefined') return false
   const desktop = window as DesktopWindow
   return !!desktop.webkit?.messageHandlers?.hydra || !!desktop.chrome?.webview
+}
+
+// Linux WebKitGTK and macOS WKWebView expose the same WebKit message-handler
+// transport. Keep this narrower than hasDesktopBridge: Windows WebView2 uses
+// Chromium and does not need WebKit-specific rendering workarounds.
+export function hasWebKitDesktopBridge(): boolean {
+  if (typeof window === 'undefined') return false
+  return !!(window as DesktopWindow).webkit?.messageHandlers?.hydra
 }
 
 export function isCompactChatWindow(): boolean {
@@ -131,11 +137,6 @@ export function pickNativeFolder(): Promise<string | null> | null {
   })
 }
 
-export function onDesktopCommand(handler: (command: DesktopCommand) => void): () => void {
-  const listener = (event: Event) => handler((event as CustomEvent<DesktopCommand>).detail)
-  window.addEventListener('hydra-desktop-command', listener)
-  return () => window.removeEventListener('hydra-desktop-command', listener)
-}
 
 export function onDesktopImagePaste(handler: (file: File) => void): () => void {
   const listener = (event: Event) => {

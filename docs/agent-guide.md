@@ -37,6 +37,18 @@ Use `mage` for development tasks.
       want to enable them.
 3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generate:go` to update server stubs.
 
+### Commits and verification
+
+When a logical change is coherent and the agent is confident in it, it commits
+promptly and runs focused tests against the committed tip. This allows Hydra's
+per-commit checks to begin without waiting for an additional agent turn. An
+agent tests before committing when confidence is low or a change is risky.
+
+Run `mage tidy` before a Go commit. Run the relevant Go tests after the commit,
+and finish Go work with `go test ./...`. Run `cd web && aube run lint` after a
+web commit; put any corrections in a follow-up commit. Before final handoff,
+run `mage build` for the complete change set.
+
 ### Keyed frontend collections
 
 Repeated identity lookups use the cached indexes in the owning store. Agent
@@ -124,7 +136,10 @@ Native `title=` is still correct for three cases:
    `CaseTree.tsx`.
 2. **Anything rendered once per row** of a long list, interactive or not - the
    same perf reason. The line-number gutter in `RepositoryView.tsx` renders per
-   source line; `CaseTree`'s copy/open buttons render per case.
+   source line; `CaseTree`'s copy/open buttons render per case. The source-aware
+   chat output gutter is the narrow exception: its line numbers use `Tooltip`
+   because the hidden path needs the shared file icon and lowlit-directory
+   treatment rather than an unstyled path string.
 3. **Drag handles** (`lib/ResizeHandle.tsx` and its callers). `Tooltip` anchors
    the box when it opens and only recomputes on scroll / window-resize / box
    resize - none of which a drag fires - so a tip opened during the pre-drag

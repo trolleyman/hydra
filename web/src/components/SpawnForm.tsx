@@ -31,6 +31,7 @@ import { PRPicker } from './PRPicker'
 import { Badge } from './Badge'
 import type { ReviewRef } from '../api/models/ReviewRef'
 import { type AgentTypeOption, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
+import { AGENT_MODELS, type AgentModel } from '../lib/agentModels'
 import { fetchBranches, peekBranches } from '../lib/branchCache'
 import { orderModelProviders, recordModelProviderUse } from '../lib/modelProviderRecency'
 import { SegmentedControl } from './SegmentedControl'
@@ -64,33 +65,6 @@ const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
   { id: 'gemini', label: 'Gemini', color: AGENT_ACCENT.gemini },
   { id: 'copilot', label: 'Copilot', color: AGENT_ACCENT.copilot },
 ]
-
-// Curated model aliases per agent type, shown as a sub-list under each agent in
-// the picker. Every agent also gets an implicit "Default" row (model '') meaning
-// "don't pass --model" so the CLI uses its own default. Claude, Codex and
-// Gemini expose a small curated set; Copilot stays on its CLI-managed default.
-const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
-  claude: [
-    { id: 'fable', label: 'Fable' },
-    { id: 'claude-opus-5', label: 'Opus 5' },
-    { id: 'claude-opus-4-8', label: 'Opus 4.8' },
-    { id: 'sonnet', label: 'Sonnet' },
-    { id: 'haiku', label: 'Haiku' },
-  ],
-  gemini: [
-    { id: 'gemini-2.5-pro', label: '2.5 Pro' },
-    { id: 'gemini-2.5-flash', label: '2.5 Flash' },
-  ],
-  copilot: [],
-  codex: [
-    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
-    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
-    { id: 'gpt-5.5', label: 'GPT-5.5' },
-    { id: 'gpt-5.4', label: 'GPT-5.4' },
-    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-  ],
-}
 
 // Short label for the currently-selected model, shown next to the brand icon on
 // the picker trigger. Empty when on the CLI default (keeps the trigger to just
@@ -159,7 +133,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
   const iconCls = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'
 
   // One selectable row: an agent + a specific model (or Default when model '').
-  const Row = ({ a, m }: { a: AgentTypeOption; m: { id: string; label: string } }) => {
+  const Row = ({ a, m }: { a: AgentTypeOption; m: AgentModel }) => {
     const selected = agent === a && model === m.id
     return (
       <button

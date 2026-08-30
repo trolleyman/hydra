@@ -3200,17 +3200,17 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
   const summary = diff?.uncommitted_summary
   if (!summary || (summary.tracked_count === 0 && summary.untracked_count === 0)) return null
 
-  const groups: { heading: string; count: number; files: string[] }[] = []
+  const groups: { type: 'modified' | 'untracked'; count: number; files: string[] }[] = []
   if (summary.tracked_count > 0) {
     groups.push({
-      heading: `${summary.tracked_count} tracked file${summary.tracked_count !== 1 ? 's' : ''} modified`,
+      type: 'modified',
       count: summary.tracked_count,
       files: summary.tracked_files ?? [],
     })
   }
   if (summary.untracked_count > 0) {
     groups.push({
-      heading: `${summary.untracked_count} untracked file${summary.untracked_count !== 1 ? 's' : ''}`,
+      type: 'untracked',
       count: summary.untracked_count,
       files: summary.untracked_files ?? [],
     })
@@ -3222,8 +3222,7 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
         <div>
           <p className="font-semibold mb-1">Uncommitted changes</p>
           {groups.map((g) => (
-            <div key={g.heading} className="mt-1 first:mt-0">
-              <p className="text-gray-600 dark:text-gray-300">{g.heading}</p>
+            <div key={g.type}>
               {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => {
                 // The per-filetype icon from the diff's file list stands in for the
                 // "- " bullet these rows used to carry: it marks the row just as
@@ -3233,16 +3232,17 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
                   // Icon and path as two flex cells rather than a prefix in the
                   // text: that hangs the indent, so a wrapped path lines up under
                   // the start of the path above it instead of under its icon.
-                  // items-start keeps the icon on the FIRST line of a path that
-                  // wraps; the span around it supplies the line box that
-                  // vertical-align needs (a flex item has none of its own), and
-                  // sizing the mark in em / offsetting it in cap centres it on the
-                  // text's cap box at whatever size the tooltip renders at.
+                  // items-start keeps the filetype icon on the FIRST line of a
+                  // wrapping path. The status mark rides in the path's inline
+                  // flow, where its cap-based alignment centres it against text.
                   <div key={f} className="flex items-start gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
                     <span className="shrink-0">
                       <Icon className={`inline-block h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)] ${className}`} />
                     </span>
-                    <span className="min-w-0 break-words"><WrappablePathName path={f} /></span>
+                    <span className="min-w-0 break-words">
+                      <WrappablePathName path={f} />
+                      <SharedChangeTypeIcon type={g.type} className="inline-block ml-1 h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)]" />
+                    </span>
                   </div>
                 )
               })}

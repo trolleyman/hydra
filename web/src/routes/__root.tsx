@@ -42,7 +42,7 @@ import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
-import { hasDesktopBridge, isCompactChatWindow, onDesktopCommand, postDesktopMessage, setDesktopKeepRunning } from '../lib/desktopBridge'
+import { hasDesktopBridge, isCompactChatWindow, postDesktopMessage, setDesktopKeepRunning } from '../lib/desktopBridge'
 import { agentHasActiveTurn, desktopRunningAgentCount } from '../lib/desktopCloseState'
 import type { AgentCommand } from '../lib/agentCommands'
 
@@ -941,19 +941,6 @@ function RootLayout() {
       commandOwnedBackend: backendLifetime === 'command-owned',
     })
   }, [desktopWindow, currentProjectId, selectedAgentId, selectedAgentActiveTurn, runningAgentCount, backendLifetime])
-
-  useEffect(() => {
-    if (!desktopWindow || !currentProjectId || !selectedAgentId) return
-    return onDesktopCommand((command) => {
-      if (command.type !== 'stop-and-close') return
-      void api.default.killAgent(currentProjectId, selectedAgentId)
-        .then(() => postDesktopMessage({ type: 'close-window', force: true }))
-        .catch((error) => useToastStore.getState().show({
-          type: 'error',
-          message: `Could not stop the agent: ${error instanceof Error ? error.message : String(error)}`,
-        }))
-    })
-  }, [desktopWindow, currentProjectId, selectedAgentId])
 
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">

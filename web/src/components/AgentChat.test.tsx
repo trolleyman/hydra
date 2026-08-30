@@ -114,7 +114,7 @@ function renderChat(agentId = `agent-${++agentSeq}`) {
 }
 
 describe('review checkout path display', () => {
-  const reviewRoot = '/home/callum/code/hydra/.hydra/local/review-checkouts/add-review-comments'
+  const reviewRoot = '/home/callum/.local/state/hydra/projects/hydra/review-checkouts/add-review-comments'
 
   it('renders files relative to the detached review checkout', () => {
     expect(trimWorktreePaths(`${reviewRoot}/web/src/AgentChat.tsx`, '/some/head/worktree'))
@@ -124,6 +124,12 @@ describe('review checkout path display', () => {
   it('turns the detached checkout itself into the display root', () => {
     const trimmed = trimWorktreePaths(`cd '${reviewRoot}'\nsed -n '1,20p' web/x.ts`, '/some/head/worktree')
     expect(formatBashForDisplay(trimmed)).toBe("sed -n '1,20p' web/x.ts")
+  })
+
+  it('also trims review checkouts from transcripts using the project-local state layout', () => {
+    const oldReviewRoot = '/home/callum/code/hydra/.hydra/local/review-checkouts/add-review-comments'
+    expect(trimWorktreePaths(`${oldReviewRoot}/web/src/AgentChat.tsx`, '/some/head/worktree'))
+      .toBe('web/src/AgentChat.tsx')
   })
 
   it('names Claude tool-result spill files without its transcript cache path', () => {
