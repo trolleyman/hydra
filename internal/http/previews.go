@@ -132,9 +132,16 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 		if head.Branch == nil {
 			return nil, nil
 		}
-		sha, err := git.ResolveRef(projectRoot, *head.Branch)
+		// Kill/merge removes the branch before the archived row disappears from
+		// every in-flight request. Treat that transition (and a degraded head with
+		// an already-missing branch) as having no previews instead of turning an
+		// expected teardown state into a git rev-parse 500.
+		sha, exists, err := resolvePreviewBranch(projectRoot, *head.Branch)
 		if err != nil {
 			return nil, errtrace.Wrap(err)
+		}
+		if !exists {
+			return &previewResolution{projectRoot: projectRoot}, nil
 		}
 		srcRef = sha
 		pv = preview.Version{HeadID: head.ID, SHA: sha, Branch: *head.Branch}
@@ -157,6 +164,17 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 	}
 	sort.Slice(specs, func(i, j int) bool { return specs[i].Name < specs[j].Name })
 	return &previewResolution{projectRoot: projectRoot, specs: specs, version: pv}, nil
+}
+
+func resolvePreviewBranch(projectRoot, branch string) (sha string, exists bool, err error) {
+	if !git.BranchExists(projectRoot, branch) {
+		return "", false, nil
+	}
+	sha, err = git.ResolveRef(projectRoot, branch)
+	if err != nil {
+		return "", false, errtrace.Wrap(err)
+	}
+	return sha, true, nil
 }
 
 // previewURL builds the URL of a preview instance from the API request's Host
