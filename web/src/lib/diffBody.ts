@@ -300,7 +300,17 @@ export function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderS
     const bot = Math.min(L - top, ov?.bot ?? (isTrail ? 0 : CTX))
     const hidden = L - top - bot
     if (hidden <= MIN_COLLAPSE_GAP) {
-      segs.push({ kind: 'lines', key: `c${run.s}`, lines: fullLines.slice(run.s, run.e) })
+      // Keep the growing side's key when a reveal consumes the final hidden
+      // lines. That lets DiffViewer's context-run wrapper animate through the
+      // render where the expander disappears instead of remounting the run and
+      // snapping straight to its full height. Short runs that were never
+      // collapsed keep their neutral key.
+      const key = ov?.bot != null && ov.top == null
+        ? `cb${run.s}`
+        : ov?.top != null
+          ? `ct${run.s}`
+          : `c${run.s}`
+      segs.push({ kind: 'lines', key, lines: fullLines.slice(run.s, run.e) })
       return
     }
     if (top > 0) segs.push({ kind: 'lines', key: `ct${run.s}`, lines: fullLines.slice(run.s, run.s + top) })

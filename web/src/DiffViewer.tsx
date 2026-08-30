@@ -1650,6 +1650,44 @@ export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
 
+// A context reveal grows one existing unchanged run. Animate that run's measured
+// height rather than the whole file body: the expander and nearby change move
+// smoothly, while unrelated lines elsewhere in a long file remain still. The
+// Web Animations API can tween from the previous rendered height to the new
+// content's exact height (including wrapped code rows), and leaves no inline
+// height behind once it finishes. Reduced-motion users get the immediate update.
+const CONTEXT_REVEAL_MS = 180
+
+function AnimatedContextRun({ lineCount, children }: { lineCount: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const previous = useRef<{ count: number; height: number } | null>(null)
+  const animation = useRef<Animation | null>(null)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const nextHeight = el.scrollHeight
+    const prev = previous.current
+    previous.current = { count: lineCount, height: nextHeight }
+
+    animation.current?.cancel()
+    animation.current = null
+    if (!prev || lineCount <= prev.count || nextHeight <= prev.height) return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || typeof el.animate !== 'function') return
+
+    animation.current = el.animate(
+      [
+        { height: `${prev.height}px`, opacity: 0.72 },
+        { height: `${nextHeight}px`, opacity: 1 },
+      ],
+      { duration: CONTEXT_REVEAL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+    )
+    return () => animation.current?.cancel()
+  }, [lineCount])
+
+  return <div ref={ref} className="overflow-hidden">{children}</div>
+}
+
 // The file's first line, when the diff actually shows it - getLanguage falls back
 // to a `#!` shebang for paths with no telling extension (`scripts/deploy`). Either
 // side will do: a hunk that doesn't reach line 1 (a windowed `-U3` hunk further
@@ -2099,15 +2137,18 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   const addToReviewForHunk = onAddToReview ? onAddToReviewForFile : undefined
 
   const renderLines = (lines: DiffLine[], key: string) => (
-    sideBySide
-      ? <SideBySideHunk key={key} hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+    <AnimatedContextRun key={key} lineCount={lines.length}>
+      {sideBySide
+      ? <SideBySideHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
-      : <UnifiedHunk key={key} hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+      : <UnifiedHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+      }
+    </AnimatedContextRun>
   )
 
   // Collapsing a file whose top has scrolled above the viewport would leave

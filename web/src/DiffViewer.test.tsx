@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
 import { FileDiff, diffMetaKey } from './DiffViewer'
-import { bodyShape } from './lib/diffBody'
+import { bodyShape, buildSegments, regionKey, type RevealMap } from './lib/diffBody'
 import { DiffFile, DiffHunk, DiffLine, type DiffResponse } from './api'
 import { EXPANDER_ROW, UNIFIED_CODE_CLASS, SBS_CODE, type BodyShape } from './lib/diffMetrics'
 
@@ -46,6 +46,19 @@ function wholeFile(): DiffFile {
   for (let i = 42; i <= 81; i++) lines.push(ctx(`context line ${i}`, i))
   return file({ expanded: true, additions: 1, deletions: 1, hunks: [hunk(lines)] })
 }
+
+describe('context reveal animation keys', () => {
+  it('keeps the growing run mounted when showing all remaining lines', () => {
+    const lines = wholeFile().hunks.flatMap((part) => part.lines)
+    const leadId = regionKey(lines[0])
+    const initial = buildSegments(lines, new Map()).find((seg) => seg.regionId === leadId)
+    expect(initial?.kind).toBe('topedge')
+
+    const reveal: RevealMap = new Map([[leadId, { bot: 40 }]])
+    const expanded = buildSegments(lines, reveal).find((seg) => seg.key === 'cb0')
+    expect(expanded).toMatchObject({ kind: 'lines', lines: lines.slice(0, 40) })
+  })
+})
 
 // Two windowed `-U3` hunks with a gap between them - the other render branch.
 function windowedFile(): DiffFile {
