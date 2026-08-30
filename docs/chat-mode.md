@@ -366,7 +366,8 @@ incoming-branch hint and remain ordinary one-commit rows.
 ## Project-directory Changes inspector
 
 A project-directory chat has the same Changes inspector as a managed worktree
-chat. When the Head is created, Hydra resolves the checkout's current `HEAD` and
+chat. It opens with the inspector hidden; **Show diff** reveals it when needed.
+When the Head is created, Hydra resolves the checkout's current `HEAD` and
 persists it as `workspace_base_ref`. The default selector range is **Chat start**
 to **Project directory**: the starting commit is the left side, and the shared
 project root - committed, staged, unstaged and untracked state together - is the

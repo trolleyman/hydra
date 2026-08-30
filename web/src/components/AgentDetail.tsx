@@ -538,6 +538,7 @@ function ProjectCheckoutPermissions({
     <>
       <SegmentedControl
         label="Project files"
+        className="shrink-0"
         value={agent.filesystem_mode ?? FocusedFilesystemMode.FocusedFilesystemEdit}
         disabled={saving}
         onChange={(filesystemMode) => onUpdate({
@@ -942,6 +943,17 @@ export function AgentDetail({
   const paneCollapse = usePaneCollapseStore((s) => s.collapse)
   const toggleInspector = usePaneCollapseStore((s) => s.toggleInspector)
   const toggleWorking = usePaneCollapseStore((s) => s.toggleWorking)
+  // Project-directory chats open on the chat alone: their inspector describes
+  // shared checkout state and is useful on demand, but should not take half of
+  // the page by default. Keep this entry default local to the focused chat so
+  // visiting it does not overwrite the user's persisted worktree-pane choice.
+  useLayoutEffect(() => {
+    if (!agent.focused) return
+    const store = usePaneCollapseStore.getState()
+    const previous = store.collapse
+    if (previous !== 'inspector') store.setCollapse('inspector')
+    return () => usePaneCollapseStore.getState().setCollapse(previous)
+  }, [agent.id, agent.focused])
   // Is the diff currently on screen? Wide: the inspector pane isn't collapsed.
   // Narrow: the single pane is showing the full-screen diff (working collapsed).
   const diffShown = isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working'

@@ -9,7 +9,9 @@ and `web/src/DiffViewer.tsx`):
   simpler archived-agent view with a single `[data-main-scroll]` container.
   Layout changes must handle both.
 - A live project-directory Head uses the same inspector pane as an isolated
-  worktree Head. Its default comparison is `Chat start -> Project directory`:
+  worktree Head, but enters with the inspector collapsed; **Show diff** reveals
+  it without changing the persisted worktree-pane preference. Its default
+  comparison is `Chat start -> Project directory`:
   the left ref is the immutable `workspace_base_ref` captured at spawn, and the
   right side is the shared checkout including uncommitted and untracked files.
   The inspector describes project state, not changes owned exclusively by that
