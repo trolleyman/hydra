@@ -1596,7 +1596,7 @@ function GapExpander({ seg, label, onDown, onUp, onAll }: {
   seg: RenderSeg; label: ContextLabel | undefined; onDown: () => void; onUp: () => void; onAll: () => void
 }) {
   return (
-    <div className={EXPANDER_ROW}>
+    <div className={EXPANDER_ROW} data-context-expander>
       <div className={EXPANDER_BTNS}>
         <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
           <button onClick={onDown} className={EXPANDER_BTN}><ChevronDown className="w-3 h-3" /></button>
@@ -1619,7 +1619,7 @@ function EdgeExpander({ seg, label, onStep, onAll }: {
 }) {
   const up = seg.kind === 'topedge'
   return (
-    <div className={EXPANDER_ROW}>
+    <div className={EXPANDER_ROW} data-context-expander>
       <div className={EXPANDER_BTNS}>
         <Tooltip side="top" content={`Expand ${up ? 'up' : 'down'} ${EXPAND_STEP} lines`}>
           <button onClick={onStep} className={EXPANDER_BTN}>
@@ -1658,9 +1658,14 @@ const FILE_COLLAPSE_MS = 200
 // height behind once it finishes. Reduced-motion users get the immediate update.
 const CONTEXT_REVEAL_MS = 180
 
-function AnimatedContextRun({ lineCount, children }: { lineCount: number; children: ReactNode }) {
+function AnimatedContextRun({ lineCount, absorbRemovedExpander, children }: {
+  lineCount: number
+  absorbRemovedExpander: boolean
+  children: ReactNode
+}) {
   const ref = useRef<HTMLDivElement | null>(null)
   const previous = useRef<{ count: number; height: number } | null>(null)
+  const adjacentExpanderHeight = useRef(0)
   const animation = useRef<Animation | null>(null)
 
   useLayoutEffect(() => {
@@ -1669,6 +1674,9 @@ function AnimatedContextRun({ lineCount, children }: { lineCount: number; childr
     const nextHeight = el.scrollHeight
     const prev = previous.current
     previous.current = { count: lineCount, height: nextHeight }
+    const adjacent = [el.previousElementSibling, el.nextElementSibling]
+      .find((sibling) => sibling?.hasAttribute('data-context-expander'))
+    if (adjacent) adjacentExpanderHeight.current = adjacent.getBoundingClientRect().height
 
     animation.current?.cancel()
     animation.current = null
@@ -1677,13 +1685,17 @@ function AnimatedContextRun({ lineCount, children }: { lineCount: number; childr
 
     animation.current = el.animate(
       [
-        { height: `${prev.height}px`, opacity: 0.72 },
+        // On the final reveal the now-unneeded expander unmounts in this same
+        // render. Start the growing run one expander-row taller to absorb that
+        // lost space; otherwise the content below jumps up by the row's height
+        // before beginning its downward glide.
+        { height: `${prev.height + (absorbRemovedExpander ? adjacentExpanderHeight.current : 0)}px`, opacity: 0.72 },
         { height: `${nextHeight}px`, opacity: 1 },
       ],
       { duration: CONTEXT_REVEAL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
     )
     return () => animation.current?.cancel()
-  }, [lineCount])
+  }, [lineCount, absorbRemovedExpander])
 
   return <div ref={ref} className="overflow-hidden">{children}</div>
 }
@@ -2136,8 +2148,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // read-only repo view keeps no "Add to review" button at all.
   const addToReviewForHunk = onAddToReview ? onAddToReviewForFile : undefined
 
-  const renderLines = (lines: DiffLine[], key: string) => (
-    <AnimatedContextRun key={key} lineCount={lines.length}>
+  const renderLines = (lines: DiffLine[], key: string, absorbRemovedExpander = false) => (
+    <AnimatedContextRun key={key} lineCount={lines.length} absorbRemovedExpander={absorbRemovedExpander}>
       {sideBySide
       ? <SideBySideHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
@@ -2314,7 +2326,11 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
             // client-side (no network), per-region, with whole-file highlighting.
             <div className="overflow-hidden">
               {segments.map((seg) => {
-                if (seg.kind === 'lines') return renderLines(seg.lines!, seg.key)
+                if (seg.kind === 'lines') {
+                  const revealRun = /^(ct|cb)(\d+)$/.exec(seg.key)
+                  const expanderStillPresent = revealRun && segments.some((part) => part.key === `g${revealRun[2]}`)
+                  return renderLines(seg.lines!, seg.key, !!revealRun && !expanderStillPresent)
+                }
                 if (seg.kind === 'gap') return (
                   <GapExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
                     onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP })}
