@@ -32,7 +32,7 @@ export function Kbd({ children, size = 'md' }: { children: React.ReactNode; size
         SIZE[size]
       }
     >
-      {children}
+      <span className="relative top-px leading-none">{children}</span>
     </kbd>
   )
 }

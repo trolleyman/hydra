@@ -121,6 +121,7 @@ import { FilePathLabel } from './FilePathLabel'
 import { onDesktopImagePaste } from '../lib/desktopBridge'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { ResumeDivider } from './ResumeDivider'
+import { historyThresholdTransition, isVerticalScrollbarPointer } from '../lib/chatScroll'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -6969,6 +6970,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [allHistoryLoaded, setAllHistoryLoaded] = useState(false)
   const pendingPrependRef = useRef<number | null>(null)
+  // One load per arrival at the top threshold. Holding the native scrollbar
+  // thumb at the top must not turn each anchored prepend into another request.
+  const historyThresholdArmedRef = useRef(true)
+  const scrollbarDraggingRef = useRef(false)
   // Composer attachments live in the undo history (`present.attachments`, above)
   // so a paste-turned-chip is undoable together with its text marker.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
@@ -7228,6 +7233,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setLoadingOlder(false)
     setAllHistoryLoaded(false)
     pendingPrependRef.current = null
+    historyThresholdArmedRef.current = true
+    scrollbarDraggingRef.current = false
     pinnedRef.current = true
 
     let nextId = 1
@@ -9222,6 +9229,40 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
   }
 
+  // Native scrollbar thumbs are not DOM children, so the scroll handler cannot
+  // otherwise tell a thumb drag from one of our own followBottom writes. Claim
+  // user ownership as soon as the pointer lands in the gutter: this cancels the
+  // current glide before Chromium moves the thumb, avoiding the two writers
+  // pulling the viewport back and forth while a turn streams.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || !isVerticalScrollbarPointer(el, event.clientX)) return
+      scrollbarDraggingRef.current = true
+      stopFollow()
+      if (wheelRafRef.current != null) cancelAnimationFrame(wheelRafRef.current)
+      wheelRafRef.current = null
+      pinnedRef.current = false
+      setPinned(false)
+    }
+    const onPointerEnd = () => {
+      if (!scrollbarDraggingRef.current) return
+      scrollbarDraggingRef.current = false
+      // Re-arm only after the thumb has left the load zone. Releasing it at the
+      // top keeps the current page as the one response to this drag.
+      if (el.scrollTop >= 300) historyThresholdArmedRef.current = true
+    }
+    el.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('pointerup', onPointerEnd)
+    window.addEventListener('pointercancel', onPointerEnd)
+    return () => {
+      el.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('pointerup', onPointerEnd)
+      window.removeEventListener('pointercancel', onPointerEnd)
+    }
+  }, [])
+
   // Smooth discrete wheel notches without taking over precision touchpads or
   // nested scroll regions (code blocks, tool output, tooltip bodies). CSS
   // scroll-behavior only affects programmatic scrolling, not wheel input, so
@@ -9727,7 +9768,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!el) return
     // Load-older pages main history; a sub-agent view fetches its whole run up
     // front when opened (requestSubagentEvents), so it never pages here.
-    if (el.scrollTop < 300 && chatView === 'main') requestOlderHistory()
+    if (chatView === 'main') {
+      const threshold = historyThresholdTransition(
+        el.scrollTop,
+        historyThresholdArmedRef.current,
+        scrollbarDraggingRef.current,
+      )
+      historyThresholdArmedRef.current = threshold.armed
+      if (threshold.request) requestOlderHistory()
+    }
     // Re-ACQUIRING the pin needs the view actually AT the bottom (a few px of
     // sub-pixel slack), not merely "within 40px". The old 40px band re-pinned on
     // any non-upward scroll event while near the bottom, so a small macOS
