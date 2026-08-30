@@ -85,14 +85,15 @@ and makes oapi-codegen prefix the whole enum - see the enum-collision note).
 ### Tooltips: one selectable engine
 
 All tooltips go through `web/src/components/Tooltip.tsx`. Short control labels
-use its compact, content-sized default with a 600ms delay. Longer explainers can
-provide a `title` and/or fixed `width`; `InfoTooltip` is the preset for the `i`
-trigger next to a section heading and opens immediately.
+and longer explainers use the same content-sized surface, 600ms delay, fade and
+generous maximum width. Longer explainers can provide a `title`; `InfoTooltip`
+is the preset for the `i` trigger next to a section heading.
 
 Every tooltip can be entered: the short grace period between leaving the trigger
 and entering the box keeps it open so text can be selected and links clicked.
-Set `pin` when clicking the trigger should latch an explainer open (notably for
-touch); ordinary action-button labels should not pin.
+Dragging a selection outside the box must not close it until the pointer is
+released. Tooltips do not pin on click, and callers cannot customize the delay
+or width: those shared details are what make the UI read as one tooltip system.
 
 Do **not** add a native `title=` to an interactive control (`<button>`, `<a>`,
 a control `<label>`, a clickable `<div>`/`<span>`) - use `<Tooltip>`. Native

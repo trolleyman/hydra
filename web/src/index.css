@@ -618,6 +618,9 @@ body {
   scrollbar-width: thin;
   scrollbar-color: rgba(107, 114, 128, 0.5) transparent; /* gray-500 thumb */
 }
+.dark * {
+  scrollbar-color: rgba(156, 163, 175, 0.7) transparent; /* gray-400 thumb */
+}
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -638,6 +641,16 @@ body {
 }
 *::-webkit-scrollbar-thumb:hover {
   background-color: rgba(107, 114, 128, 0.8);
+}
+*::-webkit-scrollbar-thumb:active {
+  background-color: rgba(75, 85, 99, 0.95);
+}
+.dark *::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.7); /* gray-400 */
+}
+.dark *::-webkit-scrollbar-thumb:hover,
+.dark *::-webkit-scrollbar-thumb:active {
+  background-color: rgba(209, 213, 219, 0.9); /* gray-300 */
 }
 
 /* The terminal font's OpenType features (Settings -> Browser -> Fonts). xterm
@@ -820,21 +833,10 @@ body {
   animation: popover-in 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Explanatory tooltip cards contain prose meant to be read immediately. Fade
-   them without scaling so glyphs and rules stay on fixed pixels as they appear. */
-@keyframes tooltip-card-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-.animate-tooltip-card-in {
-  animation: tooltip-card-in 0.1s ease-out;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .animate-chat-item-in,
   .animate-chat-sheet-up,
   .animate-popover-in,
-  .animate-tooltip-card-in,
   .work-spark,
   .work-spark-spoke,
   .repo-file-in { animation: none; }
@@ -947,6 +949,6 @@ body {
    preserve the four footer controls by collapsing the model chip to its provider
    icon; its full label returns as soon as there is room for it. */
 .compact-spawn-form { container-type: inline-size; }
-@container (max-width: 220px) {
+@container (max-width: 190px) {
   .compact-spawn-model-label { display: none; }
 }

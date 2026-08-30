@@ -267,9 +267,8 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
         {agent.focused && (
           <Tooltip
             content={agent.project_path
-              ? <>Project directory: <span className="font-mono">{agent.project_path}</span></>
+              ? <>Project directory: {agent.project_path}</>
               : 'Project directory workspace (not an isolated worktree)'}
-            centeredText={false}
           >
             <span
               aria-label="Project directory workspace"

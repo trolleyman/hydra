@@ -1054,7 +1054,7 @@ function UnanchoredComments({ entries, projectId, you, resolvedCount, showResolv
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
         <MessageSquare className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0" />
         <h3 className="text-xs font-semibold text-gray-600 dark:text-gray-300 optical-center">Comments without a line</h3>
-        <InfoTooltip title="Comments without a line" width={440}>
+        <InfoTooltip title="Comments without a line">
           <p>Review comments that name no file, or a file but no line - so there is no code to sit them next to. An agent can leave one deliberately: <strong>add_review_comment</strong>'s path and line are both optional, and a remark about the change as a whole belongs to no single line.</p>
           <p>They still count towards the open total and the up/down arrows step onto them, so they are listed here rather than dropped.</p>
         </InfoTooltip>
@@ -3213,8 +3213,6 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
 
   return (
     <Tooltip
-      width={400}
-      centeredText={false}
       content={
         <div>
           <p className="font-semibold mb-1">Uncommitted changes</p>
@@ -5468,7 +5466,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       {/* Info trigger before the file count: the count rewidths as you switch
           refs (8 -> 34 -> 123), which would otherwise shift the `i` sideways out
           from under a stationary cursor. */}
-      <InfoTooltip title="Files" width={460}>
+      <InfoTooltip title="Files">
         <p>Every file changed between the two selected refs (the <strong>vs</strong> base and the target on the Changes bar). The list on the left jumps to a file; the diffs render on the right.</p>
         <p>The cog holds this section's view options: the file-list grouping (<strong>tree</strong>, flat, or grouped by folder) and how the diffs render - <strong>side by side</strong> vs inline, <strong>ignore whitespace</strong>, and <strong>one file at a time</strong> (a pager instead of the full stack). Very large files start collapsed - expand them from their header.</p>
       </InfoTooltip>

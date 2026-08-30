@@ -1623,7 +1623,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
             syntax, sidecar schema, per-format comparison rules) lives in
             docs/artifacts.md; it ran to ~900 words here, which rendered a
             1248px-tall card that ran clean off a phone screen. */}
-        <InfoTooltip title="Artifacts" width={480}>
+        <InfoTooltip title="Artifacts">
           <p>Artifacts are visual snapshots - typically screenshots, or videos (screen recordings) - rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>, configured in <code className="text-blue-300">.hydra/config.toml</code> under <code className="text-blue-300">[[artifacts]]</code>. Hydra runs it against both the base ref and the head ref (or your uncommitted working tree) and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>A script with no visual changes - or one still generating - collapses to a single header row; click it to expand. The <strong>build log</strong> button (the scroll icon in the card header) shows both sides' output; <strong>refresh</strong> beside it re-runs that script, handy to retry a failure or re-render when nothing visibly changed.</p>

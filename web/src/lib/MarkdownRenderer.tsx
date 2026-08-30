@@ -110,7 +110,6 @@ function FileLink({ href, path, onClick, children }: {
   const { Icon } = getFileIcon(filename)
   return (
     <Tooltip
-      width={480}
       content={(
         <span className="inline-flex items-center gap-1.5 font-mono">
           <Icon className="w-3.5 h-3.5 shrink-0 opacity-60" aria-hidden="true" />

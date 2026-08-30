@@ -19,7 +19,7 @@ describe('Tooltip', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip content="Refresh" delay={600}>
+        <Tooltip content="Refresh">
           <button>trigger</button>
         </Tooltip>,
       )
@@ -38,6 +38,8 @@ describe('Tooltip', () => {
       fireEvent.mouseLeave(span)
       expect(screen.getByText('Refresh')).toBeInTheDocument()
       act(() => void vi.advanceTimersByTime(100))
+      expect(screen.getByText('Refresh')).toBeInTheDocument()
+      act(() => void vi.advanceTimersByTime(140))
       expect(screen.queryByText('Refresh')).toBeNull()
     } finally {
       vi.useRealTimers()
@@ -48,7 +50,7 @@ describe('Tooltip', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip content="Settings" delay={600}>
+        <Tooltip content="Settings">
           <button>trigger</button>
         </Tooltip>,
       )
@@ -68,12 +70,12 @@ describe('Tooltip', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip content="" delay={0}>
+        <Tooltip content="">
           <button>trigger</button>
         </Tooltip>,
       )
       fireEvent.mouseEnter(wrapper(container))
-      act(() => void vi.advanceTimersByTime(0))
+      act(() => void vi.advanceTimersByTime(600))
       // No tooltip role/box: the only thing on screen is the trigger button.
       expect(screen.getByText('trigger')).toBeInTheDocument()
       expect(document.body.querySelectorAll('.fixed')).toHaveLength(0)
@@ -85,19 +87,18 @@ describe('Tooltip', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip title="OS Sandbox" content={<p>sandbox details</p>} delay={0}>
+        <Tooltip title="OS Sandbox" content={<p>sandbox details</p>}>
           <span>icon</span>
         </Tooltip>,
       )
       const span = wrapper(container)
 
-      // This explainer explicitly requests no delay.
       fireEvent.mouseEnter(span)
-      act(() => void vi.advanceTimersByTime(0))
+      act(() => void vi.advanceTimersByTime(600))
       expect(screen.getByText('OS Sandbox')).toBeInTheDocument()
       expect(screen.getByText('sandbox details')).toBeInTheDocument()
       const surface = screen.getByRole('tooltip')
-      expect(surface).toHaveClass('animate-tooltip-card-in')
+      expect(surface).toHaveClass('transition-opacity')
       expect(surface).not.toHaveClass('animate-popover-in')
 
       // Leaving the trigger starts a grace period rather than hiding at once...
@@ -113,7 +114,7 @@ describe('Tooltip', () => {
       // test models both.
       fireEvent.mouseLeave(card)
       fireEvent.mouseLeave(span)
-      act(() => void vi.advanceTimersByTime(100))
+      act(() => void vi.advanceTimersByTime(240))
       expect(screen.queryByText('OS Sandbox')).toBeNull()
     } finally {
       vi.useRealTimers()
@@ -130,13 +131,13 @@ describe('Tooltip', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip content={<p>body</p>} delay={0}>
+        <Tooltip content={<p>body</p>}>
           <span>icon</span>
         </Tooltip>,
       )
       const span = wrapper(container)
       fireEvent.mouseEnter(span)
-      act(() => void vi.advanceTimersByTime(0))
+      act(() => void vi.advanceTimersByTime(600))
       const card = screen.getByText('body').closest('div.fixed') as HTMLElement
       fireEvent.mouseEnter(card)
 
@@ -153,25 +154,21 @@ describe('Tooltip', () => {
     }
   })
 
-  it('pins on click so it survives the pointer leaving, and Escape unpins', () => {
+  it('does not pin on click', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip content={<p>body</p>} delay={0} pin>
+        <Tooltip content={<p>body</p>}>
           <button>icon</button>
         </Tooltip>,
       )
       const span = wrapper(container)
+      fireEvent.mouseEnter(span)
+      act(() => void vi.advanceTimersByTime(600))
+      expect(screen.getByText('body')).toBeInTheDocument()
+
       fireEvent.click(span)
-      act(() => void vi.advanceTimersByTime(0))
-      expect(screen.getByText('body')).toBeInTheDocument()
-
-      // Pinned: the usual dismiss path is inert.
-      fireEvent.mouseLeave(span)
-      act(() => void vi.advanceTimersByTime(500))
-      expect(screen.getByText('body')).toBeInTheDocument()
-
-      act(() => void fireEvent.keyDown(document, { key: 'Escape' }))
+      act(() => void vi.advanceTimersByTime(140))
       expect(screen.queryByText('body')).toBeNull()
     } finally {
       vi.useRealTimers()
@@ -182,18 +179,45 @@ describe('Tooltip', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip content={<p>body</p>} delay={0}>
+        <Tooltip content={<p>body</p>}>
           <span>icon</span>
         </Tooltip>,
       )
       const span = wrapper(container)
       fireEvent.mouseEnter(span)
-      act(() => void vi.advanceTimersByTime(0))
+      act(() => void vi.advanceTimersByTime(600))
       expect(screen.getByText('body')).toBeInTheDocument()
 
       fireEvent.mouseLeave(span)
-      act(() => void vi.advanceTimersByTime(100))
+      act(() => void vi.advanceTimersByTime(240))
       expect(screen.queryByText('body')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stays mounted while text selection drags outside the tooltip', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(
+        <Tooltip content={<p>select this text</p>}>
+          <span>icon</span>
+        </Tooltip>,
+      )
+      const span = wrapper(container)
+      fireEvent.mouseEnter(span)
+      act(() => void vi.advanceTimersByTime(600))
+      const box = screen.getByRole('tooltip')
+
+      fireEvent.mouseDown(box, { button: 0 })
+      fireEvent.mouseLeave(box)
+      fireEvent.mouseLeave(span)
+      act(() => void vi.advanceTimersByTime(1_000))
+      expect(screen.getByText('select this text')).toBeInTheDocument()
+
+      fireEvent.mouseUp(document)
+      act(() => void vi.advanceTimersByTime(240))
+      expect(screen.queryByText('select this text')).toBeNull()
     } finally {
       vi.useRealTimers()
     }
@@ -217,7 +241,7 @@ describe('InfoTooltip', () => {
       expect(screen.queryByText('Network Access')).toBeNull()
 
       fireEvent.mouseEnter(wrapper(container))
-      act(() => void vi.advanceTimersByTime(0))
+      act(() => void vi.advanceTimersByTime(600))
       expect(screen.getByText('Network Access')).toBeInTheDocument()
       expect(screen.getByText('outbound network details')).toBeInTheDocument()
     } finally {

@@ -4,11 +4,9 @@ import { ShortcutHint } from './Kbd'
 
 type Placement = 'top' | 'bottom'
 
-// Default max width of the compact hint, in px. The box wraps at this width (see
-// max-w below) so computePos can clamp it on-screen using a known worst case. A
-// hint whose content wraps badly at this width can raise it with `width`.
-const HINT_MAX_WIDTH = 320
-const EXPLAINER_WIDTH = 384
+// One generous cap for every tooltip. Each box still shrink-wraps short content;
+// prose only grows to this width before wrapping.
+const TOOLTIP_MAX_WIDTH = 520
 
 // How far the rotated-square arrow pokes out past the box edge: half the
 // diagonal of an ARROW_SIZE square, i.e. size / 2 * sqrt(2).
@@ -23,6 +21,8 @@ const GAP = Math.max(8, Math.ceil(ARROW_REACH))
 // Floor for the explainer height cap, so a trigger wedged against a viewport
 // edge still gets a readable (scrollable) box rather than a 20px sliver.
 const MIN_EXPLAINER_HEIGHT = 160
+const FADE_MS = 140
+const HOVER_DELAY_MS = 600
 
 interface Position {
   top: number
@@ -49,20 +49,11 @@ const samePos = (a: Position | null, b: Position | null) =>
 export interface TooltipProps {
   content: React.ReactNode
   children: React.ReactNode
-  /** Hover delay (ms) before showing. Defaults to 600. */
-  delay?: number
   /** Force a side; otherwise auto. */
   side?: Placement
   className?: string
   /** Optional bold heading rendered above the content. */
   title?: string
-  /** Fixed width in px. Without one, the box sizes to its content up to 320px. */
-  width?: number
-  /**
-   * Whether clicking the trigger latches the tooltip open. Defaults to false.
-   * InfoTooltip enables this so explainers also work on touch devices.
-   */
-  pin?: boolean
   /** Extra gap (px) between the trigger and the box, on top of the base 8px -
    *  e.g. to clear a neighbouring control the box would otherwise sit against. */
   offset?: number
@@ -87,37 +78,25 @@ export interface TooltipProps {
    * because it is there.
    */
   footnote?: React.ReactNode
-  /** Override content alignment. Compact labels center and explainers left-align by default. */
-  centeredText?: boolean
 }
 
-// One configurable, hover-interactive tooltip. A title or explicit width gives
-// longer explainers room, while short labels size to their content. Every box
-// can be entered so its text can be selected and its links can be followed.
+// One delayed, hover-interactive tooltip. Every box shrink-wraps short content,
+// shares one generous maximum width, and can be entered so its text can be
+// selected and its links followed.
 export function Tooltip({
   content,
   children,
-  delay,
   side,
   className,
   title,
-  width,
-  pin = false,
   offset = 0,
   shortcut,
   footnote,
-  centeredText,
 }: TooltipProps) {
-  const roomy = title != null || width != null
-  const boxWidth = width ?? (roomy ? EXPLAINER_WIDTH : HINT_MAX_WIDTH)
-  const showDelay = delay ?? 600
-  const textCentered = centeredText ?? !roomy
-
   const [visible, setVisible] = useState(false)
-  // Click (or tap) can latch the tooltip open so it survives the pointer
-  // leaving - the only way to read a long card on a touch device, and what makes
-  // an overflowing card scrollable with the mouse.
-  const [pinned, setPinned] = useState(false)
+  // Keep the portal mounted briefly after dismissal so both compact hints and
+  // longer explainers can fade out instead of disappearing between frames.
+  const [opaque, setOpaque] = useState(false)
   const [pos, setPos] = useState<Position | null>(null)
   // Dark mode is class-scoped (`@custom-variant dark (&:where(.dark, .dark *))`),
   // so a subtree can force it locally - the image lightbox renders itself dark
@@ -131,10 +110,13 @@ export function Tooltip({
   const boxRef = useRef<HTMLDivElement>(null)
   const showTimer = useRef<number | null>(null)
   const hideTimer = useRef<number | null>(null)
+  const fadeTimer = useRef<number | null>(null)
+  const fadeFrame = useRef<number | null>(null)
   // Tooltips are interactive: track where the pointer is so leaving one of
   // the two hover regions doesn't dismiss the card while it travels to the other.
   const overTooltip = useRef(false)
   const overTrigger = useRef(false)
+  const selectingTooltip = useRef(false)
 
   const computePos = useCallback((): Position | null => {
     const el = wrapperRef.current
@@ -145,8 +127,8 @@ export function Tooltip({
     // ~160px sideways near a screen edge - box adrift, arrow stretched to reach.
     // On the first paint the box isn't in the DOM yet, so fall back to the cap;
     // the useLayoutEffect below re-runs this with the measured width before paint.
-    const clampPad = roomy ? 16 : 8
-    const halfWidth = (boxRef.current?.offsetWidth ?? boxWidth) / 2
+    const clampPad = 8
+    const halfWidth = (boxRef.current?.offsetWidth ?? TOOLTIP_MAX_WIDTH) / 2
 
     // Clamp horizontally so the box never spills off-screen, then shift the arrow
     // back by the same offset so it still points at the trigger.
@@ -164,7 +146,7 @@ export function Tooltip({
     // preferring above. This is what stops a box near the top of the viewport
     // from opening upward and getting clipped off-screen.
     const measured = boxRef.current
-    const boxHeight = measured ? measured.offsetHeight : roomy ? 0 : 36
+    const boxHeight = measured ? measured.offsetHeight : 36
     const spaceAbove = rect.top - GAP
     const spaceBelow = window.innerHeight - rect.bottom - GAP
     let placement: Placement
@@ -173,13 +155,13 @@ export function Tooltip({
     else if (boxHeight <= spaceBelow) placement = 'bottom'
     else placement = spaceBelow > spaceAbove ? 'bottom' : 'top'
 
-    // Cap a roomy tooltip to the room on its chosen side (it scrolls past that) so a long
-    // explainer can't run off the bottom of a phone screen. Only once the box
+    // Cap a tooltip to the room on its chosen side (it scrolls past that) so long
+    // prose can't run off the bottom of a phone screen. Only once the box
     // exists: the first pass must render at natural height so there is a real
     // height to pick a side from.
     const avail = placement === 'top' ? spaceAbove : spaceBelow
     const maxHeight =
-      roomy && measured ? Math.max(MIN_EXPLAINER_HEIGHT, avail - offset - GAP) : 0
+      measured ? Math.max(MIN_EXPLAINER_HEIGHT, avail - offset - GAP) : 0
 
     return {
       top: placement === 'top' ? rect.top - GAP - offset : rect.bottom + GAP + offset,
@@ -188,7 +170,7 @@ export function Tooltip({
       arrowX: `calc(50% + ${arrowOffset}px)`,
       maxHeight,
     }
-  }, [roomy, side, boxWidth, offset])
+  }, [side, offset])
 
   const clearTimers = useCallback(() => {
     if (showTimer.current !== null) {
@@ -199,6 +181,14 @@ export function Tooltip({
       window.clearTimeout(hideTimer.current)
       hideTimer.current = null
     }
+    if (fadeTimer.current !== null) {
+      window.clearTimeout(fadeTimer.current)
+      fadeTimer.current = null
+    }
+    if (fadeFrame.current !== null) {
+      window.cancelAnimationFrame(fadeFrame.current)
+      fadeFrame.current = null
+    }
   }, [])
 
   const show = useCallback(() => {
@@ -207,13 +197,25 @@ export function Tooltip({
     setInDark(!!wrapperRef.current?.closest('.dark'))
     setPos(p)
     setVisible(true)
+    setOpaque(false)
+    fadeFrame.current = window.requestAnimationFrame(() => {
+      fadeFrame.current = null
+      setOpaque(true)
+    })
   }, [computePos])
+
+  const beginHide = useCallback(() => {
+    setOpaque(false)
+    fadeTimer.current = window.setTimeout(() => {
+      fadeTimer.current = null
+      setVisible(false)
+    }, FADE_MS)
+  }, [])
 
   const hide = useCallback(() => {
     clearTimers()
-    setVisible(false)
-    setPinned(false)
-  }, [clearTimers])
+    beginHide()
+  }, [beginHide, clearTimers])
 
   // Is the pointer's destination inside the trigger? The portalled card is a
   // React CHILD of the wrapper span, so React propagates the card's own
@@ -231,17 +233,20 @@ export function Tooltip({
   const scheduleHide = useCallback(() => {
     clearTimers()
     hideTimer.current = window.setTimeout(() => {
-      if (!overTooltip.current && !overTrigger.current) setVisible(false)
+      hideTimer.current = null
+      if (!overTooltip.current && !overTrigger.current && !selectingTooltip.current) beginHide()
     }, 100)
-  }, [clearTimers])
+  }, [beginHide, clearTimers])
 
   const handleMouseEnter = useCallback(() => {
     overTrigger.current = true
     clearTimers()
-    if (visible) return
-    if (showDelay > 0) showTimer.current = window.setTimeout(show, showDelay)
-    else show()
-  }, [clearTimers, show, showDelay, visible])
+    if (visible) {
+      setOpaque(true)
+      return
+    }
+    showTimer.current = window.setTimeout(show, HOVER_DELAY_MS)
+  }, [clearTimers, show, visible])
 
   const handleMouseLeave = useCallback(
     (e: React.MouseEvent) => {
@@ -250,9 +255,9 @@ export function Tooltip({
       if (inTrigger(e.relatedTarget)) return
       overTrigger.current = false
       clearTimers()
-      if (!pinned) scheduleHide()
+      scheduleHide()
     },
-    [clearTimers, pinned, scheduleHide, inTrigger],
+    [clearTimers, scheduleHide, inTrigger],
   )
 
   // Keyboard parity: help text should be reachable without a mouse.
@@ -271,21 +276,26 @@ export function Tooltip({
     if (!overTooltip.current && !overTrigger.current) hide()
   }, [hide])
 
-  const handleClick = useCallback(() => {
-    // The trigger's own click is the action (pin={false}): get out of its way.
-    // Pinning here would leave the card sitting over whatever that click just
-    // scrolled to or opened, with the pointer already elsewhere.
-    if (!pin) {
-      hide()
-      return
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    // A trigger click performs the control's action and dismisses its hint.
+    // Clicks inside the portalled box must remain usable for links and text
+    // selection even though React bubbles them through this wrapper.
+    if (e.target instanceof Node && boxRef.current?.contains(e.target)) return
+    hide()
+  }, [hide])
+
+  // Selection is allowed to drag outside the box. A normal mouseleave during
+  // that drag must not start dismantling the selection's own DOM underneath it.
+  useEffect(() => {
+    if (!visible) return
+    const onUp = () => {
+      if (!selectingTooltip.current) return
+      selectingTooltip.current = false
+      if (!overTooltip.current && !overTrigger.current) scheduleHide()
     }
-    // Tap-to-open on touch (where there is no hover), click-to-pin on desktop.
-    if (visible && pinned) hide()
-    else {
-      setPinned(true)
-      if (!visible) show()
-    }
-  }, [pin, visible, pinned, hide, show])
+    document.addEventListener('mouseup', onUp)
+    return () => document.removeEventListener('mouseup', onUp)
+  }, [visible, scheduleHide])
 
   // show()'s computePos runs before the box is in the DOM, so it can't measure
   // the real height to pick a side. Re-run once now that it's rendered (synchronous
@@ -314,25 +324,6 @@ export function Tooltip({
       window.removeEventListener('resize', update)
     }
   }, [visible, computePos])
-
-  // A pinned card is modal-ish: Escape and an outside click are the ways out.
-  useEffect(() => {
-    if (!visible || !pinned) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') hide()
-    }
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (wrapperRef.current?.contains(t) || boxRef.current?.contains(t)) return
-      hide()
-    }
-    document.addEventListener('keydown', onKey)
-    document.addEventListener('mousedown', onDown)
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.removeEventListener('mousedown', onDown)
-    }
-  }, [visible, pinned, hide])
 
   useEffect(() => () => clearTimers(), [clearTimers])
 
@@ -384,100 +375,44 @@ export function Tooltip({
     >
       {children}
       {visible && pos && content && createPortal(
-        roomy ? (
-          // Outer wrapper owns the positional transform only (centre + flip) and
-          // never animates, so the box snaps to its final spot instantly. The
-          // enter animation lives on the inner card below - keeping it off this
-          // element is what stops the "rise then settle" slide: tailwindcss-animate's
-          // `enter` keyframe rebuilds `transform` from just its own offsets, so if it
-          // shared this element it would interpolate away the -translate-y-full and
-          // visibly drift into place.
-          <div
-            ref={boxRef}
-            className={`fixed z-[9999] -translate-x-1/2 ${inDark ? 'dark' : ''} ${
-              pos.placement === 'top' ? '-translate-y-full' : ''
-            }`}
-            style={{ top: pos.top, left: pos.left }}
-            onMouseEnter={() => {
-              clearTimers()
-              overTooltip.current = true
-            }}
-            onMouseLeave={(e) => {
-              overTooltip.current = false
-              // Pointer heading back onto the trigger: no enter fires there (it
-              // never left the wrapper's React subtree), so record it here.
-              if (inTrigger(e.relatedTarget)) overTrigger.current = true
-              if (!pinned) scheduleHide()
-            }}
-          >
-            <div
-              role="tooltip"
-              className={`relative flex flex-col p-3 ${surface} border text-gray-800 dark:text-gray-100 text-2xs rounded-lg shadow-xl animate-tooltip-card-in`}
-              // Cap to the viewport (minus the 16px clamp pad each side) so the
-              // fixed `width` can't spill off-screen on narrow/phone viewports where
-              // it exceeds the screen. computePos clamps by the box's REAL
-              // offsetWidth, so the capped width also fixes the horizontal position.
-              style={{
-                width: boxWidth,
-                maxWidth: 'calc(100vw - 2rem)',
-                maxHeight: pos.maxHeight || undefined,
-              }}
-            >
-              {title && <p className="font-bold mb-1.5 border-b border-gray-200 dark:border-gray-700 pb-1 shrink-0">{title}</p>}
-              {/* Body text + code spans. Call sites tag <code> with text-blue-300,
-                  which only reads on the dark surface; re-tint to a darker blue for
-                  light mode here so it stays legible on white (descendant selector
-                  wins on specificity, no caller changes needed). Scrolls when
-                  computePos has capped the card's height against the viewport. */}
-              <div className="text-gray-600 dark:text-gray-300 space-y-2 overflow-y-auto min-h-0 [&_code]:text-blue-700 dark:[&_code]:text-blue-300">
-                {content}
-              </div>
-              {arrow(pos.placement)}
-            </div>
-          </div>
-        ) : (
-          <div
-            ref={boxRef}
-            role="tooltip"
-            // py-2 once there is more than a label in the box: HALF the arrow
-            // square (ARROW_SIZE / 2 = 5px) sits INSIDE the box, which is more
-            // than a py-1's 4px, so the arrow overlapped whatever ended up
-            // against that edge. Nothing did while the box held one line of
-            // text - the descender space absorbed it - but a keycap has a
-            // border and a drop shadow, and the arrow drew straight over it.
-            className={`fixed z-[9999] -translate-x-1/2 px-2 select-text ${
-              shortcut || footnote ? 'py-2' : 'py-1'
-            } border ${inDark ? 'dark' : ''} ${surface} text-gray-700 dark:text-gray-200 text-2xs ${textCentered ? 'text-center' : ''} rounded shadow-lg break-words ${
-              pos.placement === 'top' ? '-translate-y-full' : ''
-            }`}
-            // width: max-content sizes the box to its text: a fixed-position box
-            // otherwise shrink-to-fits against the space to the RIGHT of `left`
-            // (the -translate-x-1/2 recenters only after layout), so a trigger
-            // near the right viewport edge would wrap even a short tip.
-            // Capped at boxWidth (320px unless the caller raised it), but never
-            // wider than the viewport (minus the 8px clamp pad each side) so it
-            // can't overflow on a phone.
-            style={{ top: pos.top, left: pos.left, width: 'max-content', maxWidth: `min(${boxWidth}px, calc(100vw - 1rem))` }}
-            onMouseEnter={() => {
-              clearTimers()
-              overTooltip.current = true
-            }}
-            onMouseLeave={(e) => {
-              overTooltip.current = false
-              if (inTrigger(e.relatedTarget)) overTrigger.current = true
-              if (!pinned) scheduleHide()
-            }}
-          >
+        <div
+          ref={boxRef}
+          role="tooltip"
+          className={`fixed z-[9999] -translate-x-1/2 select-text break-words rounded-lg border p-2 text-left text-2xs text-gray-700 shadow-lg transition-opacity duration-150 ease-out motion-reduce:transition-none dark:text-gray-200 ${surface} ${opaque ? 'opacity-100' : 'pointer-events-none opacity-0'} ${inDark ? 'dark' : ''} ${pos.placement === 'top' ? '-translate-y-full' : ''}`}
+          style={{
+            top: pos.top,
+            left: pos.left,
+            width: 'max-content',
+            maxWidth: `min(${TOOLTIP_MAX_WIDTH}px, calc(100vw - 1rem))`,
+            maxHeight: pos.maxHeight || undefined,
+          }}
+          onMouseDown={(e) => {
+            if (e.button !== 0) return
+            selectingTooltip.current = true
+            clearTimers()
+          }}
+          onMouseEnter={() => {
+            clearTimers()
+            overTooltip.current = true
+          }}
+          onMouseLeave={(e) => {
+            overTooltip.current = false
+            if (inTrigger(e.relatedTarget)) overTrigger.current = true
+            scheduleHide()
+          }}
+        >
+          {title && <p className="mb-1.5 shrink-0 border-b border-gray-200 pb-1 font-bold dark:border-gray-700">{title}</p>}
+          <div className="min-h-0 space-y-2 overflow-y-auto text-gray-600 [&_code]:text-blue-700 dark:text-gray-300 dark:[&_code]:text-blue-300">
             {content}
-            {shortcut && (
-              <div className="mt-1.5">
-                <ShortcutHint keys={shortcut.keys} note={shortcut.note} />
-              </div>
-            )}
-            {footnote && <div className="mt-1.5 text-3xs text-gray-500 dark:text-gray-400">{footnote}</div>}
-            {arrow(pos.placement)}
           </div>
-        ),
+          {shortcut && (
+            <div className="mt-1.5">
+              <ShortcutHint keys={shortcut.keys} note={shortcut.note} />
+            </div>
+          )}
+          {footnote && <div className="mt-1.5 text-3xs text-gray-500 dark:text-gray-400">{footnote}</div>}
+          {arrow(pos.placement)}
+        </div>,
         document.body,
       )}
     </span>

@@ -225,7 +225,7 @@ function PreviewPanelImpl({ projectId, agentId, headRef, includeUncommitted, ref
         <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Previews</h3>
         {/* Info trigger before the status chip, so a preview starting up does not
             shift the `i` sideways out from under a stationary cursor. */}
-        <InfoTooltip title="Previews" width={520}>
+        <InfoTooltip title="Previews">
           <p>Live demo servers built from the selected version - the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip.</p>
           <p>Each row is a project-defined <code className="text-blue-300">[previews.&lt;name&gt;]</code> script in <code className="text-blue-300">.hydra/config.toml</code>. <strong>Open</strong> spins the server up on its own port (the tab shows the build log live until it is ready) and proxies to it; with no open connections past its idle timeout it shuts down again, and revisiting the link transparently respawns it.</p>
           <p>There is one server per script, following your <strong>after</strong> selection: pointing at a different version rebuilds it in place - the URL and port never change. On <strong>Latest commit</strong> it tracks the branch tip, building the new commit in the background and hot-swapping it in when ready. On <strong>Latest changes</strong> it runs in its own checkout that mirrors your uncommitted edits; a build-then-serve preview then shows <span className="text-amber-400">code changed - restart</span> so you can rebuild.</p>
