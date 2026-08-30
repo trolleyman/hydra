@@ -217,6 +217,26 @@ describe('composer status and actions', () => {
     expect(sendMessage.className).toBe(sendNow.className)
     expect(sendMessage.querySelector('svg')).toHaveClass('lucide-arrow-up')
   })
+
+  it('keeps a fatal connection error visible instead of reconnecting forever', async () => {
+    renderChat()
+    await connectedComposer()
+    const ws = sockets[0]
+
+    act(() => {
+      ws.emit({ type: 'chat_error', error: 'resume agent failed: sandbox could not start' })
+      ws.close()
+    })
+
+    expect(await screen.findByText(/resume agent failed: sandbox could not start/)).toBeInTheDocument()
+    expect(screen.queryByText('Connecting')).not.toBeInTheDocument()
+
+    // The first quick-failure retry would be scheduled after one second. A
+    // fatal frame suppresses it, leaving the actionable banner in place.
+    await new Promise((resolve) => setTimeout(resolve, 1_100))
+    expect(sockets).toHaveLength(1)
+    expect(screen.getByText(/resume agent failed: sandbox could not start/)).toBeInTheDocument()
+  })
 })
 
 describe('running turn elapsed time', () => {

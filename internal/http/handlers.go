@@ -2087,8 +2087,15 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 		if mode != nil && *mode != head.FilesystemMode {
 			head.FilesystemMode = *mode
 			if s.Sessions.IsLive(head.ID) {
-				log.Printf("api: focused filesystem mode toggled to %s for %s; stopping session for sandbox switch", *mode, head.ID)
-				heads.StopSessionAndWait(s.Sessions, head.ID, 5*time.Second)
+				// The project-root bind is part of the long-lived namespace host,
+				// not just the agent child. Rebuild the supervisor synchronously so
+				// the successful response guarantees the requested permission is
+				// active; merely stopping the child would reuse the old mount mode.
+				log.Printf("api: focused filesystem mode toggled to %s for %s; rebuilding sandbox", *mode, head.ID)
+				rows, cols := heads.LoadResumeSize(s.DB, projectRoot, head.ID)
+				if err := heads.RestartHeadSandbox(s.Sessions, s.DB, projectRoot, *head, rows, cols); err != nil {
+					return nil, errtrace.Wrap(fmt.Errorf("restart focused head with %s filesystem: %w", *mode, err))
+				}
 			}
 		}
 		if request.Body.AllowCommits != nil {

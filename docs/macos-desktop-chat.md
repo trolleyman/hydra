@@ -148,8 +148,10 @@ readable but not writable. In edit mode the selected project root is writable
 in place, so edits appear immediately in the user's editor and checkout.
 
 Changing Edit/Read-only changes the sandbox profile. It therefore uses a
-controlled provider restart and exact conversation resume behind the same Hydra
-conversation. The UI must show that transition and reject or queue input until
+controlled restart of the namespace host and exact conversation resume behind
+the same Hydra conversation. The project-root mount belongs to that outer
+sandbox, so restarting only the provider child would retain the previous
+permission. The UI must show that transition and reject or queue input until
 resume completes. A visible control is required; Shift+Tab may later be added as
 an optional shortcut, but must not be the only indication or control.
 
