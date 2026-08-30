@@ -1932,6 +1932,7 @@ export function AgentDetail({
         }
       : {
           label: mergeAppearance.label,
+          tooltip: mergeAppearance.tooltip,
           icon: mergeAppearance.icon,
           onClick: handleMerge,
           variant: 'primary',
@@ -2036,6 +2037,7 @@ export function AgentDetail({
         }
       : {
           label: publishAppearance.label,
+          tooltip: publishAppearance.tooltip,
           // The FORGE mark, not a generic lucide one: this button opens the
           // "Create merge request" dialog, which leads with the same mark, and
           // the two wearing different glyphs for one action was the giveaway
@@ -2096,9 +2098,9 @@ export function AgentDetail({
           ...(agent.focused ? [] : mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: unreadAppearance.label, icon: unreadAppearance.icon, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: renameAppearance.label, icon: renameAppearance.icon, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
-          { label: restartAppearance.label, icon: restartAppearance.icon, onClick: handleRestart, variant: 'segment', disabled: restartAppearance.disabled },
+          { label: restartAppearance.label, tooltip: restartAppearance.tooltip, icon: restartAppearance.icon, onClick: handleRestart, variant: 'segment', disabled: restartAppearance.disabled },
           { label: 'Open chat window', icon: <ExternalLink className="w-4 h-4" />, onClick: () => openChatWindow(projectId ?? undefined, agent.id), variant: 'segment', iconOnly: true },
-          { label: killAppearance.label, icon: killAppearance.icon, onClick: handleKill, variant: 'danger', disabled: killAppearance.disabled, shortcut: SHORTCUT_KILL },
+          { label: killAppearance.label, tooltip: killAppearance.tooltip, icon: killAppearance.icon, onClick: handleKill, variant: 'danger', disabled: killAppearance.disabled, shortcut: SHORTCUT_KILL },
         ]}
       />
     </TopBarPortal>

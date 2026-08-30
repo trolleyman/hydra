@@ -166,6 +166,10 @@ and `web/src/DiffViewer.tsx`):
 - Keyboard hints use the shared `Kbd` / `ShortcutHint` components. Their fixed
   cap box optically lowers the glyph within the font line box, keeping fonts
   with asymmetric ascent/descent metrics vertically centred.
+- Agent action labels stay compact in the adaptive top bar. Their tooltips carry
+  the operational detail: review creation names the PR/MR forge, merge names the
+  target branch, restart says which state is preserved, and kill says that the
+  worktree is deleted.
 - Codex `View Image` tool cards resolve their path-only result through the
   agent-files endpoint and use the shared thumbnail/lightbox treatment. A
   successful durable `tool_completed` event grants an exact absolute-path
