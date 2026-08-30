@@ -931,3 +931,11 @@ body {
    little breathing room from its label. */
 .task-list-item { list-style: none; }
 .task-list-item input[type='checkbox'] { margin-right: 0.4rem; }
+
+/* The compact composer shares the resizable sidebar's width. At its narrowest,
+   preserve the four footer controls by collapsing the model chip to its provider
+   icon; its full label returns as soon as there is room for it. */
+.compact-spawn-form { container-type: inline-size; }
+@container (max-width: 220px) {
+  .compact-spawn-model-label { display: none; }
+}
