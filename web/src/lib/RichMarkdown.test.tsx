@@ -121,7 +121,7 @@ describe('RichMarkdown', () => {
       vi.useFakeTimers()
       try {
         const { container } = render(
-          <Markdown text="[controller.go](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
+          <RichMarkdown text="[controller.go](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
         )
         fireEvent.mouseEnter(container.querySelector('a')!.parentElement!)
         act(() => void vi.advanceTimersByTime(600))
@@ -164,7 +164,7 @@ describe('RichMarkdown', () => {
 
     it('opens an absolute focused-checkout path at the project HEAD', () => {
       const { container } = render(
-        <Markdown
+        <RichMarkdown
           text="[agent guide](/home/callum/code/hydra/docs/agent-guide.md)"
           linkCtx={{
             projectId: 'p1',

@@ -1,8 +1,13 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QuestionCard, deriveAnswered, toProviderEvents } from './AgentChat'
 import { editorForMarkdownComposer } from '../lib/rich-editor/mountedEditors'
 import { parseRichMarkdown } from '../lib/rich-editor/RichEditorCore'
+
+// Tiptap deliberately destroys editors on the next timer tick so a StrictMode
+// remount can reuse them. Let that deferred cleanup finish before Vitest tears
+// down this file's jsdom window.
+afterEach(async () => new Promise((resolve) => setTimeout(resolve, 2)))
 
 // An answer to an AskUserQuestion can carry a free-text note ALONGSIDE the
 // picked option ("Postgres, but keep the schema in one file"), which is a

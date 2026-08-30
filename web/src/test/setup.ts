@@ -68,6 +68,23 @@ if (typeof HTMLCanvasElement !== 'undefined') {
   HTMLCanvasElement.prototype.getContext = () => null
 }
 
+// ProseMirror measures text selections when it scrolls or anchors a menu.
+// jsdom has no text geometry, so provide the minimal DOMRectList shape its
+// editor view expects. Keep this global because rich composers appear in many
+// component tests, not only the editor's own focused suite.
+Object.defineProperty(Text.prototype, 'getClientRects', {
+  configurable: true,
+  value: () => [new DOMRect(0, 0, 20, 16)],
+})
+Object.defineProperty(Range.prototype, 'getClientRects', {
+  configurable: true,
+  value: () => [new DOMRect(0, 0, 20, 16)],
+})
+Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+  configurable: true,
+  value: () => new DOMRect(0, 0, 20, 16),
+})
+
 afterEach(() => {
   // Unmount anything @testing-library/react rendered (auto-cleanup is off with
   // vitest globals disabled, so component renders would otherwise pile up in the

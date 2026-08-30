@@ -1,25 +1,9 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownComposer, type MarkdownComposerHandle } from './MarkdownComposer'
 import { createRef } from 'react'
 
 afterEach(cleanup)
-beforeAll(() => {
-  // BubbleMenu anchors to the selected text. jsdom has no text geometry, so
-  // provide the minimal DOMRectList shape ProseMirror asks for.
-  Object.defineProperty(Text.prototype, 'getClientRects', {
-    configurable: true,
-    value: () => [new DOMRect(0, 0, 20, 16)],
-  })
-  Object.defineProperty(Range.prototype, 'getClientRects', {
-    configurable: true,
-    value: () => [new DOMRect(0, 0, 20, 16)],
-  })
-  Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
-    configurable: true,
-    value: () => new DOMRect(0, 0, 20, 16),
-  })
-})
 
 describe('MarkdownComposer', () => {
   it('exposes Markdown as its controlled value', async () => {
