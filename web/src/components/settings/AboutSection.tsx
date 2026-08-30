@@ -23,7 +23,9 @@ export function AboutSection() {
   const status = useProjectStore((state) => state.systemStatus)
   const version = status?.version || 'Development build'
   const commit = status?.git_commit || 'Unavailable'
-  const platform = status?.runtime_os || 'Unknown'
+  const platform = status?.runtime_os
+    ? ({ linux: 'Linux', windows: 'Windows', darwin: 'macOS' }[status.runtime_os] ?? status.runtime_os)
+    : 'Unknown'
   const databaseDirectory = status?.database_directory || 'Unavailable'
   const runtime = hasDesktopBridge() ? 'Desktop app' : 'Web browser'
 
