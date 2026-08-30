@@ -217,13 +217,13 @@ describe('Markdown', () => {
     })
 
     it('falls back to the uploads endpoint for an upload path with no head', () => {
-      const path = '/home/u/proj/.hydra/local/uploads/123-image1.png'
+      const path = '/home/u/.hydra/local/projects/p1/uploads/1788109758389757016-image1.png'
       const { container } = render(
         <Markdown text={`![m](${path})`} linkCtx={{ projectId: 'p1', refStr: 'main', filePath: '' }} />,
       )
       expect(container.querySelector('img')).toHaveAttribute(
         'src',
-        '/api/projects/p1/uploads/blob?name=123-image1.png',
+        '/api/projects/p1/uploads/blob?name=1788109758389757016-image1.png',
       )
     })
 

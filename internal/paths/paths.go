@@ -193,8 +193,8 @@ func GetTestsDirFromProjectRoot(projectRoot string) string {
 }
 
 // GetUploadsDirFromProjectRoot returns the (gitignored) directory holding files
-// pasted/attached to prompts. It sits under .hydra/local so it's readable
-// read-only inside agent sandboxes at the same absolute path.
+// pasted/attached to prompts. It sits under the project's state directory so
+// it is readable inside agent sandboxes at the same absolute path.
 func GetUploadsDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetProjectStateDirFromProjectRoot(projectRoot), "uploads")
 }

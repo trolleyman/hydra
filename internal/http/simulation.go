@@ -391,10 +391,10 @@ const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts an
 // take-screenshots.ts agent-prompt-attachments, which serves the thumbnails a
 // fixed image so they render deterministically.
 const simAgent2Prompt = "Migrate the auth providers to OAuth 2.0 with PKCE. Match the attached sign-in mockups (light + dark) and the error states; the full provider list is in the spec PDF.\n\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072241514128486-signin-light.png\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072347433312262-signin-dark.png\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072458377091686-error-states.png\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072717310298418-oauth-providers.pdf"
+	"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072241514128486-signin-light.png\n" +
+	"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072347433312262-signin-dark.png\n" +
+	"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072458377091686-error-states.png\n" +
+	"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072717310298418-oauth-providers.pdf"
 
 // simAgentChatPrompt seeds the chat-mode demo agent (agent-chat), whose detail
 // page renders the chat view instead of a terminal.
@@ -1474,8 +1474,8 @@ func simSeedComments(id string) []api.ReviewComment {
 			// An attachment on a published comment: the usual case is a screenshot
 			// of the thing being described, so the head can look at what you saw.
 			Attachments: ptr([]string{
-				"/home/you/acme/.hydra/local/uploads/1782072241514128486-error-states.png",
-				"/home/you/acme/.hydra/local/uploads/1782072347433312262-stack-trace.txt",
+				"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072241514128486-error-states.png",
+				"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072347433312262-stack-trace.txt",
 			}),
 		},
 		{
@@ -1486,7 +1486,7 @@ func simSeedComments(id string) []api.ReviewComment {
 			Diff:      ptr("main -> a1b2c3d"),
 			CreatedAt: "2026-07-28T10:09:00Z", Read: ptr(true),
 			Attachments: ptr([]string{
-				"/home/you/acme/.hydra/local/uploads/1782072458377091686-repro.png",
+				"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072458377091686-repro.png",
 			}),
 		},
 		// Two comments the DIFF cannot show, which is the normal case rather than
@@ -4241,7 +4241,7 @@ func (s *SimulationServer) HandleUpload(w http.ResponseWriter, r *http.Request) 
 	}
 	stored := fmt.Sprintf("%d-%s", simNow().UnixNano(), name)
 	api.WriteJSON(w, http.StatusOK, map[string]string{
-		"path":     "/home/you/acme/.hydra/local/uploads/" + stored,
+		"path":     "/home/you/acme/.hydra/local/projects/sim-project/uploads/" + stored,
 		"filename": stored,
 	})
 }
