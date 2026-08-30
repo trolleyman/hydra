@@ -221,7 +221,11 @@ const EMPTY_LINE_COMMENTS: LineCommentMap = new Map()
 const EMPTY_FILE_COMMENTS: PendingReviewComment[] = []
 // Same for a file with no forge threads.
 const EMPTY_FILE_THREADS: ReviewThread[] = []
-const NativeCommentReplyContext = createContext<((number: number, body: string) => Promise<void>) | null>(null)
+interface NativeCommentReplyActions {
+  submit: (number: number, body: string) => Promise<void>
+  start?: (number: number) => void
+}
+const NativeCommentReplyContext = createContext<NativeCommentReplyActions | null>(null)
 
 // True when a drag is carrying real files, so dragging a text selection over a
 // comment box doesn't light it up as a drop target.
@@ -259,13 +263,11 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
     [comment.attachments, projectId],
   )
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
-  const [replying, setReplying] = useState(false)
   const reply = useContext(NativeCommentReplyContext)
   const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
   return (
-    <>
     <div id={`comment-${comment.number}`} data-comment-card={comment.number} className={`border-y px-4 py-2 ${
       current
         ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]'
@@ -327,9 +329,9 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
                 )}
                 {sent ? (
                   <span className="ml-0.5 flex items-center gap-0.5">
-                    {reply && (
+                    {reply?.start && (
                       <Tooltip content="Reply" side="top">
-                        <button onClick={() => setReplying(true)} aria-label="Reply" className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer">
+                        <button onClick={() => reply.start?.(comment.replyTo || comment.number)} aria-label="Reply" className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer">
                           <MessageSquare className="w-3.5 h-3.5" />
                         </button>
                       </Tooltip>
@@ -402,15 +404,6 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
         </div>
       </div>
     </div>
-    {replying && reply && (
-      <CommentRow
-        initialText=""
-        projectId={projectId}
-        onSubmit={async (text) => { await reply(comment.replyTo || comment.number, text); setReplying(false) }}
-        onCancel={() => setReplying(false)}
-      />
-    )}
-    </>
   )
 }
 
@@ -709,10 +702,12 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
   lineDraftApi?: LineDraftApi
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [replyingTo, setReplyingTo] = useState<number | null>(null)
+  const parentReplyActions = useContext(NativeCommentReplyContext)
   const threadActions = useReviewThreadActions()
   if (!openNew && (!entries || entries.length === 0)) return null
   return (
-    <>
+    <NativeCommentReplyContext.Provider value={parentReplyActions ? { ...parentReplyActions, start: setReplyingTo } : null}>
       {entries?.map((entry) =>
         entry.kind === 'thread' ? (
           threadActions ? (
@@ -742,6 +737,14 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
           />
         ),
       )}
+      {replyingTo != null && parentReplyActions && (
+        <CommentRow
+          initialText=""
+          projectId={projectId}
+          onSubmit={async (text) => { await parentReplyActions.submit(replyingTo, text); setReplyingTo(null) }}
+          onCancel={() => setReplyingTo(null)}
+        />
+      )}
       {openNew && (
         <CommentRow
           initialText={lineDraftApi?.load(path, lineNum, isNew) ?? ''}
@@ -766,7 +769,7 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
           onCancel={onCloseNew}
         />
       )}
-    </>
+    </NativeCommentReplyContext.Provider>
   )
 }
 
@@ -818,11 +821,13 @@ function OffDiffEntryBody({ entry, projectId, you, editingId, setEditingId, onEd
   onResolveComment?: (number: number, resolved: boolean) => void
 }) {
   const threadActions = useReviewThreadActions()
+  const [replyingTo, setReplyingTo] = useState<number | null>(null)
+  const parentReplyActions = useContext(NativeCommentReplyContext)
   if (entry.kind === 'thread') {
     return threadActions ? <ReviewThreadCard thread={entry.thread} actions={threadActions} /> : null
   }
   return (
-    <>
+    <NativeCommentReplyContext.Provider value={parentReplyActions ? { ...parentReplyActions, start: setReplyingTo } : null}>
       {[entry.comment, ...entry.replies].map((c) => (
         editingId === c.id ? (
           <CommentRow
@@ -846,7 +851,15 @@ function OffDiffEntryBody({ entry, projectId, you, editingId, setEditingId, onEd
           />
         )
       ))}
-    </>
+      {replyingTo != null && parentReplyActions && (
+        <CommentRow
+          initialText=""
+          projectId={projectId}
+          onSubmit={async (text) => { await parentReplyActions.submit(replyingTo, text); setReplyingTo(null) }}
+          onCancel={() => setReplyingTo(null)}
+        />
+      )}
+    </NativeCommentReplyContext.Provider>
   )
 }
 
@@ -4504,6 +4517,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     else if (notified) showSentToast(sentToAgentText(notifiedNumbers(notified), 1))
     else showSentToast(UNDELIVERED_COMMENT, 'warning')
   }, [projectId, agent.id, showSentToast])
+  const nativeReplyActions = useMemo<NativeCommentReplyActions>(() => ({ submit: handleReplyComment }), [handleReplyComment])
 
   // Mark comments seen. Read state is explicit - nothing becomes read by the
   // passage of time - so this is called when you actually arrive at one (a
@@ -4651,6 +4665,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     url.searchParams.delete('comment')
     url.hash = `comment-${number}`
     window.history.replaceState(window.history.state, '', url)
+    // replaceState does not emit hashchange, but the agent route derives its
+    // focused comment from the fragment. Keep that route state aligned so a
+    // still-pending initial permalink effect cannot focus the old comment again.
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
   }, [])
 
   // How many of the open ones you have not seen. Separate from the open count
@@ -4658,7 +4676,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // other "what arrived while I was elsewhere".
   const unreadCount = useMemo(() => commentStops.filter((c) => c.unread).length, [commentStops])
   const commentPosition = useMemo(() => {
-    const index = commentStops.findIndex((c) => c.number === atComment)
+    const index = commentStops.findIndex((c) => atComment != null && c.numbers.includes(atComment))
     return index < 0 ? null : index + 1
   }, [commentStops, atComment])
 
@@ -4673,7 +4691,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // happens to pass the viewport on the way somewhere else.
   const stepComment = useCallback((delta: 1 | -1) => {
     if (commentStops.length === 0) return
-    const at = commentStops.findIndex((c) => c.number === atComment)
+    const at = commentStops.findIndex((c) => atComment != null && c.numbers.includes(atComment))
     const next = commentStops[(((at < 0 ? (delta > 0 ? -1 : 0) : at) + delta) % commentStops.length + commentStops.length) % commentStops.length]
     visit(next.number)
     if (next.unread) markRead(next.numbers)
@@ -4682,7 +4700,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   useEffect(() => {
     openCommentRef.current = (number: number) => {
-      const target = commentStops.find((c) => c.number === number)
+      const target = commentStops.find((c) => c.numbers.includes(number))
         ?? reviewComments.find((c) => c.number === number)
       visit(number)
       markRead([number])
@@ -4707,7 +4725,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   useEffect(() => {
     if (!focusComment || !diff || jumpedToRef.current === focusComment) return
     const target = reviewComments.find((c) => c.number === focusComment)
-      ?? commentStops.find((c) => c.number === focusComment)
+      ?? commentStops.find((c) => c.numbers.includes(focusComment))
     if (!target) return
     jumpedToRef.current = focusComment
     // Legitimate effect: this fires once per permalink, and the state it sets is
@@ -5369,7 +5387,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         reason as the thread actions above: the comment cards are the far side
         of two memo'd hunk components, and a cursor threaded through as a prop
         would re-render every line of every file each time it moved. */}
-    <NativeCommentReplyContext.Provider value={handleReplyComment}>
+    <NativeCommentReplyContext.Provider value={nativeReplyActions}>
     <VisitedCommentsContext.Provider value={focusedComment}>
     <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
       {/* Section header */}

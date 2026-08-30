@@ -29,8 +29,9 @@ export const VisitedCommentsContext = createContext<number | null>(null)
 
 // useIsCurrentComment reports whether this comment is one you have been taken to.
 // Numbers are never reused, so identity is the whole test.
-export function useIsCurrentComment(number: number): boolean {
-  return useContext(VisitedCommentsContext) === number
+export function useIsCurrentComment(number: number | readonly number[]): boolean {
+  const current = useContext(VisitedCommentsContext)
+  return Array.isArray(number) ? number.includes(current ?? -1) : current === number
 }
 
 type Jump = (number: number) => void

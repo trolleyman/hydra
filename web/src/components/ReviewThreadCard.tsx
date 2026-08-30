@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, LoaderCircle, Mail, Quote, Sparkles } from 'lucide-react'
+import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, LoaderCircle, Mail, MessageSquare, Quote, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { Tooltip } from './Tooltip'
@@ -164,7 +164,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
   // amber as a Hydra comment's: which side of the review something came from is
   // the card's colour, and where you are standing must read the same on both.
   const anchorNumber = thread.notes.map((n) => n.number).find((n): n is number => n != null)
-  const current = useIsCurrentComment(anchorNumber ?? -1)
+  const current = useIsCurrentComment(thread.notes.flatMap((n) => n.number == null ? [] : [n.number]))
 
   return (
     <div
@@ -225,8 +225,32 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                   {n.number != null && (
                     <span className="flex items-center gap-1">
                       {n.read === false && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
-                      <span className="font-mono text-2xs text-gray-400 dark:text-gray-500">#{n.number}</span>
+                      {n.number != null && actions.commentHref && (
+                        <a
+                          href={actions.commentHref(n.number)}
+                          onClick={(e) => {
+                            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+                            e.preventDefault()
+                            actions.openComment?.(n.number!)
+                          }}
+                          className="font-mono text-2xs text-gray-400 hover:text-gray-600 hover:underline dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
+                        >
+                          #{n.number}
+                        </a>
+                      )}
                     </span>
+                  )}
+                  {i === thread.notes.length - 1 && !replying && (
+                    <Tooltip content="Reply" side="top">
+                      <button
+                        type="button"
+                        onClick={() => setReplying(true)}
+                        aria-label="Reply"
+                        className="inline-flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
                   )}
                   <OriginBadge note={n} provider={actions.provider} />
                   {/* Every note gets the menu, not just the first: the thing you
@@ -378,15 +402,6 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
             )}
             {thread.outdated && (
               <span className="text-3xs text-amber-700 dark:text-amber-300">outdated</span>
-            )}
-            {!replying && (
-              <button
-                type="button"
-                onClick={() => setReplying(true)}
-                className="text-3xs text-violet-700 dark:text-violet-300 hover:underline cursor-pointer"
-              >
-                Reply
-              </button>
             )}
             {/* Resolving a forge thread is a LOCAL mark (the tooltip above says
                 so). It still earns its place: it is what takes the thread out of
