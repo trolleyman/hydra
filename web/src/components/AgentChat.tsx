@@ -82,6 +82,7 @@ import { Tooltip } from './Tooltip'
 import { CommitCard, CommitStats, COMMIT_CARD_WIDTH } from './CommitCard'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
+import { RelativeTime } from './LiveTime'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
@@ -301,7 +302,7 @@ type ChatItem =
   // conversation because the break is otherwise invisible while mattering to
   // everything that outlived a turn: the Bash tool's shell is a new one, back at
   // the worktree (see shellCwdsFor).
-  | { kind: 'resumed'; id: number; noEntrance?: boolean }
+  | { kind: 'resumed'; id: number; resumedAt?: number; noEntrance?: boolean }
   // noEntrance suppresses the fade/slide entrance when this settled block simply
   // replaces the in-flight streamed copy already on screen - it was visible, so
   // re-animating it as it settles reads as a flicker (item 56), same rationale
@@ -6233,7 +6234,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
     }
     if (ev.type === 'hydra_session_resumed') {
       flushHistFooter()
-      push({ kind: 'resumed', noEntrance: true })
+      push({ kind: 'resumed', resumedAt: evTs ?? undefined, noEntrance: true })
       continue
     }
     if (ev.type === 'hydra_shell_cwd') {
@@ -8247,7 +8248,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // partial reply rather than above it.
           settleLiveStream()
           endPendingTools()
-          push({ kind: 'resumed', noEntrance: replaying || undefined })
+          push({ kind: 'resumed', resumedAt: evTs ?? undefined, noEntrance: replaying || undefined })
           return
         }
         case 'hydra_subagent_completed': {
@@ -10459,7 +10460,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return (
           <div className="flex items-center gap-2.5 select-none" aria-label="Agent resumed">
             <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
-            <span className="optical-center text-2xs text-stone-400 dark:text-stone-500">Resumed</span>
+            <span
+              className="optical-center text-2xs text-stone-400 dark:text-stone-500"
+              title={item.resumedAt == null ? undefined : new Date(item.resumedAt).toLocaleString()}
+            >
+              Resumed{item.resumedAt == null ? null : <> <RelativeTime createdAt={item.resumedAt / 1000} /></>}
+            </span>
             <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
           </div>
         )
