@@ -1700,8 +1700,8 @@ function AnimatedContextRun({ lineCount, children }: {
 
     animation.current = el.animate(
       [
-        { height: `${prev.height}px`, opacity: 0.72 },
-        { height: `${nextHeight}px`, opacity: 1 },
+        { height: `${prev.height}px` },
+        { height: `${nextHeight}px` },
       ],
       { duration: CONTEXT_REVEAL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
     )
