@@ -149,6 +149,10 @@ and `web/src/DiffViewer.tsx`):
   Chat code gutters and section labels also carry `data-copy-skip`; do not rely
   on `user-select: none` alone, because WebKitGTK can include those nodes when a
   desktop selection crosses grid rows or block boundaries.
+- Chat file links keep the authored label in the prose and show a repository path
+  in their tooltip. An absolute path inside the current head's worktree drops that
+  implementation-specific prefix; a genuinely external absolute path remains
+  explicit.
 - Bash inspection output is sectioned by `web/src/lib/shellSections.ts`. Plain
   file reads such as `sed -n '40,80p'` render with syntax highlighting and the
   file's real line numbers. Adjacent bounded reads keep their requested starts
@@ -173,6 +177,10 @@ and `web/src/DiffViewer.tsx`):
 - Keyboard hints use the shared `Kbd` / `ShortcutHint` components. Their fixed
   cap box optically lowers the glyph within the font line box, keeping fonts
   with asymmetric ascent/descent metrics vertically centred.
+- Agent action labels stay compact in the adaptive top bar. Their tooltips carry
+  the operational detail: review creation names the PR/MR forge, merge names the
+  target branch, restart says which state is preserved, and kill says that the
+  worktree is deleted.
 - The shared confirmation dialog is opaque as soon as it mounts. While it is
   open, underlying native scrollbar chrome becomes transparent without removing
   its gutter; this prevents WebKitGTK from compositing scroll thumbs through the
@@ -184,6 +192,11 @@ and `web/src/DiffViewer.tsx`):
   owns the `hydra-webkit-diff-open` root class; the file-card condition lives in
   `index.css`. Closing the diff restores motion, and browsers plus Windows
   WebView2 are unaffected.
+- The primary Merge action preflights the existing per-runner tests endpoint
+  before opening its confirmation when the compact verdict is not already gated.
+  This distinguishes no configured runners from an unknown verdict and catches a
+  branch-tip verdict newer than the project-event snapshot, so a blocked merge
+  opens the Force / Queue choice directly instead of after a normal confirmation.
 - Codex `View Image` tool cards resolve their path-only result through the
   agent-files endpoint and use the shared thumbnail/lightbox treatment. A
   successful durable `tool_completed` event grants an exact absolute-path

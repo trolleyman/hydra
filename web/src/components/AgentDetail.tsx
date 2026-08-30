@@ -43,6 +43,7 @@ import { ensureReviewConfig, refreshReviewConfig, useProjectStore } from '../sto
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME, SHORTCUT_DIFF_SIDEBAR } from '../lib/shortcuts'
 import { pillText } from '../lib/branchPills'
+import { mergeGateForRunners, testSummaryForRunners } from '../lib/mergePreflight'
 import type { AgentCommand } from '../lib/agentCommands'
 import { agentPrimaryActionAppearances } from './agentPrimaryActions'
 import { SegmentedControl } from './SegmentedControl'
@@ -894,6 +895,13 @@ export function AgentDetail({
   // its agent tab onto the fresh session.
   const [restartSignal, setRestartSignal] = useState(0)
   const [merging, setMerging] = useState(false)
+  // Key the asynchronous preflight to the head it started for. AgentDetail is
+  // reused across agent routes, so a slow response from the previous head must
+  // neither open a dialog on the next head nor leave its Merge action disabled.
+  const currentAgentIdRef = useRef(agent.id)
+  currentAgentIdRef.current = agent.id
+  const [checkingMergeFor, setCheckingMergeFor] = useState<string | null>(null)
+  const checkingMerge = checkingMergeFor === agent.id
   const [publishing, setPublishing] = useState(false)
   const [showCreateMR, setShowCreateMR] = useState(false)
   const [publishError, setPublishError] = useState<string | null>(null)
@@ -1382,7 +1390,7 @@ export function AgentDetail({
   // 409s and the catch offers a force-merge follow-up), and the explicit Force
   // merge / Queue merge overrides live in the button's dropdown. While armed
   // ("merge when green"), the button toggles the queue off instead.
-  function handleMerge() {
+  async function handleMerge() {
     if (agent.merge_when_green === true) return void cancelMerge()
     // Don't wait for the server to 409: when the verdict is already known to be
     // un-green, open the merge-gate dialog (Force / Queue + explanation) directly.
@@ -1391,6 +1399,31 @@ export function AgentDetail({
     if (verdict === 'failing') return confirmMergeGate('failing', n)
     if (verdict === 'errored') return confirmMergeGate('errored', n)
     if (verdict === 'running') return confirmMergeGate('running', n)
+
+    // A compact passing/none/stale summary can lag the branch tip. Preflight the
+    // per-runner endpoint before showing the destructive merge confirmation, so
+    // the server does not reject that confirmation a moment later and make the
+    // user answer a second Force / Queue dialog. The endpoint also distinguishes
+    // "no runners" (empty, merge normally) from "runner has no verdict" (gate).
+    if (checkingMerge) return
+    const checkedAgentId = agent.id
+    setCheckingMergeFor(checkedAgentId)
+    try {
+      const response = await api.default.getAgentTests(projectId ?? '', checkedAgentId)
+      if (currentAgentIdRef.current !== checkedAgentId) return
+      useAgentStore.getState().patchAgentTests(checkedAgentId, testSummaryForRunners(response.runners, agent.tests))
+      const gate = mergeGateForRunners(response.runners)
+      if (gate) return confirmMergeGate(gate.kind, gate.failed)
+    } catch (err) {
+      useDialogStore.getState().show({
+        title: 'Could not check tests',
+        message: `Hydra couldn't confirm the current test verdict before merging: ${formatError(err)}`,
+        type: 'error',
+      })
+      return
+    } finally {
+      setCheckingMergeFor((current) => current === checkedAgentId ? null : current)
+    }
     // Verdict is green (or there are no runners) - nothing else gates the merge,
     // so this is where an accidental merge of a still-working agent would slip
     // through. Warn first if it hasn't finished: still working (running/starting)
@@ -1907,7 +1940,7 @@ export function AgentDetail({
   //               (Force / Queue) live in its dropdown, with a failing-tests warning.
   const verdict = agent.tests?.status
   const armed = agent.merge_when_green === true
-  const busy = merging || killing
+  const busy = merging || checkingMerge || killing
   const toBranch = agent.base_branch || 'base'
   const [publishAppearance, mergeAppearance, unreadAppearance, renameAppearance, restartAppearance, killAppearance] = agentPrimaryActionAppearances({
     agent,
@@ -1921,7 +1954,15 @@ export function AgentDetail({
   // count; anything else (errored / no verdict / still running) is "merge anyway".
   const forceMerge = () => confirmForceMerge(verdict === 'failing' ? 'failing' : 'errored')
 
-  const mergeAction: AgentTopBarAction = merging
+  const mergeAction: AgentTopBarAction = checkingMerge
+    ? {
+        label: 'Checking tests...',
+        icon: <LoaderCircle className="w-4 h-4 animate-spin" />,
+        onClick: () => {},
+        variant: 'muted',
+        shortcut: SHORTCUT_MERGE,
+      }
+    : merging
     ? {
         label: mergeAppearance.label,
         icon: mergeAppearance.icon,
@@ -1942,6 +1983,7 @@ export function AgentDetail({
         }
       : {
           label: mergeAppearance.label,
+          tooltip: mergeAppearance.tooltip,
           icon: mergeAppearance.icon,
           onClick: handleMerge,
           variant: 'primary',
@@ -2046,6 +2088,7 @@ export function AgentDetail({
         }
       : {
           label: publishAppearance.label,
+          tooltip: publishAppearance.tooltip,
           // The FORGE mark, not a generic lucide one: this button opens the
           // "Create merge request" dialog, which leads with the same mark, and
           // the two wearing different glyphs for one action was the giveaway
@@ -2106,9 +2149,9 @@ export function AgentDetail({
           ...(agent.focused ? [] : mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: unreadAppearance.label, icon: unreadAppearance.icon, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: renameAppearance.label, icon: renameAppearance.icon, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
-          { label: restartAppearance.label, icon: restartAppearance.icon, onClick: handleRestart, variant: 'segment', disabled: restartAppearance.disabled },
+          { label: restartAppearance.label, tooltip: restartAppearance.tooltip, icon: restartAppearance.icon, onClick: handleRestart, variant: 'segment', disabled: restartAppearance.disabled },
           { label: 'Open chat window', icon: <ExternalLink className="w-4 h-4" />, onClick: () => openChatWindow(projectId ?? undefined, agent.id), variant: 'segment', iconOnly: true },
-          { label: killAppearance.label, icon: killAppearance.icon, onClick: handleKill, variant: 'danger', disabled: killAppearance.disabled, shortcut: SHORTCUT_KILL },
+          { label: killAppearance.label, tooltip: killAppearance.tooltip, icon: killAppearance.icon, onClick: handleKill, variant: 'danger', disabled: killAppearance.disabled, shortcut: SHORTCUT_KILL },
         ]}
       />
     </TopBarPortal>

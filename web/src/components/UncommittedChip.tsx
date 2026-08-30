@@ -6,6 +6,7 @@ import { ShortcutHint } from './Kbd'
 import type { RepositoryUncommittedChanges } from '../api'
 import { Tooltip } from './Tooltip'
 import { ChangeTypeIcon } from './ChangeTypeIcon'
+import { getFileIcon } from '../lib/fileIcons'
 
 // ── Uncommitted-changes warning chip ───────────────────────────────────────────
 // Sits next to the sidebar's Repository button when the project root's working
@@ -146,26 +147,26 @@ export function UncommittedChip({
             Uncommitted changes in the project checkout
           </p>
           <ul className="max-h-48 overflow-y-auto space-y-0.5">
-            {uncommitted.files.map((f) => (
-              <li key={f.path} className="flex items-center gap-1.5 text-xs">
-                <ChangeTypeIcon type={f.status} />
-                {/* Not mono. A path here is being read as a name - "which files
-                    am I about to commit" - not as code to be compared column by
-                    column with the line above it, which is what the diff and
-                    repository trees use the Code font for. */}
-                <span className="truncate text-gray-700 dark:text-gray-300" title={f.path}>
-                  {(() => {
-                    const slash = f.path.lastIndexOf('/')
-                    const directory = slash >= 0 ? f.path.slice(0, slash + 1) : ''
-                    const fileName = slash >= 0 ? f.path.slice(slash + 1) : f.path
-                    return <>
-                      {directory && <span className="text-gray-400 dark:text-gray-500">{directory}</span>}
-                      {fileName}
-                    </>
-                  })()}
-                </span>
-              </li>
-            ))}
+            {uncommitted.files.map((f) => {
+              const slash = f.path.lastIndexOf('/')
+              const directory = slash >= 0 ? f.path.slice(0, slash + 1) : ''
+              const fileName = slash >= 0 ? f.path.slice(slash + 1) : f.path
+              const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName)
+              return (
+                <li key={f.path} className="flex items-center gap-1.5 text-xs">
+                  <FileIcon className={`w-3.5 h-3.5 shrink-0 ${fileIconClass}`} />
+                  {/* Not mono. A path here is being read as a name - "which files
+                      am I about to commit" - not as code to be compared column by
+                      column with the line above it, which is what the diff and
+                      repository trees use the Code font for. */}
+                  <span className="truncate text-gray-700 dark:text-gray-300" title={f.path}>
+                    {directory && <span className="text-gray-400 dark:text-gray-500">{directory}</span>}
+                    {fileName}
+                  </span>
+                  <ChangeTypeIcon type={f.status} />
+                </li>
+              )
+            })}
             {uncommitted.total > uncommitted.files.length && (
               <li className="text-xs text-gray-400 dark:text-gray-500">
                 ...and {uncommitted.total - uncommitted.files.length} more, not included in this commit

@@ -139,8 +139,10 @@ function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ct
     if (!lineHash) lineHash = `#L${line[1]}`
   }
   const authoredPath = path
-  if (ctx.worktreePath && (path === ctx.worktreePath || path.startsWith(ctx.worktreePath + '/'))) {
-    path = path.slice(ctx.worktreePath.length).replace(/^\/+/, '')
+  const worktreePath = ctx.worktreePath
+  const insideWorktree = !!worktreePath && (path === worktreePath || path.startsWith(worktreePath + '/'))
+  if (insideWorktree) {
+    path = path.slice(worktreePath.length).replace(/^\/+/, '')
   }
   const resolved = resolveRepoPath(dirOf(ctx.filePath), path)
   const splat = buildRepoSplat(ctx.refStr, resolved)
@@ -155,10 +157,11 @@ function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ct
     })
   }
   if (fileChip && resolved) {
-    // Preserve an authored absolute path in the tooltip even though navigation
-    // uses its repo-relative equivalent. Relative links show the resolved repo
-    // path, which is more useful than an unresolved ../ sequence.
-    const displayPath = authoredPath.startsWith('/') ? authoredPath : resolved
+    // A path inside this head's worktree is already identified by the surrounding
+    // chat, so repeating Hydra's long worktree prefix adds no useful information.
+    // Keep genuinely external absolute paths explicit; relative and worktree-local
+    // links show the repository path that navigation actually opens.
+    const displayPath = authoredPath.startsWith('/') && !insideWorktree ? authoredPath : resolved
     return <FileLink href={url} path={displayPath} onClick={onClick}>{children}</FileLink>
   }
   return <a className={LINK_CLASS} href={url} onClick={onClick}>{children}</a>
