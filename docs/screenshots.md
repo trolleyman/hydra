@@ -161,3 +161,12 @@ writes `/tmp/example-light@2x.png` and `/tmp/example-dark@2x.png`. The fragment 
 throwaway input; do not commit a fixture for a one-off design decision. Use the
 full simulation screenshot workflow above whenever behavior, surrounding layout,
 or application state matters.
+
+For a one-off capture of the full app, use a fresh browser context for each
+theme and call `seedScreenshotTheme` from
+`web/scripts/lib/screenshotReady.ts` before creating or navigating the page.
+Call `settleScreenshot(page)` immediately before the capture. Do not toggle the
+`dark` class and immediately call `page.screenshot()`: controls with
+`transition-colors` can otherwise be captured partway between the two palettes.
+The helper freezes CSS and Web Animations, waits for fonts, and crosses two paint
+frames, so a live-state change cannot leak an intermediate frame into the image.

@@ -42,6 +42,7 @@ import { availableParallelism, cpus, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { proxyLaunchOptions } from '../lib/browserProxy.ts'
+import { seedScreenshotTheme } from '../lib/screenshotReady.ts'
 import { pages, VIDEO_SEEK } from './pages.ts'
 
 // Share the app's localStorage key registry rather than re-typing the 'hydra-*'
@@ -538,13 +539,7 @@ try {
         // unaffected.
         await ctx.clock.setFixedTime(SIM_NOW)
         // Seed the theme preference before any app code runs.
-        await ctx.addInitScript(({ key, mode }) => {
-          try {
-            localStorage.setItem(key, mode)
-          } catch {
-            // ignore storage failures
-          }
-        }, { key: StorageKeys.themeMode, mode: theme })
+        await seedScreenshotTheme(ctx, theme, StorageKeys.themeMode)
         // Emulate a touch device's coarse pointer by forcing the fine-pointer
         // media query false, so keyboard-only chrome (shortcut hints) hides like it
         // does on a real phone. Delegates every other query to the real matchMedia
