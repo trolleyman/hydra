@@ -3230,17 +3230,17 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
                   // Icon and path as two flex cells rather than a prefix in the
                   // text: that hangs the indent, so a wrapped path lines up under
                   // the start of the path above it instead of under its icon.
-                  // items-start keeps the icon on the FIRST line of a path that
-                  // wraps; the span around it supplies the line box that
-                  // vertical-align needs (a flex item has none of its own), and
-                  // sizing the mark in em / offsetting it in cap centres it on the
-                  // text's cap box at whatever size the tooltip renders at.
+                  // items-start keeps the filetype icon on the FIRST line of a
+                  // wrapping path. The status mark rides in the path's inline
+                  // flow, where its cap-based alignment centres it against text.
                   <div key={f} className="flex items-start gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
                     <span className="shrink-0">
                       <Icon className={`inline-block h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)] ${className}`} />
                     </span>
-                    <span className="min-w-0 break-words"><WrappablePathName path={f} /></span>
-                    <SharedChangeTypeIcon type={g.type} className="w-3.5 h-3.5" />
+                    <span className="min-w-0 break-words">
+                      <WrappablePathName path={f} />
+                      <SharedChangeTypeIcon type={g.type} className="inline-block ml-1 h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)]" />
+                    </span>
                   </div>
                 )
               })}
