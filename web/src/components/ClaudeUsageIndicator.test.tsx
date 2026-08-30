@@ -118,6 +118,20 @@ describe('ClaudeUsageIndicator', () => {
     expect(spy).toHaveBeenCalledTimes(2)
   })
 
+  it('formats a reset more than one day away in days and hours', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-30T15:00:00Z'))
+    const spy = vi.spyOn(api.default, 'getClaudeUsage').mockResolvedValue({
+      ...SNAPSHOT,
+      session_resets_at: '2026-08-05T00:49:00Z',
+    })
+    render(<ClaudeUsageIndicator agentType="claude" />)
+    await act(async () => { await Promise.resolve() })
+
+    expect(spy).toHaveBeenCalledWith(undefined)
+    expect(screen.getByText('5d 9h 49m')).toBeInTheDocument()
+  })
+
   it('renders nothing until data arrives', () => {
     vi.spyOn(api.default, 'getClaudeUsage').mockReturnValue(new Promise(() => {}) as ReturnType<typeof api.default.getClaudeUsage>)
     const { container } = render(<ClaudeUsageIndicator agentType="claude" />)
