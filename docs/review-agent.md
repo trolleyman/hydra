@@ -14,7 +14,7 @@ Two halves that only work together:
 2. **A server-side comment system** - **BUILT.** Comments are no longer ephemeral
    text piped into an agent's context: they are durable, numbered, line-anchored
    objects that agents read and append to through tools. A comment permalink uses
-   the fragment `#comment-N`; older `?comment=N` links remain readable.
+   the fragment `#comment-N`.
    `internal/reviewstore/comments.go`, `internal/http/review_comments.go`,
    `reviewq.OpComments` / `OpAddComment`, `web/src/lib/reviewComments.ts`.
 
@@ -1045,7 +1045,7 @@ same batching principle as the notify-by-id line the agent gets. Not built.
 | Numbering FORGE comments into the same sequence | **built** (`sidecar.go`, assigned on first sight) |
 | Resolve, for a Hydra comment and a forge thread alike | **built** (local-only for the forge, and says so) |
 | Per-comment read state + the open/new navigator | **built** |
-| Permalink (`#comment-4`) | **built** (legacy `?comment=4` is also accepted) |
+| Permalink (`#comment-4`) | **built** |
 | Agent replies to a comment by number | **built** (`reviewq.OpNote` takes a number) |
 | Avatars (agent mark / forge picture / monogram) | **built** (`components/Avatar.tsx`; no image is hosted or proxied) |
 | Third origin badge for agent-authored notes | new (`ReviewThreadCard.tsx` knows only `forge` / `local_only`) |

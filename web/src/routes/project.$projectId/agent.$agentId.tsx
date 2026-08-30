@@ -18,10 +18,8 @@ import type { AgentCommand } from '../../lib/agentCommands'
 // address because the agent diff shows every changed file on one route.
 export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
   component: AgentPage,
-  validateSearch: (search: Record<string, unknown>): { comment?: number; line?: string; desktop?: 'focused'; action?: AgentCommand } => {
-    const out: { comment?: number; line?: string; desktop?: 'focused'; action?: AgentCommand } = {}
-    const raw = Number(search.comment)
-    if (Number.isInteger(raw) && raw > 0) out.comment = raw
+  validateSearch: (search: Record<string, unknown>): { line?: string; desktop?: 'focused'; action?: AgentCommand } => {
+    const out: { line?: string; desktop?: 'focused'; action?: AgentCommand } = {}
     // Validated by shape on read (parseLineParam), not here: an unparseable value
     // should leave the URL alone rather than be silently dropped from it.
     if (typeof search.line === 'string' && search.line) out.line = search.line
@@ -35,21 +33,19 @@ export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
 
 function AgentPage() {
   const { projectId, agentId } = useParams({ from: '/project/$projectId/agent/$agentId' })
-  const { comment: legacyFocusComment, line: focusLine, action } = useSearch({ from: '/project/$projectId/agent/$agentId' })
-  const [hashFocusComment, setHashFocusComment] = useState(() => {
+  const { line: focusLine, action } = useSearch({ from: '/project/$projectId/agent/$agentId' })
+  const [focusComment, setFocusComment] = useState(() => {
     const match = /^#comment-(\d+)$/.exec(window.location.hash)
     return match ? Number(match[1]) : undefined
   })
   useEffect(() => {
     const read = () => {
       const match = /^#comment-(\d+)$/.exec(window.location.hash)
-      setHashFocusComment(match ? Number(match[1]) : undefined)
+      setFocusComment(match ? Number(match[1]) : undefined)
     }
     window.addEventListener('hashchange', read)
     return () => window.removeEventListener('hashchange', read)
   }, [])
-  // Query links shipped before fragment permalinks remain valid.
-  const focusComment = hashFocusComment ?? legacyFocusComment
   // Per-field selectors (not a whole-store subscription): the store refreshes
   // near-constantly while an agent works, and a whole-store subscribe would
   // re-render this page - and the whole AgentDetail subtree - on every one.

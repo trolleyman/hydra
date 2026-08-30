@@ -4869,7 +4869,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // list changing under it.
   useEffect(() => registerCommentJump(agent.id, (number) => openCommentRef.current?.(number)), [agent.id])
 
-  // `#comment-4` (and legacy `?comment=4`): jump once there is a diff to find it in.
+  // `#comment-4`: jump once there is a diff to find it in.
   // Runs on the number rather than on every diff refresh, so a background refresh
   // does not yank the view back to the anchor after you have scrolled away.
   useEffect(() => {

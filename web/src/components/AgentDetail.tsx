@@ -844,7 +844,7 @@ export function AgentDetail({
   // its unread dot lit.
   onUnselect?: () => void
   onRefresh?: () => void
-  // `?comment=4` from the URL: a permalink to one review comment. Passed down to
+  // `#comment-4` from the URL: a permalink to one review comment. Passed down to
   // the diff, which scrolls to it and flashes it once it has a diff to find it in.
   focusComment?: number
   focusLine?: string
