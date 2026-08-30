@@ -170,6 +170,10 @@ and `web/src/DiffViewer.tsx`):
 - Keyboard hints use the shared `Kbd` / `ShortcutHint` components. Their fixed
   cap box optically lowers the glyph within the font line box, keeping fonts
   with asymmetric ascent/descent metrics vertically centred.
+- The shared confirmation dialog is opaque as soon as it mounts. While it is
+  open, underlying native scrollbar chrome becomes transparent without removing
+  its gutter; this prevents WebKitGTK from compositing scroll thumbs through the
+  modal without shifting the page.
 - Codex `View Image` tool cards resolve their path-only result through the
   agent-files endpoint and use the shared thumbnail/lightbox treatment. A
   successful durable `tool_completed` event grants an exact absolute-path
