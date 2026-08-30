@@ -3219,12 +3219,16 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
       content={
         <div>
           <p className="font-semibold mb-1">Uncommitted changes</p>
-          {groups.map((g) => (
-            <div key={g.type} className="mt-1 first:mt-0">
-              <p className="flex items-center gap-1 text-gray-600 dark:text-gray-300">
+          <div className="flex items-center gap-2 mb-1 text-gray-600 dark:text-gray-300">
+            {groups.map((g) => (
+              <span key={g.type} className="flex items-center gap-1" aria-label={`${g.count} ${g.type} file${g.count === 1 ? '' : 's'}`}>
                 <SharedChangeTypeIcon type={g.type} className="w-3.5 h-3.5" />
                 <span className="optical-center tabular-nums">{g.count}</span>
-              </p>
+              </span>
+            ))}
+          </div>
+          {groups.map((g) => (
+            <div key={g.type}>
               {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => {
                 // The per-filetype icon from the diff's file list stands in for the
                 // "- " bullet these rows used to carry: it marks the row just as
