@@ -175,6 +175,10 @@ white page; keeping it means the failure mode is merely the old behaviour.
   "any *non-builtin* projects". This is the class of bug that silently degrades
   first-run without failing a test, so grep for `projects.length` and
   `projects.some` when touching this.
+- **Treat the built-in as empty for add-project affordances.** The project
+  dropdown shows its add-folder actions when there are no user projects, then
+  keeps them behind Edit list. Edit list can rename user projects, but the
+  built-in keeps its system-defined name.
 - **Project IDs are stable directory names, not arbitrary filesystem paths.**
   The SQLite catalogue maps each validated ID to `ProjectInfo.Path`, while
   generated project state lives under `projects/<id>`. So a bogus or hostile ID

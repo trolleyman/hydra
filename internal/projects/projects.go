@@ -280,6 +280,38 @@ func (m *Manager) SetHidden(id string, hidden bool) (bool, error) {
 	return false, nil
 }
 
+// Rename changes the project's local display name. It does not rename the
+// project folder or its stable ID. Built-in projects keep their system-defined
+// names. Returns false if there is no such project.
+func (m *Manager) Rename(id, name string) (bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false, errtrace.Wrap(fmt.Errorf("project name is required"))
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.projects {
+		if m.projects[i].ID != id {
+			continue
+		}
+		if m.projects[i].Builtin {
+			return false, errtrace.Wrap(fmt.Errorf("built-in projects cannot be renamed"))
+		}
+		if m.projects[i].Name == name {
+			return true, nil
+		}
+		previous := m.projects[i].Name
+		m.projects[i].Name = name
+		if err := m.save(); err != nil {
+			m.projects[i].Name = previous
+			return false, errtrace.Wrap(err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 // AddProject registers the given absolute path as a project (idempotent by path).
 // Returns the ProjectInfo (existing or newly created).
 func (m *Manager) AddProject(path string) (ProjectInfo, error) {

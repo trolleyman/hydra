@@ -430,6 +430,46 @@ func (s *Server) ReorderProjects(_ context.Context, request api.ReorderProjectsR
 	return api.ReorderProjects204Response{}, nil
 }
 
+// RenameProject changes only the label Hydra shows for a project. Its folder
+// and stable ID stay unchanged, and built-in projects keep their fixed names.
+func (s *Server) RenameProject(_ context.Context, request api.RenameProjectRequestObject) (api.RenameProjectResponseObject, error) {
+	if request.Body == nil || strings.TrimSpace(request.Body.Name) == "" {
+		return api.RenameProject400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "project name is required",
+		}, nil
+	}
+	p := s.ProjectsManager.GetByID(request.ProjectId)
+	if p == nil {
+		return api.RenameProject404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "project not found",
+		}, nil
+	}
+	if p.Builtin {
+		return api.RenameProject400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: "built-in projects cannot be renamed",
+		}, nil
+	}
+	found, err := s.ProjectsManager.Rename(request.ProjectId, request.Body.Name)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if !found {
+		return api.RenameProject404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "project not found",
+		}, nil
+	}
+	s.Events.ProjectsChanged()
+	return api.RenameProject204Response{}, nil
+}
+
 // SetProjectHidden hides a project from the project lists, or shows it again.
 // Hiding is not removing: nothing on disk changes, the project's agents keep
 // running, and its pages stay reachable - it only drops out of the dropdown and
