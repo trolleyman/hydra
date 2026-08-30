@@ -5027,7 +5027,20 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const submitReview = useCallback(async (numbers: number[]) => {
     const count = numbers.length
     if (count === 0 || submittingReview) return
+    const selected = new Set(numbers)
+    // Publishing changes only two visible facts about a draft: it has been sent,
+    // and (because you sent it) it is already read. Apply those facts on the
+    // click instead of leaving the old draft cards/button in place for the whole
+    // request and then replacing the review UI in one late, conspicuous frame.
+    // Keep the exact selected drafts for a targeted rollback; comments queued or
+    // edited while this request is in flight must not be replaced on failure.
+    const optimisticDrafts = new Map(
+      reviewComments.filter((c) => selected.has(c.number)).map((c) => [c.number, c]),
+    )
     setSubmittingReview(true)
+    setReviewComments((current) => current.map((c) => selected.has(c.number)
+      ? { ...c, published: true, read: true }
+      : c))
     try {
       const { comments, notified, toReviewer } = await publishReviewComments(projectId, agent.id, numbers)
       setReviewComments(comments)
@@ -5043,10 +5056,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       else showSentToast(UNDELIVERED_COMMENT, 'warning')
     } catch (e) {
       console.error('Failed to submit review:', e)
+      setReviewComments((current) => current.map((c) => optimisticDrafts.get(c.number) ?? c))
     } finally {
       setSubmittingReview(false)
     }
-  }, [agent.id, projectId, submittingReview, showSentToast])
+  }, [agent.id, projectId, reviewComments, submittingReview, showSentToast])
   // Which queued comments have gone stale: the diff under them changed since they
   // were added (the anchoring hunk's content hash no longer matches, or the line
   // is gone from the current comparison entirely). Recomputed against the LIVE

@@ -749,6 +749,10 @@ diff file's rounded overflow clip, where an in-place popup would be cut off.
 Selecting a draft marks its card with the transient focus cue and uses the
 remeasuring diff scroll path; this matters for a comment on an unchanged file,
 whose off-diff card can grow while its source context is still loading.
+Submitting a selection is optimistic: those drafts immediately become sent,
+read comments in the diff while the daemon publishes them. The response remains
+canonical, and a failed publish restores only the selected drafts without
+disturbing comments added while the request was in flight.
 
 **A reply can join the draft review or be sent immediately.** Add to agent review
 stores it as a draft under the published parent, while Comment to agent publishes
