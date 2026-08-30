@@ -1791,7 +1791,7 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn, saved
       // top edge and alignToLastMessage clears whichever is on screen.
       data-chat-overlay=""
       style={{ width: open ? 256 : chipW ?? undefined }}
-      className={`absolute top-2 right-3 ${paired ? 'max-w-[calc(50%-1rem)]' : 'max-w-[calc(100%-1.5rem)]'} overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+      className={`absolute top-2 right-3 ${paired ? 'max-w-[calc(50%-1rem)]' : 'max-w-[calc(100%-1.5rem)]'} overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#2b2b28] shadow-lg transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
     >
       {/* Invisible clone of the header at natural width - the collapsed chip
           width the open/close transition animates from/to (border included so
