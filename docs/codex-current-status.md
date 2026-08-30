@@ -59,4 +59,5 @@ blocked on the user.
 Assistant messages are stored as written. The sidebar's existing single-line
 renderer collapses the content and truncates it to the available width, so the
 visible result is the start of the latest/final message without maintaining a
-second generated summary.
+second generated summary. Inline code is flattened into ordinary text in this
+narrow preview, keeping the truncation ellipsis visually clean.

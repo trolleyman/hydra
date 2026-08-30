@@ -101,6 +101,14 @@ describe('renderMarkdown', () => {
     expect(code?.className).not.toContain('block')
   })
 
+  it('plainCode: flattens code into the preview text', () => {
+    const { container } = render(
+      <span>{renderMarkdown('Fixed as `a6620c03`', { singleLine: true, plainCode: true })}</span>,
+    )
+    expect(container.textContent).toBe('Fixed as a6620c03')
+    expect(container.querySelector('code')).toBeNull()
+  })
+
   // CommonMark 6.1: a run of N backticks is closed by the next run of exactly N,
   // and a content that is padded with a space at BOTH ends loses one from each.
   // Getting this wrong is what turned a sentence about ``` into two blank chips.

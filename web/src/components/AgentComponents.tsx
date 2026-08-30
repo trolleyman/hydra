@@ -298,7 +298,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
         <div className="mt-0.5 ml-4 h-4 flex items-center gap-2 overflow-hidden text-2xs leading-4 text-gray-400 dark:text-gray-500">
           <span className="min-w-0 flex-1 truncate">
             {!archived && agent.agent_status
-              ? renderMarkdown(agentStatusDetail(agent), { dollarCommand: true, singleLine: true })
+              ? renderMarkdown(agentStatusDetail(agent), { dollarCommand: true, singleLine: true, plainCode: true })
               : null}
           </span>
           {/* An archived row shows when it ENDED, not when it was spawned: the
