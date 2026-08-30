@@ -28,13 +28,15 @@ of the React interface.
 
 ## Product shape
 
-Ship one Hydra desktop application with the same two window types agreed for
-macOS:
+Ship one Hydra desktop application with one responsive React shell. Each window
+may display any canonical Hydra route. New chat windows begin on a
+project-checkout draft; existing conversations open their ordinary agent URL.
+The available width determines the layout, rather than a dedicated window mode.
 
-- **Full Hydra** - the existing project, head, diff, test, artifact, preview,
-  publish, and review interface.
-- **Focused chat** - a small conversation window attached directly to one
-  registered project's real directory, without worktree-oriented chrome.
+A project-checkout chat is attached directly to one registered project's real
+directory and omits the worktree inspector. Edit/Read-only and Allow commits sit
+beside its workspace chip; the normal configuration strip retains test, network,
+Git access, checked-out branch, and run mode.
 
 Several windows share one local Hydra backend and one set of projects, sessions,
 and conversation history. Closing a window does not stop its head. Explicit Quit
@@ -394,8 +396,9 @@ desktop-managed daemon it owns. `runDesktopLocal` still leaves an existing
 foreground `mage run` daemon alive. A directly launched installed desktop keeps
 its global backend running according to the preference in Settings. The native
 application has one primary Hydra window; further activations present it, while
-chat-only windows may be opened for new or existing conversations. The same
-chat-only route opens as a browser window when no native bridge is present.
+additional windows may open new or existing conversations using the same
+responsive routes. The same URLs open in a browser when no native bridge is
+present.
 Daemon control and web listeners become ready before best-effort recovery of
 previously running heads. Slow or broken provider/sandbox recovery therefore
 appears in the daemon log without making the desktop report a false startup
@@ -403,10 +406,10 @@ timeout.
 
 ### Phase 2: add desktop window routes and lifecycle
 
-- [x] Add the shared dedicated chrome-free focused route and immediate draft
-  flow described by the macOS plan.
-- [x] Wire the shared lifecycle bridge into WebKitGTK for New Full Window, New
-  Focused Chat, and close requests. AppKit and WebView2 additionally consume
+- [x] Add the shared project-checkout draft flow and canonical agent navigation
+  described by the macOS plan.
+- [x] Wire the shared lifecycle bridge into WebKitGTK for New Window, New Chat,
+  and close requests. AppKit and WebView2 additionally consume
   active-project and active-turn lifecycle messages.
 - [x] Add native New Window/New Chat/Settings commands, project handoff, a
   constrained [`hydra://` deep-link grammar](desktop-deep-links.md), and
@@ -415,8 +418,8 @@ timeout.
   and agents running, regardless of which client originally launched it.
 - Keep browser-safe dialogs and navigation paths for every essential action.
 
-Exit criterion: full and focused windows support the agreed lifecycle, and no
-window action implicitly interrupts a head.
+Exit criterion: windows at full and chat routes support the agreed lifecycle,
+and no window action implicitly interrupts a head.
 
 ### Phase 3: integrate the Linux desktop
 

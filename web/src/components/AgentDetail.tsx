@@ -22,7 +22,7 @@ import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentL
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, ExternalLink } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, FolderGit2, ExternalLink } from 'lucide-react'
 import { openChatWindow } from '../lib/desktopBridge'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
@@ -45,6 +45,7 @@ import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_
 import { pillText } from '../lib/branchPills'
 import type { AgentCommand } from '../lib/agentCommands'
 import { agentPrimaryActionAppearances } from './agentPrimaryActions'
+import { SegmentedControl } from './SegmentedControl'
 
 // Shared style for the split layout's divider-flanking pane-collapse toggles.
 const PANE_TOGGLE_CLS = 'flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer shrink-0'
@@ -462,13 +463,15 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
 // GitIsolationBadge sits just right of the network badge and marks a head whose
 // .git is locked down. Only shown for readonly (off is the default and needs no
 // signal), mirroring the network badge's icon-only chip + card tooltip.
-function GitIsolationBadge({ mode }: { mode?: string }) {
+function GitIsolationBadge({ mode, projectCheckout = false }: { mode?: string; projectCheckout?: boolean }) {
   if (mode !== 'readonly') return null
   return (
     <Tooltip
       variant="card"
       title="Git access - .git read-only"
-      content="This head's .git is bound read-only in the sandbox, so the agent cannot write it - no in-sandbox commit, add, stash, or object destruction, and it cannot damage the main repo or a sibling head. Commits are staged and made host-side (the git_commit tool) onto the head's own branch."
+      content={projectCheckout
+        ? "The project checkout's .git stays read-only. Allow commits grants Hydra's commit tool for deliberate commits without giving the agent unrestricted .git writes."
+        : "This head's .git is bound read-only in the sandbox, so the agent cannot write it - no in-sandbox commit, add, stash, or object destruction, and it cannot damage the main repo or a sibling head. Commits are staged and made host-side (the git_commit tool) onto the head's own branch."}
       className="shrink-0"
     >
       <Badge
@@ -477,6 +480,82 @@ function GitIsolationBadge({ mode }: { mode?: string }) {
         icon={<Lock className="w-3 h-3 shrink-0" />}
       >{null}</Badge>
     </Tooltip>
+  )
+}
+
+// Workspace is independent of the agent's run mode and of which browser/native
+// window presents it. Worktree heads get a branch chip; project-checkout heads
+// get a folder chip. Live permissions sit immediately after that chip in the
+// identity row, so workspace kind and workspace controls read as one cluster.
+function WorkspaceBadge({
+  agent,
+}: {
+  agent: AgentResponse
+}) {
+  if (!agent.focused) {
+    if (!agent.branch_name) return null
+    return (
+      <Tooltip
+        variant="card"
+        width={320}
+        title="Workspace - isolated worktree"
+        content={<><span className="block">Changes are isolated on this head's own branch and worktree.</span><span className="mt-2 block break-all font-mono">{agent.branch_name}</span></>}
+        className="shrink-0"
+      >
+        <button type="button" aria-label={`Isolated worktree: ${agent.branch_name}`} className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
+          <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300" containerClassName="min-h-5" icon={<GitBranch className="w-3 h-3 shrink-0" />}>{null}</Badge>
+        </button>
+      </Tooltip>
+    )
+  }
+
+  return (
+    <Tooltip
+      variant="card"
+      width={340}
+      title="Workspace - project checkout"
+      content={(
+        <div className="space-y-3">
+          <p>This chat works directly in the shared project checkout. Changes are project changes, not an isolated agent branch.</p>
+          {agent.project_path && <p className="break-all font-mono text-xs text-gray-500 dark:text-gray-400">{agent.project_path}</p>}
+        </div>
+      )}
+      className="shrink-0"
+    >
+      <button type="button" aria-label="Project checkout workspace" className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/50">
+        <Badge className="bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300" containerClassName="min-h-5" icon={<FolderGit2 className="w-3 h-3 shrink-0" />}>{null}</Badge>
+      </button>
+    </Tooltip>
+  )
+}
+
+function ProjectCheckoutPermissions({
+  agent,
+  saving,
+  onUpdate,
+}: {
+  agent: AgentResponse
+  saving: boolean
+  onUpdate: (patch: { filesystem_mode?: FocusedFilesystemMode; allow_commits?: boolean }) => void
+}) {
+  if (!agent.focused || agent.archived) return null
+  return (
+    <>
+      <SegmentedControl
+        label="Project files"
+        value={agent.filesystem_mode ?? FocusedFilesystemMode.FocusedFilesystemEdit}
+        disabled={saving}
+        onChange={(filesystemMode) => onUpdate({ filesystem_mode: filesystemMode })}
+        options={[
+          { value: FocusedFilesystemMode.FocusedFilesystemEdit, label: 'Edit' },
+          { value: FocusedFilesystemMode.FocusedFilesystemReadonly, label: 'Read-only' },
+        ]}
+      />
+      <label className="flex h-7 shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-2.5 text-xs text-gray-600 dark:border-gray-600 dark:text-gray-300">
+        <input type="checkbox" checked={agent.allow_commits === true} disabled={saving} onChange={(event) => onUpdate({ allow_commits: event.target.checked })} />
+        <span className="whitespace-nowrap optical-center">Allow commits</span>
+      </label>
+    </>
   )
 }
 
@@ -522,6 +601,10 @@ function metaRowSignature(a: AgentResponse) {
     network_enforcement: a.network_enforcement,
     git_isolation: a.git_isolation,
     branch_name: a.branch_name,
+    focused: a.focused,
+    filesystem_mode: a.filesystem_mode,
+    allow_commits: a.allow_commits,
+    project_path: a.project_path,
     base_branch: a.base_branch,
     chat_mode: a.chat_mode,
     created_at: a.created_at,
@@ -551,30 +634,38 @@ const AgentMetaRow = memo(function AgentMetaRow({
   agentTypeClass,
   branches,
   savingBase,
+  savingCheckoutBranch,
   savingChatMode,
   savingDownstream,
   publishing,
+  savingFocusedPermissions,
   onSaveBase,
+  onCheckoutBranch,
   onRefreshBranches,
   onSaveChatMode,
   onSaveDownstream,
   onPushToMR,
   onPullFromMR,
+  onUpdateFocusedPermissions,
 }: {
   agent: AgentResponse
   projectId: string | null
   agentTypeClass: string
   branches: RepositoryBranch[] | null
   savingBase: boolean
+  savingCheckoutBranch: boolean
   savingChatMode: boolean
   savingDownstream: boolean
   publishing: boolean
+  savingFocusedPermissions: boolean
   onSaveBase: (name: string) => void
+  onCheckoutBranch: (name: string) => void
   onRefreshBranches: () => void
   onSaveChatMode: (next: boolean) => void
   onSaveDownstream: (n: string) => void
   onPushToMR: () => void
   onPullFromMR: () => void
+  onUpdateFocusedPermissions: (patch: { filesystem_mode?: FocusedFilesystemMode; allow_commits?: boolean }) => void
 }) {
   // Confirm before flipping the terminal/chat mode - switching restarts the
   // Claude process, so an accidental tap on the pill shouldn't do it silently.
@@ -589,6 +680,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
       onConfirm: () => onSaveChatMode(next),
     })
   }
+  const checkoutBranch = branches?.find((branch) => branch.is_current)?.name ?? ''
   // The head's own line: what it is (type pill), what it's doing (status chip),
   // its id (the branch minus the `hydra/` prefix - the prefix is on every head,
   // so it's noise), and how long ago it was created, on the right. The full
@@ -600,7 +692,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
     // data-head-identity is the e2e hook for this line, as [data-meta-strip] is
     // for the chip strip below - so a spec can target a chip by which line it
     // belongs to rather than by its styling classes.
-    <div data-head-identity className="flex items-center gap-2 min-w-0 min-h-7">
+    <div data-head-identity className="flex items-center gap-2 min-w-0 min-h-7 overflow-x-auto [scrollbar-width:none]">
       {/* What this head IS (agent type) and what it is DOING (status), leading the
           head's own name. They were the first two chips of the strip below, but
           they answer the question you ask first, so they belong on the identity
@@ -616,11 +708,8 @@ const AgentMetaRow = memo(function AgentMetaRow({
         >{null}</Badge>
       </Tooltip>
       {agent.agent_status && <AgentStatusChip status={agent.agent_status.status} />}
-      {agent.branch_name && (
-        <Tooltip content={<span><span className="block font-semibold">Worktree branch</span><span className="font-mono">{agent.branch_name}</span></span>}>
-          <span className="shrink-0 text-gray-400 dark:text-gray-500"><GitBranch className="w-3.5 h-3.5" /></span>
-        </Tooltip>
-      )}
+      <WorkspaceBadge agent={agent} />
+      <ProjectCheckoutPermissions agent={agent} saving={savingFocusedPermissions} onUpdate={onUpdateFocusedPermissions} />
       {agent.created_at !== 0 && agent.created_at !== undefined && (
         // ml-auto: pinned to the right edge of the row, whatever is on the left.
         <span className="ml-auto shrink-0 text-xs text-gray-400 dark:text-gray-500">
@@ -645,17 +734,28 @@ const AgentMetaRow = memo(function AgentMetaRow({
         </span>
       )}
       {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
-      {agent.git_isolation && <GitIsolationBadge mode={agent.git_isolation} />}
-      {projectId && agent.branch_name && !agent.archived && (
-        <span className="shrink-0"><TrackBranchButton projectId={projectId} agentId={agent.id} /></span>
-      )}
+      <GitIsolationBadge mode={agent.focused ? 'readonly' : agent.git_isolation} projectCheckout={agent.focused === true} />
       {/* The base branch this head merges into / diffs against. The head's own
           branch lives on the identity line above, so there's no arrow pairing
           the two here. Editing the base is metadata-only: it changes what
           update-from-base merges in and what the diff compares against, but
           does not rebase commits. */}
       <span className="shrink-0 text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1">
-        {!savingBase ? (
+        {agent.focused ? !savingCheckoutBranch ? (
+          <BranchSelector
+            branches={branches}
+            activeRef={checkoutBranch}
+            isKnownBranch={!!branches?.some((branch) => branch.name === checkoutBranch)}
+            onSelect={onCheckoutBranch}
+            onOpen={onRefreshBranches}
+            title="Change the branch checked out in the shared project workspace"
+          />
+        ) : (
+          <span className="flex items-center gap-1.5 px-2.5 py-1.5">
+            <LoaderCircle className="w-3 h-3 animate-spin" />
+            {checkoutBranch || 'switching'}
+          </span>
+        ) : !savingBase ? (
           // Rendered as a dropdown from the first frame, including while the
           // branch list is still loading: the base branch's NAME is on the agent
           // already, so there is nothing to wait for visually (see BranchSelector's
@@ -678,66 +778,46 @@ const AgentMetaRow = memo(function AgentMetaRow({
           </span>
         )}
       </span>
+      {projectId && agent.branch_name && !agent.focused && !agent.archived && (
+        <span className="shrink-0"><TrackBranchButton projectId={projectId} agentId={agent.id} /></span>
+      )}
       {/* Downstream branch (the name this head is pushed AS) - editable
           until first publish, then soft-locked. Only shown once set.
           empty:hidden on both wrappers below: their child renders nothing for a
           head with no downstream branch / no linked MR, and a zero-width span
           still eats the row's gap on either side of it - 16px that pushed the
           terminal/chat toggle onto a line of its own. */}
-      <span className="shrink-0 inline-flex items-center empty:hidden">
+      {!agent.focused && <span className="shrink-0 inline-flex items-center empty:hidden">
         <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
-      </span>
+      </span>}
       {/* Linked-MR state chip (state/CI/approvals/discussions/ahead-behind). The
           ahead/behind chips are the click target for Push/Pull to MR, so a commit
           made after the MR opened is both visible and actionable here rather than
           only inside the View MR dropdown. */}
-      <span className="shrink-0 inline-flex items-center gap-1.5 empty:hidden">
+      {!agent.focused && <span className="shrink-0 inline-flex items-center gap-1.5 empty:hidden">
         <MRStateChip agent={agent} onPush={onPushToMR} onPull={onPullFromMR} busy={publishing} />
-      </span>
+      </span>}
       {/* Terminal/chat mode toggle for agents with structured chat transports.
           A confirmation prevents an accidental process restart. */}
       {(agent.agent_type === 'claude' || agent.agent_type === 'codex') && !agent.archived && (
-        <Tooltip
-          content="How this head is driven: a terminal or a chat view. Switching restarts the agent process; the conversation is preserved."
-          className="shrink-0"
-        >
-          {/* h-7 on the pill and h-full on each half, so the segmented control is
-              exactly as tall as the branch trigger and the popovers beside it
-              rather than arriving at 27px from its buttons' padding. */}
-          <span className="inline-flex h-7 items-center overflow-hidden rounded-full border border-gray-300 dark:border-gray-600 text-xs font-mono">
-            {savingChatMode ? (
-              <span className="flex h-full items-center gap-1.5 px-2.5 text-gray-500 dark:text-gray-400">
-                <LoaderCircle className="w-3 h-3 animate-spin" />
-                switching
-              </span>
-            ) : (
-              <>
-                <button
-                  onClick={() => confirmChatMode(false)}
-                  className={`flex h-full items-center gap-1 px-2 transition-colors ${
-                    agent.chat_mode
-                      ? 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
-                      : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                  }`}
-                >
-                  <TerminalSquare className="w-3 h-3" />
-                  terminal
-                </button>
-                <button
-                  onClick={() => confirmChatMode(true)}
-                  className={`flex h-full items-center gap-1 px-2 transition-colors border-l border-gray-300 dark:border-gray-600 ${
-                    agent.chat_mode
-                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 cursor-pointer'
-                  }`}
-                >
-                  <MessageSquare className="w-3 h-3" />
-                  chat
-                </button>
-              </>
-            )}
-          </span>
-        </Tooltip>
+        <span className="shrink-0">
+          {savingChatMode ? (
+            <span className="flex h-7 items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400">
+              <LoaderCircle className="w-3 h-3 animate-spin" />
+              switching
+            </span>
+          ) : (
+            <SegmentedControl<'terminal' | 'chat'>
+              label="Run mode"
+              value={agent.chat_mode ? 'chat' : 'terminal'}
+              onChange={(value) => confirmChatMode(value === 'chat')}
+              options={[
+                { value: 'terminal', label: 'Terminal', icon: <TerminalSquare className="h-3 w-3" /> },
+                { value: 'chat', label: 'Chat', icon: <MessageSquare className="h-3 w-3" /> },
+              ]}
+            />
+          )}
+        </span>
       )}
     </MetaStrip>
   )
@@ -753,10 +833,13 @@ const AgentMetaRow = memo(function AgentMetaRow({
   prev.agentTypeClass === next.agentTypeClass &&
   prev.branches === next.branches &&
   prev.savingBase === next.savingBase &&
+  prev.savingCheckoutBranch === next.savingCheckoutBranch &&
   prev.savingChatMode === next.savingChatMode &&
   prev.savingDownstream === next.savingDownstream &&
+  prev.savingFocusedPermissions === next.savingFocusedPermissions &&
   prev.publishing === next.publishing &&
   prev.onSaveBase === next.onSaveBase &&
+  prev.onCheckoutBranch === next.onCheckoutBranch &&
   prev.onRefreshBranches === next.onRefreshBranches &&
   prev.onSaveChatMode === next.onSaveChatMode &&
   prev.onSaveDownstream === next.onSaveDownstream &&
@@ -828,6 +911,7 @@ export function AgentDetail({
   const [savingTitle, setSavingTitle] = useState(false)
   const [generatingTitle, setGeneratingTitle] = useState(false)
   const [savingBase, setSavingBase] = useState(false)
+  const [savingCheckoutBranch, setSavingCheckoutBranch] = useState(false)
   const [savingChatMode, setSavingChatMode] = useState(false)
   const [savingFocusedPermissions, setSavingFocusedPermissions] = useState(false)
   // Seeded from the shared cache so a revisit renders a populated dropdown with
@@ -1042,6 +1126,8 @@ export function AgentDetail({
   // latest closure via a ref, so no stale `agent`/state is captured.
   const saveBaseRef = useRef(saveBase)
   saveBaseRef.current = saveBase
+  const checkoutBranchRef = useRef(saveCheckoutBranch)
+  checkoutBranchRef.current = saveCheckoutBranch
   const saveChatModeRef = useRef(saveChatMode)
   saveChatModeRef.current = saveChatMode
   const saveDownstreamRef = useRef(saveDownstream)
@@ -1051,6 +1137,7 @@ export function AgentDetail({
   const pullFromMRRef = useRef(handlePullFromMR)
   pullFromMRRef.current = handlePullFromMR
   const onSaveBase = useCallback((name: string) => { void saveBaseRef.current(name) }, [])
+  const onCheckoutBranch = useCallback((name: string) => { void checkoutBranchRef.current(name) }, [])
   const onSaveChatMode = useCallback((next: boolean) => { void saveChatModeRef.current(next) }, [])
   const onSaveDownstream = useCallback((n: string) => { void saveDownstreamRef.current(n) }, [])
   const onPushToMR = useCallback(() => { void pushToMRRef.current() }, [])
@@ -1616,6 +1703,29 @@ export function AgentDetail({
     setSavingBase(false)
   }
 
+  // A project-checkout head shares the repository's real checkout, so its branch
+  // selector changes HEAD rather than editing base-branch metadata. Git performs
+  // a normal, non-forced checkout: local changes are preserved when possible and
+  // a conflicting switch fails visibly instead of discarding work.
+  async function saveCheckoutBranch(next: string) {
+    const current = branches?.find((branch) => branch.is_current)?.name ?? ''
+    if (!agent.focused || !next || next === current || savingCheckoutBranch) return
+    setSavingCheckoutBranch(true)
+    const res = await runWithToast(
+      () => api.default.updateAgent(projectId ?? '', agent.id, { checkout_branch: next }),
+      {
+        success: `Project checkout switched to ${next}`,
+        errorPrefix: 'Failed to switch project branch',
+      },
+    )
+    if (res.ok) {
+      updateAgentInStore(res.value)
+      await refreshBranches()
+      onRefresh?.()
+    }
+    setSavingCheckoutBranch(false)
+  }
+
   // Toggling chat mode relaunches the Claude process in the new
   // mode: the backend stops the live session and the pane's reconnect
   // lazy-resumes it with --continue, so the conversation itself is preserved
@@ -1951,7 +2061,7 @@ export function AgentDetail({
     try {
       const res = await runWithToast(
         () => api.default.updateAgent(projectId, agent.id, patch),
-        { errorPrefix: 'Failed to update focused permissions' },
+        { errorPrefix: 'Failed to update project checkout permissions' },
       )
       if (res.ok) {
         updateAgentInStore(res.value)
@@ -1986,11 +2096,11 @@ export function AgentDetail({
           onGenerate: generateTitle,
         }}
         actions={[
-          { label: 'Open chat window', icon: <ExternalLink className="w-4 h-4" />, onClick: () => openChatWindow(projectId ?? undefined, agent.id), variant: 'segment' },
           ...(agent.focused ? [] : mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: unreadAppearance.label, icon: unreadAppearance.icon, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: renameAppearance.label, icon: renameAppearance.icon, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
           { label: restartAppearance.label, icon: restartAppearance.icon, onClick: handleRestart, variant: 'segment', disabled: restartAppearance.disabled },
+          { label: 'Open chat window', icon: <ExternalLink className="w-4 h-4" />, onClick: () => openChatWindow(projectId ?? undefined, agent.id), variant: 'segment', iconOnly: true },
           { label: killAppearance.label, icon: killAppearance.icon, onClick: handleKill, variant: 'danger', disabled: killAppearance.disabled, shortcut: SHORTCUT_KILL },
         ]}
       />
@@ -2027,39 +2137,27 @@ export function AgentDetail({
       {agentTopBar}
       {agent.focused ? (
         <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-          <div className="shrink-0 min-h-12 px-3 sm:px-4 py-2.5 flex items-center gap-3 border-b border-gray-200 dark:border-gray-700">
-            <div className="min-w-0 flex-1">
-              <div className="truncate font-medium text-gray-800 dark:text-gray-100" title={agent.project_path}>
-                {agent.project_path}
-              </div>
-            </div>
-            <div className="shrink-0 flex items-center rounded-md border border-gray-300 dark:border-gray-600 overflow-hidden">
-              <button
-                type="button"
-                disabled={savingFocusedPermissions}
-                onClick={() => void updateFocusedPermissions({ filesystem_mode: FocusedFilesystemMode.FocusedFilesystemEdit })}
-                className={`h-8 px-3 ${agent.filesystem_mode === FocusedFilesystemMode.FocusedFilesystemEdit ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300'}`}
-              >
-                <span className="optical-center">Edit</span>
-              </button>
-              <button
-                type="button"
-                disabled={savingFocusedPermissions}
-                onClick={() => void updateFocusedPermissions({ filesystem_mode: FocusedFilesystemMode.FocusedFilesystemReadonly })}
-                className={`h-8 px-3 border-l border-gray-300 dark:border-gray-600 ${agent.filesystem_mode === FocusedFilesystemMode.FocusedFilesystemReadonly ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300'}`}
-              >
-                <span className="optical-center">Read-only</span>
-              </button>
-            </div>
-            <label className="shrink-0 h-8 px-3 flex items-center gap-2 rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300">
-              <input
-                type="checkbox"
-                checked={agent.allow_commits === true}
-                disabled={savingFocusedPermissions}
-                onChange={(event) => void updateFocusedPermissions({ allow_commits: event.target.checked })}
-              />
-              <span className="optical-center">Allow commits</span>
-            </label>
+          <div className="shrink-0 min-h-12 px-3 sm:px-4 py-2.5 border-b border-gray-200 dark:border-gray-700">
+            <AgentMetaRow
+              agent={agent}
+              projectId={projectId}
+              agentTypeClass={agentTypeClass}
+              branches={branches}
+              savingBase={savingBase}
+              savingCheckoutBranch={savingCheckoutBranch}
+              savingChatMode={savingChatMode}
+              savingDownstream={savingDownstream}
+              savingFocusedPermissions={savingFocusedPermissions}
+              publishing={publishing}
+              onSaveBase={onSaveBase}
+              onCheckoutBranch={onCheckoutBranch}
+              onRefreshBranches={refreshBranches}
+              onSaveChatMode={onSaveChatMode}
+              onSaveDownstream={onSaveDownstream}
+              onPushToMR={onPushToMR}
+              onPullFromMR={onPullFromMR}
+              onUpdateFocusedPermissions={updateFocusedPermissions}
+            />
           </div>
           <div className="flex-1 min-h-0 overflow-hidden px-3 sm:px-4 py-4">
             <AgentTerminal
@@ -2067,7 +2165,7 @@ export function AgentDetail({
               agentType={agent.agent_type}
               projectId={projectId}
               isEphemeral={agent.ephemeral}
-              chatMode
+              chatMode={agent.chat_mode === true}
               fill
               reconnectSignal={restartSignal}
               onRefresh={onRefresh}
@@ -2121,15 +2219,19 @@ export function AgentDetail({
                     agentTypeClass={agentTypeClass}
                     branches={branches}
                     savingBase={savingBase}
+                    savingCheckoutBranch={savingCheckoutBranch}
                     savingChatMode={savingChatMode}
                     savingDownstream={savingDownstream}
+                    savingFocusedPermissions={savingFocusedPermissions}
                     publishing={publishing}
                     onSaveBase={onSaveBase}
+                    onCheckoutBranch={onCheckoutBranch}
                     onRefreshBranches={refreshBranches}
                     onSaveChatMode={onSaveChatMode}
                     onSaveDownstream={onSaveDownstream}
                     onPushToMR={onPushToMR}
                     onPullFromMR={onPullFromMR}
+                    onUpdateFocusedPermissions={updateFocusedPermissions}
                   />
                 </div>
                 {/* self-start pins the toggle to the toolbar's first line even
@@ -2222,15 +2324,19 @@ export function AgentDetail({
                     agentTypeClass={agentTypeClass}
                     branches={branches}
                     savingBase={savingBase}
+                    savingCheckoutBranch={savingCheckoutBranch}
                     savingChatMode={savingChatMode}
                     savingDownstream={savingDownstream}
+                    savingFocusedPermissions={savingFocusedPermissions}
                     publishing={publishing}
                     onSaveBase={onSaveBase}
+                    onCheckoutBranch={onCheckoutBranch}
                     onRefreshBranches={refreshBranches}
                     onSaveChatMode={onSaveChatMode}
                     onSaveDownstream={onSaveDownstream}
                     onPushToMR={onPushToMR}
                     onPullFromMR={onPullFromMR}
+                    onUpdateFocusedPermissions={updateFocusedPermissions}
                   />
                 </div>
                 <Tooltip content={`Show diff (${SHORTCUT_DIFF_SIDEBAR})`}>

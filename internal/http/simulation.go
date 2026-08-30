@@ -43,9 +43,10 @@ func simAgentByID(id string) api.AgentResponse {
 
 // SimulationServer implements api.ServerInterface with mock data.
 type SimulationServer struct {
-	Development bool
-	focusedMu   sync.Mutex
-	focused     map[string]simFocusedPermissions
+	Development           bool
+	focusedMu             sync.Mutex
+	focused               map[string]simFocusedPermissions
+	focusedCheckoutBranch string
 
 	// updateMu and friends back the simulated self-update job (see UpdateServer),
 	// so the update panel - phases, streaming build log, the failure path - can
@@ -461,22 +462,25 @@ func simFocusedAgents() []api.AgentResponse {
 		{
 			Id: "focused-edit", Title: ptr("Tidy the release notes"), AgentType: "claude",
 			BranchName: nil, SessionPid: 1010, SessionStatus: "running", CreatedAt: &createdEdit,
-			ProjectPath: "/Users/callum/code/hydra", Prompt: simAgentChatPrompt, ChatMode: &chatMode,
+			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentChatPrompt, ChatMode: &chatMode,
 			Focused: &focused, FilesystemMode: &edit, AllowCommits: &allowCommits, Model: ptr("claude-opus-4-8"),
+			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-edit"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Waiting, Timestamp: simNow().Format(time.RFC3339)},
 		},
 		{
 			Id: "focused-readonly", Title: ptr("Review the desktop architecture"), AgentType: "codex",
 			BranchName: nil, SessionPid: 1011, SessionStatus: "running", CreatedAt: &createdReadonly,
-			ProjectPath: "/Users/callum/code/hydra", Prompt: simAgentCodexPrompt, ChatMode: &chatMode,
+			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentCodexPrompt, ChatMode: &chatMode,
 			Focused: &focused, FilesystemMode: &readonly, AllowCommits: &disallowCommits, Model: ptr("gpt-5.6-sol"),
+			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-readonly"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Finished, Timestamp: simNow().Format(time.RFC3339)},
 		},
 		{
 			Id: "focused-working", Title: ptr("Trace preview port allocation"), AgentType: "claude",
 			BranchName: nil, SessionPid: 1012, SessionStatus: "running", CreatedAt: &createdWorking,
-			ProjectPath: "/Users/callum/code/hydra", Prompt: simAgentWorkingPrompt, ChatMode: &chatMode,
+			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentWorkingPrompt, ChatMode: &chatMode,
 			Focused: &focused, FilesystemMode: &edit, AllowCommits: &disallowCommits, Model: ptr("claude-opus-4-8"),
+			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-working"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Running, Timestamp: simNow().Format(time.RFC3339), Activity: ptr("Reading `internal/preview/ports.go`")},
 		},
 	}
@@ -1144,11 +1148,18 @@ func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, p
 	if body.AllowCommits != nil {
 		allowCommits = *body.AllowCommits
 	}
+	if body.CheckoutBranch != nil && *body.CheckoutBranch != "main" && *body.CheckoutBranch != "release" {
+		api.WriteError(w, http.StatusBadRequest, "Unknown simulated checkout branch")
+		return
+	}
 	s.focusedMu.Lock()
 	if s.focused == nil {
 		s.focused = make(map[string]simFocusedPermissions)
 	}
 	s.focused[id] = simFocusedPermissions{mode: mode, allowCommits: allowCommits}
+	if body.CheckoutBranch != nil {
+		s.focusedCheckoutBranch = *body.CheckoutBranch
+	}
 	s.focusedMu.Unlock()
 	agent.FilesystemMode = &mode
 	agent.AllowCommits = &allowCommits
@@ -1944,6 +1955,12 @@ func simTestSummary(id string) *api.TestSummary {
 		// "stale" chip. Gives the sidebar coverage of the stale state (its chip
 		// height must match the other verdict/status chips in the row).
 		return &api.TestSummary{Status: api.TestStatusStale, Total: ptr(142), Passed: ptr(140), Skipped: ptr(2), DurationMs: ptr(int64(3900))}
+	case "focused-edit":
+		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(96), Passed: ptr(96), DurationMs: ptr(int64(2100))}
+	case "focused-readonly":
+		return &api.TestSummary{Status: api.TestStatusStale, Total: ptr(96), Passed: ptr(94), Skipped: ptr(2), DurationMs: ptr(int64(2050))}
+	case "focused-working":
+		return &api.TestSummary{Status: api.TestStatusRunning, Total: ptr(96), Passed: ptr(61), Progress: ptr("61/96")}
 	default:
 		return nil
 	}
@@ -3988,14 +4005,20 @@ func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *SimulationServer) GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string) {
+	s.focusedMu.Lock()
+	current := s.focusedCheckoutBranch
+	if current == "" {
+		current = "main"
+	}
+	s.focusedMu.Unlock()
 	api.WriteJSON(w, http.StatusOK, api.RepositoryBranchesResponse{
-		Current: "main",
+		Current: current,
 		Default: "main",
 		Branches: []api.RepositoryBranch{
 			{Name: "hydra/add-line-numbers", IsAgent: true, IsCurrent: false},
 			{Name: "hydra/branch-selector", IsAgent: true, IsCurrent: false},
-			{Name: "main", IsAgent: false, IsCurrent: true},
-			{Name: "release", IsAgent: false, IsCurrent: false},
+			{Name: "main", IsAgent: false, IsCurrent: current == "main"},
+			{Name: "release", IsAgent: false, IsCurrent: current == "release"},
 		},
 	})
 }

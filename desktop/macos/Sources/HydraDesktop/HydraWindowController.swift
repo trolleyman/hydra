@@ -7,7 +7,7 @@ enum HydraWindowKind {
 }
 
 protocol HydraWindowControllerDelegate: AnyObject {
-    func desktopWindowRequested(_ kind: HydraWindowKind, projectID: String?)
+    func desktopWindowRequested(_ kind: HydraWindowKind, projectID: String?, agentID: String?)
     func desktopWindowActivatedProject(_ projectID: String)
 }
 
@@ -30,7 +30,7 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
     private var messageHandler: WeakScriptMessageHandler?
     private(set) var activeTurn = false
 
-    init(kind: HydraWindowKind, baseURL: URL, defaultProjectID: String?, bootstrapToken: String?, configuration: WKWebViewConfiguration, desktopDelegate: HydraWindowControllerDelegate) {
+    init(kind: HydraWindowKind, baseURL: URL, defaultProjectID: String?, defaultAgentID: String? = nil, bootstrapToken: String?, configuration: WKWebViewConfiguration, desktopDelegate: HydraWindowControllerDelegate) {
         self.baseURL = baseURL
         self.desktopDelegate = desktopDelegate
         self.webView = WKWebView(frame: .zero, configuration: configuration)
@@ -42,7 +42,7 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
             defer: false
         )
         window.center()
-        window.title = kind == .full ? "Hydra" : "Hydra - Focused chat"
+        window.title = kind == .full ? "Hydra" : "Hydra - Chat"
         window.tabbingMode = .preferred
         window.contentView = webView
         super.init(window: window)
@@ -54,8 +54,13 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
 
         let path: String
         if kind == .focused, let defaultProjectID {
-            let encoded = defaultProjectID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? defaultProjectID
-            path = "/focused/\(encoded)"
+            let project = defaultProjectID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? defaultProjectID
+            if let defaultAgentID {
+                let agent = defaultAgentID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? defaultAgentID
+                path = "/project/\(project)/agent/\(agent)"
+            } else {
+                path = "/focused/\(project)"
+            }
         } else {
             path = "/"
         }
@@ -84,10 +89,10 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
         guard message.name == "hydra", let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
         let projectID = body["projectId"] as? String
         switch type {
-        case "new-full-window":
-            desktopDelegate?.desktopWindowRequested(.full, projectID: nil)
-        case "new-focused-window":
-            desktopDelegate?.desktopWindowRequested(.focused, projectID: projectID)
+        case "show-main-window", "new-full-window":
+            desktopDelegate?.desktopWindowRequested(.full, projectID: nil, agentID: nil)
+        case "new-chat-window", "new-focused-window":
+            desktopDelegate?.desktopWindowRequested(.focused, projectID: projectID, agentID: body["agentId"] as? String)
         case "active-project":
             if let projectID { desktopDelegate?.desktopWindowActivatedProject(projectID) }
         case "window-state":

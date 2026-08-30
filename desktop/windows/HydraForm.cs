@@ -28,10 +28,11 @@ internal sealed class HydraForm : Form
         BackendController backend,
         CoreWebView2Environment webViewEnvironment,
         HydraApplicationContext application,
-        string? requestedProjectId = null)
+        string? requestedProjectId = null,
+        string? requestedAgentId = null)
     {
         this.application = application;
-        Text = kind == HydraWindowKind.Full ? "Hydra" : "Hydra - Focused chat";
+        Text = kind == HydraWindowKind.Full ? "Hydra" : "Hydra - Chat";
         Width = kind == HydraWindowKind.Full ? 1380 : 940;
         Height = kind == HydraWindowKind.Full ? 900 : 780;
         StartPosition = FormStartPosition.CenterScreen;
@@ -40,7 +41,7 @@ internal sealed class HydraForm : Form
         var menu = new MenuStrip();
         var file = new ToolStripMenuItem("&File");
         file.DropDownItems.Add(new ToolStripMenuItem("New Hydra window", null, (_, _) => application.OpenWindow(HydraWindowKind.Full), Keys.Control | Keys.N));
-        file.DropDownItems.Add(new ToolStripMenuItem("New focused chat", null, (_, _) => application.OpenWindow(HydraWindowKind.Focused), Keys.Control | Keys.Shift | Keys.N));
+        file.DropDownItems.Add(new ToolStripMenuItem("New project chat", null, (_, _) => application.OpenWindow(HydraWindowKind.Focused), Keys.Control | Keys.Shift | Keys.N));
         file.DropDownItems.Add(new ToolStripSeparator());
         file.DropDownItems.Add(new ToolStripMenuItem("Exit", null, async (_, _) => await application.ExitAsync(), Keys.Alt | Keys.F4));
         menu.Items.Add(file);
@@ -95,11 +96,14 @@ internal sealed class HydraForm : Form
                     var projectId = root.TryGetProperty("projectId", out var projectElement) ? projectElement.GetString() : null;
                     switch (type)
                     {
+                        case "show-main-window":
                         case "new-full-window":
                             application.OpenWindow(HydraWindowKind.Full);
                             break;
+                        case "new-chat-window":
                         case "new-focused-window":
-                            application.OpenWindow(HydraWindowKind.Focused, projectId);
+                            var agentId = root.TryGetProperty("agentId", out var agentElement) ? agentElement.GetString() : null;
+                            application.OpenWindow(HydraWindowKind.Focused, projectId, agentId);
                             break;
                         case "active-project" when projectId is not null:
                             application.SetActiveProject(projectId);
@@ -121,7 +125,9 @@ internal sealed class HydraForm : Form
             };
             var focusedProject = requestedProjectId ?? backend.Status?.DefaultProjectId;
             var path = kind == HydraWindowKind.Focused && focusedProject is { } project
-                ? $"/focused/{Uri.EscapeDataString(project)}"
+                ? requestedAgentId is { } agent
+                    ? $"/project/{Uri.EscapeDataString(project)}/agent/{Uri.EscapeDataString(agent)}"
+                    : $"/focused/{Uri.EscapeDataString(project)}"
                 : "/";
             var target = new UriBuilder(new Uri(backend.BaseUrl!, path));
             if (backend.TakeBootstrapToken() is { } token)

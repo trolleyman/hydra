@@ -5,7 +5,7 @@ import { BranchSelector } from './BranchSelector'
 import { SettingsPopover, SettingsGroupLabel, SettingsSelect } from './SettingsPopover'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal, GitBranch, X, Lock } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal, GitBranch, FolderGit2, X, Lock } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -32,6 +32,7 @@ import type { ReviewRef } from '../api/models/ReviewRef'
 import { type AgentTypeOption, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
 import { fetchBranches, peekBranches } from '../lib/branchCache'
 import { orderModelProviders, recordModelProviderUse } from '../lib/modelProviderRecency'
+import { SegmentedControl } from './SegmentedControl'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
@@ -245,6 +246,9 @@ export const SpawnForm = memo(function SpawnForm({
   disabled?: boolean
   focusedOnly?: boolean
 }) {
+  // A dedicated project-checkout draft is a contextual default, not a modified
+  // spawn option. Keep Reset and the settings-cog state aligned with that.
+  const focusedDefault = focusedOnly || readDesktopFocusedDraft()
   const [agentType, setAgentType] = useState<AgentTypeOption>(() => {
     const remembered = readDefaultAgentType()
     return focusedOnly && remembered !== 'claude' && remembered !== 'codex' ? 'claude' : remembered
@@ -256,11 +260,11 @@ export const SpawnForm = memo(function SpawnForm({
   // Chat mode: drive Claude or Codex via its structured protocol and
   // show a chat view instead of a terminal. Remembered like the agent/model;
   // defaults ON when the user has never touched the toggle (only 'false' opts out).
-  const [chatMode, setChatMode] = useState(() => focusedOnly || readDesktopFocusedDraft() || readDefaultChatMode())
+  const [chatMode, setChatMode] = useState(() => focusedDefault || readDefaultChatMode())
   // Focused sessions run directly in the project checkout instead of creating a
   // branch and worktree. Native desktop shells use the same spawn contract, and
   // full Hydra exposes it here so both surfaces create identical heads.
-  const [focused, setFocused] = useState(() => focusedOnly || readDesktopFocusedDraft())
+  const [focused, setFocused] = useState(() => focusedDefault)
   const [focusedFilesystemMode, setFocusedFilesystemMode] = useState(FocusedFilesystemMode.FocusedFilesystemEdit)
   const [focusedAllowCommits, setFocusedAllowCommits] = useState(false)
   // Per-head git-isolation override ('' = use the project's policy default, so the
@@ -950,7 +954,7 @@ export const SpawnForm = memo(function SpawnForm({
     setBaseBranch(defaultBranch)
     setChatMode(true)
     setGitIsolation('')
-    setFocused(focusedOnly)
+    setFocused(focusedDefault)
     setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemEdit)
     setFocusedAllowCommits(false)
   }
@@ -975,7 +979,7 @@ export const SpawnForm = memo(function SpawnForm({
     // the one remembered pick with no representation outside this panel (the
     // agent and model both show on the picker trigger beside it).
     const nonDefaults: string[] = []
-    if (focused) nonDefaults.push(`Worktree: off (${focusedFilesystemMode})`)
+    if (focused && !focusedDefault) nonDefaults.push(`Workspace: project checkout (${focusedFilesystemMode})`)
     if (focused && focusedAllowCommits) nonDefaults.push('Commits: allowed')
     if (adopt) nonDefaults.push(`Pull request: #${adopt.id}`)
     if (showBranch && baseBranch && defaultBranch && baseBranch !== defaultBranch) {
@@ -985,13 +989,6 @@ export const SpawnForm = memo(function SpawnForm({
     if (!focused && gitIsolation) {
       nonDefaults.push(`Git isolation: ${GIT_ISOLATION_OPTS.find((o) => o.id === gitIsolation)?.label ?? gitIsolation}`)
     }
-    // A two-option segmented control: a chat-mode head opens the web chat view,
-    // otherwise the head runs in a terminal. `chatMode === false` selects the
-    // terminal segment.
-    const modeSegment = (active: boolean) =>
-      `flex items-center gap-1.5 px-2.5 py-1 font-medium transition-colors cursor-pointer ${active
-        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
-        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`
     return (
       <SettingsPopover
         label="Spawn options"
@@ -1008,41 +1005,6 @@ export const SpawnForm = memo(function SpawnForm({
         onReset={nonDefaults.length > 0 ? resetSpawnOptions : undefined}
         resetLabel="Reset spawn options to their defaults"
       >
-        {canFocus && (
-          <>
-            <SettingsGroupLabel className="mb-1.5">Workspace</SettingsGroupLabel>
-            {!focusedOnly && <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
-              <input type="checkbox" checked={!focused} onChange={(event) => {
-                const useWorktree = event.target.checked
-                setFocused(!useWorktree)
-                if (!useWorktree) { setChatMode(true); setAdopt(null) }
-              }} className="rounded border-gray-300 dark:border-gray-600" />
-              Use an isolated worktree
-            </label>}
-            {focused && (
-              <div className="mt-2 space-y-2">
-                <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
-                  <button type="button" aria-pressed={focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit} onClick={() => setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemEdit)} className={modeSegment(focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit)}>
-                    edit
-                  </button>
-                  <button type="button" aria-pressed={focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly} onClick={() => setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemReadonly)} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly)}`}>
-                    read-only
-                  </button>
-                </div>
-                <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={focusedAllowCommits}
-                    onChange={(e) => setFocusedAllowCommits(e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600"
-                  />
-                  Allow guarded commits
-                </label>
-              </div>
-            )}
-            <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
-          </>
-        )}
         {adoptControl && (
           <>
             <SettingsGroupLabel className="mb-1.5">Pull request</SettingsGroupLabel>
@@ -1067,16 +1029,15 @@ export const SpawnForm = memo(function SpawnForm({
         )}
         {showChat && !focused && <SettingsGroupLabel className="mb-1.5">Run mode</SettingsGroupLabel>}
         {showChat && !focused && (
-          <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
-            <button type="button" aria-pressed={!chatMode} onClick={() => setChatMode(false)} className={modeSegment(!chatMode)}>
-              <SquareTerminal className="w-3.5 h-3.5" />
-              terminal
-            </button>
-            <button type="button" aria-pressed={chatMode} onClick={() => setChatMode(true)} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(chatMode)}`}>
-              <MessageSquare className="w-3.5 h-3.5" />
-              chat
-            </button>
-          </div>
+          <SegmentedControl<'terminal' | 'chat'>
+            label="Run mode"
+            value={chatMode ? 'chat' : 'terminal'}
+            onChange={(value) => setChatMode(value === 'chat')}
+            options={[
+              { value: 'terminal', label: 'Terminal', icon: <SquareTerminal className="h-3.5 w-3.5" /> },
+              { value: 'chat', label: 'Chat', icon: <MessageSquare className="h-3.5 w-3.5" /> },
+            ]}
+          />
         )}
         {showChat && !focused && (
           <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
@@ -1099,6 +1060,49 @@ export const SpawnForm = memo(function SpawnForm({
             return { ...o, disabled, desc: disabled ? `Not available for ${agentType} (no git tools).` : o.desc }
           })}
         />}
+        {canFocus && (
+          <>
+            {!focused && <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />}
+            <SettingsGroupLabel className="mb-1.5">Workspace</SettingsGroupLabel>
+            {!focusedOnly && (
+              <SegmentedControl<'worktree' | 'project'>
+                label="Workspace"
+                value={focused ? 'project' : 'worktree'}
+                onChange={(value) => {
+                  const projectCheckout = value === 'project'
+                  setFocused(projectCheckout)
+                  if (projectCheckout) { setChatMode(true); setAdopt(null) }
+                }}
+                options={[
+                  { value: 'worktree', label: 'Worktree', icon: <GitBranch className="h-3.5 w-3.5" /> },
+                  { value: 'project', label: 'Project checkout', icon: <FolderGit2 className="h-3.5 w-3.5" /> },
+                ]}
+              />
+            )}
+            {focused && (
+              <div className={focusedOnly ? 'space-y-2' : 'mt-2 space-y-2'}>
+                <SegmentedControl
+                  label="Project files"
+                  value={focusedFilesystemMode}
+                  onChange={setFocusedFilesystemMode}
+                  options={[
+                    { value: FocusedFilesystemMode.FocusedFilesystemEdit, label: 'Edit' },
+                    { value: FocusedFilesystemMode.FocusedFilesystemReadonly, label: 'Read-only' },
+                  ]}
+                />
+                <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={focusedAllowCommits}
+                    onChange={(e) => setFocusedAllowCommits(e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600"
+                  />
+                  Allow commits
+                </label>
+              </div>
+            )}
+          </>
+        )}
       </SettingsPopover>
     )
   }

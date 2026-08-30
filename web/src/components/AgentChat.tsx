@@ -8761,6 +8761,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     wsRef.current = ws
     let retryTimer: number | null = null
     let openedAt: number | null = null
+    // A fatal server frame names a launch/attach failure that retrying the same
+    // socket cannot repair. Keep its banner on screen instead of immediately
+    // clearing it on the reconnect effect and falling back to "Connecting".
+    let fatalError = false
     ws.onopen = () => {
       openedAt = Date.now()
       setConnected(true)
@@ -8786,6 +8790,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // The daemon could not open this head's event log, so this
           // connection will render nothing. Say so - a silently empty chat is
           // indistinguishable from a head that never said anything.
+          fatalError = true
           setChatError(msg.error || 'Could not load this conversation')
           return
         case 'shell_output': {
@@ -9155,6 +9160,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     ws.onclose = () => {
       setConnected(false)
       onStatusUpdateRef.current?.('stopped')
+      if (fatalError) return
       // Schedule the reconnect. A drop after a healthy stretch retries almost
       // immediately; a streak of quick failures (the daemon is down, the head
       // can't resume) backs off exponentially to a slow poll. Unmount detaches

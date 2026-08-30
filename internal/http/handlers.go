@@ -2006,9 +2006,9 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 	return api.GetAgent200JSONResponse(s.agentResponseWithReview(*head)), nil
 }
 
-// UpdateAgent patches an agent's mutable fields (title and/or base branch).
-// Both are cheap metadata-only changes: the agent's stable ID, branch, worktree
-// and live session are untouched, so it is safe even while the agent is running.
+// UpdateAgent patches an agent's mutable fields. Most are metadata or process
+// settings; checkout_branch is the explicit exception and moves the shared
+// project checkout for a focused head with Git's normal dirty-tree protection.
 //
 // base_branch updates only which branch the agent is considered based on (used
 // by update-from-base and the diff view); it does NOT move existing commits.
@@ -2021,7 +2021,7 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			Details: "request body is required",
 		}, nil
 	}
-	if request.Body.Title == nil && request.Body.BaseBranch == nil && request.Body.ChatMode == nil && request.Body.FilesystemMode == nil && request.Body.AllowCommits == nil {
+	if request.Body.Title == nil && request.Body.BaseBranch == nil && request.Body.CheckoutBranch == nil && request.Body.ChatMode == nil && request.Body.FilesystemMode == nil && request.Body.AllowCommits == nil {
 		return api.UpdateAgent400JSONResponse{
 			Code:    400,
 			Error:   api.ErrorResponseErrorBadRequest,
@@ -2053,6 +2053,18 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 		}
 	}
 
+	var checkoutBranch string
+	if request.Body.CheckoutBranch != nil {
+		checkoutBranch = strings.TrimSpace(*request.Body.CheckoutBranch)
+		if checkoutBranch == "" {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "checkout_branch must not be empty",
+			}, nil
+		}
+	}
+
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -2067,6 +2079,22 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 			Error:   api.ErrorResponseErrorNotFound,
 			Details: "agent not found",
 		}, nil
+	}
+	if checkoutBranch != "" {
+		if !head.IsFocused() {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "checkout_branch can only be changed for a project-checkout head",
+			}, nil
+		}
+		if err := git.CheckoutBranch(projectRoot, checkoutBranch); err != nil {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: fmt.Sprintf("cannot switch project checkout to %q: %v", checkoutBranch, err),
+			}, nil
+		}
 	}
 	if request.Body.FilesystemMode != nil || request.Body.AllowCommits != nil {
 		if !head.IsFocused() {
@@ -2087,8 +2115,15 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 		if mode != nil && *mode != head.FilesystemMode {
 			head.FilesystemMode = *mode
 			if s.Sessions.IsLive(head.ID) {
-				log.Printf("api: focused filesystem mode toggled to %s for %s; stopping session for sandbox switch", *mode, head.ID)
-				heads.StopSessionAndWait(s.Sessions, head.ID, 5*time.Second)
+				// The project-root bind is part of the long-lived namespace host,
+				// not just the agent child. Rebuild the supervisor synchronously so
+				// the successful response guarantees the requested permission is
+				// active; merely stopping the child would reuse the old mount mode.
+				log.Printf("api: focused filesystem mode toggled to %s for %s; rebuilding sandbox", *mode, head.ID)
+				rows, cols := heads.LoadResumeSize(s.DB, projectRoot, head.ID)
+				if err := heads.RestartHeadSandbox(s.Sessions, s.DB, projectRoot, *head, rows, cols); err != nil {
+					return nil, errtrace.Wrap(fmt.Errorf("restart focused head with %s filesystem: %w", *mode, err))
+				}
 			}
 		}
 		if request.Body.AllowCommits != nil {

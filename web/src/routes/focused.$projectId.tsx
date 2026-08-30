@@ -18,7 +18,6 @@ function FocusedDraftPage() {
     navigate({
       to: '/project/$projectId/agent/$agentId',
       params: { projectId, agentId: agent.id },
-      search: { desktop: 'focused' },
     })
   }, [addAgent, navigate, projectId])
 

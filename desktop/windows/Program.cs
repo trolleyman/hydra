@@ -52,7 +52,7 @@ internal sealed class HydraApplicationContext : ApplicationContext
         this.webViewEnvironment = webViewEnvironment;
         var trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add("New Hydra window", null, (_, _) => OpenWindow(HydraWindowKind.Full));
-        trayMenu.Items.Add("New focused chat", null, (_, _) => OpenWindow(HydraWindowKind.Focused));
+        trayMenu.Items.Add("New project chat", null, (_, _) => OpenWindow(HydraWindowKind.Focused));
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("Exit", null, async (_, _) => await ExitAsync());
         trayIcon = new NotifyIcon
@@ -66,9 +66,9 @@ internal sealed class HydraApplicationContext : ApplicationContext
         OpenWindow(HydraWindowKind.Full);
     }
 
-    internal void OpenWindow(HydraWindowKind kind, string? projectId = null)
+    internal void OpenWindow(HydraWindowKind kind, string? projectId = null, string? agentId = null)
     {
-        var window = new HydraForm(kind, backend, webViewEnvironment, this, projectId);
+        var window = new HydraForm(kind, backend, webViewEnvironment, this, projectId, agentId);
         windows.Add(window);
         window.FormClosed += (_, _) => windows.Remove(window);
         window.Show();

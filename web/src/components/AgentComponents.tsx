@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Clock, GitPullRequest, MessageSquare } from 'lucide-react'
+import { Clock, FolderGit2, GitBranch, GitPullRequest, MessageSquare } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
@@ -254,6 +254,23 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
           {agent.agent_type || 'unknown'}
         </span>
+        {agent.focused ? (
+          <span
+            title="Project checkout workspace"
+            aria-label="Project checkout workspace"
+            className="inline-flex h-[18px] shrink-0 items-center rounded bg-violet-100 px-1 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
+          >
+            <FolderGit2 className="h-3 w-3" />
+          </span>
+        ) : agent.branch_name ? (
+          <span
+            title={`Isolated worktree: ${agent.branch_name}`}
+            aria-label={`Isolated worktree: ${agent.branch_name}`}
+            className="inline-flex h-[18px] shrink-0 items-center rounded bg-blue-100 px-1 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+          >
+            <GitBranch className="h-3 w-3" />
+          </span>
+        ) : null}
         {archived ? (
           <Badge variant="xs" className={archivedEndStateBadge(agent.end_state).className}>
             {archivedEndStateBadge(agent.end_state).label}
