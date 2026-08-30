@@ -142,6 +142,11 @@ own own-branch guard, so they're safe on codex/gemini without it.
   and **`git_merge_continue`** / **`git_merge_abort`** finish it. `continue` stages the
   still-unmerged paths itself (git won't conclude a merge while any remain) but refuses
   if any of them still contain `<<<<<<<` markers, so a conflict can't be committed raw.
+
+Raw `git commit` and `git merge` calls are proactively denied by the command gate in
+both Git isolation modes. The denial points at the matching tool, including
+`git_merge_continue` and `git_merge_abort`, and explicitly says not to use host-run.
+The default pre-prompt gives the same guidance before an agent reaches the gate.
 - **`git_stash`** (`op`: push / pop / apply / list / drop) - park uncommitted work and
   bring it back; the way out of "your local changes would be overwritten by merge"
   without discarding them or committing something half-done. **Entries are per-head.**

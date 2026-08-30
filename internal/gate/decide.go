@@ -135,6 +135,10 @@ const killByPatternReason = "Killing processes by NAME or command-line pattern i
 // scrubbing and to route raw commits to the git_commit tool.
 var gitCommitRe = regexp.MustCompile(`(?i)` + cmdBoundary + `git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*commit\b`)
 
+// gitMergeRe routes raw merge operations through the branch-pinned Hydra tools.
+// It does not match merge-base, which is a separate read-only subcommand.
+var gitMergeRe = regexp.MustCompile(`(?i)` + cmdBoundary + `git\s+(?:-c\s+\S+\s+|-[^\s]+\s+)*merge(?:\s|$)`)
+
 // gitToolSubcmdRe matches a raw `git <sub>` write-subcommand that has a
 // mcp__hydra__git_* equivalent, for the readonly-mode redirect. Same boundary +
 // leading-flag skipping as gitCommitRe.
@@ -445,7 +449,31 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 				Reason:   "git push is not allowed - it leaves the sandbox and writes to a remote (push deliberately from the host instead)",
 			}
 		}
-		// In readonly mode raw git writes cannot succeed: .git is read-only, so the
+		// Commit and merge have dedicated tools that pin the operation to this
+		// head's branch. Deny these proactively in every isolation mode so an agent
+		// gets actionable guidance instead of trying host-run after a readonly error.
+		if gitCommitRe.MatchString(cmd) {
+			return Result{
+				Decision: Deny,
+				Reason:   "raw `git commit` is not allowed - commit with the mcp__hydra__git_commit tool instead. It stages and commits your changes onto your own branch inside your worktree, so a commit can't land on the main repo or another branch. Do not use host_run for this.",
+			}
+		}
+		if gitMergeRe.MatchString(cmd) {
+			tool := "mcp__hydra__git_merge"
+			operation := "merge with"
+			if strings.Contains(cmd, "--continue") {
+				tool = "mcp__hydra__git_merge_continue"
+				operation = "continue the merge with"
+			} else if strings.Contains(cmd, "--abort") {
+				tool = "mcp__hydra__git_merge_abort"
+				operation = "abort the merge with"
+			}
+			return Result{
+				Decision: Deny,
+				Reason:   fmt.Sprintf("raw `git merge` is not allowed - %s the %s tool instead. It operates only on your own branch inside your worktree. Do not use host_run for this.", operation, tool),
+			}
+		}
+		// In readonly mode other raw git writes cannot succeed: .git is read-only, so the
 		// OS refuses the ref lock / index write and the branch is untouched. The
 		// deny that used to live here was therefore never a security control - it
 		// only bought a friendlier message than "Read-only file system" - and it
@@ -457,21 +485,6 @@ func Decide(p Policy, toolName string, toolInput map[string]any) Result {
 		// readonly-mode commit takes this path rather than that hard deny.
 		if p.HostMediatedGit && gitToolSubcmdRe.MatchString(cmd) {
 			return Result{Decision: Allow}
-		}
-		if gitCommitRe.MatchString(cmd) {
-			// Route commits through the mcp__hydra__git_commit tool, which commits onto
-			// the head's OWN branch inside its worktree. The whole shared .git is bound
-			// writable in the sandbox (a linked worktree needs it), so a raw `git commit`
-			// - especially one run from the wrong directory or after `git checkout main`
-			// - can land on the main repo or a sibling head's branch. The tool refuses
-			// unless HEAD is the head's own branch. Read-only git and `git add` are
-			// untouched; this fires after the tamper/push checks so a message mentioning
-			// a tripwire (already scrubbed above) or a chained tamper write is still
-			// caught with its own reason first.
-			return Result{
-				Decision: Deny,
-				Reason:   "raw `git commit` is not allowed - commit with the mcp__hydra__git_commit tool instead. It stages and commits your changes onto your own branch inside your worktree, so a commit can't land on the main repo or another branch. Read-only git (status/diff/log) and `git add` still work.",
-			}
 		}
 		return Result{Decision: Allow}
 	}

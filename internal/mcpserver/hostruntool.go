@@ -25,11 +25,10 @@ func hostRunToolDef() map[string]any {
 		"description": "LAST RESORT: ask the user to run ONE command on the HOST, outside your sandbox, in your worktree. " +
 			"Nothing runs unless they allow it, and an unanswered request is denied after a few minutes. " +
 			"Almost everything belongs inside the sandbox - prefer changing .hydra/config.toml (writable_paths, network, ...) or just asking in chat. " +
-			"Reach for this only when there is genuinely no in-sandbox way to proceed, and expect to be denied.\n\n" +
+			"Reach for this only when there is genuinely no in-sandbox way to proceed, and expect to be denied. Git commits and merges are not host-run jobs: use mcp__hydra__git_commit and mcp__hydra__git_merge.\n\n" +
 			"`command` is run as `bash -lc <command>` on the host, in your worktree. It is passed through verbatim - no shell of yours touches it - so pipes, redirection and `&&` all work as written and need no extra quoting.\n\n" +
 			"Ask ONCE for the whole job, with the SHORTEST command that does it. Every request interrupts the user, and they must read and understand every character before allowing it - a long script reads as a place for something to hide and gets denied. " +
-			"So fold the steps that genuinely must run outside the sandbox into one command and leave out everything else: do the preparation, checking and reporting yourself, in the sandbox, before and after. " +
-			"If the job is `git merge --no-edit main`, ask for exactly that - not the same thing wrapped in conditionals, fallbacks and echoes.\n\n" +
+			"So fold the steps that genuinely must run outside the sandbox into one command and leave out everything else: do the preparation, checking and reporting yourself, in the sandbox, before and after.\n\n" +
 			"Returns the command's combined output and exit status.",
 		"inputSchema": map[string]any{
 			"type":     "object",
@@ -40,9 +39,8 @@ func hostRunToolDef() map[string]any {
 					"description": "The command to run on the host, exactly as it should execute under `bash -lc`.",
 				},
 				"why": map[string]any{
-					"type": "string",
-					"description": "What you are trying to achieve and which specific sandbox limitation blocks it, written for a human who cannot see your reasoning " +
-						"(e.g. \"merging main in has to write .git, which is read-only in my sandbox under git_isolation=readonly\"). Shown above the command in the approval card.",
+					"type":        "string",
+					"description": "What you are trying to achieve and which specific sandbox limitation blocks it, written for a human who cannot see your reasoning. Shown above the command in the approval card.",
 				},
 			},
 		},

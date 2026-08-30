@@ -214,15 +214,38 @@ func TestDecideAskCarriesTarget(t *testing.T) {
 // scrubbing runs first, so a message that merely mentions a tripwire (an install,
 // a tamper key) is still denied with the commit-routing reason, not a misfire.
 func TestDecideGitCommitRoutesToTool(t *testing.T) {
-	p := basePolicy()
-	for _, cmd := range []string{
-		"git commit -m 'wip'",
-		`git commit -m "run apt-get install foo and pkill bar"`,
-	} {
-		r := Decide(p, "Bash", map[string]any{"command": cmd})
-		if r.Decision != Deny || !strings.Contains(r.Reason, "git_commit") {
-			t.Errorf("Decide(Bash %q) = %s (%q), want Deny mentioning git_commit", cmd, r.Decision, r.Reason)
+	for _, readonly := range []bool{false, true} {
+		p := basePolicy()
+		p.HostMediatedGit = readonly
+		for _, cmd := range []string{
+			"git commit -m 'wip'",
+			`git commit -m "run apt-get install foo and pkill bar"`,
+		} {
+			r := Decide(p, "Bash", map[string]any{"command": cmd})
+			if r.Decision != Deny || !strings.Contains(r.Reason, "git_commit") || !strings.Contains(r.Reason, "host_run") {
+				t.Errorf("Decide(Bash %q, readonly=%v) = %s (%q), want Deny mentioning git_commit and host_run", cmd, readonly, r.Decision, r.Reason)
+			}
 		}
+	}
+}
+
+func TestDecideGitMergeRoutesToTool(t *testing.T) {
+	for _, readonly := range []bool{false, true} {
+		p := basePolicy()
+		p.HostMediatedGit = readonly
+		for _, tc := range []struct{ command, tool string }{
+			{"git merge main", "git_merge"},
+			{"git merge --continue", "git_merge_continue"},
+			{"git merge --abort", "git_merge_abort"},
+		} {
+			r := Decide(p, "Bash", map[string]any{"command": tc.command})
+			if r.Decision != Deny || !strings.Contains(r.Reason, tc.tool) || !strings.Contains(r.Reason, "host_run") {
+				t.Errorf("Decide(Bash %q, readonly=%v) = %s (%q), want Deny mentioning %s and host_run", tc.command, readonly, r.Decision, r.Reason, tc.tool)
+			}
+		}
+	}
+	if r := Decide(basePolicy(), "Bash", map[string]any{"command": "git merge-base main HEAD"}); r.Decision != Allow {
+		t.Errorf("git merge-base = %s (%q), want Allow", r.Decision, r.Reason)
 	}
 }
 
@@ -382,18 +405,18 @@ func TestReadonlyGitRedirect(t *testing.T) {
 
 	bash := func(cmd string) map[string]any { return map[string]any{"command": cmd} }
 
-	// In readonly mode raw git writes are ALLOWED to run: .git is read-only, so
+	// In readonly mode most raw git writes are ALLOWED to run: .git is read-only, so
 	// the OS refuses them and nothing changes. Denying here used to cost the whole
 	// Bash call - a compound command lost its unrelated work over one git clause -
 	// for no security benefit. The explanation now arrives via GitReadonlyAdvice
-	// after the fact (see TestGitReadonlyAdvice).
+	// after the fact (see TestGitReadonlyAdvice). Commit and merge are exceptions:
+	// their branch-pinned tools are important enough to route proactively.
 	for _, sub := range []string{
 		"git reset --hard HEAD~1",
 		"git add -p file.go",
 		"git revert abc123",
 		"git rebase -i HEAD~3",
 		"git cherry-pick def456",
-		"git commit -m x",
 		"printf 'x' > a.txt && git add a.txt", // the compound case that motivated this
 	} {
 		if d := Decide(ro, "Bash", bash(sub)); d.Decision != Allow {

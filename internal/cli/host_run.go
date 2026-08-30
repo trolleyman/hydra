@@ -51,8 +51,8 @@ sandbox. It is shown at the top of the approval card, above the command, and is
 the main thing the user judges the request on - a request that only shows a shell
 script makes them reverse-engineer your intent, and is far more likely to be
 denied. Write it for a human: what you are trying to achieve, and which sandbox
-limitation blocks it (e.g. "the merge has to write .git, which is read-only in my
-sandbox under git_isolation=readonly").
+limitation blocks it. Git commits and merges are not host-run jobs: use the
+mcp__hydra__git_commit and mcp__hydra__git_merge tools for those operations.
 
 Ask ONCE for the whole job, with the SHORTEST command that does it. Two things
 to minimise, pulling in opposite directions: the number of requests (each one
@@ -60,9 +60,7 @@ interrupts the user) and the length of each one (they must read and understand
 every character before allowing it - a long script is where something nasty
 would hide, and it gets denied for being unreadable). Fold the steps that
 genuinely must run outside the sandbox into one command and leave out everything
-else: do the preparation, checking and reporting yourself, in the sandbox. If the
-job really is ` + "`git merge --no-edit main`" + `, ask for exactly that - not the same
-thing wrapped in conditionals, fallbacks and echoes.
+else: do the preparation, checking and reporting yourself, in the sandbox.
 
 How the command is parsed: the argv left after --why/-- is joined into ONE script
 and run on the host with ` + "`bash -lc <script>`" + `, in your worktree. Your OWN shell
