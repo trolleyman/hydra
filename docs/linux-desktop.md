@@ -434,6 +434,13 @@ and no window action implicitly interrupts a head.
 - [x] Bridge GTK clipboard textures into the attachment-aware chat composer so
   Ctrl+V uploads copied images even when WebKitGTK omits them from the web paste
   event. Text paste stays on WebKitGTK's native path.
+- Keep desktop attachments on the normal local upload path. "Upload" here is a
+  same-machine transfer into the project's ignored Hydra state, not a remote
+  network upload. The copy gives the attachment a stable, browser-servable path
+  after the source is moved or a head is removed, while the ordinary sandbox
+  mask and read rules still govern arbitrary original paths. Dragging or pasting
+  a file grants access only to that copied attachment; it does not turn desktop
+  mode into unrestricted path serving.
 - Add optional StatusNotifier integration without making it required.
 - Verify accessibility, IME, clipboard, drag/drop, high-DPI, multi-monitor, and
   dark/light theme behavior across representative GNOME and KDE sessions.
