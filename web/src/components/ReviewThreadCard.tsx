@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, LoaderCircle, Mail, Quote, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
-import { Markdown } from '../lib/MarkdownRenderer'
+import { RichMarkdown } from '../lib/RichMarkdown'
 import { Tooltip } from './Tooltip'
 import { ProviderIcon } from './ReviewControls'
 import { providerLabel } from '../lib/forgeDisplay'
@@ -349,7 +349,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                     </div>
                 </span>
               </div>
-              <Markdown text={n.body} highlightMentions className="mt-0.5 text-xs text-gray-700 dark:text-gray-200 break-words" />
+              <RichMarkdown text={n.body} highlightMentions className="mt-0.5 text-xs text-gray-700 dark:text-gray-200 break-words" />
               </div>
             </div>
           ))}

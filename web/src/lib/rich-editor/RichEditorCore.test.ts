@@ -77,7 +77,7 @@ describe('rich editor Markdown interchange', () => {
   })
 
   it('round trips Hydra references through readable Markdown', () => {
-    const markdown = 'Review @file[web/src/App.tsx] on @branch[main] with @agent[reviewer].'
+    const markdown = 'Review [web/src/App.tsx](hydra://file/web/src/App.tsx) on [main](hydra://branch/main) with [reviewer](hydra://agent/reviewer).'
     const document = parseRichMarkdown(markdown)
     expect(document.content?.[0].content?.filter((node) => node.type === 'hydraReference')).toEqual([
       expect.objectContaining({ attrs: expect.objectContaining({ kind: 'file', value: 'web/src/App.tsx' }) }),
@@ -85,6 +85,15 @@ describe('rich editor Markdown interchange', () => {
       expect.objectContaining({ attrs: expect.objectContaining({ kind: 'agent', value: 'reviewer' }) }),
     ])
     expect(serializeRichMarkdown(document)).toBe(markdown)
+  })
+
+  it('reads legacy Hydra references and writes the canonical link form', () => {
+    const document = parseRichMarkdown('@file[web/src/App.tsx]')
+    expect(document.content?.[0].content?.[0]).toMatchObject({
+      type: 'hydraReference',
+      attrs: { kind: 'file', value: 'web/src/App.tsx' },
+    })
+    expect(serializeRichMarkdown(document)).toBe('[web/src/App.tsx](hydra://file/web/src/App.tsx)')
   })
 
   it('chooses a safe variable-length code delimiter', () => {

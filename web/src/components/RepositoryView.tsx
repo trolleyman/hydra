@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from 'react'
 import { useNavigate, useLocation, useSearch, Link, linkOptions, type LinkProps } from '@tanstack/react-router'
-import { Markdown } from '../lib/MarkdownRenderer'
+import { RichMarkdown } from '../lib/RichMarkdown'
 import { formatBytes } from '../lib/formatBytes'
 import { getLanguage } from '../lib/language'
 import { fetchBranches, peekBranches } from '../lib/branchCache'
@@ -542,13 +542,13 @@ function TreeRow({
 
 // The file pane is shared with the lightbox's text viewer - see CodePane.
 
-// MarkdownView renders a markdown file (README) through the shared <Markdown>
+// MarkdownView renders a markdown file (README) through the shared <RichMarkdown>
 // component in its document variant. linkCtx lets relative repo links resolve
 // against the current file and navigate the repository view in-app (with
 // middle/ctrl-click still opening the real href in a new tab).
 function MarkdownView({ content, projectId, refStr, filePath }: { content: string; projectId: string; refStr: string; filePath: string }) {
   return (
-    <Markdown
+    <RichMarkdown
       text={content}
       variant="doc"
       linkCtx={{ projectId, refStr, filePath }}

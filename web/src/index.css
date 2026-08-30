@@ -1028,7 +1028,7 @@ body {
    no drift either way. */
 .md-src-italic { font-variation-settings: 'slnt' -10; }
 
-/* GFM task-list items (react-markdown + remark-gfm): the <ul> is styled
+/* GFM task-list items (remark-gfm): the <ul> is styled
    list-none/pl-0 by the Markdown component, so give the disabled checkbox a
    little breathing room from its label. */
 .task-list-item { list-style: none; }

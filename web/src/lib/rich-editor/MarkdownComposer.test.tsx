@@ -204,7 +204,7 @@ describe('MarkdownComposer', () => {
     ref.current!.editor!.commands.insertContent('@branch:feat')
     await view.findByRole('listbox', { name: 'References' })
     fireEvent.click(view.getByRole('option', { name: /hydra\/feature/ }))
-    await waitFor(() => expect(changed).toHaveBeenLastCalledWith('@branch[hydra/feature]'))
+    await waitFor(() => expect(changed).toHaveBeenLastCalledWith('[hydra/feature](hydra://branch/hydra/feature)'))
     expect(ref.current!.editor!.getJSON().content?.[0].content?.[0].type).toBe('hydraReference')
   })
 })

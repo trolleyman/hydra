@@ -530,30 +530,32 @@ thing being edited" and "Markdown after it was sent". Editing and display share:
 They should not share one literal component. Transcript rows must be static,
 cheap, selectable and free of contenteditable history/selection plugins.
 Rendering an editor instance for every message would regress long transcript
-performance and accessibility. Use two views over one document:
+performance and accessibility. Markdown is the source of truth at rest, with
+two purpose-built views:
 
 ```text
-RichDocument
-  -> EditableDocumentView (one live Tiptap editor in the composer)
-  -> RichTextRenderer     (plain React/DOM in a sent user bubble)
-  -> Markdown             (backend, replay and external clipboard)
+Markdown
+  -> MarkdownComposer (one live Tiptap document while editing)
+  -> RichMarkdown     (a private parsed tree rendered as plain React/DOM)
+  -> backend, replay and external clipboard
 ```
 
-`RichTextRenderer` takes a structured document. `RichMarkdown` is the memoized
-boundary for persisted or external Markdown: it parses once and delegates to the
-structured renderer. The compatibility `Markdown` export remains while callers
-migrate. Assistant and old transcript messages can contain syntax beyond the
-composer schema, so the structured schema and static node registry must cover
-the existing GFM/media/repository-link behaviour before the compatibility path
-is removed. Do not narrow the transcript language to match the composer.
+`RichMarkdown` is the memoized boundary for persisted or external Markdown. It
+parses into a private HAST tree and immediately renders that tree; the parsed
+representation is neither an application data model nor persisted state.
+Assistant and old transcript messages can contain syntax beyond the composer
+schema, so the static renderer continues to support the complete existing
+GFM/media/repository-link language. Do not narrow the transcript language to
+match the composer.
 
 Static attachment and Hydra-reference nodes are now semantic presentation nodes.
 An attachment keeps its sentence position when a sent message contains its
-stable `[filename]` boundary; legacy messages without one retain the trailing
-chip fallback. `@file[...]`, `@commit[...]`, `@branch[...]` and `@agent[...]`
-render as typed chips and remain literal in code. The remaining migration is to
-make the complete GFM/media renderer consume the structured document directly,
-then rename the implementation file after no source-only callers remain.
+stable `[filename]` boundary and the temporary upload manifest identifies that
+filename; legacy messages without one retain the trailing chip fallback. Hydra
+references use ordinary Markdown links with typed `hydra://` targets, such as
+`[main](hydra://branch/main)`. The static renderer turns those links into typed
+chips. Legacy `@file[...]`, `@commit[...]`, `@branch[...]` and `@agent[...]`
+references remain readable and are canonicalized to link form when edited.
 
 ### Seamless send transition
 

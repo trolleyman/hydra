@@ -58,7 +58,7 @@ export function buildFixTestMessage(runner: string, c: TestCase): string {
   const lines = [`The \`${runner}\` test runner reports a ${c.status === 'warning' ? 'warning' : 'failure'}.`, '']
   // The name in inline code and the location as a markdown link: in the chat the
   // link resolves to the repository view at that line (the renderer parses the
-  // trailing :line - see MarkdownRenderer's RepoLink), and the agent still reads
+  // trailing :line - see RichMarkdown's RepoLink), and the agent still reads
   // a plain, actionable path out of the link text.
   lines.push(`Test: \`${name}\``)
   if (loc) lines.push(`Location: [${loc}](${loc})`)

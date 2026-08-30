@@ -3,6 +3,7 @@ import { Node, type Editor, type JSONContent } from '@tiptap/core'
 export const REFERENCE_NAME = 'hydraReference'
 
 export type ReferenceKind = 'file' | 'branch' | 'commit' | 'agent'
+const REFERENCE_KINDS = new Set<ReferenceKind>(['file', 'branch', 'commit', 'agent'])
 
 export interface ComposerReference {
   kind: ReferenceKind
@@ -49,8 +50,10 @@ export const HydraReference = Node.create({
   },
 
   renderMarkdown(node) {
-    const value = String(node.attrs?.value ?? '').replaceAll('\\', '\\\\').replaceAll(']', '\\]')
-    return `@${node.attrs?.kind}[${value}]`
+    const value = String(node.attrs?.value ?? '')
+    const label = String(node.attrs?.label || value).replaceAll('\\', '\\\\').replaceAll(']', '\\]')
+    const path = value.split('/').map(encodeURIComponent).join('/')
+    return `[${label}](hydra://${node.attrs?.kind}/${path})`
   },
 })
 
@@ -69,6 +72,27 @@ export function hydrateReferences(document: JSONContent): JSONContent {
   if (!document.content) return document
   const content: JSONContent[] = []
   for (const child of document.content) {
+    const link = child.type === 'text'
+      ? child.marks?.find((mark) => mark.type === 'link' && typeof mark.attrs?.href === 'string' && mark.attrs.href.startsWith('hydra://'))
+      : undefined
+    if (link && child.text) {
+      try {
+        const href = new URL(String(link.attrs?.href))
+        if (REFERENCE_KINDS.has(href.hostname as ReferenceKind)) {
+          content.push({
+            type: REFERENCE_NAME,
+            attrs: {
+              kind: href.hostname,
+              value: href.pathname.slice(1).split('/').map(decodeURIComponent).join('/'),
+              label: child.text,
+            },
+          })
+          continue
+        }
+      } catch {
+        // Leave malformed Hydra URLs as ordinary links.
+      }
+    }
     if (child.type === 'text' && child.text) {
       let offset = 0
       let matched = false

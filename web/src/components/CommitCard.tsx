@@ -1,4 +1,4 @@
-import { Markdown } from '../lib/MarkdownRenderer'
+import { RichMarkdown } from '../lib/RichMarkdown'
 
 /* eslint-disable react-refresh/only-export-components -- the card's formatting and style tokens are deliberately shared with its callers */
 
@@ -57,7 +57,7 @@ export function CommitCard({ commit }: { commit: CommitCardCommit }) {
         <CommitStats additions={commit.additions} deletions={commit.deletions} />
       </div>
       <div className="border-t border-gray-200 pt-2 dark:border-gray-700">
-        <Markdown
+        <RichMarkdown
           text={commit.message}
           hardBreaks={false}
           className="text-xs leading-relaxed text-gray-700 dark:text-gray-200"

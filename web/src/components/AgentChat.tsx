@@ -45,7 +45,7 @@ import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../l
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
 import { useAgentStore } from '../stores/agentStore'
-import { Markdown, type RepoLinkContext } from '../lib/MarkdownRenderer'
+import { RichMarkdown, type RepoLinkContext } from '../lib/RichMarkdown'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, leadingBashComment, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
 import { FILE_BANNER, viewLineNumbers } from '../lib/fileViewCommand'
@@ -1903,7 +1903,7 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn, saved
 // --- Claude-app-ish shared styles -------------------------------------------
 
 // The user's message bubble: borderless, a shade off the pane background.
-// No whitespace-pre-wrap: the Markdown chat variant's remark-breaks already
+// No whitespace-pre-wrap: the RichMarkdown chat variant's remark-breaks already
 // preserves typed newlines.
 const USER_BUBBLE_CLASS =
   'max-w-[85%] rounded-2xl rounded-br-md bg-[#f0eee6] dark:bg-[#31302c] px-3.5 py-2 break-words'
@@ -2366,7 +2366,7 @@ function WebSearchOutput({ text }: { text: string }) {
           </ul>
         </div>
       )}
-      {parsed.body && <Markdown text={parsed.body} />}
+      {parsed.body && <RichMarkdown text={parsed.body} />}
     </div>
   )
 }
@@ -2571,7 +2571,7 @@ function ReviewCommentCard({
         // The remark is separated from the code it is about, the way it is in the
         // diff viewer: the excerpt ends, then someone speaks.
         <div className={`px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200 ${context ? 'border-t border-stone-200 dark:border-white/[0.06]' : ''}`}>
-          <Markdown text={body} />
+          <RichMarkdown text={body} />
         </div>
       )}
     </div>
@@ -2589,14 +2589,14 @@ function ReviewCommentsPanel({ text }: { text: string }) {
   if (!parsed) {
     return (
       <div className={`${PANEL_CLASS} px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200`}>
-        <Markdown text={text} />
+        <RichMarkdown text={text} />
       </div>
     )
   }
   return (
     <div className="space-y-1.5">
       {parsed.preamble && (
-        <div className="break-words leading-relaxed chat-font text-stone-500 dark:text-stone-400"><Markdown text={parsed.preamble} /></div>
+        <div className="break-words leading-relaxed chat-font text-stone-500 dark:text-stone-400"><RichMarkdown text={parsed.preamble} /></div>
       )}
       {parsed.comments.map((c) => {
         // A reply to a comment shown above it is drawn as a thread: indented
@@ -2619,7 +2619,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
       })}
       {parsed.trailer && (
         <div className={`${PANEL_CLASS} px-2.5 py-1.5 break-words leading-relaxed chat-font text-stone-700 dark:text-stone-200`}>
-          <Markdown text={parsed.trailer} />
+          <RichMarkdown text={parsed.trailer} />
         </div>
       )}
     </div>
@@ -3238,7 +3238,7 @@ function MemoryPanel({ text }: { text: string }) {
       )}
       {body && (
         <div className="break-words leading-relaxed chat-font">
-          <Markdown text={body} />
+          <RichMarkdown text={body} />
         </div>
       )}
     </div>
@@ -3274,10 +3274,10 @@ function TaskToolFields({ input }: { input: Record<string, unknown> }) {
         </div>
       )}
       {subject && (
-        <LabeledField label="Subject"><div className={proseCls}><Markdown text={subject} /></div></LabeledField>
+        <LabeledField label="Subject"><div className={proseCls}><RichMarkdown text={subject} /></div></LabeledField>
       )}
       {description && (
-        <LabeledField label="Description"><div className={proseCls}><Markdown text={description} /></div></LabeledField>
+        <LabeledField label="Description"><div className={proseCls}><RichMarkdown text={description} /></div></LabeledField>
       )}
     </div>
   )
@@ -3343,7 +3343,7 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
             reflow (hardBreaks={false}) - messages are hard-wrapped at ~72
             columns, so a <br> per source newline would shred every paragraph. */}
         <div className={`${PANEL_CLASS} break-words px-2.5 py-1.5 text-2xs leading-relaxed text-stone-700 dark:text-stone-200 chat-font`}>
-          <Markdown text={str('message')} hardBreaks={false} />
+          <RichMarkdown text={str('message')} hardBreaks={false} />
         </div>
         {paths.length > 0 && (
           <div className="space-y-0.5">{paths.map((p) => bullet(p, <span><LowlitPath path={path(p)} /></span>))}</div>
@@ -3529,12 +3529,12 @@ function SendMessageFields({
         </LabeledField>
       )}
       {summary && (
-        <LabeledField label="Summary"><div className={proseCls}><Markdown text={summary} /></div></LabeledField>
+        <LabeledField label="Summary"><div className={proseCls}><RichMarkdown text={summary} /></div></LabeledField>
       )}
       {message && (
         <LabeledField label="Message">
           <div className={`${PANEL_CLASS} px-2.5 py-1.5 ${proseCls} text-stone-700 dark:text-stone-200`}>
-            <Markdown text={message} />
+            <RichMarkdown text={message} />
           </div>
         </LabeledField>
       )}
@@ -3905,7 +3905,7 @@ const ToolCard = memo(function ToolCard({
   // These first-party tools have compact arguments fully represented by their
   // heading and summary. Repeating them as JSON makes a native action look like
   // protocol plumbing. Review writes are the exception in spirit, not layout:
-  // their long body still renders below, but as Markdown rather than JSON.
+  // their long body still renders below, but as RichMarkdown rather than JSON.
   const nativeHydraSummaryOnly = HYDRA_SUMMARY_ONLY_TOOLS.has(item.name)
 
   // SendMessage: a note to another agent, so the card reads as who it went to +
@@ -4186,11 +4186,11 @@ const ToolCard = memo(function ToolCard({
                     : mem && !item.isError
 						? <MemoryPanel text={renderedResult} />
                       : isTaskTool && !item.isError
-							? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
+							? <div className="break-words leading-relaxed chat-font"><RichMarkdown text={renderedResult} /></div>
                         : isWebSearch && !item.isError
                           ? <WebSearchOutput text={renderedResult} />
                         : isWebFetch && !item.isError
-                          ? <div className="break-words leading-relaxed chat-font"><Markdown text={renderedResult} /></div>
+                          ? <div className="break-words leading-relaxed chat-font"><RichMarkdown text={renderedResult} /></div>
                         : isReviewComments && !item.isError
                           ? <ReviewCommentsPanel text={renderedResult} />
                         : isReviewCommentWrite && !item.isError
@@ -4282,7 +4282,7 @@ const PlanCard = memo(function PlanCard({ item }: { item: ToolItem }) {
             <CodePanel code={rawJson} lang="json" />
           ) : (
             <div className="rounded-md border border-stone-200/70 dark:border-white/[0.06] bg-white/40 dark:bg-white/[0.02] px-3 py-1.5">
-              <Markdown text={parsed.plan} />
+              <RichMarkdown text={parsed.plan} />
             </div>
           )}
         </div>
@@ -4548,7 +4548,7 @@ function SubagentTimeline({
     if (it.kind === 'assistant')
       return (
         <div key={it.id} className="chat-leading-xs chat-font">
-          <Markdown text={it.text} />
+          <RichMarkdown text={it.text} />
         </div>
       )
     return null
@@ -4720,7 +4720,7 @@ function SubagentReport({ report }: { report: SubReport }) {
         <OutputPanel text={report.text} lang="" isError />
       ) : (
         <div className="chat-leading-xs chat-font">
-          <Markdown text={report.text} />
+          <RichMarkdown text={report.text} />
         </div>
       )}
     </div>
@@ -4794,7 +4794,7 @@ function FinishedReportCard({
             <OutputPanel text={report.text} lang="" isError />
           ) : (
             <div className="chat-leading-xs chat-font">
-              <Markdown text={report.text} />
+              <RichMarkdown text={report.text} />
             </div>
           )
         ) : (
@@ -4921,7 +4921,7 @@ const SubagentCard = memo(function SubagentCard({
                 Prompt
               </div>
               <div className="break-words chat-leading-xs chat-font">
-                <Markdown text={sub.prompt} />
+                <RichMarkdown text={sub.prompt} />
               </div>
             </div>
           )}
@@ -4994,7 +4994,7 @@ function SubagentChatView({
       {sub.prompt && (
         <div className="flex flex-col items-end gap-1">
           <div className={`${USER_BUBBLE_CLASS} leading-relaxed chat-font`}>
-            <Markdown text={sub.prompt} />
+            <RichMarkdown text={sub.prompt} />
           </div>
         </div>
       )}
@@ -5981,7 +5981,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
           newlines the browser adds for the bubble's block padding. */}
       <div className={`${auto ? AUTOMATED_BUBBLE_CLASS : USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
         {body && (
-          <Markdown
+          <RichMarkdown
             text={body}
             linkCtx={linkCtx}
             attachments={attachments}
@@ -6043,7 +6043,7 @@ const ContextNoteCard = memo(function ContextNoteCard({ text, outOfContext }: { 
       <div className="w-full max-w-[92%]">
         <Expandable open={open}>
           <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
-            <Markdown text={text} />
+            <RichMarkdown text={text} />
           </div>
         </Expandable>
       </div>
@@ -6072,7 +6072,7 @@ const SkillCard = memo(function SkillCard({ name, text }: { name: string; text: 
       <div className="w-full max-w-[92%]">
         <Expandable open={open}>
           <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
-            <Markdown text={text} />
+            <RichMarkdown text={text} />
           </div>
         </Expandable>
       </div>
@@ -6101,7 +6101,7 @@ const MetaCard = memo(function MetaCard({ text }: { text: string }) {
       <div className="w-full max-w-[92%]">
         <Expandable open={open}>
           <div className="mt-1.5 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-stone-200 dark:border-white/[0.08] bg-stone-50 dark:bg-white/[0.02] px-3 py-2 text-xs text-stone-600 dark:text-stone-300">
-            <Markdown text={text} />
+            <RichMarkdown text={text} />
           </div>
         </Expandable>
       </div>
@@ -7178,7 +7178,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     ...knownHeads.filter((id) => id !== agentId).map((id) => ({ kind: 'agent' as const, value: id })),
     ...Object.values(subagents).filter((sub) => !knownHeads.includes(sub.agentId)).map((sub) => ({ kind: 'agent' as const, value: sub.agentId })),
   ], [agentId, branchName, knownHeads, subagents])
-  // memo'd: <Markdown> is memo'd on its props, so a fresh object each render
+  // memo'd: <RichMarkdown> is memo'd on its props, so a fresh object each render
   // would re-parse every rendered message on every keystroke in the composer.
   // agentId lets a markdown image resolve against this head's files.
   const chatLinkCtx = useMemo(
@@ -9609,7 +9609,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       lastScrollRef.current = { top: applied, pinned: atBottom }
     }
 
-    // Markdown, code highlighting and images settle over the frames after the
+    // RichMarkdown, code highlighting and images settle over the frames after the
     // replay, each nudging the message down. Re-align while that happens, then
     // hand the pane back to the user.
     const ro = new ResizeObserver(() => alignToLastMessage())
@@ -10509,7 +10509,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const m = fence.exec(rest)
       if (!m) break
       const before = rest.slice(0, m.index)
-      if (before.trim()) parts.push(<Markdown key={key++} text={before} linkCtx={chatLinkCtx} />)
+      if (before.trim()) parts.push(<RichMarkdown key={key++} text={before} linkCtx={chatLinkCtx} />)
       const specs = parseQuestionBlock(m[1])
       if (specs) {
         parts.push(
@@ -10518,13 +10518,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>,
         )
       } else {
-        parts.push(<Markdown key={key++} text={m[0]} linkCtx={chatLinkCtx} />)
+        parts.push(<RichMarkdown key={key++} text={m[0]} linkCtx={chatLinkCtx} />)
       }
       rest = rest.slice(m.index + m[0].length)
     }
-    if (parts.length === 0) return <Markdown text={text} linkCtx={chatLinkCtx} />
+    if (parts.length === 0) return <RichMarkdown text={text} linkCtx={chatLinkCtx} />
     // eslint-disable-next-line no-useless-assignment -- final key++ is a dead store, but keep it consistent with the pushes above
-    if (rest.trim()) parts.push(<Markdown key={key++} text={rest} linkCtx={chatLinkCtx} />)
+    if (rest.trim()) parts.push(<RichMarkdown key={key++} text={rest} linkCtx={chatLinkCtx} />)
     return parts
   }
 
@@ -11077,7 +11077,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               so it sits ABOVE any queued (held-for-later) messages (item 33).
               The "working" indicator below already signals the turn is live, so
               no blinking caret or per-word opacity animation is applied to
-              either: one makes reparsed Markdown visibly flicker as delimiters
+              either: one makes reparsed RichMarkdown visibly flicker as delimiters
               arrive and the syntax tree changes (item 56). */}
           {stream && stream.kind === 'thinking' && <ThinkingCard text={stream.text} streaming />}
           {/* Live "working" indicator (item 48): a playful verb + elapsed time,

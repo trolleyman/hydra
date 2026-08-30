@@ -3,7 +3,7 @@ import type { AgentConfig, McpServer, NetworkConfig, PolicyConfig, ProjectInfo, 
 import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, TriangleAlert, Lock } from 'lucide-react'
 import { InfoTooltip } from '../InfoTooltip'
 import { ShellEditor } from '../ShellEditor'
-import { Markdown } from '../../lib/MarkdownRenderer'
+import { RichMarkdown } from '../../lib/RichMarkdown'
 import { HighlightedTextarea } from '../HighlightedTextarea'
 import { HighlightedInput } from '../HighlightedInput'
 import { HostName } from '../HostName'
@@ -401,7 +401,7 @@ export function ConfigForm({
             <span className="italic">&lt;default pre-prompt&gt;</span>
             <InfoTooltip title="Default Pre-Prompt">
               <p className="mb-1.5">This built-in pre-prompt is always prepended before any configured pre-prompts:</p>
-              <Markdown text={defaultPrePrompt} className="text-3xs leading-relaxed text-gray-200 bg-gray-800 rounded p-1.5 max-h-48 overflow-y-auto" />
+              <RichMarkdown text={defaultPrePrompt} className="text-3xs leading-relaxed text-gray-200 bg-gray-800 rounded p-1.5 max-h-48 overflow-y-auto" />
               <p className="mt-1.5 text-gray-400 italic">{'<branch>'} and {'<base-branch>'} are substituted at spawn time.</p>
             </InfoTooltip>
           </div>
@@ -413,7 +413,7 @@ export function ConfigForm({
               {allAgentsPrePrompt ? (
                 <>
                   <p className="mb-1.5">The "All Agents" pre-prompt is prepended before this agent's pre-prompt:</p>
-                  <Markdown text={allAgentsPrePrompt} className="text-3xs leading-relaxed text-gray-200 bg-gray-800 rounded p-1.5 max-h-32 overflow-y-auto" />
+                  <RichMarkdown text={allAgentsPrePrompt} className="text-3xs leading-relaxed text-gray-200 bg-gray-800 rounded p-1.5 max-h-32 overflow-y-auto" />
                 </>
               ) : (
                 <p>No "All Agents" pre-prompt is configured. Set one in the <strong>All Agents</strong> tab to have it prepended here.</p>

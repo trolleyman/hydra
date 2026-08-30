@@ -1,7 +1,6 @@
 import { createContext, memo, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkBreaks from 'remark-breaks'
+import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
+import { toJsxRuntime, type Components } from 'hast-util-to-jsx-runtime'
 import { useNavigate } from '@tanstack/react-router'
 import { Bot, GitBranch, GitCommitHorizontal, ImageOff, Maximize2, VideoOff } from 'lucide-react'
 import { highlightCode } from './markdown'
@@ -20,58 +19,12 @@ import { ansiToHtml, ansiToText, hasAnsi } from './ansi'
 import { renderCommentMentions } from './mentionHighlight'
 import { getFileIcon } from './fileIcons'
 import type { Attachment } from './spawnDrafts'
+import { parseRichMarkdownTree } from './richMarkdownParser'
 
-interface MarkdownAstNode {
-  type: string
-  value?: string
-  url?: string
-  children?: MarkdownAstNode[]
-}
-
-function unescapeHydraValue(value: string): string {
-  return value.replaceAll(/\\([\\\]])/g, '$1')
-}
-
-// Turn Hydra's stable Markdown boundaries into semantic links in the Markdown
-// AST. Text inside code nodes is never visited, so a sample reference or
-// attachment filename in a code block remains literal.
-function remarkHydraNodes(attachmentNames: Map<string, number>) {
-  return () => (tree: MarkdownAstNode) => {
-    const visit = (node: MarkdownAstNode) => {
-      if (!node.children || node.type === 'link' || node.type === 'image') return
-      const next: MarkdownAstNode[] = []
-      for (const child of node.children) {
-        if (child.type !== 'text' || !child.value) {
-          visit(child)
-          next.push(child)
-          continue
-        }
-        const token = /@(file|branch|commit|agent)\[((?:\\.|[^\\\]\n])+)\]|\[([^\]\n]+)\]/g
-        let offset = 0
-        for (const match of child.value.matchAll(token)) {
-          if (match.index! > offset) next.push({ type: 'text', value: child.value.slice(offset, match.index) })
-          if (match[1]) {
-            const value = unescapeHydraValue(match[2])
-            next.push({ type: 'link', url: `hydra-reference:${match[1]}:${encodeURIComponent(value)}`, children: [{ type: 'text', value }] })
-          } else {
-            const index = attachmentNames.get(match[3])
-            if (index == null) next.push({ type: 'text', value: match[0] })
-            else next.push({ type: 'link', url: `hydra-attachment:${index}`, children: [{ type: 'text', value: match[3] }] })
-          }
-          offset = match.index! + match[0].length
-        }
-        if (offset === 0) next.push(child)
-        else if (offset < child.value.length) next.push({ type: 'text', value: child.value.slice(offset) })
-      }
-      node.children = next
-    }
-    visit(tree)
-  }
-}
-
-// Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
-// rendered-markdown surface (chat messages, the AgentView prompt, README file
-// previews, config pre-prompt previews) gets the same feature set: GFM tables,
+// Shared read-only Markdown boundary. Markdown is the source of truth; parsing
+// produces a private syntax tree used only for this render. Chat messages, the
+// AgentView prompt, README file previews and config pre-prompt previews get the
+// same feature set: GFM tables,
 // task lists, strikethrough, autolinks, plus fenced code highlighted through our
 // existing highlight.js (highlightCode) rather than a second highlighter.
 //
@@ -577,7 +530,7 @@ const STYLES: Record<Variant, Style> = {
 //
 // Being a child of <pre> is the only thing that separates the two: markdown
 // gives a fenced (or indented) block and an inline span the same <code>
-// element, and react-markdown dropped the `inline` prop it used to pass in v9.
+// element, and the Markdown AST does not carry an inline prop into JSX.
 // Guessing from the content instead - "no language and no newline means
 // inline", which this did - gets a one-line fence with no info string wrong,
 // and that is exactly how a command gets written:
@@ -645,10 +598,6 @@ function alignStyle(align?: string | null): React.CSSProperties | undefined {
 
 // 'chat' honours single newlines as <br> (remark-breaks); 'doc' reflows them
 // (standard CommonMark) - see the file header for why.
-type RemarkPlugins = React.ComponentProps<typeof ReactMarkdown>['remarkPlugins']
-const BREAK_PLUGINS: RemarkPlugins = [remarkGfm, remarkBreaks]
-const REFLOW_PLUGINS: RemarkPlugins = [remarkGfm]
-
 // buildComponents maps markdown elements to the variant's styled React nodes.
 function mentionChildren(children: ReactNode, enabled: boolean): ReactNode {
   if (!enabled) return children
@@ -687,6 +636,18 @@ function buildComponents(
     em: ({ children }) => <em className="italic">{prose(children)}</em>,
     del: ({ children }) => <del className="line-through opacity-80">{prose(children)}</del>,
     a: ({ href, children }) => {
+      if (href?.startsWith('hydra://')) {
+        try {
+          const target = new URL(href)
+          if (['file', 'commit', 'branch', 'agent'].includes(target.hostname)) {
+            const value = target.pathname.slice(1).split('/').map(decodeURIComponent).join('/')
+            return <StructuredReference kind={target.hostname} value={value} />
+          }
+        } catch {
+          // Handled below as inert text.
+        }
+        return <span>{children}</span>
+      }
       if (href?.startsWith('hydra-reference:')) {
         const [, kind, encoded = ''] = href.split(':')
         return <StructuredReference kind={kind} value={decodeURIComponent(encoded)} />
@@ -710,7 +671,7 @@ function buildComponents(
     tbody: ({ children }) => <tbody className={s.tbody}>{children}</tbody>,
     th: ({ children, style }) => <th className={s.th} style={alignStyle(style?.textAlign)}>{children}</th>,
     td: ({ children, style }) => <td className={s.td} style={alignStyle(style?.textAlign)}>{children}</td>,
-    // react-markdown wraps code blocks in <pre>; we style the inner <code> as a
+    // remark-rehype wraps code blocks in <pre>; we style the inner <code> as a
     // display:block element instead, so strip <pre>'s own box - but not before
     // it has marked what it holds as a block (see InCodeBlock).
     pre: ({ children }) => <InCodeBlock.Provider value={true}>{children}</InCodeBlock.Provider>,
@@ -718,7 +679,7 @@ function buildComponents(
   }
 }
 
-export interface MarkdownProps {
+export interface RichMarkdownProps {
   // The markdown source to render.
   text: string
   // Styling density. 'chat' (default) is compact; 'doc' is document-like (README).
@@ -732,46 +693,42 @@ export interface MarkdownProps {
   // reflow paragraphs the way CommonMark (and GitHub) do.
   hardBreaks?: boolean
   // Paint routing mentions in review comments. Mentions have no meaning on
-  // ordinary Markdown surfaces, so callers opt in explicitly.
+  // ordinary RichMarkdown surfaces, so callers opt in explicitly.
   highlightMentions?: boolean
   attachments?: Attachment[]
   onOpenAttachment?: (attachment: Attachment, origin: Element) => void
 }
 
-// Markdown renders read-only markdown for a given surface. Do NOT wrap it in a
-// whitespace-pre-wrap container - block elements manage their own spacing and
-// remark-breaks already preserves single newlines as <br>.
-//
-// memo'd: parsing markdown is not cheap, and a chat transcript can hold hundreds
-// of these. Without memo, typing in the chat composer (a sibling state change)
-// re-parses every rendered message on each keystroke, which is visibly laggy.
-export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className, hardBreaks, highlightMentions = false, attachments = [], onOpenAttachment }: MarkdownProps): ReactNode {
-  const attachmentNames = useMemo(() => new Map(attachments.map((attachment, index) => [attachment.filename, index])), [attachments])
-  const hydraPlugin = useMemo(() => remarkHydraNodes(attachmentNames), [attachmentNames])
+// RichMarkdown parses external/persisted Markdown into a private tree and then
+// renders that tree. The parsed representation never leaves this boundary or
+// becomes persisted application state.
+export const RichMarkdown = memo(function RichMarkdown({ text, variant = 'chat', linkCtx, className, hardBreaks, highlightMentions = false, attachments = [], onOpenAttachment }: RichMarkdownProps): ReactNode {
+  const document = useMemo(
+    () => parseRichMarkdownTree(text, { hardBreaks: hardBreaks ?? variant === 'chat', attachments }),
+    [attachments, hardBreaks, text, variant],
+  )
   const components = useMemo(
     () => buildComponents(STYLES[variant], variant, linkCtx, highlightMentions, attachments, onOpenAttachment),
     [variant, linkCtx, highlightMentions, attachments, onOpenAttachment],
   )
-  // data-md-root marks the subtree as rendered markdown: copying a selection
-  // that touches it re-serializes it back to markdown source (lib/copyMarkdown).
-  // The source itself is registered against the root so a selection covering the
-  // whole thing can be copied verbatim instead of re-serialized.
+  const rendered = useMemo(
+    () => toJsxRuntime(document.root, {
+      Fragment,
+      jsx,
+      jsxs,
+      components,
+      elementAttributeNameCase: 'react',
+      stylePropertyNameCase: 'dom',
+      passKeys: true,
+    }),
+    [components, document.root],
+  )
   const rootRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const el = rootRef.current
     if (!el) return
-    setMarkdownSource(el, text)
+    setMarkdownSource(el, document.source)
     return () => setMarkdownSource(el, null)
-  }, [text])
-  return (
-    <div ref={rootRef} className={className ?? ''} data-md-root="">
-      <ReactMarkdown
-        remarkPlugins={[...((hardBreaks ?? variant === 'chat') ? BREAK_PLUGINS : REFLOW_PLUGINS), hydraPlugin]}
-        urlTransform={(url) => url.startsWith('hydra-reference:') || url.startsWith('hydra-attachment:') ? url : defaultUrlTransform(url)}
-        components={components}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  )
+  }, [document.source])
+  return <div ref={rootRef} className={className ?? ''} data-md-root="">{rendered}</div>
 })
