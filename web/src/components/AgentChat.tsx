@@ -80,7 +80,7 @@ import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
-import { CommitCard, COMMIT_CARD_WIDTH } from './CommitCard'
+import { CommitCard } from './CommitCard'
 import { ChangeStats } from './ChangeStats'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
@@ -5941,8 +5941,6 @@ const ChatUserMessage = memo(function ChatUserMessage({
         <Tooltip
           title={auto.label}
           side="top"
-          delay={0}
-          pin
           content={
             <div className="select-text">
               <p>{auto.why}</p>
@@ -7055,6 +7053,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // rAF handle + last frame time for the smooth bottom-follow (see followBottom).
   const followRafRef = useRef<number | null>(null)
   const followPrevTimeRef = useRef(0)
+  // Coarse mouse-wheel notches arrive as large isolated deltas on Linux and
+  // make a long transcript hop a few lines at a time. Track a separate glide
+  // target for those; precision touchpads retain their native pixel scrolling.
+  const wheelRafRef = useRef<number | null>(null)
+  const wheelTargetRef = useRef(0)
+  const wheelPrevTimeRef = useRef(0)
   // The previous scroll event's offset, for telling an UPWARD user scroll apart
   // from our own (possibly lagging) pin-to-bottom writes - see onScroll.
   const prevScrollTopRef = useRef(0)
@@ -9231,6 +9235,88 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
   }
 
+  // Smooth discrete wheel notches without taking over precision touchpads or
+  // nested scroll regions (code blocks, tool output, tooltip bodies). CSS
+  // scroll-behavior only affects programmatic scrolling, not wheel input, so
+  // this small rAF glide is needed for the Linux mouse-wheel case.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const nestedCanScroll = (target: EventTarget | null, delta: number) => {
+      let node = target instanceof Element ? target : null
+      while (node && node !== el) {
+        const style = getComputedStyle(node)
+        if (
+          (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+          node.scrollHeight > node.clientHeight + 1 &&
+          (delta < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight - 1)
+        ) return true
+        node = node.parentElement
+      }
+      return false
+    }
+
+    const stopWheel = () => {
+      if (wheelRafRef.current != null) cancelAnimationFrame(wheelRafRef.current)
+      wheelRafRef.current = null
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      if (
+        event.ctrlKey ||
+        event.metaKey ||
+        Math.abs(event.deltaY) <= Math.abs(event.deltaX) ||
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ) return
+
+      // DOM_DELTA_LINE/PAGE is always a discrete wheel. Chromium on Linux
+      // commonly reports a mouse notch as a large integral pixel delta instead.
+      const coarse = event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL ||
+        (Number.isInteger(event.deltaY) && Math.abs(event.deltaY) >= 40)
+      if (!coarse || nestedCanScroll(event.target, event.deltaY)) return
+
+      event.preventDefault()
+      stopFollow()
+      pinnedRef.current = false
+      setPinned(false)
+
+      const amount = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? event.deltaY * 32
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? event.deltaY * el.clientHeight * 0.9
+          : event.deltaY
+      const max = Math.max(0, el.scrollHeight - el.clientHeight)
+      if (wheelRafRef.current == null) wheelTargetRef.current = el.scrollTop
+      wheelTargetRef.current = Math.max(0, Math.min(max, wheelTargetRef.current + amount))
+
+      if (wheelRafRef.current != null) return
+      wheelPrevTimeRef.current = performance.now()
+      const step = (now: number) => {
+        wheelRafRef.current = null
+        const dt = Math.min(Math.max(now - wheelPrevTimeRef.current, 0), 50)
+        wheelPrevTimeRef.current = now
+        const distance = wheelTargetRef.current - el.scrollTop
+        if (Math.abs(distance) <= 0.5) {
+          el.scrollTop = wheelTargetRef.current
+          return
+        }
+        el.scrollTop += distance * (1 - Math.exp(-dt / 55))
+        wheelRafRef.current = requestAnimationFrame(step)
+      }
+      wheelRafRef.current = requestAnimationFrame(step)
+    }
+
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      stopWheel()
+    }
+    // The handler deliberately reads live refs; rebinding it on every chat
+    // render would interrupt a glide while streamed tokens arrive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // followBottom keeps a pinned view at the bottom as content arrives. This
   // used to be a bare `scrollTop = scrollHeight`, so every new message, thought
   // or tool card teleported the viewport and you lost your place in the text.
@@ -9304,6 +9390,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   useEffect(
     () => () => {
       if (followRafRef.current != null) cancelAnimationFrame(followRafRef.current)
+      if (wheelRafRef.current != null) cancelAnimationFrame(wheelRafRef.current)
     },
     [],
   )
@@ -10485,9 +10572,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return (
           <div className="flex justify-center">
             <Tooltip
-              pin={false}
-              delay={0}
-              width={COMMIT_CARD_WIDTH}
               content={
                 <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
               }
@@ -10625,8 +10709,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       case 'result':
         if (item.isError) {
           return (
-            <div className="rounded-lg border border-red-300/70 bg-red-50 dark:border-red-900/70 dark:bg-red-950/30 px-3 py-1.5 text-xs text-red-600 dark:text-red-300 whitespace-pre-wrap break-words">
-              {item.errorText || 'The turn ended with an error.'}
+            <div className="select-none rounded-lg border border-red-300/70 bg-red-50 px-3 py-1.5 text-xs text-red-600 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-300">
+              <span className="select-text whitespace-pre-wrap break-words">{item.errorText || 'The turn ended with an error.'}</span>
             </div>
           )
         }
