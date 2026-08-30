@@ -82,19 +82,17 @@ cache, so renaming one silently invalidates every cached verdict, and `errored`
 in particular cannot become `error` (it collides with Go's predeclared `error`
 and makes oapi-codegen prefix the whole enum - see the enum-collision note).
 
-### Tooltips: two variants, one engine
+### Tooltips: one selectable engine
 
-All tooltips go through `web/src/components/Tooltip.tsx`. There are exactly two
-variants, and the choice is about the *job*, not the look:
+All tooltips go through `web/src/components/Tooltip.tsx`. Short control labels
+use its compact, content-sized default with a 600ms delay. Longer explainers can
+provide a `title` and/or fixed `width`; `InfoTooltip` is the preset for the `i`
+trigger next to a section heading and opens immediately.
 
-- `variant="hint"` (default) - a short label for a control that has no visible
-  text. Compact, 600ms delay, non-interactive.
-- `variant="card"` - an explainer you are meant to read. Roomy, opens instantly,
-  you can put the pointer inside it, click pins it open. Reach for it via the
-  `InfoTooltip` preset (the `i` trigger next to a section heading).
-
-Both share one surface (light in light mode, dark in dark mode) so they read as
-one family.
+Every tooltip can be entered: the short grace period between leaving the trigger
+and entering the box keeps it open so text can be selected and links clicked.
+Set `pin` when clicking the trigger should latch an explainer open (notably for
+touch); ordinary action-button labels should not pin.
 
 Do **not** add a native `title=` to an interactive control (`<button>`, `<a>`,
 a control `<label>`, a clickable `<div>`/`<span>`) - use `<Tooltip>`. Native
@@ -124,8 +122,8 @@ the same OS tooltip. `@icons-pack/react-simple-icons` marks (`SiGithub`,
 a `<Tooltip>` double-tips - pass `title=""` to suppress it (see `ProviderIcon`).
 Grep for `title=` alone will miss these; check for brand-icon components too.
 
-Keep a card's body short enough to fit a phone screen. The card caps its height
-against the viewport and scrolls, but a card you have to scroll is a sign the
+Keep an explainer's body short enough to fit a phone screen. A roomy tooltip caps
+its height against the viewport and scrolls, but one you have to scroll is a sign the
 content belongs in `docs/` with a pointer from the tooltip.
 
 ### Labels beside icons: `.optical-center`

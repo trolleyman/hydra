@@ -80,7 +80,8 @@ import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
-import { CommitCard, CommitStats, COMMIT_CARD_WIDTH } from './CommitCard'
+import { CommitCard, COMMIT_CARD_WIDTH } from './CommitCard'
+import { ChangeStats } from './ChangeStats'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
 import { RelativeTime } from './LiveTime'
@@ -231,7 +232,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
         <GitMerge className="w-3 h-3 shrink-0" />
         <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
-        <CommitStats additions={item.additions} deletions={item.deletions} />
+        <ChangeStats additions={item.additions} deletions={item.deletions} />
       </button>
       <Expandable open={expanded && shown > 0} className="w-full">
         <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
@@ -249,7 +250,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
               <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
               <span className="min-w-0 flex-1 truncate optical-center">{m.subject}</span>
-              <CommitStats additions={m.additions} deletions={m.deletions} />
+              <ChangeStats additions={m.additions} deletions={m.deletions} />
             </div>
           ))}
           {shown < count && (
@@ -5938,9 +5939,10 @@ const ChatUserMessage = memo(function ChatUserMessage({
           line, which says who really sent it and why. */}
       {auto && (
         <Tooltip
-          variant="card"
           title={auto.label}
           side="top"
+          delay={0}
+          pin
           content={
             <div className="select-text">
               <p>{auto.why}</p>
@@ -10483,8 +10485,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return (
           <div className="flex justify-center">
             <Tooltip
-              variant="card"
               pin={false}
+              delay={0}
               width={COMMIT_CARD_WIDTH}
               content={
                 <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
@@ -10502,7 +10504,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
                 <span className="truncate optical-center">{item.subject}</span>
-                <CommitStats additions={item.additions} deletions={item.deletions} />
+                <ChangeStats additions={item.additions} deletions={item.deletions} />
               </div>
             </Tooltip>
           </div>

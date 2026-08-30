@@ -451,7 +451,7 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   // Icon-only: the shield color/glyph carries the signal at a glance; the label
   // and full explanation live in the tooltip (row real estate is precious).
   return (
-    <Tooltip variant="card" title={`Network access - ${c.label}`} content={c.tip} className="shrink-0">
+    <Tooltip title={`Network access - ${c.label}`} content={c.tip} delay={0} pin className="shrink-0">
       {/* min-h-5 matches the text chips' height (text-xs line + py-0.5) - an
           icon-only chip would otherwise sit a few px shorter than its
           neighbours. */}
@@ -467,8 +467,9 @@ function GitIsolationBadge({ mode, projectCheckout = false }: { mode?: string; p
   if (mode !== 'readonly') return null
   return (
     <Tooltip
-      variant="card"
       title="Git access - .git read-only"
+      delay={0}
+      pin
       content={projectCheckout
         ? "The project checkout's .git stays read-only. Allow commits grants Hydra's commit tool for deliberate commits without giving the agent unrestricted .git writes."
         : "This head's .git is bound read-only in the sandbox, so the agent cannot write it - no in-sandbox commit, add, stash, or object destruction, and it cannot damage the main repo or a sibling head. Commits are staged and made host-side (the git_commit tool) onto the head's own branch."}
@@ -496,8 +497,9 @@ function WorkspaceBadge({
     if (!agent.branch_name) return null
     return (
       <Tooltip
-        variant="card"
         width={320}
+        delay={0}
+        pin
         title="Workspace - isolated worktree"
         content={<><span className="block">Changes are isolated on this head's own branch and worktree.</span><span className="mt-2 block break-all font-mono">{agent.branch_name}</span></>}
         className="shrink-0"
@@ -511,18 +513,19 @@ function WorkspaceBadge({
 
   return (
     <Tooltip
-      variant="card"
       width={340}
-      title="Workspace - project checkout"
+      delay={0}
+      pin
+      title="Workspace - project directory"
       content={(
         <div className="space-y-3">
-          <p>This chat works directly in the shared project checkout. Changes are project changes, not an isolated agent branch.</p>
+          <p>This chat works directly in the shared project directory. Changes are project changes, not an isolated agent worktree.</p>
           {agent.project_path && <p className="break-all font-mono text-xs text-gray-500 dark:text-gray-400">{agent.project_path}</p>}
         </div>
       )}
       className="shrink-0"
     >
-      <button type="button" aria-label="Project checkout workspace" className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/50">
+      <button type="button" aria-label="Project directory workspace" className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/50">
         <Badge className="bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300" containerClassName="min-h-5" icon={<FolderGit2 className="w-3 h-3 shrink-0" />}>{null}</Badge>
       </button>
     </Tooltip>
@@ -561,21 +564,20 @@ function ProjectCheckoutPermissions({
 
 // AgentStatusChip is the head's live status badge with an explainer behind it:
 // the labels are short and internal ("needs_input", "waiting", "errored"), so the
-// chip says WHICH state and the card says what that state means and what it wants
-// from you. A card (not a hint): it's a sentence you're meant to read, it opens
-// instantly, and it can be pinned open by clicking - the only way to read it on a
-// touch device. An unmapped status has no prose, so it stays a bare chip rather
-// than opening an empty box. No card heading: it would be the status word, which
-// the chip an inch above the card already says.
+// chip says WHICH state and the tooltip says what that state means and what it
+// wants from you. It opens instantly and can be pinned by clicking - the only
+// way to read it on a touch device. An unmapped status has no prose, so it stays
+// a bare chip rather than opening an empty box. No heading: it would be the
+// status word, which the chip an inch above the tooltip already says.
 function AgentStatusChip({ status }: { status: string }) {
   const badge = agentStatusBadge(status)
   const help = agentStatusHelp(status)
   const chip = <Badge className={badge.className} containerClassName="shrink-0">{badge.label}</Badge>
   if (!help) return chip
   return (
-    <Tooltip variant="card" width={300} content={help} className="shrink-0">
-      {/* The chip is a plain span, so the card needs a focusable trigger of its
-          own for keyboard parity (Tooltip only opens a card on focus-visible). */}
+    <Tooltip width={300} content={help} delay={0} pin className="shrink-0">
+      {/* The chip is a plain span, so the tooltip needs a focusable trigger of
+          its own for keyboard parity. */}
       <button type="button" aria-label={`What "${badge.label}" means`} className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
         {chip}
       </button>
@@ -948,13 +950,14 @@ export function AgentDetail({
   const toggleWorking = usePaneCollapseStore((s) => s.toggleWorking)
   // Is the diff currently on screen? Wide: the inspector pane isn't collapsed.
   // Narrow: the single pane is showing the full-screen diff (working collapsed).
-  const diffShown = isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working'
+  const diffShown = !agent.focused && (isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working')
   // The diff-sidebar toggle (top bar + Ctrl+,): wide hides/shows the inspector
   // pane; narrow flips the single pane between working and full-screen diff.
   const toggleDiffSidebar = useCallback(() => {
+    if (agent.focused) return
     if (isWide) toggleInspector()
     else toggleWorking()
-  }, [isWide, toggleInspector, toggleWorking])
+  }, [agent.focused, isWide, toggleInspector, toggleWorking])
   // A commit chip clicked in the chat transcript: point the diff viewer at just
   // that commit (nonce makes re-clicking the same chip re-apply) and make sure
   // the diff is on screen - wide: un-collapse the inspector pane; narrow: slide
@@ -1714,7 +1717,7 @@ export function AgentDetail({
     const res = await runWithToast(
       () => api.default.updateAgent(projectId ?? '', agent.id, { checkout_branch: next }),
       {
-        success: `Project checkout switched to ${next}`,
+        success: `Project directory switched to ${next}`,
         errorPrefix: 'Failed to switch project branch',
       },
     )
@@ -2061,7 +2064,7 @@ export function AgentDetail({
     try {
       const res = await runWithToast(
         () => api.default.updateAgent(projectId, agent.id, patch),
-        { errorPrefix: 'Failed to update project checkout permissions' },
+        { errorPrefix: 'Failed to update project directory permissions' },
       )
       if (res.ok) {
         updateAgentInStore(res.value)
@@ -2135,44 +2138,7 @@ export function AgentDetail({
       )}
       {/* Portals into the global top bar - renders nothing in place. */}
       {agentTopBar}
-      {agent.focused ? (
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-          <div className="shrink-0 min-h-12 px-3 sm:px-4 py-2.5 border-b border-gray-200 dark:border-gray-700">
-            <AgentMetaRow
-              agent={agent}
-              projectId={projectId}
-              agentTypeClass={agentTypeClass}
-              branches={branches}
-              savingBase={savingBase}
-              savingCheckoutBranch={savingCheckoutBranch}
-              savingChatMode={savingChatMode}
-              savingDownstream={savingDownstream}
-              savingFocusedPermissions={savingFocusedPermissions}
-              publishing={publishing}
-              onSaveBase={onSaveBase}
-              onCheckoutBranch={onCheckoutBranch}
-              onRefreshBranches={refreshBranches}
-              onSaveChatMode={onSaveChatMode}
-              onSaveDownstream={onSaveDownstream}
-              onPushToMR={onPushToMR}
-              onPullFromMR={onPullFromMR}
-              onUpdateFocusedPermissions={updateFocusedPermissions}
-            />
-          </div>
-          <div className="flex-1 min-h-0 overflow-hidden px-3 sm:px-4 py-4">
-            <AgentTerminal
-              agentId={agent.id}
-              agentType={agent.agent_type}
-              projectId={projectId}
-              isEphemeral={agent.ephemeral}
-              chatMode={agent.chat_mode === true}
-              fill
-              reconnectSignal={restartSignal}
-              onRefresh={onRefresh}
-            />
-          </div>
-        </div>
-      ) : isWide ? (
+      {isWide ? (
         // ── Two-pane split ──────────────────────────────────────────────────
         // Left: a pane toolbar (metadata + hide-chat toggle) then collapsible
         // prompt + terminal/chat filling the height. Right: the inspector pane
@@ -2189,7 +2155,9 @@ export function AgentDetail({
             className="flex min-h-0 overflow-hidden shrink-0"
             style={{
               width:
-                paneCollapse === 'working'
+                agent.focused
+                  ? '100%'
+                  : paneCollapse === 'working'
                   ? 0
                   : paneCollapse === 'inspector'
                     ? '100%'
@@ -2204,7 +2172,9 @@ export function AgentDetail({
               className="flex flex-col min-h-0 h-full shrink-0"
               style={{
                 width:
-                  paneCollapse === 'working' || workingRevealing
+                  agent.focused
+                    ? '100%'
+                    : paneCollapse === 'working' || workingRevealing
                     ? Math.max(0, panesW * splitRatio - 6)
                     : '100%',
               }}
@@ -2237,7 +2207,7 @@ export function AgentDetail({
                 {/* self-start pins the toggle to the toolbar's first line even
                     when the chips wrap, so it stays level with the inspector
                     bar's toggle across the divider. */}
-                <div className="shrink-0 self-start">{workingTopButton}</div>
+                {!agent.focused && <div className="shrink-0 self-start">{workingTopButton}</div>}
               </div>
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-3 pb-4 gap-3">
                 {/* Prompt collapsed by default (terminal mode only) - chat heads
@@ -2264,17 +2234,17 @@ export function AgentDetail({
           {/* Draggable divider - kept mounted but width-collapsed off the full
               split so the pane widths add up cleanly and animate. */}
           <div
-            onPointerDown={paneCollapse === 'none' ? handleSplitResizeStart : undefined}
-            className={`group/resize shrink-0 flex items-center justify-center overflow-hidden ${paneCollapse === 'none' ? 'cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800' : ''}`}
-            style={{ width: paneCollapse === 'none' ? 12 : 0, transition: paneTransition }}
-            title={paneCollapse === 'none' ? 'Drag to resize' : undefined}
+            onPointerDown={!agent.focused && paneCollapse === 'none' ? handleSplitResizeStart : undefined}
+            className={`group/resize shrink-0 flex items-center justify-center overflow-hidden ${!agent.focused && paneCollapse === 'none' ? 'cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800' : ''}`}
+            style={{ width: !agent.focused && paneCollapse === 'none' ? 12 : 0, transition: paneTransition }}
+            title={!agent.focused && paneCollapse === 'none' ? 'Drag to resize' : undefined}
           >
             <ResizeGrip orientation="vertical" />
           </div>
           <div
             className="flex flex-col min-w-0 min-h-0 overflow-hidden shrink-0"
             style={{
-              width: paneCollapse === 'inspector' ? '0px' : paneCollapse === 'working' ? '100%' : `calc(${((1 - splitRatio) * 100).toFixed(4)}% - 6px)`,
+              width: agent.focused ? '0px' : paneCollapse === 'inspector' ? '0px' : paneCollapse === 'working' ? '100%' : `calc(${((1 - splitRatio) * 100).toFixed(4)}% - 6px)`,
               transition: paneTransition,
             }}
           >
@@ -2339,11 +2309,11 @@ export function AgentDetail({
                     onUpdateFocusedPermissions={updateFocusedPermissions}
                   />
                 </div>
-                <Tooltip content={`Show diff (${SHORTCUT_DIFF_SIDEBAR})`}>
+                {!agent.focused && <Tooltip content={`Show diff (${SHORTCUT_DIFF_SIDEBAR})`}>
                   <button className={PANE_TOGGLE_CLS} aria-label="Show diff" onClick={toggleDiffSidebar}>
                     <FileDiff className="w-4 h-4" />
                   </button>
-                </Tooltip>
+                </Tooltip>}
               </div>
               {/* No padding around the chat/terminal on mobile - it fills the
                   screen edge-to-edge; only the prompt keeps a small inset. */}

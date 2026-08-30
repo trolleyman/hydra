@@ -14,8 +14,8 @@ function wrapper(container: HTMLElement) {
   return container.querySelector('span') as HTMLElement
 }
 
-describe('Tooltip - hint variant (default)', () => {
-  it('shows only after the hover delay and hides immediately on leave', () => {
+describe('Tooltip', () => {
+  it('shows only after the hover delay and hides after the pointer grace period', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
@@ -34,8 +34,10 @@ describe('Tooltip - hint variant (default)', () => {
       act(() => void vi.advanceTimersByTime(1))
       expect(screen.getByText('Refresh')).toBeInTheDocument()
 
-      // Non-interactive: leaving the trigger dismisses it with no grace period.
+      // Leaving gives the pointer time to enter the selectable tooltip.
       fireEvent.mouseLeave(span)
+      expect(screen.getByText('Refresh')).toBeInTheDocument()
+      act(() => void vi.advanceTimersByTime(100))
       expect(screen.queryByText('Refresh')).toBeNull()
     } finally {
       vi.useRealTimers()
@@ -79,20 +81,17 @@ describe('Tooltip - hint variant (default)', () => {
       vi.useRealTimers()
     }
   })
-})
-
-describe('Tooltip - card variant', () => {
   it('shows immediately with title + content and survives the pointer moving into it', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip variant="card" title="OS Sandbox" content={<p>sandbox details</p>}>
+        <Tooltip title="OS Sandbox" content={<p>sandbox details</p>} delay={0}>
           <span>icon</span>
         </Tooltip>,
       )
       const span = wrapper(container)
 
-      // No delay for the card variant.
+      // This explainer explicitly requests no delay.
       fireEvent.mouseEnter(span)
       act(() => void vi.advanceTimersByTime(0))
       expect(screen.getByText('OS Sandbox')).toBeInTheDocument()
@@ -121,7 +120,7 @@ describe('Tooltip - card variant', () => {
     }
   })
 
-  // Regression: the card's arrow used to overhang onto the trigger, so nudging
+  // Regression: the tooltip's arrow used to overhang onto the trigger, so nudging
   // the pointer within a 14px icon crossed card -> trigger. React's enter/leave
   // follow the REACT tree and the portal is a child of the wrapper, so that move
   // fires leave-on-card with NO enter-on-wrapper to answer it. Dismissing
@@ -131,7 +130,7 @@ describe('Tooltip - card variant', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip variant="card" content={<p>body</p>}>
+        <Tooltip content={<p>body</p>} delay={0}>
           <span>icon</span>
         </Tooltip>,
       )
@@ -158,7 +157,7 @@ describe('Tooltip - card variant', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip variant="card" content={<p>body</p>}>
+        <Tooltip content={<p>body</p>} delay={0} pin>
           <button>icon</button>
         </Tooltip>,
       )
@@ -183,7 +182,7 @@ describe('Tooltip - card variant', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip variant="card" content={<p>body</p>}>
+        <Tooltip content={<p>body</p>} delay={0}>
           <span>icon</span>
         </Tooltip>,
       )

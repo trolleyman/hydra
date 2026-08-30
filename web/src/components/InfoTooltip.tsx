@@ -12,17 +12,16 @@ interface InfoTooltipProps {
   label?: string
 }
 
-// Thin preset over <Tooltip variant="card">: an Info icon trigger whose hover
-// card holds the passed-in body. All the portal/placement/show-hide logic lives
-// in Tooltip.tsx - this just wires up the trigger and the card defaults.
+// Thin preset over <Tooltip>: an Info icon trigger whose hover box holds the
+// passed-in body. This preset opens immediately and pins on click/tap.
 //
 // The trigger is a real <button>, not a bare <svg>: it gives the 14px icon a
 // 20px hit target (the icon alone was genuinely hard to land on), makes the help
 // reachable by keyboard, and gives Tooltip's click-to-pin something to fire on
-// so a long card can be read on a touch device.
+// so a long explainer can be read on a touch device.
 export function InfoTooltip({ title, children, width = 384, label }: InfoTooltipProps) {
   return (
-    <Tooltip variant="card" title={title} width={width} content={children} className="ml-1 align-middle">
+    <Tooltip title={title} width={width} content={children} delay={0} pin className="ml-1 align-middle">
       <button
         type="button"
         aria-label={label ?? (title ? `${title} help` : 'Help')}

@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Clock, FolderGit2, GitBranch, GitPullRequest, MessageSquare } from 'lucide-react'
+import { Clock, FolderGit2, GitPullRequest, MessageSquare } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
@@ -14,6 +14,7 @@ import {
 } from '../lib/agentDisplay'
 import type { AgentCommand } from '../lib/agentCommands'
 import { agentPrimaryActionAppearances } from './agentPrimaryActions'
+import { Tooltip } from './Tooltip'
 
 const CONTEXT_MENU_WIDTH = 208
 const CONTEXT_MENU_HEIGHT = 250
@@ -254,23 +255,6 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
           {agent.agent_type || 'unknown'}
         </span>
-        {agent.focused ? (
-          <span
-            title="Project checkout workspace"
-            aria-label="Project checkout workspace"
-            className="inline-flex h-[18px] shrink-0 items-center rounded bg-violet-100 px-1 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
-          >
-            <FolderGit2 className="h-3 w-3" />
-          </span>
-        ) : agent.branch_name ? (
-          <span
-            title={`Isolated worktree: ${agent.branch_name}`}
-            aria-label={`Isolated worktree: ${agent.branch_name}`}
-            className="inline-flex h-[18px] shrink-0 items-center rounded bg-blue-100 px-1 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
-          >
-            <GitBranch className="h-3 w-3" />
-          </span>
-        ) : null}
         {archived ? (
           <Badge variant="xs" className={archivedEndStateBadge(agent.end_state).className}>
             {archivedEndStateBadge(agent.end_state).label}
@@ -279,6 +263,21 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           <Badge variant="xs" className={agentStatusBadge(agent.agent_status.status).className}>
             {agentStatusBadge(agent.agent_status.status).label}
           </Badge>
+        )}
+        {agent.focused && (
+          <Tooltip
+            content={agent.project_path
+              ? <>Project directory: <span className="font-mono">{agent.project_path}</span></>
+              : 'Project directory workspace (not an isolated worktree)'}
+            centeredText={false}
+          >
+            <span
+              aria-label="Project directory workspace"
+              className="inline-flex h-[18px] shrink-0 items-center rounded bg-violet-100 px-1 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
+            >
+              <FolderGit2 className="h-3 w-3" />
+            </span>
+          </Tooltip>
         )}
         {/* Test verdict chip (PLAN #68): passing/failing/running/errored.
             Hidden while the head's tip is still the base commit (at_base): that

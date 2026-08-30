@@ -8,7 +8,7 @@ export interface SegmentedControlOption<T extends string> {
 }
 
 // A compact one-of-many selector for application controls such as Terminal / Chat,
-// Worktree / Project checkout, and Edit / Read-only. These choices all have the
+// Worktree / Project directory, and Edit / Read-only. These choices all have the
 // same semantics, so their keyboard/accessibility and visual treatment belong in
 // one component rather than in hand-built pairs of buttons.
 export function SegmentedControl<T extends string>({

@@ -979,7 +979,7 @@ export const SpawnForm = memo(function SpawnForm({
     // the one remembered pick with no representation outside this panel (the
     // agent and model both show on the picker trigger beside it).
     const nonDefaults: string[] = []
-    if (focused && !focusedDefault) nonDefaults.push(`Workspace: project checkout (${focusedFilesystemMode})`)
+    if (focused && !focusedDefault) nonDefaults.push(`Workspace: project directory (${focusedFilesystemMode})`)
     if (focused && focusedAllowCommits) nonDefaults.push('Commits: allowed')
     if (adopt) nonDefaults.push(`Pull request: #${adopt.id}`)
     if (showBranch && baseBranch && defaultBranch && baseBranch !== defaultBranch) {
@@ -1075,7 +1075,7 @@ export const SpawnForm = memo(function SpawnForm({
                 }}
                 options={[
                   { value: 'worktree', label: 'Worktree', icon: <GitBranch className="h-3.5 w-3.5" /> },
-                  { value: 'project', label: 'Project checkout', icon: <FolderGit2 className="h-3.5 w-3.5" /> },
+                  { value: 'project', label: 'Project directory', icon: <FolderGit2 className="h-3.5 w-3.5" /> },
                 ]}
               />
             )}
