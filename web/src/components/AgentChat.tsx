@@ -1973,12 +1973,12 @@ const CLAUDE_MODELS = [
   { id: 'haiku', label: 'Haiku' },
 ]
 const CODEX_MODELS = [
-  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
-  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
-  { id: 'gpt-5.5', label: 'GPT-5.5' },
-  { id: 'gpt-5.4', label: 'GPT-5.4' },
-  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+  { id: 'gpt-5.6-sol', label: '5.6 Sol' },
+  { id: 'gpt-5.6-terra', label: '5.6 Terra' },
+  { id: 'gpt-5.6-luna', label: '5.6 Luna' },
+  { id: 'gpt-5.5', label: '5.5' },
+  { id: 'gpt-5.4', label: '5.4' },
+  { id: 'gpt-5.4-mini', label: '5.4 Mini' },
 ]
 
 // Effective context window (tokens) for a model, used to turn a turn's prompt
