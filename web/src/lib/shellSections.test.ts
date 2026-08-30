@@ -798,6 +798,56 @@ describe('splitScriptOutput', () => {
     expect(exact?.map((s) => s.kind === 'view' && s.view.start)).toEqual([1, 1])
   })
 
+  it('trusts exact adjacent sed ranges with their requested line numbers', () => {
+    const script = [
+      "cd '~/code/hydra'",
+      '# Inspect the exact documentation paragraphs to update minimally',
+      "sed -n '145,180p' docs/web-agent-page.md",
+      "sed -n '164,182p' docs/macos-desktop-chat.md",
+    ].join('\n')
+    const first = Array.from({ length: 36 }, (_, i) => `web line ${145 + i}`)
+    const second = Array.from({ length: 19 }, (_, i) => `desktop line ${164 + i}`)
+    const sections = splitScriptOutput(steps(script), [...first, ...second].join('\n'))
+
+    expect(sections?.map((section) => [section.kind, section.lines.length])).toEqual([
+      ['view', 36],
+      ['view', 19],
+    ])
+    expect(sections?.[0]).toMatchObject({ view: { path: 'docs/web-agent-page.md', start: 145, end: 180 } })
+    expect(sections?.[1]).toMatchObject({ view: { path: 'docs/macos-desktop-chat.md', start: 164, end: 182 } })
+  })
+
+  it('keeps a shortened sed gutter between numbered rg results', () => {
+    const script = [
+      'rg -n "focused-(edit|read|active)|Focused" internal/http/simulation.go | head -80',
+      "sed -n '1,220p' web/scripts/lib/screenshotReady.ts",
+      'rg -n "seedScreenshotTheme|settleScreenshot" web/scripts | head -40',
+    ].join('\n')
+    const source = [
+      "import type { BrowserContext, Page } from 'playwright'",
+      '',
+      "export type ScreenshotTheme = 'light' | 'dark'",
+      '',
+      'export async function seedScreenshotTheme() {}',
+      'export async function settleScreenshot() {}',
+    ]
+    const output = [
+      '483:// simFocusedAgents exercise focused sessions',
+      '499:\t\t\tId: "focused-edit"',
+      ...source,
+      'web/scripts/capture-theme-snippet.ts:5:import { settleScreenshot } from \'./lib/screenshotReady.ts\'',
+      'web/scripts/lib/screenshotReady.ts:8:export async function seedScreenshotTheme() {}',
+    ].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+
+    expect(sections?.map((section) => [section.kind, section.lines.length])).toEqual([
+      ['matches', 2],
+      ['view', source.length],
+      ['matches', 2],
+    ])
+    expect(sections?.[1]).toMatchObject({ view: { path: 'web/scripts/lib/screenshotReady.ts', start: 1 } })
+  })
+
   it('uses repeated search matches to pin a following sed read', () => {
     const file = 'web/src/components/AgentChat.test.tsx'
     const source = Array.from({ length: 190 }, (_, i) => `line ${i + 1}`)

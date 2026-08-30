@@ -148,7 +148,9 @@ and `web/src/DiffViewer.tsx`):
   desktop selection crosses grid rows or block boundaries.
 - Bash inspection output is sectioned by `web/src/lib/shellSections.ts`. Plain
   file reads such as `sed -n '40,80p'` render with syntax highlighting and the
-  file's real line numbers. In a script where a numbered search immediately
+  file's real line numbers. Adjacent bounded reads keep their requested starts
+  when their exact range lengths account for all returned lines. In a script
+  where a numbered search immediately
   precedes a read of the same file, repeated search rows can pin the read's start
   even when an open-ended command ran before both: the search text and number
   must agree with the corresponding line in the read before the gutter is shown.
