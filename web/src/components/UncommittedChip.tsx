@@ -5,6 +5,7 @@ import { HighlightedTextarea } from './HighlightedTextarea'
 import { ShortcutHint } from './Kbd'
 import type { RepositoryUncommittedChanges } from '../api'
 import { Tooltip } from './Tooltip'
+import { ChangeTypeIcon } from './ChangeTypeIcon'
 
 // ── Uncommitted-changes warning chip ───────────────────────────────────────────
 // Sits next to the sidebar's Repository button when the project root's working
@@ -146,8 +147,8 @@ export function UncommittedChip({
           </p>
           <ul className="max-h-48 overflow-y-auto space-y-0.5">
             {uncommitted.files.map((f) => (
-              <li key={f.path} className="flex items-baseline gap-1.5 text-xs">
-                <span className="shrink-0 w-14 text-gray-400 dark:text-gray-500">{f.status}</span>
+              <li key={f.path} className="flex items-center gap-1.5 text-xs">
+                <ChangeTypeIcon type={f.status} />
                 {/* Not mono. A path here is being read as a name - "which files
                     am I about to commit" - not as code to be compared column by
                     column with the line above it, which is what the diff and

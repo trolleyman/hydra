@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronLeft, ChevronRight, SquarePlus, SquareMinus, SquareDot, FileArchive, FileText, File as FileIcon, Film, MessageSquarePlus } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, FileArchive, FileText, File as FileIcon, Film, MessageSquarePlus } from 'lucide-react'
 import { ImagePins, type ImagePin, type PendingPin } from './ImagePins'
 import { HighlightedTextarea } from './HighlightedTextarea'
 import { renderCommentSource } from '../lib/mentionHighlight'
@@ -20,6 +20,7 @@ import { applyABShortcut } from '../lib/abShortcuts'
 import { ZoomPan } from './ZoomPan'
 import { Tooltip } from './Tooltip'
 import type { FileKind } from '../lib/fileKind'
+import { ChangeTypeIcon } from './ChangeTypeIcon'
 import {
   canFlip, findLightboxOrigin, mediaRectOf, playFlip, rectOf,
   whenMediaLaidOut, FLIP_NAV_MS, FLIP_OPEN_MS, LIGHTBOX_MEDIA_CLASS, type Rect,
@@ -81,15 +82,7 @@ export interface LightboxItem {
 // relative to its counterpart - mirrors the diff grid's ArtifactChangeIcon, but tuned
 // for the lightbox's always-dark backdrop (the brighter dark-theme colors).
 function ChangeTypeGlyph({ type }: { type: NonNullable<LightboxItem['changeType']> }) {
-  const cls = 'w-3.5 h-3.5 shrink-0'
-  switch (type) {
-    case 'added':
-      return <SquarePlus className={`${cls} text-green-400`} />
-    case 'removed':
-      return <SquareMinus className={`${cls} text-red-400`} />
-    case 'modified':
-      return <SquareDot className={`${cls} text-amber-400`} />
-  }
+  return <ChangeTypeIcon type={type} bright />
 }
 
 // Whether a key event landed in something being typed into, so the lightbox's

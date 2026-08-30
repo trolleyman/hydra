@@ -8,6 +8,7 @@ import { withBranchPills } from '../lib/branchPills'
 import { UrlText } from './HostName'
 import { Markdown } from '../lib/MarkdownRenderer'
 import type { DialogDetails } from '../stores/dialogStore'
+import { ChangeStats } from './ChangeStats'
 
 export const Dialog: React.FC = () => {
   const { isOpen, title, message, type, variant, confirmLabel, secondaryLabel, details, showCancel, hide, onConfirm, onSecondary, onCancel } =
@@ -496,10 +497,7 @@ function MergeDetails({ details }: { details?: DialogDetails }) {
           loading ? (
             <span className="text-gray-400 dark:text-gray-500">...</span>
           ) : (
-            <>
-              <span className="text-emerald-600 dark:text-emerald-400">+{details?.additions ?? 0}</span>
-              <span className="text-red-500 dark:text-red-400">−{details?.deletions ?? 0}</span>
-            </>
+            <ChangeStats additions={details?.additions} deletions={details?.deletions} />
           )
         }
       />

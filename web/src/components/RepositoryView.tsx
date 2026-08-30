@@ -25,6 +25,7 @@ import { BranchSelector } from './BranchSelector'
 import { RepositoryArtifactsView } from './RepositoryArtifactsView'
 import { CodePane } from './CodePane'
 import { Tooltip } from './Tooltip'
+import { ChangeStats } from './ChangeStats'
 import {
   FileDiff, FileRow, ChangeTypeIcon, TreeNodeView, type FileView,
 } from '../DiffViewer'
@@ -1507,12 +1508,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
                 )}
                 <ChangeTypeIcon type={selectedDiffFile.change_type} />
                 <div className="flex items-center gap-2 shrink-0 ml-auto">
-                  {!selectedDiffFile.binary && (selectedDiffFile.additions > 0 || selectedDiffFile.deletions > 0) && (
-                    <div className="flex items-center gap-1.5">
-                      {selectedDiffFile.additions > 0 && <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{selectedDiffFile.additions}</span>}
-                      {selectedDiffFile.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{selectedDiffFile.deletions}</span>}
-                    </div>
-                  )}
+                  {!selectedDiffFile.binary && <ChangeStats additions={selectedDiffFile.additions} deletions={selectedDiffFile.deletions} className="text-xs font-medium" />}
                   {/* Inline on desktop; folded into the hamburger on phones. */}
                   <div className="hidden md:flex items-center gap-2">
                     {diffFileMeta && <FileActions file={diffFileMeta} projectId={projectId} refStr={selectedDiffFileRef} />}

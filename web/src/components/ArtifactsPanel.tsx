@@ -5,7 +5,7 @@ import { apiErrorBody, formatError } from '../api/format_error'
 import { PanelError } from './PanelError'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine, ArtifactsFrame } from '../api'
 import { ArtifactFile as ArtifactFileNS, ArtifactSide } from '../api'
-import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot, Download, FileArchive, FileText } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, Download, FileArchive, FileText } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { Tooltip } from './Tooltip'
 import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
@@ -30,6 +30,7 @@ import { applyABShortcut } from '../lib/abShortcuts'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
 import { LiveLogProvider, useLiveLogStore } from './artifactLogStore'
 import { ElapsedTime } from './ElapsedTime'
+import { ChangeTypeIcon } from './ChangeTypeIcon'
 
 const CHANGE_LABEL: Record<string, string> = {
   added: 'added',
@@ -42,17 +43,7 @@ const CHANGE_LABEL: Record<string, string> = {
 // viewer's file-list icons: green [+] added, red [-] removed, amber [•] modified.
 // Unchanged files (revealed only via the changes filter) get no icon.
 function ArtifactChangeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
-  const cls = `${className} shrink-0`
-  switch (type) {
-    case 'added':
-      return <SquarePlus className={`${cls} text-green-600 dark:text-green-400`} />
-    case 'removed':
-      return <SquareMinus className={`${cls} text-red-600 dark:text-red-400`} />
-    case 'modified':
-      return <SquareDot className={`${cls} text-amber-600 dark:text-amber-400`} />
-    default:
-      return null
-  }
+  return <ChangeTypeIcon type={type} className={className} />
 }
 
 // partialFailedSide reports which single side of a set failed while the other

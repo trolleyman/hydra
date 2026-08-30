@@ -9,7 +9,9 @@ import { api } from './stores/apiClient'
 import { formatError, apiErrorBody } from './api/format_error'
 import { runWithToast } from './lib/apiAction'
 import type { AgentResponse, CommitInfo, DiffFile, DiffHunk, DiffLine, DiffResponse, ReviewImageAnchor, ReviewThread } from './api'
-import { CommitCard, CommitStats, COMMIT_CARD_WIDTH, COMMIT_SHA_CHIP, commitParts } from './components/CommitCard'
+import { CommitCard, COMMIT_CARD_WIDTH, COMMIT_SHA_CHIP, commitParts } from './components/CommitCard'
+import { ChangeStats } from './components/ChangeStats'
+import { ChangeTypeIcon as SharedChangeTypeIcon } from './components/ChangeTypeIcon'
 import { ReviewThreadCard, type ReviewThreadActions } from './components/ReviewThreadCard'
 import { ProviderIcon } from './components/ReviewControls'
 import { providerLabel } from './lib/forgeDisplay'
@@ -20,7 +22,7 @@ import {
   Folder, FolderOpen, X, GitMergeConflict, Bot, FileDiff as FileDiffIcon, Files as FilesIcon,
   ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   CircleCheck, ArrowUp, ArrowDown, MailOpen, Paperclip,
-  SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
+  SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react'
 import { DialogIconTile, DialogSectionLabel, DialogCancelButton, DialogConfirmButton } from './components/dialogPrimitives'
@@ -272,13 +274,12 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
   return (
-    <div id={`comment-${comment.number}`} data-comment-card={comment.number} className={`border-y px-4 py-2 transition-[background-color,border-color,box-shadow] duration-700 ease-out ${
-      current
-        ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]'
-        : sent
+    <div id={`comment-${comment.number}`} data-comment-card={comment.number} className={`border-y px-4 py-2 transition-[background-color,border-color,box-shadow] duration-700 ease-out ${current
+      ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]'
+      : sent
         ? 'border-stone-200 dark:border-white/10 bg-stone-50/60 dark:bg-white/[0.03]'
         : 'border-blue-200 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20'
-    }`}>
+      }`}>
       <div className="flex items-start gap-2">
         {/* The avatar owns the left column, draft or not: a draft is still YOURS,
             and a generic speech bubble in the same slot said less. For an agent it
@@ -299,87 +300,86 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
               h-5 fixes the row to the icon buttons' height so it does not jump
               when a chip appears. */}
           <div className="mb-0.5 flex h-5 items-center gap-1.5 text-2xs text-stone-400 dark:text-stone-500">
-              {/* "You" rather than your git name: the name is on the avatar's tip,
+            {/* "You" rather than your git name: the name is on the avatar's tip,
                   and in a list of comments what matters is which ones are yours. */}
-              <span className={mine ? 'text-stone-500 dark:text-stone-400' : ''}>{mine ? 'You' : comment.author}</span>
-              {!sent && (
-                // A draft is the one state worth a chip: it is the difference
-                // between something the agent has been told and something only you
-                // can see, and that is not obvious from the card alone.
-                <span className="rounded bg-blue-100 px-1 text-3xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                  draft
-                </span>
-              )}
-              {comment.resolved && <span className="text-emerald-600 dark:text-emerald-500">resolved</span>}
-              {/* The number sits on the RIGHT, where it reads as a reference rather
+            <span className={mine ? 'text-stone-500 dark:text-stone-400' : ''}>{mine ? 'You' : comment.author}</span>
+            {!sent && (
+              // A draft is the one state worth a chip: it is the difference
+              // between something the agent has been told and something only you
+              // can see, and that is not obvious from the card alone.
+              <span className="rounded bg-blue-100 px-1 text-3xs font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                draft
+              </span>
+            )}
+            {comment.resolved && <span className="text-emerald-600 dark:text-emerald-500">resolved</span>}
+            {/* The number sits on the RIGHT, where it reads as a reference rather
                   than as part of the sentence - the same place the forge threads
                   put theirs. The unread dot rides on it, so what is new and what to
                   call it are one glance. */}
-              {/* A draft shows no number. It HAS one - it was allocated when the
+            {/* A draft shows no number. It HAS one - it was allocated when the
                   comment was written, and publishing does not change it - but until
                   it is published nobody else can cite it, so putting a handle on it
                   would invite quoting something the agent cannot look up. */}
-              <span className="ml-auto flex items-center gap-1 shrink-0">
-                {sent && (
-                  <>
-                    {!comment.read && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
-                    {/* The handle IS the comment's permalink (a real href, plain
+            <span className="ml-auto flex items-center gap-1 shrink-0">
+              {sent && (
+                <>
+                  {!comment.read && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
+                  {/* The handle IS the comment's permalink (a real href, plain
                         click jumps in-place), so it is the link and there is no
                         separate link button - see components/CommentLink. */}
-                    <CommentLink number={comment.number} className="font-mono rounded hover:text-stone-600 hover:underline dark:hover:text-stone-300 transition-colors">
-                      #{comment.number}
-                    </CommentLink>
-                  </>
-                )}
-                {sent ? (
-                  <span className="ml-0.5 flex items-center gap-0.5">
-                    {reply?.start && (
-                      <Tooltip content="Reply" side="top">
-                        <button onClick={() => reply.start?.(comment.replyTo || comment.number)} aria-label="Reply" className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer">
-                          <MessageSquare className="w-3.5 h-3.5" />
-                        </button>
-                      </Tooltip>
-                    )}
-                    {onResolve && (
-                      <Tooltip content={comment.resolved ? 'Reopen thread' : 'Mark thread resolved'} side="top">
-                        <button
-                          onClick={() => onResolve(!comment.resolved)}
-                          aria-label={comment.resolved ? 'Reopen thread' : 'Resolve thread'}
-                          className={`p-1 rounded transition-colors cursor-pointer ${
-                            comment.resolved
-                              ? 'text-emerald-600 dark:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
-                              : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                  <CommentLink number={comment.number} className="font-mono rounded hover:text-stone-600 hover:underline dark:hover:text-stone-300 transition-colors">
+                    #{comment.number}
+                  </CommentLink>
+                </>
+              )}
+              {sent ? (
+                <span className="ml-0.5 flex items-center gap-0.5">
+                  {reply?.start && (
+                    <Tooltip content="Reply" side="top">
+                      <button onClick={() => reply.start?.(comment.replyTo || comment.number)} aria-label="Reply" className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer">
+                        <MessageSquare className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
+                  )}
+                  {onResolve && (
+                    <Tooltip content={comment.resolved ? 'Reopen thread' : 'Mark thread resolved'} side="top">
+                      <button
+                        onClick={() => onResolve(!comment.resolved)}
+                        aria-label={comment.resolved ? 'Reopen thread' : 'Resolve thread'}
+                        className={`p-1 rounded transition-colors cursor-pointer ${comment.resolved
+                          ? 'text-emerald-600 dark:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
+                          : 'text-gray-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20'
                           }`}
-                        >
-                          <CircleCheck className="w-3.5 h-3.5" />
-                        </button>
-                      </Tooltip>
-                    )}
-                  </span>
-                ) : (
-                  <span className="ml-0.5 flex items-center gap-0.5">
-                    <Tooltip content="Edit comment" side="top">
-                      <button
-                        onClick={onEdit}
-                        aria-label="Edit comment"
-                        className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
                       >
-                        <Pencil className="w-3.5 h-3.5" />
+                        <CircleCheck className="w-3.5 h-3.5" />
                       </button>
                     </Tooltip>
-                    <Tooltip content="Discard comment" side="top">
-                      <button
-                        onClick={onRemove}
-                        aria-label="Discard comment"
-                        className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </Tooltip>
-                  </span>
-                )}
-              </span>
-            </div>
+                  )}
+                </span>
+              ) : (
+                <span className="ml-0.5 flex items-center gap-0.5">
+                  <Tooltip content="Edit comment" side="top">
+                    <button
+                      onClick={onEdit}
+                      aria-label="Edit comment"
+                      className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>
+                  <Tooltip content="Discard comment" side="top">
+                    <button
+                      onClick={onRemove}
+                      aria-label="Discard comment"
+                      className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </Tooltip>
+                </span>
+              )}
+            </span>
+          </div>
           <Markdown text={comment.text} highlightMentions className="text-xs text-gray-700 dark:text-gray-200 break-words" />
           <AttachmentChips
             attachments={attachments}
@@ -527,11 +527,10 @@ function CommentRow({ initialText = '', initialAttachments, projectId, onSubmit,
     // are dragging a screenshot you are aiming at "the comment", and a box that
     // only accepts the file over its inner 80px reads as broken.
     <div
-      className={`border-y px-4 py-3 ${
-        dragOver
-          ? 'border-blue-400 bg-blue-100/60 dark:border-blue-600 dark:bg-blue-900/30'
-          : 'border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/10'
-      }`}
+      className={`border-y px-4 py-3 ${dragOver
+        ? 'border-blue-400 bg-blue-100/60 dark:border-blue-600 dark:bg-blue-900/30'
+        : 'border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/10'
+        }`}
       onDragOver={(e) => { if (isFileDrag(e.dataTransfer)) { e.preventDefault(); setDragOver(true) } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false) }}
       onDrop={(e) => {
@@ -617,7 +616,7 @@ function CommentRow({ initialText = '', initialAttachments, projectId, onSubmit,
           Cancel
         </button>
         {onSave ? (
-          <Tooltip content="Save the edit." shortcut={submitShortcut} side="top">
+          <Tooltip content="Save edit." shortcut={submitShortcut} side="top">
             <button
               disabled={blocked}
               onClick={handleSave}
@@ -1434,17 +1433,7 @@ function PathName({ path }: { path: string }) {
 // renamed. Modified files (the common case) get no badge. The change type is
 // conveyed by this coloured icon rather than by colouring the filename text.
 export function ChangeTypeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
-  const cls = `${className} shrink-0`
-  switch (type) {
-    case 'added':
-      return <SquarePlus className={`${cls} text-green-600 dark:text-green-400`} />
-    case 'deleted':
-      return <SquareMinus className={`${cls} text-red-600 dark:text-red-400`} />
-    case 'renamed':
-      return <SquareArrowRight className={`${cls} text-cyan-600 dark:text-cyan-400`} />
-    default:
-      return null
-  }
+  return <SharedChangeTypeIcon type={type} className={className} />
 }
 
 // How many extra lines each ⌄/⌃ expander reveals per click (the default context
@@ -2298,14 +2287,14 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   const renderLines = (lines: DiffLine[], key: string) => (
     <AnimatedContextRun key={key} lineCount={lines.length} growFrom={key.startsWith('cb') ? 'bottom' : 'top'}>
       {sideBySide
-      ? <SideBySideHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
-        lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
-      : <UnifiedHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
-        lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+        ? <SideBySideHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+          wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
+          onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
+          lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+        : <UnifiedHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+          wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
+          onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
+          lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
       }
     </AnimatedContextRun>
   )
@@ -2333,85 +2322,82 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
       className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}
     >
       {!headless && (
-      // Sticky header: pins flush below the Changes toolbar (FILE_STICKY_TOP, the
-      // same Y as the file-list sidebar) while the file's diff scrolls under it,
-      // releasing when the card ends. The root drops its overflow-hidden (which
-      // would trap this sticky header inside the card); the header carries its own
-      // overflow-hidden + rounded-t-lg instead, plus rounded-b-lg while collapsed.
-      <div
-        style={{ top: FILE_STICKY_TOP }}
-        className={`flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
-        onClick={toggleCollapse}
-      >
-        {/* No onClick of its own: the header div handles the toggle, and a
+        // Sticky header: pins flush below the Changes toolbar (FILE_STICKY_TOP, the
+        // same Y as the file-list sidebar) while the file's diff scrolls under it,
+        // releasing when the card ends. The root drops its overflow-hidden (which
+        // would trap this sticky header inside the card); the header carries its own
+        // overflow-hidden + rounded-t-lg instead, plus rounded-b-lg while collapsed.
+        <div
+          style={{ top: FILE_STICKY_TOP }}
+          className={`flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky z-20 overflow-hidden rounded-t-lg ${isCollapsed ? 'rounded-b-lg' : ''} cursor-pointer`}
+          onClick={toggleCollapse}
+        >
+          {/* No onClick of its own: the header div handles the toggle, and a
             second handler here would fire too (bubbling) and toggle right
             back - the chevron was a no-op because of exactly that. */}
-        <button
-          aria-label={isCollapsed ? 'Expand file' : 'Collapse file'}
-          className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
-        >
-          <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
-        </button>
-        {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          {/* The file-header path reads as sans (item 2); the diff body stays mono. */}
-          <span className="text-xs min-w-0 truncate cursor-pointer hover:underline">
-            {file.change_type === 'renamed' && file.old_path ? (
-              <>
-                <PathName path={file.old_path} />
-                <span className="text-gray-400 dark:text-gray-500"> → </span>
+          <button
+            aria-label={isCollapsed ? 'Expand file' : 'Collapse file'}
+            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 cursor-pointer transition-colors"
+          >
+            <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+          </button>
+          {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
+          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+            {/* The file-header path reads as sans (item 2); the diff body stays mono. */}
+            <span className="text-xs min-w-0 truncate cursor-pointer hover:underline">
+              {file.change_type === 'renamed' && file.old_path ? (
+                <>
+                  <PathName path={file.old_path} />
+                  <span className="text-gray-400 dark:text-gray-500"> → </span>
+                  <PathName path={file.path} />
+                </>
+              ) : (
                 <PathName path={file.path} />
-              </>
-            ) : (
-              <PathName path={file.path} />
-            )}
-          </span>
-          <ChangeTypeIcon type={file.change_type} />
-          {/* Copy-path rides with the path itself rather than sitting out in the
+              )}
+            </span>
+            <ChangeTypeIcon type={file.change_type} />
+            {/* Copy-path rides with the path itself rather than sitting out in the
               header's right-hand action cluster: the flex-1 above pushed it all
               the way over there, next to buttons that have nothing to do with the
               path, which is what made "which of these copies what?" ambiguous. */}
-          <CopyButton text={file.path} what="file path" idleLabel="Copy path" />
-        </div>
-        {/* Copy the whole file's diff. A binary file has no text to copy. */}
-        {!file.binary && file.hunks.length > 0 && (
-          <CopyButton
-            text={fileDiffText(file)}
-            what="file diff"
-            idleLabel="Copy file diff"
-            idle={FileDiffIcon}
-          />
-        )}
-        {/* A deleted file no longer exists at the branch tip, so a repo-view link
-            would 404 - hide it there; every other change type opens fine. */}
-        {openInRepo && file.change_type !== 'deleted' && <RepoOpenButton target={openInRepo(file.path)} />}
-        {!file.binary && (
-          <div className="flex items-center gap-1.5 shrink-0 ml-1">
-            {file.additions > 0 && <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{file.additions}</span>}
-            {file.deletions > 0 && <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{file.deletions}</span>}
+            <CopyButton text={file.path} what="file path" idleLabel="Copy path" />
           </div>
-        )}
-        {onToggleViewed && (
-          // Marking a file viewed records its current head blob sha; when the
-          // agent later changes the file the sha no longer matches and it re-shows
-          // as unviewed. Stops propagation so ticking it doesn't also collapse the
-          // card (the header row toggles collapse).
-          <label
-            className="flex items-center gap-1 shrink-0 ml-1 pl-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none"
-            title={file.head_blob_sha ? 'Mark this file as reviewed' : 'Nothing to mark viewed (file deleted)'}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <input
-              type="checkbox"
-              className="cursor-pointer accent-blue-500"
-              checked={!!viewed}
-              disabled={!file.head_blob_sha}
-              onChange={() => onToggleViewed(file.path, file.head_blob_sha)}
+          {/* Copy the whole file's diff. A binary file has no text to copy. */}
+          {!file.binary && file.hunks.length > 0 && (
+            <CopyButton
+              text={fileDiffText(file)}
+              what="file diff"
+              idleLabel="Copy file diff"
+              idle={FileDiffIcon}
             />
-            Viewed
-          </label>
-        )}
-      </div>
+          )}
+          {/* A deleted file no longer exists at the branch tip, so a repo-view link
+            would 404 - hide it there; every other change type opens fine. */}
+          {openInRepo && file.change_type !== 'deleted' && <RepoOpenButton target={openInRepo(file.path)} />}
+          {!file.binary && (
+            <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-1 text-xs font-medium" />
+          )}
+          {onToggleViewed && (
+            // Marking a file viewed records its current head blob sha; when the
+            // agent later changes the file the sha no longer matches and it re-shows
+            // as unviewed. Stops propagation so ticking it doesn't also collapse the
+            // card (the header row toggles collapse).
+            <label
+              className="flex items-center gap-1 shrink-0 ml-1 pl-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none"
+              title={file.head_blob_sha ? 'Mark this file as reviewed' : 'Nothing to mark viewed (file deleted)'}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                className="cursor-pointer accent-blue-500"
+                checked={!!viewed}
+                disabled={!file.head_blob_sha}
+                onChange={() => onToggleViewed(file.path, file.head_blob_sha)}
+              />
+              Viewed
+            </label>
+          )}
+        </div>
       )}
       {/* Body. rounded-b-lg + overflow-hidden clip the edge-to-edge diff content's
           bottom corners (the root dropped its overflow-hidden so the header can be
@@ -2436,152 +2422,152 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
         aria-hidden={headless ? undefined : !bodyOpen}
       >
         {(headless || bodyMounted) && (
-        <div ref={headless ? undefined : bodyRef}>
-          {!near ? (
-            // Placeholder while the card is still far off-screen: hold roughly
-            // the height the rows will take so the scrollbar and jump-to-file
-            // targets stay stable, without paying for any row or highlight work.
-            <div data-lazy-placeholder style={{ height: estBodyH }} />
-          ) : file.binary && isImagePath(file.path) ? (
-            // In-tree image: reuse the artifacts panel's before/after differ.
-            <div className="p-3">
-              <ImageDiffView left={imageBefore} right={imageAfter} mode={imageDiffMode ?? 'ab'} name={file.path} />
-            </div>
-          ) : file.binary ? (
-            <div className={NOTICE_BLOCK}>Binary file changed</div>
-          ) : isHidden ? (
-            <div className={HIDDEN_BLOCK}>
-              <div className="text-sm mb-2">{file.additions + file.deletions} lines changed</div>
-              <button
-                onClick={onShow}
-                className="px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/40 cursor-pointer transition-colors"
-              >
-                Load diff
-              </button>
-            </div>
-          ) : noChanges ? (
-            // A whole, unchanged file (e.g. a pure rename). The one-by-one view
-            // (headless) shows it in full like the file viewer; the stacked view
-            // collapses it to a label so a rename doesn't dump the file inline.
-            headless && fullLines
-              ? <div className="overflow-hidden">{renderLines(fullLines, 'full')}</div>
-              : <div className={NOTICE_BLOCK}>No changes</div>
-          ) : !file.hunks || file.hunks.length === 0 ? (
-            <div className={NOTICE_BLOCK}>No changes</div>
-          ) : segments ? (
-            // Full-file model: every expander reveals already-fetched lines
-            // client-side (no network), per-region, with whole-file highlighting.
-            <div className="overflow-hidden">
-              {segments.map((seg) => {
-                if (seg.kind === 'lines') return renderLines(seg.lines!, seg.key)
-                if (seg.kind === 'gap') return (
-                  <GapExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
-                    onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP }, seg)}
-                    onUp={() => setRegion(seg.regionId!, { bot: seg.bot! + EXPAND_STEP }, seg)}
-                    onAll={() => setRegion(seg.regionId!, { top: seg.length! }, seg)} />
-                )
-                // topedge reveals upward (toward line 1), botedge downward; both
-                // grow away from the expander row without moving the scroll.
-                return (
-                  <EdgeExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
-                    onStep={() => setRegion(seg.regionId!, seg.kind === 'topedge'
-                      ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP }, seg)}
-                    onAll={() => setRegion(seg.regionId!, seg.kind === 'topedge'
-                      ? { bot: seg.length! } : { top: seg.length! }, seg)} />
-                )
-              })}
-            </div>
-          ) : (
-            // Fallback for a file the server won't ship whole (past
-            // PROMOTED_MAX_LINES): keep the `-U3` hunks and widen the file's
-            // context over the network on expand. Every expander here also
-            // records its reveal against the region it would be in the
-            // whole-content model (windowedExpand), so the usual case - the
-            // server DOES ship the file, and this branch is replaced by the
-            // segments above - applies the click to the gap it was aimed at.
-            <div className="overflow-hidden">
-              {file.hunks.map((hunk, i) => {
-                const isFirst = i === 0
-                const isLast = i === file.hunks.length - 1
-                const prevHunk = isFirst ? null : file.hunks[i - 1]
-                const gapSize = prevHunk ? computeGap(prevHunk, hunk) : 0
-                const atTopOfFile = isFirst && hunk.new_start <= 1 && hunk.old_start <= 1
-                const atEndOfFile = isLast && atFileEnd(hunk, file.total_lines, currentContext)
-                // What each edge expander hides. The leading run is measured from
-                // the first hunk's start line; the trailing one needs the file's
-                // length (total_lines), and stays null - a bare chevron - without it.
-                const leadGap = isFirst ? leadingGap(hunk) : 0
-                const tailGap = isLast ? trailingGap(hunk, file.total_lines) : null
-                // The gap above this hunk is the unchanged run that starts just
-                // after the previous hunk's last change; the run below the last
-                // hunk starts the same way. The file's leading run is line 1.
-                const gapRegion = prevHunk ? regionAfterHunk(prevHunk) : null
-                const tailRegion = regionAfterHunk(hunk)
-                return (
-                  <Fragment key={hunk.header}>
-                    {isFirst && !atTopOfFile && (
-                      <div className={EXPANDER_ROW}>
-                        <div className={EXPANDER_BTNS}>
-                          <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
-                            <button onClick={() => windowedExpand(LEAD_REGION_ID, { bot: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
-                              <ChevronUp className="w-3 h-3" />
-                            </button>
-                          </Tooltip>
+          <div ref={headless ? undefined : bodyRef}>
+            {!near ? (
+              // Placeholder while the card is still far off-screen: hold roughly
+              // the height the rows will take so the scrollbar and jump-to-file
+              // targets stay stable, without paying for any row or highlight work.
+              <div data-lazy-placeholder style={{ height: estBodyH }} />
+            ) : file.binary && isImagePath(file.path) ? (
+              // In-tree image: reuse the artifacts panel's before/after differ.
+              <div className="p-3">
+                <ImageDiffView left={imageBefore} right={imageAfter} mode={imageDiffMode ?? 'ab'} name={file.path} />
+              </div>
+            ) : file.binary ? (
+              <div className={NOTICE_BLOCK}>Binary file changed</div>
+            ) : isHidden ? (
+              <div className={HIDDEN_BLOCK}>
+                <div className="text-sm mb-2">{file.additions + file.deletions} lines changed</div>
+                <button
+                  onClick={onShow}
+                  className="px-3 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900/40 cursor-pointer transition-colors"
+                >
+                  Load diff
+                </button>
+              </div>
+            ) : noChanges ? (
+              // A whole, unchanged file (e.g. a pure rename). The one-by-one view
+              // (headless) shows it in full like the file viewer; the stacked view
+              // collapses it to a label so a rename doesn't dump the file inline.
+              headless && fullLines
+                ? <div className="overflow-hidden">{renderLines(fullLines, 'full')}</div>
+                : <div className={NOTICE_BLOCK}>No changes</div>
+            ) : !file.hunks || file.hunks.length === 0 ? (
+              <div className={NOTICE_BLOCK}>No changes</div>
+            ) : segments ? (
+              // Full-file model: every expander reveals already-fetched lines
+              // client-side (no network), per-region, with whole-file highlighting.
+              <div className="overflow-hidden">
+                {segments.map((seg) => {
+                  if (seg.kind === 'lines') return renderLines(seg.lines!, seg.key)
+                  if (seg.kind === 'gap') return (
+                    <GapExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
+                      onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP }, seg)}
+                      onUp={() => setRegion(seg.regionId!, { bot: seg.bot! + EXPAND_STEP }, seg)}
+                      onAll={() => setRegion(seg.regionId!, { top: seg.length! }, seg)} />
+                  )
+                  // topedge reveals upward (toward line 1), botedge downward; both
+                  // grow away from the expander row without moving the scroll.
+                  return (
+                    <EdgeExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
+                      onStep={() => setRegion(seg.regionId!, seg.kind === 'topedge'
+                        ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP }, seg)}
+                      onAll={() => setRegion(seg.regionId!, seg.kind === 'topedge'
+                        ? { bot: seg.length! } : { top: seg.length! }, seg)} />
+                  )
+                })}
+              </div>
+            ) : (
+              // Fallback for a file the server won't ship whole (past
+              // PROMOTED_MAX_LINES): keep the `-U3` hunks and widen the file's
+              // context over the network on expand. Every expander here also
+              // records its reveal against the region it would be in the
+              // whole-content model (windowedExpand), so the usual case - the
+              // server DOES ship the file, and this branch is replaced by the
+              // segments above - applies the click to the gap it was aimed at.
+              <div className="overflow-hidden">
+                {file.hunks.map((hunk, i) => {
+                  const isFirst = i === 0
+                  const isLast = i === file.hunks.length - 1
+                  const prevHunk = isFirst ? null : file.hunks[i - 1]
+                  const gapSize = prevHunk ? computeGap(prevHunk, hunk) : 0
+                  const atTopOfFile = isFirst && hunk.new_start <= 1 && hunk.old_start <= 1
+                  const atEndOfFile = isLast && atFileEnd(hunk, file.total_lines, currentContext)
+                  // What each edge expander hides. The leading run is measured from
+                  // the first hunk's start line; the trailing one needs the file's
+                  // length (total_lines), and stays null - a bare chevron - without it.
+                  const leadGap = isFirst ? leadingGap(hunk) : 0
+                  const tailGap = isLast ? trailingGap(hunk, file.total_lines) : null
+                  // The gap above this hunk is the unchanged run that starts just
+                  // after the previous hunk's last change; the run below the last
+                  // hunk starts the same way. The file's leading run is line 1.
+                  const gapRegion = prevHunk ? regionAfterHunk(prevHunk) : null
+                  const tailRegion = regionAfterHunk(hunk)
+                  return (
+                    <Fragment key={hunk.header}>
+                      {isFirst && !atTopOfFile && (
+                        <div className={EXPANDER_ROW}>
+                          <div className={EXPANDER_BTNS}>
+                            <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
+                              <button onClick={() => windowedExpand(LEAD_REGION_ID, { bot: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                                <ChevronUp className="w-3 h-3" />
+                              </button>
+                            </Tooltip>
+                          </div>
+                          {leadGap > 0 && (
+                            <GapCount hidden={leadGap} onClick={() => windowedExpand(LEAD_REGION_ID, { bot: CTX + leadGap }, currentContext + leadGap)} />
+                          )}
+                          <HunkContextLabel label={contextLabels.get(hunk.header)} />
                         </div>
-                        {leadGap > 0 && (
-                          <GapCount hidden={leadGap} onClick={() => windowedExpand(LEAD_REGION_ID, { bot: CTX + leadGap }, currentContext + leadGap)} />
-                        )}
-                        <HunkContextLabel label={contextLabels.get(hunk.header)} />
-                      </div>
-                    )}
-                    {!isFirst && gapSize > 0 && (
-                      <div className={EXPANDER_ROW}>
-                        <div className={EXPANDER_BTNS}>
-                          <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
-                            <button onClick={() => windowedExpand(gapRegion, { top: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
-                              <ChevronDown className="w-3 h-3" />
-                            </button>
-                          </Tooltip>
-                          <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
-                            <button onClick={() => windowedExpand(gapRegion, { bot: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
-                              <ChevronUp className="w-3 h-3" />
-                            </button>
-                          </Tooltip>
+                      )}
+                      {!isFirst && gapSize > 0 && (
+                        <div className={EXPANDER_ROW}>
+                          <div className={EXPANDER_BTNS}>
+                            <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
+                              <button onClick={() => windowedExpand(gapRegion, { top: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                            </Tooltip>
+                            <Tooltip side="top" content={`Expand up ${EXPAND_STEP} lines`}>
+                              <button onClick={() => windowedExpand(gapRegion, { bot: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                                <ChevronUp className="w-3 h-3" />
+                              </button>
+                            </Tooltip>
+                          </div>
+                          <GapCount hidden={gapSize} onClick={() => windowedExpand(gapRegion, { top: CTX + gapSize }, currentContext + Math.max(gapSize, EXPAND_STEP))} />
+                          <HunkContextLabel label={contextLabels.get(hunk.header)} />
                         </div>
-                        <GapCount hidden={gapSize} onClick={() => windowedExpand(gapRegion, { top: CTX + gapSize }, currentContext + Math.max(gapSize, EXPAND_STEP))} />
-                        <HunkContextLabel label={contextLabels.get(hunk.header)} />
-                      </div>
-                    )}
-                    {sideBySide
-                      ? <SideBySideHunk hunk={hunk} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
-                        lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
-                      : <UnifiedHunk hunk={hunk} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
-                        wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
-                        onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
-                        lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
-                    }
-                    {isLast && !atEndOfFile && (
-                      <div className={EXPANDER_ROW}>
-                        <div className={EXPANDER_BTNS}>
-                          <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
-                            <button onClick={() => windowedExpand(tailRegion, { top: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
-                              <ChevronDown className="w-3 h-3" />
-                            </button>
-                          </Tooltip>
+                      )}
+                      {sideBySide
+                        ? <SideBySideHunk hunk={hunk} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+                          wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
+                          onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
+                          lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+                        : <UnifiedHunk hunk={hunk} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+                          wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
+                          onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
+                          lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+                      }
+                      {isLast && !atEndOfFile && (
+                        <div className={EXPANDER_ROW}>
+                          <div className={EXPANDER_BTNS}>
+                            <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
+                              <button onClick={() => windowedExpand(tailRegion, { top: CTX + EXPAND_STEP }, currentContext + EXPAND_STEP)} className={EXPANDER_BTN}>
+                                <ChevronDown className="w-3 h-3" />
+                              </button>
+                            </Tooltip>
+                          </div>
+                          {tailGap != null && tailGap > 0 && (
+                            <GapCount hidden={tailGap} onClick={() => windowedExpand(tailRegion, { top: CTX + tailGap }, currentContext + tailGap)} />
+                          )}
                         </div>
-                        {tailGap != null && tailGap > 0 && (
-                          <GapCount hidden={tailGap} onClick={() => windowedExpand(tailRegion, { top: CTX + tailGap }, currentContext + tailGap)} />
-                        )}
-                      </div>
-                    )}
-                  </Fragment>
-                )
-              })}
-            </div>
-          )}
-        </div>
+                      )}
+                    </Fragment>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -3004,14 +2990,14 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
                         if (commitValid) { onChange({ type: 'commit', sha: c.sha }); setOpen(false) }
                       }}
                       aria-disabled={!commitValid}
-                      className={`w-full flex items-baseline gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : commitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : 'opacity-40'}`}
+                      className={`min-h-7 w-full flex items-baseline gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : commitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : 'opacity-40'}`}
                     >
                       {/* items-baseline, not items-start: the sha chip's padding
                           made a top-aligned chip sit a couple of px low against
                           the (larger) subject text next to it. */}
                       <span className={COMMIT_SHA_CHIP}>{c.short_sha}</span>
                       <span className="min-w-0 flex-1 text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
-                      <CommitStats additions={c.additions} deletions={c.deletions} />
+                      <ChangeStats additions={c.additions} deletions={c.deletions} />
                       {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 self-center" />}
                     </button>
                   </CustomTooltip>
@@ -3123,12 +3109,12 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
                       if (e.shiftKey) { onSelectOnly(c.sha); setOpen(false); return }
                       onChange({ type: 'commit', sha: c.sha }); setOpen(false)
                     }}
-                    className={`w-full flex items-baseline gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                    className={`min-h-7 w-full flex items-baseline gap-2 px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'commit' && selected.sha === c.sha ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                       }`}
                   >
                     <span className={COMMIT_SHA_CHIP}>{c.short_sha}</span>
                     <span className="min-w-0 flex-1 text-xs text-gray-700 dark:text-gray-300 leading-tight truncate">{commitParts(c.message).subject}</span>
-                    <CommitStats additions={c.additions} deletions={c.deletions} />
+                    <ChangeStats additions={c.additions} deletions={c.deletions} />
                     {selected.type === 'commit' && selected.sha === c.sha && <Check className="w-3 h-3 text-blue-500 shrink-0 self-center" />}
                   </button>
                 </CustomTooltip>
@@ -3148,15 +3134,6 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
 // "+N more" line. The server caps what it sends separately (and higher); this is
 // purely about keeping the hover box a readable size.
 const UNCOMMITTED_TOOLTIP_FILES = 10
-
-// Wider than the card's 384px default, because the content is paths rather than
-// prose: this repo's tracked paths run 43 characters at p90 and 54 at the longest
-// (measured over git ls-files), and 420px clears ~60 at the card's text-2xs, so
-// wrapping stays the exception rather than the common case. Approximate by
-// nature - the type ladder scales with the Interface font control, so this is
-// sized at its default step, and a path that overruns still wraps sanely (on a
-// directory boundary, filename onto the next line).
-const UNCOMMITTED_TOOLTIP_WIDTH = 420
 
 // A path too long for the tooltip has to wrap somewhere. Left to itself the
 // browser breaks mid-filename ("UncommittedChangesPane" / "l.tsx"); a <wbr> after
@@ -3235,61 +3212,50 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
   }
 
   return (
-    // A card, not a hint: this is a list you are meant to READ (which files are
-    // dirty), not a label for an unlabelled control, and the hint's compact
-    // px-2 py-1 had a two-group file list pressed against its edges. The card
-    // brings the roomier padding, the heading with a divider under it, and a box
-    // the pointer can enter - so a long list is scrollable and a tap can hold it
-    // open on a touch device.
     <Tooltip
-      className="shrink-0"
-      variant="card"
-      title="Uncommitted changes"
-      width={UNCOMMITTED_TOOLTIP_WIDTH}
-      // The chip's click jumps to the uncommitted section, so the card must not
-      // latch open on it - it would land squarely over the diff you just jumped
-      // to. The click dismisses it instead.
-      pin={false}
+      width={400}
+      centeredText={false}
       content={
-      <div>
-        {groups.map((g) => (
-          <div key={g.heading} className="mt-1 first:mt-0">
-            <p className="text-gray-600 dark:text-gray-300">{g.heading}</p>
-            {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => {
-              // The per-filetype icon from the diff's file list stands in for the
-              // "- " bullet these rows used to carry: it marks the row just as
-              // well and additionally says what kind of file it is.
-              const { Icon, className } = getFileIcon(uncommittedIconName(f))
-              return (
-                // Icon and path as two flex cells rather than a prefix in the
-                // text: that hangs the indent, so a wrapped path lines up under
-                // the start of the path above it instead of under its icon.
-                // items-start keeps the icon on the FIRST line of a path that
-                // wraps; the span around it supplies the line box that
-                // vertical-align needs (a flex item has none of its own), and
-                // sizing the mark in em / offsetting it in cap centres it on the
-                // text's cap box at whatever size the tooltip renders at.
-                <div key={f} className="flex items-start gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
-                  <span className="shrink-0">
-                    <Icon className={`inline-block h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)] ${className}`} />
-                  </span>
-                  <span className="min-w-0 break-words"><WrappablePathName path={f} /></span>
+        <div>
+          <p className="font-semibold mb-1">Uncommitted changes</p>
+          {groups.map((g) => (
+            <div key={g.heading} className="mt-1 first:mt-0">
+              <p className="text-gray-600 dark:text-gray-300">{g.heading}</p>
+              {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => {
+                // The per-filetype icon from the diff's file list stands in for the
+                // "- " bullet these rows used to carry: it marks the row just as
+                // well and additionally says what kind of file it is.
+                const { Icon, className } = getFileIcon(uncommittedIconName(f))
+                return (
+                  // Icon and path as two flex cells rather than a prefix in the
+                  // text: that hangs the indent, so a wrapped path lines up under
+                  // the start of the path above it instead of under its icon.
+                  // items-start keeps the icon on the FIRST line of a path that
+                  // wraps; the span around it supplies the line box that
+                  // vertical-align needs (a flex item has none of its own), and
+                  // sizing the mark in em / offsetting it in cap centres it on the
+                  // text's cap box at whatever size the tooltip renders at.
+                  <div key={f} className="flex items-start gap-1.5 pl-1 text-gray-500 dark:text-gray-400">
+                    <span className="shrink-0">
+                      <Icon className={`inline-block h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)] ${className}`} />
+                    </span>
+                    <span className="min-w-0 break-words"><WrappablePathName path={f} /></span>
+                  </div>
+                )
+              })}
+              {g.count > Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES) && (
+                // Empty first cell rather than a dash, so the count lines up with
+                // the filenames above it and nothing looks like a file that lost
+                // its icon.
+                <div className="flex items-start gap-1.5 pl-1 text-gray-400 dark:text-gray-500">
+                  <span aria-hidden className="shrink-0 w-[1em]" />
+                  <span>+{g.count - Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES)} more</span>
                 </div>
-              )
-            })}
-            {g.count > Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES) && (
-              // Empty first cell rather than a dash, so the count lines up with
-              // the filenames above it and nothing looks like a file that lost
-              // its icon.
-              <div className="flex items-start gap-1.5 pl-1 text-gray-400 dark:text-gray-500">
-                <span aria-hidden className="shrink-0 w-[1em]" />
-                <span>+{g.count - Math.min(g.files.length, UNCOMMITTED_TOOLTIP_FILES)} more</span>
-              </div>
-            )}
-          </div>
-        ))}
-        <p className="text-gray-400 dark:text-gray-500 mt-1.5 text-3xs">Click to view uncommitted changes</p>
-      </div>
+              )}
+            </div>
+          ))}
+          <p className="text-gray-400 dark:text-gray-500 mt-1.5 text-3xs">Click to view uncommitted changes</p>
+        </div>
       }
     >
       <button
@@ -3617,17 +3583,13 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
       {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-      <Tooltip content={file.path} className="min-w-0">
-        {/* File names read as sans (item 2), not monospace. */}
+      {/* <Tooltip content={file.path} className="min-w-0"> */}
         <span className="text-xs truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">
           {file.path.split('/').pop()}
         </span>
-      </Tooltip>
+      {/* </Tooltip> */}
       <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
-      <div className="flex items-center gap-1 shrink-0 ml-auto">
-        {file.additions > 0 && <span className="text-3xs text-green-600 dark:text-green-400">+{file.additions}</span>}
-        {file.deletions > 0 && <span className="text-3xs text-red-600 dark:text-red-400">-{file.deletions}</span>}
-      </div>
+      <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-auto text-3xs" />
     </button>
   )
 }
@@ -5177,8 +5139,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // the new inspector layout (Diff / Tests / Previews behind a view selector).
   const statsEl = diff && (
     <div className="flex items-center gap-1.5">
-      <span className="text-xs text-green-600 dark:text-green-400 font-medium">+{totalAdditions}</span>
-      <span className="text-xs text-red-600 dark:text-red-400 font-medium">-{totalDeletions}</span>
+      <ChangeStats additions={totalAdditions} deletions={totalDeletions} className="text-xs font-medium" />
       {/* Desktop: plain label (the side file list is visible). Mobile (< md, where
           that list is hidden): a tappable chip that opens the file-picker sheet. */}
       <span className="hidden md:inline text-xs text-gray-400 dark:text-gray-500">in {diff.files.length} file{diff.files.length !== 1 ? 's' : ''}</span>
@@ -5197,7 +5158,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     </div>
   )
   const resetBtn = !(leftSel.type === 'base' && rightSel.type === 'latest') && (
-    <Tooltip content="Reset to base -> latest">
+    <Tooltip content={`Reset to ${agent.base_branch} -> latest`}>
       <button
         onClick={() => { setLeftSel({ type: 'base' }); setRightSel({ type: 'latest' }) }}
         className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
@@ -5450,33 +5411,33 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           orderedFiles.map((f) => {
             const img = imageUrlsFor(f)
             return (
-            <FileDiff key={f.path} file={f} projectId={projectId} sideBySide={sideBySide} wordHighlight={wordHighlight}
-              viewed={isFileViewed(f)}
-              onToggleViewed={toggleFileViewed}
-              isCollapsed={collapsedFiles.has(f.path)}
-              onToggleCollapse={toggleFileCollapse}
-              onComment={handleComment}
-              onAddToReview={handleAddToReview}
-              fileComments={commentsByPath.get(f.path) ?? EMPTY_FILE_COMMENTS}
-              fileThreads={threadsByPath.get(f.path) ?? EMPTY_FILE_THREADS}
-              onEditComment={handleUpdateReviewComment}
-              onRemoveComment={removeQueuedComment}
-              onResolveComment={handleResolveComment}
-              you={you}
-              lineDraftApi={lineDraftApi}
-              onExpand={expandFileDiff}
-              isHidden={hiddenFiles.has(f.path)}
-              onShow={getShowCallback(f.path)}
-              fileRef={getFileRef(f.path)}
-              currentContext={fileContexts.get(f.path) ?? 3}
-              imageDiffMode={imageDiffMode}
-              imageBefore={img.before}
-              imageAfter={img.after}
-              openInRepo={openInRepo}
-              selection={lineSel?.path === f.path ? lineSel.sel : null}
-              onSelectLine={getSelectLine(f.path)}
-              revealLine={commentReveal?.path === f.path ? commentReveal : undefined}
-            />
+              <FileDiff key={f.path} file={f} projectId={projectId} sideBySide={sideBySide} wordHighlight={wordHighlight}
+                viewed={isFileViewed(f)}
+                onToggleViewed={toggleFileViewed}
+                isCollapsed={collapsedFiles.has(f.path)}
+                onToggleCollapse={toggleFileCollapse}
+                onComment={handleComment}
+                onAddToReview={handleAddToReview}
+                fileComments={commentsByPath.get(f.path) ?? EMPTY_FILE_COMMENTS}
+                fileThreads={threadsByPath.get(f.path) ?? EMPTY_FILE_THREADS}
+                onEditComment={handleUpdateReviewComment}
+                onRemoveComment={removeQueuedComment}
+                onResolveComment={handleResolveComment}
+                you={you}
+                lineDraftApi={lineDraftApi}
+                onExpand={expandFileDiff}
+                isHidden={hiddenFiles.has(f.path)}
+                onShow={getShowCallback(f.path)}
+                fileRef={getFileRef(f.path)}
+                currentContext={fileContexts.get(f.path) ?? 3}
+                imageDiffMode={imageDiffMode}
+                imageBefore={img.before}
+                imageAfter={img.after}
+                openInRepo={openInRepo}
+                selection={lineSel?.path === f.path ? lineSel.sel : null}
+                onSelectLine={getSelectLine(f.path)}
+                revealLine={commentReveal?.path === f.path ? commentReveal : undefined}
+              />
             )
           })
         )}
@@ -5547,22 +5508,22 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // In the inspector pane the mt-4 is dropped - the pane's own pt-4 already
     // spaces the bar off the pane top (and -top-4 cancels exactly that padding).
     <CommentIdentityContext.Provider value={commentIdentity}>
-    <ReviewThreadContext.Provider value={threadActions}>
-    {/* Where the review cursor is standing, by the same route and for the same
+      <ReviewThreadContext.Provider value={threadActions}>
+        {/* Where the review cursor is standing, by the same route and for the same
         reason as the thread actions above: the comment cards are the far side
         of two memo'd hunk components, and a cursor threaded through as a prop
         would re-render every line of every file each time it moved. */}
-    <DraftReviewPopoverContext.Provider value={draftReviewPopover}>
-    <NativeCommentReplyContext.Provider value={nativeReplyActions}>
-    <VisitedCommentsContext.Provider value={focusedComment}>
-    <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
-      {/* Section header */}
-      {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
+        <DraftReviewPopoverContext.Provider value={draftReviewPopover}>
+          <NativeCommentReplyContext.Provider value={nativeReplyActions}>
+            <VisitedCommentsContext.Provider value={focusedComment}>
+              <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
+                {/* Section header */}
+                {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
           header docks flush under the top bar - no overlap (was -top-6) and no
           gap for the artifacts filter bar to peek through (was top-0).
           z-[25] keeps it above the diff rows and the sticky file-list panel
           (z-20) and below the mobile sidebar panel (z-40 in __root.tsx). */}
-      {/* A pane TOOLBAR, deliberately subordinate to the global top bar: page
+                {/* A pane TOOLBAR, deliberately subordinate to the global top bar: page
           background (opaque, so content scrolls under it while stuck) and a
           small section label rather than the top bar's white bg + title type.
           py-2.5 lands a single-line bar at the working pane toolbar's min-h-12,
@@ -5572,198 +5533,198 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           working pane toolbar's px-3/px-4, and -mt-4 cancels the container's
           pt-4 so the bar sits flush at the top at rest too (not just when
           stuck). */}
-      <div ref={changesBarRef} className={`flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2.5 border-b border-gray-200 dark:border-gray-700 ${inspector ? '-mt-4 -mx-3 sm:-mx-6 px-3 sm:px-4' : '-mx-1.5 sm:-mx-3 px-1.5 sm:px-3'}`}>
-        {/* Wide split: the collapse toggle flanks the divider at the bar's left
+                <div ref={changesBarRef} className={`flex items-start gap-2 sm:gap-3 mb-3 sticky -top-4 z-[25] bg-gray-50 dark:bg-gray-900 py-2.5 border-b border-gray-200 dark:border-gray-700 ${inspector ? '-mt-4 -mx-3 sm:-mx-6 px-3 sm:px-4' : '-mx-1.5 sm:-mx-3 px-1.5 sm:px-3'}`}>
+                  {/* Wide split: the collapse toggle flanks the divider at the bar's left
             edge, pinned to the first line (self-start under items-start) so it
             stays level with the working pane toolbar's toggle even when either
             side wraps. Narrow screen-stack (leadingInline) instead flows the
             back button INLINE as the first item of the top row (beside
             "Changes"), so the ref-selector row below gets the full width. */}
-        {changesLeading && !leadingInline && <div className="shrink-0">{changesLeading}</div>}
-        {/* Wrapping content group: everything but the refresh/settings actions,
+                  {changesLeading && !leadingInline && <div className="shrink-0">{changesLeading}</div>}
+                  {/* Wrapping content group: everything but the refresh/settings actions,
             which stay pinned top-right (below). Wraps within its own flex-1 track
             so the actions never move off the corner when it goes multi-line. */}
-        <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-          {changesLeading && leadingInline && <div className="shrink-0">{changesLeading}</div>}
-          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400">Changes</h2>
-          {statsEl}
+                  <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
+                    {changesLeading && leadingInline && <div className="shrink-0">{changesLeading}</div>}
+                    <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400">Changes</h2>
+                    {statsEl}
 
-          {/* Comparison selector (base → head) kept as one wrap unit so the arrow
+                    {/* Comparison selector (base → head) kept as one wrap unit so the arrow
               never separates from its selectors - the whole "main → Latest commit"
               drops to the next line together when it can't fit beside the stats. */}
-          <div className="flex items-center gap-3">
-            <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} onSelectOnly={handleSelectOnly} />
-            <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><ArrowRightLeft className='w-6 h-6' strokeWidth='1.5' /></span>
-            <RightSelector commits={commits} selected={rightSel} onChange={handleRightChange}
-              hasUncommitted={diff?.uncommitted_changes} onSelectOnly={handleSelectOnly} />
-          </div>
+                    <div className="flex items-center gap-3">
+                      <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} onSelectOnly={handleSelectOnly} />
+                      <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><ArrowRightLeft className='w-6 h-6' strokeWidth='1.5' /></span>
+                      <RightSelector commits={commits} selected={rightSel} onChange={handleRightChange}
+                        hasUncommitted={diff?.uncommitted_changes} onSelectOnly={handleSelectOnly} />
+                    </div>
 
-          {resetBtn}
-          {warningButtons}
-        </div>
+                    {resetBtn}
+                    {warningButtons}
+                  </div>
 
-        {/* Actions pinned to the top-right corner regardless of how many lines the
+                  {/* Actions pinned to the top-right corner regardless of how many lines the
             content above wraps to (parent is items-start, this group is shrink-0). */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* "Submit review" - shown only once the user has queued at least one
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* "Submit review" - shown only once the user has queued at least one
               "Add to review" comment for this agent. */}
-          {/* Compact comment pager. Position/total covers every comment, including
+                    {/* Compact comment pager. Position/total covers every comment, including
               resolved comments; the separated open count shows work remaining. */}
-          {commentStops.length > 0 && (
-            <div
-              className="flex h-6 items-center gap-0.5 rounded-md border border-stone-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] px-1 select-none"
-              aria-label={`${commentStops.length} comments, ${openComments.length} unresolved${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
-            >
-              <MessageSquare className="w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500" />
-              <span className="optical-center min-w-6 text-center text-3xs tabular-nums text-stone-500 dark:text-stone-400">
-                {commentPosition ?? '-'} / {commentStops.length}
-              </span>
-              <span className="mx-0.5 h-3 w-px bg-stone-200 dark:bg-white/10" aria-hidden />
-              <span className={`optical-center text-3xs tabular-nums ${openComments.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                {openComments.length} open
-              </span>
-              {unreadCount > 0 && (
-                <Tooltip content={`Mark ${unreadCount} unread comment${unreadCount === 1 ? '' : 's'} read`} side="bottom">
-                  <button
-                    onClick={() => markRead(commentStops.flatMap((c) => c.numbers))}
-                    aria-label="Mark every comment read"
-                    className="ml-0.5 p-0.5 rounded text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
-                  >
-                    <MailOpen className="w-3 h-3" />
-                    <span className="sr-only">{unreadCount} unread</span>
-                  </button>
-                </Tooltip>
-              )}
-              <span className="mx-0.5 h-3 w-px bg-stone-200 dark:bg-white/10" />
-              <Tooltip content="Previous comment" side="bottom">
-                <button
-                  onClick={() => stepComment(-1)}
-                  aria-label="Previous comment"
-                  className="p-0.5 rounded text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer"
-                >
-                  <ArrowUp className="w-3 h-3" />
-                </button>
-              </Tooltip>
-              <Tooltip content="Next comment" side="bottom">
-                <button
-                  onClick={() => stepComment(1)}
-                  aria-label="Next comment"
-                  className="p-0.5 rounded text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer"
-                >
-                  <ArrowDown className="w-3 h-3" />
-                </button>
-              </Tooltip>
-            </div>
-          )}
-          <ReviewDraftPopover
-            comments={queuedComments}
-            projectId={projectId}
-            staleIds={staleReviewIds}
-            submitting={submittingReview}
-            onSubmit={submitReview}
-            onRemove={removeQueuedComment}
-            onJump={handleJumpToComment}
-          />
-          {loadingSpinner}
-          {refreshBtn}
-        </div>
-      </div>
+                    {commentStops.length > 0 && (
+                      <div
+                        className="flex h-6 items-center gap-0.5 rounded-md border border-stone-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] px-1 select-none"
+                        aria-label={`${commentStops.length} comments, ${openComments.length} unresolved${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
+                      >
+                        <MessageSquare className="w-3 h-3 shrink-0 text-stone-400 dark:text-stone-500" />
+                        <span className="optical-center min-w-6 text-center text-3xs tabular-nums text-stone-500 dark:text-stone-400">
+                          {commentPosition ?? '-'} / {commentStops.length}
+                        </span>
+                        <span className="mx-0.5 h-3 w-px bg-stone-200 dark:bg-white/10" aria-hidden />
+                        <span className={`optical-center text-3xs tabular-nums ${openComments.length > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                          {openComments.length} open
+                        </span>
+                        {unreadCount > 0 && (
+                          <Tooltip content={`Mark ${unreadCount} unread comment${unreadCount === 1 ? '' : 's'} read`} side="bottom">
+                            <button
+                              onClick={() => markRead(commentStops.flatMap((c) => c.numbers))}
+                              aria-label="Mark every comment read"
+                              className="ml-0.5 p-0.5 rounded text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                            >
+                              <MailOpen className="w-3 h-3" />
+                              <span className="sr-only">{unreadCount} unread</span>
+                            </button>
+                          </Tooltip>
+                        )}
+                        <span className="mx-0.5 h-3 w-px bg-stone-200 dark:bg-white/10" />
+                        <Tooltip content="Previous comment" side="bottom">
+                          <button
+                            onClick={() => stepComment(-1)}
+                            aria-label="Previous comment"
+                            className="p-0.5 rounded text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer"
+                          >
+                            <ArrowUp className="w-3 h-3" />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content="Next comment" side="bottom">
+                          <button
+                            onClick={() => stepComment(1)}
+                            aria-label="Next comment"
+                            className="p-0.5 rounded text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-white/[0.08] transition-colors cursor-pointer"
+                          >
+                            <ArrowDown className="w-3 h-3" />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    )}
+                    <ReviewDraftPopover
+                      comments={queuedComments}
+                      projectId={projectId}
+                      staleIds={staleReviewIds}
+                      submitting={submittingReview}
+                      onSubmit={submitReview}
+                      onRemove={removeQueuedComment}
+                      onJump={handleJumpToComment}
+                    />
+                    {loadingSpinner}
+                    {refreshBtn}
+                  </div>
+                </div>
 
-      {/* Test verdicts (PLAN #68) for the selected versions - single-sided, so it
+                {/* Test verdicts (PLAN #68) for the selected versions - single-sided, so it
           tracks the "after" commit (latest by default) like the artifacts below,
           and sits just under the Changes header. Renders nothing when the project
           configures no [[tests]] runners. */}
-      {testsPanelEl}
+                {testsPanelEl}
 
-      {/* Live server previews ([previews.<name>]) for the selected "after"
+                {/* Live server previews ([previews.<name>]) for the selected "after"
           version - single-sided like the tests above. Renders nothing when the
           project configures no preview scripts. */}
-      {previewPanelEl}
+                {previewPanelEl}
 
-      {/* Error banner on refresh failure */}
-      {diffErrorBanner}
+                {/* Error banner on refresh failure */}
+                {diffErrorBanner}
 
-      {/* Visual artifacts (e.g. screenshots) for the selected versions */}
-      {artifactsPanelEl}
+                {/* Visual artifacts (e.g. screenshots) for the selected versions */}
+                {artifactsPanelEl}
 
-      {/* Files section header (its cog holds the file-list + diff options) then
+                {/* Files section header (its cog holds the file-list + diff options) then
           the file-list column + diffs. */}
-      {filesHeaderEl}
-      {diffContentEl}
+                {filesHeaderEl}
+                {diffContentEl}
 
-      {/* Commented files with no changes, then the comments that name no line at
+                {/* Commented files with no changes, then the comments that name no line at
           all. AFTER the diff, and outside the file-list column: these are not
           files the comparison changed, so putting them in the list would make the
           count and the "N viewed" tally answer a different question. The "No
           changes" diff never renders that column anyway, and this is where every
           comment on such a head ends up. */}
-      {offDiffFiles.map((f) => (
-        <OffDiffFileCard
-          key={f.path}
-          projectId={projectId}
-          gitRef={agent.branch_name}
-          path={f.path}
-          entries={f.entries}
-          you={you}
-          openInRepo={openInRepo}
-          onEditComment={handleUpdateReviewComment}
-          onRemoveComment={removeQueuedComment}
-          onResolveComment={handleResolveComment}
-        />
-      ))}
-      <UnanchoredComments
-        entries={unanchored}
-        projectId={projectId}
-        resolvedCount={resolvedOffDiffCount}
-        showResolved={showResolvedOffDiff}
-        onToggleResolved={() => setShowResolvedOffDiff((v) => !v)}
-        you={you}
-        openInRepo={openInRepo}
-        onEditComment={handleUpdateReviewComment}
-        onRemoveComment={removeQueuedComment}
-        onResolveComment={handleResolveComment}
-      />
-      {dragOverlay}
-      {/* Mobile file-picker sheet (item 31). Portalled to document.body so its
+                {offDiffFiles.map((f) => (
+                  <OffDiffFileCard
+                    key={f.path}
+                    projectId={projectId}
+                    gitRef={agent.branch_name}
+                    path={f.path}
+                    entries={f.entries}
+                    you={you}
+                    openInRepo={openInRepo}
+                    onEditComment={handleUpdateReviewComment}
+                    onRemoveComment={removeQueuedComment}
+                    onResolveComment={handleResolveComment}
+                  />
+                ))}
+                <UnanchoredComments
+                  entries={unanchored}
+                  projectId={projectId}
+                  resolvedCount={resolvedOffDiffCount}
+                  showResolved={showResolvedOffDiff}
+                  onToggleResolved={() => setShowResolvedOffDiff((v) => !v)}
+                  you={you}
+                  openInRepo={openInRepo}
+                  onEditComment={handleUpdateReviewComment}
+                  onRemoveComment={removeQueuedComment}
+                  onResolveComment={handleResolveComment}
+                />
+                {dragOverlay}
+                {/* Mobile file-picker sheet (item 31). Portalled to document.body so its
           position:fixed is viewport-relative - the narrow screen-stack track has
           a transform, which would otherwise be its containing block. md:hidden so
           it can't linger if the viewport grows past the side-list breakpoint. */}
-      {fileSheetOpen && diff && createPortal(
-        <div className="md:hidden fixed inset-0 z-[60] flex flex-col justify-end" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setFileSheetOpen(false)} />
-          <div className="relative flex flex-col max-h-[70vh] bg-white dark:bg-gray-800 rounded-t-2xl border-t border-gray-200 dark:border-gray-700 shadow-2xl animate-in slide-in-from-bottom-4 duration-200">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-                Files <span className="text-gray-400 dark:text-gray-500 tabular-nums">{diff.files.length}</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setFileSheetOpen(false)}
-                aria-label="Close file list"
-                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="overflow-y-auto overflow-x-hidden py-1">
-              {diff.files.map((f, i) => (
-                <FileRow
-                  key={f.path}
-                  file={f}
-                  isActive={singleFile && i === singleFileIdx}
-                  onClick={() => { handleFileClick(f.path); setFileSheetOpen(false) }}
-                />
-              ))}
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
-    </div>
-    </VisitedCommentsContext.Provider>
-    </NativeCommentReplyContext.Provider>
-    </DraftReviewPopoverContext.Provider>
-    </ReviewThreadContext.Provider>
+                {fileSheetOpen && diff && createPortal(
+                  <div className="md:hidden fixed inset-0 z-[60] flex flex-col justify-end" role="dialog" aria-modal="true">
+                    <div className="absolute inset-0 bg-black/40" onClick={() => setFileSheetOpen(false)} />
+                    <div className="relative flex flex-col max-h-[70vh] bg-white dark:bg-gray-800 rounded-t-2xl border-t border-gray-200 dark:border-gray-700 shadow-2xl animate-in slide-in-from-bottom-4 duration-200">
+                      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
+                        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                          Files <span className="text-gray-400 dark:text-gray-500 tabular-nums">{diff.files.length}</span>
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => setFileSheetOpen(false)}
+                          aria-label="Close file list"
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="overflow-y-auto overflow-x-hidden py-1">
+                        {diff.files.map((f, i) => (
+                          <FileRow
+                            key={f.path}
+                            file={f}
+                            isActive={singleFile && i === singleFileIdx}
+                            onClick={() => { handleFileClick(f.path); setFileSheetOpen(false) }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>,
+                  document.body,
+                )}
+              </div>
+            </VisitedCommentsContext.Provider>
+          </NativeCommentReplyContext.Provider>
+        </DraftReviewPopoverContext.Provider>
+      </ReviewThreadContext.Provider>
     </CommentIdentityContext.Provider>
   )
 }
