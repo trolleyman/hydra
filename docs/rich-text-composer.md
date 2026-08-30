@@ -486,8 +486,9 @@ user edits or explicitly migrates it.
 | --- | --- |
 | Active-agent chat composer | First production integration |
 | Spawn composer, compact/full | Second integration |
-| Review reply/comment composer | Later; Markdown subset, no attachments first |
-| Image-pin note | Later only if compact UI still fits |
+| Review reply/comment composer | Rich Markdown editor; no attachments |
+| Image-pin note | Rich Markdown editor in the anchored popover |
+| Question option notes and Other | Compact rich Markdown editors; settled values render their structure |
 | Commit/review control text | Keep textarea unless rich editing adds value |
 | Config/uncommitted-message editors | Keep textarea; source fidelity matters |
 | Shell editor | Keep dedicated source editor |
@@ -495,7 +496,7 @@ user edits or explicitly migrates it.
 Retain `HighlightedTextarea`, `textareaEdit`, `autoPair` and the current Markdown
 source renderer while non-rich callers remain.
 
-## Reusable package boundary
+## Internal module boundary
 
 Keep editor code free of Hydra stores, routes and API models:
 
@@ -510,9 +511,10 @@ web/src/lib/hydra-composer/
   uploads, drafts, submission, references
 ```
 
-Keep it inside `web/` until two Hydra surfaces use it and the API settles. Then
-extract a workspace package if it is genuinely reusable. Publishing before the
-browser selection model and host boundary stabilize would freeze the wrong API.
+This is a Hydra-owned internal module. Keep the editor API independent of Hydra
+stores, routes and generated API models, but do not plan a workspace or external
+package extraction. A concrete second product can justify that work later; an
+abstract reuse goal cannot.
 
 ## One document language for editing and rendering
 
@@ -533,16 +535,25 @@ performance and accessibility. Use two views over one document:
 ```text
 RichDocument
   -> EditableDocumentView (one live Tiptap editor in the composer)
-  -> StaticDocumentView   (plain React/DOM in a sent user bubble)
+  -> RichTextRenderer     (plain React/DOM in a sent user bubble)
   -> Markdown             (backend, replay and external clipboard)
 ```
 
-Assistant and old transcript messages can contain Markdown beyond the composer
-schema, including GFM tables. Keep the full `MarkdownRenderer` for them. A user
-message created by the rich composer uses the shared static view while it is
-optimistic. After reload, parse its Markdown into the supported user-message
-schema when possible and fall back to `MarkdownRenderer` without losing content.
-Do not narrow the transcript's Markdown language to match the composer.
+`RichTextRenderer` takes a structured document. `RichMarkdown` is the memoized
+boundary for persisted or external Markdown: it parses once and delegates to the
+structured renderer. The compatibility `Markdown` export remains while callers
+migrate. Assistant and old transcript messages can contain syntax beyond the
+composer schema, so the structured schema and static node registry must cover
+the existing GFM/media/repository-link behaviour before the compatibility path
+is removed. Do not narrow the transcript language to match the composer.
+
+Static attachment and Hydra-reference nodes are now semantic presentation nodes.
+An attachment keeps its sentence position when a sent message contains its
+stable `[filename]` boundary; legacy messages without one retain the trailing
+chip fallback. `@file[...]`, `@commit[...]`, `@branch[...]` and `@agent[...]`
+render as typed chips and remain literal in code. The remaining migration is to
+make the complete GFM/media renderer consume the structured document directly,
+then rename the implementation file after no source-only callers remain.
 
 ### Seamless send transition
 
@@ -640,10 +651,7 @@ speculatively. A shared static viewer can reuse more node presentation between
 the editor and sent bubbles. Math remains explicitly deferred until its Markdown
 boundary and renderer agree.
 
-Package extraction is also deferred. `MarkdownComposer` is already a reusable
-Hydra-owned API with no ProseMirror state in its public value contract; turn it
-into a workspace or external package only after another product surface proves
-which host hooks are genuinely general.
+The editor remains an internal Hydra module; package extraction is not a goal.
 
 ## Build order and gates
 
@@ -680,11 +688,11 @@ which host hooks are genuinely general.
 9. **Release hardening - DONE.** Code-block exit/indent/unwrap, production table
    manipulation and announcements, narrow layout, three-engine selection/IME
    validation and final bundle measurement are complete.
-10. **Broader surfaces.** Evaluate review replies and image-pin notes separately.
+10. **Broader surfaces - DONE.** Review replies, image-pin notes, question option
+    notes and question Other answers use the rich Markdown adapter and render
+    settled Markdown structure.
 11. **Optional discovery - DONE.** Structured Hydra references and a
      start-of-line `/` menu are available in chat and Spawn.
-12. **Extraction decision.** Audit Hydra imports and extract a workspace or
-    external package only when a non-chat consumer proves the host boundary.
 
 Every phase leaves plain Markdown submission working. Do not add a parallel rich
 message backend protocol.

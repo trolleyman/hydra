@@ -202,7 +202,9 @@ before starting. Grouped by area.
   Tiptap/ProseMirror editor: real
   editable inline-code spans with predictable inside/outside cursor positions,
   formatting commands, code blocks, structured Hydra references, a start-of-line
-  command menu and attachment nodes placed in the sentence.
+  command menu and attachment nodes placed in the sentence. Review replies,
+  image-pin notes, question notes and free-text Other answers use the same model;
+  sent attachment and reference nodes keep their inline positions.
   Markdown stays the backend interchange format and Tiptap stays behind a
   Hydra-owned API. Design, interaction tables, migration and gated build order:
   [rich-text-composer.md](rich-text-composer.md).

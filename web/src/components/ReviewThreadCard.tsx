@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, LoaderCircle, Mail, Quote, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
 import { Markdown } from '../lib/MarkdownRenderer'
@@ -6,12 +6,13 @@ import { Tooltip } from './Tooltip'
 import { ProviderIcon } from './ReviewControls'
 import { providerLabel } from '../lib/forgeDisplay'
 import { formatStartedAgo } from '../lib/agentDisplay'
-import { HighlightedTextarea } from './HighlightedTextarea'
-import { renderCommentSource } from '../lib/mentionHighlight'
+import type { MarkdownComposerHandle } from '../lib/rich-editor/MarkdownComposer'
 import { copyWithToast } from '../lib/copyToast'
 import { Avatar } from './Avatar'
 import { commentAsMarkdown } from '../lib/reviewComments'
 import { useIsCurrentComment } from '../lib/reviewCommentLink'
+
+const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
 
 // The actions a thread card can perform, supplied by the diff viewer through
 // context (see reviewThreadContext) so the memo'd hunks between them never need
@@ -120,16 +121,10 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const forge = providerLabel(actions.provider)
-  // HighlightedTextarea has no autoFocus of its own (it forwards a ref to the
-  // real textarea), so opening the box focuses it here - with the caret after a
-  // restored draft rather than selecting it, so typing appends.
-  const replyRef = useRef<HTMLTextAreaElement>(null)
+  const replyRef = useRef<MarkdownComposerHandle>(null)
   useEffect(() => {
     if (!replying) return
-    const el = replyRef.current
-    if (!el) return
-    el.focus()
-    el.setSelectionRange(el.value.length, el.value.length)
+    replyRef.current?.focus('end')
   }, [replying])
 
   const changeText = (v: string) => {
@@ -410,24 +405,30 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
 
           {replying && (
             <div className="mt-2 pl-7">
-              {/* The same live inline-markdown highlighting as the chat and spawn
-                  composers - review replies are markdown on both forges, so what
-                  you type should read like what will be posted. */}
-              <HighlightedTextarea
-                renderContent={renderCommentSource}
-                ref={replyRef}
-                value={text}
-                onChange={(e) => changeText(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && text.trim()) {
-                    e.preventDefault()
-                    void run('forge', () => actions.reply(thread.id, text))
-                  } else if (e.key === 'Escape') setReplying(false)
-                }}
-                placeholder="Reply..."
-                wrapperClassName="w-full h-16 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded focus-within:ring-1 focus-within:ring-violet-500"
-                textClassName="p-2 text-xs leading-5"
-              />
+              <div className="h-20 overflow-y-auto rounded border border-gray-200 bg-white focus-within:ring-1 focus-within:ring-violet-500 dark:border-gray-700 dark:bg-gray-900">
+                <Suspense fallback={<div className="h-full p-2 text-xs text-gray-400">Loading editor...</div>}>
+                  <MarkdownComposer
+                    ref={replyRef}
+                    value={text}
+                    onChange={changeText}
+                    onKeyDown={(e) => {
+                      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && text.trim()) {
+                        e.preventDefault()
+                        void run('forge', () => actions.reply(thread.id, text))
+                        return true
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        setReplying(false)
+                        return true
+                      }
+                    }}
+                    placeholder="Reply..."
+                    ariaLabel="Review reply"
+                    className="min-h-full p-2 text-xs leading-5"
+                  />
+                </Suspense>
+              </div>
               <div className="flex items-center justify-end gap-2 mt-1.5">
                 <button type="button" onClick={() => { setReplying(false) }} className={`${btn} text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700`}>
                   Cancel

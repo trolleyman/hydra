@@ -5685,32 +5685,28 @@ export function QuestionCard({
     return (
       <div className="mb-1.5 ml-8 mr-2.5 flex items-start gap-2 border-t border-dashed border-[#c96442]/30 pt-1 dark:border-[#e0a184]/25">
         <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-stone-500" />
-        {/* Auto-grows the same way the "Other" box does - an invisible span in
-            the same grid cell drives the height. */}
-        <div className="grid min-w-0 flex-1">
-          <span aria-hidden className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4">
-            {value + ' '}
-          </span>
-          <textarea
-            rows={1}
+        <div className="min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
+          <Suspense fallback={<div className="min-h-4 text-xs text-stone-400">Loading editor...</div>}>
+          <MarkdownComposer
             spellCheck={spellcheck}
             autoFocus={value === '' && !answered}
             value={value}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => setNote(qi, at, e.target.value)}
+            onChange={(markdown) => setNote(qi, at, markdown)}
             onKeyDown={(e) => {
               // Enter submits, as in the "Other" box; shift+Enter is a newline,
               // which a note wants more often than an option label does.
-              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+              if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
               e.preventDefault()
               e.stopPropagation()
               submit()
+              return true
             }}
-            disabled={answered}
+            editable={!answered}
             placeholder="Note to go with your answer..."
-            aria-label="Note to go with your answer"
-            className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+            ariaLabel="Note to go with your answer"
+            className="question-rich-composer min-h-4 p-0 text-xs leading-4"
           />
+          </Suspense>
         </div>
       </div>
     )
@@ -5824,43 +5820,32 @@ export function QuestionCard({
                   >
                     {isSel && <Check className="h-2.5 w-2.5 text-white" />}
                   </button>
-                  {/* A textarea, not an input, so a long custom answer wraps
-                      onto more lines instead of being clipped. It auto-grows
-                      with no JS: an invisible span holding the same text sits
-                      in the same grid cell and drives the height, so it also
-                      re-fits when the pane is resized. */}
-                  <div className="grid min-w-0 flex-1">
-                    <span
-                      aria-hidden
-                      className="col-start-1 row-start-1 invisible whitespace-pre-wrap break-words text-xs leading-4"
-                    >
-                      {showOther[qi] + ' '}
-                    </span>
-                    <textarea
-                      rows={1}
+                  <div
+                    className="min-w-0 flex-1"
+                    onFocusCapture={(e) => selectOther(e.currentTarget, qi)}
+                  >
+                    <Suspense fallback={<div className="min-h-4 text-xs text-stone-400">Loading editor...</div>}>
+                    <MarkdownComposer
                       spellCheck={spellcheck}
                       value={showOther[qi]}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        setOther((prev) => prev.map((p, i) => (i === qi ? v : p)))
-                        // Typing claims the selection.
-                        selectOther(e.currentTarget, qi)
-                      }}
-                      onFocus={(e) => selectOther(e.currentTarget, qi)}
+                      onChange={(markdown) => setOther((prev) => prev.map((p, i) => (i === qi ? markdown : p)))}
                       onKeyDown={(e) => {
                         // Enter submits the card, like the composer (shift+Enter
                         // still inserts a newline). Ignored while an IME is
                         // composing, and a no-op if another question is still
                         // unanswered (submit() gates on `complete`).
-                        if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+                        if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
                         e.preventDefault()
                         e.stopPropagation()
                         submit()
+                        return true
                       }}
-                      disabled={answered}
+                      editable={!answered}
                       placeholder="Other..."
-                      className="col-start-1 row-start-1 min-w-0 resize-none overflow-hidden bg-transparent p-0 text-xs leading-4 placeholder-stone-400 dark:placeholder-stone-500 outline-none disabled:opacity-100"
+                      ariaLabel="Other answer"
+                      className="question-rich-composer min-h-4 p-0 text-xs leading-4"
                     />
+                    </Suspense>
                   </div>
                   </div>
                 </div>
@@ -5957,6 +5942,8 @@ const ChatUserMessage = memo(function ChatUserMessage({
   const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
+  const inlineAttachmentNames = new Set(Array.from(body.matchAll(/\[([^\]\n]+)\]/g), (match) => match[1]))
+  const trailingAttachments = attachments.filter((attachment) => !inlineAttachmentNames.has(attachment.filename))
   const auto = automatedOrigin(origin)
   const bubbleRef = useRef<HTMLDivElement>(null)
   const flewRef = useRef(false)
@@ -5993,10 +5980,20 @@ const ChatUserMessage = memo(function ChatUserMessage({
           handler (copyTranscriptAsMarkdown), which also trims the trailing
           newlines the browser adds for the bubble's block padding. */}
       <div className={`${auto ? AUTOMATED_BUBBLE_CLASS : USER_BUBBLE_CLASS}${sending || dimmed ? ' opacity-75' : ''}`}>
-        {body && <Markdown text={body} linkCtx={linkCtx} />}
-        {attachments.length > 0 && (
-          <AttachmentChips
+        {body && (
+          <Markdown
+            text={body}
+            linkCtx={linkCtx}
             attachments={attachments}
+            onOpenAttachment={(attachment, origin) => {
+              setLightboxOrigin(origin)
+              setLightboxIndex(openable.findIndex((candidate) => candidate.id === attachment.id))
+            }}
+          />
+        )}
+        {trailingAttachments.length > 0 && (
+          <AttachmentChips
+            attachments={trailingAttachments}
             size="sm"
             className={body ? 'mt-2' : ''}
             onOpen={(id, origin) => {

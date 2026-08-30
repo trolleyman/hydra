@@ -63,6 +63,9 @@
 .dark .rich-text-surface {
   color: var(--color-gray-100);
 }
+.lightbox-rich-composer.rich-text-surface { color: var(--color-gray-100); }
+.question-rich-composer.rich-text-surface { overflow-wrap: anywhere; }
+.question-rich-composer.rich-text-surface p { margin: 0; }
 
 .rich-text-surface p,
 .rich-text-surface blockquote,
@@ -133,6 +136,9 @@
 .rich-text-surface span[data-composer-attachment] { display: inline-flex; align-items: center; margin: 0 0.15em; border: 1px solid var(--color-blue-200); border-radius: 999px; background: var(--color-blue-50); padding: 0.1em 0.55em; color: var(--color-blue-700); font-size: 0.9em; line-height: 1; vertical-align: baseline; }
 .rich-text-surface .composer-attachment-preview { width: 1.2em; height: 1.2em; margin: 0 0.4em 0 -0.55em; border-radius: 999px 0 0 999px; object-fit: cover; }
 .dark .rich-text-surface span[data-composer-attachment] { border-color: rgb(96 165 250 / 0.35); background: rgb(59 130 246 / 0.12); color: var(--color-blue-300); }
+.composer-static-attachment { display: inline-flex; max-width: 18em; cursor: pointer; align-items: center; gap: 0.3em; margin: 0 0.15em; border: 1px solid var(--color-blue-200); border-radius: 999px; background: var(--color-blue-50); padding: 0.1em 0.55em; color: var(--color-blue-700); font-family: var(--font-mono); font-size: 0.9em; line-height: 1; vertical-align: baseline; }
+.composer-static-attachment:disabled { cursor: default; }
+.dark .composer-static-attachment { border-color: rgb(96 165 250 / 0.35); background: rgb(59 130 246 / 0.12); color: var(--color-blue-300); }
 .rich-text-surface span[data-composer-attachment][data-upload-state="failed"] { border-color: var(--color-red-300); background: var(--color-red-50); color: var(--color-red-700); }
 .dark .rich-text-surface span[data-composer-attachment][data-upload-state="failed"] { border-color: var(--color-red-800); background: rgb(127 29 29 / 0.2); color: var(--color-red-300); }
 .rich-text-surface .composer-attachment-status { margin-left: 0.35em; opacity: 0.7; }
@@ -140,8 +146,8 @@
 .rich-text-surface .composer-attachment-action:hover { background: rgb(0 0 0 / 0.08); }
 .dark .rich-text-surface .composer-attachment-action:hover { background: rgb(255 255 255 / 0.1); }
 .rich-text-surface .composer-attachment-remove { font-family: var(--font-mono); }
-.rich-text-surface .composer-reference { display: inline-flex; align-items: center; max-width: 18em; margin: 0 0.1em; border: 1px solid var(--color-violet-200); border-radius: 999px; background: var(--color-violet-50); padding: 0.08em 0.45em; overflow: hidden; color: var(--color-violet-700); font-family: var(--font-mono); font-size: 0.9em; line-height: 1; text-overflow: ellipsis; vertical-align: baseline; white-space: nowrap; }
-.dark .rich-text-surface .composer-reference { border-color: rgb(167 139 250 / 0.35); background: rgb(139 92 246 / 0.12); color: var(--color-violet-300); }
+.composer-reference { display: inline-flex; align-items: center; gap: 0.25em; max-width: 18em; margin: 0 0.1em; border: 1px solid var(--color-violet-200); border-radius: 999px; background: var(--color-violet-50); padding: 0.08em 0.45em; overflow: hidden; color: var(--color-violet-700); font-family: var(--font-mono); font-size: 0.9em; line-height: 1; text-overflow: ellipsis; vertical-align: baseline; white-space: nowrap; }
+.dark .composer-reference { border-color: rgb(167 139 250 / 0.35); background: rgb(139 92 246 / 0.12); color: var(--color-violet-300); }
 
 /* Iosevka and Iosevka Term, self-hosted. They are the only offered families that
    are not on Google Fonts, so scripts/build-fonts.ts cuts them from the upstream

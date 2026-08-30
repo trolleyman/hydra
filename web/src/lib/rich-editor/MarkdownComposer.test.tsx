@@ -1,9 +1,25 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { MarkdownComposer, type MarkdownComposerHandle } from './MarkdownComposer'
 import { createRef } from 'react'
 
 afterEach(cleanup)
+beforeAll(() => {
+  // BubbleMenu anchors to the selected text. jsdom has no text geometry, so
+  // provide the minimal DOMRectList shape ProseMirror asks for.
+  Object.defineProperty(Text.prototype, 'getClientRects', {
+    configurable: true,
+    value: () => [new DOMRect(0, 0, 20, 16)],
+  })
+  Object.defineProperty(Range.prototype, 'getClientRects', {
+    configurable: true,
+    value: () => [new DOMRect(0, 0, 20, 16)],
+  })
+  Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => new DOMRect(0, 0, 20, 16),
+  })
+})
 
 describe('MarkdownComposer', () => {
   it('exposes Markdown as its controlled value', async () => {
@@ -118,6 +134,18 @@ describe('MarkdownComposer', () => {
       },
     })
     await waitFor(() => expect(changed).toHaveBeenLastCalledWith('[label](https://example.com/docs)'))
+  })
+
+  it('edits an arbitrary text selection as a link with Ctrl+K', async () => {
+    const ref = createRef<MarkdownComposerHandle>()
+    const changed = vi.fn()
+    const view = render(<MarkdownComposer ref={ref} value="Hydra docs" onChange={changed} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+    ref.current!.editor!.commands.setTextSelection({ from: 1, to: 11 })
+    fireEvent.keyDown(view.getByRole('textbox'), { key: 'k', ctrlKey: true })
+    fireEvent.change(await view.findByRole('textbox', { name: 'Link URL' }), { target: { value: 'docs.example.com/hydra' } })
+    fireEvent.click(view.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(changed).toHaveBeenLastCalledWith('[Hydra docs](https://docs.example.com/hydra)'))
   })
 
   it('renders the language picker inside a code block and applies highlighting', async () => {

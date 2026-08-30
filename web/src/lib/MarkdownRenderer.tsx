@@ -1,9 +1,9 @@
 import { createContext, memo, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { useNavigate } from '@tanstack/react-router'
-import { GitCommitHorizontal, ImageOff, Maximize2, VideoOff } from 'lucide-react'
+import { Bot, GitBranch, GitCommitHorizontal, ImageOff, Maximize2, VideoOff } from 'lucide-react'
 import { highlightCode } from './markdown'
 import { fileKind } from './fileKind'
 import { Tooltip } from '../components/Tooltip'
@@ -19,6 +19,55 @@ import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 import { ansiToHtml, ansiToText, hasAnsi } from './ansi'
 import { renderCommentMentions } from './mentionHighlight'
 import { getFileIcon } from './fileIcons'
+import type { Attachment } from './spawnDrafts'
+
+interface MarkdownAstNode {
+  type: string
+  value?: string
+  url?: string
+  children?: MarkdownAstNode[]
+}
+
+function unescapeHydraValue(value: string): string {
+  return value.replaceAll(/\\([\\\]])/g, '$1')
+}
+
+// Turn Hydra's stable Markdown boundaries into semantic links in the Markdown
+// AST. Text inside code nodes is never visited, so a sample reference or
+// attachment filename in a code block remains literal.
+function remarkHydraNodes(attachmentNames: Map<string, number>) {
+  return () => (tree: MarkdownAstNode) => {
+    const visit = (node: MarkdownAstNode) => {
+      if (!node.children || node.type === 'link' || node.type === 'image') return
+      const next: MarkdownAstNode[] = []
+      for (const child of node.children) {
+        if (child.type !== 'text' || !child.value) {
+          visit(child)
+          next.push(child)
+          continue
+        }
+        const token = /@(file|branch|commit|agent)\[((?:\\.|[^\\\]\n])+)\]|\[([^\]\n]+)\]/g
+        let offset = 0
+        for (const match of child.value.matchAll(token)) {
+          if (match.index! > offset) next.push({ type: 'text', value: child.value.slice(offset, match.index) })
+          if (match[1]) {
+            const value = unescapeHydraValue(match[2])
+            next.push({ type: 'link', url: `hydra-reference:${match[1]}:${encodeURIComponent(value)}`, children: [{ type: 'text', value }] })
+          } else {
+            const index = attachmentNames.get(match[3])
+            if (index == null) next.push({ type: 'text', value: match[0] })
+            else next.push({ type: 'link', url: `hydra-attachment:${index}`, children: [{ type: 'text', value: match[3] }] })
+          }
+          offset = match.index! + match[0].length
+        }
+        if (offset === 0) next.push(child)
+        else if (offset < child.value.length) next.push({ type: 'text', value: child.value.slice(offset) })
+      }
+      node.children = next
+    }
+    visit(tree)
+  }
+}
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
 // rendered-markdown surface (chat messages, the AgentView prompt, README file
@@ -95,6 +144,38 @@ function encodePath(p: string): string {
 // linked code chip owns its own bordered shape, so suppress the underline there
 // and strengthen its neutral border instead.
 const LINK_CLASS = 'text-stone-800 dark:text-stone-100 underline decoration-dotted decoration-stone-400/70 dark:decoration-stone-500/80 underline-offset-2 hover:decoration-solid focus-visible:decoration-solid [&:has(>code)]:no-underline [&>code]:border-stone-400/70 dark:[&>code]:border-stone-500/70'
+
+function StructuredReference({ kind, value }: { kind: string; value: string }) {
+  const file = kind === 'file' ? getFileIcon(value.split('/').pop() ?? value).Icon : null
+  const Icon = file ?? (kind === 'commit' ? GitCommitHorizontal : kind === 'branch' ? GitBranch : Bot)
+  return (
+    <span
+      className={`composer-reference composer-reference-${kind}`}
+      data-hydra-reference={kind}
+      data-reference-value={value}
+      title={`${kind}: ${value}`}
+    >
+      <Icon className="h-[1em] w-[1em] shrink-0 opacity-60" aria-hidden="true" />
+      <span className="truncate">{value}</span>
+    </span>
+  )
+}
+
+function InlineAttachment({ attachment, onOpen }: { attachment: Attachment; onOpen?: (attachment: Attachment, origin: Element) => void }) {
+  const { Icon } = getFileIcon(attachment.filename)
+  return (
+    <button
+      type="button"
+      disabled={!onOpen || !attachment.url}
+      onClick={(event) => onOpen?.(attachment, event.currentTarget)}
+      className="composer-static-attachment"
+      aria-label={attachment.url ? `View ${attachment.filename}` : attachment.filename}
+    >
+      {attachment.previewUrl ? <img src={attachment.previewUrl} alt="" className="composer-attachment-preview" /> : <Icon className="h-[1em] w-[1em] shrink-0 opacity-60" aria-hidden="true" />}
+      <span className="truncate">{attachment.filename}</span>
+    </button>
+  )
+}
 
 // FileLink keeps the author's exact Markdown label, but makes the rendered link
 // read as a small file token. This is presentation only: the Markdown source and
@@ -578,7 +659,14 @@ function mentionChildren(children: ReactNode, enabled: boolean): ReactNode {
   return children
 }
 
-function buildComponents(s: Style, variant: Variant, linkCtx?: RepoLinkContext, highlightMentions = false): Components {
+function buildComponents(
+  s: Style,
+  variant: Variant,
+  linkCtx?: RepoLinkContext,
+  highlightMentions = false,
+  attachments: Attachment[] = [],
+  onOpenAttachment?: (attachment: Attachment, origin: Element) => void,
+): Components {
   const prose = (children: ReactNode) => mentionChildren(children, highlightMentions)
   return {
     h1: ({ children }) => <h1 className={s.h1}>{prose(children)}</h1>,
@@ -598,12 +686,21 @@ function buildComponents(s: Style, variant: Variant, linkCtx?: RepoLinkContext, 
     strong: ({ children }) => <strong className="font-semibold">{prose(children)}</strong>,
     em: ({ children }) => <em className="italic">{prose(children)}</em>,
     del: ({ children }) => <del className="line-through opacity-80">{prose(children)}</del>,
-    a: ({ href, children }) =>
-      linkCtx ? (
+    a: ({ href, children }) => {
+      if (href?.startsWith('hydra-reference:')) {
+        const [, kind, encoded = ''] = href.split(':')
+        return <StructuredReference kind={kind} value={decodeURIComponent(encoded)} />
+      }
+      if (href?.startsWith('hydra-attachment:')) {
+        const attachment = attachments[Number(href.slice('hydra-attachment:'.length))]
+        return attachment ? <InlineAttachment attachment={attachment} onOpen={onOpenAttachment} /> : children
+      }
+      return linkCtx ? (
         <RepoLink href={href} ctx={linkCtx} fileChip={variant === 'chat'}>{children}</RepoLink>
       ) : (
         <a className={LINK_CLASS} href={href} target="_blank" rel="noreferrer">{children}</a>
-      ),
+      )
+    },
     img: ({ src, alt }) => <MarkdownMedia src={typeof src === 'string' ? src : undefined} alt={alt} ctx={linkCtx} />,
     table: ({ children }) => (
       <div className={s.tableWrap}>
@@ -637,6 +734,8 @@ export interface MarkdownProps {
   // Paint routing mentions in review comments. Mentions have no meaning on
   // ordinary Markdown surfaces, so callers opt in explicitly.
   highlightMentions?: boolean
+  attachments?: Attachment[]
+  onOpenAttachment?: (attachment: Attachment, origin: Element) => void
 }
 
 // Markdown renders read-only markdown for a given surface. Do NOT wrap it in a
@@ -646,10 +745,12 @@ export interface MarkdownProps {
 // memo'd: parsing markdown is not cheap, and a chat transcript can hold hundreds
 // of these. Without memo, typing in the chat composer (a sibling state change)
 // re-parses every rendered message on each keystroke, which is visibly laggy.
-export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className, hardBreaks, highlightMentions = false }: MarkdownProps): ReactNode {
+export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx, className, hardBreaks, highlightMentions = false, attachments = [], onOpenAttachment }: MarkdownProps): ReactNode {
+  const attachmentNames = useMemo(() => new Map(attachments.map((attachment, index) => [attachment.filename, index])), [attachments])
+  const hydraPlugin = useMemo(() => remarkHydraNodes(attachmentNames), [attachmentNames])
   const components = useMemo(
-    () => buildComponents(STYLES[variant], variant, linkCtx, highlightMentions),
-    [variant, linkCtx, highlightMentions],
+    () => buildComponents(STYLES[variant], variant, linkCtx, highlightMentions, attachments, onOpenAttachment),
+    [variant, linkCtx, highlightMentions, attachments, onOpenAttachment],
   )
   // data-md-root marks the subtree as rendered markdown: copying a selection
   // that touches it re-serializes it back to markdown source (lib/copyMarkdown).
@@ -665,7 +766,8 @@ export const Markdown = memo(function Markdown({ text, variant = 'chat', linkCtx
   return (
     <div ref={rootRef} className={className ?? ''} data-md-root="">
       <ReactMarkdown
-        remarkPlugins={(hardBreaks ?? variant === 'chat') ? BREAK_PLUGINS : REFLOW_PLUGINS}
+        remarkPlugins={[...((hardBreaks ?? variant === 'chat') ? BREAK_PLUGINS : REFLOW_PLUGINS), hydraPlugin]}
+        urlTransform={(url) => url.startsWith('hydra-reference:') || url.startsWith('hydra-attachment:') ? url : defaultUrlTransform(url)}
         components={components}
       >
         {text}

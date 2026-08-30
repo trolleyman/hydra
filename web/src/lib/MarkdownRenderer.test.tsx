@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest'
-import { render } from '@testing-library/react'
+import { fireEvent, render } from '@testing-library/react'
 import { Markdown } from './MarkdownRenderer'
 
 // jsdom implements no media loading: the off-screen size probe behind a markdown
@@ -131,6 +131,43 @@ describe('Markdown', () => {
       )
       expect(container.querySelector('a')).toHaveTextContent('controller.go')
       expect(container.querySelector('a')).not.toHaveTextContent('... /')
+    })
+  })
+
+  describe('Hydra document nodes', () => {
+    it('renders structured file, commit, branch and agent references as semantic chips', () => {
+      const { container } = render(
+        <Markdown text="@file[web/src/App.tsx] @commit[abc1234] @branch[main] @agent[reviewer]" />,
+      )
+      expect([...container.querySelectorAll('[data-hydra-reference]')].map((node) => node.getAttribute('data-hydra-reference')))
+        .toEqual(['file', 'commit', 'branch', 'agent'])
+      expect(container.querySelector('[data-reference-value="web/src/App.tsx"]')).toHaveTextContent('web/src/App.tsx')
+    })
+
+    it('keeps reference syntax literal inside code', () => {
+      const { container } = render(<Markdown text="`@file[web/src/App.tsx]`" />)
+      expect(container.querySelector('[data-hydra-reference]')).toBeNull()
+      expect(container.querySelector('code')).toHaveTextContent('@file[web/src/App.tsx]')
+    })
+
+    it('renders an attachment at its sentence position and opens it', () => {
+      const attachment = {
+        id: 4,
+        filename: 'image1.png',
+        kind: 'image' as const,
+        url: '/upload/image1.png',
+        previewUrl: '/upload/image1.png',
+        uploading: false,
+        error: null,
+      }
+      const open = vi.fn()
+      const { container } = render(
+        <Markdown text="Look at [image1.png] before continuing." attachments={[attachment]} onOpenAttachment={open} />,
+      )
+      const chip = container.querySelector('.composer-static-attachment')!
+      expect(chip.parentElement).toHaveTextContent('Look at image1.png before continuing.')
+      fireEvent.click(chip)
+      expect(open).toHaveBeenCalledWith(attachment, chip)
     })
   })
 

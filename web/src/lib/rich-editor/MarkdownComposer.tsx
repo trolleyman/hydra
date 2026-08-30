@@ -1,5 +1,6 @@
 import type { Editor, JSONContent } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
+import { BubbleMenu } from '@tiptap/react/menus'
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { createRichEditorExtensions, parseRichMarkdown, serializeRichMarkdown } from './RichEditorCore'
 import type { AttachmentRegistry } from './AttachmentRegistry'
@@ -27,6 +28,7 @@ export interface MarkdownComposerProps {
   onKeyDown?: (event: KeyboardEvent, context: MarkdownComposerKeyContext) => boolean | void
   onPaste?: (event: ClipboardEvent, editor: Editor) => boolean | void
   editable?: boolean
+  autoFocus?: boolean
   placeholder?: string
   ariaLabel?: string
   spellCheck?: boolean
@@ -34,6 +36,14 @@ export interface MarkdownComposerProps {
   attachmentRegistry?: AttachmentRegistry
   references?: ComposerReference[]
   onRequestFiles?: () => void
+}
+
+function safeLinkHref(value: string): string | null {
+  const href = value.trim()
+  if (!href) return null
+  if (/^(https?:|mailto:|#|\/)/i.test(href)) return href
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(href)) return `https://${href}`
+  return null
 }
 
 type DiscoveryItem = { id: string; label: string; detail?: string; run: (editor: Editor) => void }
@@ -125,6 +135,7 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
   onKeyDown,
   onPaste,
   editable = true,
+  autoFocus = false,
   placeholder,
   ariaLabel = 'Message',
   spellCheck = false,
@@ -148,6 +159,8 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
   // document back. Values not in this bounded queue are genuinely external.
   const emittedValuesRef = useRef<string[]>([])
   const [announcement, setAnnouncement] = useState('')
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkHref, setLinkHref] = useState('')
   const [discovery, setDiscovery] = useState<DiscoveryState | null>(null)
   const discoveryRef = useRef<DiscoveryState | null>(null)
   const referencesRef = useRef(references)
@@ -208,6 +221,12 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
           setTimeout(() => { literalPasteRef.current = false }, 0)
           return false
         }
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+          event.preventDefault()
+          setLinkHref(String(editor?.getAttributes('link').href ?? ''))
+          setLinkOpen(true)
+          return true
+        }
         if (!onKeyDownRef.current || !editor) return false
         const markdown = serializeRichMarkdown(editor.getJSON())
         return onKeyDownRef.current(event, { editor, markdown, empty: markdown.trim() === '' }) === true
@@ -256,6 +275,10 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
       onSelectionChangeRef.current?.(updated)
     },
   })
+
+  useEffect(() => {
+    if (autoFocus && editable) editor?.commands.focus('end')
+  }, [autoFocus, editable, editor])
 
   useImperativeHandle(ref, () => ({
     editor,
@@ -315,6 +338,71 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
   return (
     <div className="relative h-full min-h-0">
       <EditorContent editor={editor} />
+      {editor && editable && (
+        <BubbleMenu
+          editor={editor}
+          shouldShow={({ editor: current }) => linkOpen || current.isActive('link')}
+          options={{ placement: 'top', offset: 8 }}
+          className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-gray-800"
+        >
+          {linkOpen ? (
+            <form
+              className="flex items-center gap-1"
+              onSubmit={(event) => {
+                event.preventDefault()
+                const href = safeLinkHref(linkHref)
+                if (!href) return
+                editor.chain().focus().extendMarkRange('link').setLink({ href }).run()
+                setLinkOpen(false)
+              }}
+            >
+              <input
+                autoFocus
+                aria-label="Link URL"
+                value={linkHref}
+                onChange={(event) => setLinkHref(event.target.value)}
+                placeholder="https://example.com"
+                className="h-7 w-56 rounded border border-gray-200 bg-white px-2 text-xs outline-none focus:border-blue-400 dark:border-gray-600 dark:bg-gray-900"
+              />
+              <button type="submit" className="h-7 rounded px-2 text-xs text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-500/10">Apply</button>
+              {editor.isActive('link') && (
+                <button
+                  type="button"
+                  onClick={() => { editor.chain().focus().extendMarkRange('link').unsetLink().run(); setLinkOpen(false) }}
+                  className="h-7 rounded px-2 text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]"
+                >
+                  Remove
+                </button>
+              )}
+            </form>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => { setLinkHref(String(editor.getAttributes('link').href ?? '')); setLinkOpen(true) }}
+                className="h-7 rounded px-2 text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/[0.06]"
+              >
+                Edit link
+              </button>
+              <a
+                href={String(editor.getAttributes('link').href ?? '')}
+                target="_blank"
+                rel="noreferrer"
+                className="h-7 rounded px-2 text-xs leading-7 text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-500/10"
+              >
+                Open
+              </a>
+              <button
+                type="button"
+                onClick={() => editor.chain().focus().extendMarkRange('link').unsetLink().run()}
+                className="h-7 rounded px-2 text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/[0.06]"
+              >
+                Remove
+              </button>
+            </>
+          )}
+        </BubbleMenu>
+      )}
       {discovery && (
         <div className="absolute bottom-1 left-2 z-30 max-h-64 min-w-52 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-gray-800" role="listbox" aria-label={discovery.kind === 'slash' ? 'Block commands' : 'References'}>
           {discovery.items.map((item, index) => (
