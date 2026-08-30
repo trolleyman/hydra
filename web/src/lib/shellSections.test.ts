@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseMatchLines, parseScriptSteps, splitScriptOutput, type ScriptStep } from './shellSections'
+import { consecutiveMatchLines, parseMatchLines, parseScriptSteps, splitScriptOutput, type ScriptStep } from './shellSections'
 
 function kinds(script: string) {
   return (parseScriptSteps(script) ?? []).map((s) => s.kind)
@@ -1014,6 +1014,16 @@ describe('splitScriptOutput over ANSI', () => {
 })
 
 describe('parseMatchLines', () => {
+  it('separates non-contiguous matches before stateful highlighting', () => {
+    const [open, later, adjacent] = parseMatchLines([
+      'docs/a.md:3:**opening bold',
+      'docs/a.md:18:ordinary later match',
+      'docs/a.md:19:the next source line',
+    ], [])
+    expect(consecutiveMatchLines(open, later)).toBe(false)
+    expect(consecutiveMatchLines(later, adjacent)).toBe(true)
+  })
+
   it('reads grep line numbers off a single file', () => {
     expect(parseMatchLines(['12:const a = 1', '40-  // context', '--', 'noise'], ['a.ts'])).toEqual([
       { path: '', num: '12', text: 'const a = 1', separator: false },
@@ -1069,6 +1079,27 @@ describe('parseMatchLines', () => {
     expect(parseMatchLines(['./go.mod:\tgithub.com/google/go-cmp v0.6.0'], ['.'])).toEqual([
       { path: './go.mod', num: '', text: '\tgithub.com/google/go-cmp v0.6.0', separator: false },
     ])
+  })
+
+  it('keeps search matches attributable around an empty git status', () => {
+    const script = `rg -n "runDesktop|control socket|control.sock|nsHost|nsHost|AVX|avx" Magefile.go magefiles internal web package.json . --glob '!web/node_modules/**' --glob '!web/dist/**' --glob '!.git/**'
+git status --short
+rg -n "Desktop" magefiles Magefile.go`
+    const output = [
+      "rg: Magefile.go: No such file or directory (os error 2)",
+      "rg: package.json: No such file or directory (os error 2)",
+      "magefiles/magefile.go:413:7: they're missing: pasta (+ its AVX2 sibling) is downloaded from",
+      'magefiles/magefile.go:701:    return errtrace.Wrap(runDesktop(false))',
+      'magefiles/magefile.go:720:    return errtrace.Wrap(runDesktop(true))',
+      'magefiles/magefile.go:701:    return errtrace.Wrap(runDesktop(false))',
+      'magefiles/magefile.go:720:    return errtrace.Wrap(runDesktop(true))',
+    ].join('\n')
+
+    const sections = splitScriptOutput(steps(script), output)
+    const matches = sections?.filter((section) => section.kind === 'matches') ?? []
+    expect(matches.flatMap((section) => section.lines)).toContain(
+      'magefiles/magefile.go:701:    return errtrace.Wrap(runDesktop(false))',
+    )
   })
 
   it('reads both numbered shapes out of one section', () => {

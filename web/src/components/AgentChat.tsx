@@ -55,7 +55,7 @@ import { diskOutputSpans } from '../lib/diskOutput'
 import { searchSummarySpans } from '../lib/searchSummary'
 import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
 import type { OutputSpan } from '../lib/outputSpan'
-import { parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
+import { consecutiveMatchLines, parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
 import { formatBytes } from '../lib/formatBytes'
 import { highlightHtml, highlightLines, splitHighlightedLines } from '../lib/highlightCore'
@@ -2763,10 +2763,9 @@ interface ScriptOutputRow {
 
 // scriptMatchRows renders a search's output: the file line numbers grep printed
 // in the gutter, the rest highlighted as the file it came from. Consecutive
-// lines from the SAME file are highlighted together - a search prints
-// non-contiguous lines, so this is as much context as the highlighter can
-// honestly be given, and it keeps a multi-file search from colouring one file's
-// lines by another's language.
+// source lines from the same file are highlighted together; a gap starts a fresh
+// run so an unterminated construct in omitted source cannot leak into the next
+// match. This also keeps one file from colouring another's lines.
 function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): ScriptOutputRow[] {
   // What the search named, as a language: one file gives its own, and several
   // give theirs only when they agree (two searches of two .go files print no
@@ -2778,6 +2777,7 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   const rows: ScriptOutputRow[] = []
   let run: MatchLine[] = []
   let runLang = ''
+  let previous: MatchLine | null = null
   // The file every line of the section came from, when the search named exactly
   // one - a line's own `path:` prefix says it otherwise, and is shown.
   const onlyPath = section.match.paths.length === 1 ? section.match.paths[0] : ''
@@ -2796,13 +2796,15 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   for (const line of parseMatchLines(section.lines, section.match.paths, section.match.numbered)) {
     if (line.separator) {
       flush()
+      previous = null
       rows.push({ num: '', html: '', tone: 'plain' })
       continue
     }
     const lang = line.path ? langFromPath(line.path) : only
-    if (lang !== runLang) flush()
+    if (lang !== runLang || (previous && !consecutiveMatchLines(previous, line))) flush()
     runLang = lang
     run.push(line)
+    previous = line
   }
   flush()
   return rows
@@ -2880,7 +2882,7 @@ function scriptBannerRows(section: Extract<ScriptSection, { kind: 'banners' }>):
 // by its own extension and numbered by its own line numbers, the script's `echo`
 // separators coloured as the strings they are, and anything unattributed left as
 // the plain terminal text it was.
-function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
+export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
   const rows: ScriptOutputRow[] = []
   for (const section of sections) {
     if (section.kind === 'matches') {
