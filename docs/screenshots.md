@@ -143,3 +143,21 @@ appearing all at once at the end (see the streaming section in
 [artifacts.md](artifacts.md#streaming-outputs-hydraartifact)). The `--simulation`
 server also demos this: its in-flight `components` set trickles tiles in over the
 artifacts WebSocket (`internal/http/simulation.go`, `HandleArtifactsWS`).
+
+## Focused theme snippets for chat
+
+For a small visual treatment that does not have its own simulation state, use
+`web/scripts/capture-theme-snippet.ts`. It renders an HTML fragment against the
+production stylesheet and writes sharp light and dark captures for showing in
+chat. From `web/`, after `aube run build`:
+
+```bash
+node scripts/capture-theme-snippet.ts \
+  --html /tmp/example.html --output /tmp/example --width 760 --height 180
+```
+
+Put `data-capture` on the fragment's outer element for a tight crop. The command
+writes `/tmp/example-light@2x.png` and `/tmp/example-dark@2x.png`. The fragment is
+throwaway input; do not commit a fixture for a one-off design decision. Use the
+full simulation screenshot workflow above whenever behavior, surrounding layout,
+or application state matters.
