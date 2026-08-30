@@ -95,6 +95,21 @@ import "C"`
     expect(out[0]).not.toContain('token keyword')
     expect(out[2]).toContain('token keyword')
   })
+
+  it('keeps Go syntax after a raw string containing a double quote', () => {
+    const src = [
+      'func shellQuoteForce(s string) string {',
+      '  containsDoubleQuote := strings.Contains(s, `"`)',
+      '  return `"` + escaped + `"`',
+      '}',
+      'func after() string { return "ok" }',
+    ].join('\n')
+    const out = highlightLines(src, 'go')
+
+    expect(out[2]).toContain('token keyword')
+    expect(out[4]).toContain('token keyword')
+    expect(out.map(strip)).toEqual(src.split('\n'))
+  })
 })
 
 // No Prism grammar we can find derails, so the recovery path is driven here with
