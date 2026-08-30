@@ -867,6 +867,27 @@ body {
   }
 }
 
+/* WebKitGTK/WKWebView repaint a large diff surface on every animation frame,
+   even when the animation is a tiny status mark in the other pane. AgentDetail
+   adds this root class only while a diff is visible in a WebKit desktop shell.
+   Keep the useful still states (striped progress, spinner shape, spark mark), but
+   stop their decorative loops so a settled diff also settles the paint loop. */
+.hydra-webkit-diff-open .animate-status-pulse,
+.hydra-webkit-diff-open .animate-barber-pole,
+.hydra-webkit-diff-open .animate-gradient,
+.hydra-webkit-diff-open .animate-shimmer,
+.hydra-webkit-diff-open .animate-spin,
+.hydra-webkit-diff-open .animate-pulse,
+.hydra-webkit-diff-open .work-spark,
+.hydra-webkit-diff-open .work-spark-spoke,
+.hydra-webkit-diff-open .chat-text-shimmer {
+  animation: none !important;
+}
+.hydra-webkit-diff-open .chat-text-shimmer {
+  background-image: none;
+  color: inherit;
+}
+
 /* --- ANSI terminal output (ansiToHtml) ------------------------------------ */
 
 /* SGR colours rendered from bash tool output. Two palettes - a darker set for

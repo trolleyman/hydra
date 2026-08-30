@@ -177,6 +177,12 @@ and `web/src/DiffViewer.tsx`):
   open, underlying native scrollbar chrome becomes transparent without removing
   its gutter; this prevents WebKitGTK from compositing scroll thumbs through the
   modal without shifting the page.
+- A visible diff pauses decorative infinite animations in the WebKit desktop
+  shells. WebKitGTK and WKWebView otherwise keep scheduling page-wide style and
+  paint work for tiny status, progress and chat animations after the diff has
+  fully settled. `AgentDetail` owns the `hydra-webkit-diff-open` root class;
+  closing the diff restores the motion, and browsers plus Windows WebView2 are
+  unaffected.
 - Codex `View Image` tool cards resolve their path-only result through the
   agent-files endpoint and use the shared thumbnail/lightbox treatment. A
   successful durable `tool_completed` event grants an exact absolute-path

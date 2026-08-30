@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hasNativeFolderPicker, hasNativeNotifications, isCompactChatWindow, onDesktopCommand, onDesktopImagePaste, openChatWindow, postDesktopMessage } from './desktopBridge'
+import { hasNativeFolderPicker, hasNativeNotifications, hasWebKitDesktopBridge, isCompactChatWindow, onDesktopCommand, onDesktopImagePaste, openChatWindow, postDesktopMessage } from './desktopBridge'
 
 describe('desktopBridge', () => {
   afterEach(() => {
     delete (window as Window & { hydraDesktopCapabilities?: unknown }).hydraDesktopCapabilities
+    delete (window as Window & { webkit?: unknown }).webkit
+    delete (window as Window & { chrome?: unknown }).chrome
     vi.restoreAllMocks()
   })
   it('delivers native commands and removes the listener', () => {
@@ -32,6 +34,15 @@ describe('desktopBridge', () => {
 
   it('reports no native transport in an ordinary browser', () => {
     expect(postDesktopMessage({ type: 'show-main-window' })).toBe(false)
+    expect(hasWebKitDesktopBridge()).toBe(false)
+  })
+
+  it('distinguishes WebKit desktop shells from Windows WebView2', () => {
+    ;(window as Window & { chrome?: object }).chrome = { webview: { postMessage: vi.fn() } }
+    expect(hasWebKitDesktopBridge()).toBe(false)
+    delete (window as Window & { chrome?: unknown }).chrome
+    ;(window as Window & { webkit?: object }).webkit = { messageHandlers: { hydra: { postMessage: vi.fn() } } }
+    expect(hasWebKitDesktopBridge()).toBe(true)
   })
 
   it('opens an existing chat at its canonical responsive route', () => {

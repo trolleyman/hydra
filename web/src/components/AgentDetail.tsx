@@ -23,7 +23,7 @@ import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
 import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, FolderGit2, ExternalLink } from 'lucide-react'
-import { openChatWindow } from '../lib/desktopBridge'
+import { hasWebKitDesktopBridge, openChatWindow } from '../lib/desktopBridge'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -945,6 +945,16 @@ export function AgentDetail({
   // Is the diff currently on screen? Wide: the inspector pane isn't collapsed.
   // Narrow: the single pane is showing the full-screen diff (working collapsed).
   const diffShown = !agent.focused && (isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working')
+  // A settled diff does no layout work, but each decorative infinite animation
+  // still schedules a style update and paint every frame. WebKitGTK/WKWebView
+  // repaint much more of the large diff backing surface than Chromium does, so
+  // the desktop app stays sluggish simply while the pane is visible. Pause the
+  // loops only for WebKit desktop windows and restore them when the diff closes.
+  useEffect(() => {
+    if (!diffShown || !hasWebKitDesktopBridge()) return
+    document.documentElement.classList.add('hydra-webkit-diff-open')
+    return () => document.documentElement.classList.remove('hydra-webkit-diff-open')
+  }, [diffShown])
   // The diff-sidebar toggle (top bar + Ctrl+,): wide hides/shows the inspector
   // pane; narrow flips the single pane between working and full-screen diff.
   const toggleDiffSidebar = useCallback(() => {
