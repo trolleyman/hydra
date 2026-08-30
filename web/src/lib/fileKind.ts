@@ -61,7 +61,7 @@ export function fileKind(name: string): FileKind {
 // highlight on the spot, so a name here has to be an EAGER grammar (prism.ts) to
 // show up at all - which is why the two are not simply merged.
 const LANG_BY_EXT: Record<string, string> = {
-  ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+  ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
   mjs: 'javascript', cjs: 'javascript', json: 'json', go: 'go', py: 'python',
   rb: 'ruby', rs: 'rust', java: 'java', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp',
   hpp: 'cpp', cs: 'csharp', php: 'php', swift: 'swift', kt: 'kotlin', kts: 'kotlin',

@@ -1417,26 +1417,61 @@ interface Distribution {
   // saying so is what keeps a self-identifying neighbour (most often a trailing
   // `rg -n`) from being thrown away along with them.
   plain: Set<number>
-  languageOnly: Set<number>
+  languageOnly: Map<number, string>
 }
 
-// All of these producers read source in one known language. Their boundary may
-// be lost (most often because the result was truncated at the front), but
-// colouring the combined text is still certain even though paths and gutters
-// are not.
+const SCRIPT_FAMILY = new Set(['javascript', 'jsx', 'typescript', 'tsx'])
+
+function compatibleSourceLanguage(languages: string[]): string | null {
+  if (languages.length === 0 || languages.some((language) => !language)) return null
+  if (languages.every((language) => language === languages[0])) return languages[0]
+  if (!languages.every((language) => SCRIPT_FAMILY.has(language))) return null
+  const typed = languages.some((language) => language === 'typescript' || language === 'tsx')
+  const jsx = languages.some((language) => language === 'jsx' || language === 'tsx')
+  if (typed && jsx) return 'tsx'
+  if (typed) return 'typescript'
+  return jsx ? 'jsx' : 'javascript'
+}
+
+function pathForLanguage(language: string): string {
+  if (language === 'typescript') return 'source.ts'
+  if (language === 'javascript') return 'source.js'
+  return `source.${language}`
+}
+
+function sourceLanguages(step: ScriptStep): string[] | null {
+  if (step.kind === 'view') return [langFromPath(step.view.path)]
+  if (step.kind !== 'matches') return null
+  const languages = step.match.paths.map(langFromPath).filter(Boolean)
+  // A recursive/glob search cannot enumerate its paths, but its command still
+  // often states the source family (`*.test.ts`, `src/**/*.tsx`). Those suffixes
+  // are enough to choose a grammar even though they cannot identify a file or
+  // license a gutter.
+  for (const match of step.command.matchAll(/\.([mc]?[jt]sx?)(?=$|[\s'"*?}\]])/gi)) {
+    const language = langFromPath(`source.${match[1]}`)
+    if (language) languages.push(language)
+  }
+  return languages.length > 0 ? languages : null
+}
+
+// All of these producers read compatible source. Their boundary may be lost
+// (most often because a read ended before its requested range), but colouring
+// the combined text is still certain even though paths and gutters are not.
 function commonViewLanguage(producers: ScriptStep[]): string | null {
-  if (producers.length < 2 || producers.some((p) => p.kind !== 'view')) return null
-  const languages = producers.map((p) => langFromPath((p as Extract<ScriptStep, { kind: 'view' }>).view.path))
-  return languages[0] && languages.every((lang) => lang === languages[0]) ? languages[0] : null
+  if (producers.length < 2) return null
+  const groups = producers.map(sourceLanguages)
+  if (groups.some((group) => group == null)) return null
+  return compatibleSourceLanguage(groups.flatMap((group) => group ?? []))
 }
 
 function languageOnlyDistribution(producers: ScriptStep[], slice: string[]): Distribution | null {
-  if (!commonViewLanguage(producers)) return null
+  const language = commonViewLanguage(producers)
+  if (!language) return null
   return {
     parts: producers.map((_, i) => i === 0 ? slice : []),
     pinned: producers.map(() => false),
     plain: new Set(),
-    languageOnly: new Set([0]),
+    languageOnly: new Map([[0, language]]),
   }
 }
 
@@ -1483,11 +1518,11 @@ function verifiedSearchBeforeView(
     const parts = producers.map(() => [] as string[])
     const pinned = producers.map(() => false)
     const plain = new Set<number>()
-    const languageOnly = new Set<number>()
+    const languageOnly = new Map<number, string>()
     before?.parts.forEach((part, i) => { parts[i] = part })
     before?.pinned.forEach((value, i) => { pinned[i] = value })
     before?.plain.forEach((i) => plain.add(i))
-    before?.languageOnly.forEach((i) => languageOnly.add(i))
+    before?.languageOnly.forEach((language, i) => languageOnly.set(i, language))
     parts[searchAt] = slice.slice(runStart, boundary)
     parts[viewAt] = tail
     pinned[searchAt] = true
@@ -1512,7 +1547,7 @@ function verifiedSearchBeforeView(
 // count - see searchExtent.
 function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySet<ScriptStep>): Distribution | null {
   if (producers.length === 0) return null
-  if (producers.length === 1) return { parts: [slice], pinned: [true], plain: new Set(), languageOnly: new Set() }
+  if (producers.length === 1) return { parts: [slice], pinned: [true], plain: new Set(), languageOnly: new Map() }
 
   const verified = verifiedSearchBeforeView(producers, slice, failed)
   if (verified) return verified
@@ -1536,7 +1571,7 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
       parts: producers.map((_, i) => i === last ? slice : []),
       pinned: producers.map((_, i) => i === last),
       plain: new Set(),
-      languageOnly: new Set(),
+      languageOnly: new Map(),
     }
   }
   if (suffix != null && suffix < slice.length) {
@@ -1545,12 +1580,12 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
     const parts = producers.map(() => [] as string[])
     const pinned = producers.map(() => false)
     const plain = new Set<number>()
-    const languageOnly = new Set<number>()
+    const languageOnly = new Map<number, string>()
     if (before) {
       before.parts.forEach((part, i) => { parts[i] = part })
       before.pinned.forEach((p, i) => { pinned[i] = p })
       before.plain.forEach((i) => plain.add(i))
-      before.languageOnly.forEach((i) => languageOnly.add(i))
+      before.languageOnly.forEach((language, i) => languageOnly.set(i, language))
     } else {
       // Several consecutive reads with no headings between them have no
       // recoverable boundary at all. Their combined output goes on the first
@@ -1655,7 +1690,7 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
     parts: out,
     pinned: producers.map((_, i) => exact.every((e, j) => j >= i || e)),
     plain: new Set(),
-    languageOnly: new Set(),
+    languageOnly: new Map(),
   }
 }
 
@@ -1728,6 +1763,26 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
         sections.push({ kind: 'plain', lines: part, raw: rawPart })
         return
       }
+      const inferredLanguage = languageOnly.get(i)
+      if (inferredLanguage) {
+        const view = step.kind === 'view' && langFromPath(step.view.path) === inferredLanguage
+          ? { ...step.view, start: null, end: null, ranges: undefined, numbered: false, languageOnly: true }
+          : {
+              path: pathForLanguage(inferredLanguage),
+              start: null,
+              end: null,
+              numbered: false,
+              languageOnly: true,
+              command: 'command' in step ? step.command : '',
+            }
+        sections.push({
+          kind: 'view',
+          view,
+          lines: part,
+          raw: rawPart,
+        })
+        return
+      }
       // More lines than the range could have produced (an error, a banner, a
       // marker that did not fire) means this is not what the parse thinks it is.
       if (step.kind === 'view' && (limit == null || part.length <= limit)) {
@@ -1738,7 +1793,7 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
         // numbering a file's lines from a start that is a guess.
         const view = pinned[i]
           ? step.view
-          : { ...step.view, start: null, end: null, ranges: undefined, ...(languageOnly.has(i) && { numbered: false, languageOnly: true }) }
+          : { ...step.view, start: null, end: null, ranges: undefined }
         sections.push({ kind: 'view', view, lines: part, raw: rawPart })
       } else if (step.kind === 'echo' && part.length <= (limit ?? 0)) {
         // The script says what these lines are, so they render as the string it

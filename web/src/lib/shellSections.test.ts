@@ -1167,6 +1167,36 @@ rg -n "NewManager" internal/cli internal/http | head -140`
     })
   })
 
+  it('uses the richest compatible JS-family grammar when source boundaries are unknown', () => {
+    const script = `rg -n "extractFiles" web/src/api/*.test.ts | head -120
+sed -n '1,10p' web/src/api/uploads.test.ts
+sed -n '1,10p' web/src/DiffViewer.tsx
+sed -n '1,10p' web/src/components/AgentTerminal.tsx`
+    const output = [
+      "import { describe } from 'vitest'",
+      'type Props = { value: string }',
+      'export function Panel(props: Props) {',
+      '  return <div>{props.value}</div>',
+      '}',
+    ].join('\n')
+
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections).toHaveLength(1)
+    expect(sections?.[0]).toMatchObject({
+      kind: 'view',
+      view: { path: 'source.tsx', start: null, languageOnly: true },
+    })
+  })
+
+  it.each([
+    ['sed -n 1,2p a.js\nsed -n 1,2p b.jsx', 'source.jsx'],
+    ['sed -n 1,2p a.js\nsed -n 1,2p b.ts', 'source.ts'],
+    ['sed -n 1,2p a.js\nsed -n 1,2p b.jsx\nsed -n 1,2p c.ts\nsed -n 1,2p d.tsx', 'source.tsx'],
+  ])('chooses a compatible grammar for %s', (commands, path) => {
+    const sections = splitScriptOutput(steps(commands), 'const value = 1\nconst other = 2')
+    expect(sections?.[0]).toMatchObject({ kind: 'view', view: { path, languageOnly: true } })
+  })
+
   it('reads both numbered shapes out of one section', () => {
     // Two searches merged into one section: the first named one file, so grep
     // printed `12:`, and the second named several, so it printed `path:441:`.
