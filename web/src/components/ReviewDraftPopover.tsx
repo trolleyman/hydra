@@ -13,7 +13,8 @@
 // one comment you are not sure enough about to send yet, and without this the only
 // way to hold it back was to delete it and rewrite it later.
 
-import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, MessagesSquare, Trash2, Send, TriangleAlert, X } from 'lucide-react'
 import type { PendingReviewComment } from '../lib/reviewComments'
 import { Tooltip } from './Tooltip'
@@ -40,12 +41,33 @@ export function ReviewDraftPopover({ comments, projectId, staleIds, submitting, 
   // and a newly written comment appearing pre-unticked would be a trap.
   const [heldBack, setHeldBack] = useState<Set<number>>(new Set())
   const wrapRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number; width: number; above: boolean } | null>(null)
+
+  const positionPanel = useCallback(() => {
+    const trigger = wrapRef.current?.getBoundingClientRect()
+    if (!trigger) return
+    const pad = 8
+    const gap = 6
+    const width = Math.min(352, window.innerWidth - pad * 2)
+    const left = Math.min(Math.max(pad, trigger.right - width), window.innerWidth - width - pad)
+    const height = panelRef.current?.getBoundingClientRect().height ?? 0
+    const roomBelow = window.innerHeight - trigger.bottom - gap - pad
+    const above = height > 0 && height > roomBelow && trigger.top - gap - pad > roomBelow
+    const top = above
+      ? Math.max(pad, trigger.top - gap - height)
+      : Math.min(trigger.bottom + gap, Math.max(pad, window.innerHeight - height - pad))
+    setPanelPos((prev) => prev && prev.top === top && prev.left === left && prev.width === width && prev.above === above
+      ? prev
+      : { top, left, width, above })
+  }, [])
 
   // Close on outside click / Escape while the popover is open.
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (!wrapRef.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', onDown)
@@ -55,6 +77,26 @@ export function ReviewDraftPopover({ comments, projectId, staleIds, submitting, 
       document.removeEventListener('keydown', onKey)
     }
   }, [open])
+
+  // The panel is portalled out of the diff file's overflow clipping. Position it
+  // from the trigger before paint, then keep it attached while the inner diff
+  // pane or window scrolls.
+  useLayoutEffect(() => {
+    if (!open) return
+    positionPanel()
+    window.addEventListener('scroll', positionPanel, true)
+    window.addEventListener('resize', positionPanel)
+    return () => {
+      window.removeEventListener('scroll', positionPanel, true)
+      window.removeEventListener('resize', positionPanel)
+    }
+  }, [open, positionPanel])
+
+  // The first positioning pass cannot know the mounted panel's height. Measure
+  // it once it exists so a trigger near the viewport bottom can open upward.
+  useLayoutEffect(() => {
+    if (open && panelPos) positionPanel()
+  }, [open, panelPos, positionPanel])
 
   // Nothing queued -> render nothing (the button appears only once there's a
   // review to submit).
@@ -72,26 +114,32 @@ export function ReviewDraftPopover({ comments, projectId, staleIds, submitting, 
 
   return (
     <div ref={wrapRef} className="relative">
-      <Tooltip content="Review queued comments and submit them all at once" side="bottom">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className="flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer shadow-sm"
-        >
-          <MessagesSquare className="w-3.5 h-3.5" />
-          <span>Submit review</span>
-          <span className="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-white/25 text-3xs tabular-nums leading-none">
-            {comments.length}
-          </span>
-          {staleCount > 0 && (
-            <TriangleAlert className="w-3.5 h-3.5 text-amber-200" />
-          )}
-          <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
-        </button>
-      </Tooltip>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className="flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer shadow-sm"
+      >
+        <MessagesSquare className="w-3.5 h-3.5" />
+        <span>Submit review</span>
+        <span className="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-white/25 text-3xs tabular-nums leading-none">
+          {comments.length}
+        </span>
+        {staleCount > 0 && (
+          <TriangleAlert className="w-3.5 h-3.5 text-amber-200" />
+        )}
+        <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+      </button>
 
-      {open && (
-        <div className="absolute right-0 top-full mt-1.5 z-[60] w-[22rem] max-w-[90vw] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl animate-popover-in [--popover-origin:top_right]">
+      {open && panelPos && createPortal(
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-label="Review queued comments"
+          data-portal-menu
+          style={{ top: panelPos.top, left: panelPos.left, width: panelPos.width, '--popover-origin': panelPos.above ? 'bottom right' : 'top right' } as CSSProperties}
+          className="fixed z-[9999] max-h-[calc(100vh-1rem)] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl animate-popover-in"
+        >
           <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
               Review comments <span className="text-gray-400 dark:text-gray-500 tabular-nums">{comments.length}</span>
@@ -225,7 +273,8 @@ export function ReviewDraftPopover({ comments, projectId, staleIds, submitting, 
               {submitting ? 'Sending...' : `Submit ${selected.length} comment${selected.length === 1 ? '' : 's'}`}
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

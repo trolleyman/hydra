@@ -743,7 +743,9 @@ see is not otherwise visible on the card. Every draft card also carries the same
 Submit review popover as the Changes toolbar in a footer at its bottom right.
 Both instances are the shared `ReviewDraftPopover`, including the chevron,
 selection list, held-back state, anchored entrance motion and submission path, so
-the review can be inspected and published without returning to the toolbar.
+the review can be inspected and published without returning to the toolbar. Its
+panel is portalled and viewport-positioned: the inline trigger lives inside the
+diff file's rounded overflow clip, where an in-place popup would be cut off.
 
 **A reply can join the draft review or be sent immediately.** Add to agent review
 stores it as a draft under the published parent, while Comment to agent publishes
