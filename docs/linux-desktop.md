@@ -226,6 +226,8 @@ runtime paths, executable discovery, updates, and sandbox helper behavior.
 ### Windows, menus, and deep links
 
 - Register a desktop entry and stable application ID.
+- Keep the GTK application ID identical to the desktop-entry basename so
+  Wayland and X11 associate every Hydra window with the installed Hydra icon.
 - Support New Full Window, New Chat Window, Settings, and Quit from the
   application menu and desktop actions where the environment exposes them.
 - Treat single-instance activation as a request delivered to the existing app,

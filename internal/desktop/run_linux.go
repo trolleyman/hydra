@@ -501,11 +501,11 @@ static void hydra_startup(GApplication *application, gpointer data) {
 	g_object_unref(menu);
 }
 
-static int hydra_desktop_run(const char *uri, const char *data_directory, const char *cache_directory) {
+static int hydra_desktop_run(const char *application_id, const char *uri, const char *data_directory, const char *cache_directory) {
 	HydraDesktop desktop = { .uri = uri, .origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL), .keep_running = TRUE };
 	if (desktop.origin == NULL) return 2;
 	desktop.network_session = webkit_network_session_new(data_directory, cache_directory);
-	GtkApplication *app = gtk_application_new("dev.hydra.Hydra", G_APPLICATION_HANDLES_COMMAND_LINE);
+	GtkApplication *app = gtk_application_new(application_id, G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_signal_connect(app, "startup", G_CALLBACK(hydra_startup), &desktop);
 	g_signal_connect(app, "activate", G_CALLBACK(hydra_activate), &desktop);
 	g_signal_connect(app, "command-line", G_CALLBACK(hydra_command_line), &desktop);
@@ -544,6 +544,8 @@ import (
 func run(rawURL string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	applicationID := C.CString(linuxApplicationID)
+	defer C.free(unsafe.Pointer(applicationID))
 	uri := C.CString(rawURL)
 	defer C.free(unsafe.Pointer(uri))
 	dataDirectory, cacheDirectory, err := webProfileDirectories()
@@ -559,7 +561,7 @@ func run(rawURL string) error {
 	defer C.free(unsafe.Pointer(dataPath))
 	cachePath := C.CString(cacheDirectory)
 	defer C.free(unsafe.Pointer(cachePath))
-	if status := C.hydra_desktop_run(uri, dataPath, cachePath); status != 0 {
+	if status := C.hydra_desktop_run(applicationID, uri, dataPath, cachePath); status != 0 {
 		return errtrace.Wrap(fmt.Errorf("native application exited with status %d", int(status)))
 	}
 	if C.hydra_desktop_keep_running() == 0 && daemon.IsDesktopManaged("") {
