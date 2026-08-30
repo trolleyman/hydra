@@ -16,17 +16,28 @@ import (
 )
 
 type HeadContext struct {
-	ProjectRoot      string
-	Worktree         string
-	ProjectDirectory bool
-	Prompt           string
-	AgentType        string
-	Plan             string
+	ProjectRoot string
+	// Worktree is the managed checkout for a worktree/review chat. nil means the
+	// head deliberately operates in ProjectRoot itself.
+	Worktree  *string
+	Prompt    string
+	AgentType string
+	Plan      string
 	// The branch the head is based on, used only to recognise a fast-forward
 	// that absorbed the base (see reconcileCommits). Empty is fine - the
 	// collapse then only happens for a merge Hydra itself performed, which
 	// names its ref explicitly.
 	BaseBranch string
+}
+
+// WorkingDirectory returns the checkout whose HEAD and provider transcript
+// belong to this chat. Project-directory heads have no managed worktree and use
+// the repository root directly.
+func (c HeadContext) WorkingDirectory() string {
+	if c.Worktree != nil {
+		return *c.Worktree
+	}
+	return c.ProjectRoot
 }
 
 // ContextResolver maps the globally-unique head id carried by session
@@ -112,8 +123,8 @@ func (m *Manager) store(id string) (*Store, error) {
 		seed.Provider, seed.Plan = ctx.AgentType, json.RawMessage(ctx.Plan)
 		_, _, _ = s.AppendSource("hydra:initial-plan", seed)
 	}
-	if s.Snapshot().Head == "" && ctx.Worktree != "" {
-		if head, err := git.ResolveRef(ctx.Worktree, "HEAD"); err == nil {
+	if workingDir := ctx.WorkingDirectory(); s.Snapshot().Head == "" && workingDir != "" {
+		if head, err := git.ResolveRef(workingDir, "HEAD"); err == nil {
 			observed := HeadObserved{}
 			observed.Head = head
 			_, _ = s.Append(observed)
@@ -559,15 +570,16 @@ func causalItemID(payload any) string {
 }
 
 func (w *worker) reconcileCommits(id, causalItemID, mergedRef string) {
-	if w.ctx.Worktree == "" {
+	workingDir := w.ctx.WorkingDirectory()
+	if workingDir == "" {
 		return
 	}
 	oldHead := w.store.Snapshot().Head
-	newHead, err := git.ResolveRef(w.ctx.Worktree, "HEAD")
+	newHead, err := git.ResolveRef(workingDir, "HEAD")
 	if err != nil || newHead == oldHead {
 		return
 	}
-	isAncestor, ancestorErr := git.IsAncestor(w.ctx.Worktree, oldHead, newHead)
+	isAncestor, ancestorErr := git.IsAncestor(workingDir, oldHead, newHead)
 	if oldHead != "" && ancestorErr == nil && isAncestor {
 		if w.appendAbsorbedBase(id, oldHead, newHead, mergedRef) {
 			return
@@ -575,7 +587,7 @@ func (w *worker) reconcileCommits(id, causalItemID, mergedRef string) {
 		// Walk first parents only: a merge (e.g. the agent merging main in) then
 		// surfaces as one commit rather than replaying every merged-in commit into
 		// the chat feed. The merge's own summary carries the collapsed list.
-		commits, err := git.ListFirstParentCommits(w.ctx.Worktree, oldHead, newHead)
+		commits, err := git.ListFirstParentCommits(workingDir, oldHead, newHead)
 		if err == nil {
 			for i := len(commits) - 1; i >= 0; i-- {
 				c := commits[i]
@@ -585,7 +597,11 @@ func (w *worker) reconcileCommits(id, causalItemID, mergedRef string) {
 				commit.AuthorEmail, commit.Timestamp = c.AuthorEmail, c.Timestamp
 				commit.Additions, commit.Deletions = c.Additions, c.Deletions
 				commit.CausalItemId = causalItemID
-				w.annotateMerge(&c, &commit, "")
+				incomingRef := ""
+				if c.SHA == newHead {
+					incomingRef = mergedRef
+				}
+				w.annotateMerge(&c, &commit, incomingRef)
 				if _, _, err := w.store.AppendSource("git:commit:"+c.SHA, commit); err != nil {
 					log.Printf("warn: chat events: append commit for %s: %v", id, err)
 				}
@@ -612,7 +628,7 @@ func (w *worker) annotateMerge(c *git.CommitInfo, commit *CommitCreated, mergedR
 	if !c.IsMerge() || len(c.Parents) < 2 {
 		return
 	}
-	merged, err := git.ListCommits(w.ctx.Worktree, c.Parents[0], c.Parents[1])
+	merged, err := git.ListCommits(w.ctx.WorkingDirectory(), c.Parents[0], c.Parents[1])
 	if err != nil || len(merged) == 0 {
 		return
 	}
@@ -654,11 +670,12 @@ func cappedMergedCommits(merged []git.CommitInfo) []api.ChatMergedCommit {
 // fast-forwarded onto something else (an agent merging a sibling head in), the
 // walk stays the honest account and this returns false.
 func (w *worker) appendAbsorbedBase(id, oldHead, newHead, mergedRef string) bool {
-	// A project-directory head works on the base branch itself. Every ordinary
-	// commit advances both HEAD and that branch tip, so equality with the base is
-	// not evidence that the head absorbed it. Real merge commits are still
+	// A project-directory head works on the checked-out branch itself. Every
+	// ordinary commit advances both HEAD and that branch tip, so equality is not
+	// evidence that it absorbed another ref. An explicit Hydra merge supplies
+	// that ref and still collapses a fast-forward here; real merge commits are
 	// annotated by the first-parent walk above.
-	if w.ctx.ProjectDirectory {
+	if w.ctx.Worktree == nil && mergedRef == "" {
 		return false
 	}
 	ref := mergedRef
@@ -668,14 +685,15 @@ func (w *worker) appendAbsorbedBase(id, oldHead, newHead, mergedRef string) bool
 	if ref == "" {
 		return false
 	}
-	if tip, err := git.ResolveRef(w.ctx.Worktree, ref); err != nil || tip != newHead {
+	workingDir := w.ctx.WorkingDirectory()
+	if tip, err := git.ResolveRef(workingDir, ref); err != nil || tip != newHead {
 		return false // not a fast-forward onto the base - a real merge commit, or the head's own work
 	}
-	merged, err := git.ListCommits(w.ctx.Worktree, oldHead, newHead)
+	merged, err := git.ListCommits(workingDir, oldHead, newHead)
 	if err != nil || len(merged) == 0 {
 		return false
 	}
-	c, err := git.GetCommitInfo(w.ctx.Worktree, newHead)
+	c, err := git.GetCommitInfo(workingDir, newHead)
 	if err != nil {
 		return false
 	}
@@ -725,14 +743,11 @@ func (m *Manager) importClaudeHistory(id string, w *worker) {
 			}
 		}
 	}
-	if w.ctx.Worktree == "" {
-		return
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
-	dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(w.ctx.Worktree))
+	dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(w.ctx.WorkingDirectory()))
 	transcript := claudestream.LatestTranscript(dir)
 	if transcript == "" {
 		return

@@ -2489,6 +2489,7 @@ func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, he
 		return &api.MergeConflictError{Error: api.MergeConflictErrorErrorMergeConflict, Code: 409, Details: errMsg}, nil
 	}
 	defer cleanup()
+	destinationChats := s.prepareMergeDestinationChats(projectRoot, target)
 
 	// Get author info from git config
 	authorName, authorEmail := gitConfigVal(projectRoot, "user.name"), gitConfigVal(projectRoot, "user.email")
@@ -2509,6 +2510,7 @@ func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, he
 		}
 		return &api.MergeConflictError{Error: api.MergeConflictErrorErrorMergeConflict, Code: 409, Details: errMsg}, nil
 	}
+	s.reconcileMergeDestinationChats(destinationChats, branchName)
 
 	// Keep-alive merge: the branch and worktree survive, so stacked children
 	// still have a valid parent (no reparenting) and there is nothing to tear
@@ -2548,6 +2550,57 @@ func (s *Server) performClaimedMerge(ctx context.Context, projectRoot string, he
 
 	s.notifyAgentsChanged(projectRoot, true)
 	return nil, nil
+}
+
+// prepareMergeDestinationChats observes the destination branch before a merge
+// moves it. Reconciliation after the merge can then describe the incoming
+// branch in every chat that owns that branch, including a project-directory
+// chat when the project checkout is on the destination.
+func (s *Server) prepareMergeDestinationChats(projectRoot, target string) []string {
+	if s.DB == nil || s.ChatEvents == nil {
+		return nil
+	}
+	agents, err := s.DB.ListAgents(projectRoot)
+	if err != nil {
+		log.Printf("warn: list destination chats before merging into %s: %v", target, err)
+		return nil
+	}
+	projectBranch, err := git.GetCurrentBranch(projectRoot)
+	if err != nil {
+		projectBranch = ""
+	}
+	ids := mergeDestinationChatIDs(agents, target, projectBranch)
+	prepared := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, err := s.ChatEvents.Snapshot(id); err != nil {
+			log.Printf("warn: observe destination chat %s before merging into %s: %v", id, target, err)
+			continue
+		}
+		prepared = append(prepared, id)
+	}
+	return prepared
+}
+
+func mergeDestinationChatIDs(agents []db.Agent, target, projectBranch string) []string {
+	ids := make([]string, 0)
+	for _, agent := range agents {
+		if !agent.ChatMode {
+			continue
+		}
+		if agent.BranchName == target || (agent.BranchName == "" && projectBranch == target) {
+			ids = append(ids, agent.ID)
+		}
+	}
+	return ids
+}
+
+func (s *Server) reconcileMergeDestinationChats(ids []string, mergedRef string) {
+	if s.ChatEvents == nil {
+		return
+	}
+	for _, id := range ids {
+		s.ChatEvents.ReconcileCommits(id, mergedRef)
+	}
 }
 
 func (s *Server) UpdateAgentFromBase(ctx context.Context, request api.UpdateAgentFromBaseRequestObject) (api.UpdateAgentFromBaseResponseObject, error) {

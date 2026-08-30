@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/trolleyman/hydra/internal/api"
 )
 
 func TestManagerPreservesProviderOrderAndWatches(t *testing.T) {
@@ -296,9 +298,7 @@ func TestManagerSequencesCommitAfterToolCompletion(t *testing.T) {
 	run("add", "file")
 	run("commit", "-qm", "base")
 	m := NewManager(func(id string) (HeadContext, bool) {
-		return HeadContext{
-			ProjectRoot: repo, Worktree: repo, BaseBranch: "main", ProjectDirectory: true,
-		}, id == "head"
+		return HeadContext{ProjectRoot: repo, BaseBranch: "main"}, id == "head"
 	})
 	if _, err := m.Snapshot("head"); err != nil { // opens store and observes baseline HEAD
 		t.Fatal(err)
@@ -332,6 +332,72 @@ func TestManagerSequencesCommitAfterToolCompletion(t *testing.T) {
 	}
 	if payload.IsMerge {
 		t.Fatalf("ordinary project-directory commit was presented as a merge: %+v", payload)
+	}
+}
+
+// A branch merged into the branch owned by a project-directory chat needs an
+// explicit source hint: unlike a managed worktree, every ordinary commit also
+// advances the project checkout's branch and must remain an ordinary row.
+func TestReconcileCommitsCollapsesExplicitProjectDirectoryMerge(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repo, "base"), []byte("base"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "base")
+	run("commit", "-qm", "base")
+	run("checkout", "-q", "-b", "hydra/incoming")
+	if err := os.WriteFile(filepath.Join(repo, "incoming"), []byte("incoming"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "incoming")
+	run("commit", "-qm", "incoming work")
+	run("checkout", "-q", "main")
+
+	m := NewManager(func(id string) (HeadContext, bool) {
+		return HeadContext{ProjectRoot: repo, BaseBranch: "main"}, id == "head"
+	})
+	if _, err := m.Snapshot("head"); err != nil {
+		t.Fatal(err)
+	}
+	run("merge", "--ff-only", "hydra/incoming")
+	m.ReconcileCommits("head", "hydra/incoming")
+
+	events, _, _, err := m.Before("head", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commits := []Event{}
+	for _, event := range events {
+		if event.Type == "commit_created" {
+			commits = append(commits, event)
+		}
+	}
+	if len(commits) != 1 {
+		t.Fatalf("want one collapsed commit event, got %d: %+v", len(commits), events)
+	}
+	var payload struct {
+		IsMerge     bool                   `json:"is_merge"`
+		MergedRef   string                 `json:"merged_ref"`
+		MergedCount int                    `json:"merged_count"`
+		Merged      []api.ChatMergedCommit `json:"merged_commits"`
+	}
+	if err := json.Unmarshal(commits[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.IsMerge || payload.MergedRef != "hydra/incoming" || payload.MergedCount != 1 {
+		t.Fatalf("commit payload = %+v", payload)
+	}
+	if len(payload.Merged) != 1 || payload.Merged[0].Subject != "incoming work" {
+		t.Fatalf("expanded commits = %+v", payload.Merged)
 	}
 }
 
@@ -371,8 +437,9 @@ func TestReconcileCommitsCollapsesFastForwardedBase(t *testing.T) {
 	run("checkout", "-q", "-b", "head")
 	run("reset", "-q", "--hard", "HEAD~1") // the head branched off before main's merge
 
+	storeRoot := t.TempDir()
 	m := NewManager(func(id string) (HeadContext, bool) {
-		return HeadContext{ProjectRoot: repo, Worktree: repo, BaseBranch: "main"}, id == "head"
+		return HeadContext{ProjectRoot: storeRoot, Worktree: &repo, BaseBranch: "main"}, id == "head"
 	})
 	if _, err := m.Snapshot("head"); err != nil { // opens the store and observes the baseline HEAD
 		t.Fatal(err)
@@ -430,8 +497,9 @@ func TestReconcileCommitsKeepsRealMergeCommit(t *testing.T) {
 	run("commit", "-qm", "base")
 	run("checkout", "-q", "-b", "head")
 
+	storeRoot := t.TempDir()
 	m := NewManager(func(id string) (HeadContext, bool) {
-		return HeadContext{ProjectRoot: repo, Worktree: repo, BaseBranch: "main"}, id == "head"
+		return HeadContext{ProjectRoot: storeRoot, Worktree: &repo, BaseBranch: "main"}, id == "head"
 	})
 	if _, err := m.Snapshot("head"); err != nil {
 		t.Fatal(err)
@@ -461,12 +529,16 @@ func TestReconcileCommitsKeepsRealMergeCommit(t *testing.T) {
 			continue
 		}
 		var payload struct {
-			Subject string `json:"subject"`
+			Subject   string `json:"subject"`
+			MergedRef string `json:"merged_ref"`
 		}
 		if err := json.Unmarshal(e.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
 		subjects = append(subjects, payload.Subject)
+		if payload.Subject == "Merge branch 'main'" && payload.MergedRef != "main" {
+			t.Fatalf("real merge ref = %q, want main", payload.MergedRef)
+		}
 	}
 	if len(subjects) != 2 || subjects[0] != "head work" || subjects[1] != "Merge branch 'main'" {
 		t.Fatalf("commit subjects = %v", subjects)
