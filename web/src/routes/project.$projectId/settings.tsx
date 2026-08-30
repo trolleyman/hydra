@@ -166,7 +166,7 @@ function ProjectSettingsPage() {
           has no header of its own. Browser preferences apply instantly, and
           About has no editable settings. */}
       {tab !== 'browser' && tab !== 'about' && <SettingsSaveAction dirty={hasUnsavedChanges} saving={saving} onSave={handleSave} />}
-      <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
+      <div className="flex-1 overflow-auto [scrollbar-gutter:stable] bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
           {/* Scope tabs: which settings store the page edits. Kept outside the
               loading swap so the strip doesn't flicker away on tab switch. */}

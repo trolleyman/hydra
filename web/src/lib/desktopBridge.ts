@@ -65,9 +65,12 @@ export function openFullWindow(): void {
 export function openChatWindow(projectId?: string, agentId?: string): void {
   if (postDesktopMessage({ type: 'new-chat-window', projectId, agentId })) return
   const url = projectId && agentId
-    ? `/project/${encodeURIComponent(projectId)}/agent/${encodeURIComponent(agentId)}?desktop=focused`
+    ? `/project/${encodeURIComponent(projectId)}/agent/${encodeURIComponent(agentId)}`
     : projectId ? `/focused/${encodeURIComponent(projectId)}` : '/'
-  window.open(url, '_blank', 'noopener')
+  // Browsers decide how much window chrome they permit, but `popup` requests a
+  // compact standalone window where supported. The route itself stays canonical
+  // and responsive, so the same URL also works as an ordinary tab.
+  window.open(url, '_blank', 'popup,noopener,noreferrer,width=940,height=780')
 }
 
 export function closeDesktopWindow(): void {

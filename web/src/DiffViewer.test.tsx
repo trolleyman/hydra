@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
 import { FileDiff, diffMetaKey } from './DiffViewer'
+import { commitParentSelection, reconcileRightSelection } from './lib/commitRange'
 import { bodyShape, buildSegments, regionKey, type RevealMap } from './lib/diffBody'
 import { DiffFile, DiffHunk, DiffLine, type DiffResponse } from './api'
 import { EXPANDER_ROW, UNIFIED_CODE_CLASS, SBS_CODE, type BodyShape } from './lib/diffMetrics'
@@ -17,6 +18,32 @@ import { EXPANDER_ROW, UNIFIED_CODE_CLASS, SBS_CODE, type BodyShape } from './li
 // IntersectionObserver, so FileDiff renders its body immediately rather than
 // waiting to be scrolled near.)
 afterEach(cleanup)
+
+const commits = [
+  { sha: 'new', short_sha: 'new', message: 'new', author_name: 'A', author_email: 'a@example.com', timestamp: '', additions: 1, deletions: 0, parent_sha: 'middle' },
+  { sha: 'middle', short_sha: 'middle', message: 'middle', author_name: 'A', author_email: 'a@example.com', timestamp: '', additions: 1, deletions: 0, parent_sha: 'old' },
+  { sha: 'old', short_sha: 'old', message: 'old', author_name: 'A', author_email: 'a@example.com', timestamp: '', additions: 1, deletions: 0, parent_sha: 'branch-point' },
+]
+
+describe('commit range selection', () => {
+  it('uses the oldest commit actual parent when isolating it', () => {
+    expect(commitParentSelection('old', commits)).toEqual({ type: 'base', sha: 'branch-point' })
+  })
+
+  it('moves left to the selected commit parent when a right click would invert the range', () => {
+    expect(reconcileRightSelection({ type: 'commit', sha: 'middle' }, { type: 'commit', sha: 'old' }, commits)).toEqual({
+      left: { type: 'base', sha: 'branch-point' },
+      right: { type: 'commit', sha: 'old' },
+    })
+  })
+
+  it('preserves a valid multi-commit range', () => {
+    expect(reconcileRightSelection({ type: 'commit', sha: 'old' }, { type: 'commit', sha: 'new' }, commits)).toEqual({
+      left: { type: 'commit', sha: 'old' },
+      right: { type: 'commit', sha: 'new' },
+    })
+  })
+})
 
 const line = (type: DiffLine.type, content: string, oldN: number | null, newN: number | null): DiffLine =>
   ({ type, content, old_line_num: oldN, new_line_num: newN })

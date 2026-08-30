@@ -18,7 +18,7 @@ import { hasNativeFolderPicker, pickNativeFolder } from '../lib/desktopBridge'
 // so the button hides; open surfaces the server's own text in a toast).
 export type FolderPickResult = FolderPickerOpenResponse
 
-/** Whether the UI should show a native "Browse..." button. */
+/** Whether the UI should show its compact native-folder browse button. */
 export async function folderPickerAvailable(): Promise<boolean> {
   if (hasNativeFolderPicker()) return true
   try {

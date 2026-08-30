@@ -34,8 +34,10 @@ Descriptions prefer useful structured input and stay short enough for the
 single-line sidebar surface:
 
 - A Bash command whose script starts with `# description` displays that line
-  verbatim as `# description`. This matches the description on its chat tool
-  card and avoids guessing at a grammatical rewrite.
+  verbatim as `# description`. The stored activity escapes the marker as
+  `\# description` so the sidebar's Markdown renderer does not treat it as a
+  heading. This matches the description on its chat tool card and avoids
+  guessing at a grammatical rewrite.
 - Other Bash commands display `$ command`, truncated when necessary.
 - File changes display `Editing file.go`, `Writing file.go`, or
   `Deleting file.go`; a multi-file item displays its count.
@@ -57,4 +59,5 @@ blocked on the user.
 Assistant messages are stored as written. The sidebar's existing single-line
 renderer collapses the content and truncates it to the available width, so the
 visible result is the start of the latest/final message without maintaining a
-second generated summary.
+second generated summary. Inline code is flattened into ordinary text in this
+narrow preview, keeping the truncation ellipsis visually clean.

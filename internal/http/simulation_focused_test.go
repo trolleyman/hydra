@@ -57,7 +57,7 @@ func TestSimulationIncludesFocusedChats(t *testing.T) {
 
 func TestSimulationUpdatesFocusedPermissions(t *testing.T) {
 	s := &SimulationServer{}
-	body := []byte(`{"filesystem_mode":"readonly","allow_commits":false}`)
+	body := []byte(`{"filesystem_mode":"readonly","allow_commits":false,"checkout_branch":"release"}`)
 	recorder := httptest.NewRecorder()
 	s.UpdateAgent(recorder, httptest.NewRequest("PATCH", "/api/projects/sim-project/agents/focused-edit", bytes.NewReader(body)), "sim-project", "focused-edit")
 	if recorder.Code != 200 {
@@ -70,5 +70,14 @@ func TestSimulationUpdatesFocusedPermissions(t *testing.T) {
 	}
 	if agent.AllowCommits == nil || *agent.AllowCommits {
 		t.Fatalf("allow_commits was not disabled: %+v", agent.AllowCommits)
+	}
+	recorder = httptest.NewRecorder()
+	s.GetRepositoryBranches(recorder, httptest.NewRequest("GET", "/api/projects/sim-project/repository/branches", nil), "sim-project")
+	var branches api.RepositoryBranchesResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &branches); err != nil {
+		t.Fatal(err)
+	}
+	if branches.Current != "release" {
+		t.Fatalf("current simulated branch = %q, want release", branches.Current)
 	}
 }

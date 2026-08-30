@@ -23,6 +23,12 @@ describe('renderMarkdown', () => {
     expect(container.textContent).toBe('a \\ b')
   })
 
+  it('renders an escaped heading marker literally', () => {
+    const { container } = render(<span>{renderMarkdown('\\# Run backend tests')}</span>)
+    expect(container.textContent).toBe('# Run backend tests')
+    expect(container.querySelector('strong')).toBeNull()
+  })
+
   it('leaves a backslash before a non-metachar untouched (Windows paths)', () => {
     const { container } = render(<span>{renderMarkdown('C:\\Users\\x')}</span>)
     expect(container.textContent).toBe('C:\\Users\\x')
@@ -93,6 +99,14 @@ describe('renderMarkdown', () => {
     expect(code?.textContent).toBe('const a = 1')
     // An inline chip, not the block-level one (which would blow the row height).
     expect(code?.className).not.toContain('block')
+  })
+
+  it('plainCode: flattens code into the preview text', () => {
+    const { container } = render(
+      <span>{renderMarkdown('Fixed as `a6620c03`', { singleLine: true, plainCode: true })}</span>,
+    )
+    expect(container.textContent).toBe('Fixed as a6620c03')
+    expect(container.querySelector('code')).toBeNull()
   })
 
   // CommonMark 6.1: a run of N backticks is closed by the next run of exactly N,

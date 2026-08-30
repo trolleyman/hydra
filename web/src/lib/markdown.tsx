@@ -119,7 +119,7 @@ const HEADING_RE = /^(#{1,6}[ \t]+)([^\n]*)/
 // styles (CommonMark escapes all ASCII punctuation; we stay minimal so e.g. a
 // Windows path `C:\Users` is untouched). Backslash itself is escapable so a
 // literal backslash before a metachar can be written unambiguously.
-const ESCAPABLE = new Set(['`', '*', '_', '~', '\\'])
+const ESCAPABLE = new Set(['`', '*', '_', '~', '#', '\\'])
 
 // parseInline splits text into styled/plain segments. The concatenation of all
 // segments' source (marker + value + marker, marker + pad + value + pad + marker
@@ -284,6 +284,10 @@ export interface RenderMarkdownOptions {
   // in a `last_message` from rendering as a multi-line `display:block` chip that
   // would overflow the row and show clipped, half-cut lines.
   singleLine?: boolean
+  // Render inline code as ordinary text instead of a filled chip. This is
+  // for width-constrained previews whose outer text-overflow ellipsis can cut a
+  // chip in half and paint the ellipsis through its background.
+  plainCode?: boolean
 }
 
 // collapseWs turns every whitespace run - newlines included - into a single space.
@@ -342,6 +346,7 @@ export function renderMarkdown(text: string, opts: RenderMarkdownOptions = {}): 
       case 'escape':
         return <span key={i}>{s.value}</span>
       case 'code':
+        if (opts.plainCode) return s.value
         return (
           <code key={i} className={CODE_CLASS}>
             {s.value}

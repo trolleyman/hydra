@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Clock, GitPullRequest, MessageSquare } from 'lucide-react'
+import { Clock, FolderGit2, GitBranch, GitPullRequest, MessageSquare } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import type { AgentResponse } from '../api'
 import { renderMarkdown } from '../lib/markdown'
@@ -254,6 +254,23 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           <AgentTypeIcon name={agent.agent_type as AgentTypeIconName} className="w-3 h-3 shrink-0" />
           {agent.agent_type || 'unknown'}
         </span>
+        {agent.focused ? (
+          <span
+            title="Project checkout workspace"
+            aria-label="Project checkout workspace"
+            className="inline-flex h-[18px] shrink-0 items-center rounded bg-violet-100 px-1 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
+          >
+            <FolderGit2 className="h-3 w-3" />
+          </span>
+        ) : agent.branch_name ? (
+          <span
+            title={`Isolated worktree: ${agent.branch_name}`}
+            aria-label={`Isolated worktree: ${agent.branch_name}`}
+            className="inline-flex h-[18px] shrink-0 items-center rounded bg-blue-100 px-1 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+          >
+            <GitBranch className="h-3 w-3" />
+          </span>
+        ) : null}
         {archived ? (
           <Badge variant="xs" className={archivedEndStateBadge(agent.end_state).className}>
             {archivedEndStateBadge(agent.end_state).label}
@@ -289,16 +306,16 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
         // baseline-aligned but have different font metrics, so even at an identical
         // `line-height` their inline boxes distribute that height differently around
         // the baseline and the line box's union can exceed it - making a code line
-        // taller than a plain one. Pinning line-height (a previous fix) wasn't enough
-        // for that reason. Instead lock a fixed `h-4` and center the content
-        // (`flex items-center`), clipping any overflow, so the row is exactly 1rem
-        // tall whichever font the activity uses. The activity span carries `truncate`
+        // taller than a plain one. Lock both the row and its line-height to `h-4`
+        // / `leading-4`, then center the content and clip any horizontal overflow,
+        // so the row is exactly 1rem tall whichever font the activity uses. The
+        // activity span carries `truncate`
         // (+ `min-w-0` so it can shrink inside the flex row) for the horizontal
         // ellipsis; the timestamp is `shrink-0` so it always stays fully visible.
-        <div className="mt-0.5 ml-4 h-4 flex items-center gap-2 overflow-hidden text-2xs text-gray-400 dark:text-gray-500">
+        <div className="mt-0.5 ml-4 h-4 flex items-center gap-2 overflow-hidden text-2xs leading-4 text-gray-400 dark:text-gray-500">
           <span className="min-w-0 flex-1 truncate">
             {!archived && agent.agent_status
-              ? renderMarkdown(agentStatusDetail(agent), { dollarCommand: true, singleLine: true })
+              ? renderMarkdown(agentStatusDetail(agent), { dollarCommand: true, singleLine: true, plainCode: true })
               : null}
           </span>
           {/* An archived row shows when it ENDED, not when it was spawned: the

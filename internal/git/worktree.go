@@ -67,6 +67,26 @@ func ListBranches(projectRoot string) ([]string, error) {
 	return branches, nil
 }
 
+// CheckoutBranch switches the shared project checkout to an existing local
+// branch without forcing or cleaning. It deliberately preserves Git's normal
+// dirty-tree protection: a switch that would overwrite local work fails.
+func CheckoutBranch(projectRoot, branch string) error {
+	if err := ValidateRef(branch); err != nil {
+		return errtrace.Wrap(err)
+	}
+	branches, err := ListBranches(projectRoot)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if !slices.Contains(branches, branch) {
+		return errtrace.Wrap(fmt.Errorf("local branch %q does not exist", branch))
+	}
+	if _, err := gitOutput(projectRoot, "checkout", "--quiet", branch); err != nil {
+		return errtrace.Wrap(fmt.Errorf("checkout %q: %w", branch, err))
+	}
+	return nil
+}
+
 // DefaultBranch returns the stable branch new work should normally start from,
 // independent of whichever incidental branch the project checkout is on.
 func DefaultBranch(projectRoot string, branches []string, current string) string {

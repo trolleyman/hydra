@@ -531,7 +531,11 @@ func Run() error {
 		return errtrace.Wrap(err)
 	}
 	addGoBuildDeps()
-	args := append([]string{"run"}, goBuildTags(false)...)
+	args := []string{"run"}
+	if commit, err := git.ResolveRef(".", "HEAD"); err == nil {
+		args = append(args, "-ldflags", "-X github.com/trolleyman/hydra/internal/http.buildGitCommit="+commit)
+	}
+	args = append(args, goBuildTags(false)...)
 	args = append(args, "./", "server")
 	return errtrace.Wrap(runV("go", args...))
 }

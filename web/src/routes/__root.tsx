@@ -42,7 +42,7 @@ import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
-import { closeDesktopWindow, hasDesktopBridge, onDesktopCommand, openChatWindow, openFullWindow, postDesktopMessage, setDesktopKeepRunning } from '../lib/desktopBridge'
+import { hasDesktopBridge, onDesktopCommand, postDesktopMessage, setDesktopKeepRunning } from '../lib/desktopBridge'
 import type { AgentCommand } from '../lib/agentCommands'
 
 export const Route = createRootRoute({
@@ -302,9 +302,9 @@ function RootLayout() {
     return a ? a.title || a.id : undefined
   })
   const currentProjectUnread = useAgentStore((s) => s.agents.reduce((n, a) => n + (a.has_unread_changes ? 1 : 0), 0))
-  const allLiveAgents = useAgentStore((s) => s.agents)
-  const allArchivedAgents = useAgentStore((s) => s.archived)
-  const desktopRuntimeStatus = useProjectStore((s) => s.systemStatus)
+  const selectedAgentActiveTurn = useAgentStore((s) =>
+    selectedAgentId ? s.agents.find((agent) => agent.id === selectedAgentId)?.session_status === 'running' : false,
+  )
 
   // Record every project you land on (via dropdown, switcher, direct nav, or
   // boot restore) so the Ctrl+` switcher can order by last-visited.
@@ -912,32 +912,27 @@ function RootLayout() {
   // on mobile it stays as a true toggle.
   const sidebarVisible = isDesktopViewport ? !desktopCollapsed : mobileSidebarOpen
 
-  // Focused native windows deliberately omit the full repository/agent chrome.
-  // The draft owns a dedicated route; after first submit the normal agent route
-  // carries this presentation marker so reloads preserve the compact window.
-  const focusedDesktopWindow = location.pathname.startsWith('/focused/') ||
-    new URLSearchParams(window.location.search).get('desktop') === 'focused'
-
-  const focusedHistory = [...allLiveAgents, ...allArchivedAgents].filter((agent) => agent.focused && !agent.ephemeral)
+  // Native windows render the same responsive routes as the browser. The bridge
+  // only adds native lifecycle behavior; it does not select a separate shell.
+  const desktopWindow = hasDesktopBridge()
 
   useEffect(() => {
-    if (!focusedDesktopWindow || !currentProjectId) return
+    if (!desktopWindow || !currentProjectId) return
     postDesktopMessage({ type: 'active-project', projectId: currentProjectId })
-  }, [focusedDesktopWindow, currentProjectId])
+  }, [desktopWindow, currentProjectId])
 
   useEffect(() => {
-    if (!focusedDesktopWindow) return
-    const agent = selectedAgentId ? allLiveAgents.find((candidate) => candidate.id === selectedAgentId) : undefined
+    if (!desktopWindow) return
     postDesktopMessage({
       type: 'window-state',
       projectId: currentProjectId ?? undefined,
       agentId: selectedAgentId,
-      activeTurn: agent?.session_status === 'running',
+      activeTurn: selectedAgentActiveTurn,
     })
-  }, [focusedDesktopWindow, currentProjectId, selectedAgentId, allLiveAgents])
+  }, [desktopWindow, currentProjectId, selectedAgentId, selectedAgentActiveTurn])
 
   useEffect(() => {
-    if (!focusedDesktopWindow || !currentProjectId || !selectedAgentId) return
+    if (!desktopWindow || !currentProjectId || !selectedAgentId) return
     return onDesktopCommand((command) => {
       if (command.type !== 'stop-and-close') return
       void api.default.killAgent(currentProjectId, selectedAgentId)
@@ -947,61 +942,7 @@ function RootLayout() {
           message: `Could not stop the agent: ${error instanceof Error ? error.message : String(error)}`,
         }))
     })
-  }, [focusedDesktopWindow, currentProjectId, selectedAgentId])
-
-  if (focusedDesktopWindow) {
-    return (
-      <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
-        <header className="shrink-0 h-12 px-3 flex items-center gap-2 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-          {desktopRuntimeStatus?.sandbox_available === false && (
-            <Tooltip content={desktopRuntimeStatus.sandbox_detail ?? 'Native sandboxing is unavailable'}>
-              <span className="shrink-0 rounded-md bg-red-50 dark:bg-red-950/40 px-2 py-1 text-xs text-red-700 dark:text-red-300">
-                Sandbox unavailable
-              </span>
-            </Tooltip>
-          )}
-          <select
-            aria-label="Project"
-            value={currentProjectId ?? ''}
-            onChange={(event) => navigate({ to: '/focused/$projectId', params: { projectId: event.target.value } })}
-            className="h-8 min-w-0 max-w-64 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 text-sm"
-          >
-            {visibleProjects(projects, currentProjectId ?? null).map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-          </select>
-          <select
-            aria-label="Focused chat history"
-            value={selectedAgentId ?? ''}
-            onChange={(event) => {
-              const agentId = event.target.value
-              if (!currentProjectId) return
-              if (!agentId) {
-                navigate({ to: '/focused/$projectId', params: { projectId: currentProjectId } })
-                return
-              }
-              navigate({
-                to: '/project/$projectId/agent/$agentId',
-                params: { projectId: currentProjectId, agentId },
-                search: { desktop: 'focused' },
-              })
-            }}
-            className="h-8 min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 text-sm"
-          >
-            <option value="">New project chat</option>
-            {focusedHistory.map((agent) => <option key={agent.id} value={agent.id}>{agent.title || agent.id}</option>)}
-          </select>
-          <button type="button" onClick={() => openChatWindow(currentProjectId ?? undefined)} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">New chat</button>
-          <button type="button" onClick={openFullWindow} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">Full Hydra</button>
-          <button type="button" onClick={closeDesktopWindow} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">Close</button>
-        </header>
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          <Outlet />
-        </div>
-        <Dialog />
-        <Toaster />
-        <KeyboardShortcutsModal />
-      </div>
-    )
-  }
+  }, [desktopWindow, currentProjectId, selectedAgentId])
 
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">

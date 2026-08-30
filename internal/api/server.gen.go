@@ -1775,6 +1775,9 @@ type CommitInfo struct {
 	// Message Full commit message
 	Message string `json:"message"`
 
+	// ParentSha Full SHA of the commit's first parent, when it has one
+	ParentSha *string `json:"parent_sha,omitempty"`
+
 	// Sha Full 40-character commit SHA
 	Sha string `json:"sha"`
 
@@ -2684,7 +2687,7 @@ type ProjectInfo struct {
 	// Id Unique project identifier (derived from folder name)
 	Id string `json:"id"`
 
-	// Name Human-readable project name (last path component)
+	// Name Human-readable project name. Defaults to the last path component and can be changed in Hydra's project list.
 	Name string `json:"name"`
 
 	// NeedsInputCount Number of this project's agents currently blocked on the user (status `needs_input`). Drives the red "needs your input" indicator, which is shown whenever this is greater than zero.
@@ -2835,6 +2838,12 @@ type ReasoningDurationEvent struct {
 
 // ReasoningDurationEventType defines model for ReasoningDurationEvent.Type.
 type ReasoningDurationEventType string
+
+// RenameProjectRequest defines model for RenameProjectRequest.
+type RenameProjectRequest struct {
+	// Name New non-empty display name for the project.
+	Name string `json:"name"`
+}
 
 // ReorderProjectsRequest defines model for ReorderProjectsRequest.
 type ReorderProjectsRequest struct {
@@ -4475,6 +4484,9 @@ type UpdateAgentRequest struct {
 	// ChatMode Switch the head between terminal and chat mode (Claude and Codex only; rejected for other agent types). When the value changes, a live process is relaunched and its provider conversation is resumed.
 	ChatMode *bool `json:"chat_mode,omitempty"`
 
+	// CheckoutBranch Switch the shared project checkout to this existing local branch. Valid only for a focused/project-checkout head. This performs a normal non-forced Git checkout, so local changes are preserved when possible and a conflicting switch fails rather than discarding work.
+	CheckoutBranch *string `json:"checkout_branch,omitempty"`
+
 	// FilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
 	FilesystemMode *FocusedFilesystemMode `json:"filesystem_mode,omitempty"`
 
@@ -4851,6 +4863,9 @@ type AddProjectJSONRequestBody = AddProjectRequest
 
 // ReorderProjectsJSONRequestBody defines body for ReorderProjects for application/json ContentType.
 type ReorderProjectsJSONRequestBody = ReorderProjectsRequest
+
+// RenameProjectJSONRequestBody defines body for RenameProject for application/json ContentType.
+type RenameProjectJSONRequestBody = RenameProjectRequest
 
 // SpawnAgentJSONRequestBody defines body for SpawnAgent for application/json ContentType.
 type SpawnAgentJSONRequestBody = SpawnAgentRequest
@@ -7195,6 +7210,9 @@ type ServerInterface interface {
 	// Remove a project from Hydra (does not delete files on disk)
 	// (DELETE /api/projects/{project_id})
 	RemoveProject(w http.ResponseWriter, r *http.Request, projectId string)
+	// Rename a project in Hydra
+	// (PATCH /api/projects/{project_id})
+	RenameProject(w http.ResponseWriter, r *http.Request, projectId string)
 	// List all Hydra agents (heads)
 	// (GET /api/projects/{project_id}/agents)
 	ListAgents(w http.ResponseWriter, r *http.Request, projectId string, params ListAgentsParams)
@@ -7522,6 +7540,31 @@ func (siw *ServerInterfaceWrapper) RemoveProject(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RemoveProject(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameProject operation middleware
+func (siw *ServerInterfaceWrapper) RenameProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameProject(w, r, projectId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10326,6 +10369,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects", wrapper.AddProject)
 	m.HandleFunc("PUT "+options.BaseURL+"/api/projects", wrapper.ReorderProjects)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}", wrapper.RemoveProject)
+	m.HandleFunc("PATCH "+options.BaseURL+"/api/projects/{project_id}", wrapper.RenameProject)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.ListAgents)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents", wrapper.SpawnAgent)
 	m.HandleFunc("DELETE "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}", wrapper.KillAgent)
@@ -10587,6 +10631,50 @@ func (response RemoveProject404JSONResponse) VisitRemoveProjectResponse(w http.R
 type RemoveProject500JSONResponse ErrorResponse
 
 func (response RemoveProject500JSONResponse) VisitRemoveProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RenameProjectRequestObject struct {
+	ProjectId string `json:"project_id"`
+	Body      *RenameProjectJSONRequestBody
+}
+
+type RenameProjectResponseObject interface {
+	VisitRenameProjectResponse(w http.ResponseWriter) error
+}
+
+type RenameProject204Response struct {
+}
+
+func (response RenameProject204Response) VisitRenameProjectResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RenameProject400JSONResponse ErrorResponse
+
+func (response RenameProject400JSONResponse) VisitRenameProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RenameProject404JSONResponse ErrorResponse
+
+func (response RenameProject404JSONResponse) VisitRenameProjectResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RenameProject500JSONResponse ErrorResponse
+
+func (response RenameProject500JSONResponse) VisitRenameProjectResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
 
@@ -13235,6 +13323,9 @@ type StrictServerInterface interface {
 	// Remove a project from Hydra (does not delete files on disk)
 	// (DELETE /api/projects/{project_id})
 	RemoveProject(ctx context.Context, request RemoveProjectRequestObject) (RemoveProjectResponseObject, error)
+	// Rename a project in Hydra
+	// (PATCH /api/projects/{project_id})
+	RenameProject(ctx context.Context, request RenameProjectRequestObject) (RenameProjectResponseObject, error)
 	// List all Hydra agents (heads)
 	// (GET /api/projects/{project_id}/agents)
 	ListAgents(ctx context.Context, request ListAgentsRequestObject) (ListAgentsResponseObject, error)
@@ -13631,6 +13722,39 @@ func (sh *strictHandler) RemoveProject(w http.ResponseWriter, r *http.Request, p
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RemoveProjectResponseObject); ok {
 		if err := validResponse.VisitRemoveProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenameProject operation middleware
+func (sh *strictHandler) RenameProject(w http.ResponseWriter, r *http.Request, projectId string) {
+	var request RenameProjectRequestObject
+
+	request.ProjectId = projectId
+
+	var body RenameProjectJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameProject(ctx, request.(RenameProjectRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameProject")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameProjectResponseObject); ok {
+		if err := validResponse.VisitRenameProjectResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

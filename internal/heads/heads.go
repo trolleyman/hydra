@@ -1211,6 +1211,18 @@ func RestartHead(reg *session.Registry, store *db.Store, projectRoot string, hea
 	return errtrace.Wrap(ResumeHead(reg, store, projectRoot, head, rows, cols))
 }
 
+// RestartHeadSandbox rebuilds the head's namespace host before resuming it.
+// Most restarts can keep that supervisor because only the agent child changes,
+// but mounts, masks and network rules are baked into the outer sandbox. A
+// focused filesystem-mode change therefore has to tear the supervisor down as
+// well, or switching edit <-> readonly merely relaunches the agent inside the
+// old permissions. Any sibling shell sessions end with the old supervisor.
+func RestartHeadSandbox(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
+	StopSessionAndWait(reg, head.ID, 10*time.Second)
+	removeNamespaceHost(head.ID)
+	return errtrace.Wrap(ResumeHead(reg, store, projectRoot, head, rows, cols))
+}
+
 // StopSessionAndWait terminates a head's live session process (SIGTERM) and
 // waits, bounded by timeout, for it to actually exit - escalating to SIGKILL
 // at the deadline. Used before relaunching a head in a different configuration
@@ -1399,6 +1411,13 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 	if head.ChatMode && head.AgentType == sandbox.AgentTypeCodex {
 		if err := startCodexChatController(reg, store, projectRoot, head.ID, worktreePath, head.Model, head.ConversationID, ""); err != nil {
+			// startAgentSession has already registered the provider process. Do not
+			// leave a driverless chat session looking live: a later attach would
+			// succeed but could neither replay nor accept messages.
+			StopSessionAndWait(reg, head.ID, 5*time.Second)
+			if store != nil {
+				_ = store.UpdateSessionInfo(head.ID, 0, "stopped")
+			}
 			return errtrace.Wrap(err)
 		}
 	}

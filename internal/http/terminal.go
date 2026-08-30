@@ -355,8 +355,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		// makes this the resume-on-attach path after a daemon restart.
 		reviewID, err := heads.StartReviewSession(s.Sessions, projectRoot, *head, initRows, initCols)
 		if err != nil {
-			log.Printf("terminal ws: start review session for %q: %v", agentID, err)
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("error: "+err.Error()))
+			sendChatError(conn, heads.ReviewSessionID(agentID), "start review session", err)
 			return
 		}
 		sessionID = reviewID
@@ -392,7 +391,8 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		log.Printf("terminal ws: resuming agent %q (no live session)", head.ID)
 		sendStatusUpdate(conn, "starting")
 		if err := heads.ResumeHead(s.Sessions, s.DB, projectRoot, *head, initRows, initCols); err != nil {
-			log.Printf("terminal ws: resume agent %q failed: %v", head.ID, err)
+			sendChatError(conn, head.ID, "resume agent", err)
+			return
 		} else {
 			resumed = true
 		}
@@ -412,7 +412,9 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	att, err := s.Sessions.Attach(sessionID, 0, 0)
 	if err != nil {
 		log.Printf("terminal ws: attach session %q: %v", sessionID, err)
-		if !chatMode {
+		if chatMode {
+			sendChatError(conn, sessionID, "attach session", err)
+		} else {
 			_ = conn.WriteMessage(websocket.BinaryMessage, []byte("\r\n\x1b[31mAgent is not running.\x1b[0m\r\n"))
 		}
 		sendStatusUpdate(conn, "stopped")

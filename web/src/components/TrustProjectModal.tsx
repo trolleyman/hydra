@@ -78,8 +78,9 @@ export const TrustProjectModal = memo(function TrustProjectModal({
   const highlighted = useMemo(() => (content ? highlightToHtml(content, 'toml') : null), [content])
 
   return (
-    // z-[120]: a trust decision sits ABOVE the approval toasts (z-[110]).
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+    // Modal tier: above portalled menus/tooltips (z-[9999]) as well as approval
+    // toasts, so an open project picker is dimmed and blocked by this decision.
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
       <div
         className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
         role="dialog"

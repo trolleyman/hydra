@@ -8,7 +8,7 @@ import { loadChatAttachments, saveChatAttachments } from './chatDrafts'
 // bytes were on the server the whole time - these cover storing the path and
 // rebuilding the chip from it.
 
-const UPLOAD = '/repo/.hydra/local/uploads/1785321197272323733-image1.png'
+const UPLOAD = '/state/projects/proj/uploads/1785321197272323733-image1.png'
 
 function settled(over: Partial<Attachment> = {}): Attachment {
   return { id: 1, filename: 'image1.png', path: UPLOAD, size: 42, uploading: false, ...over }
@@ -28,7 +28,7 @@ describe('attachmentFromPath', () => {
   })
 
   it('gives a non-image a source but no thumbnail', () => {
-    const a = attachmentFromPath('/repo/.hydra/local/uploads/9-notes.txt', 'proj')
+    const a = attachmentFromPath('/state/projects/proj/uploads/9-notes.txt', 'proj')
     expect(a.url).toBeTruthy()
     expect(a.previewUrl).toBeUndefined()
   })

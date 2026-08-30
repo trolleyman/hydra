@@ -16,6 +16,16 @@ and `web/src/DiffViewer.tsx`):
   a static crumb ("Repository" / "Settings") in the same slot. On the narrow
   layout the metadata row collapses to a one-line details disclosure above the
   chat.
+- The metadata header separates identity from runtime configuration. Agent type,
+  status, and workspace chip lead the identity row; project-checkout heads place
+  Edit/Read-only and Allow commits immediately after that chip. The configuration
+  strip orders test verdict, network, Git access, branch selector, and run mode.
+  A worktree head's branch selector edits base-branch metadata. A project-checkout
+  head's selector performs a normal non-forced checkout in the shared project
+  root, so Git refuses a switch that would overwrite local changes.
+- `SegmentedControl` is the shared one-of-many primitive for Terminal/Chat,
+  Worktree/Project checkout, and Edit/Read-only. Do not hand-roll another paired
+  button treatment for these choices.
 - `DiffViewer.tsx` renders, in order: the sticky "Changes" toolbar (`LeftSelector` =
   base ref, `RightSelector` = head/target ref - both component-local `useState`,
   never lifted; stats, refresh, settings cog), then `TestsPanel` -> `PreviewPanel` ->
@@ -25,6 +35,13 @@ and `web/src/DiffViewer.tsx`):
   set (each set's files in a masonry grid). The agent-page
   `ArtifactsPanel` is two-sided (base+head refs); `RepositoryArtifactsView` is the
   single-ref sibling used by the repository browser.
+- The commit range selectors keep every right-side commit selectable. Choosing a
+  right endpoint that is not newer than the current left endpoint moves left to
+  that commit's first parent, producing a one-commit diff; an already-valid
+  multi-commit range stays intact. Commit responses carry `parent_sha` so the
+  oldest commit uses its immutable parent rather than resolving a base branch
+  name that may have advanced since the branch split. Shift-click and commit
+  chips use the same parent-selection helper.
 - Sticky-header coordination: `DiffViewer` publishes `--sticky-changes-h` via a
   ResizeObserver; `--sticky-section-h`, `FILE_STICKY_TOP` (DiffViewer) and
   `STICKY_CARD_TOP` (CollapsibleCard) dock section headers under it. The file-list

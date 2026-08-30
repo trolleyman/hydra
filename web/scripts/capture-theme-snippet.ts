@@ -2,6 +2,7 @@ import { chromium } from 'playwright'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { gunzipSync } from 'node:zlib'
 import { proxyLaunchOptions } from './lib/browserProxy.ts'
+import { settleScreenshot } from './lib/screenshotReady.ts'
 
 // Capture a small HTML fragment against Hydra's production CSS in both themes.
 // This is for showing a focused UI treatment in chat without keeping a one-off
@@ -55,7 +56,7 @@ for (const theme of ['light', 'dark'] as const) {
   })
   await page.setContent(`<!doctype html><html class="${theme === 'dark' ? 'dark' : ''}"><body>${fragment}</body></html>`)
   await page.addStyleTag({ content: css })
-  await page.evaluate(() => document.fonts.ready)
+  await settleScreenshot(page)
   const target = page.locator('[data-capture]').first()
   const path = `${output}-${theme}@2x.png`
   if (await target.count()) await target.screenshot({ path })

@@ -721,7 +721,7 @@ var simChatEvents = []simNorm{
 	// placeholder: renders as an attachment chip, not a raw path/placeholder
 	// (items 41, 43). The CLI's own downscale note is filtered upstream, so
 	// nothing appears for it.
-	simUser("sim-upload", "Here is the mock, what do you think?\n\n/home/callum/code/hydra/.hydra/local/uploads/1783466659236080610-image1.png\n[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"),
+	simUser("sim-upload", "Here is the mock, what do you think?\n\n/home/callum/code/hydra/.hydra/local/projects/sim-project/uploads/1783466659236080610-image1.png\n[Image: original 800x600, displayed at 400x300. Multiply coordinates by 2 to map to original image.]"),
 	simSay("msg_sim_5", "Looks good - the layout reads clearly."),
 	// An assistant reply that embeds screenshots IT took, by the paths it wrote
 	// them to (inside the head's private /tmp). The chat markdown renderer

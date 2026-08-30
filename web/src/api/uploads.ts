@@ -3,8 +3,8 @@
 // The generated OpenAPI client only handles JSON bodies, so uploads use a raw
 // multipart request against the same-origin POST /api/projects/{id}/uploads
 // route (documented in api/openapi.yaml under the `manual` tag, hand-served
-// because of the multipart body). The backend stores the file under the
-// project's .hydra/local/uploads dir and returns its absolute path, which is valid
+// because of the multipart body). The backend stores the file under the project's
+// directory in Hydra's state root and returns its absolute path, which is valid
 // both on the host and inside the agent sandbox. Inserting that path into the
 // prompt/terminal lets the agent read the file directly.
 

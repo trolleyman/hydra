@@ -43,9 +43,10 @@ func simAgentByID(id string) api.AgentResponse {
 
 // SimulationServer implements api.ServerInterface with mock data.
 type SimulationServer struct {
-	Development bool
-	focusedMu   sync.Mutex
-	focused     map[string]simFocusedPermissions
+	Development           bool
+	focusedMu             sync.Mutex
+	focused               map[string]simFocusedPermissions
+	focusedCheckoutBranch string
 
 	// updateMu and friends back the simulated self-update job (see UpdateServer),
 	// so the update panel - phases, streaming build log, the failure path - can
@@ -77,8 +78,9 @@ type SimulationServer struct {
 	// being persisted. That is enough to drive the whole flow (hide in edit mode
 	// -> the row leaves the list -> show it again) against the real endpoint.
 	// Nothing is hidden at boot, so every other page and screenshot is unchanged.
-	hiddenMu       sync.Mutex
-	hiddenProjects map[string]bool
+	projectListMu   sync.Mutex
+	hiddenProjects  map[string]bool
+	renamedProjects map[string]string
 
 	// askRunning is true while agent-ask's answered turn is streaming. The chat's
 	// live "working" indicator keys off the AGENT RECORD's status (the store's
@@ -95,8 +97,8 @@ type simFocusedPermissions struct {
 
 // setSimHidden records a project as hidden (or shown again) for this process.
 func (s *SimulationServer) setSimHidden(id string, hidden bool) {
-	s.hiddenMu.Lock()
-	defer s.hiddenMu.Unlock()
+	s.projectListMu.Lock()
+	defer s.projectListMu.Unlock()
 	if s.hiddenProjects == nil {
 		s.hiddenProjects = map[string]bool{}
 	}
@@ -105,9 +107,27 @@ func (s *SimulationServer) setSimHidden(id string, hidden bool) {
 
 // simHidden reports whether a project has been hidden this session.
 func (s *SimulationServer) simHidden(id string) bool {
-	s.hiddenMu.Lock()
-	defer s.hiddenMu.Unlock()
+	s.projectListMu.Lock()
+	defer s.projectListMu.Unlock()
 	return s.hiddenProjects[id]
+}
+
+func (s *SimulationServer) setSimName(id, name string) {
+	s.projectListMu.Lock()
+	defer s.projectListMu.Unlock()
+	if s.renamedProjects == nil {
+		s.renamedProjects = map[string]string{}
+	}
+	s.renamedProjects[id] = name
+}
+
+func (s *SimulationServer) simName(id, fallback string) string {
+	s.projectListMu.Lock()
+	defer s.projectListMu.Unlock()
+	if name := s.renamedProjects[id]; name != "" {
+		return name
+	}
+	return fallback
 }
 
 // setSimApproval parks (or with "" clears) the picked approval kind.
@@ -283,6 +303,7 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	for i := range resp {
 		hidden := s.simHidden(resp[i].Id)
 		resp[i].Hidden = &hidden
+		resp[i].Name = s.simName(resp[i].Id, resp[i].Name)
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
@@ -292,6 +313,22 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 // 204 still lets the dropdown's drag-to-reorder be exercised end to end (the
 // client keeps its own optimistic order until the server disagrees).
 func (s *SimulationServer) ReorderProjects(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// RenameProject keeps the label in memory so the simulation exercises the same
+// refetch-driven rename flow as the real server.
+func (s *SimulationServer) RenameProject(w http.ResponseWriter, r *http.Request, projectId string) {
+	var body api.RenameProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		api.WriteError(w, http.StatusBadRequest, "project name is required")
+		return
+	}
+	if projectId == projects.ChatProjectID {
+		api.WriteError(w, http.StatusBadRequest, "built-in projects cannot be renamed")
+		return
+	}
+	s.setSimName(projectId, strings.TrimSpace(body.Name))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -391,10 +428,10 @@ const simAgentMdPrompt = "Add **simple inline-markdown** rendering so prompts an
 // take-screenshots.ts agent-prompt-attachments, which serves the thumbnails a
 // fixed image so they render deterministically.
 const simAgent2Prompt = "Migrate the auth providers to OAuth 2.0 with PKCE. Match the attached sign-in mockups (light + dark) and the error states; the full provider list is in the spec PDF.\n\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072241514128486-signin-light.png\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072347433312262-signin-dark.png\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072458377091686-error-states.png\n" +
-	"/home/you/acme/.hydra/local/uploads/1782072717310298418-oauth-providers.pdf"
+	"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072241514128486-signin-light.png\n" +
+	"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072347433312262-signin-dark.png\n" +
+	"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072458377091686-error-states.png\n" +
+	"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072717310298418-oauth-providers.pdf"
 
 // simAgentChatPrompt seeds the chat-mode demo agent (agent-chat), whose detail
 // page renders the chat view instead of a terminal.
@@ -461,22 +498,25 @@ func simFocusedAgents() []api.AgentResponse {
 		{
 			Id: "focused-edit", Title: ptr("Tidy the release notes"), AgentType: "claude",
 			BranchName: nil, SessionPid: 1010, SessionStatus: "running", CreatedAt: &createdEdit,
-			ProjectPath: "/Users/callum/code/hydra", Prompt: simAgentChatPrompt, ChatMode: &chatMode,
+			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentChatPrompt, ChatMode: &chatMode,
 			Focused: &focused, FilesystemMode: &edit, AllowCommits: &allowCommits, Model: ptr("claude-opus-4-8"),
+			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-edit"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Waiting, Timestamp: simNow().Format(time.RFC3339)},
 		},
 		{
 			Id: "focused-readonly", Title: ptr("Review the desktop architecture"), AgentType: "codex",
 			BranchName: nil, SessionPid: 1011, SessionStatus: "running", CreatedAt: &createdReadonly,
-			ProjectPath: "/Users/callum/code/hydra", Prompt: simAgentCodexPrompt, ChatMode: &chatMode,
+			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentCodexPrompt, ChatMode: &chatMode,
 			Focused: &focused, FilesystemMode: &readonly, AllowCommits: &disallowCommits, Model: ptr("gpt-5.6-sol"),
+			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-readonly"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Finished, Timestamp: simNow().Format(time.RFC3339)},
 		},
 		{
 			Id: "focused-working", Title: ptr("Trace preview port allocation"), AgentType: "claude",
 			BranchName: nil, SessionPid: 1012, SessionStatus: "running", CreatedAt: &createdWorking,
-			ProjectPath: "/Users/callum/code/hydra", Prompt: simAgentWorkingPrompt, ChatMode: &chatMode,
+			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentWorkingPrompt, ChatMode: &chatMode,
 			Focused: &focused, FilesystemMode: &edit, AllowCommits: &disallowCommits, Model: ptr("claude-opus-4-8"),
+			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-working"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Running, Timestamp: simNow().Format(time.RFC3339), Activity: ptr("Reading `internal/preview/ports.go`")},
 		},
 	}
@@ -1144,11 +1184,18 @@ func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, p
 	if body.AllowCommits != nil {
 		allowCommits = *body.AllowCommits
 	}
+	if body.CheckoutBranch != nil && *body.CheckoutBranch != "main" && *body.CheckoutBranch != "release" {
+		api.WriteError(w, http.StatusBadRequest, "Unknown simulated checkout branch")
+		return
+	}
 	s.focusedMu.Lock()
 	if s.focused == nil {
 		s.focused = make(map[string]simFocusedPermissions)
 	}
 	s.focused[id] = simFocusedPermissions{mode: mode, allowCommits: allowCommits}
+	if body.CheckoutBranch != nil {
+		s.focusedCheckoutBranch = *body.CheckoutBranch
+	}
 	s.focusedMu.Unlock()
 	agent.FilesystemMode = &mode
 	agent.AllowCommits = &allowCommits
@@ -1474,8 +1521,8 @@ func simSeedComments(id string) []api.ReviewComment {
 			// An attachment on a published comment: the usual case is a screenshot
 			// of the thing being described, so the head can look at what you saw.
 			Attachments: ptr([]string{
-				"/home/you/acme/.hydra/local/uploads/1782072241514128486-error-states.png",
-				"/home/you/acme/.hydra/local/uploads/1782072347433312262-stack-trace.txt",
+				"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072241514128486-error-states.png",
+				"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072347433312262-stack-trace.txt",
 			}),
 		},
 		{
@@ -1486,7 +1533,7 @@ func simSeedComments(id string) []api.ReviewComment {
 			Diff:      ptr("main -> a1b2c3d"),
 			CreatedAt: "2026-07-28T10:09:00Z", Read: ptr(true),
 			Attachments: ptr([]string{
-				"/home/you/acme/.hydra/local/uploads/1782072458377091686-repro.png",
+				"/home/you/acme/.hydra/local/projects/sim-project/uploads/1782072458377091686-repro.png",
 			}),
 		},
 		// Two comments the DIFF cannot show, which is the normal case rather than
@@ -1944,6 +1991,12 @@ func simTestSummary(id string) *api.TestSummary {
 		// "stale" chip. Gives the sidebar coverage of the stale state (its chip
 		// height must match the other verdict/status chips in the row).
 		return &api.TestSummary{Status: api.TestStatusStale, Total: ptr(142), Passed: ptr(140), Skipped: ptr(2), DurationMs: ptr(int64(3900))}
+	case "focused-edit":
+		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(96), Passed: ptr(96), DurationMs: ptr(int64(2100))}
+	case "focused-readonly":
+		return &api.TestSummary{Status: api.TestStatusStale, Total: ptr(96), Passed: ptr(94), Skipped: ptr(2), DurationMs: ptr(int64(2050))}
+	case "focused-working":
+		return &api.TestSummary{Status: api.TestStatusRunning, Total: ptr(96), Passed: ptr(61), Progress: ptr("61/96")}
 	default:
 		return nil
 	}
@@ -1976,9 +2029,10 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				// hover card's height cap has to bite and the card has to scroll
 				// rather than run off the screen. Also the only fixture with
 				// nested lists, a fenced block and a table in a commit message.
-				Sha:      "9f8e7d6c5b4a39281706fedcba9876543210abcd",
-				ShortSha: "9f8e7d6",
-				Subject:  ptr("Rework the artifact pipeline end to end"),
+				Sha:       "9f8e7d6c5b4a39281706fedcba9876543210abcd",
+				ShortSha:  "9f8e7d6",
+				ParentSha: ptr("abcd1234efgh5678ijkl9012mnop3456qrst7890"),
+				Subject:   ptr("Rework the artifact pipeline end to end"),
 				Message: "Rework the artifact pipeline end to end\n\n" +
 					"The generator, the uploader and the viewer each had their own\n" +
 					"idea of what an artifact was, so a run could produce a file the\n" +
@@ -2036,9 +2090,10 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				// the selectors: markdown body, paragraph reflow (no <br> per
 				// wrapped line) and the height cap that makes a tall card scroll
 				// instead of running off the bottom of the screen.
-				Sha:      "abcd1234efgh5678ijkl9012mnop3456qrst7890",
-				ShortSha: "abcd123",
-				Subject:  ptr("Add feature X"),
+				Sha:       "abcd1234efgh5678ijkl9012mnop3456qrst7890",
+				ShortSha:  "abcd123",
+				ParentSha: ptr("bcde1234efgh5678ijkl9012mnop3456qrst7890"),
+				Subject:   ptr("Add feature X"),
 				Message: "Add feature X\n\n" +
 					"The uploader had no way to express \"retry this, but not\n" +
 					"forever\", so a flaky object store took the whole run down with\n" +
@@ -2062,6 +2117,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 			{
 				Sha:         "bcde1234efgh5678ijkl9012mnop3456qrst7890",
 				ShortSha:    "bcde123",
+				ParentSha:   ptr("cdef1234efgh5678ijkl9012mnop3456qrst7890"),
 				Subject:     ptr("Fix bug Y"),
 				Message:     "Fix bug Y",
 				AuthorName:  "Agent Claude",
@@ -2071,6 +2127,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 			{
 				Sha:         "cdef1234efgh5678ijkl9012mnop3456qrst7890",
 				ShortSha:    "cdef123",
+				ParentSha:   ptr("defg1234efgh5678ijkl9012mnop3456qrst7890"),
 				Subject:     ptr("Refactor Z"),
 				Message:     "Refactor Z",
 				AuthorName:  "Agent Claude",
@@ -2080,6 +2137,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 			{
 				Sha:         "defg1234efgh5678ijkl9012mnop3456qrst7890",
 				ShortSha:    "defg123",
+				ParentSha:   ptr("0123456789abcdef0123456789abcdef01234567"),
 				Subject:     ptr("Initial work for feature X"),
 				Message:     "Initial work for feature X",
 				AuthorName:  "Agent Claude",
@@ -2099,6 +2157,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 			{
 				Sha:         "beefcafe0123456789abcdef0123456789abcdef",
 				ShortSha:    "beefcaf",
+				ParentSha:   ptr("cafebabe0123456789abcdef0123456789abcdef"),
 				Subject:     ptr("Cover the giving-up path with a test"),
 				Message:     "Cover the giving-up path with a test",
 				AuthorName:  "Agent Claude",
@@ -2110,6 +2169,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 			{
 				Sha:         "cafebabe0123456789abcdef0123456789abcdef",
 				ShortSha:    "cafebab",
+				ParentSha:   ptr("0123456789abcdef0123456789abcdef01234567"),
 				Subject:     ptr("Add jittered backoff helper to the uploader"),
 				Message:     "Add jittered backoff helper to the uploader\n\nBase 100ms, doubled per attempt, +/- 50% jitter, capped at 5 attempts.",
 				AuthorName:  "Agent Claude",
@@ -3981,14 +4041,20 @@ func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *SimulationServer) GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string) {
+	s.focusedMu.Lock()
+	current := s.focusedCheckoutBranch
+	if current == "" {
+		current = "main"
+	}
+	s.focusedMu.Unlock()
 	api.WriteJSON(w, http.StatusOK, api.RepositoryBranchesResponse{
-		Current: "main",
+		Current: current,
 		Default: "main",
 		Branches: []api.RepositoryBranch{
 			{Name: "hydra/add-line-numbers", IsAgent: true, IsCurrent: false},
 			{Name: "hydra/branch-selector", IsAgent: true, IsCurrent: false},
-			{Name: "main", IsAgent: false, IsCurrent: true},
-			{Name: "release", IsAgent: false, IsCurrent: false},
+			{Name: "main", IsAgent: false, IsCurrent: current == "main"},
+			{Name: "release", IsAgent: false, IsCurrent: current == "release"},
 		},
 	})
 }
@@ -4234,7 +4300,7 @@ func (s *SimulationServer) HandleUpload(w http.ResponseWriter, r *http.Request) 
 	}
 	stored := fmt.Sprintf("%d-%s", simNow().UnixNano(), name)
 	api.WriteJSON(w, http.StatusOK, map[string]string{
-		"path":     "/home/you/acme/.hydra/local/uploads/" + stored,
+		"path":     "/home/you/acme/.hydra/local/projects/sim-project/uploads/" + stored,
 		"filename": stored,
 	})
 }

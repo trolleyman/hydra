@@ -24,6 +24,7 @@ import type { PreviewsResponse } from '../models/PreviewsResponse';
 import type { PreviewStatus } from '../models/PreviewStatus';
 import type { ProjectInfo } from '../models/ProjectInfo';
 import type { PublishReviewCommentsBody } from '../models/PublishReviewCommentsBody';
+import type { RenameProjectRequest } from '../models/RenameProjectRequest';
 import type { ReorderProjectsRequest } from '../models/ReorderProjectsRequest';
 import type { RepositoryArtifactResponse } from '../models/RepositoryArtifactResponse';
 import type { RepositoryArtifactsResponse } from '../models/RepositoryArtifactsResponse';
@@ -221,6 +222,32 @@ export class DefaultService {
             mediaType: 'application/json',
             errors: {
                 400: `Bad Request`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
+     * Rename a project in Hydra
+     * @param projectId
+     * @param requestBody
+     * @returns void
+     * @throws ApiError
+     */
+    public renameProject(
+        projectId: string,
+        requestBody: RenameProjectRequest,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'PATCH',
+            url: '/api/projects/{project_id}',
+            path: {
+                'project_id': projectId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                400: `Bad Request`,
+                404: `Not Found`,
                 500: `Internal Server Error`,
             },
         });

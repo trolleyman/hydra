@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         alert.runModal()
     }
 
-    private func openWindow(kind: HydraWindowKind, projectID: String? = nil) {
+    private func openWindow(kind: HydraWindowKind, projectID: String? = nil, agentID: String? = nil) {
         guard let baseURL = backend.baseURL else { return }
         let configuration = WKWebViewConfiguration()
         configuration.processPool = processPool
@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
             kind: kind,
             baseURL: baseURL,
             defaultProjectID: projectID ?? backend.status?.defaultProjectId,
+            defaultAgentID: agentID,
             bootstrapToken: backend.takeBootstrapToken(),
             configuration: configuration,
             desktopDelegate: self
@@ -101,8 +102,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func desktopWindowRequested(_ kind: HydraWindowKind, projectID: String?) {
-        openWindow(kind: kind, projectID: projectID)
+    func desktopWindowRequested(_ kind: HydraWindowKind, projectID: String?, agentID: String?) {
+        openWindow(kind: kind, projectID: projectID, agentID: agentID)
     }
 
     func desktopWindowActivatedProject(_ projectID: String) {
@@ -164,7 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         let fileMenu = NSMenu(title: "File")
         let full = fileMenu.addItem(withTitle: "New Hydra Window", action: #selector(newFullWindow), keyEquivalent: "n")
         full.target = self
-        let focused = fileMenu.addItem(withTitle: "New Focused Chat", action: #selector(newFocusedWindow), keyEquivalent: "n")
+        let focused = fileMenu.addItem(withTitle: "New Project Chat", action: #selector(newFocusedWindow), keyEquivalent: "n")
         focused.keyEquivalentModifierMask = [.command, .shift]
         focused.target = self
         fileItem.submenu = fileMenu

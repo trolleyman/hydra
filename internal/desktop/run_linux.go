@@ -201,7 +201,7 @@ static void hydra_script_message(WebKitUserContentManager *manager, JSCValue *va
 			char *escaped_agent = agent == NULL ? NULL : g_uri_escape_string(agent, NULL, FALSE);
 			char *path = escaped_agent == NULL
 				? g_strdup_printf("/focused/%s", escaped)
-				: g_strdup_printf("/project/%s/agent/%s?desktop=focused", escaped, escaped_agent);
+				: g_strdup_printf("/project/%s/agent/%s", escaped, escaped_agent);
 			char *uri = hydra_origin_url(window->desktop, path);
 			hydra_open_window_at(window->desktop, uri);
 			g_free(uri); g_free(path); g_free(escaped); g_free(escaped_agent);

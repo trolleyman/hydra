@@ -83,6 +83,54 @@ func TestShowFile(t *testing.T) {
 	}
 }
 
+func TestCheckoutBranchPreservesDirtyTreeProtection(t *testing.T) {
+	dir := gitInit(t)
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	file := filepath.Join(dir, "shared.txt")
+	if err := os.WriteFile(file, []byte("main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "shared.txt")
+	run("commit", "-qm", "main")
+	initial, err := GetCurrentBranch(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run("checkout", "-qb", "other")
+	if err := os.WriteFile(file, []byte("other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("commit", "-am", "other", "-q")
+	run("checkout", "-q", initial)
+
+	if err := CheckoutBranch(dir, "other"); err != nil {
+		t.Fatalf("CheckoutBranch(clean): %v", err)
+	}
+	if current, err := GetCurrentBranch(dir); err != nil || current != "other" {
+		t.Fatalf("current branch = %q, %v; want other", current, err)
+	}
+
+	if err := os.WriteFile(file, []byte("local work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckoutBranch(dir, initial); err == nil {
+		t.Fatal("CheckoutBranch overwrote conflicting local work")
+	}
+	if got, err := os.ReadFile(file); err != nil || string(got) != "local work\n" {
+		t.Fatalf("dirty file = %q, %v; want local work", got, err)
+	}
+}
+
 func TestLsTreeEntryMode(t *testing.T) {
 	dir := gitInit(t)
 	commit := func(args ...string) {

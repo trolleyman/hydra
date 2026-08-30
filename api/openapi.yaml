@@ -243,6 +243,42 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
   /api/projects/{project_id}:
+    patch:
+      summary: Rename a project in Hydra
+      operationId: renameProject
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameProjectRequest'
+      responses:
+        '204':
+          description: No Content
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       summary: Remove a project from Hydra (does not delete files on disk)
       operationId: removeProject
@@ -3875,7 +3911,9 @@ components:
             verbatim when the path is not under HOME.
         name:
           type: string
-          description: Human-readable project name (last path component)
+          description: >-
+            Human-readable project name. Defaults to the last path component
+            and can be changed in Hydra's project list.
         builtin:
           type: boolean
           description: >-
@@ -3990,6 +4028,14 @@ components:
           description: >-
             True hides the project from the project lists, false shows it again.
             See ProjectInfo.hidden for where a hidden project still appears.
+
+    RenameProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: New non-empty display name for the project.
 
     ReorderProjectsRequest:
       type: object
@@ -4117,6 +4163,13 @@ components:
             update-from-base and the diff view) but does NOT move existing
             commits. Rebasing the agent's branch onto the new base, if desired,
             is left to the user. Must be an existing ref.
+        checkout_branch:
+          type: string
+          description: >-
+            Switch the shared project checkout to this existing local branch.
+            Valid only for a focused/project-checkout head. This performs a
+            normal non-forced Git checkout, so local changes are preserved when
+            possible and a conflicting switch fails rather than discarding work.
         chat_mode:
           type: boolean
           description: >-
@@ -5058,6 +5111,9 @@ components:
         subject:
           type: string
           description: First line of the commit message
+        parent_sha:
+          type: string
+          description: Full SHA of the commit's first parent, when it has one
         author_name:
           type: string
         author_email:

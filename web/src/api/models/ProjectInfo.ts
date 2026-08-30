@@ -16,7 +16,7 @@ export type ProjectInfo = {
      */
     display_path?: string;
     /**
-     * Human-readable project name (last path component)
+     * Human-readable project name. Defaults to the last path component and can be changed in Hydra's project list.
      */
     name: string;
     /**

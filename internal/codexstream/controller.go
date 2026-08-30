@@ -279,7 +279,7 @@ func itemActivity(raw json.RawMessage) string {
 		return ""
 	case "commandExecution", "command_execution":
 		if description := CommandDescription(item.Command); description != "" {
-			return "# " + description
+			return `\# ` + description
 		}
 		if command := firstCommandLine(item.Command); command != "" {
 			return "$ " + truncateRunes(command, 80)
