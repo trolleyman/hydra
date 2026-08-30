@@ -6720,14 +6720,13 @@ const SettledMessages = memo(
     // below.
     const rows = useMemo(
       () => {
-        let previousWasUser = false
-        return planStepRows(items, subByToolUse, grouped).map((r) => {
+        const plannedRows = planStepRows(items, subByToolUse, grouped)
+        return plannedRows.map((r, index) => {
           if (r.row !== 'item') {
-            previousWasUser = false
             return <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={row} />
           }
-          const tightBefore = previousWasUser && r.item.kind === 'user'
-          previousWasUser = r.item.kind === 'user'
+          const previous = plannedRows[index - 1]
+          const tightBefore = r.item.kind === 'user' && previous?.row === 'item' && previous.item.kind === 'user'
           return row(r.item, true, tightBefore)
         })
       },
