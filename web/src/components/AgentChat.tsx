@@ -2731,9 +2731,7 @@ interface ScriptOutputRow {
   // The file this line's NUMBER counts in, when the script named one. A
   // sectioned script's gutter is several files' numbering stacked in one column
   // - the numbers restart, and nothing on the row says at which file - so the
-  // gutter cell carries it as a tooltip. (A native title, deliberately: this is
-  // one element per output line, which is exactly the long-list case the
-  // tooltip convention in CLAUDE.md keeps native.)
+  // gutter cell carries it in a tooltip.
   file?: string
   // 'code' is a line of some file, 'marker' a separator the script echoed, and
   // 'plain' output nothing could be said about.
@@ -3009,15 +3007,23 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
         {rows.map((row, i) => (
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
-            {gutter && (
+            {gutter && (row.file ? (
+              <Tooltip
+                content={<FilePathLabel path={row.file} nativeTitle={false} />}
+                align="left"
+                className="min-h-4"
+              >
+                <span
+                  data-copy-skip
+                  className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
+                >{row.num}</span>
+              </Tooltip>
+            ) : (
               <span
                 data-copy-skip
-                // Plain non-interactive text in a long list: native title is the
-                // right tool here (see the tooltip conventions in CLAUDE.md).
-                title={row.file ? (row.num ? `${row.file}:${row.num}` : row.file) : undefined}
                 className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
-              >{row.file && row.num ? `${row.file}:${row.num}` : row.num}</span>
-            )}
+              >{row.num}</span>
+            ))}
             <span
               data-copy-line
               className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
