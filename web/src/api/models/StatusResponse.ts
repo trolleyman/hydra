@@ -14,6 +14,10 @@ export type StatusResponse = {
      */
     git_commit?: string;
     /**
+     * Absolute directory containing the running server's SQLite database.
+     */
+    database_directory?: string;
+    /**
      * Native desktop shell compatibility protocol.
      */
     desktop_protocol?: number;

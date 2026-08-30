@@ -906,6 +906,10 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	status := "OK"
 	v := version
 	commit := gitCommit()
+	databaseDirectory := ""
+	if databasePath, err := db.GlobalPath(); err == nil {
+		databaseDirectory = filepath.Dir(databasePath)
+	}
 	desktopProtocol := desktopcontract.Protocol
 	buildID := version
 	runtimeOS := runtime.GOOS
@@ -928,21 +932,22 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	}
 
 	return api.GetStatus200JSONResponse(api.StatusResponse{
-		Status:           &status,
-		SandboxError:     sandboxErr,
-		Version:          &v,
-		GitCommit:        &commit,
-		DesktopProtocol:  &desktopProtocol,
-		BuildId:          &buildID,
-		RuntimeOs:        &runtimeOS,
-		SandboxAvailable: &sandboxAvailable,
-		SandboxDetail:    sandboxDetail,
-		UptimeSeconds:    &uptime,
-		ProjectRoot:      &projectRoot,
-		DefaultProjectId: &defaultProjectID,
-		Development:      &development,
-		CanRestart:       &canRestart,
-		CanUpdate:        &canUpdate,
+		Status:            &status,
+		SandboxError:      sandboxErr,
+		Version:           &v,
+		GitCommit:         &commit,
+		DatabaseDirectory: &databaseDirectory,
+		DesktopProtocol:   &desktopProtocol,
+		BuildId:           &buildID,
+		RuntimeOs:         &runtimeOS,
+		SandboxAvailable:  &sandboxAvailable,
+		SandboxDetail:     sandboxDetail,
+		UptimeSeconds:     &uptime,
+		ProjectRoot:       &projectRoot,
+		DefaultProjectId:  &defaultProjectID,
+		Development:       &development,
+		CanRestart:        &canRestart,
+		CanUpdate:         &canUpdate,
 	}), nil
 }
 

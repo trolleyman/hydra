@@ -147,6 +147,7 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	status := "OK"
 	v := "0.1.0-sim"
 	commit := "0123456789abcdef0123456789abcdef01234567"
+	databaseDirectory := "/home/sim/.local/state/hydra"
 	// Pin uptime to a fixed value rather than time.Since(StartTime). The diff
 	// viewer renders both sides of a comparison in separate server boots and
 	// hashes the resulting screenshots, so a live uptime makes the header's
@@ -165,16 +166,17 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	canUpdate := true
 
 	api.WriteJSON(w, http.StatusOK, api.StatusResponse{
-		Status:           &status,
-		Version:          &v,
-		GitCommit:        &commit,
-		UptimeSeconds:    &uptime,
-		ProjectRoot:      &projectRoot,
-		DefaultProjectId: &defaultProjectID,
-		RuntimeOs:        &runtimeOS,
-		Development:      &development,
-		CanRestart:       &canRestart,
-		CanUpdate:        &canUpdate,
+		Status:            &status,
+		Version:           &v,
+		GitCommit:         &commit,
+		DatabaseDirectory: &databaseDirectory,
+		UptimeSeconds:     &uptime,
+		ProjectRoot:       &projectRoot,
+		DefaultProjectId:  &defaultProjectID,
+		RuntimeOs:         &runtimeOS,
+		Development:       &development,
+		CanRestart:        &canRestart,
+		CanUpdate:         &canUpdate,
 	})
 }
 

@@ -24,7 +24,7 @@ type GlobalSettingsTab = 'user' | 'browser' | 'about'
 const TAB_DESCRIPTIONS: Record<GlobalSettingsTab, string> = {
   user: 'Every project on this machine - stored in ~/.config/hydra/config.toml. Open a project\'s settings to configure that project itself.',
   browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
-  about: 'Build details and information about Hydra.',
+  about: '',
 }
 
 function SettingsPage() {

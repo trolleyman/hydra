@@ -3681,6 +3681,9 @@ type StatusResponse struct {
 	// CanUpdate Whether the server can rebuild itself from source and restart into the result. Requires the daemon's project root to be a Hydra checkout with mage available.
 	CanUpdate *bool `json:"can_update,omitempty"`
 
+	// DatabaseDirectory Absolute directory containing the running server's SQLite database.
+	DatabaseDirectory *string `json:"database_directory,omitempty"`
+
 	// DefaultProjectId Project ID of the default (CWD) project
 	DefaultProjectId *string `json:"default_project_id,omitempty"`
 

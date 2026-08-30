@@ -31,7 +31,7 @@ const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
     'This project, just you - stored in the untracked .hydra/config.local.toml and layered on top of the project config (lists combine, pre-prompts append, other values override). For personal overrides you do not want to commit.',
   user: 'Every project on this machine - stored in ~/.config/hydra/config.toml.',
   browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
-  about: 'Build details and information about Hydra.',
+  about: '',
 }
 
 function ProjectSettingsPage() {
