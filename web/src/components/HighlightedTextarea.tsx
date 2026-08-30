@@ -29,6 +29,11 @@ type HighlightedTextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>
   // blend into a differently-tinted surface (e.g. the stone-toned chat composer).
   textColorClassName?: string
   caretClassName?: string
+  // Optional colour classes for a backdrop-rendered placeholder. When set, the
+  // textarea keeps its real placeholder for accessibility but makes it
+  // transparent; the backdrop draws the visible copy with a small leading inset
+  // so a focused empty field's caret does not cut through its first glyph.
+  placeholderClassName?: string
   // Override how the backdrop renders the value. Defaults to inline-markdown
   // highlighting; the chat composer swaps in a bash highlighter when the text is
   // a "!command". MUST preserve the value's exact characters/whitespace so the
@@ -57,7 +62,9 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
       wrapperStyle,
       textColorClassName = 'text-gray-800 dark:text-gray-100',
       caretClassName = 'caret-gray-800 dark:caret-gray-100',
+      placeholderClassName,
       renderContent = renderMarkdownSource,
+      placeholder,
       onScroll,
       onKeyDown,
       onInput,
@@ -159,7 +166,9 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
           // font's slnt axis without drifting the textarea caret (see index.css).
           className={`prompt-input-font absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words ${textColorClassName} ${textClassName}`}
         >
-          {renderContent(value)}
+          {value || !placeholderClassName
+            ? renderContent(value)
+            : <span className={`inline-block pl-0.5 ${placeholderClassName}`}>{placeholder}</span>}
           {/* Trailing newline keeps the backdrop's height matching the textarea
               when the value ends in a newline. */}
           {'\n'}
@@ -167,6 +176,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
         <textarea
           ref={innerRef}
           value={value}
+          placeholder={placeholder}
           onScroll={(e) => {
             syncScroll()
             onScroll?.(e)
@@ -192,7 +202,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
           // Match the backdrop's reserved scrollbar gutter so both layers wrap
           // text at the same width (see the backdrop above).
           style={{ scrollbarGutter: 'stable', ...style }}
-          className={`prompt-input-font absolute inset-0 w-full h-full resize-none bg-transparent text-transparent ${caretClassName} focus:outline-none ${textClassName}`}
+          className={`prompt-input-font absolute inset-0 w-full h-full resize-none bg-transparent text-transparent ${placeholderClassName ? 'placeholder:text-transparent' : ''} ${caretClassName} focus:outline-none ${textClassName}`}
           {...rest}
         />
       </div>

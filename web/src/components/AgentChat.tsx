@@ -11206,7 +11206,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               wrapperStyle={{ height: composerHeight }}
               textColorClassName="text-stone-800 dark:text-stone-100"
               caretClassName="caret-stone-800 dark:caret-stone-100"
-              textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
+              placeholderClassName="text-stone-400 dark:text-stone-500"
+              textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 disabled:opacity-50"
             />
             <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
               <Tooltip content="Attach files" side="top">
