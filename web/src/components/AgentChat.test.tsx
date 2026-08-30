@@ -244,6 +244,26 @@ describe('composer status and actions', () => {
     expect(sendMessage.querySelector('svg')).toHaveClass('lucide-arrow-up')
   })
 
+  it('spaces queued bubbles like consecutive user messages', async () => {
+    renderChat()
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => {
+      ws.emit({
+        type: 'chat_event',
+        event: { seq: 1, type: 'user_message', timestamp: '', payload: { id: 'user-1', content: 'first' } },
+      })
+      ws.emit({ type: 'replay_done' })
+      ws.emit({
+        type: 'queue',
+        messages: [{ id: 'queued-1', content: [{ type: 'text', text: 'second' }] }],
+      })
+    })
+
+    await screen.findByText('second')
+    expect(document.querySelector('[data-queued-messages]')).toHaveClass('-mt-2')
+  })
+
   it('keeps a fatal connection error visible instead of reconnecting forever', async () => {
     renderChat()
     await connectedComposer()

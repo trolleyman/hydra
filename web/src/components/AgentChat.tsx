@@ -10872,6 +10872,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const renderItemRef = useRef(renderChatItem)
   renderItemRef.current = renderChatItem
   const renderItem = useCallback((item: ChatItem, shellCwd?: string | null) => renderItemRef.current(item, shellCwd), [])
+  const queueTouchesUser = mergedItems.at(-1)?.kind === 'user'
+    && !liveItem
+    && stream?.kind !== 'thinking'
+    && !(isTurnRunning && replayDone && !lastIsResult)
 
   return (
     // Every tool card below can pick up a parked security-gate approval for THIS
@@ -11033,7 +11037,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               bubbles reads as one group, so they sit tighter (gap-1) than the
               gap-3 between distinct turns (item 51). */}
           {pendingSends.length > 0 && (
-            <div className="flex flex-col gap-1">
+            <div data-queued-messages className={`flex flex-col gap-1 ${queueTouchesUser ? '-mt-2' : ''}`}>
               {pendingSends.map((p) => (
                 <div key={`pending-${p.id}`} className="group relative animate-chat-item-in">
                   {/* Flush right, exactly where the message will land once it
