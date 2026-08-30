@@ -199,6 +199,45 @@ describe('review composer status', () => {
   })
 })
 
+describe('running turn elapsed time', () => {
+  beforeAll(() => {
+    vi.stubGlobal('WebSocket', RecordingWebSocket)
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterAll(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    sockets.length = 0
+    localStorage.clear()
+    useAgentStore.setState({ agents: [] })
+  })
+
+  it('counts a reattached running turn from its snapshot start time', async () => {
+    const now = Date.parse('2026-08-30T12:00:42Z')
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now)
+    const agentId = `agent-${++agentSeq}`
+    useAgentStore.setState({
+      agents: [{ id: agentId, agent_status: { status: AgentStatus.RUNNING } } as AgentResponse],
+    })
+    renderChat(agentId)
+    await connectedComposer()
+
+    act(() => {
+      sockets[0].emit({
+        type: 'state_snapshot',
+        state: { turn: { id: 'turn-1', status: 'running', started_at: '2026-08-30T12:00:00Z' } },
+      })
+      sockets[0].emit({ type: 'replay_done' })
+    })
+
+    expect(await screen.findByText('(42s)')).toBeInTheDocument()
+    dateNow.mockRestore()
+  })
+})
+
 describe('question answer status', () => {
   beforeAll(() => {
     vi.stubGlobal('WebSocket', RecordingWebSocket)

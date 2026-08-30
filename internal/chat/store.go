@@ -635,7 +635,11 @@ func apply(p *Projection, ev Event) {
 		// result. Keep the more meaningful terminal state until the next turn
 		// starts instead of letting that implementation detail overwrite it.
 		if !(ev.Type == "turn_failed" && p.Turn != nil && p.Turn.Status == "interrupted") {
-			p.Turn = &TurnState{Id: v.ID, Status: v.Status}
+			turn := &TurnState{Id: v.ID, Status: v.Status}
+			if ev.Type == "turn_started" {
+				turn.StartedAt = &ev.Timestamp
+			}
+			p.Turn = turn
 		}
 	case "interaction_requested":
 		p.Interaction = cloneRaw(v.Interaction)

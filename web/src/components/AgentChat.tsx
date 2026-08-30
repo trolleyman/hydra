@@ -8769,6 +8769,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           if (Array.isArray(msg.state?.slash_commands) && msg.state.slash_commands.length) {
             setSlashCommands(msg.state.slash_commands.filter((c): c is string => typeof c === 'string'))
           }
+          // The snapshot reaches a newly attached chat before replayed history.
+          // Its running turn carries the durable start time, so the churning
+          // indicator begins at the real elapsed time instead of at navigation.
+          const startedAt = msg.state?.turn?.started_at
+          const turnStart = typeof startedAt === 'string' ? Date.parse(startedAt) : NaN
+          if (isTurnRunningRef.current && Number.isFinite(turnStart) && turnStart <= Date.now()) {
+            turnStartClockRef.current = turnStart
+            turnStartRef.current = turnStart
+            setElapsed(Math.floor((Date.now() - turnStart) / 1000))
+          }
           const rawPlan = msg.state?.plan
           const entries = parseServerPlan(typeof rawPlan === 'string' ? rawPlan : rawPlan == null ? '' : JSON.stringify(rawPlan))
           if (entries.length) plan.adoptServer(entries)
