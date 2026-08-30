@@ -9,6 +9,7 @@
 // prompt/terminal lets the agent read the file directly.
 
 import type { UploadResponse } from './models/UploadResponse'
+import { OpenAPI } from './core/OpenAPI'
 
 // From the spec, not hand-copied - see the note in folderPicker.ts. `path` is the
 // absolute host path (readable by the agent), `filename` the sanitized on-disk name.
@@ -18,9 +19,14 @@ export async function uploadFile(projectId: string | null, file: File): Promise<
   const form = new FormData()
   form.append('file', file, file.name || 'paste')
   const pid = projectId ? encodeURIComponent(projectId) : '_'
-  const res = await fetch(`/api/projects/${pid}/uploads`, {
+  // Keep raw multipart uploads on the same configured API origin as generated
+  // client calls. A relative URL works only when the SPA and API share an
+  // origin; desktop/reverse-proxy deployments can give the UI a different one,
+  // where it otherwise answers this POST with its own 404 page.
+  const res = await fetch(`${OpenAPI.BASE}/api/projects/${pid}/uploads`, {
     method: 'POST',
     body: form,
+    credentials: OpenAPI.CREDENTIALS,
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
