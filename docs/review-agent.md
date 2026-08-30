@@ -739,7 +739,14 @@ it was written, and publishing does not change it - but until it is published
 nobody else can cite it, so putting a handle on it would invite quoting something
 the agent cannot look up. The chip is the one state worth calling out: the
 difference between something the agent has been told and something only you can
-see is not otherwise visible on the card.
+see is not otherwise visible on the card. Every draft card also carries Submit
+review, which publishes the whole queued batch from where it is being written;
+the toolbar popover remains the place to inspect that batch as a list.
+
+**A reply can join the draft review or be sent immediately.** Add to agent review
+stores it as a draft under the published parent, while Comment to agent publishes
+it at once. In both cases the parent owns the anchor, so the reply box needs no
+second file or line selection.
 
 **Your own comments say "You"**, not your git name. The name is on the avatar's
 tooltip; in a list of comments what matters is which ones are yours. With no git

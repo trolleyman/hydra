@@ -313,3 +313,21 @@ export async function replyToReviewComment(
   })
   return { comments: all(res), notified: res.notified ?? null, toReviewer: res.notified_reviewer === true }
 }
+
+// Queue a reply in the current review batch. It inherits the published parent's
+// anchor server-side, just like an immediately sent reply, but remains a draft
+// until Submit review publishes the batch.
+export async function addReviewReply(
+  projectId: string | null,
+  agentId: string,
+  number: number,
+  body: string,
+  attachments: string[],
+): Promise<PendingReviewComment[]> {
+  if (!projectId) return []
+  return all(await api.default.addReviewComment(projectId, agentId, {
+    body,
+    reply_to: number,
+    attachments,
+  }))
+}

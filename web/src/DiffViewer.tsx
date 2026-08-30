@@ -67,7 +67,7 @@ import { useToastStore, type ToastType } from './stores/toastStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
-import { addReviewComment, addImageComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, replyToReviewComment, resolveReviewComment, markReviewCommentsRead, notifiedNumbers, draftsOf, type PendingReviewComment } from './lib/reviewComments'
+import { addReviewComment, addReviewReply, addImageComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, replyToReviewComment, resolveReviewComment, markReviewCommentsRead, notifiedNumbers, draftsOf, type PendingReviewComment } from './lib/reviewComments'
 import { useImageCommentStore } from './stores/imageCommentStore'
 import { commentPermalink, registerCommentJump, VisitedCommentsContext, useIsCurrentComment } from './lib/reviewCommentLink'
 import { CommentLink } from './components/CommentLink'
@@ -223,9 +223,11 @@ const EMPTY_FILE_COMMENTS: PendingReviewComment[] = []
 const EMPTY_FILE_THREADS: ReviewThread[] = []
 interface NativeCommentReplyActions {
   submit: (number: number, body: string) => Promise<void>
+  addToReview: (number: number, body: string, attachments: string[]) => Promise<void>
   start?: (number: number) => void
 }
 const NativeCommentReplyContext = createContext<NativeCommentReplyActions | null>(null)
+const DraftReviewSubmitContext = createContext<{ submit: () => void; submitting: boolean } | null>(null)
 
 // True when a drag is carrying real files, so dragging a text selection over a
 // comment box doesn't light it up as a drop target.
@@ -264,6 +266,7 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
   )
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const reply = useContext(NativeCommentReplyContext)
+  const draftReview = useContext(DraftReviewSubmitContext)
   const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
@@ -354,6 +357,17 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
                   </span>
                 ) : (
                   <span className="ml-0.5 flex items-center gap-0.5">
+                    {draftReview && (
+                      <Tooltip content="Publish every queued comment in this review" side="top">
+                        <button
+                          disabled={draftReview.submitting}
+                          onClick={draftReview.submit}
+                          className="mr-1 rounded border border-blue-300 px-1.5 py-0.5 text-3xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
+                        >
+                          {draftReview.submitting ? 'Submitting...' : 'Submit review'}
+                        </button>
+                      </Tooltip>
+                    )}
                     <Tooltip content="Edit comment" side="top">
                       <button
                         onClick={onEdit}
@@ -742,6 +756,11 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
           initialText=""
           projectId={projectId}
           onSubmit={async (text) => { await parentReplyActions.submit(replyingTo, text); setReplyingTo(null) }}
+          onAddToReview={(text, attachments) => {
+            void parentReplyActions.addToReview(replyingTo, text, attachments)
+              .then(() => setReplyingTo(null))
+              .catch((e) => console.error('Failed to queue reply:', e))
+          }}
           onCancel={() => setReplyingTo(null)}
         />
       )}
@@ -856,6 +875,11 @@ function OffDiffEntryBody({ entry, projectId, you, editingId, setEditingId, onEd
           initialText=""
           projectId={projectId}
           onSubmit={async (text) => { await parentReplyActions.submit(replyingTo, text); setReplyingTo(null) }}
+          onAddToReview={(text, attachments) => {
+            void parentReplyActions.addToReview(replyingTo, text, attachments)
+              .then(() => setReplyingTo(null))
+              .catch((e) => console.error('Failed to queue reply:', e))
+          }}
           onCancel={() => setReplyingTo(null)}
         />
       )}
@@ -4517,7 +4541,13 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     else if (notified) showSentToast(sentToAgentText(notifiedNumbers(notified), 1))
     else showSentToast(UNDELIVERED_COMMENT, 'warning')
   }, [projectId, agent.id, showSentToast])
-  const nativeReplyActions = useMemo<NativeCommentReplyActions>(() => ({ submit: handleReplyComment }), [handleReplyComment])
+  const handleAddReplyToReview = useCallback(async (number: number, body: string, attachments: string[]) => {
+    setReviewComments(await addReviewReply(projectId, agent.id, number, body, attachments))
+  }, [projectId, agent.id])
+  const nativeReplyActions = useMemo<NativeCommentReplyActions>(() => ({
+    submit: handleReplyComment,
+    addToReview: handleAddReplyToReview,
+  }), [handleReplyComment, handleAddReplyToReview])
 
   // Mark comments seen. Read state is explicit - nothing becomes read by the
   // passage of time - so this is called when you actually arrive at one (a
@@ -4897,6 +4927,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       setSubmittingReview(false)
     }
   }, [agent.id, projectId, submittingReview, showSentToast])
+  const draftReviewSubmit = useMemo(() => ({
+    submit: () => void submitReview(queuedComments.map((c) => c.number)),
+    submitting: submittingReview,
+  }), [submitReview, queuedComments, submittingReview])
 
   // Which queued comments have gone stale: the diff under them changed since they
   // were added (the anchoring hunk's content hash no longer matches, or the line
@@ -5387,6 +5421,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         reason as the thread actions above: the comment cards are the far side
         of two memo'd hunk components, and a cursor threaded through as a prop
         would re-render every line of every file each time it moved. */}
+    <DraftReviewSubmitContext.Provider value={draftReviewSubmit}>
     <NativeCommentReplyContext.Provider value={nativeReplyActions}>
     <VisitedCommentsContext.Provider value={focusedComment}>
     <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
@@ -5596,6 +5631,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     </div>
     </VisitedCommentsContext.Provider>
     </NativeCommentReplyContext.Provider>
+    </DraftReviewSubmitContext.Provider>
     </ReviewThreadContext.Provider>
     </CommentIdentityContext.Provider>
   )

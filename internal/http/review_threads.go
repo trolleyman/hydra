@@ -48,13 +48,16 @@ func (s *Server) CreateReviewComment(ctx context.Context, request api.CreateRevi
 	}
 	callCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), threadsTimeout)
 	defer cancel()
+	known := cachedForgeNoteIDs(projectRoot, head.ID)
 	err = provider.CommentOnLine(callCtx, projectRoot, remote, head.ReviewID, forge.NewLineComment{
 		Path: request.Body.Path, Line: request.Body.Line, Body: body,
 	})
 	if err != nil {
 		return reviewThreadBadRequest(fmt.Sprintf("the forge rejected the comment: %v", err)), nil
 	}
-	return api.CreateReviewComment200JSONResponse(s.reviewThreadsResponse(ctx, projectRoot, *head)), nil
+	resp := s.reviewThreadsResponse(ctx, projectRoot, *head)
+	markWrittenForgeNoteRead(projectRoot, head.ID, &resp, known, "", request.Body.Path, request.Body.Line, body)
+	return api.CreateReviewComment200JSONResponse(resp), nil
 }
 
 // ReplyToReviewThread adds a reply to a thread - posted to the forge as the
@@ -89,10 +92,57 @@ func (s *Server) ReplyToReviewThread(ctx context.Context, request api.ReplyToRev
 	}
 	callCtx, cancel := context.WithTimeout(s.backgroundOr(ctx), threadsTimeout)
 	defer cancel()
+	known := cachedForgeNoteIDs(projectRoot, head.ID)
 	if err := provider.ReplyToThread(callCtx, projectRoot, remote, head.ReviewID, request.ThreadId, body); err != nil {
 		return replyBadRequest(fmt.Sprintf("the forge rejected the reply: %v", err)), nil
 	}
-	return api.ReplyToReviewThread200JSONResponse(s.reviewThreadsResponse(ctx, projectRoot, *head)), nil
+	resp := s.reviewThreadsResponse(ctx, projectRoot, *head)
+	markWrittenForgeNoteRead(projectRoot, head.ID, &resp, known, request.ThreadId, "", 0, body)
+	return api.ReplyToReviewThread200JSONResponse(resp), nil
+}
+
+// cachedForgeNoteIDs snapshots what Hydra knew before a user write. The forge
+// write methods do not return the created note id, so the live response is
+// compared with this cache to identify the note the user just authored.
+func cachedForgeNoteIDs(projectRoot, headID string) map[string]bool {
+	threads, _ := reviewstore.LoadThreads(projectRoot, headID)
+	ids := make(map[string]bool)
+	for _, t := range threads {
+		for _, n := range t.Notes {
+			ids[n.ID] = true
+		}
+	}
+	return ids
+}
+
+// markWrittenForgeNoteRead persists that a note posted through this UI has
+// already been seen by its author. Match the new note within the write's target
+// and by body so an unrelated reviewer note arriving during the same refresh is
+// still correctly reported as unread.
+func markWrittenForgeNoteRead(projectRoot, headID string, resp *api.ReviewThreadsResponse, known map[string]bool, threadID, path string, line int, body string) {
+	var written *api.ReviewThreadNote
+	for i := range resp.Threads {
+		t := &resp.Threads[i]
+		if threadID != "" && t.Id != threadID {
+			continue
+		}
+		if threadID == "" && (t.Path != path || t.Line != line) {
+			continue
+		}
+		for j := range t.Notes {
+			n := &t.Notes[j]
+			if n.Origin == api.Forge && !known[n.Id] && strings.TrimSpace(n.Body) == body {
+				written = n
+			}
+		}
+	}
+	if written == nil || written.Number == nil {
+		return
+	}
+	if err := reviewstore.MarkRead(projectRoot, headID, []int{*written.Number}, true); err != nil {
+		return
+	}
+	written.Read = ptr(true)
 }
 
 // notifyLocalNote routes a local reply on a forge thread to whoever it names.
