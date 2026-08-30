@@ -154,7 +154,7 @@ async function connectedComposer(): Promise<HTMLTextAreaElement> {
   return ta
 }
 
-describe('review composer status', () => {
+describe('composer status and actions', () => {
   beforeAll(() => {
     vi.stubGlobal('WebSocket', RecordingWebSocket)
     vi.stubGlobal('ResizeObserver', class {
@@ -196,6 +196,26 @@ describe('review composer status', () => {
     act(() => sockets[0].emit({ type: 'status', status: AgentStatus.FINISHED }))
     await screen.findByRole('button', { name: 'Send message' })
     expect(useAgentStore.getState().agents[0].agent_status?.status).toBe(AgentStatus.RUNNING)
+  })
+
+  it('renders Send now like the idle Send message action', async () => {
+    const agentId = `agent-${++agentSeq}`
+    useAgentStore.setState({
+      agents: [{ id: agentId, agent_status: { status: AgentStatus.FINISHED } } as AgentResponse],
+    })
+    renderChat(agentId)
+    const ta = await connectedComposer()
+    fireEvent.change(ta, { target: { value: 'ship it' } })
+
+    act(() => useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING))
+    const sendNow = await screen.findByRole('button', { name: 'Send message now' })
+    expect(sendNow.querySelector('svg')).toHaveClass('lucide-arrow-up')
+    expect(screen.getByRole('button', { name: 'Queue message' }).querySelector('svg')).toHaveClass('lucide-list-end')
+
+    act(() => useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.FINISHED))
+    const sendMessage = await screen.findByRole('button', { name: 'Send message' })
+    expect(sendMessage.className).toBe(sendNow.className)
+    expect(sendMessage.querySelector('svg')).toHaveClass('lucide-arrow-up')
   })
 })
 
@@ -1107,11 +1127,18 @@ describe('a message sent after a commit lands under it', () => {
           seq: 1,
           type: 'commit_created',
           timestamp: '2024-01-01T00:00:00.000Z',
-          payload: { sha: 'abc123def4567', short_sha: 'abc123d', subject: 'Teach the loader about overlays' },
+          payload: {
+            sha: 'abc123def4567',
+            short_sha: 'abc123d',
+            subject: 'Teach the loader about overlays',
+            additions: 36,
+            deletions: 5,
+          },
         },
       }),
     )
     const chip = await screen.findByText('Teach the loader about overlays')
+    expect(screen.getByLabelText('36 lines added, 5 lines removed')).toBeInTheDocument()
 
     fireEvent.change(ta, { target: { value: 'ship it' } })
     fireEvent.keyDown(ta, { key: 'Enter' })

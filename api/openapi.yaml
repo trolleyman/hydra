@@ -6190,7 +6190,7 @@ components:
             ([notify] test_failures in config.toml). It only fires while the head is IDLE, so
             it cannot interrupt a turn or loop, and it is deduped per (runner, commit). The
             agent pulls the output with get_test_logs. null/absent uses the built-in default
-            (enabled).
+            (disabled).
         artifact_concurrency:
           type: integer
           nullable: true

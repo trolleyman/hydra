@@ -40,6 +40,7 @@ import {
   X,
 } from 'lucide-react'
 import { SiGit } from '@icons-pack/react-simple-icons'
+import { Link } from '@tanstack/react-router'
 import { AgentStatus, type ChatEventUnion, type ChatFrame } from '../api'
 import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../lib/chatEvents'
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
@@ -1887,10 +1888,16 @@ const AUTOMATED_BUBBLE_CLASS =
 // The test for belonging here is not "did Hydra write the words" but "did the user
 // type it in the composer" - which is why a one-click Fix with agent counts, even
 // though the user meant every word of it.
-const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
+type AutomatedOrigin = {
+  label: string
+  why: ReactNode
+  settingsFragment?: string
+}
+
+const AUTOMATED_ORIGIN: Record<string, AutomatedOrigin> = {
   review_comments: {
     label: 'Sent by Hydra',
-    why: 'Sent automatically when review comments were published, so the agent knows to read them. It fetches the bodies itself with get_review_comments.',
+    why: <>Sent automatically when review comments were published, so the agent knows to read them. It fetches the bodies itself with <code>get_review_comments</code>.</>,
   },
   // Nothing sends this any more - resolving a comment no longer costs a model
   // turn (see internal/http/review_comments.go). It stays because a transcript
@@ -1902,14 +1909,15 @@ const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
   },
   tests_failed: {
     label: 'Sent by Hydra',
-    why: 'Sent automatically when a test runner went red while the agent was idle. Turn it off with [notify] test_failures = false.',
+    why: <>Sent automatically because this project opted in to waking an idle agent when tests fail.</>,
+    settingsFragment: 'test-notifications',
   },
   // The review slot's own. Nothing else reaches a reviewer unprompted - its
   // checkout follows the head's commits silently, precisely so that a commit
   // never costs a model turn (internal/heads/reviewsync.go).
   review_mention: {
     label: 'Sent by Hydra',
-    why: 'Sent because a review comment mentioned @review, so the reviewer knows it was addressed. It fetches the comment itself with get_review_comments.',
+    why: <>Sent because a review comment mentioned <code>@review</code>, so the reviewer knows it was addressed. It fetches the comment itself with <code>get_review_comments</code>.</>,
   },
   fix_conflicts: {
     label: 'Sent from a button',
@@ -1929,7 +1937,7 @@ const AUTOMATED_ORIGIN: Record<string, { label: string; why: string }> = {
   },
 }
 
-function automatedOrigin(origin?: string): { label: string; why: string } | null {
+function automatedOrigin(origin?: string): AutomatedOrigin | null {
   if (!origin) return null
   if (origin.startsWith('agent:')) {
     const id = origin.slice('agent:'.length)
@@ -5929,7 +5937,26 @@ const ChatUserMessage = memo(function ChatUserMessage({
           the user bubble's shape and side. What changes is the tint and this
           line, which says who really sent it and why. */}
       {auto && (
-        <Tooltip content={auto.why} side="top">
+        <Tooltip
+          variant="card"
+          title={auto.label}
+          side="top"
+          content={
+            <div className="select-text">
+              <p>{auto.why}</p>
+              {auto.settingsFragment && projectId && (
+                <Link
+                  to="/project/$projectId/settings"
+                  params={{ projectId }}
+                  hash={auto.settingsFragment}
+                  className="inline-block mt-2 font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Open notification settings
+                </Link>
+              )}
+            </div>
+          }
+        >
           <span className="flex items-center gap-1 text-3xs text-stone-400 dark:text-stone-500 cursor-help">
             <Zap className="w-2.5 h-2.5" />
             <span className="optical-center">{auto.label}</span>
@@ -6720,14 +6747,13 @@ const SettledMessages = memo(
     // below.
     const rows = useMemo(
       () => {
-        let previousWasUser = false
-        return planStepRows(items, subByToolUse, grouped).map((r) => {
+        const stepRows = planStepRows(items, subByToolUse, grouped)
+        return stepRows.map((r, index) => {
           if (r.row !== 'item') {
-            previousWasUser = false
             return <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={row} />
           }
-          const tightBefore = previousWasUser && r.item.kind === 'user'
-          previousWasUser = r.item.kind === 'user'
+          const previous = stepRows[index - 1]
+          const tightBefore = previous?.row === 'item' && previous.item.kind === 'user' && r.item.kind === 'user'
           return row(r.item, true, tightBefore)
         })
       },
@@ -10470,6 +10496,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
                 <span className="truncate optical-center">{item.subject}</span>
+                <CommitStats additions={item.additions} deletions={item.deletions} />
               </div>
             </Tooltip>
           </div>
@@ -11210,7 +11237,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                           : 'bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
                       }`}
                     >
-                      <Send className="w-4 h-4" />
+                      <ArrowUp className="w-4 h-4" />
                     </button>
                   </Tooltip>
                 )}

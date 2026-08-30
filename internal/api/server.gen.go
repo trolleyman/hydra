@@ -1820,7 +1820,7 @@ type ConfigResponse struct {
 	// McpServers Read-only: candidate MCP servers discovered in the host ~/.claude.json and project .mcp.json, for populating the mcp_allowed picker. Ignored on save.
 	McpServers *[]McpServer `json:"mcp_servers"`
 
-	// NotifyTestFailures Whether a test runner settling FAILING wakes the head with a one-line message ([notify] test_failures in config.toml). It only fires while the head is IDLE, so it cannot interrupt a turn or loop, and it is deduped per (runner, commit). The agent pulls the output with get_test_logs. null/absent uses the built-in default (enabled).
+	// NotifyTestFailures Whether a test runner settling FAILING wakes the head with a one-line message ([notify] test_failures in config.toml). It only fires while the head is IDLE, so it cannot interrupt a turn or loop, and it is deduped per (runner, commit). The agent pulls the output with get_test_logs. null/absent uses the built-in default (disabled).
 	NotifyTestFailures *bool `json:"notify_test_failures"`
 
 	// Previews Per-project live-server scripts, each proxied on demand as a clickable preview of the head's app ([previews.<name>] in config.toml). A config still spelling one as an [artifacts.<name>] with type = "server" is upgraded on read, so it appears here and not under artifacts.
