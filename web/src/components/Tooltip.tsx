@@ -434,7 +434,7 @@ export function Tooltip({
           >
             <div
               role="tooltip"
-              className={`relative flex flex-col p-3 ${surface} border text-gray-800 dark:text-gray-100 text-2xs rounded-lg shadow-xl animate-popover-in`}
+              className={`relative flex flex-col p-3 ${surface} border text-gray-800 dark:text-gray-100 text-2xs rounded-lg shadow-xl animate-tooltip-card-in`}
               // Cap to the viewport (minus the 16px clamp pad each side) so the
               // fixed `width` can't spill off-screen on narrow/phone viewports where
               // it exceeds the screen. computePos clamps by the box's REAL

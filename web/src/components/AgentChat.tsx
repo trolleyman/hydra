@@ -10470,6 +10470,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
                 <span className="truncate optical-center">{item.subject}</span>
+                <CommitStats additions={item.additions} deletions={item.deletions} />
               </div>
             </Tooltip>
           </div>

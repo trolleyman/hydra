@@ -1107,11 +1107,18 @@ describe('a message sent after a commit lands under it', () => {
           seq: 1,
           type: 'commit_created',
           timestamp: '2024-01-01T00:00:00.000Z',
-          payload: { sha: 'abc123def4567', short_sha: 'abc123d', subject: 'Teach the loader about overlays' },
+          payload: {
+            sha: 'abc123def4567',
+            short_sha: 'abc123d',
+            subject: 'Teach the loader about overlays',
+            additions: 36,
+            deletions: 5,
+          },
         },
       }),
     )
     const chip = await screen.findByText('Teach the loader about overlays')
+    expect(screen.getByLabelText('36 lines added, 5 lines removed')).toBeInTheDocument()
 
     fireEvent.change(ta, { target: { value: 'ship it' } })
     fireEvent.keyDown(ta, { key: 'Enter' })
