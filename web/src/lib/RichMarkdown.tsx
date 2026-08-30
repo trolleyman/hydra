@@ -481,7 +481,7 @@ const STYLES: Record<Variant, Style> = {
     // so it rendered 1.077x its surroundings everywhere and read as a size step
     // up mid-paragraph.
     table: 'border-collapse',
-    th: 'px-3 py-1.5 text-left font-semibold text-stone-700 dark:text-stone-200 bg-stone-100/70 dark:bg-white/[0.04] border-b border-stone-200 dark:border-white/10 whitespace-nowrap',
+    th: 'px-3 py-1.5 text-left font-normal text-stone-700 dark:text-stone-200 bg-stone-100/70 dark:bg-white/[0.04] shadow-[inset_0_2px_#a8a29e] dark:shadow-[inset_0_2px_rgba(168,162,158,0.55)] border-b border-stone-200 dark:border-white/10 whitespace-nowrap',
     td: 'px-3 py-1.5 border-b border-stone-200/60 dark:border-white/[0.06] align-top',
     tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-stone-500/[0.04] dark:[&>tr:nth-child(even)]:bg-white/[0.025]',
     // Claude-app-style code (chat items 1/10): bordered terracotta chips for
@@ -511,7 +511,7 @@ const STYLES: Record<Variant, Style> = {
     // Same framed look as chat, roomier cell padding for document density.
     tableWrap: 'my-4 max-w-full overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700',
     table: 'w-full border-collapse text-sm',
-    th: 'px-4 py-2 text-left font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-700 whitespace-nowrap',
+    th: 'px-4 py-2 text-left font-normal text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800/60 shadow-[inset_0_2px_#93c5fd] dark:shadow-[inset_0_2px_rgba(96,165,250,0.55)] border-b border-gray-200 dark:border-gray-700 whitespace-nowrap',
     td: 'px-4 py-2 border-b border-gray-100 dark:border-gray-800 align-top',
     tbody: '[&>tr:last-child>td]:border-b-0 [&>tr:nth-child(even)]:bg-gray-500/[0.035] dark:[&>tr:nth-child(even)]:bg-white/[0.03]',
     // Doc code stays neutral (a README isn't a chat bubble) but picks up the

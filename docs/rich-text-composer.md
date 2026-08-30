@@ -111,8 +111,11 @@ Completed 2026-08-29:
   in the first header cell; pipes elsewhere remain literal.
 - Finished release hardening. Fenced code now indents/outdents with
   Tab/Shift+Tab, exits from its final line with ArrowDown and unwraps when empty
-  with Backspace. Focused production tables expose compact row/column/delete
-  controls with polite accessibility announcements and narrow-width scrolling.
+  with Backspace. Tables start as a two-column header plus one body row. Tab and
+  Enter grow columns and rows, Shift+Arrow selects row/column ranges, and
+  draggable gutters select whole rows or columns for deletion. A cell-local
+  menu inserts adjacent rows/columns and sets Markdown column alignment. Header
+  tinting and zebra rows communicate structure without bold header text.
   The behavior fixture runs in Chromium, Firefox and WebKit (engine-unsupported
   clipboard-permission checks are skipped). The lazy `MarkdownComposer` chunk,
   including reference discovery and the command menu, is 234.38 KB minified /
@@ -687,9 +690,10 @@ The editor remains an internal Hydra module; package extraction is not a goal.
 8. **Spawn integration - DONE.** Compact and full-page Spawn layouts use the
    lazy adapter while the surrounding selectors retain stable callbacks and the
    existing Markdown submission contract.
-9. **Release hardening - DONE.** Code-block exit/indent/unwrap, production table
-   manipulation and announcements, narrow layout, three-engine selection/IME
-   validation and final bundle measurement are complete.
+9. **Release hardening - DONE.** Code-block exit/indent/unwrap, spreadsheet-like
+   table navigation and range selection, cell-local table actions, narrow
+   layout, three-engine selection/IME validation and final bundle measurement
+   are complete.
 10. **Broader surfaces - DONE.** Review replies, image-pin notes, question option
     notes and question Other answers use the rich Markdown adapter and render
     settled Markdown structure.

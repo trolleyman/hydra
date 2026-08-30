@@ -160,20 +160,72 @@ describe('MarkdownComposer', () => {
     expect(ref.current!.editor!.getAttributes('codeBlock').language).toBe('typescript')
   })
 
-  it('shows accessible controls on a focused table and reshapes it', async () => {
+  it('offers cell-local table actions without a global toolbar', async () => {
     const ref = createRef<MarkdownComposerHandle>()
     const view = render(<MarkdownComposer ref={ref} value={'| A | B |\n| --- | --- |\n| 1 | 2 |'} onChange={() => {}} />)
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
 
-    ref.current!.editor!.commands.setTextSelection(3)
-    const toolbar = view.getByRole('toolbar', { name: 'Table controls' })
-    expect(toolbar).toBeInTheDocument()
-    fireEvent.click(view.getByRole('button', { name: 'Add row below' }))
+    expect(view.queryByRole('toolbar', { name: 'Table controls' })).toBeNull()
+    const firstCell = view.container.querySelector('th')!
+    fireEvent.mouseMove(firstCell)
+    fireEvent.click(view.getByRole('button', { name: 'Cell actions' }))
+    fireEvent.click(view.getByRole('menuitem', { name: 'Add row below' }))
     expect(ref.current!.editor!.getJSON().content?.[0].content).toHaveLength(3)
-    fireEvent.click(view.getByRole('button', { name: 'Add column after' }))
+    fireEvent.mouseMove(firstCell)
+    fireEvent.click(view.getByRole('button', { name: 'Cell actions' }))
+    fireEvent.click(view.getByRole('menuitem', { name: 'Add column right' }))
     expect(ref.current!.editor!.getJSON().content?.[0].content?.[0].content).toHaveLength(3)
-    fireEvent.click(view.getByRole('button', { name: 'Delete table' }))
-    expect(ref.current!.editor!.getJSON().content?.some((node) => node.type === 'table')).toBe(false)
+    fireEvent.mouseMove(firstCell)
+    fireEvent.click(view.getByRole('button', { name: 'Cell actions' }))
+    fireEvent.click(view.getByRole('menuitem', { name: 'Align center' }))
+    expect(ref.current!.editor!.getJSON().content?.[0].content?.map((row) => row.content?.[0].attrs?.align)).toEqual(['center', 'center', 'center'])
+  })
+
+  it('grows tables with Tab and Enter while keeping one header row', async () => {
+    const ref = createRef<MarkdownComposerHandle>()
+    const view = render(<MarkdownComposer ref={ref} value={'| A | B |\n| --- | --- |\n| 1 | 2 |'} onChange={() => {}} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+    const editor = ref.current!.editor!
+    const cells: number[] = []
+    editor.state.doc.descendants((node, pos) => { if (node.type.spec.tableRole === 'cell' || node.type.spec.tableRole === 'header_cell') cells.push(pos) })
+    editor.commands.setCellSelection({ anchorCell: cells[1] })
+    fireEvent.keyDown(view.getByRole('textbox'), { key: 'Tab' })
+    expect(editor.getJSON().content?.[0].content?.[0].content).toHaveLength(3)
+    fireEvent.keyDown(view.getByRole('textbox'), { key: 'Enter' })
+    fireEvent.keyDown(view.getByRole('textbox'), { key: 'Enter' })
+    expect(editor.getJSON().content?.[0].content).toHaveLength(3)
+    expect(editor.getJSON().content?.[0].content?.[0].content?.every((cell) => cell.type === 'tableHeader')).toBe(true)
+    expect(editor.getJSON().content?.[0].content?.slice(1).flatMap((row) => row.content ?? []).every((cell) => cell.type === 'tableCell')).toBe(true)
+  })
+
+  it('lets a send-on-Enter host keep Enter and reserves Shift+Enter for table navigation', async () => {
+    const ref = createRef<MarkdownComposerHandle>()
+    const onKeyDown = vi.fn(() => true)
+    const view = render(<MarkdownComposer ref={ref} value={'| A | B |\n| --- | --- |\n| 1 | 2 |'} onChange={() => {}} onKeyDown={onKeyDown} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+    const editor = ref.current!.editor!
+    const cells: number[] = []
+    editor.state.doc.descendants((node, pos) => { if (node.type.spec.tableRole === 'cell' || node.type.spec.tableRole === 'header_cell') cells.push(pos) })
+    editor.commands.setCellSelection({ anchorCell: cells[0] })
+
+    fireEvent.keyDown(view.getByRole('textbox'), { key: 'Enter' })
+    expect(onKeyDown).toHaveBeenCalledTimes(1)
+    fireEvent.keyDown(view.getByRole('textbox'), { key: 'Enter', shiftKey: true })
+    expect(onKeyDown).toHaveBeenCalledTimes(1)
+    expect(editor.state.selection.$from.parent.textContent).toBe('1')
+  })
+
+  it('lets row and column handle selections be deleted', async () => {
+    const ref = createRef<MarkdownComposerHandle>()
+    const view = render(<MarkdownComposer ref={ref} value={'| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |'} onChange={() => {}} />)
+    await waitFor(() => expect(view.getByRole('button', { name: 'Select row 2' })).toBeInTheDocument())
+    const editor = ref.current!.editor!
+    fireEvent.mouseDown(view.getByRole('button', { name: 'Select row 2' }))
+    fireEvent.keyDown(view.getByRole('textbox'), { key: 'Backspace' })
+    expect(editor.getJSON().content?.[0].content).toHaveLength(2)
+    fireEvent.mouseDown(view.getByRole('button', { name: 'Select column 2' }))
+    fireEvent.keyDown(view.getByRole('textbox'), { key: 'Delete' })
+    expect(editor.getJSON().content?.[0].content?.[0].content).toHaveLength(1)
   })
 
   it('discovers slash commands at the start of an empty block', async () => {

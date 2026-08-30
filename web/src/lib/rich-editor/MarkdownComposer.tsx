@@ -6,6 +6,7 @@ import { createRichEditorExtensions, parseRichMarkdown, serializeRichMarkdown } 
 import type { AttachmentRegistry } from './AttachmentRegistry'
 import { registerMountedEditor } from './mountedEditors'
 import { insertReference, type ComposerReference, type ReferenceKind } from './Reference'
+import { handleTableKeyDown, isTableSelection } from './Table'
 
 export interface MarkdownComposerHandle {
   editor: Editor | null
@@ -226,6 +227,17 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
           setLinkHref(String(editor?.getAttributes('link').href ?? ''))
           setLinkOpen(true)
           return true
+        }
+        if (editor && isTableSelection(editor)) {
+          // A host that owns bare Enter (chat sends, for example) keeps it.
+          // Shift+Enter always performs table navigation; otherwise the table
+          // gets Enter only when the host declines it.
+          if (event.key === 'Enter' && !event.shiftKey && onKeyDownRef.current) {
+            const markdown = serializeRichMarkdown(editor.getJSON())
+            if (onKeyDownRef.current(event, { editor, markdown, empty: markdown.trim() === '' }) === true) return true
+          }
+          if (handleTableKeyDown(editor, event)) return true
+          if (event.key === 'Enter' && !event.shiftKey && onKeyDownRef.current) return false
         }
         if (!onKeyDownRef.current || !editor) return false
         const markdown = serializeRichMarkdown(editor.getJSON())

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import type { Editor } from '@tiptap/core'
 
 interface SpikeSnapshot {
   doc: Record<string, unknown>
@@ -44,6 +45,7 @@ declare global {
       setCodeLanguage: (language: string) => void
       snapshot: () => SpikeSnapshot
     }
+    interactiveRichEditor: Editor | null
   }
 }
 
@@ -204,15 +206,34 @@ test('pipe-space at the start of a line opens a two-column table', async ({ page
   })
 })
 
-test('a focused table exposes controls, announces mutations, and scrolls narrowly', async ({ page }) => {
+test('a table grows by keyboard, exposes local actions and selection gutters, and scrolls narrowly', async ({ page }) => {
   const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
   await expect(interactive).toBeVisible()
-  await interactive.locator('th').first().click()
-  const toolbar = page.getByRole('toolbar', { name: 'Table controls' })
-  await expect(toolbar).toBeVisible()
-  await toolbar.getByRole('button', { name: 'Add row below' }).click()
-  await expect(page.getByRole('status')).toHaveText('Row added')
+  await interactive.locator('th').first().hover()
+  await page.getByRole('button', { name: 'Cell actions' }).click()
+  await page.getByRole('menuitem', { name: 'Add row below' }).click()
+  await expect(page.getByRole('status')).toHaveText('Row added below')
   await expect(interactive.locator('tr')).toHaveCount(3)
+
+  await interactive.locator('th').nth(1).locator('p').click({ position: { x: 3, y: 8 } })
+  await page.keyboard.press('Tab')
+  await expect(interactive.locator('th')).toHaveCount(3)
+
+  const firstRowHandle = page.getByRole('button', { name: 'Select row 1' })
+  const secondRowHandle = page.getByRole('button', { name: 'Select row 2' })
+  const from = await firstRowHandle.boundingBox()
+  const to = await secondRowHandle.boundingBox()
+  if (!from || !to) throw new Error('Missing table row handle geometry')
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2)
+  await page.mouse.up()
+  await expect(interactive.locator('.selectedCell')).toHaveCount(6)
+
+  await page.getByRole('button', { name: 'Select row 3' }).click()
+  await expect(interactive.locator('.selectedCell')).toHaveCount(3)
+  await page.keyboard.press('Backspace')
+  await expect(interactive.locator('tr')).toHaveCount(2)
 
   await page.locator('#interactive-editor').evaluate((element) => { (element as HTMLElement).style.width = '240px' })
   const geometry = await interactive.locator('.rich-table-wrapper').evaluate((element) => ({
@@ -224,9 +245,8 @@ test('a focused table exposes controls, announces mutations, and scrolls narrowl
 
 test('the discovery menus create blocks and structured references', async ({ page }) => {
   const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
+  await page.evaluate(() => window.interactiveRichEditor?.commands.clearContent())
   await interactive.click()
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
-  await page.keyboard.press('Backspace')
   await page.keyboard.type('/quo')
   await expect(page.getByRole('listbox', { name: 'Block commands' })).toBeVisible()
   await page.keyboard.press('Enter')

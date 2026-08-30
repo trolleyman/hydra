@@ -77,4 +77,11 @@ createRoot(interactiveHost).render(createElement(MarkdownComposer, {
   ],
   ariaLabel: 'Interactive rich editor fixture',
   className: 'fixture-interactive-editor',
+  onEditor: (interactiveEditor) => { window.interactiveRichEditor = interactiveEditor },
 }))
+
+declare global {
+  interface Window {
+    interactiveRichEditor: ReturnType<typeof createRichEditor> | null
+  }
+}

@@ -9,7 +9,7 @@ import type { AttachmentRegistry } from './AttachmentRegistry'
 import { InlineCode, InlineCodeEditing } from './InlineCode'
 import { HighlightedCodeBlock } from './CodeBlock'
 import { TableShortcut } from './TableShortcut'
-import { InteractiveTable } from './Table'
+import { InteractiveTable, TableInteraction } from './Table'
 import { HydraReference, hydrateReferences } from './Reference'
 
 // Hydra deliberately supports *italic* as a typing convenience but not
@@ -35,6 +35,7 @@ export function createRichEditorExtensions(attachmentRegistry?: AttachmentRegist
   TaskItem.configure({ nested: true }),
   TableKit.configure({ table: false }),
   InteractiveTable.configure({ resizable: false, controls: interactiveNodeViews }),
+  TableInteraction,
   HighlightedCodeBlock.configure({
     languagePicker: interactiveNodeViews,
     enableTabIndentation: true,
