@@ -1464,6 +1464,21 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   // boundary the output really does carry is kept even when everything before it
   // has to stay one plain run.
   const suffix = searchExtent(producers[producers.length - 1], slice, 0, slice.length, 'end')
+  // When every row carries its OWN path, the whole stretch is safely a search
+  // result even if an intervening command printed nothing. Which search printed
+  // which row is immaterial: the prefix names the file that supplies both the
+  // gutter and the language. Do not extend this to bare `12:text` rows - there
+  // the script's operand is the only thing naming the file, so handing an
+  // earlier search to the last one could colour it as the wrong language.
+  if (suffix === slice.length && slice.every((line) => line.trim() === '--' || PATH_NUMBERED.test(line))) {
+    const last = producers.length - 1
+    return {
+      parts: producers.map((_, i) => i === last ? slice : []),
+      pinned: producers.map((_, i) => i === last),
+      plain: new Set(),
+      languageOnly: new Set(),
+    }
+  }
   if (suffix != null && suffix < slice.length) {
     const last = producers.length - 1
     const before = distribute(producers.slice(0, last), slice.slice(0, -suffix), failed)

@@ -1071,6 +1071,27 @@ describe('parseMatchLines', () => {
     ])
   })
 
+  it('keeps search matches attributable around an empty git status', () => {
+    const script = `rg -n "runDesktop|control socket|control.sock|nsHost|nsHost|AVX|avx" Magefile.go magefiles internal web package.json . --glob '!web/node_modules/**' --glob '!web/dist/**' --glob '!.git/**'
+git status --short
+rg -n "Desktop" magefiles Magefile.go`
+    const output = [
+      "rg: Magefile.go: No such file or directory (os error 2)",
+      "rg: package.json: No such file or directory (os error 2)",
+      "magefiles/magefile.go:413:7: they're missing: pasta (+ its AVX2 sibling) is downloaded from",
+      'magefiles/magefile.go:701:    return errtrace.Wrap(runDesktop(false))',
+      'magefiles/magefile.go:720:    return errtrace.Wrap(runDesktop(true))',
+      'magefiles/magefile.go:701:    return errtrace.Wrap(runDesktop(false))',
+      'magefiles/magefile.go:720:    return errtrace.Wrap(runDesktop(true))',
+    ].join('\n')
+
+    const sections = splitScriptOutput(steps(script), output)
+    const matches = sections?.filter((section) => section.kind === 'matches') ?? []
+    expect(matches.flatMap((section) => section.lines)).toContain(
+      'magefiles/magefile.go:701:    return errtrace.Wrap(runDesktop(false))',
+    )
+  })
+
   it('reads both numbered shapes out of one section', () => {
     // Two searches merged into one section: the first named one file, so grep
     // printed `12:`, and the second named several, so it printed `path:441:`.

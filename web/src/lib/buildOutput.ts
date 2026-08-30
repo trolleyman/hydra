@@ -246,11 +246,19 @@ export function diagnosticSpans(line: string): OutputSpan[] {
   // shell's own error is a `cd:`/`node:` of its own, and reads correctly as part
   // of the subject.
   const cut = message.lastIndexOf(': ')
+  const subject = cut > 0 ? message.slice(0, cut + 2) : ''
+  // A direct `tool: path: reason` complaint names the same path that compiler
+  // locations and search rows do. Give that path the same lowlit treatment
+  // instead of leaving it visually indistinguishable from prose. A phrase in
+  // front (`can't read path`) stays at full strength: it is part of the news.
+  const path = /^(.*?)([\w./~@+-]+\.[A-Za-z][\w]*)(:\s*)$/.exec(subject)
   return [
     { text: tool, cls: DIM },
     { text: at, cls: LOC },
     { text: `:${sep}`, cls: DIM },
-    { text: cut > 0 ? message.slice(0, cut + 2) : '', cls: '' },
+    { text: path?.[1] ?? subject, cls: '' },
+    { text: path?.[2] ?? '', cls: DIM },
+    { text: path?.[3] ?? '', cls: path ? DIM : '' },
     { text: cut > 0 ? message.slice(cut + 2) : message, cls },
   ].filter((s) => s.text !== '')
 }
