@@ -1,4 +1,5 @@
-import { memo } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Clock, GitPullRequest, MessageSquare } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import type { AgentResponse } from '../api'
@@ -11,6 +12,88 @@ import {
   agentDotClass, agentDotAnimate, agentTypeColor,
   agentStatusBadge, agentStatusDetail, archivedEndStateBadge,
 } from '../lib/agentDisplay'
+import type { AgentCommand } from '../lib/agentCommands'
+import { agentPrimaryActionAppearances } from './agentPrimaryActions'
+
+const CONTEXT_MENU_WIDTH = 208
+const CONTEXT_MENU_HEIGHT = 250
+
+function AgentContextMenu({
+  agent,
+  x,
+  y,
+  onAction,
+  onClose,
+  provider,
+}: {
+  agent: AgentResponse
+  x: number
+  y: number
+  onAction: (action: AgentCommand) => void
+  onClose: () => void
+  provider?: string
+}) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const items = agentPrimaryActionAppearances({ agent, provider }).filter(
+    (item) => !agent.focused || (item.command !== 'publish' && item.command !== 'merge'),
+  )
+  const left = Math.min(x, window.innerWidth - CONTEXT_MENU_WIDTH - 8)
+  const top = Math.min(y, window.innerHeight - CONTEXT_MENU_HEIGHT - 8)
+
+  useEffect(() => {
+    menuRef.current?.querySelector<HTMLButtonElement>('button')?.focus()
+    const close = () => onClose()
+    window.addEventListener('blur', close)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      window.removeEventListener('blur', close)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [onClose])
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[9998]" onPointerDown={onClose} />
+      <div
+        ref={menuRef}
+        role="menu"
+        aria-label={`Actions for ${agent.title || agent.id}`}
+        style={{ left: Math.max(8, left), top: Math.max(8, top) }}
+        className="fixed z-[9999] w-52 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl animate-popover-in"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') return onClose()
+          if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+          e.preventDefault()
+          const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+          const current = buttons.indexOf(document.activeElement as HTMLButtonElement)
+          const direction = e.key === 'ArrowDown' ? 1 : -1
+          buttons[(current + direction + buttons.length) % buttons.length]?.focus()
+        }}
+      >
+        {items.map(({ command, label, count, icon, danger, disabled }, index) => (
+          <button
+            key={command}
+            type="button"
+            role="menuitem"
+            disabled={disabled}
+            onClick={() => onAction(command)}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none ${
+              danger
+                ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 focus:bg-red-50 dark:focus:bg-red-950/30'
+                : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 focus:bg-gray-100 dark:focus:bg-gray-700'
+            } ${index === 2 ? 'mt-1 border-t border-gray-100 dark:border-gray-700 pt-2' : ''}`}
+          >
+            <span className="shrink-0">{icon}</span>
+            <span className="optical-center">{label}{count != null && <span className="ml-1.5 font-normal opacity-60">· {count}</span>}</span>
+          </button>
+        ))}
+      </div>
+    </>,
+    document.body,
+  )
+}
 
 // MRSidebarMarker is the sidebar row's linked-MR indicator: a small forge glyph
 // so you can see at a glance which heads have an MR open, carrying an up-arrow
@@ -72,6 +155,8 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
   selected,
   projectId,
   onDeselect,
+  onAction,
+  reviewProvider,
 }: {
   agent: AgentResponse
   selected: boolean
@@ -80,10 +165,15 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
   // (mirrors the Repository button). Middle/Ctrl-click ignore this and open the
   // agent page in a new tab, since the row is a real link to that page.
   onDeselect: () => void
+  onAction: (agent: AgentResponse, action: AgentCommand) => void
+  reviewProvider?: string
 }) {
   const archived = agent.archived ?? false
   const comments = commentBadge(agent)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
   return (
+    <>
     <Link
       to="/project/$projectId/agent/$agentId"
       params={{ projectId, agentId: agent.id }}
@@ -92,6 +182,11 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
           e.preventDefault()
           onDeselect()
         }
+      }}
+      onContextMenu={(e) => {
+        if (archived) return
+        e.preventDefault()
+        setMenu({ x: e.clientX, y: e.clientY })
       }}
       className={`relative block w-full text-left px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
         selected
@@ -230,5 +325,19 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
         </div>
       )}
     </Link>
+    {menu && (
+      <AgentContextMenu
+        agent={agent}
+        x={menu.x}
+        y={menu.y}
+        onClose={closeMenu}
+        provider={reviewProvider}
+        onAction={(action) => {
+          setMenu(null)
+          onAction(agent, action)
+        }}
+      />
+    )}
+    </>
   )
 })

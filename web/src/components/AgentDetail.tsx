@@ -23,7 +23,7 @@ import type { Attachment } from '../lib/spawnDrafts'
 import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, Pencil, TerminalSquare, Mail, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -43,6 +43,8 @@ import { ensureReviewConfig, refreshReviewConfig, useProjectStore } from '../sto
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME, SHORTCUT_DIFF_SIDEBAR } from '../lib/shortcuts'
 import { pillText } from '../lib/branchPills'
+import type { AgentCommand } from '../lib/agentCommands'
+import { agentPrimaryActionAppearances } from './agentPrimaryActions'
 
 // Matches an upload path the spawn form embeds in a prompt: any token containing
 // the uploads dir followed by the on-disk filename (sanitized to [A-Za-z0-9._-]
@@ -808,6 +810,24 @@ const AgentMetaRow = memo(function AgentMetaRow({
   deepEqual(metaRowSignature(prev.agent), metaRowSignature(next.agent)),
 )
 
+function RequestedAgentAction({ action, run, onHandled }: {
+  action: AgentCommand
+  run: (action: AgentCommand) => void
+  onHandled?: () => void
+}) {
+  useEffect(() => {
+    // Run after the detail page has committed. Rename needs its top-bar portal
+    // mounted before it opens the inline editor; dialogs likewise should not be
+    // opened during the parent's render.
+    const timer = window.setTimeout(() => {
+      run(action)
+      onHandled?.()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [action, run, onHandled])
+  return null
+}
+
 export function AgentDetail({
   agent,
   projectId,
@@ -816,6 +836,8 @@ export function AgentDetail({
   onRefresh,
   focusComment,
   focusLine,
+  requestedAction,
+  onActionHandled,
 }: {
   agent: AgentResponse
   projectId: string | null
@@ -829,6 +851,8 @@ export function AgentDetail({
   // the diff, which scrolls to it and flashes it once it has a diff to find it in.
   focusComment?: number
   focusLine?: string
+  requestedAction?: AgentCommand
+  onActionHandled?: () => void
 }) {
   const [killing, setKilling] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -1809,14 +1833,22 @@ export function AgentDetail({
   const armed = agent.merge_when_green === true
   const busy = merging || killing
   const toBranch = agent.base_branch || 'base'
+  const [publishAppearance, mergeAppearance, unreadAppearance, renameAppearance, restartAppearance, killAppearance] = agentPrimaryActionAppearances({
+    agent,
+    provider: reviewConfig?.provider,
+    merging,
+    publishing,
+    killing,
+    restarting,
+  })
   // Force routes to the right confirm copy: a failing verdict names the failing
   // count; anything else (errored / no verdict / still running) is "merge anyway".
   const forceMerge = () => confirmForceMerge(verdict === 'failing' ? 'failing' : 'errored')
 
   const mergeAction: AgentTopBarAction = merging
     ? {
-        label: 'Merging...',
-        icon: <LoaderCircle className="w-4 h-4 animate-spin" />,
+        label: mergeAppearance.label,
+        icon: mergeAppearance.icon,
         onClick: () => {},
         variant: 'muted',
         shortcut: SHORTCUT_MERGE,
@@ -1826,15 +1858,15 @@ export function AgentDetail({
           // Compound control (see AgentTopBarAction.render): a green status pill
           // carrying its own Cancel button, so the state and the way out are both
           // visible. `onClick` is the keyboard-shortcut fallback (Ctrl+M cancels).
-          label: 'Merge queued',
-          icon: <Clock className="w-4 h-4" />,
+          label: mergeAppearance.label,
+          icon: mergeAppearance.icon,
           onClick: () => void cancelMerge(),
           shortcut: SHORTCUT_MERGE,
           render: <MergeWhenGreenPill agent={agent} onCancel={() => void cancelMerge()} disabled={busy} />,
         }
       : {
-          label: 'Merge',
-          icon: <GitPullRequestArrow className="w-4 h-4" />,
+          label: mergeAppearance.label,
+          icon: mergeAppearance.icon,
           onClick: handleMerge,
           variant: 'primary',
           disabled: busy,
@@ -1915,12 +1947,12 @@ export function AgentDetail({
     disabled: busy,
   }
   const publishAction: AgentTopBarAction = publishing
-    ? { label: 'Publishing...', icon: <LoaderCircle className="w-4 h-4 animate-spin" />, onClick: () => {}, variant: 'muted' }
+    ? { label: publishAppearance.label, icon: publishAppearance.icon, onClick: () => {}, variant: 'muted' }
     : linked
       ? {
-          label: leadWithPush ? `Push to ${mrNoun}` : `View ${mrNoun}`,
-          count: leadWithPush ? ahead : undefined,
-          icon: leadWithPush ? <Upload className="w-4 h-4" /> : <ProviderIcon provider={agent.review?.provider} className="w-4 h-4" />,
+          label: publishAppearance.label,
+          count: publishAppearance.count,
+          icon: publishAppearance.icon,
           onClick: leadWithPush ? () => void handlePushToMR() : () => window.open(agent.review!.url, '_blank', 'noreferrer'),
           variant: leadWithPush ? 'blue' : 'segment',
           disabled: busy || publishing,
@@ -1937,18 +1969,19 @@ export function AgentDetail({
           ] as AgentTopBarMenuItem[],
         }
       : {
-          label: `Create ${mrNoun}`,
+          label: publishAppearance.label,
           // The FORGE mark, not a generic lucide one: this button opens the
           // "Create merge request" dialog, which leads with the same mark, and
           // the two wearing different glyphs for one action was the giveaway
           // that they were designed apart. It also says WHICH forge before you
           // open anything. Falls back to a generic PR glyph when the project has
           // no provider configured (see ProviderIcon).
-          icon: <ProviderIcon provider={reviewConfig?.provider} className="w-4 h-4" />,
+          icon: publishAppearance.icon,
           onClick: () => void openCreateMR(),
           variant: 'blue',
           disabled: busy || publishing,
         }
+
   // Create MR (blue) always leads, to the left of Merge; once linked it becomes
   // the View-MR button, still first.
   const mrFirst = true
@@ -1995,10 +2028,10 @@ export function AgentDetail({
         }}
         actions={[
           ...(agent.focused ? [] : mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
-          { label: 'Mark as unread', icon: <Mail className="w-4 h-4" />, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
-          { label: 'Rename', icon: <Pencil className="w-4 h-4" />, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
-          { label: 'Restart', icon: <RotateCcw className="w-4 h-4" />, onClick: handleRestart, variant: 'segment', disabled: merging || killing || restarting },
-          { label: 'Kill', icon: <Trash2 className="w-4 h-4" />, onClick: handleKill, variant: 'danger', disabled: merging || killing, shortcut: SHORTCUT_KILL },
+          { label: unreadAppearance.label, icon: unreadAppearance.icon, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
+          { label: renameAppearance.label, icon: renameAppearance.icon, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
+          { label: restartAppearance.label, icon: restartAppearance.icon, onClick: handleRestart, variant: 'segment', disabled: restartAppearance.disabled },
+          { label: killAppearance.label, icon: killAppearance.icon, onClick: handleKill, variant: 'danger', disabled: killAppearance.disabled, shortcut: SHORTCUT_KILL },
         ]}
       />
     </TopBarPortal>
@@ -2006,6 +2039,19 @@ export function AgentDetail({
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
+      {requestedAction && !agent.archived && (
+        <RequestedAgentAction
+          action={requestedAction}
+          onHandled={onActionHandled}
+          run={(action) => {
+            if (action === 'publish') publishAction.onClick()
+            else if (action === 'merge') mergeAction.onClick()
+            else if (action === 'rename') startEditingTitle()
+            else if (action === 'restart') handleRestart()
+            else if (action === 'kill') void handleKill()
+          }}
+        />
+      )}
       {showCreateMR && (
         <CreateMRDialog
           agent={agent}
