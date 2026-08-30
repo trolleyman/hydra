@@ -177,7 +177,8 @@ and `web/src/DiffViewer.tsx`):
   a streaming update. History loading fires once per arrival in the top zone;
   an anchored prepend re-arms it after moving the preserved content clear, so a
   thumb held at the top deliberately continues paging. Reaching the bottom
-  explicitly reacquires the pin.
+  explicitly reacquires the pin. The optional coarse-wheel easing layer is a
+  default-off browser feature flag, independent from bottom following.
 - Keyboard hints use the shared `Kbd` / `ShortcutHint` components. Their fixed
   cap box optically lowers the glyph within the font line box, keeping fonts
   with asymmetric ascent/descent metrics vertically centred.
@@ -188,7 +189,9 @@ and `web/src/DiffViewer.tsx`):
 - The shared confirmation dialog is opaque as soon as it mounts. While it is
   open, underlying native scrollbar chrome becomes transparent without removing
   its gutter; this prevents WebKitGTK from compositing scroll thumbs through the
-  modal without shifting the page.
+  modal without shifting the page. Hydra's thin app-wide scrollbar treatment is
+  a separate default-off browser feature flag; otherwise scrollbars use native
+  browser and operating-system chrome.
 - A visible, loaded Files diff pauses decorative infinite animations in the
   WebKit desktop shells. WebKitGTK and WKWebView otherwise repaint the Files
   surface for tiny status, progress and chat animations after the diff has fully

@@ -123,6 +123,7 @@ import { onDesktopImagePaste } from '../lib/desktopBridge'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { ResumeDivider } from './ResumeDivider'
 import { historyThresholdTransition, isVerticalScrollbarPointer } from '../lib/chatScroll'
+import { useFeatureFlagsStore } from '../lib/featureFlags'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -7156,6 +7157,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // per-frame flush via a ref so a mid-stream toggle takes effect on the next
   // frame without re-running the reducer effect.
   const smoothStream = useChatStreamStore((s) => s.smooth)
+  const smoothChatWheel = useFeatureFlagsStore((s) => s.smoothChatWheel)
 
   const onStatusUpdateRef = useRef<(status: string) => void>(() => {})
   const onDiffRefreshRef = useRef(onDiffRefresh)
@@ -9242,6 +9244,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // scroll-behavior only affects programmatic scrolling, not wheel input, so
   // this small rAF glide is needed for the Linux mouse-wheel case.
   useEffect(() => {
+    if (!smoothChatWheel) return
     const el = scrollRef.current
     if (!el) return
 
@@ -9316,7 +9319,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
     // The handler deliberately reads live refs; rebinding it on every chat
     // render would interrupt a glide while streamed tokens arrive.
-  }, [])
+  }, [smoothChatWheel])
 
   // followBottom keeps a pinned view at the bottom as content arrives. This
   // used to be a bare `scrollTop = scrollHeight`, so every new message, thought

@@ -16,13 +16,14 @@ import { RemoveProjectSection } from '../../components/settings/RemoveProjectSec
 import { BrowserSections } from '../../components/settings/BrowserSections'
 import { ScopeTabs, SettingsSaveAction } from '../../components/settings/shared'
 import { AboutSection } from '../../components/settings/AboutSection'
+import { FeatureFlagsSections } from '../../components/settings/FeatureFlagsSections'
 
 export const Route = createFileRoute('/project/$projectId/settings')({
   component: ProjectSettingsPage,
 })
 
 type SettingsScope = 'project' | 'local' | 'user'
-type SettingsTab = SettingsScope | 'browser' | 'about'
+type SettingsTab = SettingsScope | 'browser' | 'features' | 'about'
 
 const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
   project:
@@ -31,6 +32,7 @@ const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
     'This project, just you - stored in the untracked .hydra/config.local.toml and layered on top of the project config (lists combine, pre-prompts append, other values override). For personal overrides you do not want to commit.',
   user: 'Every project on this machine - stored in ~/.config/hydra/config.toml.',
   browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
+  features: 'Experimental behavior for this browser only. Flags are stored locally, apply immediately, and default off.',
   about: '',
 }
 
@@ -146,12 +148,12 @@ function ProjectSettingsPage() {
     setTestAgent(null)
   }
 
-  // Switching between the two config tabs refetches and discards the draft, so
-  // guard that the same way navigation is guarded. The Browser tab touches no
-  // config state, so moving to or from it needs no guard.
+  // Switching between config tabs refetches and discards the draft, so guard
+  // that the same way navigation is guarded. The Browser, Feature flags and
+  // About tabs touch no config state, so moving to or from them needs no guard.
   function switchTab(t: SettingsTab) {
     if (t === tab) return
-    if (t !== 'browser' && t !== 'about' && t !== scope) {
+    if (t !== 'browser' && t !== 'features' && t !== 'about' && t !== scope) {
       if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Discard them?')) return
       setScope(t)
     }
@@ -163,7 +165,7 @@ function ProjectSettingsPage() {
       {/* Save lives in the global top bar beside its "Settings" crumb - the page
           has no header of its own. Browser preferences apply instantly, and
           About has no editable settings. */}
-      {tab !== 'browser' && tab !== 'about' && <SettingsSaveAction dirty={hasUnsavedChanges} saving={saving} onSave={handleSave} />}
+      {tab !== 'browser' && tab !== 'features' && tab !== 'about' && <SettingsSaveAction dirty={hasUnsavedChanges} saving={saving} onSave={handleSave} />}
       <div className="flex-1 overflow-auto [scrollbar-gutter:stable] bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
           {/* Scope tabs: which settings store the page edits. Kept outside the
@@ -174,6 +176,7 @@ function ProjectSettingsPage() {
               { id: 'local' as SettingsTab, label: 'Local' },
               { id: 'user' as SettingsTab, label: 'User' },
               { id: 'browser' as SettingsTab, label: 'Browser' },
+              { id: 'features' as SettingsTab, label: 'Feature flags' },
               { id: 'about' as SettingsTab, label: 'About' },
             ]}
             active={tab}
@@ -182,6 +185,8 @@ function ProjectSettingsPage() {
           />
           {tab === 'about' ? (
             <AboutSection />
+          ) : tab === 'features' ? (
+            <FeatureFlagsSections />
           ) : tab === 'browser' ? (
             <BrowserSections />
           ) : loading ? (

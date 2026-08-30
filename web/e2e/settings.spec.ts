@@ -39,6 +39,15 @@ test('the settings page renders every split section with its seeded config', asy
   await page.getByRole('tab', { name: 'Browser', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Theme', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Terminal', exact: true })).toBeVisible()
+
+  // Experimental scroll behavior is isolated on its own default-off tab so it
+  // can be tested independently from ordinary browser preferences.
+  await page.getByRole('tab', { name: 'Feature flags', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Smooth chat wheel scrolling' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Custom scrollbars' })).toBeVisible()
+  await expect(page.getByRole('checkbox')).toHaveCount(2)
+  await expect(page.getByRole('checkbox').nth(0)).not.toBeChecked()
+  await expect(page.getByRole('checkbox').nth(1)).not.toBeChecked()
 })
 
 test('switching the agent tab swaps in that agent’s ConfigForm', async ({ page }) => {
