@@ -364,11 +364,14 @@ and backend build identity. Linux refuses to attach when the protocol is absent
 or different, so compatibility is checked for reused daemons as well as newly
 launched ones.
 The GTK shell also supports repeated application activation and Ctrl+N as
-native multi-window actions against the same application/backend. WebKit policy
-keeps same-origin Hydra navigation embedded, opens clicked external HTTP(S)
-links with the system handler, and blocks cross-origin redirects and non-web
-schemes. Shared cookie/storage behavior and window-manager lifecycle still need
-native Wayland/X11 validation.
+native multi-window actions against the same application/backend. Its WebKit
+profile is persistent under the selected Hydra state root, so browser-local
+preferences such as the last project and model survive an app restart while
+checkout-local development runs remain isolated from the installed app. WebKit
+policy keeps same-origin Hydra navigation embedded, opens clicked external
+HTTP(S) links with the system handler, and blocks cross-origin redirects and
+non-web schemes. Window-manager lifecycle still needs native Wayland/X11
+validation.
 Desktop cold-start explicitly binds `127.0.0.1:0`; the assigned port exists only
 in the private ownership record. `mage buildDesktop` and `mage runDesktop`
 dispatch by host OS; on Linux they build the frontend and tagged shell.
