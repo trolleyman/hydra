@@ -814,6 +814,7 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		PrePrompt:          h.PrePrompt,
 		Prompt:             h.Prompt,
 		BaseBranch:         h.BaseBranch,
+		WorkspaceBaseRef:   &h.WorkspaceBaseRef,
 		Ephemeral:          &h.Ephemeral,
 		ChatMode:           &h.ChatMode,
 		CreatedAt:          createdAt,
@@ -3108,6 +3109,23 @@ func diffCost(files []git.DiffFile) int64 {
 	return n
 }
 
+// workspaceComparisonBase returns the immutable starting commit for a focused
+// head. Legacy rows created before that field existed fall back to the current
+// HEAD: they can still inspect live uncommitted changes, without pretending an
+// older commit belonged to that chat.
+func workspaceComparisonBase(projectRoot string, head *heads.Head) string {
+	if !head.IsFocused() {
+		return head.BaseBranch
+	}
+	if head.WorkspaceBaseRef != "" {
+		return head.WorkspaceBaseRef
+	}
+	if sha, err := git.ResolveRef(projectRoot, "HEAD"); err == nil {
+		return sha
+	}
+	return "HEAD"
+}
+
 func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommitsRequestObject) (api.GetAgentCommitsResponseObject, error) {
 	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
 	if err != nil {
@@ -3127,10 +3145,13 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 
 	baseBranch := head.BaseBranch
 	headBranch := ""
-	if head.Branch != nil {
+	if head.IsFocused() {
+		baseBranch = workspaceComparisonBase(projectRoot, head)
+		headBranch = "HEAD"
+	} else if head.Branch != nil {
 		headBranch = *head.Branch
 	}
-	if headBranch == "" {
+	if baseBranch == "" || headBranch == "" {
 		return api.GetAgentCommits200JSONResponse{}, nil
 	}
 
@@ -3234,7 +3255,9 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	}
 
 	headBranch := ""
-	if head.Branch != nil {
+	if head.IsFocused() {
+		headBranch = "HEAD"
+	} else if head.Branch != nil {
 		headBranch = *head.Branch
 	}
 	if headBranch == "" {
@@ -3244,6 +3267,9 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 
 	// Resolve base and head refs.
 	baseRef := head.BaseBranch
+	if head.IsFocused() {
+		baseRef = workspaceComparisonBase(projectRoot, head)
+	}
 	headRef := headBranch
 	if request.Params.BaseRef != nil && *request.Params.BaseRef != "" {
 		baseRef = *request.Params.BaseRef
@@ -3256,7 +3282,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	// HEAD). The default agent comparison should use that worktree commit rather
 	// than exposing git's ambiguous-revision error in the Files panel. Explicit
 	// caller-supplied refs still fail normally so typos are not hidden.
-	if request.Params.HeadRef == nil || *request.Params.HeadRef == "" {
+	if !head.IsFocused() && (request.Params.HeadRef == nil || *request.Params.HeadRef == "") {
 		if resolved, ok := resolveDefaultAgentHead(projectRoot, head.Worktree, headRef); ok {
 			headRef = resolved
 		} else {
@@ -3297,17 +3323,18 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 
 	// Use triple-dot (merge-base) diff when using default branch refs (whole MR view).
 	// Use double-dot when specific commits are given (commit-to-commit view).
-	useTripleDot := (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
+	useTripleDot := !head.IsFocused() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
 		(request.Params.HeadRef == nil || *request.Params.HeadRef == "") &&
 		!includeUncommitted
 
 	diffRoot := projectRoot
-	if includeUncommitted && head.Worktree != nil {
+	workingDir := head.WorkingDir()
+	if includeUncommitted && workingDir != "" {
 		// Use the agent's worktree to see uncommitted changes.
-		diffRoot = *head.Worktree
+		diffRoot = workingDir
 
 		// If using default refs (full diff), compare merge-base with worktree.
-		if (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
+		if !head.IsFocused() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
 			(request.Params.HeadRef == nil || *request.Params.HeadRef == "") {
 			if mb, err := git.GetMergeBase(diffRoot, baseRef, "HEAD"); err == nil {
 				baseRef = mb
@@ -3342,8 +3369,8 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	}
 
 	// Append untracked files when including uncommitted changes.
-	if includeUncommitted && head.Worktree != nil {
-		if untrackedDiffs, err := git.GetUntrackedDiff(*head.Worktree, path, contextLines); err == nil {
+	if includeUncommitted && workingDir != "" {
+		if untrackedDiffs, err := git.GetUntrackedDiff(workingDir, path, contextLines); err == nil {
 			diffFiles = append(diffFiles, untrackedDiffs...)
 		}
 	}
@@ -3395,8 +3422,8 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 
 	uncommittedChanges := false
 	var uncommittedSummary *api.UncommittedSummary
-	if head.Worktree != nil {
-		if summary, err := git.GetUncommittedSummary(*head.Worktree); err == nil {
+	if workingDir != "" {
+		if summary, err := git.GetUncommittedSummary(workingDir); err == nil {
 			uncommittedChanges = summary.TrackedCount > 0 || summary.UntrackedCount > 0
 			uncommittedSummary = apiUncommittedSummary(summary)
 		}
@@ -3487,7 +3514,9 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	}
 
 	headBranch := ""
-	if head.Branch != nil {
+	if head.IsFocused() {
+		headBranch = "HEAD"
+	} else if head.Branch != nil {
 		headBranch = *head.Branch
 	}
 	if headBranch == "" {
@@ -3497,6 +3526,9 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 
 	// Resolve base and head refs.
 	baseRef := head.BaseBranch
+	if head.IsFocused() {
+		baseRef = workspaceComparisonBase(projectRoot, head)
+	}
 	headRef := headBranch
 	if request.Params.BaseRef != nil && *request.Params.BaseRef != "" {
 		baseRef = *request.Params.BaseRef
@@ -3510,14 +3542,15 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 		includeUncommitted = *request.Params.IncludeUncommitted
 	}
 
-	useTripleDot := (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
+	useTripleDot := !head.IsFocused() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
 		(request.Params.HeadRef == nil || *request.Params.HeadRef == "") &&
 		!includeUncommitted
 
 	diffRoot := projectRoot
-	if includeUncommitted && head.Worktree != nil {
-		diffRoot = *head.Worktree
-		if (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
+	workingDir := head.WorkingDir()
+	if includeUncommitted && workingDir != "" {
+		diffRoot = workingDir
+		if !head.IsFocused() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
 			(request.Params.HeadRef == nil || *request.Params.HeadRef == "") {
 			if mb, err := git.GetMergeBase(diffRoot, baseRef, "HEAD"); err == nil {
 				baseRef = mb
@@ -3536,8 +3569,8 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	}
 
 	// Append untracked files when including uncommitted changes.
-	if includeUncommitted && head.Worktree != nil {
-		if untrackedFiles, err := git.GetUntrackedDiffFiles(*head.Worktree); err == nil {
+	if includeUncommitted && workingDir != "" {
+		if untrackedFiles, err := git.GetUntrackedDiffFiles(workingDir); err == nil {
 			diffFiles = append(diffFiles, untrackedFiles...)
 		}
 	}
@@ -3562,8 +3595,8 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 
 	uncommittedChanges := false
 	var uncommittedSummary *api.UncommittedSummary
-	if head.Worktree != nil {
-		if summary, err := git.GetUncommittedSummary(*head.Worktree); err == nil {
+	if workingDir != "" {
+		if summary, err := git.GetUncommittedSummary(workingDir); err == nil {
 			uncommittedChanges = summary.TrackedCount > 0 || summary.UntrackedCount > 0
 			uncommittedSummary = apiUncommittedSummary(summary)
 		}

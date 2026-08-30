@@ -4277,6 +4277,12 @@ components:
             True for a branchless head that runs directly in project_path.
             Derived from branch_name being null; persisted without a separate
             kind field.
+        workspace_base_ref:
+          type: string
+          description: >-
+            Immutable checkout commit captured when a project-directory Head
+            starts. It is the default left side of that chat's Changes inspector;
+            empty for ordinary worktree Heads and legacy focused Heads.
         filesystem_mode:
           $ref: '#/components/schemas/FocusedFilesystemMode'
         allow_commits:

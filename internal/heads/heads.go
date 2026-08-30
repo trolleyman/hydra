@@ -49,7 +49,10 @@ type Head struct {
 	PrePrompt     string
 	Prompt        string
 	BaseBranch    string
-	Ephemeral     bool
+	// WorkspaceBaseRef is the immutable checkout commit captured when a focused
+	// head starts. Its inspector compares this ref with the live project directory.
+	WorkspaceBaseRef string
+	Ephemeral        bool
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	ChatMode bool
 	// FilesystemMode and AllowCommits apply to focused heads (Branch == nil).
@@ -176,6 +179,7 @@ func ListHeads(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			PrePrompt:        a.PrePrompt,
 			Prompt:           a.Prompt,
 			BaseBranch:       a.BaseBranch,
+			WorkspaceBaseRef: a.WorkspaceBaseRef,
 			GitIsolation:     a.GitIsolation,
 			Ephemeral:        a.Ephemeral,
 			ChatMode:         a.ChatMode,
@@ -356,28 +360,29 @@ func archivedHead(a *db.Agent) Head {
 		archivedAt = a.DeletedAt.Time.Unix()
 	}
 	return Head{
-		ID:             a.ID,
-		Title:          a.Title,
-		Plan:           a.Plan,
-		Model:          a.Model,
-		ConversationID: a.ConversationID,
-		Branch:         branch,
-		Worktree:       nil,
-		ProjectPath:    a.ProjectPath,
-		AgentType:      sandbox.AgentType(a.AgentType),
-		PrePrompt:      a.PrePrompt,
-		Prompt:         a.Prompt,
-		BaseBranch:     a.BaseBranch,
-		GitIsolation:   a.GitIsolation,
-		Ephemeral:      a.Ephemeral,
-		ChatMode:       a.ChatMode,
-		FilesystemMode: a.FilesystemMode,
-		AllowCommits:   a.AllowCommits,
-		CreatedAt:      a.CreatedAt.Unix(),
-		AgentStatus:    archivedAgentStatus(a),
-		Archived:       true,
-		EndState:       a.EndState,
-		ArchivedAt:     archivedAt,
+		ID:               a.ID,
+		Title:            a.Title,
+		Plan:             a.Plan,
+		Model:            a.Model,
+		ConversationID:   a.ConversationID,
+		Branch:           branch,
+		Worktree:         nil,
+		ProjectPath:      a.ProjectPath,
+		AgentType:        sandbox.AgentType(a.AgentType),
+		PrePrompt:        a.PrePrompt,
+		Prompt:           a.Prompt,
+		BaseBranch:       a.BaseBranch,
+		WorkspaceBaseRef: a.WorkspaceBaseRef,
+		GitIsolation:     a.GitIsolation,
+		Ephemeral:        a.Ephemeral,
+		ChatMode:         a.ChatMode,
+		FilesystemMode:   a.FilesystemMode,
+		AllowCommits:     a.AllowCommits,
+		CreatedAt:        a.CreatedAt.Unix(),
+		AgentStatus:      archivedAgentStatus(a),
+		Archived:         true,
+		EndState:         a.EndState,
+		ArchivedAt:       archivedAt,
 	}
 }
 
@@ -553,6 +558,13 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			return nil, errtrace.Wrap(fmt.Errorf("detect default branch: %w", err))
 		}
 	}
+	workspaceBaseRef := ""
+	if opts.Focused {
+		workspaceBaseRef, err = git.ResolveRef(projectRoot, "HEAD")
+		if err != nil {
+			return nil, errtrace.Wrap(fmt.Errorf("capture focused workspace baseline: %w", err))
+		}
+	}
 	// The worktree is normally created from the base branch; an adopted head is
 	// created from the already-fetched PR head ref instead.
 	worktreeBase := baseBranch
@@ -589,22 +601,23 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	if store != nil {
 		agent := &db.Agent{
-			ID:             opts.ID,
-			ProjectPath:    projectRoot,
-			BranchName:     branchName,
-			BaseBranch:     baseBranch,
-			GitIsolation:   opts.GitIsolation,
-			AgentType:      string(opts.AgentType),
-			PrePrompt:      opts.PrePrompt,
-			Prompt:         opts.Prompt,
-			Title:          title,
-			Ephemeral:      opts.Ephemeral,
-			ChatMode:       opts.ChatMode,
-			FilesystemMode: opts.FilesystemMode,
-			AllowCommits:   opts.AllowCommits,
-			SessionStatus:  "pending",
-			HeadStatus:     "idle",
-			CreatedAt:      now,
+			ID:               opts.ID,
+			ProjectPath:      projectRoot,
+			BranchName:       branchName,
+			BaseBranch:       baseBranch,
+			WorkspaceBaseRef: workspaceBaseRef,
+			GitIsolation:     opts.GitIsolation,
+			AgentType:        string(opts.AgentType),
+			PrePrompt:        opts.PrePrompt,
+			Prompt:           opts.Prompt,
+			Title:            title,
+			Ephemeral:        opts.Ephemeral,
+			ChatMode:         opts.ChatMode,
+			FilesystemMode:   opts.FilesystemMode,
+			AllowCommits:     opts.AllowCommits,
+			SessionStatus:    "pending",
+			HeadStatus:       "idle",
+			CreatedAt:        now,
 		}
 		// Auto-push is armed when Hydra creates an MR, not at spawn. This keeps new
 		// heads from opening MRs on their own. Adopted PRs remain explicit opt-in.

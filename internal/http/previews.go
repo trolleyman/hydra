@@ -115,9 +115,9 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 	var pv preview.Version
 	uncommitted := includeUncommitted != nil && *includeUncommitted
 	switch {
-	case uncommitted && head.Worktree != nil:
-		srcWorktree = *head.Worktree
-		pv = preview.Version{HeadID: head.ID, WorktreeDir: *head.Worktree}
+	case uncommitted && head.WorkingDir() != "":
+		srcWorktree = head.WorkingDir()
+		pv = preview.Version{HeadID: head.ID, WorktreeDir: head.WorkingDir()}
 	case headRef != nil && *headRef != "":
 		// A pinned commit: no Branch, so the slot never follows a moving tip.
 		sha, err := git.ResolveRef(projectRoot, *headRef)
@@ -126,12 +126,9 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 		}
 		srcRef = sha
 		pv = preview.Version{HeadID: head.ID, SHA: sha}
-	default:
+	case head.Branch != nil:
 		// "Latest commit" = the head's branch tip. Carry the branch so the slot
 		// rebuilds and hot-swaps in the background as the tip advances.
-		if head.Branch == nil {
-			return nil, nil
-		}
 		// Kill/merge removes the branch before the archived row disappears from
 		// every in-flight request. Treat that transition (and a degraded head with
 		// an already-missing branch) as having no previews instead of turning an
@@ -145,6 +142,16 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 		}
 		srcRef = sha
 		pv = preview.Version{HeadID: head.ID, SHA: sha, Branch: *head.Branch}
+	default:
+		// A focused head follows the shared checkout's current HEAD. It has no
+		// branch identity of its own, so this is a pinned version; the inspector's
+		// normal diff-refresh signal re-resolves it after a commit.
+		sha, err := git.ResolveRef(projectRoot, "HEAD")
+		if err != nil {
+			return nil, errtrace.Wrap(err)
+		}
+		srcRef = sha
+		pv = preview.Version{HeadID: head.ID, SHA: sha}
 	}
 
 	liveCfg, err := config.Load(projectRoot)

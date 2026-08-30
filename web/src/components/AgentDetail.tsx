@@ -944,14 +944,13 @@ export function AgentDetail({
   const toggleWorking = usePaneCollapseStore((s) => s.toggleWorking)
   // Is the diff currently on screen? Wide: the inspector pane isn't collapsed.
   // Narrow: the single pane is showing the full-screen diff (working collapsed).
-  const diffShown = !agent.focused && (isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working')
+  const diffShown = isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working'
   // The diff-sidebar toggle (top bar + Ctrl+,): wide hides/shows the inspector
   // pane; narrow flips the single pane between working and full-screen diff.
   const toggleDiffSidebar = useCallback(() => {
-    if (agent.focused) return
     if (isWide) toggleInspector()
     else toggleWorking()
-  }, [agent.focused, isWide, toggleInspector, toggleWorking])
+  }, [isWide, toggleInspector, toggleWorking])
   // A commit chip clicked in the chat transcript: point the diff viewer at just
   // that commit (nonce makes re-clicking the same chip re-apply) and make sure
   // the diff is on screen - wide: un-collapse the inspector pane; narrow: slide
@@ -2151,9 +2150,7 @@ export function AgentDetail({
             className="flex min-h-0 overflow-hidden shrink-0"
             style={{
               width:
-                agent.focused
-                  ? '100%'
-                  : paneCollapse === 'working'
+                paneCollapse === 'working'
                   ? 0
                   : paneCollapse === 'inspector'
                     ? '100%'
@@ -2168,9 +2165,7 @@ export function AgentDetail({
               className="flex flex-col min-h-0 h-full shrink-0"
               style={{
                 width:
-                  agent.focused
-                    ? '100%'
-                    : paneCollapse === 'working' || workingRevealing
+                  paneCollapse === 'working' || workingRevealing
                     ? Math.max(0, panesW * splitRatio - 6)
                     : '100%',
               }}
@@ -2203,7 +2198,7 @@ export function AgentDetail({
                 {/* self-start pins the toggle to the toolbar's first line even
                     when the chips wrap, so it stays level with the inspector
                     bar's toggle across the divider. */}
-                {!agent.focused && <div className="shrink-0 self-start">{workingTopButton}</div>}
+                <div className="shrink-0 self-start">{workingTopButton}</div>
               </div>
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 sm:px-4 pt-3 pb-4 gap-3">
                 {/* Prompt collapsed by default (terminal mode only) - chat heads
@@ -2230,17 +2225,17 @@ export function AgentDetail({
           {/* Draggable divider - kept mounted but width-collapsed off the full
               split so the pane widths add up cleanly and animate. */}
           <div
-            onPointerDown={!agent.focused && paneCollapse === 'none' ? handleSplitResizeStart : undefined}
-            className={`group/resize shrink-0 flex items-center justify-center overflow-hidden ${!agent.focused && paneCollapse === 'none' ? 'cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800' : ''}`}
-            style={{ width: !agent.focused && paneCollapse === 'none' ? 12 : 0, transition: paneTransition }}
-            title={!agent.focused && paneCollapse === 'none' ? 'Drag to resize' : undefined}
+            onPointerDown={paneCollapse === 'none' ? handleSplitResizeStart : undefined}
+            className={`group/resize shrink-0 flex items-center justify-center overflow-hidden ${paneCollapse === 'none' ? 'cursor-ew-resize touch-none border-x-1 border-gray-200 dark:border-gray-800' : ''}`}
+            style={{ width: paneCollapse === 'none' ? 12 : 0, transition: paneTransition }}
+            title={paneCollapse === 'none' ? 'Drag to resize' : undefined}
           >
             <ResizeGrip orientation="vertical" />
           </div>
           <div
             className="flex flex-col min-w-0 min-h-0 overflow-hidden shrink-0"
             style={{
-              width: agent.focused ? '0px' : paneCollapse === 'inspector' ? '0px' : paneCollapse === 'working' ? '100%' : `calc(${((1 - splitRatio) * 100).toFixed(4)}% - 6px)`,
+              width: paneCollapse === 'inspector' ? '0px' : paneCollapse === 'working' ? '100%' : `calc(${((1 - splitRatio) * 100).toFixed(4)}% - 6px)`,
               transition: paneTransition,
             }}
           >
@@ -2305,11 +2300,11 @@ export function AgentDetail({
                     onUpdateFocusedPermissions={updateFocusedPermissions}
                   />
                 </div>
-                {!agent.focused && <Tooltip content="Show diff" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
+                <Tooltip content="Show diff" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
                   <button className={PANE_TOGGLE_CLS} aria-label="Show diff" onClick={toggleDiffSidebar}>
                     <FileDiff className="w-4 h-4" />
                   </button>
-                </Tooltip>}
+                </Tooltip>
               </div>
               {/* No padding around the chat/terminal on mobile - it fills the
                   screen edge-to-edge; only the prompt keeps a small inset. */}

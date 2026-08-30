@@ -363,6 +363,30 @@ for both managed worktree branches and a project-directory chat whose checkout
 is on the destination branch. Ordinary project-directory commits have no
 incoming-branch hint and remain ordinary one-commit rows.
 
+## Project-directory Changes inspector
+
+A project-directory chat has the same Changes inspector as a managed worktree
+chat. When the Head is created, Hydra resolves the checkout's current `HEAD` and
+persists it as `workspace_base_ref`. The default selector range is **Chat start**
+to **Project directory**: the starting commit is the left side, and the shared
+project root - committed, staged, unstaged and untracked state together - is the
+right side. Selecting Latest commit or an individual commit pins the right side
+to that committed ref instead.
+
+This is deliberately a project-state comparison, not an ownership claim. The
+directory is shared, so edits made by another Head, a user shell or an editor are
+visible too. A checkout that was already dirty when the chat started also shows
+those edits: the durable baseline is the starting commit, not a hidden snapshot
+of the initial dirty tree. Switching the shared checkout to another branch does
+not rewrite the baseline; the inspector continues to show the literal tree
+difference from the chat's starting commit.
+
+Tests and previews resolve the selected right side. Diff artifacts resolve both
+selected sides, so their before/after matches the code comparison. The focused
+Head remains branchless throughout: commit inventory walks from
+`workspace_base_ref` to the shared checkout's `HEAD`, and uncommitted reads use
+the project root rather than synthesizing a Hydra worktree.
+
 ## Queued messages
 
 A queued message lives only in the checkpointed queue projection and rides in

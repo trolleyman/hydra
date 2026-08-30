@@ -766,11 +766,11 @@ func (s *Server) HandleAgentBlob(w http.ResponseWriter, r *http.Request) {
 
 	if q.Get("worktree") == "true" {
 		head, err := heads.GetHeadByID(r.Context(), s.Sessions, s.DB, projectRoot, r.PathValue("agent_id"))
-		if err != nil || head == nil || head.Worktree == nil {
+		if err != nil || head == nil || head.WorkingDir() == "" {
 			http.NotFound(w, r)
 			return
 		}
-		s.serveWorktreeBlob(w, r, *head.Worktree, filePath)
+		s.serveWorktreeBlob(w, r, head.WorkingDir(), filePath)
 		return
 	}
 

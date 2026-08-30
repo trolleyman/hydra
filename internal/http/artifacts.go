@@ -104,7 +104,7 @@ func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, param
 		return nil, nil
 	}
 	liveCfg, err := config.Load(projectRoot)
-	if err != nil || head.Branch == nil {
+	if err != nil {
 		return nil, nil //nolint:nilerr // a missing/unreadable config means "no artifacts"
 	}
 	mgr := s.Artifacts.Manager(projectRoot)
@@ -117,10 +117,18 @@ func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, param
 	// regenerate the "before" artifact from newer state, producing spurious
 	// before/after differences (e.g. a screenshot's clock) unrelated to the work.
 	leftRef := head.BaseBranch
+	if head.IsFocused() {
+		leftRef = workspaceComparisonBase(projectRoot, head)
+	}
 	if params.BaseRef != nil && *params.BaseRef != "" {
 		leftRef = *params.BaseRef
-	} else if mb, err := git.GetMergeBase(projectRoot, head.BaseBranch, *head.Branch); err == nil && mb != "" {
-		leftRef = mb
+	} else if head.Branch != nil {
+		if mb, err := git.GetMergeBase(projectRoot, head.BaseBranch, *head.Branch); err == nil && mb != "" {
+			leftRef = mb
+		}
+	}
+	if leftRef == "" {
+		return nil, nil
 	}
 	left := artifacts.Version{Ref: leftRef}
 
@@ -128,12 +136,14 @@ func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, param
 	var right artifacts.Version
 	includeUncommitted := params.IncludeUncommitted != nil && *params.IncludeUncommitted
 	switch {
-	case includeUncommitted && head.Worktree != nil:
-		right = artifacts.Version{WorktreeDir: *head.Worktree}
+	case includeUncommitted && head.WorkingDir() != "":
+		right = artifacts.Version{WorktreeDir: head.WorkingDir()}
 	case params.HeadRef != nil && *params.HeadRef != "":
 		right = artifacts.Version{Ref: *params.HeadRef}
-	default:
+	case head.Branch != nil:
 		right = artifacts.Version{Ref: *head.Branch}
+	default:
+		right = artifacts.Version{Ref: "HEAD"}
 	}
 
 	// Resolve the artifact scripts independently for each side: the [[artifacts]]

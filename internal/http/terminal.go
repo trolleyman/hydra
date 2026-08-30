@@ -598,12 +598,9 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}()
 		statusLogPath := paths.GetStatusLogFromProjectRoot(projectRoot, agentID)
 
-		// Worktree path captured at attach time; nil if the head has no worktree
-		// (e.g. host shell), in which case we never emit content-driven refreshes.
-		var worktree string
-		if head.Worktree != nil {
-			worktree = *head.Worktree
-		}
+		// Checkout path captured at attach time. Focused heads watch the shared
+		// project directory; ordinary heads watch their linked worktree.
+		worktree := head.WorkingDir()
 
 		// lastHash/lastHead start at the current state so attaching never fires a
 		// spurious initial refresh - the client already fetched the diff on mount.

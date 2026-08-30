@@ -8,6 +8,12 @@ and `web/src/DiffViewer.tsx`):
   its own scroll context, the inspector's marked `[data-inspector-scroll]`) and a
   simpler archived-agent view with a single `[data-main-scroll]` container.
   Layout changes must handle both.
+- A live project-directory Head uses the same inspector pane as an isolated
+  worktree Head. Its default comparison is `Chat start -> Project directory`:
+  the left ref is the immutable `workspace_base_ref` captured at spawn, and the
+  right side is the shared checkout including uncommitted and untracked files.
+  The inspector describes project state, not changes owned exclusively by that
+  chat. Tests and previews use the selected right side; artifacts use both sides.
 - The agent page has no in-page header bar: both paths portal their status dot,
   title (inline rename) and action toolbar into the **global top bar** in
   `__root.tsx` via `TopBarPortal` (`web/src/lib/topBarSlot.ts` holds the slot

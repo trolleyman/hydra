@@ -131,8 +131,8 @@ func testVersion(head *heads.Head, headRef *string, includeUncommitted bool) hyd
 		branch = *head.Branch
 	}
 	switch {
-	case includeUncommitted && head.Worktree != nil:
-		return hydratests.Version{WorktreeDir: *head.Worktree, TotalHintRefs: hints, Branch: branch}
+	case includeUncommitted && head.WorkingDir() != "":
+		return hydratests.Version{WorktreeDir: head.WorkingDir(), TotalHintRefs: hints, Branch: branch}
 	case headRef != nil && *headRef != "":
 		// An explicit ref: the Manager records it to the branch only if it's the
 		// branch's current tip (recordBranchTotal guards this), so viewing an old
@@ -140,6 +140,8 @@ func testVersion(head *heads.Head, headRef *string, includeUncommitted bool) hyd
 		return hydratests.Version{Ref: *headRef, TotalHintRefs: hints, Branch: branch}
 	case head.Branch != nil:
 		return hydratests.Version{Ref: *head.Branch, TotalHintRefs: hints, Branch: branch}
+	case head.IsFocused():
+		return hydratests.Version{Ref: "HEAD", TotalHintRefs: hints}
 	default:
 		return hydratests.Version{}
 	}
@@ -155,6 +157,9 @@ func headTotalHintRefs(head *heads.Head) []string {
 	}
 	if head.BaseBranch != "" {
 		refs = append(refs, head.BaseBranch)
+	}
+	if head.WorkspaceBaseRef != "" {
+		refs = append(refs, head.WorkspaceBaseRef)
 	}
 	return refs
 }
@@ -173,7 +178,7 @@ func (s *Server) GetAgentTests(ctx context.Context, request api.GetAgentTestsReq
 	if head == nil {
 		return api.GetAgentTests404JSONResponse{Code: 404, Error: api.ErrorResponseErrorNotFound, Details: "agent not found"}, nil
 	}
-	if s.Tests == nil || head.Branch == nil {
+	if s.Tests == nil {
 		return api.GetAgentTests200JSONResponse(api.TestsResponse{Runners: []api.TestRunResult{}}), nil
 	}
 

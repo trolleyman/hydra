@@ -16,6 +16,9 @@ type Agent struct {
 	// Git
 	BranchName string
 	BaseBranch string
+	// WorkspaceBaseRef is the starting commit for a focused head's shared-checkout
+	// comparison. Ordinary worktree heads leave it empty.
+	WorkspaceBaseRef string
 	// GitIsolation is the per-head git-isolation mode override (off/readonly; "" =
 	// use the agent-type policy default). See docs/git-isolation.md.
 	GitIsolation string

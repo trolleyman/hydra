@@ -16,6 +16,10 @@ type Agent struct {
 	// Git
 	BranchName string
 	BaseBranch string
+	// WorkspaceBaseRef is the immutable HEAD commit captured when a focused head
+	// starts. It is the left side of that chat's project-directory comparison.
+	// Ordinary worktree heads leave it empty.
+	WorkspaceBaseRef string
 	// GitIsolation is the per-head git-isolation mode override (off/readonly; "" =
 	// use the agent-type policy default). Chosen at spawn and persisted so resume
 	// re-applies the same .git lockdown. See docs/git-isolation.md.

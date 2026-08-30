@@ -26,6 +26,10 @@ export type AgentResponse = {
      * True for a branchless head that runs directly in project_path. Derived from branch_name being null; persisted without a separate kind field.
      */
     focused?: boolean;
+    /**
+     * Immutable checkout commit captured when a project-directory Head starts. It is the default left side of that chat's Changes inspector; empty for ordinary worktree Heads and legacy focused Heads.
+     */
+    workspace_base_ref?: string;
     filesystem_mode?: FocusedFilesystemMode;
     /**
      * Whether a focused head may request Hydra's guarded commit operation. Independent of filesystem_mode; false for ordinary heads.

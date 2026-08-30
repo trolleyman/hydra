@@ -499,7 +499,7 @@ func simFocusedAgents() []api.AgentResponse {
 			Id: "focused-edit", Title: ptr("Tidy the release notes"), AgentType: "claude",
 			BranchName: nil, SessionPid: 1010, SessionStatus: "running", CreatedAt: &createdEdit,
 			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentChatPrompt, ChatMode: &chatMode,
-			Focused: &focused, FilesystemMode: &edit, AllowCommits: &allowCommits, Model: ptr("claude-opus-4-8"),
+			Focused: &focused, FilesystemMode: &edit, AllowCommits: &allowCommits, Model: ptr("claude-opus-4-8"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
 			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-edit"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Waiting, Timestamp: simNow().Format(time.RFC3339)},
 		},
@@ -507,7 +507,7 @@ func simFocusedAgents() []api.AgentResponse {
 			Id: "focused-readonly", Title: ptr("Review the desktop architecture"), AgentType: "codex",
 			BranchName: nil, SessionPid: 1011, SessionStatus: "running", CreatedAt: &createdReadonly,
 			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentCodexPrompt, ChatMode: &chatMode,
-			Focused: &focused, FilesystemMode: &readonly, AllowCommits: &disallowCommits, Model: ptr("gpt-5.6-sol"),
+			Focused: &focused, FilesystemMode: &readonly, AllowCommits: &disallowCommits, Model: ptr("gpt-5.6-sol"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
 			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-readonly"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Finished, Timestamp: simNow().Format(time.RFC3339)},
 		},
@@ -515,7 +515,7 @@ func simFocusedAgents() []api.AgentResponse {
 			Id: "focused-working", Title: ptr("Trace preview port allocation"), AgentType: "claude",
 			BranchName: nil, SessionPid: 1012, SessionStatus: "running", CreatedAt: &createdWorking,
 			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentWorkingPrompt, ChatMode: &chatMode,
-			Focused: &focused, FilesystemMode: &edit, AllowCommits: &disallowCommits, Model: ptr("claude-opus-4-8"),
+			Focused: &focused, FilesystemMode: &edit, AllowCommits: &disallowCommits, Model: ptr("claude-opus-4-8"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
 			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-working"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Running, Timestamp: simNow().Format(time.RFC3339), Activity: ptr("Reading `internal/preview/ports.go`")},
 		},
@@ -1033,7 +1033,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		})
 		return
 	}
-	if id == "agent-chat" {
+	if id == "agent-chat" || id == "focused-edit" {
 		write(simAgentChat())
 		return
 	}
