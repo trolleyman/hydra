@@ -25,6 +25,7 @@ import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { useProjectStore } from '../stores/projectStore'
+import { useToastStore } from '../stores/toastStore'
 import { PRPicker } from './PRPicker'
 import { Badge } from './Badge'
 import type { ReviewRef } from '../api/models/ReviewRef'
@@ -267,7 +268,6 @@ export const SpawnForm = memo(function SpawnForm({
   // .git is a deliberate per-spawn choice, defaulted to the project policy.
   const [gitIsolation, setGitIsolation] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   // Base branch the new agent will be created from. Defaults to the repository's
   // stable default branch; can be pointed at another agent's hydra/<id> branch to stack
   // agents on top of one another. `branches` is null until the list loads.
@@ -827,7 +827,6 @@ export const SpawnForm = memo(function SpawnForm({
     e.preventDefault()
     if (!canSubmit || loading) return
     setLoading(true)
-    setError(null)
     // Whatever the outcome, the composer gets focus back once it re-enables
     // (see the effect above) - on an error too, so the prompt can be edited and
     // retried without reaching for the mouse.
@@ -882,7 +881,11 @@ export const SpawnForm = memo(function SpawnForm({
       setAdopt(null)
       onSpawned?.(agent)
     } catch (err) {
-      setError(formatError(err))
+      useToastStore.getState().show({
+        key: `spawn-error:${projectId ?? ''}`,
+        message: `Couldn't spawn agent: ${formatError(err)}`,
+        type: 'error',
+      })
     } finally {
       setLoading(false)
     }
@@ -1217,9 +1220,6 @@ export const SpawnForm = memo(function SpawnForm({
             {renderResizeHandle()}
           </div>
         </div>
-        {error && (
-          <p className="mt-1.5 text-3xs text-red-500 leading-snug">{error}</p>
-        )}
       </form>
       {lightbox}
       </>
@@ -1318,11 +1318,6 @@ export const SpawnForm = memo(function SpawnForm({
             </div>
           </div>
 
-          {error && (
-            <div className="mt-3 px-4 py-2.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
-              <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
-            </div>
-          )}
         </form>
       </div>
     </div>
