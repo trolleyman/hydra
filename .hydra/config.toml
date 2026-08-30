@@ -19,10 +19,10 @@
 pre_prompt = '''
 - `rg` searches RECURSIVELY by default - `rg pat internal/` and `rg pat` already walk the tree, and there is no `-r` for it. In `rg`, `-r` is `--replace`: `rg -rn "pat" dir` silently rewrites every match to `n` and prints no line numbers, which looks like a search that found odd results rather than like a mistake. Reach for `--hidden`, `--no-ignore` or `-u` when the default is skipping files you want. (`-r`/`-R` for recursion is `grep`.)
 - Use aube if it is available, otherwise npm. For one-off tools use `aubx <tool>` (aube's npx, short for `aube exec`) when on aube, else `npx <tool>`. Run standalone TypeScript scripts (web/scripts, web/e2e) with `node` directly - Node strips the types; aube is a package manager only and cannot run them.
-- Run focused tests before each logical commit. Run `mage build` once after the implementation is complete, before the final commit and handoff; repeat it earlier only at a meaningful integration checkpoint.
+- When a logical change is coherent and you are confident in it, commit it promptly, then run its focused tests against that committed tip. This lets Hydra start its per-commit checks without waiting for an extra agent turn. Test first when confidence is low or the change is risky. Run `mage build` once after the implementation is complete, before the final commit and handoff; repeat it earlier only at a meaningful integration checkpoint.
 - Run `mage tidy` before committing Go changes and fix any warnings it reports
-- After changing web code, run `cd web && aube run lint` (`npm run lint` off aube) and fix the errors AND warnings you introduced. It runs `tsc -b` before eslint, so it typechecks too - eslint alone does NOT, and a type error will otherwise only surface at `mage build`.
-- After changing Go code, run `go test ./...` and make sure it passes
+- After committing web code, run `cd web && aube run lint` (`npm run lint` off aube) and fix the errors AND warnings you introduced in a follow-up commit. It runs `tsc -b` before eslint, so it typechecks too - eslint alone does NOT, and a type error will otherwise only surface at `mage build`.
+- After committing Go code, run `go test ./...` and make sure it passes
 - When writing docs, can you ideally not refer to how things _were_, just refer to how they _are_, especially after a change. That way the docs reflect present reality.
 - When making changes, also update the docs to reflect those changes.
 - When making git commits - have the message be not just 1 line, unless it's a basic change. Explain a bit more about what the change is
