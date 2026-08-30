@@ -121,8 +121,10 @@ development can select explicitly with `mage buildDesktopLinux`,
 invokes the complete native build matrix and therefore belongs on an
 orchestrator with matching platform builders/toolchains.
 
-`mage runDesktop` behaves like an installed app: it uses the stable production
-runtime socket and OS-standard global database. It actively clears inherited
+`mage runDesktop` uses the stable production runtime socket and OS-standard
+global database, but owns its development backend: every launch loads the newly
+built binary, and closing the app or pressing Ctrl+C stops that backend. It
+actively clears inherited
 development database, runtime, and listener variables, so this remains true when
 it is invoked from a terminal opened by a development Hydra. `mage run` and
 `mage runDesktopLocal` instead use the checkout-local development database and
@@ -137,9 +139,9 @@ on Linux these are
 `$XDG_RUNTIME_DIR/hydra/` for development. The desktop backend uses an OS-assigned
 loopback port. Windows builds additionally require `HYDRA_PORTABLE_GIT` to point
 at an extracted official PortableGit distribution.
-On Linux, closing `mage runDesktopLocal` or pressing Ctrl+C stops a detached
-desktop daemon in that checkout's namespace, but leaves an existing `mage run`
-daemon alive.
+On Linux, closing either Mage desktop runner or pressing Ctrl+C stops the
+desktop daemon owned by that command. `runDesktopLocal` still leaves an existing
+`mage run` daemon alive.
 
 The separate build keeps the normal `hydra` CLI free of GTK/WebKit runtime
 dependencies. The project flag is optional; without it the app opens the global

@@ -12,6 +12,7 @@ import { ChatHeightSection } from './ChatHeightSection'
 import { TerminalSection } from './TerminalSection'
 import { NotificationsSection } from './NotificationsSection'
 import { ResetBrowserSection } from './ResetBrowserSection'
+import { DesktopLifetimeSection } from './DesktopLifetimeSection'
 
 // The Browser tab of the settings pages: the client-only preferences (theme /
 // paste markers / auto-close pairs / spellcheck / fonts / step folding / smooth
@@ -35,6 +36,7 @@ export function BrowserSections() {
       <ChatHeightSection />
       <TerminalSection />
       <NotificationsSection />
+      <DesktopLifetimeSection />
       <ResetBrowserSection />
     </>
   )

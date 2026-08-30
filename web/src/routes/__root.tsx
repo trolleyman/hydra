@@ -42,7 +42,7 @@ import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
-import { closeDesktopWindow, onDesktopCommand, openFocusedWindow, openFullWindow, postDesktopMessage } from '../lib/desktopBridge'
+import { closeDesktopWindow, hasDesktopBridge, onDesktopCommand, openChatWindow, openFullWindow, postDesktopMessage, setDesktopKeepRunning } from '../lib/desktopBridge'
 import type { AgentCommand } from '../lib/agentCommands'
 
 export const Route = createRootRoute({
@@ -220,6 +220,15 @@ function RootLayout() {
   // project (see effect below).
   const didAutoNavigate = useRef(false)
   const [restarting, setRestarting] = useState(false)
+  const [desktopKeepRunning, setDesktopKeepRunningState] = useState(() => readLocal(StorageKeys.desktopKeepRunning) !== '0')
+
+  useEffect(() => {
+    if (!hasDesktopBridge()) return
+    setDesktopKeepRunning(desktopKeepRunning)
+    const changed = (event: Event) => setDesktopKeepRunningState((event as CustomEvent<boolean>).detail)
+    window.addEventListener('hydra-desktop-lifetime-changed', changed)
+    return () => window.removeEventListener('hydra-desktop-lifetime-changed', changed)
+  }, [desktopKeepRunning])
   // Sidebar visibility: the persisted desktop collapse preference and the
   // transient mobile panel state are independent flags (see lib/sidebar.ts), so
   // resizing across the breakpoint never pops the sidebar open. The top bar
@@ -977,10 +986,10 @@ function RootLayout() {
             }}
             className="h-8 min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 text-sm"
           >
-            <option value="">New focused chat</option>
+            <option value="">New project chat</option>
             {focusedHistory.map((agent) => <option key={agent.id} value={agent.id}>{agent.title || agent.id}</option>)}
           </select>
-          <button type="button" onClick={() => openFocusedWindow(currentProjectId ?? undefined)} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">New chat</button>
+          <button type="button" onClick={() => openChatWindow(currentProjectId ?? undefined)} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">New chat</button>
           <button type="button" onClick={openFullWindow} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">Full Hydra</button>
           <button type="button" onClick={closeDesktopWindow} className="h-8 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">Close</button>
         </header>
@@ -1269,6 +1278,11 @@ function RootLayout() {
               instead of a second line. */}
           <div className="group border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            {hasDesktopBridge() && (
+              <Tooltip content={desktopKeepRunning ? 'Hydra backend stays running after windows close' : 'Hydra backend stops with the last window'}>
+                <span className={`shrink-0 w-2 h-2 rounded-full ${desktopKeepRunning ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+              </Tooltip>
+            )}
             {canRestart && (
               // Primary action is whichever one is actually useful here: a server
               // that can rebuild itself gets "update", one that can't gets a plain
