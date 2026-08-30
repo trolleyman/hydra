@@ -19,6 +19,7 @@ export function InspectorPane({
   projectId,
   externalRefreshTrigger,
   externalArtifactRefresh,
+  externalReviewRefresh,
   externalCommitSelect,
   changesLeading,
   leadingInline,
@@ -29,6 +30,7 @@ export function InspectorPane({
   projectId: string | null
   externalRefreshTrigger?: number
   externalArtifactRefresh?: number
+  externalReviewRefresh?: number
   // A commit chip clicked in the chat: show just that commit's diff.
   externalCommitSelect?: { sha: string; nonce: number } | null
   // A control rendered at the left edge of the diff's Changes bar (the split
@@ -38,7 +40,7 @@ export function InspectorPane({
   // instead of as a vertically-centered left-edge sibling - used by the narrow
   // screen-stack so the base->head selector row below gets the full width.
   leadingInline?: boolean
-  // A review comment number from `?comment=N`, forwarded to the diff.
+  // A review comment number from `#comment-N`, forwarded to the diff.
   focusComment?: number
   focusLine?: string
 }) {
@@ -60,6 +62,7 @@ export function InspectorPane({
         projectId={projectId}
         externalRefreshTrigger={externalRefreshTrigger}
         externalArtifactRefresh={externalArtifactRefresh}
+        externalReviewRefresh={externalReviewRefresh}
         externalCommitSelect={externalCommitSelect}
         inspector
         changesLeading={changesLeading}

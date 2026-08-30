@@ -1056,10 +1056,13 @@ func handleSimChatWS(conn *safeConn) {
 	turn := 0
 	// processTurn echoes one user turn and streams its reply (ending in a turn
 	// event). A slash command answers with local output instead.
-	processTurn := func(content json.RawMessage) {
+	processTurn := func(content json.RawMessage, clientID string) {
 		turn++
+		if clientID == "" {
+			clientID = fmt.Sprintf("sim-live-user-%d", turn)
+		}
 		sendSimChatEvent(conn, int64(nextSimChatSeq()), "user_message", map[string]any{
-			"id": fmt.Sprintf("sim-live-user-%d", turn), "content": content,
+			"id": clientID, "content": content,
 		})
 		text := firstTextBlock(content)
 		if strings.HasPrefix(text, "/") {
@@ -1121,7 +1124,7 @@ func handleSimChatWS(conn *safeConn) {
 			// The daemon treats that as a turn end, so held messages auto-send
 			// instead of staying queued (one turn each).
 			for _, qm := range simQueuePopAll("sim-chat") {
-				processTurn(qm.Content)
+				processTurn(qm.Content, qm.ID)
 			}
 		case "dequeue":
 			simQueueRemove("sim-chat", msg.Id)
@@ -1148,9 +1151,9 @@ func handleSimChatWS(conn *safeConn) {
 				simQueueAppend("sim-chat", simQueuedMsg{ID: msg.Id, Content: msg.Content})
 				continue
 			}
-			processTurn(msg.Content)
+			processTurn(msg.Content, msg.Id)
 			for _, qm := range simQueuePopAll("sim-chat") {
-				processTurn(qm.Content)
+				processTurn(qm.Content, qm.ID)
 			}
 		}
 	}

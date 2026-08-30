@@ -13,7 +13,8 @@ Two halves that only work together:
    `TabKind = 'review'` in `AgentTerminal.tsx`.
 2. **A server-side comment system** - **BUILT.** Comments are no longer ephemeral
    text piped into an agent's context: they are durable, numbered, line-anchored
-   objects that agents read and append to through tools.
+   objects that agents read and append to through tools. A comment permalink uses
+   the fragment `#comment-N`.
    `internal/reviewstore/comments.go`, `internal/http/review_comments.go`,
    `reviewq.OpComments` / `OpAddComment`, `web/src/lib/reviewComments.ts`.
 
@@ -573,7 +574,7 @@ Assignment is safe because every write already goes through the daemon - the web
 client does not write the store directly, and `reviewq`
 (`internal/reviewq/reviewq.go`) is already the daemon-mediated channel agent
 writes arrive on. The permalink is
-`/project/<p>/agent/<h>?comment=4`, and the head is already in the path.
+`/project/<p>/agent/<h>#comment-4`, and the head is already in the path.
 
 The tradeoff to accept knowingly: sequential ids are only meaningful **within a
 head**. If comments ever need to move between heads or be aggregated
@@ -738,7 +739,25 @@ it was written, and publishing does not change it - but until it is published
 nobody else can cite it, so putting a handle on it would invite quoting something
 the agent cannot look up. The chip is the one state worth calling out: the
 difference between something the agent has been told and something only you can
-see is not otherwise visible on the card.
+see is not otherwise visible on the card. Every draft card also carries the same
+Submit review popover as the Changes toolbar in a footer at its bottom right.
+Both instances are the shared `ReviewDraftPopover`, including the chevron,
+selection list, held-back state, anchored entrance motion and submission path, so
+the review can be inspected and published without returning to the toolbar. Its
+panel is portalled and viewport-positioned: the inline trigger lives inside the
+diff file's rounded overflow clip, where an in-place popup would be cut off.
+Selecting a draft marks its card with the transient focus cue and uses the
+remeasuring diff scroll path; this matters for a comment on an unchanged file,
+whose off-diff card can grow while its source context is still loading.
+Submitting a selection is optimistic: those drafts immediately become sent,
+read comments in the diff while the daemon publishes them. The response remains
+canonical, and a failed publish restores only the selected drafts without
+disturbing comments added while the request was in flight.
+
+**A reply can join the draft review or be sent immediately.** Add to agent review
+stores it as a draft under the published parent, while Comment to agent publishes
+it at once. In both cases the parent owns the anchor, so the reply box needs no
+second file or line selection.
 
 **Your own comments say "You"**, not your git name. The name is on the avatar's
 tooltip; in a list of comments what matters is which ones are yours. With no git
@@ -748,12 +767,16 @@ starts with Y.
 
 ### Permalinks
 
-`?comment=4` on the agent page. The number is the whole address - the head is
+`#comment-4` on the agent page. The number is the whole address - the head is
 already in the path, and a number is stable and never reused - so the link is
 short enough to paste into a message and still means one exact thing months
 later. Landing on one jumps to it and marks it read. The jump keys on the number
 rather than on the diff, so a background refresh cannot yank the view back to the
-anchor after you have scrolled away.
+anchor after you have scrolled away. Its amber focus cue stays fully visible long
+enough to orient you, then fades back to the card's normal colour instead of
+ending in a hard visual cut. In a forge thread the cue sits on the exact numbered
+note the link names, while Previous/Next still treats the conversation as one
+navigation stop.
 
 Three ways to get one, because people reach for different ones:
 
@@ -767,7 +790,9 @@ Three ways to get one, because people reach for different ones:
   location is an opinion about nothing) and **Mark unread**, which is the only way
   a comment becomes new again. Thread-wide actions ("Resolve with agent", the
   thread's forge link) stay on the first note, where they describe the whole
-  conversation.
+  conversation. The menu is portalled and viewport-positioned because forge
+  notes render inside the diff file's overflow clip; keeping it in the note's DOM
+  subtree would cut the menu off at the next code row.
 - **The link button** on Hydra's own comments.
 
 Two UI details that were wrong and are worth remembering:
@@ -1020,7 +1045,7 @@ same batching principle as the notify-by-id line the agent gets. Not built.
 | Numbering FORGE comments into the same sequence | **built** (`sidecar.go`, assigned on first sight) |
 | Resolve, for a Hydra comment and a forge thread alike | **built** (local-only for the forge, and says so) |
 | Per-comment read state + the open/new navigator | **built** |
-| Permalink (`?comment=4`) | **built** (`validateSearch` on the agent route) |
+| Permalink (`#comment-4`) | **built** |
 | Agent replies to a comment by number | **built** (`reviewq.OpNote` takes a number) |
 | Avatars (agent mark / forge picture / monogram) | **built** (`components/Avatar.tsx`; no image is hosted or proxied) |
 | Third origin badge for agent-authored notes | new (`ReviewThreadCard.tsx` knows only `forge` / `local_only`) |

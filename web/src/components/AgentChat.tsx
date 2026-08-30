@@ -161,6 +161,9 @@ interface ChatProps {
   reconnectAttempt: number
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: (headMoved: boolean) => void
+  // A review-comment tool changed Hydra's numbered comment store. Kept separate
+  // from onDiffRefresh because no worktree content changed.
+  onReviewCommentsChanged?: () => void
   // Clicking a commit chip: point the diff viewer at just that commit (and
   // reveal the diff pane). Absent -> chips render non-clickable.
   onSelectCommit?: (sha: string) => void
@@ -260,7 +263,8 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         >
           {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
           <GitMerge className="w-3 h-3 shrink-0" />
-          <span className="truncate optical-center">{label}</span>
+          <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
+          <CommitStats additions={item.additions} deletions={item.deletions} />
         </button>
       </Tooltip>
       <Expandable open={expanded && shown > 0} className="w-full">
@@ -278,7 +282,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               <GitCommitHorizontal className="w-3 h-3 shrink-0" />
               {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
               <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
-              <span className="truncate optical-center">{m.subject}</span>
+              <span className="min-w-0 flex-1 truncate optical-center">{m.subject}</span>
               <CommitStats additions={m.additions} deletions={m.deletions} />
             </div>
           ))}
@@ -2924,7 +2928,7 @@ function scriptBannerRows(section: Extract<ScriptSection, { kind: 'banners' }>):
 // by its own extension and numbered by its own line numbers, the script's `echo`
 // separators coloured as the strings they are, and anything unattributed left as
 // the plain terminal text it was.
-// eslint-disable-next-line react-refresh/only-export-components
+// eslint-disable-next-line react-refresh/only-export-components -- exported for focused rendering tests
 export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
   const rows: ScriptOutputRow[] = []
   for (const section of sections) {
@@ -6692,6 +6696,9 @@ interface SettledMessagesProps {
 interface SettledRowProps {
   item: ChatItem
   animate: boolean
+  // Consecutive user bubbles read as one authored run, not separate turns.
+  // The transcript's outer gap remains for every other transition.
+  tightBefore?: boolean
   renderItem: (item: ChatItem, shellCwd?: string | null) => ReactNode
   shellCwd: string | null
   serif: boolean
@@ -6709,13 +6716,13 @@ function isChatMessage(item: ChatItem): boolean {
 }
 
 const SettledRow = memo(
-  function SettledRow({ item, animate, renderItem, shellCwd }: SettledRowProps) {
+  function SettledRow({ item, animate, tightBefore, renderItem, shellCwd }: SettledRowProps) {
     return (
       <div
         // Marks the row as a scroll target for alignToLastMessage; absent on
         // rows it should skip, so a plain querySelectorAll finds the candidates.
         data-chat-message={isChatMessage(item) ? '' : undefined}
-        className={animate ? 'animate-chat-item-in' : undefined}
+        className={[tightBefore && '-mt-2', animate && 'animate-chat-item-in'].filter(Boolean).join(' ') || undefined}
       >
         {renderItem(item, shellCwd)}
       </div>
@@ -6724,6 +6731,7 @@ const SettledRow = memo(
   (a, b) =>
     a.item === b.item &&
     a.animate === b.animate &&
+    a.tightBefore === b.tightBefore &&
     a.renderItem === b.renderItem &&
     a.shellCwd === b.shellCwd &&
     a.serif === b.serif &&
@@ -6743,11 +6751,12 @@ const SettledMessages = memo(
     // step group is handed the group's own answer for it: a step that lands
     // while the group is open fades in like any other message, one revealed by
     // opening the group does not (see StepGroup).
-    const row = (item: ChatItem, animate = true) => (
+    const row = (item: ChatItem, animate = true, tightBefore = false) => (
       <SettledRow
         key={item.id}
         item={item}
         animate={animate && liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
+        tightBefore={tightBefore}
         renderItem={renderItem}
         shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
         serif={serif}
@@ -6764,14 +6773,17 @@ const SettledMessages = memo(
     // per row 60 times a second. The deps are exactly this component's memo keys
     // below.
     const rows = useMemo(
-      () =>
-        planStepRows(items, subByToolUse, grouped).map((r) =>
-          r.row === 'item' ? (
-            row(r.item)
-          ) : (
-            <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={row} />
-          ),
-        ),
+      () => {
+        const planned = planStepRows(items, subByToolUse, grouped)
+        return planned.map((r, index) => {
+          if (r.row !== 'item') {
+            return <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={row} />
+          }
+          const previous = planned[index - 1]
+          const tightBefore = previous?.row === 'item' && previous.item.kind === 'user' && r.item.kind === 'user'
+          return row(r.item, true, tightBefore)
+        })
+      },
       // eslint-disable-next-line react-hooks/exhaustive-deps -- `row` is a per-render closure over these same deps
       [items, grouped, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds],
     )
@@ -6794,7 +6806,7 @@ const SettledMessages = memo(
     a.subagents === b.subagents,
 )
 
-export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit, review }: ChatProps) {
+export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onReviewCommentsChanged, onSelectCommit, review }: ChatProps) {
   // The key for everything this pane stores per CONVERSATION rather than per
   // head: the composer draft and its attachments, the composer height, the
   // transcript scroll offset, and the local plan mirror. A review pane is a
@@ -7235,6 +7247,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   const onStatusUpdateRef = useRef<(status: string) => void>(() => {})
   const onDiffRefreshRef = useRef(onDiffRefresh)
+  const onReviewCommentsChangedRef = useRef(onReviewCommentsChanged)
   // The current head status, read from inside the WS reducer closure (which is
   // pinned to its own render) to decide at replay_done whether a still-"working"
   // sub-agent is genuinely live or just stale replayed history (item 5).
@@ -7253,6 +7266,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       onStatusUpdate?.(nextStatus)
     }
     onDiffRefreshRef.current = onDiffRefresh
+    onReviewCommentsChangedRef.current = onReviewCommentsChanged
     isTurnRunningRef.current = isTurnRunning
     questionMayBeLiveRef.current = isTurnRunning || status === AgentStatus.NEEDS_INPUT
     smoothStreamRef.current = smoothStream
@@ -8975,6 +8989,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 						if (toolID && toolName && event.payload && 'input' in event.payload) {
 							patchToolMetadata(toolID, toolName, event.payload.input)
 						}
+						if (event.type === 'tool_completed' && (
+							toolName === 'mcp__hydra__reply_to_review_comment' ||
+							toolName === 'mcp__hydra__resolve_review_comments'
+						)) {
+							onReviewCommentsChangedRef.current?.()
+						}
 					}
 					if (event.type === 'tool_delta') {
 						const toolID = typeof event.payload?.id === 'string' ? event.payload.id : ''
@@ -10039,20 +10059,21 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // --- Sending ----------------------------------------------------------------
 
   // sendUserText hands one user turn to the socket, tagged with a client id and
-  // whether a turn is currently running (queued). The daemon HOLDS a queued
+  // whether it should wait for the current turn. The daemon HOLDS a queued
   // message (draining it when the turn ends) or delivers it immediately, and
   // replays the held queue on reconnect (item 21) - so the queue survives
   // closing the window / navigating away, and stays editable (Up arrow). The
   // bubble is added optimistically; the CLI's echo (or a `queue` frame on
   // reattach) is the source of truth. Returns false when the socket isn't usable.
-  function sendUserText(text: string, flightFrom?: ComposerFlightRect): boolean {
+  function sendUserText(text: string, queue = isTurnRunning, flightFrom?: ComposerFlightRect): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
     pinnedRef.current = true
     setPinned(true)
     // isTurnRunning already excludes needs_input (that's WAITING/NEEDS_INPUT,
-    // not RUNNING/STARTING), so a running turn means the daemon should queue it.
-    const queued = isTurnRunning
+    // not RUNNING/STARTING). The default preserves the normal safe behaviour;
+    // the explicit Send now action opts into steering the running turn instead.
+    const queued = queue
     const clientId = randomId()
     ws.send(JSON.stringify({ type: 'user_message', id: clientId, queued, content: [{ type: 'text', text }] }))
     if (queued) {
@@ -10125,7 +10146,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     return renderMarkdownSource(value)
   }, [])
 
-  function send() {
+  function send(queue = isTurnRunning) {
     if (uploading) return
     const text = input.trim()
     // A leading "!" runs the rest as a shell command in the head's sandbox (a
@@ -10147,7 +10168,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     const finalText = paths.length > 0 ? (text ? `${text}\n\n${paths.join('\n')}` : paths.join('\n')) : text
     const composerRect = richComposerHostRef.current?.getBoundingClientRect()
     const flightFrom = composerRect ? { top: composerRect.top, right: composerRect.right } : undefined
-    if (!finalText || !sendUserText(finalText, flightFrom)) return
+    if (!finalText || !sendUserText(finalText, queue, flightFrom)) return
     setSlashDismissed(false)
     // The message is sent - free every preview URL minted this session (including
     // ones only reachable via undo history) and reset the composer + its history.
@@ -11427,9 +11448,25 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     </button>
                   </Tooltip>
                 )}
+                {isTurnRunning && (
+                  <Tooltip content="Send now" side="top">
+                    <button
+                      onClick={() => send(false)}
+                      disabled={!canSend}
+                      aria-label="Send message now"
+                      className={`p-1.5 rounded-full transition-colors ${
+                        canSend
+                          ? `${ACCENT_BG} text-white cursor-pointer`
+                          : 'bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
+                      }`}
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </Tooltip>
+                )}
                 <Tooltip content={isTurnRunning ? 'Queue message' : 'Send'} shortcut={{ keys: ['Enter'] }} side="top">
                   <button
-                    onClick={send}
+                    onClick={() => send()}
                     disabled={!canSend}
                     aria-label={isTurnRunning ? 'Queue message' : 'Send message'}
                     className={`p-1.5 rounded-full transition-colors ${

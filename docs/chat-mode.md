@@ -374,6 +374,12 @@ treating the stdin write as infallible. Recovery retries only when the provider
 protocol honours an idempotency or client id; otherwise Hydra surfaces an
 uncertain delivery state instead of silently sending a possibly duplicated turn.
 
+While a turn runs, the composer keeps Queue as its primary action and Enter's
+default: a queued message is durable and can be recalled until it drains. Its
+separate Send now action writes a message to the provider immediately, asking it
+to steer at its next input boundary. It does not interrupt or replace the
+current turn, and cannot be recalled after it is handed to the provider.
+
 ## Presentation
 
 `AgentChat.tsx` consumes the event log and converts each event into the

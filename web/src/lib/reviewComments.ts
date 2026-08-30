@@ -295,3 +295,39 @@ export async function sendReviewComment(
   })
   return { comments: all(res), notified: res.notified ?? null, toReviewer: res.notified_reviewer === true }
 }
+
+// Reply to an existing Hydra-native comment. The parent owns the anchor, so the
+// reply only needs its number and body; published immediately, like a direct
+// line comment, so the addressed agent can read it at once.
+export async function replyToReviewComment(
+  projectId: string | null,
+  agentId: string,
+  number: number,
+  body: string,
+): Promise<{ comments: PendingReviewComment[]; notified: string | null; toReviewer: boolean }> {
+  if (!projectId) return { comments: [], notified: null, toReviewer: false }
+  const res = await api.default.addReviewComment(projectId, agentId, {
+    body,
+    reply_to: number,
+    publish: true,
+  })
+  return { comments: all(res), notified: res.notified ?? null, toReviewer: res.notified_reviewer === true }
+}
+
+// Queue a reply in the current review batch. It inherits the published parent's
+// anchor server-side, just like an immediately sent reply, but remains a draft
+// until Submit review publishes the batch.
+export async function addReviewReply(
+  projectId: string | null,
+  agentId: string,
+  number: number,
+  body: string,
+  attachments: string[],
+): Promise<PendingReviewComment[]> {
+  if (!projectId) return []
+  return all(await api.default.addReviewComment(projectId, agentId, {
+    body,
+    reply_to: number,
+    attachments,
+  }))
+}

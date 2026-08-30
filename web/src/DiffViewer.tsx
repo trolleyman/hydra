@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, Fragment, useMemo, memo, type ComponentType, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, createContext, useContext, Fragment, useMemo, memo, type ComponentProps, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, linkOptions, useNavigate, type LinkProps } from '@tanstack/react-router'
 import { canHighlight, highlightHtml, highlightLines } from './lib/highlightCore'
@@ -50,7 +50,7 @@ import {
 import { useFontSizePx, useFontStack } from './lib/fontPrefs'
 import {
   buildSideBySide, buildSegments, bodyShape, computeGap, leadingGap, trailingGap, atFileEnd, isContiguous, isChangeLine,
-  hunkContext, regionAfterHunk, LEAD_REGION_ID, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, PROMOTED_MAX_LINES, PROMOTED_MAX_CHANGES,
+  hunkContext, regionAfterHunk, regionKey, LEAD_REGION_ID, CTX, MIN_COLLAPSE_GAP, FULL_MAX_LINES, PROMOTED_MAX_LINES, PROMOTED_MAX_CHANGES,
   type RenderSeg, type RevealMap,
 } from './lib/diffBody'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
@@ -67,7 +67,7 @@ import { useToastStore, type ToastType } from './stores/toastStore'
 import { StorageKeys, readLocal, writeLocal } from './lib/storage'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from './lib/agentViewPrefs'
 import { loadLineDraft, saveLineDraft, clearLineDraft, loadThreadDraft, saveThreadDraft, clearThreadDraft } from './lib/reviewDrafts'
-import { addReviewComment, addImageComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, resolveReviewComment, markReviewCommentsRead, notifiedNumbers, draftsOf, type PendingReviewComment } from './lib/reviewComments'
+import { addReviewComment, addReviewReply, addImageComment, removeReviewComment, updateReviewComment, publishReviewComments, fetchReviewComments, sendReviewComment, replyToReviewComment, resolveReviewComment, markReviewCommentsRead, notifiedNumbers, draftsOf, type PendingReviewComment } from './lib/reviewComments'
 import { useImageCommentStore } from './stores/imageCommentStore'
 import { commentPermalink, registerCommentJump, VisitedCommentsContext, useIsCurrentComment } from './lib/reviewCommentLink'
 import { CommentLink } from './components/CommentLink'
@@ -221,6 +221,13 @@ const EMPTY_LINE_COMMENTS: LineCommentMap = new Map()
 const EMPTY_FILE_COMMENTS: PendingReviewComment[] = []
 // Same for a file with no forge threads.
 const EMPTY_FILE_THREADS: ReviewThread[] = []
+interface NativeCommentReplyActions {
+  submit: (number: number, body: string) => Promise<void>
+  addToReview: (number: number, body: string, attachments: string[]) => Promise<void>
+  start?: (number: number) => void
+}
+const NativeCommentReplyContext = createContext<NativeCommentReplyActions | null>(null)
+const DraftReviewPopoverContext = createContext<ComponentProps<typeof ReviewDraftPopover> | null>(null)
 
 // True when a drag is carrying real files, so dragging a text selection over a
 // comment box doesn't light it up as a drop target.
@@ -248,9 +255,8 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
   // you, and has no controls that would lie about what is still possible.
   const sent = comment.published
   const mine = comment.author === 'user'
-  // data-comment-card is what the jump scrolls to, and the amber inset bar is the
-  // "you have been here" mark - it stays, where the old transient flash on the
-  // diff LINE was gone before you had finished reading (VisitedCommentsContext).
+  // data-comment-card is what the jump scrolls to. The amber inset bar is a
+  // short-lived focus cue for the comment the user just navigated to.
   const current = useIsCurrentComment(comment.number)
   // Rebuilt from the stored paths: the bytes are on the server, so a chip is
   // fully reconstructible from the path alone (see lib/draftAttachments).
@@ -259,11 +265,13 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
     [comment.attachments, projectId],
   )
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const reply = useContext(NativeCommentReplyContext)
+  const draftReview = useContext(DraftReviewPopoverContext)
   const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
   return (
-    <div data-comment-card={comment.number} className={`border-y px-4 py-2 ${
+    <div id={`comment-${comment.number}`} data-comment-card={comment.number} className={`border-y px-4 py-2 transition-[background-color,border-color,box-shadow] duration-700 ease-out ${
       current
         ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]'
         : sent
@@ -324,6 +332,13 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
                 )}
                 {sent ? (
                   <span className="ml-0.5 flex items-center gap-0.5">
+                    {reply?.start && (
+                      <Tooltip content="Reply" side="top">
+                        <button onClick={() => reply.start?.(comment.replyTo || comment.number)} aria-label="Reply" className="p-1 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer">
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </button>
+                      </Tooltip>
+                    )}
                     {onResolve && (
                       <Tooltip content={comment.resolved ? 'Reopen thread' : 'Mark thread resolved'} side="top">
                         <button
@@ -387,6 +402,11 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
             <div className="mt-1 flex items-start gap-1 text-2xs text-amber-700 dark:text-amber-300">
               <TriangleAlert className="w-3 h-3 mt-px shrink-0" />
               <span>The diff around this line changed after this comment was queued; it will still be sent with its original context.</span>
+            </div>
+          )}
+          {!sent && draftReview && (
+            <div className="mt-2 flex justify-end">
+              <ReviewDraftPopover {...draftReview} />
             </div>
           )}
         </div>
@@ -690,10 +710,12 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
   lineDraftApi?: LineDraftApi
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [replyingTo, setReplyingTo] = useState<number | null>(null)
+  const parentReplyActions = useContext(NativeCommentReplyContext)
   const threadActions = useReviewThreadActions()
   if (!openNew && (!entries || entries.length === 0)) return null
   return (
-    <>
+    <NativeCommentReplyContext.Provider value={parentReplyActions ? { ...parentReplyActions, start: setReplyingTo } : null}>
       {entries?.map((entry) =>
         entry.kind === 'thread' ? (
           threadActions ? (
@@ -723,6 +745,19 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
           />
         ),
       )}
+      {replyingTo != null && parentReplyActions && (
+        <CommentRow
+          initialText=""
+          projectId={projectId}
+          onSubmit={async (text) => { await parentReplyActions.submit(replyingTo, text); setReplyingTo(null) }}
+          onAddToReview={(text, attachments) => {
+            void parentReplyActions.addToReview(replyingTo, text, attachments)
+              .then(() => setReplyingTo(null))
+              .catch((e) => console.error('Failed to queue reply:', e))
+          }}
+          onCancel={() => setReplyingTo(null)}
+        />
+      )}
       {openNew && (
         <CommentRow
           initialText={lineDraftApi?.load(path, lineNum, isNew) ?? ''}
@@ -747,7 +782,7 @@ function LineComments({ entries, path, lineNum, isNew, openNew, onCloseNew, onCo
           onCancel={onCloseNew}
         />
       )}
-    </>
+    </NativeCommentReplyContext.Provider>
   )
 }
 
@@ -799,11 +834,13 @@ function OffDiffEntryBody({ entry, projectId, you, editingId, setEditingId, onEd
   onResolveComment?: (number: number, resolved: boolean) => void
 }) {
   const threadActions = useReviewThreadActions()
+  const [replyingTo, setReplyingTo] = useState<number | null>(null)
+  const parentReplyActions = useContext(NativeCommentReplyContext)
   if (entry.kind === 'thread') {
     return threadActions ? <ReviewThreadCard thread={entry.thread} actions={threadActions} /> : null
   }
   return (
-    <>
+    <NativeCommentReplyContext.Provider value={parentReplyActions ? { ...parentReplyActions, start: setReplyingTo } : null}>
       {[entry.comment, ...entry.replies].map((c) => (
         editingId === c.id ? (
           <CommentRow
@@ -827,7 +864,20 @@ function OffDiffEntryBody({ entry, projectId, you, editingId, setEditingId, onEd
           />
         )
       ))}
-    </>
+      {replyingTo != null && parentReplyActions && (
+        <CommentRow
+          initialText=""
+          projectId={projectId}
+          onSubmit={async (text) => { await parentReplyActions.submit(replyingTo, text); setReplyingTo(null) }}
+          onAddToReview={(text, attachments) => {
+            void parentReplyActions.addToReview(replyingTo, text, attachments)
+              .then(() => setReplyingTo(null))
+              .catch((e) => console.error('Failed to queue reply:', e))
+          }}
+          onCancel={() => setReplyingTo(null)}
+        />
+      )}
+    </NativeCommentReplyContext.Provider>
   )
 }
 
@@ -1743,7 +1793,7 @@ function firstFileLine(file: DiffFile): string | undefined {
   return line.content
 }
 
-export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, projectId, you, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo }: {
+export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight = true, viewed, onToggleViewed, fileRef, onComment, onAddToReview, fileComments, fileThreads, onEditComment, onRemoveComment, onResolveComment, projectId, you, lineDraftApi, isCollapsed, onToggleCollapse, onExpand, isHidden, onShow, currentContext, readOnly, headless, imageDiffMode, imageBefore, imageAfter, selection, onSelectLine, openInRepo, revealLine }: {
   file: DiffFile
   sideBySide: boolean
   // Highlight the exact changed words within a modified line (on top of the
@@ -1780,6 +1830,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   isHidden?: boolean
   onShow?: () => void
   currentContext: number
+  revealLine?: { side: 'old' | 'new'; line: number; nonce: number }
   // An in-tree image (binary) renders the artifacts panel's before/after image
   // differ instead of the "Binary file changed" placeholder. imageBefore/After
   // are the raw-blob URLs for each side (null when the file was added/deleted on
@@ -1883,6 +1934,35 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     // hunksSig stands in for file.hunks identity (stable across no-op refreshes).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hunksSig, file.binary, file.expanded, isHidden, bodyMounted, near])
+
+  // A comment can be anchored inside an unchanged range represented by an
+  // "N lines" expander. Reveal the shortest edge of that range containing the
+  // anchor before the jump's scroll loop looks for its gutter cell.
+  useEffect(() => {
+    if (!revealLine || !fullLines) return
+    const lineAt = (l: DiffLine) => revealLine.side === 'new' ? l.new_line_num : l.old_line_num
+    const index = fullLines.findIndex((l) => lineAt(l) === revealLine.line)
+    if (index < 0 || isChangeLine(fullLines[index])) return
+    let start = index
+    let end = index + 1
+    while (start > 0 && !isChangeLine(fullLines[start - 1])) start--
+    while (end < fullLines.length && !isChangeLine(fullLines[end])) end++
+    const id = regionKey(fullLines[start])
+    const fromTop = index - start + 1
+    const fromBottom = end - index
+    // Legitimate effect: the target arrives from a parent jump after this file
+    // has rendered; reveal is the local per-region state it has to update.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setReveal((prev) => {
+      const current = prev.get(id) ?? {}
+      const patch = fromTop <= fromBottom
+        ? { top: Math.max(current.top ?? 0, fromTop) }
+        : { bot: Math.max(current.bot ?? 0, fromBottom) }
+      const next = new Map(prev)
+      next.set(id, { ...current, ...patch })
+      return next
+    })
+  }, [revealLine, fullLines])
 
   // Lines to highlight: the whole file when expanded (so multi-line constructs
   // stay correct), else the visible `-U3` hunks. Null when nothing is rendered
@@ -3630,6 +3710,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.projectId === next.projectId &&
   prev.externalRefreshTrigger === next.externalRefreshTrigger &&
   prev.externalArtifactRefresh === next.externalArtifactRefresh &&
+  prev.externalReviewRefresh === next.externalReviewRefresh &&
   prev.externalCommitSelect === next.externalCommitSelect &&
   prev.inspector === next.inspector &&
   prev.changesLeading === next.changesLeading &&
@@ -3662,7 +3743,7 @@ export function diffMetaKey(d: DiffResponse): string {
 // layout as the classic single-column page (Changes bar with the base -> head
 // selectors, then tests, previews, artifacts, and the diff itself), just
 // without the top margin - the pane's own padding supplies it.
-function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, externalCommitSelect, inspector, changesLeading, leadingInline, focusComment, focusLine }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; externalCommitSelect?: { sha: string; nonce: number } | null; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean; focusComment?: number; focusLine?: string }) {
+function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, externalReviewRefresh, externalCommitSelect, inspector, changesLeading, leadingInline, focusComment, focusLine }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; externalReviewRefresh?: number; externalCommitSelect?: { sha: string; nonce: number } | null; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean; focusComment?: number; focusLine?: string }) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -4307,7 +4388,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   // Land on a deep-linked line once the diff is there to hold it. Keyed on the
   // param, so a background refresh does not yank the view back after you have
-  // scrolled away - the same rule the `?comment=` jump follows.
+  // scrolled away - the same rule the comment permalink jump follows.
   const jumpedToLineRef = useRef<string | null>(null)
   useEffect(() => {
     if (!lineSel || !diff || jumpedToLineRef.current === focusLine) return
@@ -4350,6 +4431,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // build a stop out of a comment OR a forge thread, and only these four fields
   // are ever read.
   const [showResolvedOffDiff, setShowResolvedOffDiff] = useState(false)
+  const [commentReveal, setCommentReveal] = useState<{ path: string; side: 'old' | 'new'; line: number; nonce: number } | null>(null)
   const handleJumpToComment = useCallback((c: { number: number; path: string; lineNum: number; isNew: boolean }) => {
     if (!diff) return
     const idx = diff.files.findIndex((f) => f.path === c.path)
@@ -4357,13 +4439,20 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       const find = () => document.querySelector<HTMLElement>(`[data-offdiff-comment="${c.number}"]`)
       const card = find()
       if (card) {
-        card.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        // Off-diff cards fetch their source context while the jump is in flight,
+        // so their height can still change after the first measurement. Use the
+        // same remeasuring helper as file navigation instead of a one-shot native
+        // smooth scroll that can strand the comment below the viewport.
+        scrollCardToTop(card)
       } else {
         // Not on screen: the only way an off-diff comment is missing its card is
         // that it is resolved and the section is hiding those. A permalink to a
         // resolved comment has to land, so reveal them and scroll once it mounts.
         setShowResolvedOffDiff(true)
-        requestAnimationFrame(() => find()?.scrollIntoView({ block: 'center', behavior: 'smooth' }))
+        requestAnimationFrame(() => {
+          const revealed = find()
+          if (revealed) scrollCardToTop(revealed)
+        })
       }
       return
     }
@@ -4376,19 +4465,22 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // no line to scroll to.
     if (collapsedFiles.has(c.path)) toggleFileCollapse(c.path)
     if (hiddenFiles.has(c.path)) handleShowFile(c.path)
+    setCommentReveal({ path: c.path, side: c.isNew ? 'new' : 'old', line: c.lineNum, nonce: Date.now() })
+    // A large/windowed file does not hold the hidden line yet. Ask for its full
+    // content; once it arrives, FileDiff applies the reveal target above.
+    if (!diff.files[idx].expanded) void expandFileDiff(c.path, 3)
     // Scroll to the LINE, not to the comment card: the line is what mounts the
     // lazy body, and it is the anchor that exists whether or not the card has
     // rendered yet. The card sits directly beneath it, so centring the line puts
     // both on screen - and the card marks ITSELF as the one you arrived at,
-    // permanently, off the cursor (see CurrentCommentContext). That mark replaced
-    // a 1.6s flash on the row, which drew the eye to the code rather than to the
-    // remark, and was gone before you had finished reading it.
+    // briefly, off the cursor. The comment itself is highlighted rather than the
+    // code row, so the cue points at the thing the user asked to see.
     scrollToDiffLine(
       () => fileRefs.current.get(c.path) ?? null,
       c.isNew ? 'new' : 'old',
       c.lineNum,
     )
-  }, [diff, singleFile, collapsedFiles, toggleFileCollapse, hiddenFiles, handleShowFile])
+  }, [diff, singleFile, collapsedFiles, toggleFileCollapse, hiddenFiles, handleShowFile, expandFileDiff])
 
   const handleSingleFileChange = useCallback((v: boolean) => {
     setSingleFile(v); setSingleFileIdx(0)
@@ -4418,6 +4510,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // Who "you" is on this machine (git's user.name), for the monogram on a comment
   // you wrote. Hydra has no accounts and hosts no pictures.
   const [you, setYou] = useState('')
+  const refreshReviewComments = useCallback(async () => {
+    const res = await fetchReviewComments(projectId, agent.id)
+    setReviewComments(res.comments)
+    setYou(res.you)
+  }, [projectId, agent.id])
   // Refetch when the agent changes. The store is server-side now, so this starts
   // empty and fills in - which also means a draft written in another browser (or
   // before a reload) is simply there, the thing localStorage could never do.
@@ -4429,6 +4526,12 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       .catch((e) => console.error('Failed to load review comments:', e))
     return () => { cancelled = true }
   }, [projectId, agent.id])
+  useEffect(() => {
+    if (!externalReviewRefresh) return
+    // The async fetch updates state only after its network await.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refreshReviewComments().catch((e) => console.error('Failed to refresh review comments:', e))
+  }, [externalReviewRefresh, refreshReviewComments])
   const [submittingReview, setSubmittingReview] = useState(false)
 
   // Latest-value refs so handleComment (passed to every FileDiff) keeps a stable
@@ -4551,6 +4654,21 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       .catch((e) => console.error('Failed to resolve comment:', e))
   }, [projectId, agent.id])
 
+  const handleReplyComment = useCallback(async (number: number, body: string) => {
+    const { comments, notified, toReviewer } = await replyToReviewComment(projectId, agent.id, number, body)
+    setReviewComments(comments)
+    if (toReviewer) showSentToast('Sent to your reviewer - open the Review tab to see the reply')
+    else if (notified) showSentToast(sentToAgentText(notifiedNumbers(notified), 1))
+    else showSentToast(UNDELIVERED_COMMENT, 'warning')
+  }, [projectId, agent.id, showSentToast])
+  const handleAddReplyToReview = useCallback(async (number: number, body: string, attachments: string[]) => {
+    setReviewComments(await addReviewReply(projectId, agent.id, number, body, attachments))
+  }, [projectId, agent.id])
+  const nativeReplyActions = useMemo<NativeCommentReplyActions>(() => ({
+    submit: handleReplyComment,
+    addToReview: handleAddReplyToReview,
+  }), [handleReplyComment, handleAddReplyToReview])
+
   // Mark comments seen. Read state is explicit - nothing becomes read by the
   // passage of time - so this is called when you actually arrive at one (a
   // permalink, or a step of the next/previous navigation), not on render.
@@ -4662,7 +4780,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // revealing brings the file cards back too.
   const resolvedOffDiffCount = offDiff.resolvedCount
 
-  // The comment the `?comment=` effect below has already landed on. Declared up
+  // The comment permalink effect below has already landed on. Declared up
   // here because the in-place jump claims it before writing the URL, so the
   // effect does not scroll to the same comment a second time.
   const jumpedToRef = useRef<number | null>(null)
@@ -4671,12 +4789,20 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // index so it survives the list changing under it (resolving the one you are on
   // shortens the list, which would otherwise silently move you somewhere else).
   const [atComment, setAtComment] = useState<number | null>(null)
-  // ...and everywhere it has BEEN, which is what stays marked. Additive: a mark
-  // that moved with the cursor threw away the trail (VisitedCommentsContext).
-  const [visitedComments, setVisitedComments] = useState<ReadonlySet<number>>(() => new Set())
+  // The amber focus is intentionally transient; read/unread is the durable state.
+  const [focusedComment, setFocusedComment] = useState<number | null>(null)
+  const focusTimerRef = useRef<number | null>(null)
   const visit = useCallback((number: number) => {
     setAtComment(number)
-    setVisitedComments((prev) => (prev.has(number) ? prev : new Set(prev).add(number)))
+    setFocusedComment(number)
+    if (focusTimerRef.current != null) window.clearTimeout(focusTimerRef.current)
+    focusTimerRef.current = window.setTimeout(() => {
+      setFocusedComment((current) => current === number ? null : current)
+      focusTimerRef.current = null
+    }, 2600)
+  }, [])
+  useEffect(() => () => {
+    if (focusTimerRef.current != null) window.clearTimeout(focusTimerRef.current)
   }, [])
 
   // Clicking a comment's "#7" (components/CommentLink) jumps in place rather than
@@ -4685,20 +4811,22 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // of it. replace, not push: naming what is already on screen is not a
   // navigation, and should not cost a back-button press to undo.
   const addressComment = useCallback((number: number) => {
-    void navigate({
-      to: '/project/$projectId/agent/$agentId',
-      params: { projectId: projectId ?? '_', agentId: agent.id },
-      search: (p: Record<string, unknown>) => ({ ...p, comment: number }),
-      replace: true,
-    })
-  }, [navigate, projectId, agent.id])
+    const url = new URL(window.location.href)
+    url.searchParams.delete('comment')
+    url.hash = `comment-${number}`
+    window.history.replaceState(window.history.state, '', url)
+    // replaceState does not emit hashchange, but the agent route derives its
+    // focused comment from the fragment. Keep that route state aligned so a
+    // still-pending initial permalink effect cannot focus the old comment again.
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+  }, [])
 
   // How many of the open ones you have not seen. Separate from the open count
   // because they answer different questions - one is "how much is left", the
   // other "what arrived while I was elsewhere".
   const unreadCount = useMemo(() => commentStops.filter((c) => c.unread).length, [commentStops])
   const commentPosition = useMemo(() => {
-    const index = commentStops.findIndex((c) => c.number === atComment)
+    const index = commentStops.findIndex((c) => atComment != null && c.numbers.includes(atComment))
     return index < 0 ? null : index + 1
   }, [commentStops, atComment])
 
@@ -4713,7 +4841,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // happens to pass the viewport on the way somewhere else.
   const stepComment = useCallback((delta: 1 | -1) => {
     if (commentStops.length === 0) return
-    const at = commentStops.findIndex((c) => c.number === atComment)
+    const at = commentStops.findIndex((c) => atComment != null && c.numbers.includes(atComment))
     const next = commentStops[(((at < 0 ? (delta > 0 ? -1 : 0) : at) + delta) % commentStops.length + commentStops.length) % commentStops.length]
     visit(next.number)
     if (next.unread) markRead(next.numbers)
@@ -4722,11 +4850,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   useEffect(() => {
     openCommentRef.current = (number: number) => {
-      const target = commentStops.find((c) => c.number === number)
+      const target = commentStops.find((c) => c.numbers.includes(number))
         ?? reviewComments.find((c) => c.number === number)
       visit(number)
       markRead([number])
-      // Claim the jump before writing the URL: the `?comment=` effect below fires
+      // Claim the jump before writing the URL: the permalink effect below fires
       // on the value we are about to set, and would otherwise scroll to the same
       // comment a second time.
       jumpedToRef.current = number
@@ -4741,13 +4869,13 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // list changing under it.
   useEffect(() => registerCommentJump(agent.id, (number) => openCommentRef.current?.(number)), [agent.id])
 
-  // `?comment=4`: jump to it once there is a diff to find it in, and mark it read.
+  // `#comment-4`: jump once there is a diff to find it in.
   // Runs on the number rather than on every diff refresh, so a background refresh
   // does not yank the view back to the anchor after you have scrolled away.
   useEffect(() => {
     if (!focusComment || !diff || jumpedToRef.current === focusComment) return
     const target = reviewComments.find((c) => c.number === focusComment)
-      ?? commentStops.find((c) => c.number === focusComment)
+      ?? commentStops.find((c) => c.numbers.includes(focusComment))
     if (!target) return
     jumpedToRef.current = focusComment
     // Legitimate effect: this fires once per permalink, and the state it sets is
@@ -4899,7 +5027,20 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const submitReview = useCallback(async (numbers: number[]) => {
     const count = numbers.length
     if (count === 0 || submittingReview) return
+    const selected = new Set(numbers)
+    // Publishing changes only two visible facts about a draft: it has been sent,
+    // and (because you sent it) it is already read. Apply those facts on the
+    // click instead of leaving the old draft cards/button in place for the whole
+    // request and then replacing the review UI in one late, conspicuous frame.
+    // Keep the exact selected drafts for a targeted rollback; comments queued or
+    // edited while this request is in flight must not be replaced on failure.
+    const optimisticDrafts = new Map(
+      reviewComments.filter((c) => selected.has(c.number)).map((c) => [c.number, c]),
+    )
     setSubmittingReview(true)
+    setReviewComments((current) => current.map((c) => selected.has(c.number)
+      ? { ...c, published: true, read: true }
+      : c))
     try {
       const { comments, notified, toReviewer } = await publishReviewComments(projectId, agent.id, numbers)
       setReviewComments(comments)
@@ -4915,11 +5056,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       else showSentToast(UNDELIVERED_COMMENT, 'warning')
     } catch (e) {
       console.error('Failed to submit review:', e)
+      setReviewComments((current) => current.map((c) => optimisticDrafts.get(c.number) ?? c))
     } finally {
       setSubmittingReview(false)
     }
-  }, [agent.id, projectId, submittingReview, showSentToast])
-
+  }, [agent.id, projectId, reviewComments, submittingReview, showSentToast])
   // Which queued comments have gone stale: the diff under them changed since they
   // were added (the anchoring hunk's content hash no longer matches, or the line
   // is gone from the current comparison entirely). Recomputed against the LIVE
@@ -4935,6 +5076,18 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     }
     return stale
   }, [diff, queuedComments])
+  const draftReviewPopover = useMemo<ComponentProps<typeof ReviewDraftPopover>>(() => ({
+    comments: queuedComments,
+    projectId,
+    staleIds: staleReviewIds,
+    submitting: submittingReview,
+    onSubmit: submitReview,
+    onRemove: removeQueuedComment,
+    onJump: (comment) => {
+      visit(comment.number)
+      handleJumpToComment(comment)
+    },
+  }), [queuedComments, projectId, staleReviewIds, submittingReview, submitReview, removeQueuedComment, handleJumpToComment, visit])
 
   const [isResizing, setIsResizing] = useState(false)
   const startResizing = useCallback((e: React.MouseEvent) => {
@@ -5076,6 +5229,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         onClick={() => {
           setRefreshKey((k) => k + 1)
           void refreshThreads()
+          void refreshReviewComments().catch((e) => console.error('Failed to refresh review comments:', e))
         }}
         disabled={loadingDiff}
         className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors cursor-pointer"
@@ -5294,6 +5448,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               selection={lineSel?.path === diff.files[singleFileIdx].path ? lineSel.sel : null}
               // eslint-disable-next-line react-hooks/refs -- see the getShowCallback note above
               onSelectLine={getSelectLine(diff.files[singleFileIdx].path)}
+              revealLine={commentReveal?.path === diff.files[singleFileIdx].path ? commentReveal : undefined}
             />
           </>
         ) : (
@@ -5330,6 +5485,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               openInRepo={openInRepo}
               selection={lineSel?.path === f.path ? lineSel.sel : null}
               onSelectLine={getSelectLine(f.path)}
+              revealLine={commentReveal?.path === f.path ? commentReveal : undefined}
             />
             )
           })
@@ -5406,7 +5562,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         reason as the thread actions above: the comment cards are the far side
         of two memo'd hunk components, and a cursor threaded through as a prop
         would re-render every line of every file each time it moved. */}
-    <VisitedCommentsContext.Provider value={visitedComments}>
+    <DraftReviewPopoverContext.Provider value={draftReviewPopover}>
+    <NativeCommentReplyContext.Provider value={nativeReplyActions}>
+    <VisitedCommentsContext.Provider value={focusedComment}>
     <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
       {/* Section header */}
       {/* -top-4 cancels the scroll container's pt-4 (AgentDetail) so the stuck
@@ -5613,6 +5771,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       )}
     </div>
     </VisitedCommentsContext.Provider>
+    </NativeCommentReplyContext.Provider>
+    </DraftReviewPopoverContext.Provider>
     </ReviewThreadContext.Provider>
     </CommentIdentityContext.Provider>
   )
