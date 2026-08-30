@@ -9895,20 +9895,21 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // --- Sending ----------------------------------------------------------------
 
   // sendUserText hands one user turn to the socket, tagged with a client id and
-  // whether a turn is currently running (queued). The daemon HOLDS a queued
+  // whether it should wait for the current turn. The daemon HOLDS a queued
   // message (draining it when the turn ends) or delivers it immediately, and
   // replays the held queue on reconnect (item 21) - so the queue survives
   // closing the window / navigating away, and stays editable (Up arrow). The
   // bubble is added optimistically; the CLI's echo (or a `queue` frame on
   // reattach) is the source of truth. Returns false when the socket isn't usable.
-  function sendUserText(text: string): boolean {
+  function sendUserText(text: string, queue = isTurnRunning): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
     pinnedRef.current = true
     setPinned(true)
     // isTurnRunning already excludes needs_input (that's WAITING/NEEDS_INPUT,
-    // not RUNNING/STARTING), so a running turn means the daemon should queue it.
-    const queued = isTurnRunning
+    // not RUNNING/STARTING). The default preserves the normal safe behaviour;
+    // the explicit Send now action opts into steering the running turn instead.
+    const queued = queue
     const clientId = randomId()
     ws.send(JSON.stringify({ type: 'user_message', id: clientId, queued, content: [{ type: 'text', text }] }))
     if (queued) {
@@ -9981,7 +9982,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     return renderMarkdownSource(value)
   }, [])
 
-  function send() {
+  function send(queue = isTurnRunning) {
     if (uploading) return
     const text = input.trim()
     // A leading "!" runs the rest as a shell command in the head's sandbox (a
@@ -10001,7 +10002,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Attachment paths ride below the typed text, same as the spawn box - the
     // agent reads the uploaded files from inside its sandbox.
     const finalText = paths.length > 0 ? (text ? `${text}\n\n${paths.join('\n')}` : paths.join('\n')) : text
-    if (!finalText || !sendUserText(finalText)) return
+    if (!finalText || !sendUserText(finalText, queue)) return
     setSlashDismissed(false)
     // The message is sent - free every preview URL minted this session (including
     // ones only reachable via undo history) and reset the composer + its history.
@@ -11175,9 +11176,25 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     </button>
                   </Tooltip>
                 )}
+                {isTurnRunning && (
+                  <Tooltip variant="card" content="Send now steers the running agent at its next input boundary. It does not interrupt the current turn, and the message cannot be recalled." side="top">
+                    <button
+                      onClick={() => send(false)}
+                      disabled={!canSend}
+                      aria-label="Send message now"
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        canSend
+                          ? 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-white/[0.06] dark:hover:text-stone-200 cursor-pointer'
+                          : 'text-stone-300 dark:text-stone-600 cursor-default'
+                      }`}
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </Tooltip>
+                )}
                 <Tooltip content={isTurnRunning ? 'Queue message' : 'Send'} shortcut={{ keys: ['Enter'] }} side="top">
                   <button
-                    onClick={send}
+                    onClick={() => send()}
                     disabled={!canSend}
                     aria-label={isTurnRunning ? 'Queue message' : 'Send message'}
                     className={`p-1.5 rounded-full transition-colors ${
