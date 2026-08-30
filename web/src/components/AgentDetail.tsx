@@ -495,10 +495,10 @@ function WorkspaceBadge({
     return (
       <Tooltip
         title="Workspace - isolated worktree"
-        content={<><span className="block">Changes are isolated on this head's own branch and worktree.</span><span className="mt-2 block break-all">{agent.branch_name}</span></>}
+        content={<><span className="block">Changes are isolated on this head's own branch and worktree.</span><span className="mt-2 block break-all font-mono text-xs">{agent.branch_name}</span></>}
         className="shrink-0"
       >
-        <button type="button" aria-label={`Isolated worktree: ${agent.branch_name}`} className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
+        <button type="button" aria-label={`Isolated worktree: ${agent.branch_name}`} className="inline-flex cursor-default rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
           <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300" containerClassName="min-h-5" icon={<GitBranch className="w-3 h-3 shrink-0" />}>{null}</Badge>
         </button>
       </Tooltip>
@@ -979,7 +979,7 @@ export function AgentDetail({
   //    collapsed. memoized so a new node each agent tick doesn't defeat
   //    DiffViewer's memo.
   const workingTopButton = useMemo(() => (
-    <Tooltip content={paneCollapse === 'inspector' ? `Show diff (${SHORTCUT_DIFF_SIDEBAR})` : 'Hide chat'}>
+    <Tooltip content={paneCollapse === 'inspector' ? 'Show diff' : 'Hide chat'} shortcut={paneCollapse === 'inspector' ? { keys: SHORTCUT_DIFF_SIDEBAR.split('+') } : undefined}>
       <button
         className={PANE_TOGGLE_CLS}
         aria-label={paneCollapse === 'inspector' ? 'Show diff' : 'Hide chat'}
@@ -990,7 +990,7 @@ export function AgentDetail({
     </Tooltip>
   ), [paneCollapse, toggleInspector, toggleWorking])
   const changesLeadingButton = useMemo(() => (
-    <Tooltip content={paneCollapse === 'working' ? 'Show chat' : `Hide diff (${SHORTCUT_DIFF_SIDEBAR})`}>
+    <Tooltip content={paneCollapse === 'working' ? 'Show chat' : 'Hide diff'} shortcut={paneCollapse === 'working' ? undefined : { keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
       <button
         className={PANE_TOGGLE_CLS}
         aria-label={paneCollapse === 'working' ? 'Show chat' : 'Hide diff'}
@@ -1004,7 +1004,7 @@ export function AgentDetail({
   // so its Changes bar leads with a back chevron that slides back to the chat
   // (toggleWorking reveals the working pane). memoized for DiffViewer's memo.
   const narrowBackButton = useMemo(() => (
-    <Tooltip content={`Back to chat (${SHORTCUT_DIFF_SIDEBAR})`}>
+    <Tooltip content="Back to chat" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
       <button className={PANE_TOGGLE_CLS} aria-label="Back to chat" onClick={toggleWorking}>
         <ChevronLeft className="w-4 h-4" />
       </button>
@@ -2303,7 +2303,7 @@ export function AgentDetail({
                     onUpdateFocusedPermissions={updateFocusedPermissions}
                   />
                 </div>
-                {!agent.focused && <Tooltip content={`Show diff (${SHORTCUT_DIFF_SIDEBAR})`}>
+                {!agent.focused && <Tooltip content="Show diff" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
                   <button className={PANE_TOGGLE_CLS} aria-label="Show diff" onClick={toggleDiffSidebar}>
                     <FileDiff className="w-4 h-4" />
                   </button>

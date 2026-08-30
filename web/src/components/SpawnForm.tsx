@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, memo } from 'react'
+import { useState, useRef, useEffect, useEffectEvent, useCallback, memo } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import { FocusedFilesystemMode, type AgentResponse, type SpawnAgentRequest, type RepositoryBranch } from '../api'
@@ -34,6 +34,7 @@ import { type AgentTypeOption, readModelMap, readDefaultAgentType, readDefaultCh
 import { fetchBranches, peekBranches } from '../lib/branchCache'
 import { orderModelProviders, recordModelProviderUse } from '../lib/modelProviderRecency'
 import { SegmentedControl } from './SegmentedControl'
+import { onDesktopImagePaste } from '../lib/desktopBridge'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
@@ -814,6 +815,17 @@ export const SpawnForm = memo(function SpawnForm({
     lastPasteRef.current = { text, attachmentId: id, filename, lang: detectCodeLanguage(e.clipboardData) }
   }
 
+  // WebKitGTK does not always expose a copied desktop image on the browser's
+  // paste event. The native shell forwards that image separately; only the
+  // focused spawn composer may consume it because the compact spawn form can
+  // remain mounted alongside an agent's chat composer.
+  const handleDesktopImagePaste = useEffectEvent((file: File) => {
+    if (document.activeElement !== textareaRef.current) return
+    const names = addFiles([file])
+    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+  })
+  useEffect(() => onDesktopImagePaste(handleDesktopImagePaste), [])
+
   function handleDrop(e: React.DragEvent) {
     const files = extractFiles(e.dataTransfer)
     setDragOver(false)
@@ -1195,6 +1207,7 @@ export const SpawnForm = memo(function SpawnForm({
               onKeyDown={handleKeyDown}
               onScroll={handlePromptScroll}
               onPaste={handlePaste}
+              data-desktop-image-paste
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
               onDragLeave={() => setDragOver(false)}
@@ -1268,6 +1281,7 @@ export const SpawnForm = memo(function SpawnForm({
                 onKeyDown={handleKeyDown}
                 onScroll={handlePromptScroll}
                 onPaste={handlePaste}
+                data-desktop-image-paste
                 onDrop={handleDrop}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}
