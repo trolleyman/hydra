@@ -3645,7 +3645,7 @@ type SpawnAgentRequest struct {
 	// AgentType Agent type: claude, gemini, copilot, codex, or bash
 	AgentType *string `json:"agent_type,omitempty"`
 
-	// AllowCommits Initially authorize Hydra's guarded commit operation for a focused head. Ignored for ordinary worktree heads.
+	// AllowCommits Initially authorize Hydra's guarded commit operation for a focused head. Defaults to true for editable focused heads, must be false in read-only mode, and is ignored for ordinary worktree heads.
 	AllowCommits *bool `json:"allow_commits,omitempty"`
 
 	// BaseBranch Base branch to create the worktree from (defaults to the repository's stable default branch)
@@ -4487,7 +4487,7 @@ type UncommittedSummary struct {
 
 // UpdateAgentRequest Patch an agent's mutable fields. Provide any subset; at least one field is required. Omitted fields are left unchanged.
 type UpdateAgentRequest struct {
-	// AllowCommits Enable or disable guarded commits for a focused head immediately. Rejected for ordinary worktree heads.
+	// AllowCommits Enable or disable guarded commits for a focused head immediately. Must be false in read-only mode. Rejected for ordinary worktree heads.
 	AllowCommits *bool `json:"allow_commits,omitempty"`
 
 	// BaseBranch New base branch for the agent. This is a metadata-only change: it updates which branch the agent is considered to be based on (used by update-from-base and the diff view) but does NOT move existing commits. Rebasing the agent's branch onto the new base, if desired, is left to the user. Must be an existing ref.

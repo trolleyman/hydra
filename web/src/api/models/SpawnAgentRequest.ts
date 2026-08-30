@@ -40,7 +40,7 @@ export type SpawnAgentRequest = {
     focused?: boolean;
     filesystem_mode?: FocusedFilesystemMode;
     /**
-     * Initially authorize Hydra's guarded commit operation for a focused head. Ignored for ordinary worktree heads.
+     * Initially authorize Hydra's guarded commit operation for a focused head. Defaults to true for editable focused heads, must be false in read-only mode, and is ignored for ordinary worktree heads.
      */
     allow_commits?: boolean;
     /**

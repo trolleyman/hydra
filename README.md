@@ -7,6 +7,14 @@ checkout or each other.
 It consists of a Go backend and a React frontend. The frontend is bundled into the binary, so it can be shipped as a
 single binary.
 
+## Project direction
+
+Hydra's core agent, sandbox, worktree, review, and test-gating workflows are in
+place. Current development is focused on polishing project-directory chats and
+the native desktop experience, strengthening cross-platform sandbox isolation,
+and simplifying the diff and review workflow. See the
+[open roadmap](docs/roadmap.md) for the remaining ideas and known gaps.
+
 Hydra stores agent and conversation history in one user-scoped database shared
 by CLI, browser-server, and desktop clients. Its native locations are
 `$XDG_STATE_HOME/hydra/db.sqlite3` on Linux (falling back to
