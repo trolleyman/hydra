@@ -26,7 +26,7 @@ func newUploadServer(t *testing.T) (*Server, string, string) {
 	home := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", home)
 	t.Setenv("HOME", home)
-	t.Setenv(statepath.Environment, t.TempDir())
+	t.Setenv(statepath.Environment, home)
 
 	root := t.TempDir()
 	norm, err := paths.NormalizePath(root)

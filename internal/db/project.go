@@ -28,12 +28,12 @@ func (s *Store) ListProjects() ([]Project, error) {
 func (s *Store) ReplaceProjects(projects []Project) error {
 	return errtrace.Wrap(s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&Project{}).Error; err != nil {
-			return err
+			return errtrace.Wrap(err)
 		}
 		if len(projects) == 0 {
 			return nil
 		}
-		return tx.Create(&projects).Error
+		return errtrace.Wrap(tx.Create(&projects).Error)
 	}))
 }
 

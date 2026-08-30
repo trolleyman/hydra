@@ -183,9 +183,9 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 
 	// Supervises each project's [[services]] (e.g. a host-side emulator pool).
 	// Gate the services on activity: a project runs its services only while it has
-	// at least one agent, so an idle project doesn't hold a resource pool open (see
-	// RunActivityGate below). The probe counts a project's active (non-archived)
-	// agents; on a read error it returns 1 so a transient DB blip keeps services up
+	// at least one session that is starting or live, so a stopped head left in the
+	// active list doesn't hold a resource pool open (see RunActivityGate below).
+	// On a read error the probe returns 1 so a transient DB blip keeps services up
 	// rather than tearing a pool down.
 	svcMgr := services.NewManager()
 	svcMgr.SetActivityProbe(func(root string) int {
@@ -194,7 +194,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 			log.Printf("services: count agents for %s: %v", root, err)
 			return 1
 		}
-		return len(agents)
+		return serviceActiveAgentCount(agents)
 	})
 
 	// Holds chat-mode heads' queued (not-yet-sent) user messages, daemon-side and
@@ -577,6 +577,20 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		deploy:      deployCfg,
 		auth:        auth,
 	}, nil
+}
+
+// serviceActiveAgentCount counts sessions that either need project services to
+// start or can still use them. "stopped" heads remain visible so they can be
+// resumed, but they must not keep host-side services alive while idle.
+func serviceActiveAgentCount(agents []db.Agent) int {
+	count := 0
+	for _, agent := range agents {
+		switch agent.SessionStatus {
+		case "pending", "building", "starting", "running":
+			count++
+		}
+	}
+	return count
 }
 
 // serveUnixSocket makes srv also serve the project's daemon control socket, so
