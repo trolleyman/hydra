@@ -189,9 +189,11 @@ can't just be skipped. The intended escape valve is the existing **host-run** ha
 (the `mcp__hydra__host_run` tool, or `/tmp/hydra-internal host-run` for agents without
 it): `git submodule update --init` runs host-side against the real writable `.git`,
 approval-gated. That covers the once-per-head setup without building submodule/lfs
--specific tooling. Caveats: it is approval-gated (a click per op, fine for setup, wrong
-for a hot loop), and it runs **unsandboxed** - so avoid asking for `bun install` (that
-runs all npm postinstall scripts on the host, a supply-chain vector); prefer narrow
+-specific tooling. The command runs from the head's effective working directory:
+an ordinary head's linked worktree, or the registered project root for a focused
+head. Caveats: it is approval-gated (a click per op, fine for setup, wrong for a
+hot loop), and it runs **unsandboxed** - so avoid asking for `bun install` (that runs
+all npm postinstall scripts on the host, a supply-chain vector); prefer narrow
 git-only commands.
 
 Do **not** try to fix this by carving `.git/config` read-write out of the readonly

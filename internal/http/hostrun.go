@@ -24,7 +24,7 @@ const hostRunTimeout = 8 * time.Minute
 const hostRunOutputCap = 64 * 1024
 
 // runApprovedHostCommand executes an approved host_command OUTSIDE the sandbox,
-// on the host, in the head's worktree, and writes the result for the blocked
+// on the host, in the head's working directory, and writes the result for the blocked
 // `hydra host-run` CLI to relay to the agent.
 //
 // command is the exact text the UI displayed and the user approved - passed
@@ -34,11 +34,11 @@ const hostRunOutputCap = 64 * 1024
 //
 // It runs asynchronously (the HTTP handler returns immediately after writing the
 // allow decision); the CLI reads the allow, then polls for the result this writes.
-func runApprovedHostCommand(dir, reqid, worktree, command string) {
-	if worktree == "" {
+func runApprovedHostCommand(dir, reqid, workingDir, command string) {
+	if workingDir == "" {
 		_ = gate.WriteHostRunResult(dir, reqid, gate.HostRunResult{
 			ExitCode: 1,
-			Error:    "the head has no worktree to run the command in",
+			Error:    "the head has no working directory to run the command in",
 		})
 		return
 	}
@@ -50,7 +50,7 @@ func runApprovedHostCommand(dir, reqid, worktree, command string) {
 	// human typing it in the worktree - the point of the escape hatch is unconfined
 	// host execution, so there is deliberately no sandbox wrapper here.
 	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
-	cmd.Dir = worktree
+	cmd.Dir = workingDir
 	cmd.Env = os.Environ()
 
 	out, err := cmd.CombinedOutput()

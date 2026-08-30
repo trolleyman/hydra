@@ -130,11 +130,7 @@ func (s *Server) DecideAgentApproval(ctx context.Context, request api.DecideAgen
 				s.Events.AgentsChanged(projectRoot)
 				return api.DecideAgentApproval204Response{}, nil
 			}
-			worktree := ""
-			if head.Worktree != nil {
-				worktree = *head.Worktree
-			}
-			go runApprovedHostCommand(dir, request.Reqid, worktree, command)
+			go runApprovedHostCommand(dir, request.Reqid, head.WorkingDir(), command)
 		}
 		if err := gate.WriteDecision(dir, request.Reqid, gate.DecisionFile{Decision: decision}); err != nil {
 			return api.DecideAgentApproval500JSONResponse{
