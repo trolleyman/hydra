@@ -383,6 +383,12 @@ provider's own payload stays available under Raw, and blocks Hydra reconstructed
 rather than received are marked synthetic so Raw does not present them as
 protocol payloads the provider never sent.
 
+**Session breaks.** A `session_resumed` event renders as a divider at its
+durable position in the conversation. The divider includes a self-updating
+relative time, with the exact local date and time on hover, so multiple process
+replacements remain distinguishable. Older events without a usable timestamp
+keep the plain `Resumed` label.
+
 **Streaming.** The first delta opens the live block and the completed message
 closes and replaces it in the same render batch, so a preview cannot briefly
 disappear before the final Markdown is committed. Provider content-boundary

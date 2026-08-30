@@ -576,6 +576,18 @@ describe('reduceHistoryEvents across page boundaries', () => {
     return () => id--
   }
 
+  it('keeps the resume time so repeated session breaks remain distinguishable', () => {
+    const timestamp = '2026-08-30T12:34:56Z'
+    const items = reduceHistoryEvents(
+      toProviderEvents({ type: 'session_resumed', seq: 9, timestamp, payload: { worktree: '/wt' } } as never),
+      alloc(),
+    )
+
+    expect(items).toMatchObject([
+      { kind: 'resumed', resumedAt: Date.parse(timestamp), noEntrance: true },
+    ])
+  })
+
   it('applies a tool_result reduced in a newer page to a card built by an older page', () => {
     const link = newToolResultLink()
     // Newer page: only the result.
