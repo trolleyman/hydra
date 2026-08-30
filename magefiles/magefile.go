@@ -80,28 +80,28 @@ var (
 
 // Quotes a string for display as a shell argument.
 func shellQuoteForce(s string) string {
-	containsDoubleQuote := strings.Contains(s, `"`)
-	containsSingleQuote := strings.Contains(s, `'`)
+	containsDoubleQuote := strings.Contains(s, "\"")
+	containsSingleQuote := strings.Contains(s, "'")
 	if runtime.GOOS == "windows" {
 		escaped := strings.ReplaceAll(s, "\t", "`t")
 		escaped = strings.ReplaceAll(s, "\n", "`n")
 		if !containsDoubleQuote {
-			return `"` + escaped + `"`
+			return "\"" + escaped + "\""
 		} else if !containsSingleQuote {
-			return `'` + escaped + `'`
+			return "'" + escaped + "'"
 		} else {
-			return `"` + strings.ReplaceAll(escaped, `"`, "`\"") + `"`
+			return "\"" + strings.ReplaceAll(escaped, "\"", "`\\\"") + "\""
 		}
 	} else {
 		escaped := strings.ReplaceAll(s, "\t", `\t`)
 		escaped = strings.ReplaceAll(s, "\n", `\n`)
 		escaped = strings.ReplaceAll(s, `\`, `\\`)
 		if !containsDoubleQuote {
-			return `"` + escaped + `"`
+			return "\"" + escaped + "\""
 		} else if !containsSingleQuote {
-			return `'` + escaped + `'`
+			return "'" + escaped + "'"
 		} else {
-			return `"` + strings.ReplaceAll(escaped, `"`, `\"`) + `"`
+			return "\"" + strings.ReplaceAll(escaped, "\"", "\\\"") + "\""
 		}
 	}
 }
