@@ -661,6 +661,18 @@ body {
   background-color: rgba(209, 213, 219, 0.9); /* gray-300 */
 }
 
+/* WebKitGTK may promote native scrollbars into a compositor layer above fixed
+   content, ignoring the dialog's z-index. Preserve their gutter (so opening a
+   dialog causes no layout shift) but hide the chrome for the dialog lifetime. */
+.hydra-dialog-open * {
+  scrollbar-color: transparent transparent;
+}
+.hydra-dialog-open *::-webkit-scrollbar-thumb,
+.hydra-dialog-open *::-webkit-scrollbar-thumb:hover,
+.hydra-dialog-open *::-webkit-scrollbar-thumb:active {
+  background-color: transparent;
+}
+
 /* The terminal font's OpenType features (Settings -> Browser -> Fonts). xterm
    writes font-family onto its row elements itself and has no option for
    features, so they are set here on the container and inherit down - which is

@@ -289,14 +289,16 @@ func TestManagerSequencesCommitAfterToolCompletion(t *testing.T) {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}
-	run("init", "-q")
+	run("init", "-q", "-b", "main")
 	if err := os.WriteFile(filepath.Join(repo, "file"), []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	run("add", "file")
 	run("commit", "-qm", "base")
 	m := NewManager(func(id string) (HeadContext, bool) {
-		return HeadContext{ProjectRoot: repo, Worktree: repo}, id == "head"
+		return HeadContext{
+			ProjectRoot: repo, Worktree: repo, BaseBranch: "main", ProjectDirectory: true,
+		}, id == "head"
 	})
 	if _, err := m.Snapshot("head"); err != nil { // opens store and observes baseline HEAD
 		t.Fatal(err)
@@ -320,12 +322,16 @@ func TestManagerSequencesCommitAfterToolCompletion(t *testing.T) {
 	var payload struct {
 		Subject      string `json:"subject"`
 		CausalItemID string `json:"causal_item_id"`
+		IsMerge      bool   `json:"is_merge"`
 	}
 	if err := json.Unmarshal(events[2].Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
 	if payload.Subject != "second" || payload.CausalItemID != "bash1" {
 		t.Fatalf("commit payload = %+v", payload)
+	}
+	if payload.IsMerge {
+		t.Fatalf("ordinary project-directory commit was presented as a merge: %+v", payload)
 	}
 }
 

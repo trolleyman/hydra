@@ -3,6 +3,9 @@ import type { ProjectInfo, ReviewConfigResponse, StatusResponse } from '../api'
 import { api } from './apiClient'
 import { StorageKeys, readJSON, readLocal, writeJSON, writeLocal } from '../lib/storage'
 import { deepEqual, reconcileList, reuseIfEqual } from '../lib/deepEqual'
+import { createArrayIndex } from '../lib/arrayIndex'
+
+const indexProjects = createArrayIndex<ProjectInfo, string>((project) => project.id)
 
 // readStoredReviewConfigs hydrates the persisted per-project review-config
 // snapshots (see StorageKeys.reviewConfigs). The endpoint that refreshes them
@@ -41,8 +44,9 @@ function applyHidden(
 ): { projects: ProjectInfo[]; pending: Record<string, boolean> } {
   const ids = Object.keys(pending)
   if (ids.length === 0) return { projects, pending }
+  const projectsById = indexProjects(projects)
   const settled = ids.filter((id) => {
-    const p = projects.find((x) => x.id === id)
+    const p = projectsById.get(id)
     // A project that vanished (removed elsewhere) settles too - nothing to hold.
     return p == null || !!p.hidden === pending[id]
   })
@@ -79,6 +83,10 @@ interface ProjectState {
   setSelectedProjectId: (id: string | null) => void
   setSystemStatus: (status: StatusResponse) => void
   setReviewConfig: (projectId: string, cfg: ReviewConfigResponse) => void
+}
+
+export function selectProject(state: Pick<ProjectState, 'projects'>, id: string): ProjectInfo | undefined {
+  return indexProjects(state.projects).get(id)
 }
 
 export const useProjectStore = create<ProjectState>((set) => ({

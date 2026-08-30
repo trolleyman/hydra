@@ -16,11 +16,12 @@ import (
 )
 
 type HeadContext struct {
-	ProjectRoot string
-	Worktree    string
-	Prompt      string
-	AgentType   string
-	Plan        string
+	ProjectRoot      string
+	Worktree         string
+	ProjectDirectory bool
+	Prompt           string
+	AgentType        string
+	Plan             string
 	// The branch the head is based on, used only to recognise a fast-forward
 	// that absorbed the base (see reconcileCommits). Empty is fine - the
 	// collapse then only happens for a merge Hydra itself performed, which
@@ -653,6 +654,13 @@ func cappedMergedCommits(merged []git.CommitInfo) []api.ChatMergedCommit {
 // fast-forwarded onto something else (an agent merging a sibling head in), the
 // walk stays the honest account and this returns false.
 func (w *worker) appendAbsorbedBase(id, oldHead, newHead, mergedRef string) bool {
+	// A project-directory head works on the base branch itself. Every ordinary
+	// commit advances both HEAD and that branch tip, so equality with the base is
+	// not evidence that the head absorbed it. Real merge commits are still
+	// annotated by the first-parent walk above.
+	if w.ctx.ProjectDirectory {
+		return false
+	}
 	ref := mergedRef
 	if ref == "" {
 		ref = w.ctx.BaseBranch

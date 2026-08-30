@@ -45,7 +45,7 @@ import { AgentStatus, type ChatEventUnion, type ChatFrame } from '../api'
 import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../lib/chatEvents'
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
-import { useAgentStore } from '../stores/agentStore'
+import { selectAgent, selectLiveAgent, useAgentStore } from '../stores/agentStore'
 import { Markdown, type RepoLinkContext } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, leadingBashComment, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
@@ -235,7 +235,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
         <GitMerge className="w-3 h-3 shrink-0" />
         <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
-        <ChangeStats additions={item.additions} deletions={item.deletions} />
+        <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
       </button>
       <Expandable open={expanded && shown > 0} className="w-full">
         <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
@@ -253,7 +253,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
               <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
               <span className="min-w-0 flex-1 truncate optical-center">{m.subject}</span>
-              <ChangeStats additions={m.additions} deletions={m.deletions} />
+              <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px" />
             </div>
           ))}
           {shown < count && (
@@ -2560,6 +2560,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
       </div>
     )
   }
+  const commentsByNumber = new Map(parsed.comments.map((comment) => [comment.number, comment]))
   return (
     <div className="space-y-1.5">
       {parsed.preamble && (
@@ -2569,7 +2570,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
         // A reply to a comment shown above it is drawn as a thread: indented
         // under its parent, and headed by what it answers rather than by the
         // file, which is the parent's line repeated verbatim.
-        const parent = parsed.comments.find((p) => p.number === c.replyTo)
+        const parent = commentsByNumber.get(c.replyTo)
         const sameAnchor = parent != null && parent.path === c.path && parent.line === c.line
           && parent.image?.file === c.image?.file && parent.image?.position === c.image?.position
         return (
@@ -6970,10 +6971,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [allHistoryLoaded, setAllHistoryLoaded] = useState(false)
   const pendingPrependRef = useRef<number | null>(null)
-  // One load per arrival at the top threshold. Holding the native scrollbar
-  // thumb at the top must not turn each anchored prepend into another request.
+  // One load per arrival at the top threshold. An anchored prepend that moves
+  // the viewport clear re-arms it, so holding the native thumb at the top can
+  // intentionally keep paging without duplicate requests from one position.
   const historyThresholdArmedRef = useRef(true)
-  const scrollbarDraggingRef = useRef(false)
   // Composer attachments live in the undo history (`present.attachments`, above)
   // so a paste-turned-chip is undoable together with its text marker.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
@@ -7060,7 +7061,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // it (item 20).
   const lastScrollRef = useRef({ top: 0, pinned: true })
 
-  const headStatus = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
+  const headStatus = useAgentStore((s) => selectLiveAgent(s, agentId)?.agent_status?.status)
   // A review slot has no db.Agent row, so its lifecycle comes from this pane's
   // socket. Using the owning head's status here made a finished reviewer offer
   // to queue messages whenever the head itself was still working.
@@ -7077,7 +7078,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // (__root's auto-clear effect), and effects run after render, so by the time
   // any effect of ours could read the store the answer would always be "read".
   const unreadNow = useAgentStore((s) => {
-    const a = s.agents.find((x) => x.id === agentId)
+    const a = selectLiveAgent(s, agentId)
     return a ? !!a.has_unread_changes : null
   })
   const [openedUnread, setOpenedUnread] = useState<{ key: string; unread: boolean | null }>(
@@ -7107,13 +7108,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // project root and deliberately has no Hydra worktree of its own.
   const worktreePath = useAgentStore(
     (s) => {
-      const agent = s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId)
+      const agent = selectAgent(s, agentId)
       if (!agent || review) return agent?.worktree_path ?? null
       return agent.focused ? agent.project_path : agent.worktree_path ?? null
     },
   )
   const repositoryRef = useAgentStore((s) => chatRepositoryRef(
-    (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name,
+    selectAgent(s, agentId)?.branch_name,
   ))
   // memo'd: <Markdown> is memo'd on its props, so a fresh object each render
   // would re-parse every rendered message on every keystroke in the composer.
@@ -7134,7 +7135,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // has no db.Agent row to carry one), and seeding it here is what put the head's
   // to-do chip on the reviewer's transcript. Its own plan arrives live.
   const serverPlan = useAgentStore(
-    (s) => (review ? undefined : (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.plan),
+    (s) => (review ? undefined : selectAgent(s, agentId)?.plan),
   )
   useEffect(() => {
     const seeded = seedLocalPlan(projectId, stateId, serverPlan)
@@ -7154,7 +7155,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // is still on the placeholder, so the right model shows on load before any
   // live system:init lands. The live stream stays authoritative from there.
   const serverModel = useAgentStore(
-    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.model,
+    (s) => selectAgent(s, agentId)?.model,
   )
   useEffect(() => {
     // Adopt the daemon-captured model only while the selector is still on its
@@ -7234,7 +7235,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setAllHistoryLoaded(false)
     pendingPrependRef.current = null
     historyThresholdArmedRef.current = true
-    scrollbarDraggingRef.current = false
     pinnedRef.current = true
 
     let nextId = 1
@@ -9239,27 +9239,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!el) return
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0 || !isVerticalScrollbarPointer(el, event.clientX)) return
-      scrollbarDraggingRef.current = true
       stopFollow()
       if (wheelRafRef.current != null) cancelAnimationFrame(wheelRafRef.current)
       wheelRafRef.current = null
       pinnedRef.current = false
       setPinned(false)
     }
-    const onPointerEnd = () => {
-      if (!scrollbarDraggingRef.current) return
-      scrollbarDraggingRef.current = false
-      // Re-arm only after the thumb has left the load zone. Releasing it at the
-      // top keeps the current page as the one response to this drag.
-      if (el.scrollTop >= 300) historyThresholdArmedRef.current = true
-    }
     el.addEventListener('pointerdown', onPointerDown)
-    window.addEventListener('pointerup', onPointerEnd)
-    window.addEventListener('pointercancel', onPointerEnd)
     return () => {
       el.removeEventListener('pointerdown', onPointerDown)
-      window.removeEventListener('pointerup', onPointerEnd)
-      window.removeEventListener('pointercancel', onPointerEnd)
     }
   }, [])
 
@@ -9772,7 +9760,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const threshold = historyThresholdTransition(
         el.scrollTop,
         historyThresholdArmedRef.current,
-        scrollbarDraggingRef.current,
       )
       historyThresholdArmedRef.current = threshold.armed
       if (threshold.request) requestOlderHistory()
@@ -10628,7 +10615,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
                 <span className="truncate optical-center">{item.subject}</span>
-                <ChangeStats additions={item.additions} deletions={item.deletions} />
+                <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
               </div>
             </Tooltip>
           </div>
@@ -10857,7 +10844,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     while (ci < chips.length) out.push(chips[ci++])
     return out
   }, [visibleItems, commitChips, replayDone, allHistoryLoaded])
-  const conversationResumedAt = useMemo(() => {
+  const conversationBeganAt = useMemo(() => {
     if (!allHistoryLoaded) return undefined
     for (const item of visibleItems) {
       const timestamp = itemTsRef.current.get(item.id)
@@ -11031,7 +11018,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             </div>
           )}
           {replayDone && allHistoryLoaded && items.length > 0 && (
-            <ResumeDivider resumedAt={conversationResumedAt} ariaLabel="Conversation resumed" />
+            <ResumeDivider
+              resumedAt={conversationBeganAt}
+              label="Conversation began"
+              ariaLabel="Beginning of conversation"
+            />
           )}
           <SettledMessages
             items={mergedItems}

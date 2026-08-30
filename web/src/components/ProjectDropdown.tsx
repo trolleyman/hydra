@@ -10,7 +10,7 @@ import { ProjectIcon } from '../lib/projectIcon'
 import { api } from '../stores/apiClient'
 import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
-import { expandOrder, reorderProjects, setProjectHidden, useProjectStore, visibleProjects } from '../stores/projectStore'
+import { expandOrder, reorderProjects, selectProject, setProjectHidden, useProjectStore, visibleProjects } from '../stores/projectStore'
 import { ProjectAgentCounts, ProjectAttentionDot } from './ProjectAgentCounts'
 import { ServiceHealthWarning } from './ServiceHealthWarning'
 import { Tooltip } from './Tooltip'
@@ -413,7 +413,7 @@ export const ProjectDropdown = memo(function ProjectDropdown({
     }
   }, [isOpen])
 
-  const selected = projects.find((p) => p.id === selectedId)
+  const selected = selectedId ? selectProject({ projects }, selectedId) : undefined
   // Unread agents sitting in projects other than the one you're looking at -
   // drives the dot on the folder button ("updates waiting elsewhere").
   const otherProjectsUnread = projects

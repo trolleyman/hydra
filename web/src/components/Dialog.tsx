@@ -46,6 +46,16 @@ export const Dialog: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, handleCancel, handleConfirm])
 
+  // WebKitGTK can composite a native scrollbar above a fixed modal layer even
+  // when the layer has the higher z-index. Keep the scrollbar gutter stable but
+  // make its chrome transparent while this dialog is mounted, so it cannot draw
+  // a vertical stripe through an otherwise opaque panel.
+  useEffect(() => {
+    if (!isOpen) return
+    document.documentElement.classList.add('hydra-dialog-open')
+    return () => document.documentElement.classList.remove('hydra-dialog-open')
+  }, [isOpen])
+
   if (!isOpen) return null
 
   // The plain dialog used to hang a bare coloured glyph off its header while every
@@ -73,7 +83,7 @@ export const Dialog: React.FC = () => {
     // popover tier (z-[9999]: dropdown menus, tooltips). A menu is what usually
     // *opened* the dialog, and at 9999 it punched a bright hole through the
     // modal scrim while the dialog sat behind it.
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
       {variant === 'merge' ? (
         <RichConfirmPanel
           tone="emerald"

@@ -65,16 +65,18 @@ func chatContextResolver(store *db.Store) chat.ContextResolver {
 	return func(id string) (chat.HeadContext, bool) {
 		if agent, err := store.GetAgent(id); err == nil && agent != nil {
 			workingDir := paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID)
-			if agent.BranchName == "" {
+			projectDirectory := agent.BranchName == ""
+			if projectDirectory {
 				workingDir = agent.ProjectPath
 			}
 			return chat.HeadContext{
-				ProjectRoot: agent.ProjectPath,
-				Worktree:    workingDir,
-				Prompt:      agent.Prompt,
-				AgentType:   agent.AgentType,
-				Plan:        agent.Plan,
-				BaseBranch:  agent.BaseBranch,
+				ProjectRoot:      agent.ProjectPath,
+				Worktree:         workingDir,
+				ProjectDirectory: projectDirectory,
+				Prompt:           agent.Prompt,
+				AgentType:        agent.AgentType,
+				Plan:             agent.Plan,
+				BaseBranch:       agent.BaseBranch,
 			}, true
 		}
 		headID, slot, ok := heads.SplitSlotID(id)

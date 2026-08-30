@@ -10,10 +10,9 @@ export function isVerticalScrollbarPointer(element: HTMLElement, clientX: number
 export function historyThresholdTransition(
   scrollTop: number,
   armed: boolean,
-  scrollbarDragging: boolean,
   threshold = 300,
 ): { armed: boolean; request: boolean } {
-  if (scrollTop >= threshold) return { armed: scrollbarDragging ? armed : true, request: false }
+  if (scrollTop >= threshold) return { armed: true, request: false }
   if (!armed) return { armed: false, request: false }
   return { armed: false, request: true }
 }

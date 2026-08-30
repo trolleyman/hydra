@@ -37,6 +37,17 @@ Use `mage` for development tasks.
       want to enable them.
 3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generate:go` to update server stubs.
 
+### Keyed frontend collections
+
+Repeated identity lookups use the cached indexes in the owning store. Agent
+consumers use `selectAgent` / `selectLiveAgent`; project consumers use
+`selectProject`. Other stable arrays that need repeated keyed access use
+`createArrayIndex` from `web/src/lib/arrayIndex.ts`. The helper caches one `Map`
+per array identity, which works with the stores' list reconciliation and avoids
+duplicating synchronized array-and-map state. Keep `.find` for predicate searches
+such as "the current branch" or "the first non-empty line", where there is no
+stable lookup key.
+
 ## Conventions
 
 ### ASCII punctuation only

@@ -154,15 +154,19 @@ and `web/src/DiffViewer.tsx`):
   precedes a read of the same file, repeated search rows can pin the read's start
   even when an open-ended command ran before both: the search text and number
   must agree with the corresponding line in the read before the gutter is shown.
-- A fully loaded transcript starts with the same ruled `Resumed <time> ago`
-  divider used for process-resume events. Its exact timestamp uses the shared
-  selectable Tooltip rather than a native browser title. When the floating
-  conversation selector or Plan control is present, the transcript reserves
-  their first row so this divider remains visible at scroll-top.
+- A fully loaded transcript starts with a ruled `Conversation began <time> ago`
+  divider styled like the `Resumed <time> ago` process-resume divider. Its exact
+  timestamp uses the shared selectable Tooltip rather than a native browser
+  title. When the floating conversation selector or Plan control is present, the
+  transcript reserves their first row so this divider remains visible at
+  scroll-top.
 - A pinned running chat follows new output until the user takes control. Wheel
   movement and a pointer press in the native scrollbar gutter cancel the active
   follow animation before scrolling begins, so dragging the thumb never fights
-  a streaming update. Reaching the bottom explicitly reacquires the pin.
+  a streaming update. History loading fires once per arrival in the top zone;
+  an anchored prepend re-arms it after moving the preserved content clear, so a
+  thumb held at the top deliberately continues paging. Reaching the bottom
+  explicitly reacquires the pin.
 - Keyboard hints use the shared `Kbd` / `ShortcutHint` components. Their fixed
   cap box optically lowers the glyph within the font line box, keeping fonts
   with asymmetric ascent/descent metrics vertically centred.
@@ -170,6 +174,10 @@ and `web/src/DiffViewer.tsx`):
   the operational detail: review creation names the PR/MR forge, merge names the
   target branch, restart says which state is preserved, and kill says that the
   worktree is deleted.
+- The shared confirmation dialog is opaque as soon as it mounts. While it is
+  open, underlying native scrollbar chrome becomes transparent without removing
+  its gutter; this prevents WebKitGTK from compositing scroll thumbs through the
+  modal without shifting the page.
 - Codex `View Image` tool cards resolve their path-only result through the
   agent-files endpoint and use the shared thumbnail/lightbox treatment. A
   successful durable `tool_completed` event grants an exact absolute-path

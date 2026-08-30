@@ -25,7 +25,7 @@ import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTe
 import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
-import { useProjectStore } from '../stores/projectStore'
+import { selectProject, useProjectStore } from '../stores/projectStore'
 import { useToastStore } from '../stores/toastStore'
 import { PRPicker } from './PRPicker'
 import { Badge } from './Badge'
@@ -391,7 +391,7 @@ export const SpawnForm = memo(function SpawnForm({
   // Selector, not a whole-store subscribe: this form re-renders on every
   // keystroke.
   const isBuiltinProject = useProjectStore(
-    (s) => !!s.projects.find((p) => p.id === projectId)?.builtin,
+    (s) => !!(projectId && selectProject(s, projectId)?.builtin),
   )
 
   // Guards against a slow request for an old project resolving after the user

@@ -15,14 +15,21 @@ export interface TreeNode {
 
 export function buildFileTree(files: DiffFile[]): TreeNode[] {
   const root: TreeNode[] = []
+  const directories = new WeakMap<TreeNode[], Map<string, TreeNode>>()
   for (const file of files) {
     const parts = file.path.split('/')
     let current = root
     for (let i = 0; i < parts.length - 1; i++) {
-      let node = current.find((n) => n.type === 'dir' && n.name === parts[i])
+      let byName = directories.get(current)
+      if (!byName) {
+        byName = new Map()
+        directories.set(current, byName)
+      }
+      let node = byName.get(parts[i])
       if (!node) {
         node = { name: parts[i], path: parts.slice(0, i + 1).join('/'), type: 'dir', children: [] }
         current.push(node)
+        byName.set(node.name, node)
       }
       current = node.children
     }
