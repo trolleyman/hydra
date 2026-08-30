@@ -154,11 +154,12 @@ and `web/src/DiffViewer.tsx`):
   precedes a read of the same file, repeated search rows can pin the read's start
   even when an open-ended command ran before both: the search text and number
   must agree with the corresponding line in the read before the gutter is shown.
-- A fully loaded transcript starts with the same ruled `Resumed <time> ago`
-  divider used for process-resume events. Its exact timestamp uses the shared
-  selectable Tooltip rather than a native browser title. When the floating
-  conversation selector or Plan control is present, the transcript reserves
-  their first row so this divider remains visible at scroll-top.
+- A fully loaded transcript starts with a ruled `Conversation began <time> ago`
+  divider styled like the `Resumed <time> ago` process-resume divider. Its exact
+  timestamp uses the shared selectable Tooltip rather than a native browser
+  title. When the floating conversation selector or Plan control is present, the
+  transcript reserves their first row so this divider remains visible at
+  scroll-top.
 - Per-agent view state lives in `web/src/lib/agentViewPrefs.ts`: a sharded
   localStorage store keyed per project+agent, 30-day TTL (terminal height, page
   scrollTop, collapsed diff files, bash tabs, tests-panel view toggles, and the
