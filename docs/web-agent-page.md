@@ -88,7 +88,10 @@ and `web/src/DiffViewer.tsx`):
   per file ('\n'-joined lines in one `pre-wrap` cell wrap exactly as one row
   each); side-by-side needs a read per pair, because a row is as tall as its
   taller half. Runs through `queueMeasure`'s idle queue, so it lands shortly
-  after load rather than during a scroll. The row classes live in `diffMetrics`
+  after load rather than during a scroll. WebKit has no `requestIdleCallback`, so
+  its timer fallback budgets each slice from actual elapsed time and yields
+  between expensive file measurements instead of blocking the desktop view. The
+  row classes live in `diffMetrics`
   so the replica and the real rows can't drift; `DiffViewer.test.tsx` renders a
   body and asserts `bodyShape` predicted its row/expander counts. In-tree images
   are the one body that can't be predicted (`estimateVisibleRows` is the crude
@@ -146,18 +149,72 @@ and `web/src/DiffViewer.tsx`):
   Chat code gutters and section labels also carry `data-copy-skip`; do not rely
   on `user-select: none` alone, because WebKitGTK can include those nodes when a
   desktop selection crosses grid rows or block boundaries.
+- Chat file links keep the authored label in the prose and show a repository path
+  in their tooltip. An absolute path inside the current head's worktree drops that
+  implementation-specific prefix; a genuinely external absolute path remains
+  explicit.
 - Bash inspection output is sectioned by `web/src/lib/shellSections.ts`. Plain
   file reads such as `sed -n '40,80p'` render with syntax highlighting and the
-  file's real line numbers. In a script where a numbered search immediately
+  file's real line numbers. Adjacent bounded reads keep their requested starts
+  when their exact range lengths account for all returned lines. In a script
+  where a numbered search immediately
   precedes a read of the same file, repeated search rows can pin the read's start
   even when an open-ended command ran before both: the search text and number
   must agree with the corresponding line in the read before the gutter is shown.
+- Bash command cards render commands relative to the head's worktree or a review
+  agent's detached checkout. A command that ran elsewhere gets a reproducible
+  `cd` preamble; home-relative preambles keep `~` outside quotes so the shell
+  expands it.
+- A fully loaded transcript starts with a ruled `Conversation began <time> ago`
+  divider styled like the `Resumed <time> ago` process-resume divider. Its exact
+  timestamp uses the shared selectable Tooltip rather than a native browser
+  title. When the floating conversation selector or Plan control is present, the
+  transcript reserves their first row so this divider remains visible at
+  scroll-top.
+- A pinned running chat follows new output until the user takes control. Wheel
+  movement and a pointer press in the native scrollbar gutter cancel the active
+  follow animation before scrolling begins, so dragging the thumb never fights
+  a streaming update. History loading fires once per arrival in the top zone;
+  an anchored prepend re-arms it after moving the preserved content clear, so a
+  thumb held at the top deliberately continues paging. Reaching the bottom
+  explicitly reacquires the pin.
+- Keyboard hints use the shared `Kbd` / `ShortcutHint` components. Their fixed
+  cap box optically lowers the glyph within the font line box, keeping fonts
+  with asymmetric ascent/descent metrics vertically centred.
+- Agent action labels stay compact in the adaptive top bar. Their tooltips carry
+  the operational detail: review creation names the PR/MR forge, merge names the
+  target branch, restart says which state is preserved, and kill says that the
+  worktree is deleted.
+- The shared confirmation dialog is opaque as soon as it mounts. While it is
+  open, underlying native scrollbar chrome becomes transparent without removing
+  its gutter; this prevents WebKitGTK from compositing scroll thumbs through the
+  modal without shifting the page.
+- A visible, loaded Files diff pauses decorative infinite animations in the
+  WebKit desktop shells. WebKitGTK and WKWebView otherwise repaint the Files
+  surface for tiny status, progress and chat animations after the diff has fully
+  settled. An empty Changes inspector leaves animation running. `AgentDetail`
+  owns the `hydra-webkit-diff-open` root class; the file-card condition lives in
+  `index.css`. Closing the diff restores motion, and browsers plus Windows
+  WebView2 are unaffected.
+- The primary Merge action preflights the existing per-runner tests endpoint
+  before opening its confirmation when the compact verdict is not already gated.
+  This distinguishes no configured runners from an unknown verdict and catches a
+  branch-tip verdict newer than the project-event snapshot, so a blocked merge
+  opens the Force / Queue choice directly instead of after a normal confirmation.
+- Codex `View Image` tool cards resolve their path-only result through the
+  agent-files endpoint and use the shared thumbnail/lightbox treatment. A
+  successful durable `tool_completed` event grants an exact absolute-path
+  capability even when Codex omits its optional status field; explicit failures
+  never grant it. Each chat store indexes these paths while loading/appending,
+  so serving a thumbnail is an O(1) lookup rather than a transcript scan.
 - Per-agent view state lives in `web/src/lib/agentViewPrefs.ts`: a sharded
   localStorage store keyed per project+agent, 30-day TTL (terminal height, page
   scrollTop, collapsed diff files, bash tabs, tests-panel view toggles, and the
   chat Plan disclosure). Switching through Chat, Review and Bash tabs preserves
   whether the Plan is open, and the panel waits for a measured pane width before
   mounting so it does not briefly lay itself out at an impossible width.
+- Chat, Review and Bash tab labels use the interface font. The shell palette
+  distinguishes terminal content without decorative window traffic lights.
 - `web/src/lib/storage.ts` is the `StorageKeys` registry. The left sidebar's
   state is two independent flags in the zustand `useSidebarStore`
   (`web/src/lib/sidebar.ts`): a persisted desktop `desktopCollapsed` preference

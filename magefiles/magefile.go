@@ -663,6 +663,9 @@ func BuildDesktopLinux() error {
 		return errtrace.Wrap(err)
 	}
 	share := filepath.Join("dist", "linux", "share")
+	if err := os.RemoveAll(share); err != nil {
+		return errtrace.Wrap(err)
+	}
 	applications := filepath.Join(share, "applications")
 	icons := filepath.Join(share, "icons", "hicolor", "512x512", "apps")
 	if err := os.MkdirAll(applications, 0o755); err != nil {
@@ -671,10 +674,10 @@ func BuildDesktopLinux() error {
 	if err := os.MkdirAll(icons, 0o755); err != nil {
 		return errtrace.Wrap(err)
 	}
-	if err := sh.Copy(filepath.Join(applications, "dev.hydra.desktop"), filepath.Join("desktop", "linux", "dev.hydra.desktop")); err != nil {
+	if err := sh.Copy(filepath.Join(applications, "org.trolleyman.hydra.desktop"), filepath.Join("desktop", "linux", "org.trolleyman.hydra.desktop")); err != nil {
 		return errtrace.Wrap(err)
 	}
-	return errtrace.Wrap(sh.Copy(filepath.Join(icons, "dev.hydra.desktop.png"), filepath.Join("web", "public", "android-chrome-512x512.png")))
+	return errtrace.Wrap(sh.Copy(filepath.Join(icons, "org.trolleyman.hydra.png"), filepath.Join("web", "public", "android-chrome-512x512.png")))
 }
 
 // BuildDesktopDeb builds an installable Ubuntu/Debian package for the host
@@ -722,8 +725,8 @@ func BuildDesktopDeb() error {
 	}
 	files := [][2]string{
 		{filepath.Join("dist", "linux", "hydra-desktop"), filepath.Join(root, "usr", "bin", "hydra-desktop")},
-		{filepath.Join("desktop", "linux", "dev.hydra.desktop"), filepath.Join(root, "usr", "share", "applications", "dev.hydra.desktop")},
-		{filepath.Join("web", "public", "android-chrome-512x512.png"), filepath.Join(root, "usr", "share", "icons", "hicolor", "512x512", "apps", "dev.hydra.desktop.png")},
+		{filepath.Join("desktop", "linux", "org.trolleyman.hydra.desktop"), filepath.Join(root, "usr", "share", "applications", "org.trolleyman.hydra.desktop")},
+		{filepath.Join("web", "public", "android-chrome-512x512.png"), filepath.Join(root, "usr", "share", "icons", "hicolor", "512x512", "apps", "org.trolleyman.hydra.png")},
 	}
 	for _, file := range files {
 		if err := sh.Copy(file[1], file[0]); err != nil {

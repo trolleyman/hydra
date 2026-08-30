@@ -16,7 +16,12 @@
 // which still works in an insecure context. Callers await the boolean to drive
 // their own success/failure UI (tick, toast, ...).
 export async function copyText(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
+  // WebKitGTK exposes navigator.clipboard.writeText, but its implementation can
+  // attempt a GTK write without a MIME type. That logs a GTK critical and loses
+  // the copy. The legacy route selects a textarea, so WebKit supplies
+  // text/plain itself. Keep the async route for browsers and the other desktop
+  // shells where it is reliable.
+  if (!isWebKitGTKDesktop() && navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text)
       return true
@@ -26,6 +31,11 @@ export async function copyText(text: string): Promise<boolean> {
     }
   }
   return legacyCopy(text)
+}
+
+function isWebKitGTKDesktop(): boolean {
+  return navigator.userAgent.includes('Linux') &&
+    !!(window as { webkit?: { messageHandlers?: { hydra?: unknown } } }).webkit?.messageHandlers?.hydra
 }
 
 // legacyCopy is the insecure-context / old-browser fallback: drop a hidden,

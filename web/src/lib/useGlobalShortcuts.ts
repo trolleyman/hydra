@@ -35,10 +35,12 @@ export function useGlobalShortcuts({
   projects,
   currentProjectId,
   selectProject,
+  toggleSidebar,
 }: {
   projects: ProjectInfo[]
   currentProjectId: string | null
   selectProject: (id: string) => void
+  toggleSidebar?: () => void
 }): Switcher {
   const [switcher, setSwitcher] = useState<SwitcherState | null>(null)
 
@@ -49,11 +51,13 @@ export function useGlobalShortcuts({
   const projectsRef = useRef(projects)
   const currentProjectIdRef = useRef(currentProjectId)
   const switcherRef = useRef(switcher)
+  const toggleSidebarRef = useRef(toggleSidebar)
   useEffect(() => {
     selectProjectRef.current = selectProject
     projectsRef.current = projects
     currentProjectIdRef.current = currentProjectId
     switcherRef.current = switcher
+    toggleSidebarRef.current = toggleSidebar
   })
 
   useEffect(() => {
@@ -62,7 +66,8 @@ export function useGlobalShortcuts({
       // collapse button). Treated as an explicit toggle, so it persists.
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === '.') {
         e.preventDefault()
-        useSidebarStore.getState().toggle()
+        if (toggleSidebarRef.current) toggleSidebarRef.current()
+        else useSidebarStore.getState().toggle()
         return
       }
 

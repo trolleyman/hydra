@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { useAgentStore } from './agentStore'
+import { selectLiveAgent, useAgentStore } from './agentStore'
 import { useToastStore } from './toastStore'
 import type { AgentResponse } from '../api'
 import { AgentStatus } from '../api'
@@ -30,10 +30,10 @@ function makeAgent(
 }
 
 const statusOf = (id: string) =>
-  useAgentStore.getState().agents.find((a) => a.id === id)?.agent_status?.status
+  selectLiveAgent(useAgentStore.getState(), id)?.agent_status?.status
 
 const unreadOf = (id: string) =>
-  useAgentStore.getState().agents.find((a) => a.id === id)?.has_unread_changes
+  selectLiveAgent(useAgentStore.getState(), id)?.has_unread_changes
 
 beforeEach(() => {
   // Pin the clock so Date.now()-based TTLs are deterministic.
@@ -220,20 +220,20 @@ describe('removeAgent prunes per-id overrides', () => {
 
     const s = useAgentStore.getState()
     // a1 is gone from the list and from every override map.
-    expect(s.agents.find((a) => a.id === 'a1')).toBeUndefined()
+    expect(selectLiveAgent(s, 'a1')).toBeUndefined()
     expect(s.optimistic['a1']).toBeUndefined()
     expect(s.readUntil['a1']).toBeUndefined()
     expect(s.unreadUntil['a1']).toBeUndefined()
 
     // a2's override is untouched.
-    expect(s.agents.find((a) => a.id === 'a2')).toBeDefined()
+    expect(selectLiveAgent(s, 'a2')).toBeDefined()
     expect(s.unreadUntil['a2']).toBeDefined()
   })
 })
 
 describe('patchAgentStatus (agent_status_changed in-place patch)', () => {
   const agentStatusOf = (id: string) =>
-    useAgentStore.getState().agents.find((a) => a.id === id)?.agent_status
+    selectLiveAgent(useAgentStore.getState(), id)?.agent_status
 
   it('patches status, activity and last_message in place', () => {
     const store = useAgentStore.getState

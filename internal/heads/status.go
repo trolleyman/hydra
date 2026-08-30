@@ -132,11 +132,16 @@ func SetOnStateRemoved(fn func(id string)) {
 	onStateRemoved = fn
 }
 
-// RemoveAgentStatusFiles removes a head's per-type state files: the status JSON,
-// status log, build log, review file, sub-agents dir, approvals dir (parked
-// requests + session host grants, which must not leak to a future head reusing
-// the ID), and any unsent chat queue.
-func RemoveAgentStatusFiles(projectRoot, id string) {
+// RemoveAgentRuntimeFiles removes a head's disposable runtime state: the status
+// JSON, status log, build log, review file, sub-agents dir, approvals dir
+// (parked requests + session host grants, which must not leak to a future head
+// reusing the ID), and any unsent chat queue.
+//
+// It deliberately preserves the normalized chat event log and projection. A
+// killed or merged head is archived rather than deleted, and Resume needs that
+// durable timeline to show every prior turn after recreating the worktree. Use
+// RemoveAgentStatusFiles only for a permanent purge or an aborted fresh spawn.
+func RemoveAgentRuntimeFiles(projectRoot, id string) {
 	removeState := func(what, path string) {
 		if _, err := os.Stat(path); err != nil {
 			return // absent - nothing to remove
@@ -156,8 +161,6 @@ func RemoveAgentStatusFiles(projectRoot, id string) {
 	removeState("subagents dir", paths.GetSubagentsDirFromProjectRoot(projectRoot, id))
 	removeState("approvals dir", paths.GetApprovalsDirFromProjectRoot(projectRoot, id))
 	removeState("chat queue", paths.GetChatQueueJsonFromProjectRoot(projectRoot, id))
-	removeState("chat events", paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id))
-	removeState("chat state", paths.GetChatStateJSONFromProjectRoot(projectRoot, id))
 	// Remove category directories when this was their final head. All of these
 	// are recreated lazily on the next write, so empty sidecar scaffolding does
 	// not accumulate as heads come and go.
@@ -173,11 +176,28 @@ func RemoveAgentStatusFiles(projectRoot, id string) {
 		paths.GetSubagentsBaseDirFromProjectRoot(projectRoot),
 		filepath.Dir(paths.GetApprovalsDirFromProjectRoot(projectRoot, id)),
 		paths.GetChatQueueDirFromProjectRoot(projectRoot),
-		paths.GetChatEventsDirFromProjectRoot(projectRoot),
-		paths.GetChatStateDirFromProjectRoot(projectRoot),
 	} {
 		_ = os.Remove(dir)
 	}
+}
+
+// RemoveAgentStatusFiles removes all per-head state, including the durable chat
+// timeline. It is for permanent deletion and failed fresh spawns only; archiving
+// uses RemoveAgentRuntimeFiles so Resume can restore the full conversation.
+func RemoveAgentStatusFiles(projectRoot, id string) {
+	RemoveAgentRuntimeFiles(projectRoot, id)
+	removeState := func(what, path string) {
+		if _, err := os.Stat(path); err != nil {
+			return
+		}
+		if err := os.RemoveAll(path); err != nil {
+			log.Printf("warn: heads: remove %s %s failed for %s: %v", what, path, id, err)
+		}
+	}
+	removeState("chat events", paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id))
+	removeState("chat state", paths.GetChatStateJSONFromProjectRoot(projectRoot, id))
+	_ = os.Remove(paths.GetChatEventsDirFromProjectRoot(projectRoot))
+	_ = os.Remove(paths.GetChatStateDirFromProjectRoot(projectRoot))
 	stateRemovedMu.RLock()
 	notify := onStateRemoved
 	stateRemovedMu.RUnlock()

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useAgentStore } from '../stores/agentStore'
-import { useProjectStore } from '../stores/projectStore'
+import { selectProject, useProjectStore } from '../stores/projectStore'
 import { useToastStore } from '../stores/toastStore'
 import { useApprovalStore } from '../stores/approvalStore'
 import { api } from '../stores/apiClient'
@@ -161,7 +161,7 @@ export function useAgentNotifications(
     // every cross-project count broadcast, and making it a dep would re-run this
     // whole diff - including the approval fetches - for an icon lookup.
     const projectIcon = projectIconUrl(
-      useProjectStore.getState().projects.find((p) => p.id === currentProjectId)?.icon,
+      currentProjectId ? selectProject(useProjectStore.getState(), currentProjectId)?.icon : undefined,
       currentProjectId,
     )
 

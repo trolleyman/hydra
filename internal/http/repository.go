@@ -37,6 +37,21 @@ const (
 // up, so a symlink cycle can't loop forever.
 const maxSymlinkHops = 40
 
+func repositoryRefNotFound(projectRoot, ref string) (*api.ErrorResponse, error) {
+	exists, err := git.RefExists(projectRoot, ref)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if exists {
+		return nil, nil
+	}
+	return &api.ErrorResponse{
+		Code:    404,
+		Error:   api.ErrorResponseErrorNotFound,
+		Details: "repository revision not found: " + ref,
+	}, nil
+}
+
 // resolveSymlink follows a chain of symlinks at ref, starting from linkPath
 // (which the caller has already confirmed is a symlink). It returns the
 // repo-relative path of the first non-symlink entry reached and that entry's git
@@ -128,6 +143,11 @@ func (s *Server) GetRepositoryTree(_ context.Context, request api.GetRepositoryT
 		return nil, errtrace.Wrap(err)
 	}
 	ref := repoRef(request.Params.Ref)
+	if missing, err := repositoryRefNotFound(projectRoot, ref); err != nil {
+		return nil, errtrace.Wrap(err)
+	} else if missing != nil {
+		return api.GetRepositoryTree404JSONResponse(*missing), nil
+	}
 
 	files, err := git.ListTreeFiles(projectRoot, ref)
 	if err != nil {
@@ -598,6 +618,11 @@ func (s *Server) GetRepositoryFile(_ context.Context, request api.GetRepositoryF
 		return nil, errtrace.Wrap(err)
 	}
 	ref := repoRef(request.Params.Ref)
+	if missing, err := repositoryRefNotFound(projectRoot, ref); err != nil {
+		return nil, errtrace.Wrap(err)
+	} else if missing != nil {
+		return api.GetRepositoryFile404JSONResponse(*missing), nil
+	}
 	// Normalise the path so leading "./" or stray slashes don't defeat the
 	// "missing → 404" check below.
 	filePath := strings.TrimPrefix(path.Clean(request.Params.Path), "/")

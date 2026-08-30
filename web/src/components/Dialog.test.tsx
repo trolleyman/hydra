@@ -4,6 +4,29 @@ import { Dialog } from './Dialog'
 import { useDialogStore } from '../stores/dialogStore'
 import { loadPublicSuffixList } from '../lib/publicSuffix'
 
+describe('Dialog: modal opacity', () => {
+  afterEach(() => {
+    useDialogStore.getState().hide()
+  })
+
+  it('does not fade the opaque panel together with its backdrop', () => {
+    useDialogStore.getState().show({
+      title: 'Tests still running',
+      message: "Tests haven't finished on this commit yet.",
+      variant: 'mergeGate',
+      details: { fromBranch: 'hydra/fix', toBranch: 'main', testStatus: 'running' },
+    })
+    const { unmount } = render(<Dialog />)
+
+    const layer = screen.getByRole('dialog').parentElement
+    expect(layer).not.toHaveClass('fade-in')
+    expect(layer).not.toHaveClass('animate-in')
+    expect(document.documentElement).toHaveClass('hydra-dialog-open')
+    unmount()
+    expect(document.documentElement).not.toHaveClass('hydra-dialog-open')
+  })
+})
+
 describe('Dialog: externalLink', () => {
   beforeAll(async () => {
     await loadPublicSuffixList()

@@ -66,7 +66,7 @@ func TestManagerReadsShellCwdFromTranscript(t *testing.T) {
 	root := t.TempDir()
 	worktree := filepath.Join(root, "wt")
 	m := NewManager(func(id string) (HeadContext, bool) {
-		return HeadContext{ProjectRoot: root, Worktree: worktree, AgentType: "claude"}, id == "head"
+		return HeadContext{ProjectRoot: root, Worktree: &worktree, AgentType: "claude"}, id == "head"
 	})
 
 	m.ObserveProviderLine("head", "claude", []byte(`{"type":"assistant","uuid":"u1","message":{"id":"m1","content":[{"type":"tool_use","id":"tool1","name":"Bash","input":{"command":"cd web && ls"}}]}}`))

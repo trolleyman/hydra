@@ -789,6 +789,18 @@ body {
   background-color: rgba(209, 213, 219, 0.9); /* gray-300 */
 }
 
+/* WebKitGTK may promote native scrollbars into a compositor layer above fixed
+   content, ignoring the dialog's z-index. Preserve their gutter (so opening a
+   dialog causes no layout shift) but hide the chrome for the dialog lifetime. */
+.hydra-dialog-open * {
+  scrollbar-color: transparent transparent;
+}
+.hydra-dialog-open *::-webkit-scrollbar-thumb,
+.hydra-dialog-open *::-webkit-scrollbar-thumb:hover,
+.hydra-dialog-open *::-webkit-scrollbar-thumb:active {
+  background-color: transparent;
+}
+
 /* The terminal font's OpenType features (Settings -> Browser -> Fonts). xterm
    writes font-family onto its row elements itself and has no option for
    features, so they are set here on the container and inherit down - which is
@@ -981,6 +993,28 @@ body {
     background-image: none;
     color: inherit;
   }
+}
+
+/* WebKitGTK/WKWebView repaint the Files surface on every animation frame, even
+   when the animation is a tiny status mark elsewhere. AgentDetail adds the root
+   class while the inspector is visible; :has narrows the workaround to a loaded
+   Files diff, since an empty Changes inspector does not have the costly surface.
+   Keep the useful still states (striped progress, spinner shape, spark mark), but
+   stop their decorative loops so a settled Files diff also settles the paint loop. */
+.hydra-webkit-diff-open:has([data-file-card]) .animate-status-pulse,
+.hydra-webkit-diff-open:has([data-file-card]) .animate-barber-pole,
+.hydra-webkit-diff-open:has([data-file-card]) .animate-gradient,
+.hydra-webkit-diff-open:has([data-file-card]) .animate-shimmer,
+.hydra-webkit-diff-open:has([data-file-card]) .animate-spin,
+.hydra-webkit-diff-open:has([data-file-card]) .animate-pulse,
+.hydra-webkit-diff-open:has([data-file-card]) .work-spark,
+.hydra-webkit-diff-open:has([data-file-card]) .work-spark-spoke,
+.hydra-webkit-diff-open:has([data-file-card]) .chat-text-shimmer {
+  animation: none !important;
+}
+.hydra-webkit-diff-open:has([data-file-card]) .chat-text-shimmer {
+  background-image: none;
+  color: inherit;
 }
 
 /* --- ANSI terminal output (ansiToHtml) ------------------------------------ */

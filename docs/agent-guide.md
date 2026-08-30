@@ -37,6 +37,29 @@ Use `mage` for development tasks.
       want to enable them.
 3.  **API**: Define API changes in `api/openapi.yaml` and run `mage generate:go` to update server stubs.
 
+### Commits and verification
+
+When a logical change is coherent and the agent is confident in it, it commits
+promptly and runs focused tests against the committed tip. This allows Hydra's
+per-commit checks to begin without waiting for an additional agent turn. An
+agent tests before committing when confidence is low or a change is risky.
+
+Run `mage tidy` before a Go commit. Run the relevant Go tests after the commit,
+and finish Go work with `go test ./...`. Run `cd web && aube run lint` after a
+web commit; put any corrections in a follow-up commit. Before final handoff,
+run `mage build` for the complete change set.
+
+### Keyed frontend collections
+
+Repeated identity lookups use the cached indexes in the owning store. Agent
+consumers use `selectAgent` / `selectLiveAgent`; project consumers use
+`selectProject`. Other stable arrays that need repeated keyed access use
+`createArrayIndex` from `web/src/lib/arrayIndex.ts`. The helper caches one `Map`
+per array identity, which works with the stores' list reconciliation and avoids
+duplicating synchronized array-and-map state. Keep `.find` for predicate searches
+such as "the current branch" or "the first non-empty line", where there is no
+stable lookup key.
+
 ## Conventions
 
 ### ASCII punctuation only
@@ -86,8 +109,11 @@ and makes oapi-codegen prefix the whole enum - see the enum-collision note).
 
 All tooltips go through `web/src/components/Tooltip.tsx`. Short control labels
 and longer explainers use the same content-sized surface, 600ms delay, fade and
-generous maximum width. Longer explainers can provide a `title`; `InfoTooltip`
-is the preset for the `i` trigger next to a section heading.
+generous maximum width. Compact hints are centered by default, and shortcut
+keycaps share the label's row. Longer explainers can provide a `title`, which
+also selects prose-style left alignment; untitled path or list content uses
+`align="left"`. `InfoTooltip` is the preset for the `i` trigger next to a section
+heading.
 
 Every tooltip can be entered: the short grace period between leaving the trigger
 and entering the box keeps it open so text can be selected and links clicked.
@@ -110,7 +136,10 @@ Native `title=` is still correct for three cases:
    `CaseTree.tsx`.
 2. **Anything rendered once per row** of a long list, interactive or not - the
    same perf reason. The line-number gutter in `RepositoryView.tsx` renders per
-   source line; `CaseTree`'s copy/open buttons render per case.
+   source line; `CaseTree`'s copy/open buttons render per case. The source-aware
+   chat output gutter is the narrow exception: its line numbers use `Tooltip`
+   because the hidden path needs the shared file icon and lowlit-directory
+   treatment rather than an unstyled path string.
 3. **Drag handles** (`lib/ResizeHandle.tsx` and its callers). `Tooltip` anchors
    the box when it opens and only recomputes on scroll / window-resize / box
    resize - none of which a drag fires - so a tip opened during the pre-drag

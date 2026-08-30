@@ -4,6 +4,7 @@ import { AgentStatus } from '../api'
 import { useToastStore } from './toastStore'
 import { agentTransitionToast } from '../lib/agentToast'
 import { deepEqual, reconcileList } from '../lib/deepEqual'
+import { createArrayIndex } from '../lib/arrayIndex'
 
 // Default lifetime of an optimistic status override. Comfortably longer than
 // the agent-list poll interval (5s) plus the hook → status-poller latency, so
@@ -106,6 +107,31 @@ interface AgentState {
   // Optimistically light an agent's unread dot for a short window (paired with a
   // markAgentUnread API call by the caller).
   markUnread: (id: string) => void
+}
+
+const indexAgents = createArrayIndex<AgentResponse, string>((agent) => agent.id)
+const indexAgentsByBranch = createArrayIndex<AgentResponse, string | null | undefined>((agent) => agent.branch_name)
+
+export function selectLiveAgent(state: Pick<AgentState, 'agents'>, id: string): AgentResponse | undefined {
+  return indexAgents(state.agents).get(id)
+}
+
+export function selectArchivedAgent(state: Pick<AgentState, 'archived'>, id: string): AgentResponse | undefined {
+  return indexAgents(state.archived).get(id)
+}
+
+export function selectLiveAgentByBranch(
+  state: Pick<AgentState, 'agents'>,
+  branch: string,
+): AgentResponse | undefined {
+  return indexAgentsByBranch(state.agents).get(branch)
+}
+
+export function selectAgent(
+  state: Pick<AgentState, 'agents' | 'archived'>,
+  id: string,
+): AgentResponse | undefined {
+  return selectLiveAgent(state, id) ?? selectArchivedAgent(state, id)
 }
 
 // applyOverrides overlays one family of optimistic overrides onto a fresh agent
@@ -234,19 +260,19 @@ export const useAgentStore = create<AgentState>((set) => ({
     unreadUntil: Object.fromEntries(Object.entries(state.unreadUntil).filter(([k]) => k !== id)),
   })),
   updateAgent: (agent) => set((state) => {
-    const prev = state.agents.find((a) => a.id === agent.id)
+    const prev = selectLiveAgent(state, agent.id)
     // Identical content: keep the existing object/array so nothing re-renders.
     if (prev && deepEqual(prev, agent)) return {}
     return { agents: state.agents.map((a) => a.id === agent.id ? agent : a) }
   }),
   patchAgentTests: (id, tests) => set((state) => {
-    const prev = state.agents.find((a) => a.id === id)
+    const prev = selectLiveAgent(state, id)
     // Streamed runs re-send the summary on every marker; skip no-op patches.
     if (!prev || deepEqual(prev.tests, tests)) return {}
     return { agents: state.agents.map((a) => a.id === id ? { ...a, tests } : a) }
   }),
   patchAgentStatus: (id, patch) => set((state) => {
-    const prev = state.agents.find((a) => a.id === id)
+    const prev = selectLiveAgent(state, id)
     if (!prev) return {}
     // Respect an active optimistic status override (e.g. a just-submitted prompt):
     // keep the optimistic status rather than let a slightly-stale pushed status flip
@@ -287,7 +313,7 @@ export const useAgentStore = create<AgentState>((set) => ({
     }
   }),
   upsertArchived: (agent) => set((state) => {
-    const existing = state.archived.find((a) => a.id === agent.id)
+    const existing = selectArchivedAgent(state, agent.id)
     if (existing) {
       if (deepEqual(existing, agent)) return {}
       return { archived: state.archived.map((a) => (a.id === agent.id ? agent : a)) }

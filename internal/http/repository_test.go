@@ -72,6 +72,38 @@ func TestPickDefaultFile(t *testing.T) {
 	}
 }
 
+func TestRepositoryRefNotFound(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "README.md")
+	git("commit", "-qm", "first")
+
+	missing, err := repositoryRefNotFound(dir, "HEAD")
+	if err != nil || missing != nil {
+		t.Fatalf("HEAD = %#v, %v, want present", missing, err)
+	}
+	missing, err = repositoryRefNotFound(dir, "hydra/missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing == nil || missing.Code != http.StatusNotFound || missing.Details != "repository revision not found: hydra/missing" {
+		t.Fatalf("missing ref response = %#v, want repository 404", missing)
+	}
+}
+
 func TestResolveSymlink(t *testing.T) {
 	dir := t.TempDir()
 	git := func(args ...string) {

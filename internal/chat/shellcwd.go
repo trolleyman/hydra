@@ -89,10 +89,10 @@ func toolResultCwd(line []byte) (toolUseID, cwd string) {
 // next call's START, because by then it certainly is - the agent only issues the
 // next command after reading the last one's output.
 func (w *worker) syncShellCwds() {
-	if len(w.pendingBash) == 0 || w.ctx.AgentType != "claude" || w.ctx.Worktree == "" {
+	if len(w.pendingBash) == 0 || w.ctx.AgentType != "claude" {
 		return
 	}
-	transcript := claudestream.LatestTranscript(paths.ClaudeProjectDir(w.ctx.Worktree))
+	transcript := claudestream.LatestTranscript(paths.ClaudeProjectDir(w.ctx.WorkingDirectory()))
 	if transcript == "" {
 		return
 	}

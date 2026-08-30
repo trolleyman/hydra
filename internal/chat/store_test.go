@@ -147,7 +147,8 @@ func TestPendingStreamAndHistorySkipDeltas(t *testing.T) {
 }
 
 func TestHasCompletedViewImageRequiresSuccessfulExactPath(t *testing.T) {
-	s, err := Open(t.TempDir(), "head")
+	root := t.TempDir()
+	s, err := Open(root, "head")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,6 +171,31 @@ func TestHasCompletedViewImageRequiresSuccessfulExactPath(t *testing.T) {
 	}
 	if s.HasCompletedViewImage("/home/user/other.png") {
 		t.Fatal("a different path must not inherit authorization")
+	}
+
+	// Real Codex item/completed imageView events commonly omit the optional
+	// status. The completed event type still proves success when is_error is
+	// false, and the load-time index must recover that capability after restart.
+	withoutStatus := ToolCompleted{}
+	withoutStatus.Id, withoutStatus.Name, withoutStatus.Input = "v2", "View Image", json.RawMessage(`{"path":"/home/user/statusless.png"}`)
+	if _, err := s.Append(withoutStatus); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(root, "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reopened.HasCompletedViewImage("/home/user/statusless.png") {
+		t.Fatal("statusless completed image view was not indexed on load")
+	}
+
+	failed := ToolCompleted{}
+	failed.Id, failed.Name, failed.Input, failed.Status, failed.IsError = "v3", "View Image", json.RawMessage(`{"path":"/home/user/failed.png"}`), "failed", true
+	if _, err := s.Append(failed); err != nil {
+		t.Fatal(err)
+	}
+	if s.HasCompletedViewImage("/home/user/failed.png") {
+		t.Fatal("failed image view must not authorize host file serving")
 	}
 }
 

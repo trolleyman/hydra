@@ -117,6 +117,21 @@ describe('RichMarkdown', () => {
       expect(link.className.split(' ')).toContain('decoration-dotted')
     })
 
+    it('omits the worktree prefix from a chat file tooltip', () => {
+      vi.useFakeTimers()
+      try {
+        const { container } = render(
+          <Markdown text="[controller.go](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
+        )
+        fireEvent.mouseEnter(container.querySelector('a')!.parentElement!)
+        act(() => void vi.advanceTimersByTime(600))
+        expect(document.body.textContent).toContain('internal/controller.go')
+        expect(document.body.textContent).not.toContain('/work/hydra')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('distinguishes linked inline code with a stronger neutral border', () => {
       const { container } = render(<RichMarkdown text="[`go help buildconstraint`](https://go.dev/help/buildconstraint)" />)
       const link = container.querySelector('a')!
@@ -145,6 +160,25 @@ describe('RichMarkdown', () => {
       } finally {
         vi.useRealTimers()
       }
+    })
+
+    it('opens an absolute focused-checkout path at the project HEAD', () => {
+      const { container } = render(
+        <Markdown
+          text="[agent guide](/home/callum/code/hydra/docs/agent-guide.md)"
+          linkCtx={{
+            projectId: 'p1',
+            agentId: 'focused-1',
+            refStr: 'HEAD',
+            filePath: '',
+            worktreePath: '/home/callum/code/hydra',
+          }}
+        />,
+      )
+      expect(container.querySelector('a')).toHaveAttribute(
+        'href',
+        '/project/p1/repository/HEAD/-/docs/agent-guide.md',
+      )
     })
   })
 

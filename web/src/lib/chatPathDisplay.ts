@@ -9,8 +9,11 @@ export function trimWorktreePaths(text: string, worktree: string | null): string
     out = out.split(prefix).join('').split(worktree).join('.')
   }
 
+  // Review checkouts lived under a project's .hydra/local directory before
+  // runtime state moved to <state-dir>/projects/<project-id>. Recognise both so
+  // old transcripts and current review commands share the same display root.
   return out.replace(
-    /\/(?:home|Users)\/[^/\s"']+\/[^\s"']*?\.hydra\/local\/review-checkouts\/[^/\s"']+(\/)?/g,
+    /\/(?:[^\s"']*?\.hydra\/local|[^\s"']*?\/projects\/[^/\s"']+)\/review-checkouts\/[^/\s"']+(\/)?/g,
     (_root, trailingSlash: string | undefined) => (trailingSlash ? '' : '.'),
   )
 }

@@ -226,6 +226,9 @@ runtime paths, executable discovery, updates, and sandbox helper behavior.
 ### Windows, menus, and deep links
 
 - Register a desktop entry and stable application ID.
+- Use `org.trolleyman.hydra` as the GTK application ID and keep it identical to
+  the desktop-entry basename so Wayland and X11 associate every Hydra window
+  with the installed Hydra icon.
 - Support New Full Window, New Chat Window, Settings, and Quit from the
   application menu and desktop actions where the environment exposes them.
 - Treat single-instance activation as a request delivered to the existing app,
@@ -364,11 +367,14 @@ and backend build identity. Linux refuses to attach when the protocol is absent
 or different, so compatibility is checked for reused daemons as well as newly
 launched ones.
 The GTK shell also supports repeated application activation and Ctrl+N as
-native multi-window actions against the same application/backend. WebKit policy
-keeps same-origin Hydra navigation embedded, opens clicked external HTTP(S)
-links with the system handler, and blocks cross-origin redirects and non-web
-schemes. Shared cookie/storage behavior and window-manager lifecycle still need
-native Wayland/X11 validation.
+native multi-window actions against the same application/backend. Its WebKit
+profile is persistent under the selected Hydra state root, so browser-local
+preferences such as the last project and model survive an app restart while
+checkout-local development runs remain isolated from the installed app. WebKit
+policy keeps same-origin Hydra navigation embedded, opens clicked external
+HTTP(S) links with the system handler, and blocks cross-origin redirects and
+non-web schemes. Window-manager lifecycle still needs native Wayland/X11
+validation.
 Desktop cold-start explicitly binds `127.0.0.1:0`; the assigned port exists only
 in the private ownership record. `mage buildDesktop` and `mage runDesktop`
 dispatch by host OS; on Linux they build the frontend and tagged shell.
@@ -397,8 +403,10 @@ foreground `mage run` daemon alive. A directly launched installed desktop keeps
 its global backend running according to the preference in Settings. The native
 application has one primary Hydra window; further activations present it, while
 additional windows may open new or existing conversations using the same
-responsive routes. The same URLs open in a browser when no native bridge is
-present.
+responsive routes. A native New Chat window starts at 940 x 780 with its sidebar
+collapsed; expanding it is local to that window and does not overwrite the main
+window's saved sidebar preference. The same URLs open in a browser when no
+native bridge is present.
 Daemon control and web listeners become ready before best-effort recovery of
 previously running heads. Slow or broken provider/sandbox recovery therefore
 appears in the daemon log without making the desktop report a false startup
@@ -414,8 +422,13 @@ timeout.
 - [x] Add native New Window/New Chat/Settings commands, project handoff, a
   constrained [`hydra://` deep-link grammar](desktop-deep-links.md), and
   active-window close confirmation.
-- [x] Make Quit warn about active turns and explicitly leave the shared backend
-  and agents running, regardless of which client originally launched it.
+- [x] Guard only the last window while agents are actively working. Finished or
+  waiting heads may retain a reusable sandbox process without triggering the
+  guard, and closing a secondary window never offers to stop its shared head.
+- [x] Make close and Quit copy follow backend ownership. Installed persistent
+  backends leave agents running when a window closes. Command-owned Mage desktop
+  runs explain that closing the last window stops the backend. Dialog titles
+  report the number of active agents.
 - Keep browser-safe dialogs and navigation paths for every essential action.
 
 Exit criterion: windows at full and chat routes support the agreed lifecycle,
@@ -431,9 +444,11 @@ and no window action implicitly interrupts a head.
 - [x] Route notification clicks to the exact project/agent URL. Secondary
   process deep-link handoff to an already-running instance still needs an
   installed-session test.
-- [x] Bridge GTK clipboard textures into the attachment-aware chat composer so
-  Ctrl+V uploads copied images even when WebKitGTK omits them from the web paste
-  event. Text paste stays on WebKitGTK's native path.
+- [x] Bridge GTK clipboard textures into the attachment-aware chat and spawn
+  composers so Ctrl+V uploads copied images even when WebKitGTK omits them from
+  the web paste event. Text paste stays on WebKitGTK's native path. The focused
+  textarea opts into the bridge, so a sidebar spawn form mounted beside chat
+  cannot consume that chat's paste.
 - Keep desktop attachments on the normal local upload path. "Upload" here is a
   same-machine transfer into the project's ignored Hydra state, not a remote
   network upload. The copy gives the attachment a stable, browser-servable path

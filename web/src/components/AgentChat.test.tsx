@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
+import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
 import { useAgentStore } from '../stores/agentStore'
@@ -124,7 +125,7 @@ function renderChat(agentId = `agent-${++agentSeq}`) {
 }
 
 describe('review checkout path display', () => {
-  const reviewRoot = '/home/callum/code/hydra/.hydra/local/review-checkouts/add-review-comments'
+  const reviewRoot = '/home/callum/.local/state/hydra/projects/hydra/review-checkouts/add-review-comments'
 
   it('renders files relative to the detached review checkout', () => {
     expect(trimWorktreePaths(`${reviewRoot}/web/src/AgentChat.tsx`, '/some/head/worktree'))
@@ -136,9 +137,25 @@ describe('review checkout path display', () => {
     expect(formatBashForDisplay(trimmed)).toBe("sed -n '1,20p' web/x.ts")
   })
 
+  it('also trims review checkouts from transcripts using the project-local state layout', () => {
+    const oldReviewRoot = '/home/callum/code/hydra/.hydra/local/review-checkouts/add-review-comments'
+    expect(trimWorktreePaths(`${oldReviewRoot}/web/src/AgentChat.tsx`, '/some/head/worktree'))
+      .toBe('web/src/AgentChat.tsx')
+  })
+
   it('names Claude tool-result spill files without its transcript cache path', () => {
     expect(toolResultName('/home/callum/.claude/projects/-long-slug/session/tool-results/bij43gmi4.txt'))
       .toBe('bij43gmi4.txt')
+  })
+})
+
+describe('chat repository links', () => {
+  it('uses the owned branch for a worktree head', () => {
+    expect(chatRepositoryRef('hydra/feature')).toBe('hydra/feature')
+  })
+
+  it('uses the project checkout for a branchless focused head', () => {
+    expect(chatRepositoryRef(null)).toBe('HEAD')
   })
 })
 
@@ -1261,7 +1278,7 @@ describe('a message sent after a commit lands under it', () => {
       }),
     )
     const chip = await screen.findByText('Teach the loader about overlays')
-    expect(screen.getByLabelText('36 lines added, 5 lines removed')).toBeInTheDocument()
+    expect(screen.getByLabelText('36 lines added, 5 lines removed')).toHaveClass('top-px')
 
     setComposerValue(ta, 'ship it')
     fireEvent.keyDown(ta, { key: 'Enter' })
@@ -1278,7 +1295,7 @@ describe('a message sent after a commit lands under it', () => {
     composerHost.getBoundingClientRect = vi.fn(() => ({ top: 500, right: 900 } as DOMRect))
     const animate = vi.fn()
     const previousAnimate = HTMLElement.prototype.animate
-      HTMLElement.prototype.animate = animate
+    HTMLElement.prototype.animate = animate
     try {
       setComposerValue(composer, 'animate me')
       const send = await screen.findByRole('button', { name: 'Send message' })
@@ -1292,6 +1309,37 @@ describe('a message sent after a commit lands under it', () => {
     } finally {
       HTMLElement.prototype.animate = previousAnimate
     }
+  })
+
+  it('lowers stats in a merge pill and its expanded commit rows', async () => {
+    renderChat()
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => ws.emit({ type: 'replay_done' }))
+    act(() =>
+      ws.emit({
+        type: 'chat_event',
+        event: {
+          seq: 1,
+          type: 'commit_created',
+          timestamp: '2024-01-01T00:00:00.000Z',
+          payload: {
+            sha: 'merge123', short_sha: 'merge12', subject: "Merge branch 'main'",
+            additions: 10, deletions: 2, is_merge: true, merged_count: 1,
+            merged_commits: [{
+              sha: 'child123', short_sha: 'child12', subject: 'The merged change',
+              additions: 8, deletions: 1,
+            }],
+          },
+        },
+      }),
+    )
+
+    const pill = await screen.findByRole('button', { name: /Merged main - 1 commit/ })
+    expect(screen.getByLabelText('10 lines added, 2 lines removed')).toHaveClass('top-px')
+    fireEvent.click(pill)
+    await screen.findByText('The merged change')
+    expect(screen.getByLabelText('8 lines added, 1 lines removed')).toHaveClass('top-px')
   })
 })
 

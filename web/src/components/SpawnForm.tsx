@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo, memo, lazy, Suspense } from 'react'
+import { useState, useRef, useEffect, useEffectEvent, useCallback, useMemo, memo, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import { FocusedFilesystemMode, type AgentResponse, type SpawnAgentRequest, type RepositoryBranch } from '../api'
@@ -26,16 +26,18 @@ import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTe
 import { usePasteMarkersStore } from '../lib/composerPrefs'
 import { ResizeGrip } from './ResizeGrip'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
-import { useProjectStore } from '../stores/projectStore'
+import { selectProject, useProjectStore } from '../stores/projectStore'
 import { useToastStore } from '../stores/toastStore'
 import { PRPicker } from './PRPicker'
 import { Badge } from './Badge'
 import type { ReviewRef } from '../api/models/ReviewRef'
 import { type AgentTypeOption, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
+import { AGENT_MODELS, type AgentModel } from '../lib/agentModels'
 import { fetchBranches, peekBranches } from '../lib/branchCache'
 import type { Editor } from '@tiptap/core'
 import { orderModelProviders, recordModelProviderUse } from '../lib/modelProviderRecency'
 import { SegmentedControl } from './SegmentedControl'
+import { onDesktopImagePaste } from '../lib/desktopBridge'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
@@ -66,33 +68,6 @@ const AGENT_TYPES: { id: AgentTypeOption; label: string; color: string }[] = [
   { id: 'gemini', label: 'Gemini', color: AGENT_ACCENT.gemini },
   { id: 'copilot', label: 'Copilot', color: AGENT_ACCENT.copilot },
 ]
-
-// Curated model aliases per agent type, shown as a sub-list under each agent in
-// the picker. Every agent also gets an implicit "Default" row (model '') meaning
-// "don't pass --model" so the CLI uses its own default. Claude, Codex and
-// Gemini expose a small curated set; Copilot stays on its CLI-managed default.
-const AGENT_MODELS: Record<AgentTypeOption, { id: string; label: string }[]> = {
-  claude: [
-    { id: 'fable', label: 'Fable' },
-    { id: 'claude-opus-5', label: 'Opus 5' },
-    { id: 'claude-opus-4-8', label: 'Opus 4.8' },
-    { id: 'sonnet', label: 'Sonnet' },
-    { id: 'haiku', label: 'Haiku' },
-  ],
-  gemini: [
-    { id: 'gemini-2.5-pro', label: '2.5 Pro' },
-    { id: 'gemini-2.5-flash', label: '2.5 Flash' },
-  ],
-  copilot: [],
-  codex: [
-    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
-    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
-    { id: 'gpt-5.5', label: 'GPT-5.5' },
-    { id: 'gpt-5.4', label: 'GPT-5.4' },
-    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-  ],
-}
 
 // Short label for the currently-selected model, shown next to the brand icon on
 // the picker trigger. Empty when on the CLI default (keeps the trigger to just
@@ -161,7 +136,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
   const iconCls = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'
 
   // One selectable row: an agent + a specific model (or Default when model '').
-  const Row = ({ a, m }: { a: AgentTypeOption; m: { id: string; label: string } }) => {
+  const Row = ({ a, m }: { a: AgentTypeOption; m: AgentModel }) => {
     const selected = agent === a && model === m.id
     return (
       <button
@@ -392,7 +367,7 @@ export const SpawnForm = memo(function SpawnForm({
   // Selector, not a whole-store subscribe: this form re-renders on every
   // keystroke.
   const isBuiltinProject = useProjectStore(
-    (s) => !!s.projects.find((p) => p.id === projectId)?.builtin,
+    (s) => !!(projectId && selectProject(s, projectId)?.builtin),
   )
 
   // Guards against a slow request for an old project resolving after the user
@@ -817,6 +792,19 @@ export const SpawnForm = memo(function SpawnForm({
     lastPasteRef.current = { text, attachmentId: id, filename, lang: detectCodeLanguage(e.clipboardData) }
   }
 
+  // WebKitGTK does not always expose a copied desktop image on the browser's
+  // paste event. The native shell forwards that image separately; only the
+  // focused spawn composer may consume it because the compact spawn form can
+  // remain mounted alongside an agent's chat composer.
+  const handleDesktopImagePaste = useEffectEvent((file: File) => {
+    const rich = richComposerRef.current?.editor?.view.dom
+    const active = document.activeElement
+    if (!rich || !active || !rich.contains(active)) return
+    const names = addFiles([file])
+    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+  })
+  useEffect(() => onDesktopImagePaste(handleDesktopImagePaste), [])
+
   function handleDrop(e: React.DragEvent) {
     const files = extractFiles(e.dataTransfer)
     setDragOver(false)
@@ -1176,11 +1164,21 @@ export const SpawnForm = memo(function SpawnForm({
                   onEditor={bindPromptEditor}
                   onKeyDown={handleRichKeyDown}
                   onPaste={(event) => { handlePaste(event); return event.defaultPrevented }}
+                  onDrop={(event) => {
+                    const files = extractFiles(event.dataTransfer)
+                    if (files.length === 0) return false
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setDragOver(false)
+                    addFiles(files)
+                    return true
+                  }}
                   references={composerReferences}
                   onRequestFiles={() => fileInputRef.current?.click()}
                   placeholder={disabled ? 'Select a project first...' : 'Describe a task...'}
                   editable={!loading && !disabled}
                   ariaLabel="Describe a task"
+                  dataDesktopImagePaste
                   className="h-full overflow-y-auto px-3 pt-2.5 pb-1 text-xs leading-relaxed text-gray-800 placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500"
                 />
               </Suspense>
@@ -1256,11 +1254,21 @@ export const SpawnForm = memo(function SpawnForm({
                     onEditor={bindPromptEditor}
                     onKeyDown={handleRichKeyDown}
                     onPaste={(event) => { handlePaste(event); return event.defaultPrevented }}
+                    onDrop={(event) => {
+                      const files = extractFiles(event.dataTransfer)
+                      if (files.length === 0) return false
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDragOver(false)
+                      addFiles(files)
+                      return true
+                    }}
                     references={composerReferences}
                     onRequestFiles={() => fileInputRef.current?.click()}
                     placeholder="Describe what you need..."
                     editable={!loading}
                     ariaLabel="Describe what you need"
+                    dataDesktopImagePaste
                     className="h-full overflow-y-auto px-4 pt-4 pb-2 text-sm leading-relaxed text-gray-800 placeholder-gray-400 dark:text-gray-100 dark:placeholder-gray-500"
                   />
                 </Suspense>

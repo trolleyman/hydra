@@ -745,6 +745,11 @@ export function dropNoopCd(cmd: string): string {
 }
 
 function quoteShellPath(path: string): string {
+  // collapseHome deliberately produces ~/... paths. Keep the tilde outside
+  // quotes so the displayed cd remains executable: unlike `cd '~/x'`, both
+  // `cd ~/x` and `cd ~/'x y'` let the shell expand the home directory.
+  if (path === '~') return path
+  if (path.startsWith('~/')) return `~/${quoteShellPath(path.slice(2))}`
   return /^[A-Za-z0-9_./-]+$/.test(path) ? path : `'${path.replace(/'/g, `'"'"'`)}'`
 }
 

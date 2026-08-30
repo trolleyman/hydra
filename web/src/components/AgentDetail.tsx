@@ -23,7 +23,7 @@ import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
 import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, FolderGit2, ExternalLink } from 'lucide-react'
-import { openChatWindow } from '../lib/desktopBridge'
+import { hasWebKitDesktopBridge, openChatWindow } from '../lib/desktopBridge'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -38,11 +38,12 @@ import { renderMarkdown } from '../lib/markdown'
 
 import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
-import { useAgentStore } from '../stores/agentStore'
+import { selectLiveAgentByBranch, useAgentStore } from '../stores/agentStore'
 import { ensureReviewConfig, refreshReviewConfig, useProjectStore } from '../stores/projectStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME, SHORTCUT_DIFF_SIDEBAR } from '../lib/shortcuts'
 import { pillText } from '../lib/branchPills'
+import { mergeGateForRunners, testSummaryForRunners } from '../lib/mergePreflight'
 import type { AgentCommand } from '../lib/agentCommands'
 import { agentPrimaryActionAppearances } from './agentPrimaryActions'
 import { SegmentedControl } from './SegmentedControl'
@@ -495,10 +496,10 @@ function WorkspaceBadge({
     return (
       <Tooltip
         title="Workspace - isolated worktree"
-        content={<><span className="block">Changes are isolated on this head's own branch and worktree.</span><span className="mt-2 block break-all">{agent.branch_name}</span></>}
+        content={<><span className="block">Changes are isolated on this head's own branch and worktree.</span><span className="mt-2 block break-all font-mono text-xs">{agent.branch_name}</span></>}
         className="shrink-0"
       >
-        <button type="button" aria-label={`Isolated worktree: ${agent.branch_name}`} className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
+        <button type="button" aria-label={`Isolated worktree: ${agent.branch_name}`} className="inline-flex cursor-default rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
           <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300" containerClassName="min-h-5" icon={<GitBranch className="w-3 h-3 shrink-0" />}>{null}</Badge>
         </button>
       </Tooltip>
@@ -894,6 +895,13 @@ export function AgentDetail({
   // its agent tab onto the fresh session.
   const [restartSignal, setRestartSignal] = useState(0)
   const [merging, setMerging] = useState(false)
+  // Key the asynchronous preflight to the head it started for. AgentDetail is
+  // reused across agent routes, so a slow response from the previous head must
+  // neither open a dialog on the next head nor leave its Merge action disabled.
+  const currentAgentIdRef = useRef(agent.id)
+  currentAgentIdRef.current = agent.id
+  const [checkingMergeFor, setCheckingMergeFor] = useState<string | null>(null)
+  const checkingMerge = checkingMergeFor === agent.id
   const [publishing, setPublishing] = useState(false)
   const [showCreateMR, setShowCreateMR] = useState(false)
   const [publishError, setPublishError] = useState<string | null>(null)
@@ -945,6 +953,16 @@ export function AgentDetail({
   // Is the diff currently on screen? Wide: the inspector pane isn't collapsed.
   // Narrow: the single pane is showing the full-screen diff (working collapsed).
   const diffShown = !agent.focused && (isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working')
+  // A settled diff does no layout work, but each decorative infinite animation
+  // still schedules a style update and paint every frame. WebKitGTK/WKWebView
+  // repaint much more of the large diff backing surface than Chromium does, so
+  // the desktop app stays sluggish simply while the pane is visible. Pause the
+  // loops only for WebKit desktop windows and restore them when the diff closes.
+  useEffect(() => {
+    if (!diffShown || !hasWebKitDesktopBridge()) return
+    document.documentElement.classList.add('hydra-webkit-diff-open')
+    return () => document.documentElement.classList.remove('hydra-webkit-diff-open')
+  }, [diffShown])
   // The diff-sidebar toggle (top bar + Ctrl+,): wide hides/shows the inspector
   // pane; narrow flips the single pane between working and full-screen diff.
   const toggleDiffSidebar = useCallback(() => {
@@ -979,7 +997,7 @@ export function AgentDetail({
   //    collapsed. memoized so a new node each agent tick doesn't defeat
   //    DiffViewer's memo.
   const workingTopButton = useMemo(() => (
-    <Tooltip content={paneCollapse === 'inspector' ? `Show diff (${SHORTCUT_DIFF_SIDEBAR})` : 'Hide chat'}>
+    <Tooltip content={paneCollapse === 'inspector' ? 'Show diff' : 'Hide chat'} shortcut={paneCollapse === 'inspector' ? { keys: SHORTCUT_DIFF_SIDEBAR.split('+') } : undefined}>
       <button
         className={PANE_TOGGLE_CLS}
         aria-label={paneCollapse === 'inspector' ? 'Show diff' : 'Hide chat'}
@@ -990,7 +1008,7 @@ export function AgentDetail({
     </Tooltip>
   ), [paneCollapse, toggleInspector, toggleWorking])
   const changesLeadingButton = useMemo(() => (
-    <Tooltip content={paneCollapse === 'working' ? 'Show chat' : `Hide diff (${SHORTCUT_DIFF_SIDEBAR})`}>
+    <Tooltip content={paneCollapse === 'working' ? 'Show chat' : 'Hide diff'} shortcut={paneCollapse === 'working' ? undefined : { keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
       <button
         className={PANE_TOGGLE_CLS}
         aria-label={paneCollapse === 'working' ? 'Show chat' : 'Hide diff'}
@@ -1004,7 +1022,7 @@ export function AgentDetail({
   // so its Changes bar leads with a back chevron that slides back to the chat
   // (toggleWorking reveals the working pane). memoized for DiffViewer's memo.
   const narrowBackButton = useMemo(() => (
-    <Tooltip content={`Back to chat (${SHORTCUT_DIFF_SIDEBAR})`}>
+    <Tooltip content="Back to chat" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
       <button className={PANE_TOGGLE_CLS} aria-label="Back to chat" onClick={toggleWorking}>
         <ChevronLeft className="w-4 h-4" />
       </button>
@@ -1372,7 +1390,7 @@ export function AgentDetail({
   // 409s and the catch offers a force-merge follow-up), and the explicit Force
   // merge / Queue merge overrides live in the button's dropdown. While armed
   // ("merge when green"), the button toggles the queue off instead.
-  function handleMerge() {
+  async function handleMerge() {
     if (agent.merge_when_green === true) return void cancelMerge()
     // Don't wait for the server to 409: when the verdict is already known to be
     // un-green, open the merge-gate dialog (Force / Queue + explanation) directly.
@@ -1381,6 +1399,31 @@ export function AgentDetail({
     if (verdict === 'failing') return confirmMergeGate('failing', n)
     if (verdict === 'errored') return confirmMergeGate('errored', n)
     if (verdict === 'running') return confirmMergeGate('running', n)
+
+    // A compact passing/none/stale summary can lag the branch tip. Preflight the
+    // per-runner endpoint before showing the destructive merge confirmation, so
+    // the server does not reject that confirmation a moment later and make the
+    // user answer a second Force / Queue dialog. The endpoint also distinguishes
+    // "no runners" (empty, merge normally) from "runner has no verdict" (gate).
+    if (checkingMerge) return
+    const checkedAgentId = agent.id
+    setCheckingMergeFor(checkedAgentId)
+    try {
+      const response = await api.default.getAgentTests(projectId ?? '', checkedAgentId)
+      if (currentAgentIdRef.current !== checkedAgentId) return
+      useAgentStore.getState().patchAgentTests(checkedAgentId, testSummaryForRunners(response.runners, agent.tests))
+      const gate = mergeGateForRunners(response.runners)
+      if (gate) return confirmMergeGate(gate.kind, gate.failed)
+    } catch (err) {
+      useDialogStore.getState().show({
+        title: 'Could not check tests',
+        message: `Hydra couldn't confirm the current test verdict before merging: ${formatError(err)}`,
+        type: 'error',
+      })
+      return
+    } finally {
+      setCheckingMergeFor((current) => current === checkedAgentId ? null : current)
+    }
     // Verdict is green (or there are no runners) - nothing else gates the merge,
     // so this is where an accidental merge of a still-working agent would slip
     // through. Warn first if it hasn't finished: still working (running/starting)
@@ -1464,7 +1507,7 @@ export function AgentDetail({
     // agent's branch), the merge advances that parent agent's branch - name it,
     // and warn when the parent is still running since its working files will
     // shift underneath it.
-    const parent = useAgentStore.getState().agents.find((a) => a.branch_name === agent.base_branch)
+    const parent = selectLiveAgentByBranch(useAgentStore.getState(), agent.base_branch)
     const fromBranch = agent.branch_name || `hydra/${agent.id}`
     const toBranch = agent.base_branch || 'base'
     const parentWarning = parent && parent.session_status === 'running'
@@ -1897,7 +1940,7 @@ export function AgentDetail({
   //               (Force / Queue) live in its dropdown, with a failing-tests warning.
   const verdict = agent.tests?.status
   const armed = agent.merge_when_green === true
-  const busy = merging || killing
+  const busy = merging || checkingMerge || killing
   const toBranch = agent.base_branch || 'base'
   const [publishAppearance, mergeAppearance, unreadAppearance, renameAppearance, restartAppearance, killAppearance] = agentPrimaryActionAppearances({
     agent,
@@ -1911,7 +1954,15 @@ export function AgentDetail({
   // count; anything else (errored / no verdict / still running) is "merge anyway".
   const forceMerge = () => confirmForceMerge(verdict === 'failing' ? 'failing' : 'errored')
 
-  const mergeAction: AgentTopBarAction = merging
+  const mergeAction: AgentTopBarAction = checkingMerge
+    ? {
+        label: 'Checking tests...',
+        icon: <LoaderCircle className="w-4 h-4 animate-spin" />,
+        onClick: () => {},
+        variant: 'muted',
+        shortcut: SHORTCUT_MERGE,
+      }
+    : merging
     ? {
         label: mergeAppearance.label,
         icon: mergeAppearance.icon,
@@ -1932,6 +1983,7 @@ export function AgentDetail({
         }
       : {
           label: mergeAppearance.label,
+          tooltip: mergeAppearance.tooltip,
           icon: mergeAppearance.icon,
           onClick: handleMerge,
           variant: 'primary',
@@ -2036,6 +2088,7 @@ export function AgentDetail({
         }
       : {
           label: publishAppearance.label,
+          tooltip: publishAppearance.tooltip,
           // The FORGE mark, not a generic lucide one: this button opens the
           // "Create merge request" dialog, which leads with the same mark, and
           // the two wearing different glyphs for one action was the giveaway
@@ -2096,9 +2149,9 @@ export function AgentDetail({
           ...(agent.focused ? [] : mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: unreadAppearance.label, icon: unreadAppearance.icon, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: renameAppearance.label, icon: renameAppearance.icon, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
-          { label: restartAppearance.label, icon: restartAppearance.icon, onClick: handleRestart, variant: 'segment', disabled: restartAppearance.disabled },
+          { label: restartAppearance.label, tooltip: restartAppearance.tooltip, icon: restartAppearance.icon, onClick: handleRestart, variant: 'segment', disabled: restartAppearance.disabled },
           { label: 'Open chat window', icon: <ExternalLink className="w-4 h-4" />, onClick: () => openChatWindow(projectId ?? undefined, agent.id), variant: 'segment', iconOnly: true },
-          { label: killAppearance.label, icon: killAppearance.icon, onClick: handleKill, variant: 'danger', disabled: killAppearance.disabled, shortcut: SHORTCUT_KILL },
+          { label: killAppearance.label, tooltip: killAppearance.tooltip, icon: killAppearance.icon, onClick: handleKill, variant: 'danger', disabled: killAppearance.disabled, shortcut: SHORTCUT_KILL },
         ]}
       />
     </TopBarPortal>
@@ -2303,7 +2356,7 @@ export function AgentDetail({
                     onUpdateFocusedPermissions={updateFocusedPermissions}
                   />
                 </div>
-                {!agent.focused && <Tooltip content={`Show diff (${SHORTCUT_DIFF_SIDEBAR})`}>
+                {!agent.focused && <Tooltip content="Show diff" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>
                   <button className={PANE_TOGGLE_CLS} aria-label="Show diff" onClick={toggleDiffSidebar}>
                     <FileDiff className="w-4 h-4" />
                   </button>

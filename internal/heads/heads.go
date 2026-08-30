@@ -1762,7 +1762,9 @@ func KillHeadNoLock(ctx context.Context, reg *session.Registry, store *db.Store,
 			}
 		}
 
-		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
+		// Archive keeps the normalized chat history so an explicit Resume can
+		// rebuild its UI timeline as well as the provider conversation.
+		RemoveAgentRuntimeFiles(head.ProjectPath, head.ID)
 		removeCowDir(head.ProjectPath, head.ID)
 		removeHeadTmpDir(head.ProjectPath, head.ID)
 		// The review slot's own detached checkout is reclaimed by the

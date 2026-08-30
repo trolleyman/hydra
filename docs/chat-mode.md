@@ -329,7 +329,10 @@ the transcript by timestamp - provider output, filesystem polling, HTTP fetches
 and author timestamps are independent clocks, so timestamps cannot guarantee a
 commit renders after the tool card that created it.
 
-The driver holds an observed Git HEAD for the worktree. At a completed command
+The driver holds an observed Git HEAD for the chat's working directory. A
+managed worktree/review context carries its checkout explicitly; a
+project-directory context has no worktree and resolves its working directory to
+the project root. At a completed command
 or other potentially mutating tool boundary it finalizes the `tool_completed`
 event, resolves HEAD, and if it moved enumerates the commits reachable from the
 new HEAD but not the old one, oldest first, appending one `commit_created` per
@@ -351,6 +354,14 @@ with old and new HEAD and makes the projection reconcile its visible commit set.
 Pretending every changed SHA was newly committed would leave stale or duplicate
 chips. The commits endpoint is still the source for the diff selector and the
 full branch inventory; it is not the source of chat chronology.
+
+When a worktree fast-forwards onto its base, the incoming commits collapse into
+one expandable `Merged <base> - N commits` row. Hydra also observes every chat
+that owns a merge destination before merging another head into it, then labels
+the resulting fast-forward or merge commit with the incoming branch. This works
+for both managed worktree branches and a project-directory chat whose checkout
+is on the destination branch. Ordinary project-directory commits have no
+incoming-branch hint and remain ordinary one-commit rows.
 
 ## Queued messages
 

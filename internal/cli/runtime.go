@@ -64,13 +64,14 @@ type daemonRuntime struct {
 func chatContextResolver(store *db.Store) chat.ContextResolver {
 	return func(id string) (chat.HeadContext, bool) {
 		if agent, err := store.GetAgent(id); err == nil && agent != nil {
-			workingDir := paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID)
-			if agent.BranchName == "" {
-				workingDir = agent.ProjectPath
+			var worktree *string
+			if agent.BranchName != "" {
+				path := paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID)
+				worktree = &path
 			}
 			return chat.HeadContext{
 				ProjectRoot: agent.ProjectPath,
-				Worktree:    workingDir,
+				Worktree:    worktree,
 				Prompt:      agent.Prompt,
 				AgentType:   agent.AgentType,
 				Plan:        agent.Plan,
@@ -85,9 +86,10 @@ func chatContextResolver(store *db.Store) chat.ContextResolver {
 		if err != nil || owner == nil {
 			return chat.HeadContext{}, false
 		}
+		reviewWorktree := paths.GetReviewCheckoutDirFromProjectRoot(owner.ProjectPath, headID)
 		return chat.HeadContext{
 			ProjectRoot: owner.ProjectPath,
-			Worktree:    paths.GetReviewCheckoutDirFromProjectRoot(owner.ProjectPath, headID),
+			Worktree:    &reviewWorktree,
 			AgentType:   string(sandbox.AgentTypeClaude),
 		}, true
 	}

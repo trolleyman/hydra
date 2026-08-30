@@ -40,8 +40,27 @@ func TestChatContextResolverResolvesTheReviewSlot(t *testing.T) {
 	if head.Prompt == "" || head.Plan == "" {
 		t.Errorf("head context lost its seeds: %+v", head)
 	}
-	if head.Worktree != root {
-		t.Errorf("focused head working directory = %q, want project root %q", head.Worktree, root)
+	if head.Worktree != nil {
+		t.Errorf("project-directory head worktree = %q, want nil", *head.Worktree)
+	}
+	if head.WorkingDirectory() != root {
+		t.Errorf("focused head working directory = %q, want project root %q", head.WorkingDirectory(), root)
+	}
+
+	if err := store.CreateAgent(&db.Agent{
+		ID: "worktree-head", ProjectPath: root, AgentType: "claude", BranchName: "hydra/worktree-head",
+	}); err != nil {
+		t.Fatalf("create worktree agent: %v", err)
+	}
+	worktree, ok := resolve("worktree-head")
+	if !ok {
+		t.Fatal("worktree head did not resolve")
+	}
+	if worktree.Worktree == nil {
+		t.Fatal("worktree head context has no worktree")
+	}
+	if want := paths.GetWorktreeDirFromProjectRoot(root, "worktree-head"); *worktree.Worktree != want {
+		t.Errorf("worktree head working directory = %q, want %q", *worktree.Worktree, want)
 	}
 
 	review, ok := resolve(heads.ReviewSessionID("fix-the"))
@@ -51,11 +70,14 @@ func TestChatContextResolverResolvesTheReviewSlot(t *testing.T) {
 	if review.ProjectRoot != root {
 		t.Errorf("review project root = %q, want %q", review.ProjectRoot, root)
 	}
-	if want := paths.GetReviewCheckoutDirFromProjectRoot(root, "fix-the"); review.Worktree != want {
-		t.Errorf("review worktree = %q, want its own checkout %q", review.Worktree, want)
+	if review.Worktree == nil {
+		t.Fatal("review context has no checkout")
 	}
-	if review.Worktree == head.Worktree {
-		t.Error("review slot shares the head's worktree; their transcripts would collide")
+	if want := paths.GetReviewCheckoutDirFromProjectRoot(root, "fix-the"); *review.Worktree != want {
+		t.Errorf("review worktree = %q, want its own checkout %q", *review.Worktree, want)
+	}
+	if review.WorkingDirectory() == head.WorkingDirectory() {
+		t.Error("review slot shares the head's working directory; their transcripts would collide")
 	}
 	if review.Prompt != "" || review.Plan != "" {
 		t.Errorf("review slot inherited the head's prompt/plan: %+v", review)

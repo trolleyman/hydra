@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,9 +65,13 @@ type Store struct {
 	projectionPath string
 	events         []Event
 	sourceIDs      map[string]uint64
-	projection     Projection
-	now            func() time.Time
-	subscribers    map[chan Event]struct{}
+	// completedViewImages is the exact-path capability index used by the media
+	// endpoint. Building it alongside the event log avoids reparsing a large
+	// transcript for every browser image request.
+	completedViewImages map[string]struct{}
+	projection          Projection
+	now                 func() time.Time
+	subscribers         map[chan Event]struct{}
 	// lastSync is when the log was last flushed to the device; see syncInterval.
 	lastSync time.Time
 	// lastCheckpoint is when the projection was last written; see
@@ -125,11 +130,12 @@ const checkpointInterval = 30 * time.Second
 
 func Open(projectRoot, id string) (*Store, error) {
 	s := &Store{
-		eventsPath:     paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id),
-		projectionPath: paths.GetChatStateJSONFromProjectRoot(projectRoot, id),
-		now:            time.Now,
-		sourceIDs:      map[string]uint64{},
-		subscribers:    map[chan Event]struct{}{},
+		eventsPath:          paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id),
+		projectionPath:      paths.GetChatStateJSONFromProjectRoot(projectRoot, id),
+		now:                 time.Now,
+		sourceIDs:           map[string]uint64{},
+		completedViewImages: map[string]struct{}{},
+		subscribers:         map[chan Event]struct{}{},
 		projection: Projection{
 			Version:   ProjectionVersion,
 			Subagents: map[string]SubagentState{},
@@ -186,6 +192,7 @@ func (s *Store) load() error {
 			break
 		}
 		s.events = append(s.events, ev)
+		s.indexCompletedViewImage(ev)
 		if ev.SourceId != "" {
 			s.sourceIDs[ev.SourceId] = ev.Seq
 		}
@@ -219,6 +226,7 @@ func (s *Store) Discard() {
 	defer s.mu.Unlock()
 	s.events = nil
 	s.sourceIDs = map[string]uint64{}
+	s.completedViewImages = map[string]struct{}{}
 	s.projection = Projection{
 		Version:   ProjectionVersion,
 		Subagents: map[string]SubagentState{},
@@ -306,6 +314,7 @@ func (s *Store) AppendSource(sourceID string, payload Payload) (ev Event, append
 		return Event{}, false, errtrace.Wrap(closeErr)
 	}
 	s.events = append(s.events, ev)
+	s.indexCompletedViewImage(ev)
 	if sourceID != "" {
 		s.sourceIDs[sourceID] = ev.Seq
 	}
@@ -503,35 +512,44 @@ func (s *Store) Before(cursor string, limit int) ([]Event, string, bool, error) 
 	return out, next, start == 0, nil
 }
 
+// indexCompletedViewImage folds one successful Codex View Image completion into
+// the exact-path capability index. Codex commonly omits status on a successful
+// item/completed event; the event type is authoritative unless an error or an
+// explicit non-success status says otherwise. The caller holds s.mu.
+func (s *Store) indexCompletedViewImage(ev Event) {
+	if ev.Type != "tool_completed" {
+		return
+	}
+	var payload struct {
+		Name    string          `json:"name"`
+		Status  string          `json:"status"`
+		IsError bool            `json:"is_error"`
+		Input   json.RawMessage `json:"input"`
+	}
+	if json.Unmarshal(ev.Payload, &payload) != nil || payload.Name != "View Image" || payload.IsError {
+		return
+	}
+	switch strings.ToLower(payload.Status) {
+	case "", "completed", "complete", "success", "succeeded":
+	default:
+		return
+	}
+	var input struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(payload.Input, &input) == nil && filepath.IsAbs(input.Path) {
+		s.completedViewImages[filepath.Clean(input.Path)] = struct{}{}
+	}
+}
+
 // HasCompletedViewImage reports whether the durable transcript records a
-// successful Codex View Image call for this exact path. Codex's imageView result
-// carries only the path (not image bytes), so the media endpoint uses this as a
-// narrow capability: it may serve an otherwise-out-of-worktree image only after
-// the sandboxed tool actually completed viewing that path.
+// successful Codex View Image call for this exact path. It is an O(1) lookup;
+// load and append maintain the capability index.
 func (s *Store) HasCompletedViewImage(path string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := len(s.events) - 1; i >= 0; i-- {
-		ev := s.events[i]
-		if ev.Type != "tool_completed" {
-			continue
-		}
-		var payload struct {
-			Name   string          `json:"name"`
-			Status string          `json:"status"`
-			Input  json.RawMessage `json:"input"`
-		}
-		if json.Unmarshal(ev.Payload, &payload) != nil || payload.Name != "View Image" || payload.Status != "completed" {
-			continue
-		}
-		var input struct {
-			Path string `json:"path"`
-		}
-		if json.Unmarshal(payload.Input, &input) == nil && input.Path == path {
-			return true
-		}
-	}
-	return false
+	_, ok := s.completedViewImages[filepath.Clean(path)]
+	return ok
 }
 
 // SubagentEvents returns every display event belonging to sub-agent subID (its

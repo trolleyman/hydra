@@ -37,6 +37,9 @@ export interface AgentTopBarMenuItem {
 
 export interface AgentTopBarAction {
   label: string
+  // Optional fuller explanation for the hover surface. The visible label and
+  // accessible name stay terse enough for the adaptive toolbar and menus.
+  tooltip?: ReactNode
   // A lowlit counter hung off the label after an interpunct ("Push to MR · 1"):
   // the number qualifies the action rather than naming it, so it reads at a lower
   // weight than the verb it follows. Kept out of `label` so the accessible name,
@@ -154,7 +157,7 @@ function ActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: '
   const shortcut = showShortcut && a.shortcut ? { keys: a.shortcut.split('+') } : undefined
   return (
     // shrink-0 rides the wrapper too: it is now the toolbar row's flex child.
-    <Tooltip content={a.label} shortcut={shortcut} side="bottom" className="shrink-0">
+    <Tooltip content={a.tooltip ?? a.label} shortcut={shortcut} side="bottom" className="shrink-0">
       <button
         type="button"
         disabled={a.disabled}
@@ -220,7 +223,7 @@ function SplitActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mo
   const mainCls = actionBtnClass(mode, a).replace('rounded-lg', 'rounded-l-lg rounded-r-none')
   return (
     <div ref={wrapRef} className="relative inline-flex shrink-0">
-      <Tooltip content={a.label} shortcut={showShortcut && a.shortcut ? { keys: a.shortcut.split('+') } : undefined} side="bottom" className="shrink-0">
+      <Tooltip content={a.tooltip ?? a.label} shortcut={showShortcut && a.shortcut ? { keys: a.shortcut.split('+') } : undefined} side="bottom" className="shrink-0">
         <button
           type="button"
           disabled={a.disabled}

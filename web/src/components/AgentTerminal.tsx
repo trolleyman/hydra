@@ -10,7 +10,7 @@ import { Tooltip } from './Tooltip'
 import { ResizeGrip } from './ResizeGrip'
 import { uploadFile, extractFiles, hasFilePayload } from '../api/uploads'
 import { copyWithToast } from '../lib/copyToast'
-import { useAgentStore } from '../stores/agentStore'
+import { selectAgent, selectLiveAgent, useAgentStore } from '../stores/agentStore'
 import { fileUrlToWorktreeRelative, isTrustedLinkUrl } from '../lib/repoLink'
 import { buildRepoSplat } from '../lib/repoSplat'
 import { useDialogStore } from '../stores/dialogStore'
@@ -53,10 +53,10 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   // below). Selected as primitives so a poll that leaves them unchanged doesn't
   // re-render this pane. Falls back to the archived list for a finished head.
   const branchName = useAgentStore((s) =>
-    (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? null,
+    selectAgent(s, agentId)?.branch_name ?? null,
   )
   const worktreePath = useAgentStore((s) =>
-    (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
+    selectAgent(s, agentId)?.worktree_path ?? null,
   )
   // The chosen terminal font (Settings -> Browser -> Fonts), as a real
   // font-family string: xterm measures the cell off this and takes an option,
@@ -567,7 +567,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         // optimistic override would then mask the real backend needs_input for
         // its whole TTL. Leave needs_input alone and let the backend report the
         // true next state (another question, or genuinely running).
-        const curStatus = useAgentStore.getState().agents.find((a) => a.id === agentId)?.agent_status?.status
+        const curStatus = selectLiveAgent(useAgentStore.getState(), agentId)?.agent_status?.status
         if (!shell && data.includes('\r') && curStatus !== AgentStatus.NEEDS_INPUT) {
           useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
           onStatusUpdateRef.current?.(AgentStatus.RUNNING)
@@ -1025,9 +1025,8 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   // entry reflects (and toggles) in place of a close button on the tab itself.
   const reviewTabOpen = tabs.some(t => t.kind === 'review')
 
-  // While a chat tab is showing, the panel sheds its terminal-window costume
-  // (dark chrome, traffic lights) and follows the app theme like the chat pane
-  // inside it; bash tabs bring the terminal look back. Keyed off what the active
+  // While a chat tab is showing, the panel follows the app theme like the chat
+  // pane inside it; bash tabs bring the terminal palette back. Keyed off what the active
   // tab RENDERS, not off the head's mode: the review slot is a chat pane whatever
   // mode the head runs in, and dressing it as a terminal window was leaving a
   // chat transcript sitting inside dark terminal chrome.
@@ -1072,17 +1071,8 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
             : 'border-gray-700 dark:border-gray-600 bg-gray-800/80'
         }`}
       >
-        {/* Traffic lights: terminal-window dressing only */}
-        {!chatActive && (
-          <div className="flex gap-1.5 shrink-0">
-            <span className="w-3 h-3 rounded-full bg-red-500/70" />
-            <span className="w-3 h-3 rounded-full bg-yellow-500/70" />
-            <span className="w-3 h-3 rounded-full bg-green-500/70" />
-          </div>
-        )}
-
         {/* Tabs */}
-        <div className={`flex items-center gap-0.5 ${chatActive ? '' : 'ml-2'}`}>
+        <div className="flex items-center gap-0.5">
           {tabs.map(tab => (
             <div key={tab.id} className="flex items-center">
               <button
@@ -1094,7 +1084,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                 // glance at the tab strip answers that, where a violet-washed
                 // transcript would just be tiring to read and would fight the chat's
                 // warm palette.
-                className={`px-2.5 py-0.5 text-xs font-mono rounded transition-colors cursor-pointer ${
+                className={`px-2.5 py-0.5 text-xs rounded transition-colors cursor-pointer ${
                   tab.kind === 'review'
                     ? activeTabId === tab.id
                       ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300'

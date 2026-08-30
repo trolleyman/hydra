@@ -45,7 +45,7 @@ import { AgentStatus, type ChatEventUnion, type ChatFrame } from '../api'
 import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../lib/chatEvents'
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
-import { useAgentStore } from '../stores/agentStore'
+import { selectAgent, selectLiveAgent, useAgentStore } from '../stores/agentStore'
 import { RichMarkdown, type RepoLinkContext } from '../lib/RichMarkdown'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, leadingBashComment, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
@@ -89,7 +89,6 @@ import { CommitCard } from './CommitCard'
 import { ChangeStats } from './ChangeStats'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
-import { RelativeTime } from './LiveTime'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
@@ -101,6 +100,7 @@ import { useImageCommentStore } from '../stores/imageCommentStore'
 // classifier, so the lightbox's text viewer highlights by the same table.
 import { langFromPath } from '../lib/fileKind'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
+import { CLAUDE_MODELS, CODEX_MODELS } from '../lib/agentModels'
 import { loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
@@ -146,6 +146,9 @@ import { CommentIdentityContext } from './commentIdentity'
 import { BranchPill } from './BranchPill'
 import { FilePathLabel } from './FilePathLabel'
 import { onDesktopImagePaste } from '../lib/desktopBridge'
+import { chatRepositoryRef } from '../lib/chatRepositoryRef'
+import { ResumeDivider } from './ResumeDivider'
+import { historyThresholdTransition, isVerticalScrollbarPointer } from '../lib/chatScroll'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -264,7 +267,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
           {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
           <GitMerge className="w-3 h-3 shrink-0" />
           <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
-          <ChangeStats additions={item.additions} deletions={item.deletions} />
+          <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
         </button>
       </Tooltip>
       <Expandable open={expanded && shown > 0} className="w-full">
@@ -283,7 +286,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
               <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
               <span className="min-w-0 flex-1 truncate optical-center">{m.subject}</span>
-              <ChangeStats additions={m.additions} deletions={m.deletions} />
+              <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px" />
             </div>
           ))}
           {shown < count && (
@@ -1996,27 +1999,6 @@ const PANEL_CLASS =
 // The send button's terracotta accent.
 const ACCENT_BG = 'bg-[#c96442] hover:bg-[#b55535]'
 
-// Claude models offered by the in-chat model dropdown. Sent verbatim to the
-// CLI's set_model control request, so these must be aliases (or full model ids)
-// it accepts. The two Opus versions use full ids rather than the bare `opus`
-// alias so they map to distinct labels in modelDisplayLabel's substring match
-// (bare `opus` is a substring of both claude-opus-5 and claude-opus-4-8).
-const CLAUDE_MODELS = [
-  { id: 'fable', label: 'Fable' },
-  { id: 'claude-opus-5', label: 'Opus 5' },
-  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { id: 'sonnet', label: 'Sonnet' },
-  { id: 'haiku', label: 'Haiku' },
-]
-const CODEX_MODELS = [
-  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
-  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
-  { id: 'gpt-5.5', label: 'GPT-5.5' },
-  { id: 'gpt-5.4', label: 'GPT-5.4' },
-  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-]
-
 // Effective context window (tokens) for a model, used to turn a turn's prompt
 // size into a "context left" percentage (item 40). Opus, Sonnet and Fable all
 // expose a 1M window; only Haiku is 200k. A flat 200k constant (the old value)
@@ -2596,6 +2578,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
       </div>
     )
   }
+  const commentsByNumber = new Map(parsed.comments.map((comment) => [comment.number, comment]))
   return (
     <div className="space-y-1.5">
       {parsed.preamble && (
@@ -2605,7 +2588,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
         // A reply to a comment shown above it is drawn as a thread: indented
         // under its parent, and headed by what it answers rather than by the
         // file, which is the parent's line repeated verbatim.
-        const parent = parsed.comments.find((p) => p.number === c.replyTo)
+        const parent = commentsByNumber.get(c.replyTo)
         const sameAnchor = parent != null && parent.path === c.path && parent.line === c.line
           && parent.image?.file === c.image?.file && parent.image?.position === c.image?.position
         return (
@@ -2786,9 +2769,7 @@ interface ScriptOutputRow {
   // The file this line's NUMBER counts in, when the script named one. A
   // sectioned script's gutter is several files' numbering stacked in one column
   // - the numbers restart, and nothing on the row says at which file - so the
-  // gutter cell carries it as a tooltip. (A native title, deliberately: this is
-  // one element per output line, which is exactly the long-list case the
-  // tooltip convention in CLAUDE.md keeps native.)
+  // gutter cell carries it in a tooltip.
   file?: string
   // 'code' is a line of some file, 'marker' a separator the script echoed, and
   // 'plain' output nothing could be said about.
@@ -3064,15 +3045,23 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
         {rows.map((row, i) => (
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
-            {gutter && (
+            {gutter && (row.file ? (
+              <Tooltip
+                content={<FilePathLabel path={row.file} nativeTitle={false} />}
+                align="left"
+                className="min-h-4"
+              >
+                <span
+                  data-copy-skip
+                  className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
+                >{row.num}</span>
+              </Tooltip>
+            ) : (
               <span
                 data-copy-skip
-                // Plain non-interactive text in a long list: native title is the
-                // right tool here (see the tooltip conventions in CLAUDE.md).
-                title={row.file ? (row.num ? `${row.file}:${row.num}` : row.file) : undefined}
                 className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
-              >{row.file && row.num ? `${row.file}:${row.num}` : row.num}</span>
-            )}
+              >{row.num}</span>
+            ))}
             <span
               data-copy-line
               className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
@@ -7041,6 +7030,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [allHistoryLoaded, setAllHistoryLoaded] = useState(false)
   const pendingPrependRef = useRef<number | null>(null)
+  // One load per arrival at the top threshold. An anchored prepend that moves
+  // the viewport clear re-arms it, so holding the native thumb at the top can
+  // intentionally keep paging without duplicate requests from one position.
+  const historyThresholdArmedRef = useRef(true)
   // Composer attachments live in the undo history (`present.attachments`, above)
   // so a paste-turned-chip is undoable together with its text marker.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
@@ -7142,7 +7135,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // it (item 20).
   const lastScrollRef = useRef({ top: 0, pinned: true })
 
-  const headStatus = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
+  const headStatus = useAgentStore((s) => selectLiveAgent(s, agentId)?.agent_status?.status)
   // A review slot has no db.Agent row, so its lifecycle comes from this pane's
   // socket. Using the owning head's status here made a finished reviewer offer
   // to queue messages whenever the head itself was still working.
@@ -7159,7 +7152,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // (__root's auto-clear effect), and effects run after render, so by the time
   // any effect of ours could read the store the answer would always be "read".
   const unreadNow = useAgentStore((s) => {
-    const a = s.agents.find((x) => x.id === agentId)
+    const a = selectLiveAgent(s, agentId)
     return a ? !!a.has_unread_changes : null
   })
   const [openedUnread, setOpenedUnread] = useState<{ key: string; unread: boolean | null }>(
@@ -7190,11 +7183,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // project root and deliberately has no Hydra worktree of its own.
   const worktreePath = useAgentStore(
     (s) => {
-      const agent = s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId)
+      const agent = selectAgent(s, agentId)
       if (!agent || review) return agent?.worktree_path ?? null
       return agent.focused ? agent.project_path : agent.worktree_path ?? null
     },
   )
+  const repositoryRef = useAgentStore((s) => chatRepositoryRef(
+    selectAgent(s, agentId)?.branch_name,
+  ))
   const branchName = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
   )
@@ -7212,9 +7208,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const chatLinkCtx = useMemo(
     () =>
       projectId
-        ? { projectId, agentId, refStr: branchName, filePath: '', worktreePath: worktreePath ?? undefined }
+        ? { projectId, agentId, refStr: repositoryRef, filePath: '', worktreePath: worktreePath ?? undefined }
         : undefined,
-    [projectId, agentId, branchName, worktreePath],
+    [projectId, agentId, repositoryRef, worktreePath],
   )
   // The server-persisted plan (AgentResponse.plan). On a fresh browser, this is
   // the only copy of the plan; seed it into localStorage (only when local is
@@ -7225,7 +7221,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // has no db.Agent row to carry one), and seeding it here is what put the head's
   // to-do chip on the reviewer's transcript. Its own plan arrives live.
   const serverPlan = useAgentStore(
-    (s) => (review ? undefined : (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.plan),
+    (s) => (review ? undefined : selectAgent(s, agentId)?.plan),
   )
   useEffect(() => {
     const seeded = seedLocalPlan(projectId, stateId, serverPlan)
@@ -7245,7 +7241,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // is still on the placeholder, so the right model shows on load before any
   // live system:init lands. The live stream stays authoritative from there.
   const serverModel = useAgentStore(
-    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.model,
+    (s) => selectAgent(s, agentId)?.model,
   )
   useEffect(() => {
     // Adopt the daemon-captured model only while the selector is still on its
@@ -7324,6 +7320,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setLoadingOlder(false)
     setAllHistoryLoaded(false)
     pendingPrependRef.current = null
+    historyThresholdArmedRef.current = true
     pinnedRef.current = true
 
     let nextId = 1
@@ -9321,6 +9318,28 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
   }
 
+  // Native scrollbar thumbs are not DOM children, so the scroll handler cannot
+  // otherwise tell a thumb drag from one of our own followBottom writes. Claim
+  // user ownership as soon as the pointer lands in the gutter: this cancels the
+  // current glide before Chromium moves the thumb, avoiding the two writers
+  // pulling the viewport back and forth while a turn streams.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || !isVerticalScrollbarPointer(el, event.clientX)) return
+      stopFollow()
+      if (wheelRafRef.current != null) cancelAnimationFrame(wheelRafRef.current)
+      wheelRafRef.current = null
+      pinnedRef.current = false
+      setPinned(false)
+    }
+    el.addEventListener('pointerdown', onPointerDown)
+    return () => {
+      el.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [])
+
   // Smooth discrete wheel notches without taking over precision touchpads or
   // nested scroll regions (code blocks, tool output, tooltip bodies). CSS
   // scroll-behavior only affects programmatic scrolling, not wheel input, so
@@ -9842,7 +9861,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!el) return
     // Load-older pages main history; a sub-agent view fetches its whole run up
     // front when opened (requestSubagentEvents), so it never pages here.
-    if (el.scrollTop < 300 && chatView === 'main') requestOlderHistory()
+    if (chatView === 'main') {
+      const threshold = historyThresholdTransition(
+        el.scrollTop,
+        historyThresholdArmedRef.current,
+      )
+      historyThresholdArmedRef.current = threshold.armed
+      if (threshold.request) requestOlderHistory()
+    }
     // Re-ACQUIRING the pin needs the view actually AT the bottom (a few px of
     // sub-pixel slack), not merely "within 40px". The old 40px band re-pinned on
     // any non-upward scroll event while near the bottom, so a small macOS
@@ -10785,7 +10811,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
                 <span className="truncate optical-center">{item.subject}</span>
-                <ChangeStats additions={item.additions} deletions={item.deletions} />
+                <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
               </div>
             </Tooltip>
           </div>
@@ -10806,18 +10832,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>
         )
       case 'resumed':
-        return (
-          <div className="flex items-center gap-2.5 select-none" aria-label="Agent resumed">
-            <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
-            <span
-              className="optical-center text-2xs text-stone-400 dark:text-stone-500"
-              title={item.resumedAt == null ? undefined : new Date(item.resumedAt).toLocaleString()}
-            >
-              Resumed{item.resumedAt == null ? null : <> <RelativeTime createdAt={item.resumedAt / 1000} /></>}
-            </span>
-            <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
-          </div>
-        )
+        return <ResumeDivider resumedAt={item.resumedAt} />
       case 'assistant':
         return <div className={`max-w-[95%] chat-font ${serif ? 'chat-serif' : 'chat-leading'}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
@@ -11025,6 +11040,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     while (ci < chips.length) out.push(chips[ci++])
     return out
   }, [visibleItems, commitChips, replayDone, allHistoryLoaded])
+  const conversationBeganAt = useMemo(() => {
+    if (!allHistoryLoaded) return undefined
+    for (const item of visibleItems) {
+      const timestamp = itemTsRef.current.get(item.id)
+      if (timestamp != null) return timestamp
+    }
+    return undefined
+  }, [visibleItems, allHistoryLoaded])
   // The in-flight streamed reply is the LAST ROW of the transcript, not a
   // separate node underneath it: it carries the id its settled event will land
   // on, so the swap is an in-place update of one row (see liveId). Rendering it
@@ -11166,7 +11189,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           onCopy={copyTranscriptAsMarkdown}
           className="h-full overflow-y-auto [overflow-anchor:none]"
         >
-          <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
+          <div
+            ref={contentRef}
+            className={`mx-auto max-w-5xl px-4 pb-3 flex flex-col gap-3 ${hasSubagents || planVisible ? 'pt-14' : 'pt-3'}`}
+          >
           {viewSub ? (
             <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} links={subagentLinks} />
           ) : (
@@ -11188,9 +11214,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             </div>
           )}
           {replayDone && allHistoryLoaded && items.length > 0 && (
-            <div className="text-center py-1 text-2xs text-stone-300 dark:text-stone-600 select-none">
-              Beginning of conversation
-            </div>
+            <ResumeDivider
+              resumedAt={conversationBeganAt}
+              label="Conversation began"
+              ariaLabel="Beginning of conversation"
+            />
           )}
           <SettledMessages
             items={mergedItems}

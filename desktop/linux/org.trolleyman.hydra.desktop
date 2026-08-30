@@ -3,11 +3,11 @@ Type=Application
 Name=Hydra
 Comment=Run and review AI coding agents
 Exec=hydra-desktop %u
-Icon=dev.hydra.desktop
+Icon=org.trolleyman.hydra
 Terminal=false
 Categories=Development;Utility;
 StartupNotify=true
-StartupWMClass=dev.hydra.desktop
+StartupWMClass=org.trolleyman.hydra
 MimeType=x-scheme-handler/hydra;
 Actions=NewWindow;NewChat;
 

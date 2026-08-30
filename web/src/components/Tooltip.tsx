@@ -54,12 +54,14 @@ export interface TooltipProps {
   className?: string
   /** Optional bold heading rendered above the content. */
   title?: string
+  /** Compact hints are centered by default. Use left for path/list content. */
+  align?: 'center' | 'left'
   /** Extra gap (px) between the trigger and the box, on top of the base 8px -
    *  e.g. to clear a neighbouring control the box would otherwise sit against. */
   offset?: number
   /**
-   * A keyboard shortcut for this control, rendered as keycaps on their own line
-   * under the label and lowlit (see ShortcutHint). `note` is what the keys do
+   * A keyboard shortcut for this control, rendered as keycaps beside the label
+   * and lowlit (see ShortcutHint). `note` is what the keys do
    * when that differs from the control's main action - a modifier variant, e.g.
    * Alt on the restart button.
    *
@@ -89,10 +91,15 @@ export function Tooltip({
   side,
   className,
   title,
+  align,
   offset = 0,
   shortcut,
   footnote,
 }: TooltipProps) {
+  // Titled cards are explanatory surfaces and read like prose. Compact hints
+  // are labels, so centering them keeps their text aligned with the trigger and
+  // with any shortcut keycaps beside it.
+  const textAlign = align ?? (title ? 'left' : 'center')
   const [visible, setVisible] = useState(false)
   // Keep the portal mounted briefly after dismissal so both compact hints and
   // longer explainers can fade out instead of disappearing between frames.
@@ -378,7 +385,7 @@ export function Tooltip({
         <div
           ref={boxRef}
           role="tooltip"
-          className={`fixed z-[9999] inline-flex -translate-x-1/2 flex-col items-stretch select-text break-words rounded-lg border p-2 text-left text-2xs text-gray-700 shadow-lg transition-opacity duration-150 ease-out motion-reduce:transition-none dark:text-gray-200 ${surface} ${opaque ? 'opacity-100' : 'pointer-events-none opacity-0'} ${inDark ? 'dark' : ''} ${pos.placement === 'top' ? '-translate-y-full' : ''}`}
+          className={`fixed z-[9999] inline-flex -translate-x-1/2 flex-col items-stretch select-text break-words rounded-lg border p-2 text-2xs text-gray-700 shadow-lg transition-opacity duration-150 ease-out motion-reduce:transition-none dark:text-gray-200 ${textAlign === 'center' ? 'text-center' : 'text-left'} ${surface} ${opaque ? 'opacity-100' : 'pointer-events-none opacity-0'} ${inDark ? 'dark' : ''} ${pos.placement === 'top' ? '-translate-y-full' : ''}`}
           style={{
             top: pos.top,
             left: pos.left,
@@ -402,14 +409,12 @@ export function Tooltip({
           }}
         >
           {title && <p className="mb-1.5 shrink-0 border-b border-gray-200 pb-1 font-bold dark:border-gray-700">{title}</p>}
-          <div className="min-h-0 space-y-2 overflow-y-auto text-gray-600 [&_code]:text-blue-700 dark:text-gray-300 dark:[&_code]:text-blue-300">
-            {content}
-          </div>
-          {shortcut && (
-            <div className="mt-1.5">
+          <div className={`min-h-0 overflow-y-auto text-gray-600 [&_code]:text-blue-700 dark:text-gray-300 dark:[&_code]:text-blue-300 ${shortcut ? `flex items-center gap-2 ${textAlign === 'center' ? 'justify-center' : 'justify-start'}` : ''}`}>
+            <div className="space-y-2">{content}</div>
+            {shortcut && (
               <ShortcutHint keys={shortcut.keys} note={shortcut.note} />
-            </div>
-          )}
+            )}
+          </div>
           {footnote && <div className="mt-1.5 text-3xs text-gray-500 dark:text-gray-400">{footnote}</div>}
           {arrow(pos.placement)}
         </div>,
