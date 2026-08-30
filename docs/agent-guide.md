@@ -136,7 +136,10 @@ Native `title=` is still correct for three cases:
    `CaseTree.tsx`.
 2. **Anything rendered once per row** of a long list, interactive or not - the
    same perf reason. The line-number gutter in `RepositoryView.tsx` renders per
-   source line; `CaseTree`'s copy/open buttons render per case.
+   source line; `CaseTree`'s copy/open buttons render per case. The source-aware
+   chat output gutter is the narrow exception: its line numbers use `Tooltip`
+   because the hidden path needs the shared file icon and lowlit-directory
+   treatment rather than an unstyled path string.
 3. **Drag handles** (`lib/ResizeHandle.tsx` and its callers). `Tooltip` anchors
    the box when it opens and only recomputes on scroll / window-resize / box
    resize - none of which a drag fires - so a tip opened during the pre-drag
