@@ -143,6 +143,9 @@ and `web/src/DiffViewer.tsx`):
   (`<button>`), which a drag can't select in the first place - so taking over the
   copy event doesn't start pulling chrome into the clipboard. A selection that
   stays inside one code block copies the raw code, no fence.
+  Chat code gutters and section labels also carry `data-copy-skip`; do not rely
+  on `user-select: none` alone, because WebKitGTK can include those nodes when a
+  desktop selection crosses grid rows or block boundaries.
 - Bash inspection output is sectioned by `web/src/lib/shellSections.ts`. Plain
   file reads such as `sed -n '40,80p'` render with syntax highlighting and the
   file's real line numbers. In a script where a numbered search immediately

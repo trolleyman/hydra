@@ -2657,8 +2657,8 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
     <div className="bg-white dark:bg-[#20201e] font-mono text-2xs leading-4">
       {rows.map((row, i) => (
         <div key={i} className={`grid ${kind === 'add' || kind === 'delete' ? 'grid-cols-[2.25rem_1fr]' : 'grid-cols-[2.25rem_2.25rem_1fr]'} ${row.added ? 'bg-emerald-50 dark:bg-emerald-950/25' : row.removed ? 'bg-red-50 dark:bg-red-950/25' : ''}`}>
-          {kind !== 'add' && <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.oldNo}</span>}
-          {kind !== 'delete' && <span className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.newNo}</span>}
+          {kind !== 'add' && <span data-copy-skip className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.oldNo}</span>}
+          {kind !== 'delete' && <span data-copy-skip className="select-none border-r border-stone-200/70 dark:border-white/[0.05] px-1 text-right text-stone-400 dark:text-stone-600">{row.newNo}</span>}
           <span className={`min-w-0 whitespace-pre-wrap break-words px-2 ${row.added ? 'text-emerald-900 dark:text-emerald-200' : row.removed ? 'text-red-900 dark:text-red-200' : 'text-stone-700 dark:text-stone-300'}`} dangerouslySetInnerHTML={{ __html: highlighted[i] ?? '' }} />
         </div>
       ))}
@@ -2687,7 +2687,7 @@ function GutterCodePanel({ nums, code, lang }: { nums: string[]; code: string[];
         {nums.map((n, i) => (
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
-            <span className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]">{n}</span>
+            <span data-copy-skip className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]">{n}</span>
             <span data-copy-line className="min-w-0 whitespace-pre-wrap break-words px-2.5 text-stone-800 dark:text-stone-200" dangerouslySetInnerHTML={{ __html: lines[i] ?? '' }} />
           </Fragment>
         ))}
@@ -3028,6 +3028,7 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
             {gutter && (
               <span
+                data-copy-skip
                 // Plain non-interactive text in a long list: native title is the
                 // right tool here (see the tooltip conventions in CLAUDE.md).
                 title={row.file ? (row.num ? `${row.file}:${row.num}` : row.file) : undefined}
@@ -3123,8 +3124,8 @@ function EditDiffPanel({ oldStr, newStr, lang, replaceAll, hunks }: { oldStr: st
                         diff viewer's unified gutter separates them (see
                         UNIFIED_LINE_NUM_CLASS). min-h keeps a blank line one
                         row tall. */}
-                    <span className={`${EDIT_NUM_CLASS} pl-2 ${bg}`}>{row.oldNum ?? ''}</span>
-                    <span className={`${EDIT_NUM_CLASS} pl-1.5 ${bg}`}>{row.newNum ?? ''}</span>
+                    <span data-copy-skip className={`${EDIT_NUM_CLASS} pl-2 ${bg}`}>{row.oldNum ?? ''}</span>
+                    <span data-copy-skip className={`${EDIT_NUM_CLASS} pl-1.5 ${bg}`}>{row.newNum ?? ''}</span>
                   </>
                 )}
                 <span data-copy-line className={`min-w-0 whitespace-pre-wrap break-words pl-1.5 pr-2 text-stone-800 dark:text-stone-200 ${bg}`}>
@@ -4094,7 +4095,7 @@ const ToolCard = memo(function ToolCard({
                   {/* "Output" only when there's an input panel above it to
                       separate from; a plain Read's body is output-only (item 32). */}
                   {hasInput && (
-                    <div className="mb-0.5 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                    <div data-copy-skip className="mb-0.5 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
                       Output
                     </div>
                   )}
