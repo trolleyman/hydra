@@ -95,6 +95,7 @@ import { useImageCommentStore } from '../stores/imageCommentStore'
 // classifier, so the lightbox's text viewer highlights by the same table.
 import { langFromPath } from '../lib/fileKind'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
+import { CLAUDE_MODELS, CODEX_MODELS } from '../lib/agentModels'
 import { loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
 import { createPlanBuilder, parseTodos, toTodoItems, type TodoItem } from '../lib/planReducer'
@@ -1959,27 +1960,6 @@ const PANEL_CLASS =
 
 // The send button's terracotta accent.
 const ACCENT_BG = 'bg-[#c96442] hover:bg-[#b55535]'
-
-// Claude models offered by the in-chat model dropdown. Sent verbatim to the
-// CLI's set_model control request, so these must be aliases (or full model ids)
-// it accepts. The two Opus versions use full ids rather than the bare `opus`
-// alias so they map to distinct labels in modelDisplayLabel's substring match
-// (bare `opus` is a substring of both claude-opus-5 and claude-opus-4-8).
-const CLAUDE_MODELS = [
-  { id: 'fable', label: 'Fable' },
-  { id: 'claude-opus-5', label: 'Opus 5' },
-  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { id: 'sonnet', label: 'Sonnet' },
-  { id: 'haiku', label: 'Haiku' },
-]
-const CODEX_MODELS = [
-  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
-  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
-  { id: 'gpt-5.5', label: 'GPT-5.5' },
-  { id: 'gpt-5.4', label: 'GPT-5.4' },
-  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-]
 
 // Effective context window (tokens) for a model, used to turn a turn's prompt
 // size into a "context left" percentage (item 40). Opus, Sonnet and Fable all
