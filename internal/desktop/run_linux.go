@@ -100,13 +100,6 @@ static char *hydra_origin_url(HydraDesktop *desktop, const char *path) {
 	return g_strdup_printf("%s://%s%s", scheme, host, path);
 }
 
-static void hydra_dispatch_command(WebKitWebView *web_view, const char *type) {
-	char *script = g_strdup_printf(
-		"window.dispatchEvent(new CustomEvent('hydra-desktop-command',{detail:{type:'%s'}}))", type);
-	webkit_web_view_evaluate_javascript(web_view, script, -1, NULL, NULL, NULL, NULL, NULL);
-	g_free(script);
-}
-
 static void hydra_image_paste_ready(GObject *source, GAsyncResult *result, gpointer data) {
 	HydraImagePasteRequest *request = data;
 	GError *error = NULL;
@@ -231,8 +224,7 @@ static void hydra_close_choice(GObject *source, GAsyncResult *result, gpointer d
 	int choice = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, &error);
 	if (error == NULL && choice > 0) {
 		window->force_close = TRUE;
-		if (choice == 2) hydra_dispatch_command(window->web_view, "stop-and-close");
-		else gtk_window_destroy(GTK_WINDOW(window->window));
+		gtk_window_destroy(GTK_WINDOW(window->window));
 	}
 	g_clear_error(&error);
 }
@@ -247,7 +239,7 @@ static gboolean hydra_close_request(GtkWindow *gtk_window, gpointer data) {
 	char *title = g_strdup_printf("%u agent%s %s running", count, count == 1 ? "" : "s", count == 1 ? "is" : "are");
 	GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", title);
 	g_free(title);
-	const char *persistent_buttons[] = { "Cancel", "Close and leave running", "Stop and close", NULL };
+	const char *persistent_buttons[] = { "Cancel", "Close and leave running", NULL };
 	const char *owned_buttons[] = { "Cancel", "Close and stop", NULL };
 	if (stops_backend) {
 		gtk_alert_dialog_set_detail(dialog, count == 1
