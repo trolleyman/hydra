@@ -64,9 +64,13 @@ type daemonRuntime struct {
 func chatContextResolver(store *db.Store) chat.ContextResolver {
 	return func(id string) (chat.HeadContext, bool) {
 		if agent, err := store.GetAgent(id); err == nil && agent != nil {
+			workingDir := paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID)
+			if agent.BranchName == "" {
+				workingDir = agent.ProjectPath
+			}
 			return chat.HeadContext{
 				ProjectRoot: agent.ProjectPath,
-				Worktree:    paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID),
+				Worktree:    workingDir,
 				Prompt:      agent.Prompt,
 				AgentType:   agent.AgentType,
 				Plan:        agent.Plan,

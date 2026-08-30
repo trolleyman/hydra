@@ -7099,10 +7099,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // textarea applies the rules itself; this composer needs the flag because it
   // owns Enter (which sends), so the fence-body step is its call to make.
   const autoPair = useAutoPairStore((s) => s.enabled)
-  // The head's worktree, for trimming absolute paths in tool cards (item 19).
-  // Falls back to the archived list for a finished head.
+  // The checkout the head works in, for trimming absolute paths in tool cards
+  // and recognising the shell's default directory. A focused head works in the
+  // project root and deliberately has no Hydra worktree of its own.
   const worktreePath = useAgentStore(
-    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
+    (s) => {
+      const agent = s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId)
+      if (!agent || review) return agent?.worktree_path ?? null
+      return agent.focused ? agent.project_path : agent.worktree_path ?? null
+    },
   )
   const branchName = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
