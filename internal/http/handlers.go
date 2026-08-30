@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,6 +42,19 @@ import (
 )
 
 const version = "0.1.0"
+
+func gitCommit() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			return setting.Value
+		}
+	}
+	return ""
+}
 
 // agentInputSeq numbers REST-injected chat messages (diff comments, "Fix with
 // agent") so each queued message carries a unique id across the daemon's life.
@@ -891,6 +905,7 @@ func (s *Server) ListAgents(ctx context.Context, request api.ListAgentsRequestOb
 func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api.GetStatusResponseObject, error) {
 	status := "OK"
 	v := version
+	commit := gitCommit()
 	desktopProtocol := desktopcontract.Protocol
 	buildID := version
 	runtimeOS := runtime.GOOS
@@ -916,6 +931,7 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		Status:           &status,
 		SandboxError:     sandboxErr,
 		Version:          &v,
+		GitCommit:        &commit,
 		DesktopProtocol:  &desktopProtocol,
 		BuildId:          &buildID,
 		RuntimeOs:        &runtimeOS,

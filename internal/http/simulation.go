@@ -146,6 +146,7 @@ func (s *SimulationServer) CheckHealth(w http.ResponseWriter, r *http.Request) {
 func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	status := "OK"
 	v := "0.1.0-sim"
+	commit := "0123456789abcdef0123456789abcdef01234567"
 	// Pin uptime to a fixed value rather than time.Since(StartTime). The diff
 	// viewer renders both sides of a comparison in separate server boots and
 	// hashes the resulting screenshots, so a live uptime makes the header's
@@ -156,6 +157,7 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	uptime := float32(2 * time.Hour / time.Second)
 	projectRoot := "/simulated/project"
 	defaultProjectID := "sim-project"
+	runtimeOS := "linux"
 	development := s.Development
 	// The simulated server offers both controls so the update panel is drivable
 	// here; neither actually replaces this process (see UpdateServer).
@@ -165,9 +167,11 @@ func (s *SimulationServer) GetStatus(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, api.StatusResponse{
 		Status:           &status,
 		Version:          &v,
+		GitCommit:        &commit,
 		UptimeSeconds:    &uptime,
 		ProjectRoot:      &projectRoot,
 		DefaultProjectId: &defaultProjectID,
+		RuntimeOs:        &runtimeOS,
 		Development:      &development,
 		CanRestart:       &canRestart,
 		CanUpdate:        &canUpdate,

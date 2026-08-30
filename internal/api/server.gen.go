@@ -3690,6 +3690,9 @@ type StatusResponse struct {
 	// Development Whether the server is being served out of a Hydra source checkout, which is what enables developer affordances such as the Chrome DevTools workspace endpoint.
 	Development *bool `json:"development,omitempty"`
 
+	// GitCommit Git commit embedded in the running server binary, when available.
+	GitCommit *string `json:"git_commit,omitempty"`
+
 	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`
 
