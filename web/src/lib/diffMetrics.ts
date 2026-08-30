@@ -312,14 +312,20 @@ export function measureBodyHeight(width: number, shape: BodyShape): number | nul
 const jobs = new Set<() => void>()
 let flushHandle = 0
 const SLICE_TAIL_MS = 2
+const FALLBACK_SLICE_MS = 8
 
 type IdleDeadline = { timeRemaining: () => number }
 const requestIdle: (cb: (d: IdleDeadline) => void) => number =
   typeof requestIdleCallback === 'function'
     ? (cb) => requestIdleCallback(cb, { timeout: 200 })
-    // Safari has no requestIdleCallback: fall back to a macrotask with a fixed
-    // budget, which drains the same queue a slice at a time.
-    : (cb) => setTimeout(() => cb({ timeRemaining: () => SLICE_TAIL_MS + 6 }), 16) as unknown as number
+    // Safari and the desktop WebKit views have no requestIdleCallback. Give the
+    // macrotask a real elapsed-time budget: returning a constant here makes the
+    // flush below believe time never passes, so it drains every forced layout in
+    // one blocking task precisely in the browsers that take this fallback.
+    : (cb) => setTimeout(() => {
+        const started = performance.now()
+        cb({ timeRemaining: () => Math.max(0, FALLBACK_SLICE_MS - (performance.now() - started)) })
+      }, 16) as unknown as number
 
 function flush(deadline: IdleDeadline) {
   flushHandle = 0
