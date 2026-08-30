@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useCallback, type ReactNo
 import { MoreHorizontal, ChevronDown, Sparkles, LoaderCircle } from 'lucide-react'
 import { useFinePointer } from '../lib/useFinePointer'
 import { Tooltip } from './Tooltip'
+import { ShortcutHint } from './Kbd'
 import { TILE_TONE, TILE_GLYPH } from '../lib/tileTone'
 import { withBranchPills } from '../lib/branchPills'
 
@@ -150,9 +151,10 @@ function ActionLabel({ a }: { a: AgentTopBarAction }) {
 // Render a single action button.
 function ActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: 'labels' | 'icons'; showShortcut: boolean }) {
   const effectiveMode = a.iconOnly ? 'icons' : mode
+  const shortcut = showShortcut && a.shortcut ? { keys: a.shortcut.split('+') } : undefined
   return (
     // shrink-0 rides the wrapper too: it is now the toolbar row's flex child.
-    <Tooltip content={actionTitle(a, showShortcut)} side="bottom" className="shrink-0">
+    <Tooltip content={a.label} shortcut={shortcut} side="bottom" className="shrink-0">
       <button
         type="button"
         disabled={a.disabled}
@@ -218,7 +220,7 @@ function SplitActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mo
   const mainCls = actionBtnClass(mode, a).replace('rounded-lg', 'rounded-l-lg rounded-r-none')
   return (
     <div ref={wrapRef} className="relative inline-flex shrink-0">
-      <Tooltip content={actionTitle(a, showShortcut)} side="bottom" className="shrink-0">
+      <Tooltip content={a.label} shortcut={showShortcut && a.shortcut ? { keys: a.shortcut.split('+') } : undefined} side="bottom" className="shrink-0">
         <button
           type="button"
           disabled={a.disabled}
@@ -298,10 +300,6 @@ function renderActions(list: AgentTopBarAction[], mode: 'labels' | 'icons', show
     }
   }
   return out
-}
-
-function actionTitle(a: AgentTopBarAction, showShortcut: boolean): string {
-  return showShortcut && a.shortcut ? `${a.label} (${a.shortcut})` : a.label
 }
 
 // An action toolbar that adapts to the space the header gives it: show every
@@ -465,7 +463,7 @@ function AdaptiveActions({
                     <span className="shrink-0">{a.icon}</span>
                     {a.label}
                     {showShortcut && a.shortcut && (
-                      <span className="ml-auto pl-6 text-2xs font-medium text-gray-400 dark:text-gray-500">{a.shortcut}</span>
+                      <span className="ml-auto pl-6"><ShortcutHint keys={a.shortcut.split('+')} /></span>
                     )}
                   </button>
                   {/* A split action that folded into the overflow menu keeps its
@@ -619,7 +617,7 @@ export function AgentTopBarContent({
           // size={1} keeps the input's intrinsic 20-character width out of the
           // row's min-content, so a narrow viewport shrinks the box rather than
           // overflowing the bar.
-          <Tooltip content={editing ? undefined : 'Rename'} side="bottom" className="min-w-0 flex-1">
+          <Tooltip content={editing ? undefined : 'Rename'} shortcut={editing ? undefined : { keys: ['F2'] }} side="bottom" className="min-w-0 flex-1">
             <input
               ref={inputRef}
               type="text"
