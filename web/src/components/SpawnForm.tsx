@@ -188,7 +188,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
             <AgentTypeIcon name={active.id} className={iconCls} />
           </span>
-          {label && <span className="max-w-[5rem] truncate text-3xs font-medium text-gray-600 dark:text-gray-300">{label}</span>}
+          {label && <span className="compact-spawn-model-label max-w-[5rem] truncate text-3xs font-medium text-gray-600 dark:text-gray-300">{label}</span>}
         </button>
       </Tooltip>
       {open && coords && (
@@ -1167,7 +1167,7 @@ export const SpawnForm = memo(function SpawnForm({
   if (compact) {
     return (
       <>
-      <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
+      <form onSubmit={handleSubmit} className="compact-spawn-form px-3 py-3 border-b border-gray-100 dark:border-gray-700">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
         <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
           <div ref={cardRef} className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[128px]">
