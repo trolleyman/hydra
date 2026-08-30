@@ -134,6 +134,13 @@ func (s *Server) HandleAgentFileBlob(w http.ResponseWriter, r *http.Request) {
 		worktree = *head.Worktree
 	}
 	full := resolveAgentFile(projectRoot, worktree, heads.HeadTmpDir(projectRoot, headID), raw)
+	// Codex imageView returns a path rather than an image block. A completed View
+	// Image event is a durable, exact-path capability proving the sandboxed tool
+	// successfully read it; this lets the UI show user-supplied images outside
+	// the worktree without turning this route into an arbitrary host-file reader.
+	if full == "" && filepath.IsAbs(raw) && s.ChatEvents != nil && s.ChatEvents.HasCompletedViewImage(headID, raw) {
+		full = filepath.Clean(raw)
+	}
 	if full == "" {
 		http.NotFound(w, r)
 		return

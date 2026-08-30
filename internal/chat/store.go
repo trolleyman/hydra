@@ -503,6 +503,37 @@ func (s *Store) Before(cursor string, limit int) ([]Event, string, bool, error) 
 	return out, next, start == 0, nil
 }
 
+// HasCompletedViewImage reports whether the durable transcript records a
+// successful Codex View Image call for this exact path. Codex's imageView result
+// carries only the path (not image bytes), so the media endpoint uses this as a
+// narrow capability: it may serve an otherwise-out-of-worktree image only after
+// the sandboxed tool actually completed viewing that path.
+func (s *Store) HasCompletedViewImage(path string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.events) - 1; i >= 0; i-- {
+		ev := s.events[i]
+		if ev.Type != "tool_completed" {
+			continue
+		}
+		var payload struct {
+			Name   string          `json:"name"`
+			Status string          `json:"status"`
+			Input  json.RawMessage `json:"input"`
+		}
+		if json.Unmarshal(ev.Payload, &payload) != nil || payload.Name != "View Image" || payload.Status != "completed" {
+			continue
+		}
+		var input struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(payload.Input, &input) == nil && input.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
 // SubagentEvents returns every display event belonging to sub-agent subID (its
 // sidechain steps, which carry agent_id == subID in the payload), oldest-first.
 // Stream-only deltas are excluded, mirroring Before. Unlike the main history

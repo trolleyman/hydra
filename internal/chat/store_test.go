@@ -146,6 +146,33 @@ func TestPendingStreamAndHistorySkipDeltas(t *testing.T) {
 	}
 }
 
+func TestHasCompletedViewImageRequiresSuccessfulExactPath(t *testing.T) {
+	s, err := Open(t.TempDir(), "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := ToolStarted{}
+	started.Id, started.Name, started.Input, started.Status = "v1", "View Image", json.RawMessage(`{"path":"/home/user/shot.png"}`), "in_progress"
+	if _, err := s.Append(started); err != nil {
+		t.Fatal(err)
+	}
+	if s.HasCompletedViewImage("/home/user/shot.png") {
+		t.Fatal("an in-progress image view must not authorize host file serving")
+	}
+
+	completed := ToolCompleted{}
+	completed.Id, completed.Name, completed.Input, completed.Status = "v1", "View Image", started.Input, "completed"
+	if _, err := s.Append(completed); err != nil {
+		t.Fatal(err)
+	}
+	if !s.HasCompletedViewImage("/home/user/shot.png") {
+		t.Fatal("completed image view was not found")
+	}
+	if s.HasCompletedViewImage("/home/user/other.png") {
+		t.Fatal("a different path must not inherit authorization")
+	}
+}
+
 func TestEventUsesSequenceAsSoleWireIdentity(t *testing.T) {
 	event := Event{Seq: 7, Type: "notice", Timestamp: time.Unix(123, 0), Payload: json.RawMessage(`{"text":"hi"}`)}
 	raw, err := json.Marshal(event)

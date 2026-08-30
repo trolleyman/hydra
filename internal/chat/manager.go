@@ -836,6 +836,13 @@ func (m *Manager) Before(id, cursor string, limit int) ([]Event, string, bool, e
 	return errtrace.Wrap4(s.Before(cursor, limit))
 }
 
+// HasCompletedViewImage delegates the media endpoint's path authorization to
+// the head's durable transcript. See Store.HasCompletedViewImage.
+func (m *Manager) HasCompletedViewImage(id, path string) bool {
+	s, err := m.store(id)
+	return err == nil && s.HasCompletedViewImage(path)
+}
+
 // SubagentEvents returns sub-agent subID's full (unpaginated) event history for
 // the head id, so a client can render that sub-agent's tab on demand without
 // waiting for the main conversation to page back to where the sub-agent ran.
