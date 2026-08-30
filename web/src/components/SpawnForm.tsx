@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, memo } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
 import { FocusedFilesystemMode, type AgentResponse, type SpawnAgentRequest, type RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
@@ -122,6 +123,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const [coords, setCoords] = useState<{ left: number; top: number } | null>(null)
 
   const place = useCallback(() => {
@@ -132,7 +134,8 @@ const AgentModelPicker = memo(function AgentModelPicker({
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (!ref.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false)
     }
     document.addEventListener('mousedown', handleClick)
     // Keep the menu pinned to the trigger if the page scrolls or resizes.
@@ -172,8 +175,8 @@ const AgentModelPicker = memo(function AgentModelPicker({
   return (
     // `flex` so the Tooltip's inline-flex wrapper is a flex item here and can't
     // add baseline/descender space under the trigger.
-    <div ref={ref} className="relative flex shrink-0">
-      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}`} className="shrink-0">
+    <div ref={ref} className={`relative flex ${size === 'sm' ? 'min-w-0' : 'shrink-0'}`}>
+      <Tooltip content={`Agent: ${active.label}${label ? ` · ${label}` : ''}`} className={size === 'sm' ? 'min-w-0' : 'shrink-0'}>
         <button
           ref={btnRef}
           type="button"
@@ -181,7 +184,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           // Measure the trigger before opening so the fixed-position menu lands in
           // the right spot on its first paint; scroll/resize keep it pinned after.
           onClick={() => { if (!open) place(); setOpen((o) => !o) }}
-          className={`flex items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : 'w-7 justify-center'} ${trigger} ${
+          className={`flex min-w-0 max-w-full items-center gap-0.5 rounded-full border transition-colors cursor-pointer ${label ? 'pr-1.5' : 'w-7 justify-center'} ${trigger} ${
             open
               ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
               : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -190,13 +193,16 @@ const AgentModelPicker = memo(function AgentModelPicker({
           <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
             <AgentTypeIcon name={active.id} className={iconCls} />
           </span>
-          {label && <span className="compact-spawn-model-label max-w-[5rem] truncate text-3xs font-medium text-gray-600 dark:text-gray-300">{label}</span>}
+          {label && <span className="compact-spawn-model-label min-w-[2.5rem] max-w-[5rem] flex-1 truncate text-3xs font-medium text-gray-600 dark:text-gray-300">{label}</span>}
         </button>
       </Tooltip>
-      {open && coords && (
+      {open && coords && createPortal(
         <div
+          ref={menuRef}
+          data-portal-menu
           style={{ position: 'fixed', left: coords.left, top: coords.top }}
-          className="w-44 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
+          onWheel={(e) => e.stopPropagation()}
+          className="z-[100] w-44 max-h-80 overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1"
         >
           {orderedAgents.map((a, i) => (
             <div key={a.id}>
@@ -209,7 +215,8 @@ const AgentModelPicker = memo(function AgentModelPicker({
               {AGENT_MODELS[a.id].map((m) => <Row key={m.id} a={a.id} m={m} />)}
             </div>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
@@ -266,7 +273,7 @@ export const SpawnForm = memo(function SpawnForm({
   // full Hydra exposes it here so both surfaces create identical heads.
   const [focused, setFocused] = useState(() => focusedDefault)
   const [focusedFilesystemMode, setFocusedFilesystemMode] = useState(FocusedFilesystemMode.FocusedFilesystemEdit)
-  const [focusedAllowCommits, setFocusedAllowCommits] = useState(false)
+  const [focusedAllowCommits, setFocusedAllowCommits] = useState(true)
   // Per-head git-isolation override ('' = use the project's policy default, so the
   // request omits git_isolation). See docs/git-isolation.md. Not persisted: a locked
   // .git is a deliberate per-spawn choice, defaulted to the project policy.
@@ -860,7 +867,7 @@ export const SpawnForm = memo(function SpawnForm({
         ...(focusedSession ? {
           focused: true,
           filesystem_mode: focusedFilesystemMode,
-          allow_commits: focusedAllowCommits,
+          allow_commits: focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit && focusedAllowCommits,
         } : {}),
         // Adopting a PR takes precedence over (and ignores) the base branch: the
         // server bases the head on the PR head and its target branch.
@@ -956,14 +963,13 @@ export const SpawnForm = memo(function SpawnForm({
     setGitIsolation('')
     setFocused(focusedDefault)
     setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemEdit)
-    setFocusedAllowCommits(false)
+    setFocusedAllowCommits(true)
   }
 
   // Both spawn layouts collapse the per-spawn options into a single settings cog,
-  // styled like the per-section options popovers elsewhere. Ordered widest-effect
-  // first: the PR to adopt (which decides the base branch for you), the base
-  // branch, the run mode, then git isolation. Git isolation applies to every
-  // head, so the cog always renders.
+  // styled like the per-section options popovers elsewhere. Workspace stays at
+  // the top because changing it replaces the controls below; keeping the switch
+  // first makes that change feel anchored instead of moving the switch itself.
   function renderSpawnSettings() {
     const showChat = agentType === 'claude' || agentType === 'codex'
     const canFocus = showChat
@@ -992,9 +998,8 @@ export const SpawnForm = memo(function SpawnForm({
     return (
       <SettingsPopover
         label="Spawn options"
-        width={260}
+        width={288}
         align="left"
-        fitContent
         active={nonDefaults.length > 0}
         tooltip={nonDefaults.length > 0 ? (
           <span className="block text-left">
@@ -1005,6 +1010,54 @@ export const SpawnForm = memo(function SpawnForm({
         onReset={nonDefaults.length > 0 ? resetSpawnOptions : undefined}
         resetLabel="Reset spawn options to their defaults"
       >
+        {canFocus && (
+          <>
+            <SettingsGroupLabel className="mb-1.5">Workspace</SettingsGroupLabel>
+            {!focusedOnly && (
+              <SegmentedControl<'worktree' | 'project'>
+                label="Workspace"
+                value={focused ? 'project' : 'worktree'}
+                onChange={(value) => {
+                  const projectCheckout = value === 'project'
+                  setFocused(projectCheckout)
+                  if (projectCheckout) { setChatMode(true); setAdopt(null) }
+                }}
+                options={[
+                  { value: 'worktree', label: 'Worktree', icon: <GitBranch className="h-3.5 w-3.5" /> },
+                  { value: 'project', label: 'Project directory', icon: <FolderGit2 className="h-3.5 w-3.5" /> },
+                ]}
+                className="w-full [&>button]:flex-1 [&>button]:justify-center"
+              />
+            )}
+            {focused && (
+              <div className={focusedOnly ? 'space-y-2' : 'mt-2 space-y-2'}>
+                <SegmentedControl
+                  label="Project files"
+                  value={focusedFilesystemMode}
+                  onChange={(filesystemMode) => {
+                    setFocusedFilesystemMode(filesystemMode)
+                    setFocusedAllowCommits(filesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit)
+                  }}
+                  options={[
+                    { value: FocusedFilesystemMode.FocusedFilesystemEdit, label: 'Editable' },
+                    { value: FocusedFilesystemMode.FocusedFilesystemReadonly, label: 'Read-only' },
+                  ]}
+                />
+                <label className={`flex items-center gap-2 text-xs ${focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly ? 'cursor-not-allowed text-gray-400 dark:text-gray-500' : 'cursor-pointer text-gray-600 dark:text-gray-300'}`}>
+                  <input
+                    type="checkbox"
+                    checked={focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit && focusedAllowCommits}
+                    disabled={focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly}
+                    onChange={(e) => setFocusedAllowCommits(e.target.checked)}
+                    className="rounded border-gray-300 disabled:cursor-not-allowed dark:border-gray-600"
+                  />
+                  Allow commits
+                </label>
+              </div>
+            )}
+            {!focused && <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />}
+          </>
+        )}
         {adoptControl && (
           <>
             <SettingsGroupLabel className="mb-1.5">Pull request</SettingsGroupLabel>
@@ -1060,49 +1113,6 @@ export const SpawnForm = memo(function SpawnForm({
             return { ...o, disabled, desc: disabled ? `Not available for ${agentType} (no git tools).` : o.desc }
           })}
         />}
-        {canFocus && (
-          <>
-            {!focused && <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />}
-            <SettingsGroupLabel className="mb-1.5">Workspace</SettingsGroupLabel>
-            {!focusedOnly && (
-              <SegmentedControl<'worktree' | 'project'>
-                label="Workspace"
-                value={focused ? 'project' : 'worktree'}
-                onChange={(value) => {
-                  const projectCheckout = value === 'project'
-                  setFocused(projectCheckout)
-                  if (projectCheckout) { setChatMode(true); setAdopt(null) }
-                }}
-                options={[
-                  { value: 'worktree', label: 'Worktree', icon: <GitBranch className="h-3.5 w-3.5" /> },
-                  { value: 'project', label: 'Project directory', icon: <FolderGit2 className="h-3.5 w-3.5" /> },
-                ]}
-              />
-            )}
-            {focused && (
-              <div className={focusedOnly ? 'space-y-2' : 'mt-2 space-y-2'}>
-                <SegmentedControl
-                  label="Project files"
-                  value={focusedFilesystemMode}
-                  onChange={setFocusedFilesystemMode}
-                  options={[
-                    { value: FocusedFilesystemMode.FocusedFilesystemEdit, label: 'Edit' },
-                    { value: FocusedFilesystemMode.FocusedFilesystemReadonly, label: 'Read-only' },
-                  ]}
-                />
-                <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={focusedAllowCommits}
-                    onChange={(e) => setFocusedAllowCommits(e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600"
-                  />
-                  Allow commits
-                </label>
-              </div>
-            )}
-          </>
-        )}
       </SettingsPopover>
     )
   }
