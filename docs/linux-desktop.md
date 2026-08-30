@@ -345,8 +345,8 @@ loopback Hydra URL without adding desktop runtime dependencies to the normal
 CLI. Daemon ownership and the SQLite agent/history store are now user-global;
 the shell starts or reuses that service and reads its atomically published web
 listener instead of assuming a port. The global database uses each platform's
-native state location and transactionally imports retained project-local legacy
-stores. A desktop client now obtains a one-minute, single-use login credential
+native state location; checkout-local development databases remain independent
+and are never imported into it. A desktop client now obtains a one-minute, single-use login credential
 over the filesystem-protected daemon socket, places it only in the URL fragment,
 and redeems it for the ordinary HttpOnly session cookie before routing starts.
 TCP clients cannot mint credentials and redemption consumes them. A

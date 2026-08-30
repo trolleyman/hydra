@@ -543,16 +543,6 @@ func (s *Server) AddProject(_ context.Context, request api.AddProjectRequestObje
 		}, nil
 	}
 
-	// Import the project-local history before publishing the project through the
-	// manager. Clients can never observe an empty project and create new global
-	// heads ahead of its delayed legacy import.
-	if err := s.DB.ImportLegacyProject(projectPath); err != nil {
-		return api.AddProject500JSONResponse{
-			Code:    500,
-			Error:   api.ErrorResponseErrorInternalError,
-			Details: "failed to import existing Hydra history: " + err.Error(),
-		}, nil
-	}
 	p, err := s.ProjectsManager.AddProject(projectPath)
 	if err != nil {
 		return nil, errtrace.Wrap(err)

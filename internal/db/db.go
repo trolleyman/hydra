@@ -8,7 +8,6 @@ import (
 	"braces.dev/errtrace"
 	"github.com/glebarez/sqlite"
 	"github.com/trolleyman/hydra/internal/paths"
-	"github.com/trolleyman/hydra/internal/projects"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -24,9 +23,8 @@ import (
 // Read methods in queries.go run against `read`; everything that mutates (incl.
 // AutoMigrate and the boot backfills) runs against `db`.
 type Store struct {
-	db                *gorm.DB // writer: a single serialised connection
-	read              *gorm.DB // readers: a pool of query-only connections
-	importLegacyOnAdd bool     // global production DB only; explicit dev DBs stay isolated
+	db   *gorm.DB // writer: a single serialised connection
+	read *gorm.DB // readers: a pool of query-only connections
 }
 
 // maxReadConns caps the read pool. Reads here are sub-millisecond, so a handful
@@ -57,8 +55,8 @@ func pragmas(queryOnly bool) string {
 	return p
 }
 
-// Open opens a legacy project-local database. It remains available for isolated
-// tests and migration; production clients use OpenGlobal.
+// Open opens a project-local database. Development commands use it to keep their
+// head catalogue separate from production; production clients use OpenGlobal.
 func Open(projectRoot string) (*Store, error) {
 	// Move a pre-existing flat .hydra/<dir> layout under .hydra/local first, so the
 	// DB (and worktrees etc.) are found at their new home rather than recreated empty.
@@ -74,10 +72,9 @@ func Open(projectRoot string) (*Store, error) {
 	return errtrace.Wrap2(openPath(paths.GetDBPathFromProjectRoot(projectRoot)))
 }
 
-// OpenGlobal opens Hydra's user-scoped database and imports any legacy
-// project-local databases registered on this machine. legacyProjectRoot is
-// included even if it has not reached projects.json yet.
-func OpenGlobal(legacyProjectRoot string) (*Store, error) {
+// OpenGlobal opens Hydra's user-scoped production database. Project-local
+// development databases are deliberately independent and are never imported.
+func OpenGlobal(_ string) (*Store, error) {
 	dbPath, err := GlobalPath()
 	if err != nil {
 		return nil, errtrace.Wrap(err)
@@ -85,39 +82,7 @@ func OpenGlobal(legacyProjectRoot string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("create global state directory: %w", err))
 	}
-	store, err := openPath(dbPath)
-	if err != nil {
-		return nil, errtrace.Wrap(err)
-	}
-	// An explicit path is used by isolated development commands such as
-	// `mage run`. It is already the caller's chosen database, so importing the
-	// project-local legacy database into itself would be both unnecessary and
-	// unsafe.
-	if os.Getenv(pathEnvironment) != "" {
-		return store, nil
-	}
-	store.importLegacyOnAdd = true
-
-	roots := []string{legacyProjectRoot}
-	if manager, managerErr := projects.NewManager(); managerErr == nil {
-		for _, project := range manager.ListProjects() {
-			roots = append(roots, project.Path)
-		}
-	}
-	for _, root := range roots {
-		if root == "" {
-			continue
-		}
-		if err := paths.MigrateHydraLayout(root); err != nil {
-			_ = store.Close()
-			return nil, errtrace.Wrap(fmt.Errorf("prepare legacy database in %s: %w", root, err))
-		}
-	}
-	if err := store.ImportLegacy(roots); err != nil {
-		_ = store.Close()
-		return nil, errtrace.Wrap(err)
-	}
-	return store, nil
+	return errtrace.Wrap2(openPath(dbPath))
 }
 
 func openPath(dbPath string) (*Store, error) {
@@ -150,7 +115,7 @@ func openPath(dbPath string) (*Store, error) {
 	if err := migrateLegacyReviewColumns(gormDB); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("migrate legacy review columns: %w", err))
 	}
-	if err := gormDB.AutoMigrate(&Agent{}, &LegacyImport{}); err != nil {
+	if err := gormDB.AutoMigrate(&Agent{}); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("auto migrate: %w", err))
 	}
 
