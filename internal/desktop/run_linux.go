@@ -20,6 +20,7 @@ typedef struct {
 	char *project_id;
 	char *agent_id;
 	gboolean active_turn;
+	gboolean image_paste_target;
 	gboolean force_close;
 } HydraWindow;
 
@@ -35,6 +36,10 @@ typedef struct {
 	WebKitWebView *web_view;
 	char *request_id;
 } HydraFolderRequest;
+
+typedef struct {
+	WebKitWebView *web_view;
+} HydraImagePasteRequest;
 
 static void hydra_open_window_at(HydraDesktop *desktop, const char *uri);
 
@@ -89,6 +94,54 @@ static void hydra_dispatch_command(WebKitWebView *web_view, const char *type) {
 		"window.dispatchEvent(new CustomEvent('hydra-desktop-command',{detail:{type:'%s'}}))", type);
 	webkit_web_view_evaluate_javascript(web_view, script, -1, NULL, NULL, NULL, NULL, NULL);
 	g_free(script);
+}
+
+static void hydra_image_paste_ready(GObject *source, GAsyncResult *result, gpointer data) {
+	HydraImagePasteRequest *request = data;
+	GError *error = NULL;
+	GdkTexture *texture = gdk_clipboard_read_texture_finish(GDK_CLIPBOARD(source), result, &error);
+	if (texture != NULL) {
+		GBytes *png = gdk_texture_save_to_png_bytes(texture);
+		gsize size = 0;
+		const guchar *bytes = g_bytes_get_data(png, &size);
+		char *encoded = g_base64_encode(bytes, size);
+		char *script = g_strdup_printf(
+			"window.dispatchEvent(new CustomEvent('hydra-desktop-image-paste',{detail:{base64:'%s',mediaType:'image/png',name:'image.png'}}))",
+			encoded);
+		webkit_web_view_evaluate_javascript(request->web_view, script, -1, NULL, NULL, NULL, NULL, NULL);
+		g_free(script);
+		g_free(encoded);
+		g_bytes_unref(png);
+		g_object_unref(texture);
+	}
+	g_clear_error(&error);
+	g_object_unref(request->web_view);
+	g_free(request);
+}
+
+static gboolean hydra_clipboard_has_image(GdkClipboard *clipboard) {
+	GdkContentFormats *formats = gdk_clipboard_get_formats(clipboard);
+	if (gdk_content_formats_contain_gtype(formats, GDK_TYPE_TEXTURE)) return TRUE;
+	gsize count = 0;
+	const char * const *types = gdk_content_formats_get_mime_types(formats, &count);
+	for (gsize i = 0; i < count; i++) {
+		if (g_str_has_prefix(types[i], "image/")) return TRUE;
+	}
+	return FALSE;
+}
+
+static gboolean hydra_key_pressed(GtkEventControllerKey *controller, guint keyval,
+	guint keycode, GdkModifierType modifiers, gpointer data) {
+	HydraWindow *window = data;
+	if (!window->image_paste_target || gdk_keyval_to_lower(keyval) != GDK_KEY_v ||
+		(modifiers & GDK_CONTROL_MASK) == 0 || (modifiers & (GDK_ALT_MASK | GDK_SHIFT_MASK)) != 0)
+		return FALSE;
+	GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(window->web_view));
+	if (!hydra_clipboard_has_image(clipboard)) return FALSE;
+	HydraImagePasteRequest *request = g_new0(HydraImagePasteRequest, 1);
+	request->web_view = g_object_ref(window->web_view);
+	gdk_clipboard_read_texture_async(clipboard, NULL, hydra_image_paste_ready, request);
+	return TRUE;
 }
 
 static void hydra_folder_response(HydraFolderRequest *request, const char *path, const char *error) {
@@ -215,6 +268,8 @@ static void hydra_script_message(WebKitUserContentManager *manager, JSCValue *va
 		window->project_id = hydra_string_property(value, "projectId");
 		window->agent_id = hydra_string_property(value, "agentId");
 		window->active_turn = hydra_boolean_property(value, "activeTurn");
+	} else if (g_strcmp0(type, "image-paste-target") == 0) {
+		window->image_paste_target = hydra_boolean_property(value, "enabled");
 	} else if (g_strcmp0(type, "close-window") == 0) {
 		window->force_close = hydra_boolean_property(value, "force");
 		gtk_window_close(GTK_WINDOW(window->window));
@@ -267,6 +322,8 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri) {
 	WebKitUserContentManager *manager = webkit_user_content_manager_new();
 	WebKitUserScript *capabilities = webkit_user_script_new(
 		"window.hydraDesktopCapabilities={nativeNotifications:true,nativeFolderPicker:true};"
+		"document.addEventListener('focusin',event=>window.webkit.messageHandlers.hydra.postMessage({type:'image-paste-target',enabled:!!event.target?.hasAttribute?.('data-desktop-image-paste')}),true);"
+		"document.addEventListener('focusout',()=>queueMicrotask(()=>window.webkit.messageHandlers.hydra.postMessage({type:'image-paste-target',enabled:!!document.activeElement?.hasAttribute?.('data-desktop-image-paste')})),true);"
 		"window.addEventListener('DOMContentLoaded',()=>window.webkit.messageHandlers.hydra.postMessage({type:'keep-running',enabled:localStorage.getItem('hydra-desktop-keep-running')!=='0'}))",
 		WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, NULL, NULL);
 	webkit_user_content_manager_add_script(manager, capabilities);
@@ -287,6 +344,10 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri) {
 	g_signal_connect(window, "close-request", G_CALLBACK(hydra_close_request), state);
 	g_signal_connect(window, "destroy", G_CALLBACK(hydra_window_destroy), state);
 	g_signal_connect(web_view, "decide-policy", G_CALLBACK(hydra_decide_policy), desktop);
+	GtkEventController *keys = gtk_event_controller_key_new();
+	gtk_event_controller_set_propagation_phase(keys, GTK_PHASE_CAPTURE);
+	g_signal_connect(keys, "key-pressed", G_CALLBACK(hydra_key_pressed), state);
+	gtk_widget_add_controller(GTK_WIDGET(web_view), keys);
 	gtk_window_set_child(GTK_WINDOW(window), GTK_WIDGET(web_view));
 	webkit_web_view_load_uri(web_view, uri);
 	gtk_window_present(GTK_WINDOW(window));

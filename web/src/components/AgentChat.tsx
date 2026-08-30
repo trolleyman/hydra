@@ -1,4 +1,4 @@
-import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
+import { Fragment, createContext, memo, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -119,6 +119,7 @@ import { CommentLink } from './CommentLink'
 import { CommentIdentityContext } from './commentIdentity'
 import { BranchPill } from './BranchPill'
 import { FilePathLabel } from './FilePathLabel'
+import { onDesktopImagePaste } from '../lib/desktopBridge'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -9298,7 +9299,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
     // The handler deliberately reads live refs; rebinding it on every chat
     // render would interrupt a glide while streamed tokens arrive.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // followBottom keeps a pinned view at the bottom as content arrives. This
@@ -9882,6 +9882,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // message text via "[filename]" markers at the caret.
     if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
   }
+
+  const handleDesktopImagePaste = useEffectEvent((file: File) => {
+    if (document.activeElement !== textareaRef.current) return
+    const names = addFiles([file])
+    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+  })
+  useEffect(() => onDesktopImagePaste(handleDesktopImagePaste), [])
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files) addFiles(Array.from(e.target.files))
@@ -11182,6 +11189,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={onComposerKeyDown}
               onPaste={handlePaste}
+              data-desktop-image-paste
               renderContent={renderComposerBackdrop}
               placeholder={connected ? (review ? 'Ask about the diff...' : 'Write a message...') : 'Connecting...'}
               disabled={!connected}

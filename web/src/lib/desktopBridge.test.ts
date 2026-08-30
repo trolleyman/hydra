@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hasNativeFolderPicker, hasNativeNotifications, onDesktopCommand, openChatWindow, postDesktopMessage } from './desktopBridge'
+import { hasNativeFolderPicker, hasNativeNotifications, onDesktopCommand, onDesktopImagePaste, openChatWindow, postDesktopMessage } from './desktopBridge'
 
 describe('desktopBridge', () => {
   afterEach(() => {
@@ -14,6 +14,20 @@ describe('desktopBridge', () => {
     remove()
     window.dispatchEvent(new CustomEvent('hydra-desktop-command', { detail: { type: 'stop-and-close' } }))
     expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it('turns a native clipboard texture into a browser File', () => {
+    const handler = vi.fn()
+    const remove = onDesktopImagePaste(handler)
+    window.dispatchEvent(new CustomEvent('hydra-desktop-image-paste', {
+      detail: { base64: 'AQID', mediaType: 'image/png', name: 'image.png' },
+    }))
+    const file = handler.mock.calls[0]?.[0] as File
+    expect(file).toBeInstanceOf(File)
+    expect(file.name).toBe('image.png')
+    expect(file.type).toBe('image/png')
+    expect(file.size).toBe(3)
+    remove()
   })
 
   it('reports no native transport in an ordinary browser', () => {
