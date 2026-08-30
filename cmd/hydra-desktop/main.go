@@ -39,8 +39,9 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "__stop-daemon" {
-		if os.Getenv("HYDRA_RUNTIME_NAMESPACE") == "" {
-			fmt.Fprintln(os.Stderr, "hydra-desktop: refusing development daemon cleanup without HYDRA_RUNTIME_NAMESPACE")
+		config := desktop.CurrentLaunchConfig()
+		if os.Getenv("HYDRA_RUNTIME_NAMESPACE") == "" && config.BackendLifetime != "command-owned" {
+			fmt.Fprintln(os.Stderr, "hydra-desktop: refusing daemon cleanup without a command-owned launch")
 			os.Exit(1)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -55,6 +56,8 @@ func main() {
 		return
 	}
 	useProductionEnvironmentByDefault()
+	launchConfig := desktop.CurrentLaunchConfig()
+	fmt.Fprintf(os.Stderr, "hydra desktop launch: %s\n", launchConfig.String())
 
 	url := flag.String("url", "", "local Hydra server URL")
 	project := flag.String("project", "", "project root to select after opening Hydra")

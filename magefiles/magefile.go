@@ -27,6 +27,7 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/desktop"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/service"
@@ -783,6 +784,21 @@ func RunDesktop() error {
 	if err := useProductionDesktopRuntime(); err != nil {
 		return errtrace.Wrap(err)
 	}
+	launchConfig := desktop.LaunchConfig{State: "global", BackendLifetime: "command-owned", Build: "development"}
+	if err := desktop.SetLaunchConfig(launchConfig); err != nil {
+		return errtrace.Wrap(err)
+	}
+	fmt.Printf("%sdesktop launch:%s %s\n", colorDim, colorReset, launchConfig.String())
+	// A prior command-owned desktop daemon would otherwise keep running the old
+	// binary after this rebuild. Replace only desktop-owned production daemons;
+	// foreground and systemd-owned servers remain authoritative.
+	if daemon.IsDesktopManaged("") {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := daemon.StopDaemon(ctx, ""); err != nil {
+			return errtrace.Wrap(fmt.Errorf("stop previous desktop development backend: %w", err))
+		}
+	}
 	if err := BuildDesktop(); err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -802,6 +818,11 @@ func RunDesktopLocal() error {
 	if err := os.Setenv(desktopLocalEnv, "1"); err != nil {
 		return errtrace.Wrap(err)
 	}
+	launchConfig := desktop.LaunchConfig{State: "checkout", BackendLifetime: "command-owned", Build: "development"}
+	if err := desktop.SetLaunchConfig(launchConfig); err != nil {
+		return errtrace.Wrap(err)
+	}
+	fmt.Printf("%sdesktop launch:%s %s\n", colorDim, colorReset, launchConfig.String())
 	if err := BuildDesktop(); err != nil {
 		return errtrace.Wrap(err)
 	}
@@ -812,7 +833,7 @@ func runDesktop(local bool) error {
 	switch runtime.GOOS {
 	case "linux":
 		binary := filepath.Join(".", "dist", "linux", "hydra-desktop")
-		if local {
+		if desktop.CurrentLaunchConfig().BackendLifetime == "command-owned" {
 			return errtrace.Wrap(runDesktopLinuxDevelopment(binary))
 		}
 		return errtrace.Wrap(runV(binary))
