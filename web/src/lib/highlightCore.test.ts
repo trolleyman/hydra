@@ -64,6 +64,37 @@ describe('highlightLines', () => {
       expect(highlightHtml('echo hi', lang), lang).toContain('token')
     }
   })
+
+  it('highlights the comment attached to import C as embedded C', () => {
+    const src = `//go:build linux && cgo
+
+package sample
+
+/*
+#include <stdlib.h>
+static int answer(void) { return 42; }
+*/
+import "C"
+
+func value() int { return int(C.answer()) }`
+    const out = highlightLines(src, 'go')
+    expect(out[0]).toContain('token comment')
+    expect(out[5]).toContain('token macro property')
+    expect(out[6]).toContain('token keyword')
+    expect(out[6]).not.toContain('token comment')
+    expect(out.map(strip)).toEqual(src.split('\n'))
+  })
+
+  it('leaves ordinary Go block comments as comments in a cgo file', () => {
+    const src = `/* ordinary documentation */
+package sample
+/* static int embedded(void) { return 1; } */
+import "C"`
+    const out = highlightLines(src, 'go')
+    expect(out[0]).toContain('token comment')
+    expect(out[0]).not.toContain('token keyword')
+    expect(out[2]).toContain('token keyword')
+  })
 })
 
 // No Prism grammar we can find derails, so the recovery path is driven here with
