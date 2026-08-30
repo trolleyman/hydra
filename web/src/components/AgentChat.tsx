@@ -95,7 +95,6 @@ import { useImageCommentStore } from '../stores/imageCommentStore'
 // highlighted by, item 3) now lives in lib/fileKind, beside the file-type
 // classifier, so the lightbox's text viewer highlights by the same table.
 import { langFromPath } from '../lib/fileKind'
-import { getFileIcon } from '../lib/fileIcons'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
@@ -119,6 +118,7 @@ import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommen
 import { CommentLink } from './CommentLink'
 import { CommentIdentityContext } from './commentIdentity'
 import { BranchPill } from './BranchPill'
+import { FilePathLabel } from './FilePathLabel'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -2498,10 +2498,6 @@ function ReviewCommentCard({
   // A pin names a picture where a line comment names a path, so both take the
   // same file line - icon, name, and the location in mono where ":12" sits.
   const anchorPath = path || image?.file || ''
-  const slash = anchorPath ? anchorPath.lastIndexOf('/') : -1
-  const directory = slash >= 0 ? anchorPath.slice(0, slash + 1) : ''
-  const fileName = anchorPath ? (slash >= 0 ? anchorPath.slice(slash + 1) : anchorPath) : ''
-  const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName || 'comment.txt')
   const [fromLabel, toLabel] = (diff ?? '').split(' -> ')
   const meta = (author && author !== 'user') || replyTo || resolved || diff
   return (
@@ -2510,11 +2506,7 @@ function ReviewCommentCard({
         <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
           {anchorPath ? (
             <>
-              <FileIcon className={`h-3.5 w-3.5 shrink-0 ${fileIconClass}`} />
-              <span className="min-w-0 truncate" title={anchorPath}>
-                {directory && <span className="text-stone-400 dark:text-stone-500">{directory}</span>}
-                <span className="text-stone-700 dark:text-stone-200">{fileName}</span>
-              </span>
+              <FilePathLabel path={anchorPath} className="flex-1" />
               {image ? (
                 <span className="shrink-0 font-mono text-stone-400 dark:text-stone-500">@ {image.position}</span>
               ) : line ? (
@@ -2610,19 +2602,11 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
         const diff = typeof change.diff === 'string' ? change.diff : ''
         const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
-        const slash = path.lastIndexOf('/')
-        const directory = slash >= 0 ? path.slice(0, slash + 1) : ''
-        const fileName = slash >= 0 ? path.slice(slash + 1) : path
-        const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName)
         return (
           <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
             {showFileHeaders && (
               <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
-                <FileIcon className={`h-3.5 w-3.5 shrink-0 ${fileIconClass}`} />
-                <span className="min-w-0 truncate font-medium">
-                  {directory && <span className="text-stone-400 dark:text-stone-500">{directory}</span>}
-                  <span className="text-stone-700 dark:text-stone-200">{fileName}</span>
-                </span>
+                <FilePathLabel path={path} className="flex-1 font-medium" />
                 <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
               </div>
             )}
@@ -3286,13 +3270,17 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
   const note = 'text-2xs text-stone-500 dark:text-stone-400'
   const sha = (value: string) => <span className="font-mono text-2xs text-stone-600 dark:text-stone-300">{value}</span>
 
-  // A "- " bulleted path row. LowlitPath is a FRAGMENT of two spans (dir + name),
-  // so it must sit inside its own element: dropping it straight into a flex row
-  // makes the gap apply BETWEEN the directory and the filename.
+  // Bullets are reserved for non-file sequences such as rebase steps. File
+  // lists use FilePathLabel's shared icon + lowlit-directory treatment.
   const bullet = (key: string, body: ReactNode) => (
     <div key={key} className="flex items-baseline gap-1.5">
       <span className="select-none text-stone-400 dark:text-stone-500">-</span>
       {body}
+    </div>
+  )
+  const fileRow = (key: string, filePath: string, trailing?: ReactNode) => (
+    <div key={key} className="flex min-w-0 items-center text-2xs">
+      <FilePathLabel path={filePath} trailing={trailing} />
     </div>
   )
 
@@ -3318,7 +3306,7 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
           <Markdown text={str('message')} hardBreaks={false} />
         </div>
         {paths.length > 0 && (
-          <div className="space-y-0.5">{paths.map((p) => bullet(p, <span><LowlitPath path={path(p)} /></span>))}</div>
+          <div className="space-y-0.5">{paths.map((p) => fileRow(p, path(p)))}</div>
         )}
       </div>
     )
@@ -3330,17 +3318,13 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
     const specs = gitAddSpecs(input)
     return (
       <div className="space-y-0.5">
-        {specs.map((s) =>
-          bullet(
-            s.path,
-            <span>
-              <LowlitPath path={path(s.path)} />
-              {s.lines.length > 0 && (
-                <span className="ml-1.5 font-mono text-3xs text-stone-500 dark:text-stone-400">lines {s.lines.join(', ')}</span>
-              )}
-            </span>,
-          ),
-        )}
+        {specs.map((s) => fileRow(
+          s.path,
+          path(s.path),
+          s.lines.length > 0
+            ? <span className="shrink-0 font-mono text-3xs text-stone-500 dark:text-stone-400">lines {s.lines.join(', ')}</span>
+            : null,
+        ))}
       </div>
     )
   }
@@ -3351,7 +3335,7 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
       return (
         <div className="space-y-1.5">
           <div className={note}>Unstaged these paths; the branch did not move</div>
-          <div className="space-y-0.5">{unstage.map((p) => bullet(p, <span><LowlitPath path={path(p)} /></span>))}</div>
+          <div className="space-y-0.5">{unstage.map((p) => fileRow(p, path(p)))}</div>
         </div>
       )
     }
