@@ -10843,7 +10843,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     while (ci < chips.length) out.push(chips[ci++])
     return out
   }, [visibleItems, commitChips, replayDone, allHistoryLoaded])
-  const conversationResumedAt = useMemo(() => {
+  const conversationBeganAt = useMemo(() => {
     if (!allHistoryLoaded) return undefined
     for (const item of visibleItems) {
       const timestamp = itemTsRef.current.get(item.id)
@@ -11017,7 +11017,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             </div>
           )}
           {replayDone && allHistoryLoaded && items.length > 0 && (
-            <ResumeDivider resumedAt={conversationResumedAt} ariaLabel="Conversation resumed" />
+            <ResumeDivider
+              resumedAt={conversationBeganAt}
+              label="Conversation began"
+              ariaLabel="Beginning of conversation"
+            />
           )}
           <SettledMessages
             items={mergedItems}

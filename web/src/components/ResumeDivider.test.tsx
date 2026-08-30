@@ -22,4 +22,19 @@ describe('ResumeDivider', () => {
     act(() => vi.advanceTimersByTime(600))
     expect(document.body).toHaveTextContent(new Date(resumedAt).toLocaleString())
   })
+
+  it('can identify the beginning of the conversation without calling it a resume', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-30T12:00:10Z'))
+    const beganAt = Date.parse('2026-08-30T12:00:00Z')
+    render(
+      <ResumeDivider
+        resumedAt={beganAt}
+        label="Conversation began"
+        ariaLabel="Beginning of conversation"
+      />,
+    )
+
+    expect(screen.getByLabelText('Beginning of conversation')).toHaveTextContent('Conversation began 10s ago')
+  })
 })
