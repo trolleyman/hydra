@@ -39,6 +39,16 @@ describe('UncommittedChip', () => {
     expect(screen.getByTitle('.hydra/config.toml')).toHaveTextContent('.hydra/config.toml')
     expect(screen.getByLabelText('modified')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Commit message')).toHaveValue('Update .hydra/config.toml')
+
+    const row = screen.getByTitle('.hydra/config.toml').closest('li')
+    expect(row).not.toBeNull()
+    const icons = row?.querySelectorAll('svg') ?? []
+    expect(icons).toHaveLength(2)
+    expect(row?.children[0]).toBe(icons[0])
+    expect(row?.children[1]).toBe(screen.getByTitle('.hydra/config.toml'))
+    expect(row?.children[2]).toBe(icons[1])
+    expect(icons[0]).toHaveClass('text-gray-500')
+    expect(icons[1]).toHaveAttribute('aria-label', 'modified')
   })
 
   it('notes paths beyond the display cap and counts only the shown ones', () => {
