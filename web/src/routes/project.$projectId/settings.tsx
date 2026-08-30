@@ -88,6 +88,26 @@ function ProjectSettingsPage() {
     fetchConfig()
   }, [projectId, scope])
 
+  // Settings links can target controls that mount only after the config fetch.
+  // Browsers try the fragment before that async content exists, so retry once
+  // the project tab has rendered and also honour later hash-only navigation.
+  useEffect(() => {
+    if (loading || tab !== 'project' || scope !== 'project') return
+    let frame = 0
+    const scrollToFragment = () => {
+      if (window.location.hash !== '#test-notifications') return
+      frame = window.requestAnimationFrame(() => {
+        document.getElementById('test-notifications')?.scrollIntoView({ block: 'start' })
+      })
+    }
+    scrollToFragment()
+    window.addEventListener('hashchange', scrollToFragment)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('hashchange', scrollToFragment)
+    }
+  }, [loading, tab, scope])
+
   async function handleSave() {
     if (!config) return
     setSaving(true)
