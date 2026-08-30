@@ -55,7 +55,7 @@ import { diskOutputSpans } from '../lib/diskOutput'
 import { searchSummarySpans } from '../lib/searchSummary'
 import { blamePrefixSpans, gitOutputSpans, parseBlameLine } from '../lib/gitOutput'
 import type { OutputSpan } from '../lib/outputSpan'
-import { parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
+import { consecutiveMatchLines, parseMatchLines, parseScriptSteps, splitScriptOutput, type MatchLine, type ScriptSection } from '../lib/shellSections'
 import { trackShellCwds, type ShellStep } from '../lib/shellCwd'
 import { formatBytes } from '../lib/formatBytes'
 import { highlightHtml, highlightLines, splitHighlightedLines } from '../lib/highlightCore'
@@ -82,6 +82,7 @@ import { Tooltip } from './Tooltip'
 import { CommitCard, CommitStats, COMMIT_CARD_WIDTH } from './CommitCard'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
+import { RelativeTime } from './LiveTime'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
@@ -301,7 +302,7 @@ type ChatItem =
   // conversation because the break is otherwise invisible while mattering to
   // everything that outlived a turn: the Bash tool's shell is a new one, back at
   // the worktree (see shellCwdsFor).
-  | { kind: 'resumed'; id: number; noEntrance?: boolean }
+  | { kind: 'resumed'; id: number; resumedAt?: number; noEntrance?: boolean }
   // noEntrance suppresses the fade/slide entrance when this settled block simply
   // replaces the in-flight streamed copy already on screen - it was visible, so
   // re-animating it as it settles reads as a flicker (item 56), same rationale
@@ -2763,10 +2764,9 @@ interface ScriptOutputRow {
 
 // scriptMatchRows renders a search's output: the file line numbers grep printed
 // in the gutter, the rest highlighted as the file it came from. Consecutive
-// lines from the SAME file are highlighted together - a search prints
-// non-contiguous lines, so this is as much context as the highlighter can
-// honestly be given, and it keeps a multi-file search from colouring one file's
-// lines by another's language.
+// source lines from the same file are highlighted together; a gap starts a fresh
+// run so an unterminated construct in omitted source cannot leak into the next
+// match. This also keeps one file from colouring another's lines.
 function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): ScriptOutputRow[] {
   // What the search named, as a language: one file gives its own, and several
   // give theirs only when they agree (two searches of two .go files print no
@@ -2778,6 +2778,7 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   const rows: ScriptOutputRow[] = []
   let run: MatchLine[] = []
   let runLang = ''
+  let previous: MatchLine | null = null
   // The file every line of the section came from, when the search named exactly
   // one - a line's own `path:` prefix says it otherwise, and is shown.
   const onlyPath = section.match.paths.length === 1 ? section.match.paths[0] : ''
@@ -2796,13 +2797,15 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   for (const line of parseMatchLines(section.lines, section.match.paths, section.match.numbered)) {
     if (line.separator) {
       flush()
+      previous = null
       rows.push({ num: '', html: '', tone: 'plain' })
       continue
     }
     const lang = line.path ? langFromPath(line.path) : only
-    if (lang !== runLang) flush()
+    if (lang !== runLang || (previous && !consecutiveMatchLines(previous, line))) flush()
     runLang = lang
     run.push(line)
+    previous = line
   }
   flush()
   return rows
@@ -2880,7 +2883,7 @@ function scriptBannerRows(section: Extract<ScriptSection, { kind: 'banners' }>):
 // by its own extension and numbered by its own line numbers, the script's `echo`
 // separators coloured as the strings they are, and anything unattributed left as
 // the plain terminal text it was.
-function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
+export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
   const rows: ScriptOutputRow[] = []
   for (const section of sections) {
     if (section.kind === 'matches') {
@@ -6231,7 +6234,7 @@ export function reduceHistoryEvents(events: ProviderEvent[], allocId: () => numb
     }
     if (ev.type === 'hydra_session_resumed') {
       flushHistFooter()
-      push({ kind: 'resumed', noEntrance: true })
+      push({ kind: 'resumed', resumedAt: evTs ?? undefined, noEntrance: true })
       continue
     }
     if (ev.type === 'hydra_shell_cwd') {
@@ -8245,7 +8248,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           // partial reply rather than above it.
           settleLiveStream()
           endPendingTools()
-          push({ kind: 'resumed', noEntrance: replaying || undefined })
+          push({ kind: 'resumed', resumedAt: evTs ?? undefined, noEntrance: replaying || undefined })
           return
         }
         case 'hydra_subagent_completed': {
@@ -10457,7 +10460,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return (
           <div className="flex items-center gap-2.5 select-none" aria-label="Agent resumed">
             <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
-            <span className="optical-center text-2xs text-stone-400 dark:text-stone-500">Resumed</span>
+            <span
+              className="optical-center text-2xs text-stone-400 dark:text-stone-500"
+              title={item.resumedAt == null ? undefined : new Date(item.resumedAt).toLocaleString()}
+            >
+              Resumed{item.resumedAt == null ? null : <> <RelativeTime createdAt={item.resumedAt / 1000} /></>}
+            </span>
             <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
           </div>
         )

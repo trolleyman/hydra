@@ -179,12 +179,10 @@ The agent/history SQLite database is user-global on every platform: under the
 Linux state directory above, `~/Library/Application Support/Hydra` on macOS,
 and `%LOCALAPPDATA%\Hydra` on Windows. CLI, browser-server, and desktop builds
 open the same store. Project-local `.hydra/local` remains the home of worktrees,
-caches, artifacts, tests, logs, and per-head sidecars.
-
-On first open, Hydra transactionally imports agent rows from every registered
-legacy project database. Conflicting agent IDs with different data abort the
-whole import, completed source paths are recorded for idempotency, and legacy
-database files are never changed or deleted automatically.
+caches, artifacts, tests, logs, and per-head sidecars. Checkout development
+runtimes keep those generated files under a namespace-specific
+`.hydra/local/instances/` subtree; their databases remain independent and are
+never imported into production state.
 
 ### Provider and tool discovery
 

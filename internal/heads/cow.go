@@ -14,7 +14,7 @@ import (
 // are cleaned up with the head. The .hydra/local/cow dir self-ignores via a "*"
 // .gitignore (see buildCowMounts) so these layers never surface in git status.
 func cowBaseDir(projectRoot, id string) string {
-	return filepath.Join(paths.GetHydraLocalDirFromProjectRoot(projectRoot), "cow", id)
+	return filepath.Join(paths.GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "cow", id)
 }
 
 // buildCowMounts resolves a head's configured cow_paths into sandbox.CowMount

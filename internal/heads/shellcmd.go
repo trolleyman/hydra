@@ -191,7 +191,7 @@ func buildShellCommandSpec(projectRoot, worktree, command string) (*sandbox.Spec
 
 	var cowLayerDir string
 	if len(cow) > 0 {
-		cowDir := filepath.Join(paths.GetHydraLocalDirFromProjectRoot(projectRoot), "cow")
+		cowDir := filepath.Join(paths.GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "cow")
 		_ = os.MkdirAll(cowDir, 0o755)
 		if base, err := os.MkdirTemp(cowDir, "shellcmd-"); err == nil {
 			cowLayerDir = base

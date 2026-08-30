@@ -1440,6 +1440,63 @@ function languageOnlyDistribution(producers: ScriptStep[], slice: string[]): Dis
   }
 }
 
+// verifiedSearchBeforeView finds the boundary in the common inspection shape
+//
+//   rg -n pattern file
+//   sed -n '1,240p' file
+//
+// even when an open-ended command (usually `git status`) ran before both. The
+// search's numbered rows immediately precede the read, and the read itself lets
+// us verify them: `148:text` must equal line 148 at the corresponding offset in
+// the candidate sed output. That is evidence for the boundary rather than a
+// guess based only on a line looking like grep output.
+function verifiedSearchBeforeView(
+  producers: ScriptStep[],
+  slice: string[],
+  failed: ReadonlySet<ScriptStep>,
+): Distribution | null {
+  if (producers.length < 2) return null
+  const viewAt = producers.length - 1
+  const searchAt = viewAt - 1
+  const search = producers[searchAt]
+  const view = producers[viewAt]
+  if (search.kind !== 'matches' || view.kind !== 'view' || !search.match.numbered || view.view.start == null) return null
+  if (search.match.paths.length !== 1 || search.match.paths[0] !== view.view.path) return null
+
+  const limit = stepLimit(view, failed)
+  for (let boundary = Math.max(1, slice.length - (limit ?? slice.length)); boundary < slice.length; boundary++) {
+    const tail = slice.slice(boundary)
+    let runStart = boundary
+    while (runStart > 0) {
+      const parsed: MatchLine | undefined = parseMatchLines(
+        [slice[runStart - 1]], search.match.paths, search.match.numbered,
+      )[0]
+      if (!parsed || parsed.separator || !parsed.num || (parsed.path && parsed.path !== view.view.path)) break
+      const offset = Number(parsed.num) - view.view.start
+      if (offset < 0 || offset >= tail.length || tail[offset] !== parsed.text) break
+      runStart--
+    }
+    if (runStart === boundary) continue
+
+    const before = distribute(producers.slice(0, searchAt), slice.slice(0, runStart), failed)
+    if (searchAt > 0 && !before) continue
+    const parts = producers.map(() => [] as string[])
+    const pinned = producers.map(() => false)
+    const plain = new Set<number>()
+    const languageOnly = new Set<number>()
+    before?.parts.forEach((part, i) => { parts[i] = part })
+    before?.pinned.forEach((value, i) => { pinned[i] = value })
+    before?.plain.forEach((i) => plain.add(i))
+    before?.languageOnly.forEach((i) => languageOnly.add(i))
+    parts[searchAt] = slice.slice(runStart, boundary)
+    parts[viewAt] = tail
+    pinned[searchAt] = true
+    pinned[viewAt] = true
+    return { parts, pinned, plain, languageOnly }
+  }
+  return null
+}
+
 // distribute hands a stretch of output to the producers that ran inside it.
 // Null when the boundaries between them are not knowable.
 //
@@ -1457,6 +1514,9 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   if (producers.length === 0) return null
   if (producers.length === 1) return { parts: [slice], pinned: [true], plain: new Set(), languageOnly: new Set() }
 
+  const verified = verifiedSearchBeforeView(producers, slice, failed)
+  if (verified) return verified
+
   // Peel a search-shaped suffix before using any file-view limit. A sed range is
   // an UPPER bound, not an exact count: a range past the end of the file emits
   // fewer lines, and greedily taking the maximum made a preceding sed claim the
@@ -1464,6 +1524,21 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   // boundary the output really does carry is kept even when everything before it
   // has to stay one plain run.
   const suffix = searchExtent(producers[producers.length - 1], slice, 0, slice.length, 'end')
+  // When every row carries its OWN path, the whole stretch is safely a search
+  // result even if an intervening command printed nothing. Which search printed
+  // which row is immaterial: the prefix names the file that supplies both the
+  // gutter and the language. Do not extend this to bare `12:text` rows - there
+  // the script's operand is the only thing naming the file, so handing an
+  // earlier search to the last one could colour it as the wrong language.
+  if (suffix === slice.length && slice.every((line) => line.trim() === '--' || PATH_NUMBERED.test(line))) {
+    const last = producers.length - 1
+    return {
+      parts: producers.map((_, i) => i === last ? slice : []),
+      pinned: producers.map((_, i) => i === last),
+      plain: new Set(),
+      languageOnly: new Set(),
+    }
+  }
   if (suffix != null && suffix < slice.length) {
     const last = producers.length - 1
     const before = distribute(producers.slice(0, last), slice.slice(0, -suffix), failed)
@@ -1775,6 +1850,18 @@ export interface MatchLine {
   text: string
   // A `--` between context groups: not a line of any file.
   separator: boolean
+}
+
+// Whether two search rows are adjacent source lines and may safely be handed to
+// a stateful syntax highlighter as one run. Search results are usually sparse:
+// treating line 3 and line 18 of a Markdown file as neighbours lets an opening
+// `**` whose close was on omitted line 4 leak into line 18. With no numbers the
+// gap is unknowable, so retain the existing grouping; the highlighter then has
+// no more reliable boundary to follow.
+export function consecutiveMatchLines(prev: MatchLine, next: MatchLine): boolean {
+  if (prev.path !== next.path) return false
+  if (!prev.num || !next.num) return true
+  return Number(next.num) === Number(prev.num) + 1
 }
 
 // grep writes `NNN:` before a matched line and `NNN-` before a context line
