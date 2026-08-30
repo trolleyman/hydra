@@ -17,6 +17,7 @@ afterEach(() => {
   if (realClipboard) Object.defineProperty(globalThis.navigator, 'clipboard', realClipboard)
   else delete (globalThis.navigator as { clipboard?: unknown }).clipboard
   if (realUserAgent) Object.defineProperty(globalThis.navigator, 'userAgent', realUserAgent)
+  else delete (globalThis.navigator as { userAgent?: unknown }).userAgent
   vi.restoreAllMocks()
   delete (window as { webkit?: unknown }).webkit
 })
