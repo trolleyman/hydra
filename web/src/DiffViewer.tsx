@@ -1648,11 +1648,32 @@ function GapCount({ hidden, onClick }: { hidden: number; onClick: () => void }) 
 // GapExpander sits between two changes. Both ⌄ (reveal more after the upper
 // change) and ⌃ (reveal more before the lower change) live together on the left;
 // the "··· N lines ···" label reveals the whole gap.
+function AnimatedExpanderRow({ closing, children }: { closing?: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !closing || typeof el.animate !== 'function') return
+    const animation = el.animate(
+      [
+        { height: `${el.getBoundingClientRect().height}px`, opacity: 1 },
+        { height: '0px', opacity: 0 },
+      ],
+      { duration: CONTEXT_REVEAL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'forwards' },
+    )
+    return () => animation.cancel()
+  }, [closing])
+  return (
+    <div ref={ref} className={`overflow-hidden ${closing ? 'pointer-events-none' : ''}`}>
+      <div className={EXPANDER_ROW}>{children}</div>
+    </div>
+  )
+}
+
 function GapExpander({ seg, label, onDown, onUp, onAll }: {
   seg: RenderSeg; label: ContextLabel | undefined; onDown: () => void; onUp: () => void; onAll: () => void
 }) {
   return (
-    <div className={EXPANDER_ROW}>
+    <AnimatedExpanderRow closing={seg.closing}>
       <div className={EXPANDER_BTNS}>
         <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
           <button onClick={onDown} className={EXPANDER_BTN}><ChevronDown className="w-3 h-3" /></button>
@@ -1663,7 +1684,7 @@ function GapExpander({ seg, label, onDown, onUp, onAll }: {
       </div>
       <GapCount hidden={seg.hidden!} onClick={onAll} />
       <HunkContextLabel label={label} />
-    </div>
+    </AnimatedExpanderRow>
   )
 }
 
@@ -1675,7 +1696,7 @@ function EdgeExpander({ seg, label, onStep, onAll }: {
 }) {
   const up = seg.kind === 'topedge'
   return (
-    <div className={EXPANDER_ROW}>
+    <AnimatedExpanderRow closing={seg.closing}>
       <div className={EXPANDER_BTNS}>
         <Tooltip side="top" content={`Expand ${up ? 'up' : 'down'} ${EXPAND_STEP} lines`}>
           <button onClick={onStep} className={EXPANDER_BTN}>
@@ -1685,7 +1706,7 @@ function EdgeExpander({ seg, label, onStep, onAll }: {
       </div>
       <GapCount hidden={seg.hidden!} onClick={onAll} />
       <HunkContextLabel label={label} />
-    </div>
+    </AnimatedExpanderRow>
   )
 }
 
@@ -1705,6 +1726,68 @@ export const FILE_STICKY_TOP = 'calc(var(--sticky-changes-h, 45px) - 16px + var(
 // deferred-unmount timer matches the CSS duration (mirrors CollapsibleCard's
 // COLLAPSE_MS). See FileDiff's `bodyMounted`.
 const FILE_COLLAPSE_MS = 200
+
+// A context reveal grows one existing unchanged run. Animate that run's measured
+// height rather than the whole file body: the expander and nearby change move
+// smoothly, while unrelated lines elsewhere in a long file remain still. The
+// Web Animations API can tween from the previous rendered height to the new
+// content's exact height (including wrapped code rows), and leaves no inline
+// height behind once it finishes. Reduced-motion users get the immediate update.
+const CONTEXT_REVEAL_MS = 180
+
+function AnimatedContextRun({ lineCount, growFrom, children }: {
+  lineCount: number
+  growFrom: 'top' | 'bottom'
+  children: ReactNode
+}) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const previous = useRef<{ count: number; height: number } | null>(null)
+  const animation = useRef<Animation | null>(null)
+  const contentAnimation = useRef<Animation | null>(null)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const nextHeight = el.scrollHeight
+    const prev = previous.current
+    previous.current = { count: lineCount, height: nextHeight }
+    animation.current?.cancel()
+    contentAnimation.current?.cancel()
+    animation.current = null
+    contentAnimation.current = null
+    if (!prev || lineCount <= prev.count || nextHeight <= prev.height) return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || typeof el.animate !== 'function') return
+
+    animation.current = el.animate(
+      [
+        { height: `${prev.height}px` },
+        { height: `${nextHeight}px` },
+      ],
+      { duration: CONTEXT_REVEAL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+    )
+    // A run growing from its bottom prepends earlier lines. Height clipping is
+    // top-anchored by default, which briefly exposes the FIRST new line (90)
+    // instead of the one adjacent to the existing context (99). Keep the
+    // content's bottom edge aligned with the wrapper while it grows so the
+    // sequence reveals continuously: 99, then 98, and so on.
+    if (growFrom === 'bottom' && contentRef.current) {
+      contentAnimation.current = contentRef.current.animate(
+        [
+          { transform: `translateY(${prev.height - nextHeight}px)` },
+          { transform: 'translateY(0)' },
+        ],
+        { duration: CONTEXT_REVEAL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+      )
+    }
+    return () => {
+      animation.current?.cancel()
+      contentAnimation.current?.cancel()
+    }
+  }, [lineCount, growFrom])
+
+  return <div ref={ref} className="overflow-hidden"><div ref={contentRef}>{children}</div></div>
+}
 
 // The file's first line, when the diff actually shows it - getLanguage falls back
 // to a `#!` shebang for paths with no telling extension (`scripts/deploy`). Either
@@ -2111,12 +2194,45 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segments, hunksSig, lang, highlightedOld, highlightedNew])
 
-  const setRegion = useCallback((id: string, patch: { top?: number; bot?: number }) => {
+  const closingTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  useEffect(() => () => {
+    closingTimers.current.forEach((timer) => clearTimeout(timer))
+    closingTimers.current.clear()
+  }, [])
+  const setRegion = useCallback((id: string, patch: { top?: number; bot?: number }, seg?: RenderSeg) => {
+    const nextTop = patch.top ?? seg?.top ?? 0
+    const nextBot = patch.bot ?? seg?.bot ?? 0
+    const closing = !!seg?.length && seg.length - nextTop - nextBot <= MIN_COLLAPSE_GAP
+      && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     setReveal((prev) => {
       const next = new Map(prev)
-      next.set(id, { ...(next.get(id) ?? {}), ...patch })
+      next.set(id, {
+        ...(next.get(id) ?? {}),
+        ...patch,
+        closingHidden: closing ? seg?.hidden : undefined,
+        closingSide: closing ? (patch.top != null ? 'top' : 'bot') : undefined,
+        settled: false,
+      })
       return next
     })
+    const oldTimer = closingTimers.current.get(id)
+    if (oldTimer) clearTimeout(oldTimer)
+    if (closing) {
+      closingTimers.current.set(id, setTimeout(() => {
+        setReveal((prev) => {
+          const next = new Map(prev)
+          const value = next.get(id)
+          if (value) next.set(id, {
+            ...value,
+            closingHidden: undefined,
+            closingSide: undefined,
+            settled: true,
+          })
+          return next
+        })
+        closingTimers.current.delete(id)
+      }, CONTEXT_REVEAL_MS))
+    }
   }, [])
 
   // Revealing context never touches the scroll. Both directions insert lines on
@@ -2185,15 +2301,18 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   const addToReviewForHunk = onAddToReview ? onAddToReviewForFile : undefined
 
   const renderLines = (lines: DiffLine[], key: string) => (
-    sideBySide
-      ? <SideBySideHunk key={key} hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+    <AnimatedContextRun key={key} lineCount={lines.length} growFrom={key.startsWith('cb') ? 'bottom' : 'top'}>
+      {sideBySide
+      ? <SideBySideHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
-      : <UnifiedHunk key={key} hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
+      : <UnifiedHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
         onComment={onCommentForFile} onAddToReview={addToReviewForHunk} onEditComment={onEditComment} onRemoveComment={onRemoveComment} onResolveComment={onResolveComment} projectId={projectId} you={you}
         lineDraftApi={lineDraftApi} readOnly={readOnly} selection={lineSel} onSelectLine={selectLine} />
+      }
+    </AnimatedContextRun>
   )
 
   // Collapsing a file whose top has scrolled above the viewport would leave
@@ -2362,18 +2481,18 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
                 if (seg.kind === 'lines') return renderLines(seg.lines!, seg.key)
                 if (seg.kind === 'gap') return (
                   <GapExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
-                    onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP })}
-                    onUp={() => setRegion(seg.regionId!, { bot: seg.bot! + EXPAND_STEP })}
-                    onAll={() => setRegion(seg.regionId!, { top: seg.length! })} />
+                    onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP }, seg)}
+                    onUp={() => setRegion(seg.regionId!, { bot: seg.bot! + EXPAND_STEP }, seg)}
+                    onAll={() => setRegion(seg.regionId!, { top: seg.length! }, seg)} />
                 )
                 // topedge reveals upward (toward line 1), botedge downward; both
                 // grow away from the expander row without moving the scroll.
                 return (
                   <EdgeExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
                     onStep={() => setRegion(seg.regionId!, seg.kind === 'topedge'
-                      ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP })}
+                      ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP }, seg)}
                     onAll={() => setRegion(seg.regionId!, seg.kind === 'topedge'
-                      ? { bot: seg.length! } : { top: seg.length! })} />
+                      ? { bot: seg.length! } : { top: seg.length! }, seg)} />
                 )
               })}
             </div>
