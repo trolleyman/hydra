@@ -23,7 +23,7 @@ import { formatLineHash } from '../lib/lineRange'
 import { buildRepoSplat } from '../lib/repoSplat'
 import { buildFixTestMessage } from '../lib/testCases'
 import { useDialogStore } from '../stores/dialogStore'
-import { useAgentStore } from '../stores/agentStore'
+import { selectLiveAgent, useAgentStore } from '../stores/agentStore'
 import { useToastStore } from '../stores/toastStore'
 import { agentTransitionToast } from '../lib/agentToast'
 import { TILE_TONE, TILE_BAR } from '../lib/tileTone'
@@ -273,7 +273,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
   // The head's own branch, for a "Spawn agent" that starts from the code the
   // test is failing in. A selector, not a whole-store subscribe: this panel
   // re-renders on every streamed test frame as it is.
-  const branchName = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.branch_name ?? '')
+  const branchName = useAgentStore((s) => selectLiveAgent(s, agentId)?.branch_name ?? '')
 
   // Every parsed case across all runners: drives the status dropdown's counts
   // and the scope-axis availability the cog needs.

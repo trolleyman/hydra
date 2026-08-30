@@ -7,7 +7,7 @@ import { fetchBranches, peekBranches } from '../lib/branchCache'
 import { api } from '../stores/apiClient'
 import { apiErrorBody, formatError } from '../api/format_error'
 import { ApiError, ErrorResponse } from '../api'
-import type { RepositoryFileResponse, RepositoryBranch, DiffResponse } from '../api'
+import type { RepositoryFileResponse, RepositoryBranch, DiffFile, DiffResponse } from '../api'
 import { StorageKeys, readLocal, writeLocal } from '../lib/storage'
 import {
   ChevronRight, ChevronLeft, File as FileIcon, Folder, FolderOpen, FileText,
@@ -42,6 +42,9 @@ import {
   parseDiffLineRange, formatDiffLineHash,
 } from '../lib/lineRange'
 import type { RepositorySearch } from '../routes/project.$projectId/repository.$'
+import { createArrayIndex } from '../lib/arrayIndex'
+
+const indexDiffFiles = createArrayIndex<DiffFile, string>((file) => file.path)
 
 // ── File tree model ────────────────────────────────────────────────────────────
 
@@ -74,16 +77,25 @@ function artifactScriptOf(path: string | null): string | null {
 // directories-first, alphabetically-sorted tree (GitHub/GitLab style).
 function buildTree(files: string[]): TreeNode[] {
   const root: TreeNode = { name: '', path: '', type: 'dir', children: [] }
+  const childrenByKey = new WeakMap<TreeNode, Map<string, TreeNode>>()
   for (const file of files) {
     const parts = file.split('/')
     let node = root
     parts.forEach((part, i) => {
       const isFile = i === parts.length - 1
       const path = parts.slice(0, i + 1).join('/')
-      let child = node.children.find((c) => c.name === part && c.type === (isFile ? 'file' : 'dir'))
+      let children = childrenByKey.get(node)
+      if (!children) {
+        children = new Map()
+        childrenByKey.set(node, children)
+      }
+      const type = isFile ? 'file' : 'dir'
+      const key = `${type}\0${part}`
+      let child = children.get(key)
       if (!child) {
-        child = { name: part, path, type: isFile ? 'file' : 'dir', children: [] }
+        child = { name: part, path, type, children: [] }
         node.children.push(child)
+        children.set(key, child)
       }
       node = child
     })
@@ -941,7 +953,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
   // compare (head) side for added/modified/renamed files, the base side for a
   // deleted file (which no longer exists at head).
   const selectedDiffFile = (diffActive && diffSettings.singleFile && selectedDiffPath)
-    ? diff?.files.find((f) => f.path === selectedDiffPath) ?? null
+    ? (diff ? indexDiffFiles(diff.files).get(selectedDiffPath) : undefined) ?? null
     : null
   const selectedDiffFileRef = selectedDiffFile && selectedDiffFile.change_type === 'deleted' ? activeRef : compareRef
 
@@ -1263,7 +1275,7 @@ export function RepositoryView({ projectId, splat }: { projectId: string; splat:
     try {
       const fileDiff = await api.default.getRepositoryDiff(projectId, activeRef, compareRef, diffSettings.ignoreWhitespace, path, context,
         true, PROMOTED_MAX_CHANGES, PROMOTED_MAX_LINES)
-      const updated = fileDiff.files.find((x) => x.path === path)
+      const updated = indexDiffFiles(fileDiff.files).get(path)
       const promoted = !!updated?.expanded
       if (!promoted) {
         fileContextsRef.current.set(path, context)

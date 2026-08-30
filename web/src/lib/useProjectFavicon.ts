@@ -11,7 +11,7 @@
 // leaving a project (or unmounting) always returns the Hydra mark.
 
 import { useEffect } from 'react'
-import { useProjectStore } from '../stores/projectStore'
+import { selectProject, useProjectStore } from '../stores/projectStore'
 import { ensureProjectIconUrl } from './projectIconUrl'
 
 function iconLinks(): HTMLLinkElement[] {
@@ -24,7 +24,7 @@ export function useProjectFavicon(projectId: string | null): void {
   // Subscribing to the icon (a primitive, so no re-render churn) rather than
   // snapshotting it means changing a project's icon in Settings repaints the tab
   // straight away instead of waiting for a reload.
-  const icon = useProjectStore((s) => s.projects.find((p) => p.id === projectId)?.icon)
+  const icon = useProjectStore((s) => projectId ? selectProject(s, projectId)?.icon : undefined)
 
   useEffect(() => {
     const links = iconLinks()

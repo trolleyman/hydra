@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
-import { useProjectStore } from '../stores/projectStore'
+import { selectProject, useProjectStore } from '../stores/projectStore'
 import type { ConfigResponse, AgentResponse } from '../api'
 import { useDialogStore } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
@@ -28,7 +28,9 @@ const TAB_DESCRIPTIONS: Record<GlobalSettingsTab, string> = {
 }
 
 function SettingsPage() {
-  const { selectedProjectId, projects } = useProjectStore()
+  const selectedProjectId = useProjectStore((s) => s.selectedProjectId)
+  const projects = useProjectStore((s) => s.projects)
+  const selectedProject = useProjectStore((s) => selectedProjectId ? selectProject(s, selectedProjectId) : undefined)
   // Unlike the project page there is only one config scope here, so switching
   // tabs never refetches: the user-config draft survives a Browser detour.
   const [tab, setTab] = useState<GlobalSettingsTab>('user')
@@ -41,7 +43,6 @@ function SettingsPage() {
   const [testAgent, setTestAgent] = useState<AgentResponse | null>(null)
   const [testing, setTesting] = useState(false)
 
-  const selectedProject = projects.find(p => p.id === selectedProjectId)
   // User config API requires a project ID in the path even though config is global.
   // Fall back to first available project if none is selected - preferring a real
   // one, since the built-in scratch project sorts first on a fresh install and

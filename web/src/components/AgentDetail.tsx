@@ -38,7 +38,7 @@ import { renderMarkdown } from '../lib/markdown'
 
 import { useDialogStore, type DialogDetails } from '../stores/dialogStore'
 import { useToastStore } from '../stores/toastStore'
-import { useAgentStore } from '../stores/agentStore'
+import { selectLiveAgentByBranch, useAgentStore } from '../stores/agentStore'
 import { ensureReviewConfig, refreshReviewConfig, useProjectStore } from '../stores/projectStore'
 import { useShortcutsStore } from '../stores/shortcutsStore'
 import { hasMod, isTypingTarget, SHORTCUT_MERGE, SHORTCUT_MARK_UNREAD, SHORTCUT_KILL, SHORTCUT_RENAME, SHORTCUT_DIFF_SIDEBAR } from '../lib/shortcuts'
@@ -1464,7 +1464,7 @@ export function AgentDetail({
     // agent's branch), the merge advances that parent agent's branch - name it,
     // and warn when the parent is still running since its working files will
     // shift underneath it.
-    const parent = useAgentStore.getState().agents.find((a) => a.branch_name === agent.base_branch)
+    const parent = selectLiveAgentByBranch(useAgentStore.getState(), agent.base_branch)
     const fromBranch = agent.branch_name || `hydra/${agent.id}`
     const toBranch = agent.base_branch || 'base'
     const parentWarning = parent && parent.session_status === 'running'

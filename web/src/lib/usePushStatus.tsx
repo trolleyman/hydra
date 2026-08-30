@@ -3,7 +3,7 @@ import { ApiError } from '../api'
 import { api } from '../stores/apiClient'
 import { formatError } from '../api/format_error'
 import { useToastStore, type ToastProjectContext } from '../stores/toastStore'
-import { useProjectStore } from '../stores/projectStore'
+import { selectProject, useProjectStore } from '../stores/projectStore'
 import { useServerData } from './useServerData'
 import { EVENT_FALLBACK_MS } from './visibilityPolling'
 import { pillText } from './branchPills'
@@ -63,7 +63,7 @@ export function usePushStatus(currentProjectId: string | null): PushStatus {
     // Carry the project so its toasts show a header once the user switches away
     // to another project (the Toaster hides the header while this project is in
     // view). The icon matches the project switcher's glyph.
-    const project = useProjectStore.getState().projects.find((p) => p.id === projectId)
+    const project = selectProject(useProjectStore.getState(), projectId)
     const projectContext: ToastProjectContext = {
       projectId,
       projectName: project?.name || project?.path || projectId,

@@ -87,6 +87,11 @@ import { useCopyFlash } from './lib/useCopyFlash'
 import { CopyStateIcon } from './components/CopyStateIcon'
 import { mergeBaseInstruction } from './lib/mergeBaseInstruction'
 import { commitIdx, commitParentSelection, reconcileRightSelection, type LeftSel, type RightSel } from './lib/commitRange'
+import { createArrayIndex } from './lib/arrayIndex'
+
+const indexCommits = createArrayIndex<CommitInfo, string>((commit) => commit.sha)
+const indexDiffFiles = createArrayIndex<DiffFile, string>((file) => file.path)
+const indexReviewComments = createArrayIndex<PendingReviewComment, number>((comment) => comment.number)
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -2605,10 +2610,10 @@ function resolveDiffLabels(
     ? baseBranch
     : leftSel.type === 'latest'
       ? (commits[0]?.short_sha ? `HEAD (${commits[0].short_sha})` : 'HEAD')
-      : (commits.find((c) => c.sha === leftSel.sha)?.short_sha ?? leftSel.sha.slice(0, 8))
+      : (indexCommits(commits).get(leftSel.sha)?.short_sha ?? leftSel.sha.slice(0, 8))
   const toLabel = rightSel.type === 'latest' ? 'latest commit'
     : rightSel.type === 'uncommitted' ? 'uncommitted changes'
-      : (commits.find((c) => c.sha === rightSel.sha)?.short_sha ?? rightSel.sha.slice(0, 8))
+      : (indexCommits(commits).get(rightSel.sha)?.short_sha ?? rightSel.sha.slice(0, 8))
   return { fromLabel, toLabel }
 }
 
@@ -2932,7 +2937,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
   }, [open])
 
   const label = selected.type === 'commit'
-    ? <CommitLabel commit={commits.find((c) => c.sha === selected.sha)} sha={selected.sha} />
+    ? <CommitLabel commit={indexCommits(commits).get(selected.sha)} sha={selected.sha} />
     : <span className="max-w-[150px] truncate">{selected.type === 'base' ? baseBranch : 'Latest commit'}</span>
 
   // Determine which commits are valid for the left selector (must be older than right)
@@ -3055,7 +3060,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
   }, [open])
 
   const label = selected.type === 'commit'
-    ? <CommitLabel commit={commits.find((c) => c.sha === selected.sha)} sha={selected.sha} />
+    ? <CommitLabel commit={indexCommits(commits).get(selected.sha)} sha={selected.sha} />
     : <span className="max-w-[150px] truncate">{selected.type === 'uncommitted' ? 'Latest changes' : 'Latest commit'}</span>
 
   return (
@@ -3895,7 +3900,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
       // Select by path rather than [0] - the backend may return more than the
       // requested file (e.g. the simulation server ignores the path filter).
-      const updated = fileDiff.files.find((x) => x.path === path)
+      const updated = indexDiffFiles(fileDiff.files).get(path)
       const promoted = !!updated?.expanded
 
       // Remember which files need what after a background refresh replaces the
@@ -4499,7 +4504,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   const handleComment = useCallback(async (path: string, lineNum: number, isNew: boolean, text: string, attachments: string[]) => {
     const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
-    const file = diffRef.current?.files.find(f => f.path === path)
+    const file = diffRef.current ? indexDiffFiles(diffRef.current.files).get(path) : undefined
     const block = diffContextBlock(path, findHunkForLine(file, lineNum, isNew), lineNum, isNew)
 
     const hunk = findHunkForLine(file, lineNum, isNew)
@@ -4530,7 +4535,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // doesn't bust FileDiff's memo, just like handleComment.
   const handleAddToReview = useCallback((path: string, lineNum: number, isNew: boolean, text: string, attachments: string[]) => {
     const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
-    const file = diffRef.current?.files.find(f => f.path === path)
+    const file = diffRef.current ? indexDiffFiles(diffRef.current.files).get(path) : undefined
     const hunk = findHunkForLine(file, lineNum, isNew)
     addReviewComment(projectId, agent.id, {
       path, lineNum, isNew, text, fromLabel, toLabel, attachments,
@@ -4671,6 +4676,13 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [reviewComments, threads, diff])
 
   const openComments = useMemo(() => commentStops.filter((c) => !c.resolved), [commentStops])
+  const commentStopsByNumber = useMemo(() => {
+    const index = new Map<number, (typeof commentStops)[number]>()
+    for (const stop of commentStops) {
+      for (const number of stop.numbers) index.set(number, stop)
+    }
+    return index
+  }, [commentStops])
 
   // The comments the diff has no line for: their file is not among the changed
   // files of the current comparison (a path-less comment is here too - '' is
@@ -4798,8 +4810,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
 
   useEffect(() => {
     openCommentRef.current = (number: number) => {
-      const target = commentStops.find((c) => c.numbers.includes(number))
-        ?? reviewComments.find((c) => c.number === number)
+      const target = commentStopsByNumber.get(number)
+        ?? indexReviewComments(reviewComments).get(number)
       visit(number)
       markRead([number])
       // Claim the jump before writing the URL: the permalink effect below fires
@@ -4809,7 +4821,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       addressComment(number)
       if (target) handleJumpToComment({ number, path: target.path, lineNum: target.lineNum, isNew: target.isNew })
     }
-  }, [commentStops, reviewComments, markRead, handleJumpToComment, visit, addressComment])
+  }, [commentStopsByNumber, reviewComments, markRead, handleJumpToComment, visit, addressComment])
 
   // The same jump, published for panes outside this component - the chat's review
   // comment cards link to a comment and land you on it without a navigation (see
@@ -4822,8 +4834,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // does not yank the view back to the anchor after you have scrolled away.
   useEffect(() => {
     if (!focusComment || !diff || jumpedToRef.current === focusComment) return
-    const target = reviewComments.find((c) => c.number === focusComment)
-      ?? commentStops.find((c) => c.numbers.includes(focusComment))
+    const target = indexReviewComments(reviewComments).get(focusComment)
+      ?? commentStopsByNumber.get(focusComment)
     if (!target) return
     jumpedToRef.current = focusComment
     // Legitimate effect: this fires once per permalink, and the state it sets is
@@ -4834,7 +4846,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     visit(focusComment)
     markRead([focusComment])
     handleJumpToComment({ number: focusComment, path: target.path, lineNum: target.lineNum, isNew: target.isNew })
-  }, [focusComment, diff, reviewComments, commentStops, markRead, handleJumpToComment, visit])
+  }, [focusComment, diff, reviewComments, commentStopsByNumber, markRead, handleJumpToComment, visit])
 
   // Forge review threads for this head's MR, fetched when the head is linked. The
   // fetch reads the forge live host-side (~a second), so it runs on mount and
@@ -5018,7 +5030,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     const stale = new Set<string>()
     for (const c of queuedComments) {
       if (!c.hunkHash) continue
-      const file = diff?.files.find(f => f.path === c.path)
+      const file = diff ? indexDiffFiles(diff.files).get(c.path) : undefined
       const hunk = findHunkForLine(file, c.lineNum, c.isNew)
       if ((hunk ? hashHunks([hunk]) : '') !== c.hunkHash) stale.add(c.id)
     }

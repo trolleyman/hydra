@@ -10,7 +10,7 @@ import { Tooltip } from './Tooltip'
 import { ResizeGrip } from './ResizeGrip'
 import { uploadFile, extractFiles, hasFilePayload } from '../api/uploads'
 import { copyWithToast } from '../lib/copyToast'
-import { useAgentStore } from '../stores/agentStore'
+import { selectAgent, selectLiveAgent, useAgentStore } from '../stores/agentStore'
 import { fileUrlToWorktreeRelative, isTrustedLinkUrl } from '../lib/repoLink'
 import { buildRepoSplat } from '../lib/repoSplat'
 import { useDialogStore } from '../stores/dialogStore'
@@ -53,10 +53,10 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
   // below). Selected as primitives so a poll that leaves them unchanged doesn't
   // re-render this pane. Falls back to the archived list for a finished head.
   const branchName = useAgentStore((s) =>
-    (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? null,
+    selectAgent(s, agentId)?.branch_name ?? null,
   )
   const worktreePath = useAgentStore((s) =>
-    (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
+    selectAgent(s, agentId)?.worktree_path ?? null,
   )
   // The chosen terminal font (Settings -> Browser -> Fonts), as a real
   // font-family string: xterm measures the cell off this and takes an option,
@@ -567,7 +567,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
         // optimistic override would then mask the real backend needs_input for
         // its whole TTL. Leave needs_input alone and let the backend report the
         // true next state (another question, or genuinely running).
-        const curStatus = useAgentStore.getState().agents.find((a) => a.id === agentId)?.agent_status?.status
+        const curStatus = selectLiveAgent(useAgentStore.getState(), agentId)?.agent_status?.status
         if (!shell && data.includes('\r') && curStatus !== AgentStatus.NEEDS_INPUT) {
           useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING)
           onStatusUpdateRef.current?.(AgentStatus.RUNNING)
