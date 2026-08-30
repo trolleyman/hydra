@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
+import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
 import { useAgentStore } from '../stores/agentStore'
@@ -131,6 +131,20 @@ describe('Bash card summary comments', () => {
   it('handles Codex wrappers whose closing quote was consumed by shell expansion', () => {
     const command = `/usr/bin/bash -lc "# Verify the merge\ngit status --short\nprintf '%s\\n' \\"'$?'`
     expect(leadingBashComment(command)).toBe('Verify the merge')
+  })
+})
+
+describe('sectioned search output', () => {
+  it('does not leak Markdown bold across omitted source lines', () => {
+    const rows = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n focused docs/a.md',
+      match: { paths: ['docs/a.md'], numbered: true },
+      lines: ['3:**Status: shared focused-session', '18:ordinary later match'],
+    }])
+
+    expect(rows).toHaveLength(2)
+    expect(rows[1].html).not.toContain('token bold')
   })
 })
 
@@ -575,6 +589,18 @@ describe('reduceHistoryEvents across page boundaries', () => {
     let id = -1
     return () => id--
   }
+
+  it('keeps the resume time so repeated session breaks remain distinguishable', () => {
+    const timestamp = '2026-08-30T12:34:56Z'
+    const items = reduceHistoryEvents(
+      toProviderEvents({ type: 'session_resumed', seq: 9, timestamp, payload: { worktree: '/wt' } } as never),
+      alloc(),
+    )
+
+    expect(items).toMatchObject([
+      { kind: 'resumed', resumedAt: Date.parse(timestamp), noEntrance: true },
+    ])
+  })
 
   it('applies a tool_result reduced in a newer page to a card built by an older page', () => {
     const link = newToolResultLink()

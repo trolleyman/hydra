@@ -1464,6 +1464,21 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   // boundary the output really does carry is kept even when everything before it
   // has to stay one plain run.
   const suffix = searchExtent(producers[producers.length - 1], slice, 0, slice.length, 'end')
+  // When every row carries its OWN path, the whole stretch is safely a search
+  // result even if an intervening command printed nothing. Which search printed
+  // which row is immaterial: the prefix names the file that supplies both the
+  // gutter and the language. Do not extend this to bare `12:text` rows - there
+  // the script's operand is the only thing naming the file, so handing an
+  // earlier search to the last one could colour it as the wrong language.
+  if (suffix === slice.length && slice.every((line) => line.trim() === '--' || PATH_NUMBERED.test(line))) {
+    const last = producers.length - 1
+    return {
+      parts: producers.map((_, i) => i === last ? slice : []),
+      pinned: producers.map((_, i) => i === last),
+      plain: new Set(),
+      languageOnly: new Set(),
+    }
+  }
   if (suffix != null && suffix < slice.length) {
     const last = producers.length - 1
     const before = distribute(producers.slice(0, last), slice.slice(0, -suffix), failed)
@@ -1775,6 +1790,18 @@ export interface MatchLine {
   text: string
   // A `--` between context groups: not a line of any file.
   separator: boolean
+}
+
+// Whether two search rows are adjacent source lines and may safely be handed to
+// a stateful syntax highlighter as one run. Search results are usually sparse:
+// treating line 3 and line 18 of a Markdown file as neighbours lets an opening
+// `**` whose close was on omitted line 4 leak into line 18. With no numbers the
+// gap is unknowable, so retain the existing grouping; the highlighter then has
+// no more reliable boundary to follow.
+export function consecutiveMatchLines(prev: MatchLine, next: MatchLine): boolean {
+  if (prev.path !== next.path) return false
+  if (!prev.num || !next.num) return true
+  return Number(next.num) === Number(prev.num) + 1
 }
 
 // grep writes `NNN:` before a matched line and `NNN-` before a context line

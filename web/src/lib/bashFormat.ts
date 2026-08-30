@@ -700,7 +700,15 @@ function hostRunArgv(rest: string): string {
 // CLI does when it renders the request, so the chat shows the same text the
 // approval card asks about.
 export function parseHostRunScript(command: string): string | null {
-  const match = command.match(HOST_RUN)
+  // Codex puts the tool-call description in a standalone leading comment. It
+  // is presentation metadata rather than a shell operation, so allow the
+  // host-run invocation immediately after it to retain its first-class card.
+  // Do not strip later comments or arbitrary prefixes: a host run mixed into a
+  // larger script must continue to render as the Bash script that actually ran.
+  const source = leadingBashComment(command)
+    ? command.replace(/^[ \t]*#[^\r\n]*(?:\r?\n|$)/, '')
+    : command
+  const match = source.match(HOST_RUN)
   if (!match) return null
   const rest = stripHostRunFlags(hostRunArgv(match[1]).trim())
   if (!rest) return null

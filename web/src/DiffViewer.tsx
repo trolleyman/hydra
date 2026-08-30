@@ -3201,7 +3201,10 @@ function MergeConflictButton({ diff, agent, projectId }: {
           </button>
         </Tooltip>
 
-        {open && (
+        {/* The button lives in the sticky Changes bar (z-[25]), but the modal
+            must compete at the root stacking level. Keeping it in this subtree
+            caps even z-[300] below the chat's open Plan card (z-30). */}
+        {open && createPortal(
           <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
             {/* Backdrop */}
             <div className="absolute inset-0" onClick={() => setOpen(false)} />
@@ -3290,7 +3293,8 @@ function MergeConflictButton({ diff, agent, projectId }: {
                 </DialogConfirmButton>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     </>
