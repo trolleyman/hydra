@@ -13,16 +13,18 @@ import {
 import { useUnsavedChangesGuard } from '../lib/unsavedChanges'
 import { BrowserSections } from '../components/settings/BrowserSections'
 import { ScopeTabs, SettingsSaveAction } from '../components/settings/shared'
+import { RichTextLab } from '../components/settings/RichTextLab'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
 })
 
-type GlobalSettingsTab = 'user' | 'browser'
+type GlobalSettingsTab = 'user' | 'browser' | 'rich-text'
 
 const TAB_DESCRIPTIONS: Record<GlobalSettingsTab, string> = {
   user: 'Every project on this machine - stored in ~/.config/hydra/config.toml. Open a project\'s settings to configure that project itself.',
   browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
+  'rich-text': 'An unsaved hands-on lab for the proposed rich chat composer and its Markdown boundary.',
 }
 
 function SettingsPage() {
@@ -112,19 +114,22 @@ function SettingsPage() {
       {/* Save lives in the global top bar beside its "Settings" crumb - the page
           has no header of its own. Nothing to save on the Browser tab, whose
           preferences apply instantly. */}
-      {tab !== 'browser' && <SettingsSaveAction dirty={hasUnsavedChanges} saving={saving} onSave={handleSave} />}
+      {tab === 'user' && <SettingsSaveAction dirty={hasUnsavedChanges} saving={saving} onSave={handleSave} />}
       <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
           <ScopeTabs
             tabs={[
               { id: 'user' as GlobalSettingsTab, label: 'User' },
               { id: 'browser' as GlobalSettingsTab, label: 'Browser' },
+              { id: 'rich-text' as GlobalSettingsTab, label: 'Rich text lab' },
             ]}
             active={tab}
             onSelect={setTab}
             description={TAB_DESCRIPTIONS[tab]}
           />
-          {tab === 'browser' ? (
+          {tab === 'rich-text' ? (
+            <RichTextLab />
+          ) : tab === 'browser' ? (
             <BrowserSections />
           ) : !effectiveProjectId ? (
             <div className="py-8 text-gray-500">Add a project to view user settings.</div>

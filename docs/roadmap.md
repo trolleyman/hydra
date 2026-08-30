@@ -198,6 +198,14 @@ before starting. Grouped by area.
 
 ## Web
 
+- [ ] **Structured rich-text composer.** Replace the prompt textarea's
+  source-shaped Markdown overlay with a compact Tiptap/ProseMirror editor: real
+  editable inline-code spans with predictable inside/outside cursor positions,
+  formatting commands, code blocks and attachment nodes placed in the sentence.
+  Markdown stays the backend interchange format and Tiptap stays behind a
+  Hydra-owned API. Design, interaction tables, migration and gated build order:
+  [rich-text-composer.md](rich-text-composer.md).
+
 - [ ] **Tabs inside the inspector pane, and head-level events as chat rows.** The
   inspector is five mutually-exclusive things stacked in one scroll (Changes bar,
   Tests, Previews, Artifacts, Files+diffs), which is what the sticky-header

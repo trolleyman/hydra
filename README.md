@@ -65,7 +65,7 @@ Use "hydra [command] --help" for more information about a command.
 - [Go](https://go.dev/)
 - [Mage](https://magefile.org/)
 - [Node.js](https://nodejs.org/) 24+ (for the frontend; runs the build scripts directly via its native TypeScript support)
-- [npm](https://www.npmjs.com/) (ships with Node) or, optionally, [aube](https://github.com/jdx/aube) - see below
+- [aube](https://github.com/jdx/aube) (preferred) or [npm](https://www.npmjs.com/) (fallback; ships with Node) - see below
 - Git
 
 Building the experimental standalone Linux desktop shell additionally requires
@@ -75,10 +75,10 @@ GTK 4 and WebKitGTK 6 development files. On Ubuntu 24.04 and derivatives:
 sudo apt install libwebkitgtk-6.0-dev
 ```
 
-The frontend's package installs and `package.json` scripts run through **npm** by
-default, since it ships with Node and needs no extra setup. If [aube](https://github.com/jdx/aube)
-is on your `PATH`, `mage` uses it instead for a faster install - it reads and
-writes the same `web/package-lock.json`, so the choice never affects the repo.
+Use [aube](https://github.com/jdx/aube) for frontend package installs and
+`package.json` scripts when it is on your `PATH`; fall back to **npm** when aube
+is unavailable. Mage follows the same preference. Both read and write the same
+`web/package-lock.json`, so the choice never affects the repo.
 Any npm-compatible package manager (aube, pnpm, yarn, bun) works if you run the
 web build by hand; only npm and aube are auto-detected.
 

@@ -91,7 +91,7 @@ describe('Markdown', () => {
       worktreePath: '/work/hydra',
     }
 
-    it('keeps a chat file link label exact and neutral', () => {
+    it('renders a chat file link as a presentation-only file chip', () => {
       const { container } = render(
         <Markdown text="[controller.go](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
       )
@@ -103,7 +103,7 @@ describe('Markdown', () => {
         '/project/p1/repository/hydra/a1/-/internal/controller.go',
       )
       expect(link.className).not.toContain('text-blue')
-      expect(link.querySelector('svg')).toBeNull()
+      expect(link.querySelector('svg')).not.toBeNull()
     })
 
     it('also keeps a semantic repo link label as understated prose', () => {
@@ -114,6 +114,7 @@ describe('Markdown', () => {
       expect(link).toHaveTextContent('the controller')
       expect(link.textContent).toBe('the controller')
       expect(link.className).not.toContain('text-blue')
+      expect(link.querySelector('svg')).toBeNull()
     })
 
     it('keeps README file links as prose links', () => {
@@ -138,6 +139,13 @@ describe('Markdown', () => {
 
     it('renders a one-line fence with no language as a block', () => {
       expect(kind('```\ngit rebase --onto main x y\n```')).toBe('block')
+    })
+
+    it('renders only inline commit-shaped code as a git hash chip', () => {
+      const { container } = render(<Markdown text={'`5cf36289` and `cafe`\n\n```\n5cf36289\n```'} />)
+      expect(container.querySelectorAll('[data-md-git-hash]')).toHaveLength(1)
+      expect(container.querySelector('[data-md-git-hash]')).toHaveTextContent('5cf36289')
+      expect(container.querySelector('[data-md-code-block]')).not.toHaveAttribute('data-md-git-hash')
     })
 
     it('renders an annotated or multi-line fence as a block', () => {

@@ -22,8 +22,8 @@ Use `mage` for development tasks.
 ## Development Workflow
 
 1.  **Backend**: Go 1.22+ is used. Follow standard Go idioms.
-2.  **Frontend**: React + TypeScript + Vite. Uses `npm` (or `aube`, if on PATH) for
-    package management against `web/package-lock.json`. Build scripts under
+2.  **Frontend**: React + TypeScript + Vite. Use `aube` when it is available and
+    fall back to `npm` otherwise; both use `web/package-lock.json`. Build scripts under
     `web/scripts/` and `web/e2e/` run directly with `node` (Node 24+ strips the TS
     types), not a separate TS runner.
 

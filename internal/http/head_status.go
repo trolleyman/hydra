@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -271,6 +272,12 @@ func (s *Server) headArtifactsText(projectRoot string, head *heads.Head) string 
 		return "This project configures no artifacts.\n"
 	}
 	mgr := s.Artifacts.Manager(projectRoot)
+	projectID := ""
+	if s.ProjectsManager != nil {
+		if project := s.ProjectsManager.GetByPath(projectRoot); project != nil {
+			projectID = project.ID
+		}
+	}
 
 	names := make([]string, 0, len(specs))
 	for name := range specs {
@@ -291,28 +298,55 @@ func (s *Server) headArtifactsText(projectRoot string, head *heads.Head) string 
 		case meta.Status == artifacts.StatusError:
 			fmt.Fprintf(&b, "- %s: FAILED: %s\n", name, oneLine(meta.Error, headStatusMessageLen))
 		default:
-			fmt.Fprintf(&b, "- %s: ready, %d file(s)%s\n", name, len(meta.Files), artifactFileNames(meta))
+			fmt.Fprintf(&b, "- %s: ready, %d file(s)\n", name, len(meta.Files))
+			b.WriteString(artifactFilesText(meta, projectID, name))
 		}
 	}
 	return b.String()
 }
 
-// artifactFileNames lists a ready set's file names, capped so a 200-screenshot
-// set doesn't dominate the answer.
-func artifactFileNames(meta artifacts.Meta) string {
+// artifactFilesText lists a ready set's outputs, capped so a 200-screenshot set
+// does not dominate the answer. When the project id is known, media uses Markdown
+// image syntax so Hydra's chat can show the actual screenshot/video preview;
+// other output is a clickable link. A status request in a minimal test/server
+// without a project manager degrades to names rather than minting a broken URL.
+func artifactFilesText(meta artifacts.Meta, projectID, script string) string {
 	if len(meta.Files) == 0 {
 		return ""
 	}
 	const max = 10
-	names := make([]string, 0, len(meta.Files))
-	for _, f := range meta.Files {
-		if len(names) == max {
-			names = append(names, fmt.Sprintf("... +%d more", len(meta.Files)-max))
-			break
+	var b strings.Builder
+	for i, f := range meta.Files {
+		if i == max {
+			fmt.Fprintf(&b, "  - ... +%d more\n", len(meta.Files)-max)
+			return b.String()
 		}
-		names = append(names, f.Name)
+		label := strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]").Replace(f.Name)
+		url := ""
+		if projectID != "" {
+			url = blobURL(projectID, script, meta.Key, f.Name)
+		}
+		if url == "" {
+			fmt.Fprintf(&b, "  - %s\n", label)
+			continue
+		}
+		if artifactPreviewFile(f.Name) {
+			fmt.Fprintf(&b, "  - ![%s](%s)\n", label, url)
+		} else {
+			fmt.Fprintf(&b, "  - [%s](%s)\n", label, url)
+		}
 	}
-	return ": " + strings.Join(names, ", ")
+	return b.String()
+}
+
+func artifactPreviewFile(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg", ".webm", ".mp4":
+		return true
+	default:
+		return false
+	}
 }
 
 // headServicesText renders the project's supervised [[services]]. They are

@@ -1,4 +1,4 @@
-import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
+import { Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -72,9 +72,13 @@ import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
+import type { RichComposerHandle, RichComposerKeyContext } from '../lib/rich-editor/RichComposer'
+import { AttachmentRegistry } from '../lib/rich-editor/AttachmentRegistry'
+import { restoreAttachment, type ComposerAttachment } from '../lib/rich-editor/Attachment'
 import { applyEdit, enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
 import { renderMarkdownSource } from '../lib/markdown'
 import { randomId } from '../lib/uuid'
+import { optimisticEchoIndex } from '../lib/optimisticEcho'
 import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
@@ -111,6 +115,27 @@ import type { ToolResultLink } from '../lib/toolResultLink'
 import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '../lib/editDiff'
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
 import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from '../lib/whitespaceMarks'
+
+const RichComposer = lazy(() => import('../lib/rich-editor/RichComposer').then((module) => ({ default: module.RichComposer })))
+
+function composerAttachment(attachment: Attachment): ComposerAttachment {
+  const lower = attachment.filename.toLowerCase()
+  const kind: ComposerAttachment['kind'] = attachment.previewUrl
+    ? 'image'
+    : lower.endsWith('.pdf')
+      ? 'pdf'
+      : /\.(txt|md|log|csv|json|ya?ml)$/.test(lower)
+        ? 'text'
+        : /\.(zip|tar|tgz|gz|bz2|xz|7z)$/.test(lower)
+          ? 'archive'
+          : 'file'
+  return {
+    id: String(attachment.id),
+    name: attachment.filename,
+    kind,
+    display: attachment.previewUrl ? 'thumbnail' : 'chip',
+  }
+}
 import { useWhitespaceMarks } from '../lib/whitespacePrefs'
 import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommentsText'
 import { CommentLink } from './CommentLink'
@@ -265,7 +290,7 @@ type ChatItem =
   // suppresses the fade/slide entrance for a message that takes the place of a
   // queued bubble already on screen (item 21) - it was visible, so re-animating
   // it as it settles reads as a flicker.
-  | { kind: 'user'; id: number; text: string; sending?: boolean; noEntrance?: boolean; origin?: string }
+  | { kind: 'user'; id: number; text: string; clientId?: string; sending?: boolean; noEntrance?: boolean; origin?: string; flightFrom?: ComposerFlightRect }
   // A slash command echoed back by the CLI (<command-name>/<command-args>).
   | { kind: 'command'; id: number; name: string; args: string }
   // A local command's output echoed back as <local-command-stdout>.
@@ -448,6 +473,12 @@ interface PendingSend {
   text: string
   queued: boolean
   origin?: string
+  flightFrom?: ComposerFlightRect
+}
+
+interface ComposerFlightRect {
+  top: number
+  right: number
 }
 
 // Minimal shapes of the stream-json events the reducer consumes. Everything
@@ -5886,6 +5917,7 @@ const ChatUserMessage = memo(function ChatUserMessage({
   origin,
   projectId,
   linkCtx,
+  flightFrom,
 }: {
   text: string
   sending?: boolean
@@ -5903,19 +5935,34 @@ const ChatUserMessage = memo(function ChatUserMessage({
   // test" send points at) to the repository view - same context the assistant
   // bubbles use. Without it a link falls back to a plain, unresolvable anchor.
   linkCtx?: RepoLinkContext
+  flightFrom?: ComposerFlightRect
 }) {
   const { text: body, attachments } = useMemo(() => parseUploadAttachments(text, projectId), [text, projectId])
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   // The chip clicked, so the picture flies out of it instead of fading in.
   const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
-  // Nothing left after stripping the CLI's image placeholder (item 41) - don't
-  // render an empty bubble.
-  if (!body && attachments.length === 0 && !sending && !dimmed) return null
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
   const auto = automatedOrigin(origin)
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  const flewRef = useRef(false)
+  useLayoutEffect(() => {
+    const bubble = bubbleRef.current
+    if (!bubble || !flightFrom || flewRef.current || typeof bubble.animate !== 'function') return
+    flewRef.current = true
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    const destination = bubble.getBoundingClientRect()
+    bubble.animate([
+      { transform: `translate(${flightFrom.right - destination.right}px, ${flightFrom.top - destination.top}px) scale(0.96)`, opacity: 0.72 },
+      { transform: 'translate(0, 0) scale(1)', opacity: 1 },
+    ], { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' })
+  }, [flightFrom])
+  // Nothing left after stripping the CLI's image placeholder (item 41) - don't
+  // render an empty bubble. Keep this after the transition hooks so every render
+  // calls the same hooks even if a streamed placeholder becomes empty.
+  if (!body && attachments.length === 0 && !sending && !dimmed) return null
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div ref={bubbleRef} className="flex flex-col items-end gap-1" data-composer-flight={flightFrom ? '' : undefined}>
       {/* An automated turn is still YOUR side of the conversation - it acts on
           your behalf and the agent answers it as if you had spoken - so it keeps
           the user bubble's shape and side. What changes is the tint and this
@@ -6886,7 +6933,29 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   }
   const { present, commit, reconcile, reset: resetHistory, undo, redo } = useComposerHistory(initialComposer.current)
   const input = present.prompt
+  const shellComposer = input.startsWith('!')
   const attachments = present.attachments
+  const [initialRichDocument] = useState(() => loadAgentViewPrefs(projectId, stateId).chatRichDraft?.document)
+  const richDocumentRef = useRef(initialRichDocument)
+  const [richAttachmentIds, setRichAttachmentIds] = useState<Set<string>>(
+    () => new Set(initialComposer.current!.attachments.map((attachment) => String(attachment.id))),
+  )
+  const restoredAttachmentIdsRef = useRef(new Set<string>())
+  const attachmentRegistry = useMemo(() => new AttachmentRegistry(async (file, id, signal) => {
+    const uploaded = await uploadFile(projectId, file, signal)
+    reconcile(Number(id), { path: uploaded.path, uploading: false })
+    return { path: uploaded.path }
+  }), [projectId, reconcile])
+
+  useEffect(() => attachmentRegistry.subscribe(() => {
+    for (const attachment of attachmentsRef.current) {
+      const state = attachmentRegistry.get(String(attachment.id))
+      if (state?.status === 'failed') reconcile(attachment.id, { uploading: false, error: formatError(state.error) })
+    }
+  }), [attachmentRegistry, reconcile])
+  const documentAttachments = useMemo(() => shellComposer
+    ? attachments
+    : attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id))), [attachments, richAttachmentIds, shellComposer])
   const inputRef = useRef(input)
   useEffect(() => {
     inputRef.current = input
@@ -7001,6 +7070,21 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // grows across the 0.22s disclosure animation, not in one step.
   const contentRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const richComposerRef = useRef<RichComposerHandle>(null)
+  const richComposerHostRef = useRef<HTMLDivElement>(null)
+  const focusComposer = useCallback((position: 'start' | 'end' | number = 'end') => {
+    if (inputRef.current.startsWith('!')) {
+      const textarea = textareaRef.current
+      textarea?.focus()
+      if (textarea && position === 'end') textarea.selectionStart = textarea.selectionEnd = textarea.value.length
+    } else richComposerRef.current?.focus(position)
+  }, [])
+  const previousShellComposer = useRef(shellComposer)
+  useEffect(() => {
+    if (previousShellComposer.current === shellComposer) return
+    previousShellComposer.current = shellComposer
+    requestAnimationFrame(() => focusComposer('end'))
+  }, [focusComposer, shellComposer])
   // Pin-to-bottom: keep auto-scrolling while the user is at (or near) the
   // bottom; stop once they scroll up to read history. The ref is the live
   // value the socket/scroll handlers read; the state mirror drives the
@@ -7062,6 +7146,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Whether pasting an attachment also inserts its "[filename]" marker into the
   // composer (a Browser setting, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
+  const composerSpellcheck = useSpellcheckStore((s) => s.enabled)
   // Whether the composer auto-pairs (a Browser setting, default on). The shared
   // textarea applies the rules itself; this composer needs the flag because it
   // owns Enter (which sends), so the fence-body step is its call to make.
@@ -8123,8 +8208,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // confirm that copy (clear its sending flag) instead of rendering a
       // duplicate. The echo can arrive after the turn's response, so relying on
       // it for placement would put the user message below its own reply.
-      const oi = optimisticTextsRef.current.findIndex((pending) =>
-        (clientId !== '' && pending.clientId === clientId) || (clientId === '' && pending.text === text))
+      const oi = optimisticEchoIndex(optimisticTextsRef.current, clientId, text)
+      // Some providers echo a transcript/message UUID rather than the client
+      // send UUID. Fall back to the pending text in that case; without this the
+      // acknowledged turn is appended beside its optimistic twin.
       if (oi >= 0) {
         markTurnStart()
         const optimisticText = optimisticTextsRef.current[oi].text
@@ -8133,7 +8220,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           let j = -1
           for (let k = prev.length - 1; k >= 0; k--) {
             const it = prev[k]
-            if (it.kind === 'user' && it.sending && it.text === optimisticText) {
+            if (it.kind === 'user' && it.sending
+              && ((clientId !== '' && it.clientId === clientId) || it.text === optimisticText)) {
               j = k
               break
             }
@@ -9532,6 +9620,22 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     [projectId, stateId],
   )
 
+  const syncAttachmentsIntoDocument = useCallback((editor = richComposerRef.current?.editor) => {
+    if (!editor || shellComposer) return
+    for (const attachment of attachmentsRef.current) {
+      const metadata = composerAttachment(attachment)
+      if (attachment.path) attachmentRegistry.registerUploaded(metadata, { path: attachment.path }, attachment.previewUrl)
+      if (!restoredAttachmentIdsRef.current.has(metadata.id)) {
+        restoreAttachment(editor, metadata)
+        restoredAttachmentIdsRef.current.add(metadata.id)
+      }
+    }
+  }, [attachmentRegistry, shellComposer])
+
+  useEffect(() => {
+    syncAttachmentsIntoDocument()
+  }, [attachments, syncAttachmentsIntoDocument])
+
   // requestOlderHistory asks the daemon for the batch older than the current
   // oldest line, when the user scrolls near the top (item 25).
   function requestOlderHistory() {
@@ -9637,7 +9741,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Save the composer text (debounced) so a half-written message survives an
   // agent switch or reload. Sending clears input, which persists as "no draft".
   useEffect(() => {
-    const t = setTimeout(() => patchAgentViewPrefs(projectId, stateId, { chatDraft: input || undefined }), 300)
+    const t = setTimeout(() => patchAgentViewPrefs(projectId, stateId, {
+      chatDraft: input || undefined,
+      chatRichDraft: input && richDocumentRef.current
+        ? { version: 1, document: richDocumentRef.current }
+        : undefined,
+    }), 300)
     return () => clearTimeout(t)
   }, [input, projectId, stateId])
 
@@ -9649,8 +9758,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Mirror to the per-agent caches so a switch away - or a reload - restores
     // them. Running on every change (rather than only on unmount) is what makes
     // the reload case work: a reload tears the page down without unmounting.
-    saveChatAttachments(projectId, stateId, attachments)
-  }, [attachments, projectId, stateId])
+    saveChatAttachments(projectId, stateId, documentAttachments)
+  }, [attachments, documentAttachments, projectId, stateId])
   // Every preview object URL minted this session. We can't revoke on remove (an
   // undo can bring the chip back) or on unmount (the attachments are stashed to
   // the cache and restored on return), so URLs live until a send consumes the
@@ -9693,10 +9802,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const objectUrl = URL.createObjectURL(file)
       objectUrlsRef.current.add(objectUrl)
       const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, url: objectUrl, previewUrl: isImageFile(file) ? objectUrl : undefined, size: file.size, uploading: true }
+      const editor = richComposerRef.current?.editor
+      // The registry inserts fresh rich attachments itself. Mark them before
+      // committing the legacy upload manifest so the migration effect cannot
+      // race it and append a second node at the end of the document.
+      if (editor && !shellComposer) restoredAttachmentIdsRef.current.add(String(id))
       commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
-      uploadFile(projectId, file)
-        .then((res) => reconcile(id, { path: res.path, uploading: false }))
-        .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
+      if (editor && !shellComposer) {
+        attachmentRegistry.add(editor, composerAttachment(chip), file, chip.previewUrl)
+      } else {
+        uploadFile(projectId, file)
+          .then((res) => reconcile(id, { path: res.path, uploading: false }))
+          .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
+      }
       names.push(file.name || 'pasted-image')
     }
     return names
@@ -9717,6 +9835,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // whether they need a leading space; they never carry a trailing one, so the
   // caret stays against the "]".
   function insertPasteMarkers(names: string[]) {
+    const rich = richComposerRef.current?.editor
+    if (rich && !input.startsWith('!')) {
+      const insert = pasteMarkerText(names, input)
+      rich.commands.insertContent(insert)
+      return
+    }
     const ta = textareaRef.current
     const start = ta?.selectionStart ?? input.length
     const end = ta?.selectionEnd ?? input.length
@@ -9733,14 +9857,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     })
   }
 
-  function handlePaste(e: React.ClipboardEvent) {
+  function handlePaste(e: ClipboardEvent | globalThis.ClipboardEvent) {
     const files = extractFiles(e.clipboardData)
     if (files.length === 0) return
     e.preventDefault()
     const names = addFiles(files)
     // With the preference on, also reference the pasted attachments in the
     // message text via "[filename]" markers at the caret.
-    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+    if ((shellComposer || !richComposerRef.current?.editor) && pasteMarkers && names.length > 0) insertPasteMarkers(names)
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -9750,12 +9874,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   const isFileDrag = (dt: DataTransfer | null) => !!dt && Array.from(dt.types).includes('Files')
 
-  const uploading = attachments.some((a) => a.uploading)
-  const readyAttachments = attachments.filter((a) => a.path && !a.error)
+  const uploading = documentAttachments.some((a) => a.uploading)
+  const readyAttachments = documentAttachments.filter((a) => a.path && !a.error)
   // Every attachment is openable, in chip order - the lightbox navigates this list
   // and each chip opens at its own index (see lib/attachmentLightbox).
-  const openable = openableAttachments(attachments)
-  const lightboxItems = attachmentLightboxItems(attachments)
+  const openable = openableAttachments(documentAttachments)
+  const lightboxItems = attachmentLightboxItems(documentAttachments)
   const canSend = connected && !uploading && (!!input.trim() || readyAttachments.length > 0)
 
   // A pin placed on a picture in the lightbox, arriving as text for this
@@ -9771,8 +9895,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const next = appendToComposer(prev.prompt, text)
       return makeSnapshot(next, prev.attachments, next.length, next.length)
     }, false)
-    requestAnimationFrame(() => textareaRef.current?.focus())
-  }, [commit])
+    requestAnimationFrame(() => focusComposer())
+  }, [commit, focusComposer])
   useEffect(() => {
     registerPinTargets({
       quote: (note) => addToComposer(formatQuote(note)),
@@ -9808,30 +9932,34 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function acceptSlash(cmd: string) {
     const value = '/' + cmd + ' '
     commit((prev) => makeSnapshot(value, prev.attachments, value.length, value.length), false)
-    requestAnimationFrame(() => textareaRef.current?.focus())
+    requestAnimationFrame(() => focusComposer())
   }
 
   // --- Composer: sizing (item 9) ---------------------------------------------
 
   const MAX_ROWS = 10
 
+  const composerElement = useCallback((): HTMLElement | null => (
+    shellComposer ? textareaRef.current : richComposerRef.current?.editor?.view.dom ?? null
+  ), [shellComposer])
+
   // Grow/shrink the textarea one whole line at a time with its content,
   // respecting the user-dragged minimum.
   useEffect(() => {
-    const ta = textareaRef.current
-    if (!ta) return
-    const cs = getComputedStyle(ta)
+    const element = composerElement()
+    if (!element) return
+    const cs = getComputedStyle(element)
     const lineHeight = parseFloat(cs.lineHeight) || 20
     const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
     // The textarea fills its wrapper (position: absolute, inset-0), so collapsing
     // to 'auto' would just stretch it to the parent. Pin it to 0 instead: the box
     // is empty but the content overflows, so scrollHeight reports the true content
     // height. Restore to '' afterwards to hand sizing back to the wrapper.
-    ta.style.height = '0px'
-    const contentRows = Math.max(1, Math.round((ta.scrollHeight - pad) / lineHeight))
-    ta.style.height = ''
+    element.style.height = '0px'
+    const contentRows = Math.max(1, Math.round((element.scrollHeight - pad) / lineHeight))
+    element.style.height = ''
     const rows = Math.min(MAX_ROWS, Math.max(minRows, contentRows))
-    ta.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
+    element.style.overflowY = contentRows > rows ? 'auto' : 'hidden'
     // Bail when the height is unchanged (sub-pixel tolerance): a fractional
     // lineHeight can make this recompute a hair-different value each pass, and an
     // unconditional setState there would keep committing - a needless re-render at
@@ -9850,16 +9978,16 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       composerHeightRef.current = nextH
       setComposerHeight(nextH)
     }
-  }, [input, minRows])
+  }, [composerElement, input, minRows])
 
   function onComposerResizeStart(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault()
-    const ta = textareaRef.current
-    if (!ta) return
-    const cs = getComputedStyle(ta)
+    const element = composerElement()
+    if (!element) return
+    const cs = getComputedStyle(element)
     const lineHeight = parseFloat(cs.lineHeight) || 20
     const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
-    const displayedRows = Math.max(1, Math.round((ta.clientHeight - pad) / lineHeight))
+    const displayedRows = Math.max(1, Math.round((element.clientHeight - pad) / lineHeight))
     composerDragRef.current = { startY: e.clientY, startRows: displayedRows, lineHeight }
     e.currentTarget.setPointerCapture(e.pointerId)
   }
@@ -9888,7 +10016,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // closing the window / navigating away, and stays editable (Up arrow). The
   // bubble is added optimistically; the CLI's echo (or a `queue` frame on
   // reattach) is the source of truth. Returns false when the socket isn't usable.
-  function sendUserText(text: string): boolean {
+  function sendUserText(text: string, flightFrom?: ComposerFlightRect): boolean {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return false
     pinnedRef.current = true
@@ -9901,7 +10029,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (queued) {
       // A held message shows as a queued bubble pinned under the transcript
       // (reconciled against the server's queue frame on reconnect).
-      setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, clientId, text, queued }])
+      setPendingSends((prev) => [...prev, { id: sendSeqRef.current++, clientId, text, queued, flightFrom }])
     } else {
       // A message that goes straight through appears immediately, in-flow, above
       // the thinking/response it triggers (item 26); the CLI's echo (which can
@@ -9909,7 +10037,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       // Allocated OUTSIDE the updater: React may run an updater more than once
       // (StrictMode does, in dev), and an id/stamp taken in there would be too.
       const optId = takeOptimisticId()
-      setItems((prev) => [...prev, { kind: 'user', id: optId, text, sending: true }])
+      setItems((prev) => [...prev, { kind: 'user', id: optId, text, clientId, sending: true, flightFrom }])
       optimisticTextsRef.current.push({ clientId, text })
       // It starts a turn; nudge the status optimistically (like the terminal's
       // Enter handling), unless the agent is answering our question.
@@ -9988,7 +10116,9 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     // Attachment paths ride below the typed text, same as the spawn box - the
     // agent reads the uploaded files from inside its sandbox.
     const finalText = paths.length > 0 ? (text ? `${text}\n\n${paths.join('\n')}` : paths.join('\n')) : text
-    if (!finalText || !sendUserText(finalText)) return
+    const composerRect = richComposerHostRef.current?.getBoundingClientRect()
+    const flightFrom = composerRect ? { top: composerRect.top, right: composerRect.right } : undefined
+    if (!finalText || !sendUserText(finalText, flightFrom)) return
     setSlashDismissed(false)
     // The message is sent - free every preview URL minted this session (including
     // ones only reachable via undo history) and reset the composer + its history.
@@ -10090,6 +10220,11 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setSlashDismissed(false)
   }
 
+  function handleRichInputChange(value: string) {
+    commit((prev) => makeSnapshot(value, prev.attachments, value.length, value.length), true)
+    setSlashDismissed(false)
+  }
+
   // Ctrl+Enter / Alt+Enter insert a newline explicitly (plain Enter sends), so
   // they carry the same markdown list continuation the shared textarea handler
   // gives Shift+Enter - the box shouldn't behave differently depending on which
@@ -10116,11 +10251,69 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!snap) return
     const ta = textareaRef.current
     requestAnimationFrame(() => {
-      if (!ta) return
-      ta.focus()
-      ta.selectionStart = snap.selStart
-      ta.selectionEnd = snap.selEnd
+      if (snap.prompt.startsWith('!') && ta) {
+        ta.focus()
+        ta.selectionStart = snap.selStart
+        ta.selectionEnd = snap.selEnd
+      } else {
+        focusComposer('end')
+      }
     })
+  }
+
+  function recallLatestQueued(): boolean {
+    if (attachments.length > 0 || slashMatches.length > 0) return false
+    const last = [...pendingSends].reverse().find((pending) => pending.queued)
+    if (!last) return false
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'dequeue', id: last.clientId }))
+    setPendingSends((prev) => prev.filter((pending) => pending.id !== last.id))
+    const { text: body, attachments: recalled } = parseUploadAttachments(last.text, projectId)
+    const restored = recalled.map((attachment) => ({ ...attachment, id: nextAttachmentId() }))
+    commit(() => makeSnapshot(body, restored, body.length, body.length), false)
+    requestAnimationFrame(() => focusComposer('end'))
+    return true
+  }
+
+  function onRichComposerKeyDown(e: KeyboardEvent, context: RichComposerKeyContext): boolean {
+    // Tiptap owns rich-document undo/redo, including inline attachment nodes.
+    // The explicit snapshot history remains for the dedicated shell textarea.
+    if (slashMatches.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashSel((selection) => e.key === 'ArrowDown'
+          ? (selection + 1) % slashMatches.length
+          : (selection - 1 + slashMatches.length) % slashMatches.length)
+        return true
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashDismissed(true)
+        return true
+      }
+      const exact = slashMatches.length === 1 && slashQuery === slashMatches[0]
+      if (e.key === 'Tab' || (e.key === 'Enter' && !exact && !e.shiftKey && !e.ctrlKey && !e.altKey)) {
+        e.preventDefault()
+        acceptSlash(slashMatches[Math.min(slashSel, slashMatches.length - 1)])
+        return true
+      }
+    }
+    if (e.key === 'ArrowUp' && context.empty && recallLatestQueued()) {
+      e.preventDefault()
+      return true
+    }
+    if (e.key !== 'Enter' || e.isComposing) return false
+    if (e.altKey || (e.ctrlKey && !e.metaKey)) {
+      e.preventDefault()
+      context.editor.commands.setHardBreak()
+      return true
+    }
+    if (!e.shiftKey && !e.metaKey) {
+      e.preventDefault()
+      send()
+      return true
+    }
+    return false
   }
 
   function onComposerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -10320,7 +10513,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   function renderChatItem(item: ChatItem, shellCwd: string | null = null): ReactNode {
     switch (item.kind) {
       case 'user':
-        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} projectId={projectId} linkCtx={chatLinkCtx} />
+        return <ChatUserMessage text={item.text} sending={item.sending} origin={item.origin} projectId={projectId} linkCtx={chatLinkCtx} flightFrom={item.flightFrom} />
       case 'command': {
         const name = item.name.startsWith('/') ? item.name : '/' + item.name
         return (
@@ -10891,7 +11084,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       is sent (a real user bubble) - and rendered the same way, so
                       image thumbnails / attachment chips show here too, not raw
                       upload paths (dimmed while it waits). */}
-                  <ChatUserMessage text={p.text} dimmed origin={p.origin} projectId={projectId} linkCtx={chatLinkCtx} />
+                  <ChatUserMessage text={p.text} dimmed origin={p.origin} projectId={projectId} linkCtx={chatLinkCtx} flightFrom={p.flightFrom} />
                   {/* Discard button (item 52): drops the queued message from the
                       server queue. A floating chip overhanging the bubble's
                       top-right corner (revealed on hover so the resting stack
@@ -11022,32 +11215,73 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             }`}
           >
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
-            <AttachmentChips
-              attachments={attachments}
-              size="sm"
-              className="px-3 pt-2.5"
-              onRemove={removeAttachment}
-              onOpen={(id, origin) => {
-                setLightboxOrigin(origin)
-                setLightboxIndex(openable.findIndex((a) => a.id === id))
-              }}
-            />
-            <HighlightedTextarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => handleInputChange(e.target.value)}
-              onKeyDown={onComposerKeyDown}
-              onPaste={handlePaste}
-              renderContent={renderComposerBackdrop}
-              placeholder={connected ? (review ? 'Ask about the diff...' : 'Write a message...') : 'Connecting...'}
-              disabled={!connected}
-              rows={1}
-              wrapperClassName="w-full"
-              wrapperStyle={{ height: composerHeight }}
-              textColorClassName="text-stone-800 dark:text-stone-100"
-              caretClassName="caret-stone-800 dark:caret-stone-100"
-              textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
-            />
+            {shellComposer && (
+              <AttachmentChips
+                attachments={attachments}
+                size="sm"
+                className="px-3 pt-2.5"
+                onRemove={removeAttachment}
+                onOpen={(id, origin) => {
+                  setLightboxOrigin(origin)
+                  setLightboxIndex(openable.findIndex((a) => a.id === id))
+                }}
+              />
+            )}
+            {shellComposer ? (
+              <HighlightedTextarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={onComposerKeyDown}
+                onPaste={handlePaste}
+                renderContent={renderComposerBackdrop}
+                placeholder={connected ? 'Run a shell command...' : 'Connecting...'}
+                disabled={!connected}
+                rows={1}
+                wrapperClassName="w-full"
+                wrapperStyle={{ height: composerHeight }}
+                textColorClassName="text-stone-800 dark:text-stone-100"
+                caretClassName="caret-stone-800 dark:caret-stone-100"
+                textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
+              />
+            ) : (
+              <div ref={richComposerHostRef} className="w-full overflow-hidden" style={{ height: composerHeight }} data-rich-chat-composer>
+                <Suspense fallback={<div className="h-full px-3.5 pt-2.5 text-sm leading-5 text-stone-400">Loading editor...</div>}>
+                  <RichComposer
+                    ref={richComposerRef}
+                    value={input}
+                    initialDocument={initialRichDocument}
+                    onDocumentChange={(document) => {
+                      richDocumentRef.current = document
+                      const ids = new Set<string>()
+                      const visit = (node: typeof document) => {
+                        if (node.type === 'attachment' && typeof node.attrs?.id === 'string') ids.add(node.attrs.id)
+                        node.content?.forEach(visit)
+                      }
+                      visit(document)
+                      setRichAttachmentIds(ids)
+                    }}
+                    onEditor={(editor) => {
+                      if (editor) syncAttachmentsIntoDocument(editor)
+                    }}
+                    attachmentRegistry={attachmentRegistry}
+                    onChange={handleRichInputChange}
+                    onKeyDown={onRichComposerKeyDown}
+                    onPaste={(event) => {
+                      const files = extractFiles(event.clipboardData)
+                      if (files.length === 0) return false
+                      handlePaste(event)
+                      return true
+                    }}
+                    editable={connected}
+                    spellCheck={composerSpellcheck}
+                    placeholder={connected ? (review ? 'Ask about the diff...' : 'Write a message...') : 'Connecting...'}
+                    ariaLabel="Message"
+                    className="h-full overflow-y-auto px-3.5 pt-2.5 pb-1 text-sm leading-5 text-stone-800 caret-stone-800 dark:text-stone-100 dark:caret-stone-100"
+                  />
+                </Suspense>
+              </div>
+            )}
             <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
               <Tooltip content="Attach files" side="top">
                 <button

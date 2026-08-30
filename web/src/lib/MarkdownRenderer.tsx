@@ -3,7 +3,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { useNavigate } from '@tanstack/react-router'
-import { ImageOff, Maximize2, VideoOff } from 'lucide-react'
+import { GitCommitHorizontal, ImageOff, Maximize2, VideoOff } from 'lucide-react'
 import { highlightCode } from './markdown'
 import { fileKind } from './fileKind'
 import { Tooltip } from '../components/Tooltip'
@@ -95,9 +95,9 @@ function encodePath(p: string): string {
 // and keyboard focus, while the resting colour stays inside the prose palette.
 const LINK_CLASS = 'text-stone-700 dark:text-stone-200 decoration-stone-400/70 underline-offset-2 hover:underline focus-visible:underline'
 
-// FileLink keeps the author's exact Markdown label in the prose, then uses the
-// tooltip for the richer file treatment shared with repository surfaces: a
-// Lucide file-kind icon, a lowlit directory and an emphasized filename.
+// FileLink keeps the author's exact Markdown label, but makes the rendered link
+// read as a small file token. This is presentation only: the Markdown source and
+// the editable composer remain untouched.
 function FileLink({ href, path, onClick, children }: {
   href: string
   path: string
@@ -120,7 +120,14 @@ function FileLink({ href, path, onClick, children }: {
         </span>
       )}
     >
-      <a className={LINK_CLASS} href={href} onClick={onClick}>{children}</a>
+      <a
+        className="inline-flex items-center gap-1 rounded border border-stone-300/70 bg-stone-100/70 px-1.5 align-middle font-mono text-[0.9em] text-stone-700 no-underline hover:bg-stone-200/70 focus-visible:ring-2 focus-visible:ring-blue-500/50 dark:border-white/15 dark:bg-white/[0.06] dark:text-stone-200 dark:hover:bg-white/10"
+        href={href}
+        onClick={onClick}
+      >
+        <Icon className="h-[1em] w-[1em] shrink-0 opacity-60" aria-hidden="true" />
+        {children}
+      </a>
     </Tooltip>
   )
 }
@@ -162,7 +169,10 @@ function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ct
       hash: lineHash ? lineHash.slice(1) : undefined,
     })
   }
-  if (fileChip && resolved) {
+  const label = typeof children === 'string' ? children : ''
+  const resolvedName = resolved.split('/').pop() ?? resolved
+  const fileLabel = label === resolved || label === resolvedName || label.includes('/')
+  if (fileChip && resolved && fileLabel) {
     return <FileLink href={url} path={resolved} onClick={onClick}>{children}</FileLink>
   }
   return <a className={LINK_CLASS} href={url} onClick={onClick}>{children}</a>
@@ -504,7 +514,21 @@ const InCodeBlock = createContext(false)
 // a wider selection.
 function MarkdownCode({ s, className, children }: { s: Style; className?: string; children?: ReactNode }) {
   const block = useContext(InCodeBlock)
-  if (!block) return <code className={s.codeInline}>{children}</code>
+  if (!block) {
+    const text = String(children ?? '')
+    if (/^[0-9a-f]{7,40}$/i.test(text)) {
+      return (
+        <code
+          className="inline-flex items-center gap-1 rounded border border-violet-300/60 bg-violet-50 px-1.5 align-middle font-mono text-[0.9em] text-violet-800 dark:border-violet-400/25 dark:bg-violet-400/10 dark:text-violet-200"
+          data-md-git-hash=""
+        >
+          <GitCommitHorizontal className="h-[1em] w-[1em] shrink-0 opacity-65" aria-hidden="true" />
+          {text}
+        </code>
+      )
+    }
+    return <code className={s.codeInline}>{children}</code>
+  }
   const text = String(children ?? '').replace(/\n$/, '')
   const lang = /language-([\w-]+)/.exec(className || '')?.[1] ?? ''
   // Captured command/test output is commonly fenced into a prompt or chat

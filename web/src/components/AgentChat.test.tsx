@@ -6,6 +6,17 @@ import { AgentStatus, type AgentResponse } from '../api'
 import { useAgentStore } from '../stores/agentStore'
 import { formatBashForDisplay, leadingBashComment } from '../lib/bashFormat'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
+import { editorForRichComposer } from '../lib/rich-editor/mountedEditors'
+import { optimisticEchoIndex } from '../lib/optimisticEcho'
+
+describe('optimistic user echo reconciliation', () => {
+  const pending = [{ clientId: 'client-send-id', text: 'same message' }]
+
+  it('prefers the client send id and falls back when a provider returns its own message id', () => {
+    expect(optimisticEchoIndex(pending, 'client-send-id', 'same message')).toBe(0)
+    expect(optimisticEchoIndex(pending, 'provider-transcript-id', 'same message')).toBe(0)
+  })
+})
 
 // The chat composer turns a pasted image into an attachment chip and (with the
 // paste-markers preference on) a "[filename]" marker in the text. Both mutations
@@ -134,10 +145,21 @@ describe('Bash card summary comments', () => {
   })
 })
 
-async function connectedComposer(): Promise<HTMLTextAreaElement> {
-  const ta = screen.getByRole('textbox') as HTMLTextAreaElement
-  await waitFor(() => expect(ta).not.toBeDisabled())
-  return ta
+async function connectedComposer(): Promise<HTMLElement> {
+  // RichComposer is a production lazy chunk. Under the full parallel test run,
+  // transforming that chunk can exceed Testing Library's 1s default even
+  // though the websocket and editor mount normally.
+  const composer = await screen.findByRole('textbox', {}, { timeout: 5_000 })
+  await waitFor(() => expect(composer).toHaveAttribute('contenteditable', 'true'))
+  return composer
+}
+
+function setComposerValue(composer: HTMLElement, value: string) {
+  editorForRichComposer(composer)!.commands.setContent(value, { contentType: 'markdown' })
+}
+
+function composerValue(composer: HTMLElement): string {
+  return editorForRichComposer(composer)!.getText()
 }
 
 describe('review composer status', () => {
@@ -174,7 +196,7 @@ describe('review composer status', () => {
       />,
     )
     const ta = await connectedComposer()
-    fireEvent.change(ta, { target: { value: 'one more question' } })
+    setComposerValue(ta, 'one more question')
 
     act(() => sockets[0].emit({ type: 'status', status: AgentStatus.RUNNING }))
     await screen.findByRole('button', { name: 'Queue message' })
@@ -291,24 +313,20 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
   afterAll(() => vi.unstubAllGlobals())
   afterEach(() => localStorage.clear())
 
-  it('undoes a pasted image: first Ctrl+Z drops the marker, second drops the chip', async () => {
+  it('undoes a pasted image as one structured document step', async () => {
     renderChat()
     const ta = await connectedComposer()
 
     fireEvent.paste(ta, imagePasteEvent())
 
-    // The paste both inserts a "[image1.png]" marker and stages an image chip.
+    // The attachment is one inline document node. Its Markdown serialization
+    // remains the readable marker sent to the agent.
     await screen.findByLabelText('Remove image1.png')
-    expect(ta.value).toBe('[image1.png]')
+    expect(composerValue(ta)).toBe('[image1.png]')
 
-    // First Ctrl+Z: the marker is gone but the chip remains (two distinct steps).
+    // One undo removes both its visible chip and serialized marker.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('')
-    expect(screen.getByLabelText('Remove image1.png')).toBeInTheDocument()
-
-    // Second Ctrl+Z: the chip is gone too - back to an empty composer.
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('')
+    expect(composerValue(ta)).toBe('')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
   })
 
@@ -319,16 +337,13 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     fireEvent.paste(ta, imagePasteEvent())
     await screen.findByLabelText('Remove image1.png')
 
-    // Undo the whole paste (marker, then chip).
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
+    // Undo and redo the single inline attachment node.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
 
-    // Redo brings the chip back, then the marker.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true, shiftKey: true })
     expect(screen.getByLabelText('Remove image1.png')).toBeInTheDocument()
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true, shiftKey: true })
-    expect(ta.value).toBe('[image1.png]')
+    expect(composerValue(ta)).toBe('[image1.png]')
   })
 
   it('keeps typed text when a later pasted image is undone', async () => {
@@ -336,22 +351,35 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     const ta = await connectedComposer()
 
     // Type into the composer (a coalesced undo step), then paste an image.
-    fireEvent.change(ta, { target: { value: 'look at this ' } })
-    expect(ta.value).toBe('look at this ')
+    setComposerValue(ta, 'look at this ')
+    expect(composerValue(ta)).toBe('look at this ')
 
     // Paste with the caret at the end (jsdom doesn't move it on a controlled
     // re-render), so the marker lands after the typed text.
-    ta.selectionStart = ta.selectionEnd = ta.value.length
     fireEvent.paste(ta, imagePasteEvent())
     await screen.findByLabelText('Remove image1.png')
-    expect(ta.value).toBe('look at this [image1.png]')
+    expect(composerValue(ta)).toBe('look at this [image1.png]')
 
-    // Undo marker, then chip - the typed text survives.
+    // The attachment has its own history boundary, so typed text survives.
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('look at this ')
-    fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
-    expect(ta.value).toBe('look at this ')
+    expect(composerValue(ta)).toBe('look at this ')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
+  })
+
+  it('shows a contextual language selector while the caret is in a code block', async () => {
+    renderChat()
+    const composer = await connectedComposer()
+    const editor = editorForRichComposer(composer)!
+    editor.commands.setContent('```javascript\nconst x = 1\n```', { contentType: 'markdown' })
+    editor.commands.setTextSelection(2)
+
+    const language = await screen.findByRole('combobox', { name: 'Code block language' })
+    expect(language).toHaveValue('javascript')
+    fireEvent.change(language, { target: { value: 'typescript' } })
+    expect(editor.getAttributes('codeBlock').language).toBe('typescript')
+
+    editor.commands.setContent('ordinary text', { contentType: 'markdown' })
+    await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Code block language' })).toBeNull())
   })
 })
 
@@ -1048,11 +1076,35 @@ describe('a message sent after a commit lands under it', () => {
     )
     const chip = await screen.findByText('Teach the loader about overlays')
 
-    fireEvent.change(ta, { target: { value: 'ship it' } })
+    setComposerValue(ta, 'ship it')
     fireEvent.keyDown(ta, { key: 'Enter' })
     const bubble = await screen.findByText('ship it')
 
     expect(chip.compareDocumentPosition(bubble) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('flies the composer content into its optimistic bubble', async () => {
+    renderChat()
+    const composer = await connectedComposer()
+    act(() => sockets[0].emit({ type: 'replay_done' }))
+    const composerHost = composer.closest<HTMLElement>('[data-rich-chat-composer]')!
+    composerHost.getBoundingClientRect = vi.fn(() => ({ top: 500, right: 900 } as DOMRect))
+    const animate = vi.fn()
+    const previousAnimate = HTMLElement.prototype.animate
+      HTMLElement.prototype.animate = animate
+    try {
+      setComposerValue(composer, 'animate me')
+      const send = await screen.findByRole('button', { name: 'Send message' })
+      await waitFor(() => expect(send).not.toBeDisabled())
+      fireEvent.click(send)
+      await waitFor(() => expect(animate).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ transform: expect.stringContaining('translate(') })]),
+        expect.objectContaining({ duration: 220 }),
+      ))
+      expect(document.querySelector('[data-composer-flight]')).not.toBeNull()
+    } finally {
+      HTMLElement.prototype.animate = previousAnimate
+    }
   })
 })
 

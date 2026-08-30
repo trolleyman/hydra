@@ -357,7 +357,7 @@ func toolDefs(deps Deps) []map[string]any {
 	if deps.HeadStatus != nil {
 		defs = append(defs, map[string]any{
 			"name": "get_head_status",
-			"description": "Get the status of YOUR OWN work as Hydra sees it: the verdict of each configured test runner - with the failing cases NAMED and their failure messages included, so this is usually all you need to start fixing - plus the state of each artifact/screenshot set and the project's supervised services. " +
+			"description": "Get the status of YOUR OWN work as Hydra sees it: the verdict of each configured test runner - with the failing cases NAMED and their failure messages included, so this is usually all you need to start fixing - plus the state of each artifact/screenshot set and the project's supervised services. Ready image and video artifacts are embedded as previews; other outputs are linked. " +
 				"This is the same state the user is looking at in Hydra's panels, and the test verdicts are what the merge and publish gates check - so this, not your own ad-hoc test command, is the answer to \"am I green?\". " +
 				"Everything is measured against your branch's latest COMMIT, so commit before calling it if you want your newest work judged. " +
 				"Read-only and cheap: it reports cached results and never starts a test run or a generation.",
