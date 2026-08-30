@@ -19,12 +19,15 @@ const RESET_REFRESH_GRACE_MS = 5_000
 const RESET_REFRESH_RETRY_MS = 31_000
 const RESET_REFRESH_ATTEMPTS = 4
 
-// fmtCountdown renders a millisecond remaining-time as "2h 14m" / "14m" / "<1m".
+// fmtCountdown renders a millisecond remaining-time as "2d 2h 14m" / "2h 14m" /
+// "14m" / "<1m".
 function fmtCountdown(ms: number): string {
   if (ms <= 0) return 'now'
   const totalMin = Math.floor(ms / 60_000)
+  const d = Math.floor(totalMin / (24 * 60))
   const h = Math.floor(totalMin / 60)
   const m = totalMin % 60
+  if (d > 0) return `${d}d ${h % 24}h ${m}m`
   if (h > 0) return `${h}h ${m}m`
   if (m > 0) return `${m}m`
   return '<1m'

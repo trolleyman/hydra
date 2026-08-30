@@ -40,6 +40,10 @@ export const StorageKeys = {
   // spawn form seeds the next spawn of that same agent type. '' / absent = the
   // CLI's own default.
   defaultModel: 'hydra-default-model',
+  // Most-recently selected agent providers (JSON array, most recent first).
+  // The model picker keeps the active provider first, then uses this history to
+  // place the providers the user returns to most often near the top.
+  modelProviderRecency: 'hydra-model-provider-recency',
   // 'true' when the spawn form's structured chat-mode toggle
   // was last on, so the next spawn defaults to the same mode.
   defaultChatMode: 'hydra-default-chat-mode',
@@ -118,6 +122,9 @@ export const StorageKeys = {
   // backgrounded or unfocused. Absent = off (the default; enabling requires an
   // explicit user gesture so the OS permission prompt has one). See lib/notifyPrefs.
   desktopNotifications: 'hydra-desktop-notifications',
+  // '0' when closing the final native window should also stop a desktop-owned
+  // backend. Absent = keep it running, matching an installed desktop app.
+  desktopKeepRunning: 'hydra-desktop-keep-running',
 
   diffSideBySide: 'hydra-diff-side-by-side',
   diffIgnoreWhitespace: 'hydra-diff-ignore-whitespace',

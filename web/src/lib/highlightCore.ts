@@ -7,6 +7,43 @@ import { hasLanguage } from './prism'
 import { escapeText, highlightTree, treeToHtml, treeToLines } from './prismHtml'
 import { highlightShell, isShellLanguage } from './shellEmbed'
 
+// cgoPreambleRanges finds the C preamble Go assigns to an `import "C"`.
+// `//go:build cgo` is only a build condition and does not prove a file embeds C;
+// the language-defined adjacency of a block comment and import does. Work
+// backwards from each import so an earlier ordinary block comment can never be
+// swallowed into the preamble.
+function cgoPreambleRanges(code: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = []
+  const imports = /^[ \t]*import[ \t]+"C"/gm
+  for (let match = imports.exec(code); match; match = imports.exec(code)) {
+    const before = code.slice(0, match.index)
+    const close = before.lastIndexOf('*/')
+    if (close < 0 || !/^[ \t]*\r?\n[ \t]*$/.test(before.slice(close + 2))) continue
+    const start = before.lastIndexOf('/*', close)
+    if (start >= 0) ranges.push({ start, end: close + 2 })
+  }
+  return ranges
+}
+
+function highlightCgo(code: string): string | null {
+  const ranges = cgoPreambleRanges(code)
+  if (!ranges.length) return null
+  let cursor = 0
+  let html = ''
+  for (const range of ranges) {
+    const goBefore = highlightTree(code.slice(cursor, range.start), 'go')
+    const cBody = highlightTree(code.slice(range.start + 2, range.end - 2), 'c')
+    if (goBefore == null || cBody == null) return null
+    html += treeToHtml(goBefore.children)
+    html += '<span class="token comment">/*</span>'
+    html += treeToHtml(cBody.children)
+    html += '<span class="token comment">*/</span>'
+    cursor = range.end
+  }
+  const goAfter = highlightTree(code.slice(cursor), 'go')
+  return goAfter == null ? null : html + treeToHtml(goAfter.children)
+}
+
 // splitHighlightedLines turns a single HTML string (whose token spans may
 // straddle newlines) into one HTML string per line, re-opening any span still
 // open at a line break. Only the shell path needs it - lib/shellEmbed composes
@@ -75,6 +112,14 @@ export function highlightHtml(code: string, language: string): string | null {
     }
   }
   if (isIgnoreLanguage(language)) return highlightIgnore(code)
+  if (language === 'go') {
+    try {
+      const embedded = highlightCgo(code)
+      if (embedded != null) return embedded
+    } catch {
+      return null
+    }
+  }
   if (!hasLanguage(language)) return null
   const tree = highlightTree(code, language)
   return tree == null ? null : treeToHtml(tree.children)
@@ -110,7 +155,8 @@ function lastTokenedLine(lines: string[], from: number): number {
 function linesOnce(code: string, language: string): string[] | null {
   // The two languages with no grammar behind them compose HTML directly, so
   // there is no tree to split - the markup is cut at the newlines instead.
-  if (isShellLanguage(language) || isIgnoreLanguage(language)) {
+  const hasEmbeddedC = language === 'go' && cgoPreambleRanges(code).length > 0
+  if (isShellLanguage(language) || isIgnoreLanguage(language) || hasEmbeddedC) {
     const html = highlightHtml(code, language)
     return html == null ? null : splitHighlightedLines(html)
   }

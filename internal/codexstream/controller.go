@@ -26,8 +26,9 @@ type Options struct {
 	OnConversation func(string)
 	OnModel        func(string)
 	OnTurnStart    func(string)
-	OnActivity     func()
-	OnNeedsInput   func()
+	OnActivity     func(string)
+	OnMessage      func(string)
+	OnNeedsInput   func(string)
 	OnStep         func()
 	OnTurnEnd      func(string)
 	OnHistoryLine  func([]byte)
@@ -135,7 +136,7 @@ func (c *Controller) OnLine(line []byte) {
 	// item as a provider-neutral running edge as well; this is deliberately not
 	// called for token deltas, so status persistence is bounded per item.
 	if msg.Method == "item/started" && c.opts.OnActivity != nil {
-		c.opts.OnActivity()
+		c.opts.OnActivity(itemActivity(msg.Params))
 	}
 	hasID := len(msg.ID) > 0 && string(msg.ID) != "null"
 	switch {
@@ -224,6 +225,11 @@ func (c *Controller) OnLine(line []byte) {
 			c.opts.OnTurnEnd(params.Turn.ID)
 		}
 	case msg.Method == "item/completed":
+		if c.opts.OnMessage != nil {
+			if text := completedMessage(msg.Params); text != "" {
+				c.opts.OnMessage(text)
+			}
+		}
 		if c.opts.OnStep != nil {
 			c.opts.OnStep()
 		}
@@ -244,9 +250,193 @@ func (c *Controller) OnLine(line []byte) {
 		c.requests[key] = pendingRequest{id: append(json.RawMessage(nil), msg.ID...), method: msg.Method, params: append(json.RawMessage(nil), msg.Params...)}
 		c.mu.Unlock()
 		if msg.Method == "item/tool/requestUserInput" && c.opts.OnNeedsInput != nil {
-			c.opts.OnNeedsInput()
+			c.opts.OnNeedsInput(firstQuestion(msg.Params))
 		}
 	}
+}
+
+// itemActivity turns a Codex item/started notification into the durable,
+// one-line "latest thing" shown in Hydra's agent list. The full structured item
+// remains available to the chat normalizer and tool card.
+func itemActivity(raw json.RawMessage) string {
+	var params struct {
+		Item struct {
+			Type    string          `json:"type"`
+			Command string          `json:"command"`
+			Changes json.RawMessage `json:"changes"`
+			Query   string          `json:"query"`
+			Path    string          `json:"path"`
+			Tool    string          `json:"tool"`
+			Prompt  string          `json:"prompt"`
+		} `json:"item"`
+	}
+	if json.Unmarshal(raw, &params) != nil {
+		return ""
+	}
+	item := params.Item
+	switch item.Type {
+	case "agent_message", "agentMessage", "reasoning":
+		return ""
+	case "commandExecution", "command_execution":
+		if description := CommandDescription(item.Command); description != "" {
+			return "# " + description
+		}
+		if command := firstCommandLine(item.Command); command != "" {
+			return "$ " + truncateRunes(command, 80)
+		}
+		return "Running a command"
+	case "fileChange", "file_change":
+		return fileChangeActivity(item.Changes)
+	case "webSearch", "web_search":
+		if item.Query != "" {
+			return "Searching the web: " + truncateRunes(item.Query, 50)
+		}
+		return "Searching the web"
+	case "imageView", "image_view":
+		if base := pathBase(item.Path); base != "" {
+			return "Viewing " + base
+		}
+		return "Viewing an image"
+	case "mcpToolCall":
+		return "Using " + friendlyToolName(item.Tool)
+	case "collabToolCall", "collabAgentToolCall":
+		if item.Prompt != "" {
+			return "Using Agent: " + truncateRunes(item.Prompt, 50)
+		}
+		return "Using Agent"
+	case "sleep":
+		return "Waiting"
+	default:
+		if item.Type == "" {
+			return ""
+		}
+		return "Using " + friendlyToolName(item.Type)
+	}
+}
+
+func completedMessage(raw json.RawMessage) string {
+	var params struct {
+		Item struct {
+			Type   string `json:"type"`
+			Text   string `json:"text"`
+			Review string `json:"review"`
+		} `json:"item"`
+	}
+	if json.Unmarshal(raw, &params) != nil {
+		return ""
+	}
+	switch params.Item.Type {
+	case "agent_message", "agentMessage":
+		return strings.TrimSpace(params.Item.Text)
+	case "exitedReviewMode":
+		return strings.TrimSpace(params.Item.Review)
+	default:
+		return ""
+	}
+}
+
+func firstQuestion(raw json.RawMessage) string {
+	var params struct {
+		Questions []struct {
+			Question string `json:"question"`
+		} `json:"questions"`
+	}
+	if json.Unmarshal(raw, &params) != nil {
+		return ""
+	}
+	for _, question := range params.Questions {
+		if text := strings.TrimSpace(question.Question); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+// CommandDescription reads the concise `# description` first-line convention
+// from a Codex shell item. Both the transcript tool card and current-status line
+// use this helper so they always show the same authored description.
+func CommandDescription(command string) string {
+	script := strings.TrimSpace(command)
+	for _, launcher := range []string{"bash -lc ", "bash -c ", "/bin/bash -lc ", "/bin/bash -c ", "/usr/bin/bash -lc ", "/usr/bin/bash -c "} {
+		if strings.HasPrefix(script, launcher) {
+			script = strings.TrimSpace(strings.TrimPrefix(script, launcher))
+			if len(script) >= 2 && (script[0] == '\'' || script[0] == '"') && script[len(script)-1] == script[0] {
+				script = script[1 : len(script)-1]
+			}
+			break
+		}
+	}
+	first, _, _ := strings.Cut(script, "\n")
+	first = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(first), `"`), `'`))
+	if !strings.HasPrefix(first, "#") || strings.HasPrefix(first, "#!") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(first, "#"))
+}
+
+func firstCommandLine(command string) string {
+	for _, line := range strings.Split(command, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			return line
+		}
+	}
+	return ""
+}
+
+func fileChangeActivity(raw json.RawMessage) string {
+	var changes []struct {
+		Path string          `json:"path"`
+		Kind json.RawMessage `json:"kind"`
+	}
+	if json.Unmarshal(raw, &changes) != nil || len(changes) == 0 {
+		return "Editing files"
+	}
+	verb := "Editing"
+	kind := strings.ToLower(strings.Trim(string(changes[0].Kind), `"`))
+	if strings.Contains(kind, "add") || strings.Contains(kind, "create") || strings.Contains(kind, "write") {
+		verb = "Writing"
+	} else if strings.Contains(kind, "delete") || strings.Contains(kind, "remove") {
+		verb = "Deleting"
+	}
+	if len(changes) > 1 {
+		return fmt.Sprintf("%s %d files", verb, len(changes))
+	}
+	if base := pathBase(changes[0].Path); base != "" {
+		return verb + " " + base
+	}
+	return verb + " files"
+}
+
+func pathBase(path string) string {
+	parts := strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' })
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[len(parts)-1]
+}
+
+func friendlyToolName(name string) string {
+	if name == "" {
+		return "tool"
+	}
+	name = strings.TrimPrefix(name, "mcp__")
+	if i := strings.Index(name, "__"); i >= 0 {
+		name = name[i+2:]
+	}
+	name = strings.NewReplacer("__", " ", "_", " ", "-", " ").Replace(name)
+	words := strings.Fields(name)
+	if len(words) > 0 && len(words[0]) > 0 {
+		words[0] = strings.ToUpper(words[0][:1]) + words[0][1:]
+	}
+	return strings.Join(words, " ")
+}
+
+func truncateRunes(value string, max int) string {
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max]) + "..."
 }
 
 func modelFromList(raw json.RawMessage, requested string) string {
@@ -533,7 +723,7 @@ func (c *Controller) Respond(raw json.RawMessage) error {
 			c.opts.OnHistoryLine(line)
 		}
 		if c.opts.OnActivity != nil {
-			c.opts.OnActivity()
+			c.opts.OnActivity("")
 		}
 	}
 	return errtrace.Wrap(err)

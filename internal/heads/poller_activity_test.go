@@ -99,6 +99,65 @@ func TestPollerPersistsActivityAndEmitsStatusEvent(t *testing.T) {
 	}
 }
 
+func TestPollerPersistsProviderNativeLatestThing(t *testing.T) {
+	root := t.TempDir()
+	store, err := db.Open(root)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	const id = "codex1"
+	if err := store.UpsertAgent(&db.Agent{ID: id, ProjectPath: root, AgentType: "codex", SessionStatus: "running"}); err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+
+	hub := events.NewHub()
+	sub := hub.Subscribe(root)
+	t.Cleanup(sub.Close)
+	base := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	detail := "# Run backend tests"
+	notSuggested := false
+	if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{
+		Status: api.Running, Timestamp: base.Format(time.RFC3339Nano),
+		Activity: &detail, LastMessage: &detail, LastMessageIsSuggestedNextMessage: &notSuggested,
+	}); err != nil {
+		t.Fatalf("write running status: %v", err)
+	}
+	pollJSONStatusOnce(store, root, newUnreadDebouncer(), hub, nil)
+
+	agents, err := store.ListAgents(root)
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	if agents[0].Activity != detail || agents[0].LastMessage != detail {
+		t.Fatalf("running latest thing = activity %q, message %q; want %q", agents[0].Activity, agents[0].LastMessage, detail)
+	}
+	if agents[0].LastMessageIsSuggested {
+		t.Fatal("tool description was marked as a suggested next message")
+	}
+	if payloads := statusPayloads(sub); len(payloads) != 1 || payloads[0].Activity != detail || payloads[0].LastMessage != detail {
+		t.Fatalf("running status event = %+v", payloads)
+	}
+
+	// The turn-end snapshot carries the same latest item as LastMessage. At rest
+	// activity clears, while the completed tool remains the visible detail.
+	if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{
+		Status: api.Finished, Timestamp: base.Add(time.Second).Format(time.RFC3339Nano),
+		Activity: &detail, LastMessage: &detail, LastMessageIsSuggestedNextMessage: &notSuggested,
+	}); err != nil {
+		t.Fatalf("write finished status: %v", err)
+	}
+	pollJSONStatusOnce(store, root, newUnreadDebouncer(), hub, nil)
+	agents, err = store.ListAgents(root)
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	if agents[0].Activity != "" || agents[0].LastMessage != detail {
+		t.Fatalf("finished latest thing = activity %q, message %q; want empty/%q", agents[0].Activity, agents[0].LastMessage, detail)
+	}
+}
+
 // TestPollerSelfSchedulesUnreadRecheck locks in the self-scheduling of the unread
 // debounce: arming a deferred running->finished flag schedules a one-shot re-poll
 // of that project, so a cleanly finished head (which writes nothing more, and so

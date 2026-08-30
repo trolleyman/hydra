@@ -88,7 +88,7 @@ The desktop layer owns only:
 
 React continues to own all product UI. The shell must not duplicate chat state,
 settings, navigation, or permission decisions. Native-to-web messages should be
-small semantic commands such as `new-focused-window`, `window-closing`, and
+small semantic commands such as `new-chat-window`, `window-closing`, and
 `notification-opened`, with versioned payloads and an ordinary browser fallback
 for every essential flow.
 
@@ -370,8 +370,11 @@ native Wayland/X11 validation.
 Desktop cold-start explicitly binds `127.0.0.1:0`; the assigned port exists only
 in the private ownership record. `mage buildDesktop` and `mage runDesktop`
 dispatch by host OS; on Linux they build the frontend and tagged shell.
-`mage runDesktop` deliberately behaves like an installed app, using the stable
-production socket and global database. It clears inherited development runtime,
+`mage runDesktop` uses the stable production socket and global database while
+owning its development backend for the lifetime of the Mage command. It replaces
+an earlier desktop-managed development backend so rebuilt code is loaded, then
+stops its backend when the app exits or the command receives Ctrl+C. It clears
+inherited development runtime,
 database, and listener variables, including when launched from a terminal opened
 inside a development Hydra. `mage runDesktopLocal` uses the
 checkout-local development database and a worktree-specific daemon runtime
@@ -386,11 +389,13 @@ running a development desktop cannot attach to or restart another Hydra daemon
 for the same OS user. The bundled `__desktop-connect` command exposes this same
 control-socket discovery/bootstrap operation to thin native shells without
 making the filesystem-protected endpoint protocol platform-UI-specific.
-When the Linux app launched by `mage runDesktopLocal` closes or the command
-receives Ctrl+C, Mage stops a desktop-managed daemon in that exact development
-runtime namespace. If it attached to an existing foreground `mage run`, that
-daemon is not desktop-managed and remains alive. Global, legacy-layout, and
-other checkout namespaces are untouched.
+When either Linux Mage desktop runner closes or receives Ctrl+C, Mage stops the
+desktop-managed daemon it owns. `runDesktopLocal` still leaves an existing
+foreground `mage run` daemon alive. A directly launched installed desktop keeps
+its global backend running according to the preference in Settings. The native
+application has one primary Hydra window; further activations present it, while
+chat-only windows may be opened for new or existing conversations. The same
+chat-only route opens as a browser window when no native bridge is present.
 Daemon control and web listeners become ready before best-effort recovery of
 previously running heads. Slow or broken provider/sandbox recovery therefore
 appears in the daemon log without making the desktop report a false startup

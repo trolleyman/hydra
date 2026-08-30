@@ -32,6 +32,7 @@ import type { ReviewRef } from '../api/models/ReviewRef'
 import { type AgentTypeOption, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
 import { fetchBranches, peekBranches } from '../lib/branchCache'
 import type { Editor } from '@tiptap/core'
+import { orderModelProviders, recordModelProviderUse } from '../lib/modelProviderRecency'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
@@ -146,6 +147,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
   }, [open, place])
 
   const active = AGENT_TYPES.find((a) => a.id === agent) ?? AGENT_TYPES[0]
+  const orderedAgents = orderModelProviders(agents, agent)
   const label = modelLabel(agent, model)
   // Both sizes are h-7: the trigger sits in a row of h-7 controls either way, and
   // `sm` differs in the icon and the pill's width, not in how tall it is.
@@ -189,7 +191,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           <span className={`flex items-center justify-center rounded-full ${iconWrap} ${active.color}`}>
             <AgentTypeIcon name={active.id} className={iconCls} />
           </span>
-          {label && <span className="max-w-[4rem] truncate text-3xs font-medium text-gray-600 dark:text-gray-300">{label}</span>}
+          {label && <span className="compact-spawn-model-label max-w-[5rem] truncate text-3xs font-medium text-gray-600 dark:text-gray-300">{label}</span>}
         </button>
       </Tooltip>
       {open && coords && (
@@ -197,7 +199,7 @@ const AgentModelPicker = memo(function AgentModelPicker({
           style={{ position: 'fixed', left: coords.left, top: coords.top }}
           className="w-44 max-h-80 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
         >
-          {agents.map((a, i) => (
+          {orderedAgents.map((a, i) => (
             <div key={a.id}>
               {i > 0 && <div className="my-1 border-t border-gray-100 dark:border-gray-700" />}
               <div className="flex items-center gap-2 px-3 py-1 text-2xs font-semibold text-gray-500 dark:text-gray-400">
@@ -413,6 +415,7 @@ export const SpawnForm = memo(function SpawnForm({
   // Stable handlers for the memo'd picker/selector children, so typing in the
   // textarea (which re-renders the form) doesn't re-render them too.
   const handleAgentModelChange = useCallback((a: AgentTypeOption, m: string) => {
+    recordModelProviderUse(a)
     setAgentType(a)
     setModel(m)
     onAgentTypeChange?.(a)
@@ -972,7 +975,7 @@ export const SpawnForm = memo(function SpawnForm({
     // the one remembered pick with no representation outside this panel (the
     // agent and model both show on the picker trigger beside it).
     const nonDefaults: string[] = []
-    if (focused) nonDefaults.push(`Workspace: focused (${focusedFilesystemMode})`)
+    if (focused) nonDefaults.push(`Worktree: off (${focusedFilesystemMode})`)
     if (focused && focusedAllowCommits) nonDefaults.push('Commits: allowed')
     if (adopt) nonDefaults.push(`Pull request: #${adopt.id}`)
     if (showBranch && baseBranch && defaultBranch && baseBranch !== defaultBranch) {
@@ -1008,14 +1011,14 @@ export const SpawnForm = memo(function SpawnForm({
         {canFocus && (
           <>
             <SettingsGroupLabel className="mb-1.5">Workspace</SettingsGroupLabel>
-            {!focusedOnly && <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
-              <button type="button" aria-pressed={!focused} onClick={() => setFocused(false)} className={modeSegment(!focused)}>
-                branch
-              </button>
-              <button type="button" aria-pressed={focused} onClick={() => { setFocused(true); setChatMode(true); setAdopt(null) }} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(focused)}`}>
-                focused
-              </button>
-            </div>}
+            {!focusedOnly && <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
+              <input type="checkbox" checked={!focused} onChange={(event) => {
+                const useWorktree = event.target.checked
+                setFocused(!useWorktree)
+                if (!useWorktree) { setChatMode(true); setAdopt(null) }
+              }} className="rounded border-gray-300 dark:border-gray-600" />
+              Use an isolated worktree
+            </label>}
             {focused && (
               <div className="mt-2 space-y-2">
                 <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
@@ -1138,7 +1141,7 @@ export const SpawnForm = memo(function SpawnForm({
   if (compact) {
     return (
       <>
-      <form onSubmit={handleSubmit} className="px-3 py-3 border-b border-gray-100 dark:border-gray-700">
+      <form onSubmit={handleSubmit} className="compact-spawn-form px-3 py-3 border-b border-gray-100 dark:border-gray-700">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileInput} />
         <div className={`relative rounded-xl p-[1.5px] transition-colors duration-200 ${disabled ? 'bg-gray-100 dark:bg-gray-700' : 'bg-gray-200 dark:bg-gray-600 focus-within:bg-gradient-to-br focus-within:from-blue-500 focus-within:via-indigo-500 focus-within:to-purple-600 focus-within:shadow-md focus-within:shadow-blue-500/20'}`}>
           <div ref={cardRef} className="rounded-[10px] bg-white dark:bg-gray-800 overflow-hidden flex flex-col min-h-[128px]">
@@ -1166,7 +1169,7 @@ export const SpawnForm = memo(function SpawnForm({
               </Suspense>
             </div>
             {renderAttachments('sm')}
-            <div className="flex items-center justify-between px-2 pb-2 gap-1.5 shrink-0">
+            <div className="flex items-center justify-between px-2 pb-2 gap-2 shrink-0">
               <div className="flex items-center gap-1 min-w-0 flex-1">
                 <Tooltip content="Attach files" side="top">
                   <button

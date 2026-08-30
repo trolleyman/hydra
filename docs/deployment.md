@@ -265,8 +265,11 @@ What remains, because each does a genuinely different job:
   production database. Desktop-owned ephemeral authentication is
   carried in the process environment across an in-app re-exec, so an existing
   webview cookie remains valid after an update.
-- `mage devFast` - Vite HMR in front of the Go API. Hot-module-replacement is
-  faster than any rebuild loop and is a different mechanism, not a duplicate.
+- `mage devFast` - Vite HMR in front of the Go API. It installs dependencies and
+  refreshes generated API and route sources when their inputs changed, but does
+  not run the release typecheck, bundle, source-map, or precompression pipeline
+  before showing the preview. Hot-module-replacement is faster than any rebuild
+  loop and is a different mechanism, not a duplicate.
 - `mage demo` - simulation mode. `runSimulationServer` (`internal/cli/server.go`)
   returns *before* `setupRuntime` / `serveUnixSocket`, so it touches no daemon
   socket, DB, `projects.json` or scope sweep. It is the one genuinely isolated

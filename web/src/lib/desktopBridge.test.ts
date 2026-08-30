@@ -16,7 +16,7 @@ describe('desktopBridge', () => {
   })
 
   it('reports no native transport in an ordinary browser', () => {
-    expect(postDesktopMessage({ type: 'new-full-window' })).toBe(false)
+    expect(postDesktopMessage({ type: 'show-main-window' })).toBe(false)
   })
 
   it('requires explicit capabilities for platform-specific bridge features', () => {

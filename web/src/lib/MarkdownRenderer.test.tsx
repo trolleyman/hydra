@@ -106,15 +106,23 @@ describe('Markdown', () => {
       expect(link.querySelector('svg')).not.toBeNull()
     })
 
-    it('also keeps a semantic repo link label as understated prose', () => {
+    it('also makes a semantic repo link visibly linked', () => {
       const { container } = render(
         <Markdown text="[the controller](/work/hydra/internal/controller.go)" linkCtx={ctx} />,
       )
       const link = container.querySelector('a')!
       expect(link).toHaveTextContent('the controller')
       expect(link.textContent).toBe('the controller')
-      expect(link.className).not.toContain('text-blue')
-      expect(link.querySelector('svg')).toBeNull()
+      expect(link.className.split(' ')).toContain('text-stone-800')
+      expect(link.className.split(' ')).toContain('decoration-dotted')
+    })
+
+    it('distinguishes linked inline code with a stronger neutral border', () => {
+      const { container } = render(<Markdown text="[`go help buildconstraint`](https://go.dev/help/buildconstraint)" />)
+      const link = container.querySelector('a')!
+      expect(link.className).toContain('[&:has(>code)]:no-underline')
+      expect(link.className).toContain('[&>code]:border-stone-400/70')
+      expect(link.querySelector('code')).toHaveTextContent('go help buildconstraint')
     })
 
     it('keeps README file links as prose links', () => {

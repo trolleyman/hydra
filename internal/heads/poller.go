@@ -396,6 +396,19 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			// survive a daemon restart. Kept out of UpdateAgentStatus so it never
 			// touches agent_status_time, which owns the transition/unread logic.
 			activity, lastMsg, lastMsgIsQuestion := readStatusLogTail(projectRoot, a.ID)
+			var lastMsgIsSuggested *bool
+			// Codex has no provider hook log. Its app-server controller writes the
+			// ordered latest item directly into status.json, so prefer those fields
+			// when present. Hook-based providers continue to use the log-derived
+			// values above.
+			if info.Activity != nil && *info.Activity != "" {
+				activity = *info.Activity
+			}
+			if info.LastMessage != nil && *info.LastMessage != "" {
+				lastMsg = *info.LastMessage
+				lastMsgIsQuestion = agentStatus == "needs_input"
+				lastMsgIsSuggested = info.LastMessageIsSuggestedNextMessage
+			}
 			// Activity is only meaningful while the agent is actively working; clear it
 			// at rest (matches the running-only gate in agentStatusDetail / ListHeads).
 			newActivity := ""
@@ -409,7 +422,11 @@ func pollJSONStatusOnce(store *db.Store, projectRoot string, deb *unreadDebounce
 			newSuggested := a.LastMessageIsSuggested
 			if lastMsg != "" {
 				newLastMsg = lastMsg
-				newSuggested = !lastMsgIsQuestion && IsSuggestedNextMessage(lastMsg)
+				if lastMsgIsSuggested != nil {
+					newSuggested = *lastMsgIsSuggested
+				} else {
+					newSuggested = !lastMsgIsQuestion && IsSuggestedNextMessage(lastMsg)
+				}
 			}
 			if newActivity != a.Activity || newLastMsg != a.LastMessage || newSuggested != a.LastMessageIsSuggested {
 				if err := store.UpdateAgentActivity(a.ID, newActivity, newLastMsg, newSuggested); err != nil {

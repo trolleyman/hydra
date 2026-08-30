@@ -797,6 +797,48 @@ describe('splitScriptOutput', () => {
     expect(exact?.map((s) => s.kind === 'view' && s.view.start)).toEqual([1, 1])
   })
 
+  it('uses repeated search matches to pin a following sed read', () => {
+    const file = 'web/src/components/AgentChat.test.tsx'
+    const source = Array.from({ length: 190 }, (_, i) => `line ${i + 1}`)
+    source[147] = '<<<<<<< HEAD'
+    source[168] = '======='
+    source[188] = '>>>>>>> main'
+    source[0] = "import { describe, it, expect } from 'vitest'"
+    const sections = splitScriptOutput(steps([
+      'git status --short',
+      `rg -n "^(<<<<<<<|=======|>>>>>>>)" ${file}`,
+      `sed -n '1,240p' ${file}`,
+    ].join('\n')), [
+      ' M web/src/lib/shellSections.ts',
+      '148:<<<<<<< HEAD',
+      '169:=======',
+      '189:>>>>>>> main',
+      ...source,
+    ].join('\n'))
+
+    expect(sections?.map((section) => [section.kind, section.lines.length])).toEqual([
+      ['git', 1],
+      ['matches', 3],
+      ['view', 190],
+    ])
+    expect(sections?.[2]).toMatchObject({ view: { path: file, start: 1 } })
+  })
+
+  it('does not pin a sed read when the preceding search text disagrees', () => {
+    const sections = splitScriptOutput(steps([
+      'git status --short',
+      'rg -n conflict a.ts',
+      "sed -n '1,3p' a.ts",
+    ].join('\n')), [
+      ' M a.ts',
+      '2:different text',
+      'const one = 1',
+      'const two = 2',
+    ].join('\n'))
+
+    expect(sections).toBeNull()
+  })
+
   it('reads two git reports back to back as one', () => {
     // Neither report is bounded by anything the script says, so where one stops
     // and the next starts is not knowable - and here there was nothing to know:

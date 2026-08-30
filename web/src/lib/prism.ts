@@ -86,6 +86,20 @@ const EAGER = [
 
 for (const lang of EAGER) refractor.register(lang)
 
+// Prism's Go grammar puts raw and interpreted strings in one greedy alternation.
+// At a raw string containing a double quote, a hunk can be tokenized from that
+// inner quote instead of from the opening backtick, leaving every following line
+// styled as an unterminated string. Keep the two forms as ordered string tokens:
+// the raw form owns its opening delimiter before an interpreted string can see
+// a quote inside it. Both retain the standard `string` class and theme.
+const goLanguage = refractor.languages.go as Record<string, unknown> | undefined
+if (goLanguage) {
+  goLanguage.string = [
+    { pattern: /`[^`]*`/, greedy: true },
+    { pattern: /(^|[^\\])"(?:\\.|[^"\\\r\n])*"/, lookbehind: true, greedy: true },
+  ]
+}
+
 // Prism's bash grammar colours a number wherever a word STARTS with one, so the
 // `1` of a `sed -n 1,60p` range lights up blue while the `,60p` welded to it
 // stays plain - a lone highlighted digit stranded in the middle of one argument.

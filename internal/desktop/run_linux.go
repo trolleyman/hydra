@@ -11,6 +11,7 @@ package desktop
 #include <webkit/webkit.h>
 
 typedef struct HydraDesktop HydraDesktop;
+static gboolean hydra_keep_running = TRUE;
 
 typedef struct {
 	HydraDesktop *desktop;
@@ -24,8 +25,10 @@ typedef struct {
 
 struct HydraDesktop {
 	GtkApplication *app;
+	GtkWindow *primary_window;
 	const char *uri;
 	GUri *origin;
+	gboolean keep_running;
 };
 
 typedef struct {
@@ -34,6 +37,15 @@ typedef struct {
 } HydraFolderRequest;
 
 static void hydra_open_window_at(HydraDesktop *desktop, const char *uri);
+
+static void hydra_show_main_window(HydraDesktop *desktop) {
+	if (desktop->primary_window != NULL) {
+		gtk_window_present(desktop->primary_window);
+		return;
+	}
+	hydra_open_window_at(desktop, desktop->uri);
+	desktop->primary_window = gtk_application_get_active_window(desktop->app);
+}
 
 static char *hydra_string_property(JSCValue *value, const char *name) {
 	JSCValue *property = jsc_value_object_get_property(value, name);
@@ -178,19 +190,23 @@ static gboolean hydra_close_request(GtkWindow *gtk_window, gpointer data) {
 static void hydra_script_message(WebKitUserContentManager *manager, JSCValue *value, gpointer data) {
 	HydraWindow *window = data;
 	char *type = hydra_string_property(value, "type");
-	if (g_strcmp0(type, "new-full-window") == 0) {
-		hydra_open_window_at(window->desktop, window->desktop->uri);
-	} else if (g_strcmp0(type, "new-focused-window") == 0) {
+	if (g_strcmp0(type, "show-main-window") == 0) {
+		hydra_show_main_window(window->desktop);
+	} else if (g_strcmp0(type, "new-chat-window") == 0) {
 		char *project = hydra_string_property(value, "projectId");
+		char *agent = hydra_string_property(value, "agentId");
 		if (project == NULL) project = g_strdup(window->project_id);
 		if (project != NULL) {
 			char *escaped = g_uri_escape_string(project, NULL, FALSE);
-			char *path = g_strdup_printf("/focused/%s", escaped);
+			char *escaped_agent = agent == NULL ? NULL : g_uri_escape_string(agent, NULL, FALSE);
+			char *path = escaped_agent == NULL
+				? g_strdup_printf("/focused/%s", escaped)
+				: g_strdup_printf("/project/%s/agent/%s?desktop=focused", escaped, escaped_agent);
 			char *uri = hydra_origin_url(window->desktop, path);
 			hydra_open_window_at(window->desktop, uri);
-			g_free(uri); g_free(path); g_free(escaped);
+			g_free(uri); g_free(path); g_free(escaped); g_free(escaped_agent);
 		}
-		g_free(project);
+		g_free(project); g_free(agent);
 	} else if (g_strcmp0(type, "active-project") == 0) {
 		g_free(window->project_id);
 		window->project_id = hydra_string_property(value, "projectId");
@@ -212,6 +228,9 @@ static void hydra_script_message(WebKitUserContentManager *manager, JSCValue *va
 		char *request_id = hydra_string_property(value, "requestId");
 		if (request_id != NULL) hydra_pick_folder(window, request_id);
 		g_free(request_id);
+	} else if (g_strcmp0(type, "keep-running") == 0) {
+		window->desktop->keep_running = hydra_boolean_property(value, "enabled");
+		hydra_keep_running = window->desktop->keep_running;
 	}
 	g_free(type);
 }
@@ -234,6 +253,7 @@ static gboolean hydra_decide_policy(WebKitWebView *web_view, WebKitPolicyDecisio
 
 static void hydra_window_destroy(GtkWidget *widget, gpointer data) {
 	HydraWindow *window = data;
+	if (window->desktop->primary_window == GTK_WINDOW(widget)) window->desktop->primary_window = NULL;
 	g_free(window->project_id);
 	g_free(window->agent_id);
 	g_free(window);
@@ -246,7 +266,8 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri) {
 
 	WebKitUserContentManager *manager = webkit_user_content_manager_new();
 	WebKitUserScript *capabilities = webkit_user_script_new(
-		"window.hydraDesktopCapabilities={nativeNotifications:true,nativeFolderPicker:true}",
+		"window.hydraDesktopCapabilities={nativeNotifications:true,nativeFolderPicker:true};"
+		"window.addEventListener('DOMContentLoaded',()=>window.webkit.messageHandlers.hydra.postMessage({type:'keep-running',enabled:localStorage.getItem('hydra-desktop-keep-running')!=='0'}))",
 		WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, NULL, NULL);
 	webkit_user_content_manager_add_script(manager, capabilities);
 	webkit_user_script_unref(capabilities);
@@ -273,7 +294,7 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri) {
 
 static void hydra_new_window(GSimpleAction *action, GVariant *parameter, gpointer data) {
 	HydraDesktop *desktop = data;
-	hydra_open_window_at(desktop, desktop->uri);
+	hydra_show_main_window(desktop);
 }
 
 static void hydra_new_chat(GSimpleAction *action, GVariant *parameter, gpointer data) {
@@ -326,7 +347,7 @@ static void hydra_activate(GtkApplication *app, gpointer data) {
 	desktop->app = app;
 	GtkWindow *active = gtk_application_get_active_window(app);
 	if (active != NULL) gtk_window_present(active);
-	else hydra_open_window_at(desktop, desktop->uri);
+	else hydra_show_main_window(desktop);
 }
 
 static int hydra_command_line(GApplication *application, GApplicationCommandLine *command_line, gpointer data) {
@@ -335,14 +356,8 @@ static int hydra_command_line(GApplication *application, GApplicationCommandLine
 	int argc = 0;
 	char **argv = g_application_command_line_get_arguments(command_line, &argc);
 	const char *uri = argc > 1 && hydra_same_origin(desktop, argv[1]) ? argv[1] : desktop->uri;
-	GtkWindow *active = gtk_application_get_active_window(desktop->app);
-	if (active != NULL) {
-		HydraWindow *window = g_object_get_data(G_OBJECT(active), "hydra-window");
-		if (window != NULL) webkit_web_view_load_uri(window->web_view, uri);
-		gtk_window_present(active);
-	} else {
-		hydra_open_window_at(desktop, uri);
-	}
+	if (g_strcmp0(uri, desktop->uri) == 0) hydra_show_main_window(desktop);
+	else hydra_open_window_at(desktop, uri);
 	g_strfreev(argv);
 	return 0;
 }
@@ -376,7 +391,7 @@ static void hydra_startup(GApplication *application, gpointer data) {
 }
 
 static int hydra_desktop_run(const char *uri) {
-	HydraDesktop desktop = { .uri = uri, .origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL) };
+	HydraDesktop desktop = { .uri = uri, .origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL), .keep_running = TRUE };
 	if (desktop.origin == NULL) return 2;
 	GtkApplication *app = gtk_application_new("dev.hydra.Hydra", G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_signal_connect(app, "startup", G_CALLBACK(hydra_startup), &desktop);
@@ -389,6 +404,8 @@ static int hydra_desktop_run(const char *uri) {
 	return status;
 }
 
+static gboolean hydra_desktop_keep_running(void) { return hydra_keep_running; }
+
 static unsigned hydra_gtk_major(void) { return gtk_get_major_version(); }
 static unsigned hydra_gtk_minor(void) { return gtk_get_minor_version(); }
 static unsigned hydra_gtk_micro(void) { return gtk_get_micro_version(); }
@@ -399,11 +416,14 @@ static unsigned hydra_webkit_micro(void) { return webkit_get_micro_version(); }
 import "C"
 
 import (
+	"context"
 	"fmt"
 	"runtime"
+	"time"
 	"unsafe"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/daemon"
 )
 
 func run(rawURL string) error {
@@ -413,6 +433,13 @@ func run(rawURL string) error {
 	defer C.free(unsafe.Pointer(uri))
 	if status := C.hydra_desktop_run(uri); status != 0 {
 		return errtrace.Wrap(fmt.Errorf("native application exited with status %d", int(status)))
+	}
+	if C.hydra_desktop_keep_running() == 0 && daemon.IsDesktopManaged("") {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := daemon.StopDaemon(ctx, ""); err != nil {
+			return errtrace.Wrap(fmt.Errorf("stop desktop backend: %w", err))
+		}
 	}
 	return nil
 }

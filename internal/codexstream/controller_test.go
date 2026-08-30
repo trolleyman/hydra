@@ -194,7 +194,7 @@ func TestControllerAutoAcceptsApprovalRequests(t *testing.T) {
 func TestControllerItemActivityMarksRunning(t *testing.T) {
 	activity, steps := 0, 0
 	c := New(Options{
-		OnActivity: func() { activity++ },
+		OnActivity: func(string) { activity++ },
 		OnStep:     func() { steps++ },
 	})
 	c.OnLine([]byte(`{"method":"item/started","params":{"item":{"id":"a","type":"agentMessage"}}}`))
@@ -205,6 +205,51 @@ func TestControllerItemActivityMarksRunning(t *testing.T) {
 	}
 	if steps != 1 {
 		t.Fatalf("step callbacks = %d, want 1", steps)
+	}
+}
+
+func TestControllerReportsLatestThing(t *testing.T) {
+	var activities, messages, questions []string
+	c := New(Options{
+		OnActivity:   func(detail string) { activities = append(activities, detail) },
+		OnMessage:    func(message string) { messages = append(messages, message) },
+		OnNeedsInput: func(question string) { questions = append(questions, question) },
+	})
+	c.OnLine([]byte(`{"method":"item/started","params":{"item":{"id":"shell","type":"commandExecution","command":"/usr/bin/bash -lc '# Run backend tests\ngo test ./...'"}}}`))
+	c.OnLine([]byte(`{"method":"item/started","params":{"item":{"id":"edit","type":"fileChange","changes":[{"path":"internal/heads/activity.go","kind":{"type":"update"}}]}}}`))
+	c.OnLine([]byte(`{"method":"item/started","params":{"item":{"id":"mcp","type":"mcpToolCall","server":"hydra","tool":"get_head_status"}}}`))
+	c.OnLine([]byte(`{"method":"item/completed","params":{"item":{"id":"message","type":"agentMessage","text":"The improved status is implemented.\n\nTests pass."}}}`))
+	c.OnLine([]byte(`{"id":7,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","question":"Which status behavior should Codex use?"},{"id":"q2","question":"Anything else?"}]}}`))
+
+	wantActivities := []string{"# Run backend tests", "Editing activity.go", "Using Get head status"}
+	if !reflect.DeepEqual(activities, wantActivities) {
+		t.Fatalf("activities = %#v, want %#v", activities, wantActivities)
+	}
+	if want := []string{"The improved status is implemented.\n\nTests pass."}; !reflect.DeepEqual(messages, want) {
+		t.Fatalf("messages = %#v, want %#v", messages, want)
+	}
+	if want := []string{"Which status behavior should Codex use?"}; !reflect.DeepEqual(questions, want) {
+		t.Fatalf("questions = %#v, want %#v", questions, want)
+	}
+}
+
+func TestItemActivityFallbacks(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"raw command", `{"item":{"type":"commandExecution","command":"mage build"}}`, "$ mage build"},
+		{"unknown item", `{"item":{"type":"ToolSearch"}}`, "Using ToolSearch"},
+		{"image basename", `{"item":{"type":"imageView","path":"/tmp/image1.png"}}`, "Viewing image1.png"},
+		{"web query", `{"item":{"type":"webSearch","query":"Codex app server"}}`, "Searching the web: Codex app server"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := itemActivity(json.RawMessage(test.line)); got != test.want {
+				t.Fatalf("itemActivity() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
@@ -273,7 +318,7 @@ func TestControllerRespondsToUserInputRequest(t *testing.T) {
 	var sent []map[string]any
 	var history [][]byte
 	needsInput, activity := 0, 0
-	c := New(Options{OnNeedsInput: func() { needsInput++ }, OnActivity: func() { activity++ }, OnHistoryLine: func(line []byte) { history = append(history, line) }, Send: func(line []byte) error {
+	c := New(Options{OnNeedsInput: func(string) { needsInput++ }, OnActivity: func(string) { activity++ }, OnHistoryLine: func(line []byte) { history = append(history, line) }, Send: func(line []byte) error {
 		var value map[string]any
 		_ = json.Unmarshal(line, &value)
 		sent = append(sent, value)
@@ -303,7 +348,7 @@ func TestControllerRespondsToUserInputRequest(t *testing.T) {
 func TestControllerFailedUserInputResponseStaysNeedsInput(t *testing.T) {
 	activity := 0
 	c := New(Options{
-		OnActivity: func() { activity++ },
+		OnActivity: func(string) { activity++ },
 		Send:       func([]byte) error { return errtrace.Wrap(errors.New("send failed")) },
 	})
 	c.OnLine([]byte(`{"id":42,"method":"item/tool/requestUserInput","params":{"questions":[]}}`))

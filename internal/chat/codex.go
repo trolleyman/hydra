@@ -449,28 +449,7 @@ func codexToolPayload(item codexItem, completed bool) Payload {
 // view and auditability; this only adds the semantic field Claude supplies
 // natively.
 func codexCommandDescription(command string) string {
-	script := strings.TrimSpace(command)
-	for _, launcher := range []string{"bash -lc ", "bash -c ", "/bin/bash -lc ", "/bin/bash -c ", "/usr/bin/bash -lc ", "/usr/bin/bash -c "} {
-		if !strings.HasPrefix(script, launcher) {
-			continue
-		}
-		script = strings.TrimSpace(strings.TrimPrefix(script, launcher))
-		if len(script) >= 2 && (script[0] == '\'' || script[0] == '"') && script[len(script)-1] == script[0] {
-			script = script[1 : len(script)-1]
-		}
-		break
-	}
-	first, _, _ := strings.Cut(script, "\n")
-	first = strings.TrimSpace(first)
-	// Shell expansion can consume the wrapper's closing quote (notably when a
-	// script ends in `$?`) while leaving its opening quote in Codex's recorded
-	// command. The first script line remains unambiguous, so tolerate that one
-	// unmatched wrapper quote when extracting its description.
-	first = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(first, `"`), `'`))
-	if !strings.HasPrefix(first, "#") || strings.HasPrefix(first, "#!") {
-		return ""
-	}
-	return strings.TrimSpace(strings.TrimPrefix(first, "#"))
+	return codexstream.CommandDescription(command)
 }
 
 func codexFileChangeName(changes json.RawMessage) string {

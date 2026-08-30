@@ -126,6 +126,12 @@ and `web/src/DiffViewer.tsx`):
   (`<button>`), which a drag can't select in the first place - so taking over the
   copy event doesn't start pulling chrome into the clipboard. A selection that
   stays inside one code block copies the raw code, no fence.
+- Bash inspection output is sectioned by `web/src/lib/shellSections.ts`. Plain
+  file reads such as `sed -n '40,80p'` render with syntax highlighting and the
+  file's real line numbers. In a script where a numbered search immediately
+  precedes a read of the same file, repeated search rows can pin the read's start
+  even when an open-ended command ran before both: the search text and number
+  must agree with the corresponding line in the read before the gutter is shown.
 - Per-agent view state lives in `web/src/lib/agentViewPrefs.ts`: a sharded
   localStorage store keyed per project+agent, 30-day TTL (terminal height, page
   scrollTop, collapsed diff files, bash tabs, tests-panel view toggles, and the
