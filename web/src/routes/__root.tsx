@@ -1222,19 +1222,6 @@ function RootLayout() {
               instead of a second line. */}
           <div className="group border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            {hasDesktopBridge() && (
-              <Tooltip content={
-                backendLifetime === 'command-owned'
-                  ? 'Command-owned backend - stops when the desktop command exits'
-                  : backendLifetime == null
-                    ? 'Checking backend lifetime...'
-                    : desktopKeepRunning
-                      ? 'Hydra backend stays running after windows close'
-                      : 'Hydra backend stops with the last window'
-              }>
-                <span className={`shrink-0 w-2 h-2 rounded-full ${backendLifetime !== 'command-owned' && desktopKeepRunning ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-              </Tooltip>
-            )}
             {canRestart && (
               // Primary action is whichever one is actually useful here: a server
               // that can rebuild itself gets "update", one that can't gets a plain
@@ -1251,8 +1238,8 @@ function RootLayout() {
                   restarting
                     ? 'Restarting...'
                     : canUpdate
-                      ? 'Rebuild and restart the server'
-                      : 'Restart the server'
+                      ? 'Rebuild and restart server'
+                      : 'Restart server'
                 }
                 shortcut={canUpdate && !restarting ? { keys: ['Alt'], note: 'restart without rebuilding' } : undefined}
                 footnote={
@@ -1267,6 +1254,19 @@ function RootLayout() {
                 >
                   <RotateCw className={`w-4 h-4 ${restarting ? 'animate-spin' : ''}`} />
                 </button>
+              </Tooltip>
+            )}
+            {hasDesktopBridge() && (
+              <Tooltip content={
+                backendLifetime === 'command-owned'
+                  ? 'Command-owned backend - stops when the desktop command exits'
+                  : backendLifetime == null
+                    ? 'Checking backend lifetime...'
+                    : desktopKeepRunning
+                      ? 'Hydra backend stays running after windows close'
+                      : 'Hydra backend stops with the last window'
+              }>
+                <span className={`shrink-0 w-2 h-2 rounded-full ${backendLifetime !== 'command-owned' && desktopKeepRunning ? 'bg-emerald-500' : 'bg-gray-400'}`} />
               </Tooltip>
             )}
             {spawnedAt.current !== null && (
