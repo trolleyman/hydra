@@ -1541,9 +1541,77 @@ func webPM() string {
 	return webPMName
 }
 
+// EnsureWebDependencies installs frontend dependencies only when the committed
+// dependency manifest changes. npm/aube is still authoritative for a fresh
+// checkout, but repeatedly resolving an unchanged lockfile adds needless delay
+// to both a release build and the fast preview path.
+func EnsureWebDependencies() error {
+	stamp := ".mage/web-deps.stamp"
+
+	changed, err := target.Path(stamp, "web/package.json", "web/package-lock.json")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if _, err := os.Stat("web/node_modules"); os.IsNotExist(err) {
+		changed = true
+	} else if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if !changed {
+		return nil
+	}
+
+	if err := runInDirV("web", webPM(), "install"); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(stamp), 0755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(os.WriteFile(stamp, nil, 0644))
+}
+
+// GenerateWebSources keeps the generated API client and route tree current for
+// Vite without running TypeScript's release typecheck or building web/dist.
+// Those generated sources are the only frontend build prerequisites DevFast
+// needs; Vite compiles the application lazily and serves updates through HMR.
+func GenerateWebSources() error {
+	if err := EnsureWebDependencies(); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	stamp := ".mage/web-generated.stamp"
+	routesChanged, err := dirChangedIgnores(stamp, "web/src/routes", nil)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	apiChanged, err := target.Dir(stamp, "api")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	packageChanged, err := target.Path(stamp, "web/package.json", "web/package-lock.json")
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if !routesChanged && !apiChanged && !packageChanged {
+		return nil
+	}
+
+	if err := runInDirV("web", webPM(), "run", "generate-openapi"); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := runInDirV("web", webPM(), "run", "generate-tanstack-router"); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(stamp), 0755); err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(os.WriteFile(stamp, nil, 0644))
+}
+
 // BuildWeb builds the frontend into web/dist, which the binary embeds. There is
-// exactly one build flavour - minified with source maps, see web/vite.config.ts -
-// so there is one stamp and no build-mode environment to get wrong.
+// exactly one release flavour - minified with source maps, see web/vite.config.ts.
 func BuildWeb() error {
 	stamp := ".mage/web-build.stamp"
 
@@ -1571,8 +1639,7 @@ func BuildWeb() error {
 		return nil
 	}
 
-	// Run install + build
-	if err := runInDirV("web", webPM(), "install"); err != nil {
+	if err := EnsureWebDependencies(); err != nil {
 		return errtrace.Wrap(err)
 	}
 
@@ -1679,8 +1746,8 @@ func getHydraOutputFile() string {
 // while running the Vite dev server on http://localhost:26600 for hot-module-replacement.
 // Vite proxies /api, /health, and /ws to the Go backend automatically.
 // The frontend is never embedded into the binary (hydra_no_frontend build tag).
-// BuildWeb is still called to keep the generated TS API client (web/src/api/) in sync;
-// it uses stamp-based caching so it is a no-op when neither web/ nor api/ have changed.
+// Only generated API and route sources are prepared before Vite starts; a release
+// bundle would typecheck, minify, map and precompress assets Vite does not use.
 //
 // There is no rebuild loop here any more. The server restarts itself in place
 // (syscall.Exec, same PID - see internal/selfupdate), so the UI's restart and
@@ -1693,7 +1760,7 @@ func DevFast() error {
 	if err := GenerateGo(); err != nil {
 		return errtrace.Wrap(err)
 	}
-	if err := BuildWeb(); err != nil {
+	if err := GenerateWebSources(); err != nil {
 		return errtrace.Wrap(err)
 	}
 
