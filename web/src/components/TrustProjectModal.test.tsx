@@ -32,6 +32,11 @@ describe('TrustProjectModal - Escape to cancel', () => {
     expect(onCancel).toHaveBeenCalledTimes(1)
   })
 
+  it('uses the modal layer above portalled project menus', () => {
+    const { container } = renderModal(() => {})
+    expect(container.firstChild).toHaveClass('z-[10000]')
+  })
+
   it('ignores other keys', () => {
     const onCancel = vi.fn()
     renderModal(onCancel)

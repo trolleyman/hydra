@@ -177,8 +177,10 @@ white page; keeping it means the failure mode is merely the old behaviour.
   `projects.some` when touching this.
 - **Treat the built-in as empty for add-project affordances.** The project
   dropdown shows its add-folder actions when there are no user projects, then
-  keeps them behind Edit list. Edit list can rename user projects, but the
-  built-in keeps its system-defined name.
+  keeps them behind Edit list. Open folder expands one path field; when native
+  browsing is available its compact browse button sits beside that field, and
+  resolved-path details live in the field's status tooltip. Edit list can
+  rename user projects, but the built-in keeps its system-defined name.
 - **Project IDs are stable directory names, not arbitrary filesystem paths.**
   The SQLite catalogue maps each validated ID to `ProjectInfo.Path`, while
   generated project state lives under `projects/<id>`. So a bogus or hostile ID

@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, ChevronUp, Eye, EyeOff, FolderOpen, GripVertical, Pencil, Plus, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, Ellipsis, Eye, EyeOff, GripVertical, Info, Pencil, Plus, TriangleAlert, X } from 'lucide-react'
 import type { ProjectInfo, ResolvedPathResponse } from '../api'
 import { formatError } from '../api/format_error'
 import { folderPickerAvailable, openFolderPicker } from '../api/folderPicker'
@@ -13,6 +13,7 @@ import { useToastStore } from '../stores/toastStore'
 import { expandOrder, reorderProjects, setProjectHidden, useProjectStore, visibleProjects } from '../stores/projectStore'
 import { ProjectAgentCounts, ProjectAttentionDot } from './ProjectAgentCounts'
 import { ServiceHealthWarning } from './ServiceHealthWarning'
+import { Tooltip } from './Tooltip'
 import { pillText } from '../lib/branchPills'
 
 // Project-switch shortcut hint. We bind Ctrl (not Cmd) on every platform,
@@ -462,7 +463,7 @@ export const ProjectDropdown = memo(function ProjectDropdown({
 
   // Resolve the typed path as the user types, debounced. This is what turns
   // "~/code/hydra" (or a bare "code/hydra", which resolves against home) into
-  // the absolute path shown under the input - and confirmed in the trust prompt.
+  // the absolute path shown by the field's status tooltip and trust prompt.
   useEffect(() => {
     const typed = newPath.trim()
     if (!typed) return
@@ -544,6 +545,12 @@ export const ProjectDropdown = memo(function ProjectDropdown({
   // Adding a folder is a first-run affordance. Once a user project exists it
   // stays out of the everyday switcher unless the user opens Edit list.
   const showAddActions = editing || !allOrdered.some((p) => !p.builtin)
+  const currentResolution = resolved?.input === newPath.trim() ? resolved.result : null
+  const currentPathHint = currentResolution ? pathHint(currentResolution) : null
+  const resolutionDiffers = !!currentResolution && currentResolution.path !== newPath.trim()
+  const pathStatusLabel = currentPathHint ?? (
+    resolutionDiffers ? `Resolves to ${currentResolution.path}` : null
+  )
 
   // Persist a new order. No-op when the drag put everything back where it was.
   // The dragged rows are only the ones on screen, so the hidden projects are
@@ -737,69 +744,88 @@ export const ProjectDropdown = memo(function ProjectDropdown({
           <div className="py-1">
             {showAddActions && (
               <>
-                {pickerAvailable && !showAddInput && (
-                  <>
-                    <button
-                      onClick={handleBrowse}
-                      disabled={browsing}
-                      className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-default"
-                    >
-                      <FolderOpen className="w-3 h-3" />
-                      {browsing ? 'Waiting for folder...' : 'Browse...'}
-                    </button>
-                    {addError && (
-                      <p className="text-3xs text-red-500 px-3 pb-1 leading-snug">{addError}</p>
-                    )}
-                  </>
-                )}
                 {!showAddInput ? (
                   <button
                     onClick={() => { setShowAddInput(true); setAddError(null) }}
                     className="w-full flex items-center gap-2 px-3 py-2 cursor-pointer text-left text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                   >
                     <Plus className="w-3 h-3" />
-                    {pickerAvailable ? 'Enter path manually...' : 'Open folder...'}
+                    Open folder...
                   </button>
                 ) : (
                   <form onSubmit={handleAdd} className="px-3 py-2">
-                <label className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Folder path</label>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={newPath}
-                  onChange={(e) => setNewPath(e.target.value)}
-                  placeholder="~/code/project or /absolute/path"
-                  disabled={adding}
-                  className="w-full text-xs font-mono px-2 py-1.5 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-500 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
-                />
-                {/* Where that lands. Shown whenever it differs from what was
-                    typed, so "~/x" and relative paths make it obvious which
-                    folder is about to be opened before the trust prompt. */}
-                {resolved?.input === newPath.trim() && resolved.result.path !== newPath.trim() && (
-                  <p className="text-3xs font-mono text-gray-500 dark:text-gray-400 mt-1 leading-snug break-all">{resolved.result.path}</p>
-                )}
-                {resolved?.input === newPath.trim() && pathHint(resolved.result) && (
-                  <p className="text-3xs text-amber-600 dark:text-amber-500 mt-0.5 leading-snug">{pathHint(resolved.result)}</p>
-                )}
-                {addError && (
-                  <p className="text-3xs text-red-500 mt-1 leading-snug">{addError}</p>
-                )}
-                <div className="flex gap-2 mt-2">
-                  <button
-                    type="submit"
-                    disabled={!newPath.trim() || adding}
-                    className="flex-1 text-xs py-1 px-2 rounded bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                  >
-                    {adding ? 'Opening...' : 'Open'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setShowAddInput(false); setNewPath(''); setResolved(null); setAddError(null) }}
-                    className="text-xs py-1 px-2 rounded border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
+                    <label htmlFor="project-folder-path" className="text-xs text-gray-500 dark:text-gray-400 mb-1 block">Folder path</label>
+                    <div className="flex items-stretch gap-1.5">
+                      <div className="relative min-w-0 flex-1">
+                        <input
+                          ref={inputRef}
+                          id="project-folder-path"
+                          type="text"
+                          value={newPath}
+                          onChange={(e) => setNewPath(e.target.value)}
+                          placeholder="~/code/project or /absolute/path"
+                          disabled={adding}
+                          className="w-full text-xs font-mono pl-2 pr-7 py-1.5 rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-300 dark:placeholder-gray-500 focus:outline-none focus:border-blue-400 dark:focus:border-blue-500 disabled:opacity-50"
+                        />
+                        {pathStatusLabel && currentResolution && (
+                          <Tooltip
+                            content={(
+                              <span className="block text-left">
+                                {resolutionDiffers && (
+                                  <span className="block font-mono break-all">{currentResolution.path}</span>
+                                )}
+                                {currentPathHint && (
+                                  <span className={`block ${resolutionDiffers ? 'mt-1' : ''}`}>{currentPathHint}</span>
+                                )}
+                              </span>
+                            )}
+                            className={`absolute right-2 top-1/2 -translate-y-1/2 ${
+                              currentPathHint ? 'text-amber-500' : 'text-gray-400 dark:text-gray-500'
+                            }`}
+                          >
+                            <span tabIndex={0} aria-label={pathStatusLabel} className="inline-flex outline-none">
+                              {currentPathHint ? (
+                                <TriangleAlert className="w-3.5 h-3.5" />
+                              ) : (
+                                <Info className="w-3.5 h-3.5" />
+                              )}
+                            </span>
+                          </Tooltip>
+                        )}
+                      </div>
+                      {pickerAvailable && (
+                        <Tooltip content="Browse folders">
+                          <button
+                            type="button"
+                            aria-label="Browse folders"
+                            onClick={handleBrowse}
+                            disabled={browsing || adding}
+                            className="w-8 shrink-0 inline-flex items-center justify-center rounded border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-default cursor-pointer transition-colors"
+                          >
+                            <Ellipsis className="w-4 h-4" />
+                          </button>
+                        </Tooltip>
+                      )}
+                    </div>
+                    {addError && (
+                      <p className="text-3xs text-red-500 mt-1 leading-snug">{addError}</p>
+                    )}
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        type="submit"
+                        disabled={!newPath.trim() || adding}
+                        className="flex-1 text-xs py-1 px-2 rounded bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        {adding ? 'Opening...' : 'Open'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowAddInput(false); setNewPath(''); setResolved(null); setAddError(null) }}
+                        className="text-xs py-1 px-2 rounded border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </form>
                 )}
               </>

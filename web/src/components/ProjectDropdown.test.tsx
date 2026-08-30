@@ -138,4 +138,37 @@ describe('ProjectDropdown - editing projects', () => {
 
     expect(screen.queryByLabelText('Rename Just chatting')).toBeNull()
   })
+
+  it('shows path status as an in-field warning instead of shifting text', async () => {
+    vi.spyOn(api.default, 'resolvePath').mockResolvedValue({
+      path: '/home/test/missing',
+      display_path: '~/missing',
+      exists: false,
+      is_dir: false,
+      is_git_repo: false,
+    })
+    renderDropdown()
+    fireEvent.click(screen.getByLabelText('Select project'))
+    fireEvent.click(screen.getByText('Edit list'))
+    fireEvent.click(screen.getByText('Open folder...'))
+    fireEvent.change(screen.getByLabelText('Folder path'), { target: { value: 'missing' } })
+
+    const warning = 'Does not exist yet - you will be asked to create it.'
+    expect(await screen.findByLabelText(warning)).toBeInTheDocument()
+    expect(screen.queryByText(warning)).toBeNull()
+  })
+
+  it('puts native browse beside the folder field', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ available: true }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ))
+    renderDropdown()
+    fireEvent.click(screen.getByLabelText('Select project'))
+    fireEvent.click(screen.getByText('Edit list'))
+    fireEvent.click(screen.getByText('Open folder...'))
+
+    expect(await screen.findByLabelText('Browse folders')).toBeInTheDocument()
+    expect(screen.queryByText('Browse...')).toBeNull()
+  })
 })
