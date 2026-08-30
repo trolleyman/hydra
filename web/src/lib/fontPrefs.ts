@@ -35,7 +35,13 @@ const KEY: Record<FontRole, string> = {
 // Reads one role's stored font id, defaulting to the role's own default.
 // Exported for non-React callers / unit testing.
 export function loadFont(role: FontRole): string {
-  const stored = readLocal(KEY[role])
+  let stored = readLocal(KEY[role])
+  // Iosevka and Iosevka Term were consolidated into the patched terminal-safe
+  // face. Preserve either old role choice under the new single catalogue id.
+  if ((role === 'code' || role === 'terminal') && stored === 'iosevka-term') {
+    stored = 'iosevka'
+    writeLocal(KEY[role], stored)
+  }
   if (isValidFontFor(role, stored)) return stored as string
   // Chat inherited the old boolean serif/sans toggle. Its key held the bare
   // marker 'sans' (written only when serif was turned OFF), so an existing

@@ -16,11 +16,11 @@
 //
 // Where the fonts come from:
 //   - The system stacks resolve to whatever the OS provides and cost nothing.
-//   - Iosevka and Iosevka Term are self-hosted from public/fonts. They are not on
-//     Google Fonts and have no maintained CDN build, so scripts/build-fonts.ts
-//     fetches and subsets them at BUILD time - the .woff2 files are gitignored,
-//     not committed. A checkout that has never run that script falls through to
-//     the system monospace.
+//   - Iosevka is the terminal-safe Iosevka Term Nerd Font Mono build, self-hosted
+//     from public/fonts. scripts/build-fonts.ts fetches and subsets it at BUILD
+//     time - the .woff2 files are gitignored, not committed. A checkout that has
+//     never run that script falls through to the shared Nerd Symbols face and
+//     system monospace.
 //   - Everything else comes from the single Google Fonts stylesheet in
 //     index.html. A @font-face is only fetched when a glyph actually needs it,
 //     so listing nine families costs one ~3KB stylesheet, not nine downloads.
@@ -123,18 +123,10 @@ export const FONT_OPTIONS: FontOption[] = [
     label: 'Iosevka',
     category: 'mono',
     stack: monoStack('Iosevka', 50),
-    note: 'Narrow - fits more diff per line',
-    features: IOSEVKA_FEATURES,
-  },
-  {
-    id: 'iosevka-term',
-    label: 'Iosevka Term',
-    category: 'mono',
-    stack: monoStack('Iosevka Term', 50),
-    // The only difference from Iosevka: the wide symbols (arrows, some math) are
-    // drawn one cell across instead of two, which is what keeps a TUI's columns
-    // lined up. Harmless outside a terminal, so it is offered for code too.
-    note: 'Iosevka with every glyph one cell wide',
+    // The patched Term Mono face keeps wide symbols and Nerd Font icons inside
+    // one narrow terminal cell. The label stays simply "Iosevka": there is no
+    // longer a second, grid-unsafe cut to distinguish it from.
+    note: 'Narrow, terminal-safe Nerd Font',
     features: IOSEVKA_FEATURES,
   },
   { id: 'fira-code', label: 'Fira Code', category: 'mono', stack: monoStack('Fira Code', 60), note: 'Ligatures for => and !=' },
@@ -202,7 +194,7 @@ export const FONT_ROLE_SPEC: Record<FontRole, FontRoleSpec> = {
     // regardless of the mono font in use. Measured
     // at the 13px terminal size: Iosevka's cell is 7px, so an emoji covers 114%
     // of its two cells and clips the glyph beside it, where Fira Code's 8px cell
-    // makes it an exact 100% fit. Iosevka Term is still offered, and is still
+    // makes it an exact 100% fit. Iosevka is still offered, and is still
     // the better answer for a TUI's box drawing - it is just not the safer
     // default for output that contains emoji, which agent output routinely does.
     defaultId: 'fira-code',

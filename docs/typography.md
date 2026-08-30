@@ -32,6 +32,13 @@ Each role also publishes `<var>-features` for `font-feature-settings`. Keep it
 per-role: OpenType tags are not portable between families - Iosevka's `cv10` is a
 dotted zero and another family's `cv10` is something else entirely.
 
+The single `Iosevka` option is built from Iosevka Term Nerd Font Mono. The Term
+metrics keep arrows and other wide symbols inside one terminal cell; the patched
+face embeds Powerline and Nerd Font marks at their intended size. Do not restore
+a separate plain-Iosevka option: its grid-unsafe symbols are the only meaningful
+difference, while using a size-adjusted fallback for its Nerd glyphs makes marks
+such as Starship's branch icon visibly too small.
+
 ## Sizes are steps
 
 Each control stores a **signed whole number of pixels** ('-1', '2') and

@@ -47,24 +47,24 @@
   size-adjust: 110%;
 }
 
-/* Iosevka and Iosevka Term, self-hosted. They are the only offered families that
-   are not on Google Fonts, so scripts/build-fonts.ts cuts them from the upstream
-   release: four faces each, subset to Latin + punctuation + box drawing + the
-   symbols this UI and a TUI actually draw (~200KB a face instead of ~1MB).
+/* Iosevka, self-hosted. It is the terminal-safe Iosevka Term Nerd Font Mono
+   build: wide symbols stay inside one cell and Powerline/Nerd glyphs such as
+   Starship's branch mark are embedded at the font's intended size. The generic
+   Symbols Nerd Font fallback below has to be size-adjusted to a narrow cell and
+   made that mark look tiny. scripts/build-fonts.ts cuts four patched faces to
+   Latin + punctuation + box drawing + the symbols this UI and a TUI draw.
 
    The .woff2 files these point at are NOT in the repo. They are gitignored and
    fetched + subset at build time (`npm run build-fonts`, which `npm run build`
    runs first and which no-ops once its cache stamp matches), so the checkout
-   stays free of 1.7MB of binaries. A build with no network and no cache leaves
+   stays free of several MB of binaries. A build with no network and no cache leaves
    them missing, and the stacks in src/lib/fonts.ts fall through to the system
    monospace - degraded, but not broken.
 
    See src/lib/fonts.ts for the catalogue and public/fonts/OFL.txt for the licence.
 
-   Term differs from the default release in one way that matters here: its wide
-   symbols are drawn one character cell across rather than two, which is what
-   keeps a terminal's columns lined up. Plain Iosevka is the default for code;
-   the terminal defaults to Fira Code instead, for the emoji-width reason
+   The UI calls the family simply Iosevka because the grid-unsafe plain cut is no
+   longer offered. The terminal defaults to Fira Code instead, for the emoji-width reason
    spelled out on FONT_ROLE_SPEC.terminal in src/lib/fonts.ts.
 
    Only 400 and 700 are cut. A weight in between (font-semibold, 600) is
@@ -74,10 +74,6 @@
 @font-face { font-family: 'Iosevka'; src: url('/fonts/iosevka-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
 @font-face { font-family: 'Iosevka'; src: url('/fonts/iosevka-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
 @font-face { font-family: 'Iosevka'; src: url('/fonts/iosevka-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
-@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
-@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
 
 /* Nerd Fonts symbols - a FALLBACK face, not an offered family. Agents and TUIs
    print Powerline separators, Devicons, Codicons and Seti file-type icons out of
