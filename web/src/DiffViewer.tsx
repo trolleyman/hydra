@@ -1679,13 +1679,16 @@ const FILE_COLLAPSE_MS = 200
 // height behind once it finishes. Reduced-motion users get the immediate update.
 const CONTEXT_REVEAL_MS = 180
 
-function AnimatedContextRun({ lineCount, children }: {
+function AnimatedContextRun({ lineCount, growFrom, children }: {
   lineCount: number
+  growFrom: 'top' | 'bottom'
   children: ReactNode
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
+  const contentRef = useRef<HTMLDivElement | null>(null)
   const previous = useRef<{ count: number; height: number } | null>(null)
   const animation = useRef<Animation | null>(null)
+  const contentAnimation = useRef<Animation | null>(null)
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -1694,7 +1697,9 @@ function AnimatedContextRun({ lineCount, children }: {
     const prev = previous.current
     previous.current = { count: lineCount, height: nextHeight }
     animation.current?.cancel()
+    contentAnimation.current?.cancel()
     animation.current = null
+    contentAnimation.current = null
     if (!prev || lineCount <= prev.count || nextHeight <= prev.height) return
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || typeof el.animate !== 'function') return
 
@@ -1705,10 +1710,27 @@ function AnimatedContextRun({ lineCount, children }: {
       ],
       { duration: CONTEXT_REVEAL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
     )
-    return () => animation.current?.cancel()
-  }, [lineCount])
+    // A run growing from its bottom prepends earlier lines. Height clipping is
+    // top-anchored by default, which briefly exposes the FIRST new line (90)
+    // instead of the one adjacent to the existing context (99). Keep the
+    // content's bottom edge aligned with the wrapper while it grows so the
+    // sequence reveals continuously: 99, then 98, and so on.
+    if (growFrom === 'bottom' && contentRef.current) {
+      contentAnimation.current = contentRef.current.animate(
+        [
+          { transform: `translateY(${prev.height - nextHeight}px)` },
+          { transform: 'translateY(0)' },
+        ],
+        { duration: CONTEXT_REVEAL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+      )
+    }
+    return () => {
+      animation.current?.cancel()
+      contentAnimation.current?.cancel()
+    }
+  }, [lineCount, growFrom])
 
-  return <div ref={ref} className="overflow-hidden">{children}</div>
+  return <div ref={ref} className="overflow-hidden"><div ref={contentRef}>{children}</div></div>
 }
 
 // The file's first line, when the diff actually shows it - getLanguage falls back
@@ -2193,7 +2215,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   const addToReviewForHunk = onAddToReview ? onAddToReviewForFile : undefined
 
   const renderLines = (lines: DiffLine[], key: string) => (
-    <AnimatedContextRun key={key} lineCount={lines.length}>
+    <AnimatedContextRun key={key} lineCount={lines.length} growFrom={key.startsWith('cb') ? 'bottom' : 'top'}>
       {sideBySide
       ? <SideBySideHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
