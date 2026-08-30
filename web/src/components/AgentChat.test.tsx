@@ -227,7 +227,7 @@ describe('composer status and actions', () => {
     })
     renderChat(agentId)
     const ta = await connectedComposer()
-    fireEvent.change(ta, { target: { value: 'ship it' } })
+    setComposerValue(ta, 'ship it')
 
     act(() => useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING))
     const sendNow = await screen.findByRole('button', { name: 'Send message now' })
