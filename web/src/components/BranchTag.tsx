@@ -49,6 +49,7 @@ export function BranchTag({
           chrome with its own delay. One tooltip on this row is enough. */}
       <span className="truncate">{label ?? branch}</span>
       <Tooltip
+        align="left"
         content={
           <>
             <div>Copy branch name</div>

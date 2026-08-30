@@ -83,6 +83,52 @@ describe('Tooltip', () => {
       vi.useRealTimers()
     }
   })
+  it('centers compact hints and keeps shortcut keycaps on the label row', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(
+        <Tooltip content="Mark as unread" shortcut={{ keys: ['Ctrl', 'U'] }}>
+          <button>trigger</button>
+        </Tooltip>,
+      )
+      fireEvent.mouseEnter(wrapper(container))
+      act(() => void vi.advanceTimersByTime(600))
+
+      const box = screen.getByRole('tooltip')
+      expect(box).toHaveClass('text-center')
+      const labelRow = screen.getByText('Mark as unread').parentElement
+      expect(labelRow).toHaveClass('flex', 'items-center')
+      expect(labelRow?.querySelectorAll('kbd')).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('left-aligns titled cards and explicit path content', () => {
+    vi.useFakeTimers()
+    try {
+      const titled = render(
+        <Tooltip title="Workspace" content="Details">
+          <button>workspace</button>
+        </Tooltip>,
+      )
+      fireEvent.mouseEnter(wrapper(titled.container))
+      act(() => void vi.advanceTimersByTime(600))
+      expect(screen.getByRole('tooltip')).toHaveClass('text-left')
+      titled.unmount()
+
+      const path = render(
+        <Tooltip content="src/a/long/file/path.ts" align="left">
+          <button>path</button>
+        </Tooltip>,
+      )
+      fireEvent.mouseEnter(wrapper(path.container))
+      act(() => void vi.advanceTimersByTime(600))
+      expect(screen.getByRole('tooltip')).toHaveClass('text-left')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
   it('shows immediately with title + content and survives the pointer moving into it', () => {
     vi.useFakeTimers()
     try {

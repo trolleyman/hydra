@@ -32,14 +32,14 @@ export function Kbd({ children, size = 'md' }: { children: React.ReactNode; size
         SIZE[size]
       }
     >
-      {children}
+      <span className="relative top-px leading-none">{children}</span>
     </kbd>
   )
 }
 
 // A whole shortcut - its keys, and optionally what they do when they differ
 // from the control's main action ("Alt / restart without rebuilding"). Used on
-// its own line under a tooltip's label, and lowlit, because it is the answer to
+// beside a tooltip's label, and lowlit, because it is the answer to
 // "is there a faster way to do this" rather than part of the label.
 export function ShortcutHint({ keys, note, size = 'sm' }: { keys: string[]; note?: string; size?: KbdSize }) {
   return (

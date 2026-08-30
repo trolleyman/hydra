@@ -2,7 +2,14 @@ export type DesktopMessage =
   | { type: 'show-main-window' }
   | { type: 'new-chat-window'; projectId?: string; agentId?: string }
   | { type: 'active-project'; projectId: string }
-  | { type: 'window-state'; projectId?: string; agentId?: string; activeTurn: boolean }
+  | {
+      type: 'window-state'
+      projectId?: string
+      agentId?: string
+      activeTurn: boolean
+      runningAgentCount: number
+      commandOwnedBackend: boolean
+    }
   | { type: 'image-paste-target'; enabled: boolean }
   | { type: 'close-window'; force?: boolean }
   | { type: 'show-notification'; title: string; body: string; tag: string; url: string }
@@ -22,6 +29,7 @@ interface DesktopWindow extends Window {
   hydraDesktopCapabilities?: {
     nativeNotifications?: boolean
     nativeFolderPicker?: boolean
+    compactChatWindow?: boolean
   }
   webkit?: { messageHandlers?: { hydra?: { postMessage: (message: DesktopMessage) => void } } }
   chrome?: { webview?: { postMessage: (message: DesktopMessage) => void } }
@@ -43,6 +51,10 @@ export function hasDesktopBridge(): boolean {
   if (typeof window === 'undefined') return false
   const desktop = window as DesktopWindow
   return !!desktop.webkit?.messageHandlers?.hydra || !!desktop.chrome?.webview
+}
+
+export function isCompactChatWindow(): boolean {
+  return typeof window !== 'undefined' && (window as DesktopWindow).hydraDesktopCapabilities?.compactChatWindow === true
 }
 
 export function setDesktopKeepRunning(enabled: boolean): boolean {

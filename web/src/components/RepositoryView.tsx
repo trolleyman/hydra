@@ -704,7 +704,7 @@ function FilePathLabel({ path }: { path: string }) {
   return (
     // min-w-0 also goes on the wrapper: it is the header's flex child now, and
     // without it the clipped path could no longer shrink.
-    <Tooltip content={path} className="min-w-0">
+    <Tooltip content={path} align="left" className="min-w-0">
       <button
         type="button"
         onClick={() => setExpanded(true)}

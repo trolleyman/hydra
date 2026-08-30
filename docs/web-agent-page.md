@@ -160,6 +160,19 @@ and `web/src/DiffViewer.tsx`):
   title. When the floating conversation selector or Plan control is present, the
   transcript reserves their first row so this divider remains visible at
   scroll-top.
+- A pinned running chat follows new output until the user takes control. Wheel
+  movement and a pointer press in the native scrollbar gutter cancel the active
+  follow animation before scrolling begins, so dragging the thumb never fights
+  a streaming update. Reaching the bottom explicitly reacquires the pin.
+- Keyboard hints use the shared `Kbd` / `ShortcutHint` components. Their fixed
+  cap box optically lowers the glyph within the font line box, keeping fonts
+  with asymmetric ascent/descent metrics vertically centred.
+- Codex `View Image` tool cards resolve their path-only result through the
+  agent-files endpoint and use the shared thumbnail/lightbox treatment. A
+  successful durable `tool_completed` event grants an exact absolute-path
+  capability even when Codex omits its optional status field; explicit failures
+  never grant it. Each chat store indexes these paths while loading/appending,
+  so serving a thumbnail is an O(1) lookup rather than a transcript scan.
 - Per-agent view state lives in `web/src/lib/agentViewPrefs.ts`: a sharded
   localStorage store keyed per project+agent, 30-day TTL (terminal height, page
   scrollTop, collapsed diff files, bash tabs, tests-panel view toggles, and the
