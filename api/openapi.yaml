@@ -6675,6 +6675,13 @@ components:
         status:
           x-go-type-skip-optional-pointer: true
           type: string
+        started_at:
+          type: string
+          format: date-time
+          description: >-
+            Wall-clock time the current turn started. Present only while the
+            turn is running, so a newly attached client can render its elapsed
+            time from the true start rather than from navigation.
 
     ChatSubagentState:
       type: object

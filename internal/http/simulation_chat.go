@@ -849,8 +849,8 @@ func simSequence(events []simNorm) []api.ChatEvent {
 }
 
 // simChatProjection is the current-state snapshot a chat socket opens with: the
-// plan, the "/" autocomplete list and every sub-agent's lifecycle state, all
-// derived from the log so the two can never drift.
+// plan, the "/" autocomplete list and every sub-agent's lifecycle state. Its
+// active turn starts before attachment, exercising the restored elapsed clock.
 func simChatProjection() api.ChatProjection {
 	subagents := map[string]api.ChatSubagentState{}
 	for _, ev := range simChatLog {
@@ -886,6 +886,7 @@ func simChatProjection() api.ChatProjection {
 			subagents[payload.ID] = state
 		}
 	}
+	startedAt := simNow().Add(-42 * time.Second)
 	return api.ChatProjection{
 		Version:       1,
 		Through:       uint64(len(simChatLog)),
@@ -893,6 +894,7 @@ func simChatProjection() api.ChatProjection {
 		SlashCommands: simChatSlashCommands,
 		Plan:          simRaw(simChatPlan),
 		Subagents:     subagents,
+		Turn:          &api.ChatTurnState{Id: "sim-active-turn", Status: "running", StartedAt: &startedAt},
 	}
 }
 

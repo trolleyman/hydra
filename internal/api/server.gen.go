@@ -1652,8 +1652,11 @@ type ChatTurnPayload struct {
 
 // ChatTurnState defines model for ChatTurnState.
 type ChatTurnState struct {
-	Id     string `json:"id,omitempty"`
-	Status string `json:"status,omitempty"`
+	Id string `json:"id,omitempty"`
+
+	// StartedAt Wall-clock time the current turn started. Present only while the turn is running, so a newly attached client can render its elapsed time from the true start rather than from navigation.
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	Status    string     `json:"status,omitempty"`
 }
 
 // ChatUsageUpdatedPayload Token accounting. One carrying a message_id opens a message's count; the rest tick it up, which is what the live working indicator counts.

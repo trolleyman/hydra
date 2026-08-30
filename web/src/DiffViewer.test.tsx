@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
 import { FileDiff, diffMetaKey } from './DiffViewer'
-import { bodyShape } from './lib/diffBody'
+import { bodyShape, buildSegments, regionKey, type RevealMap } from './lib/diffBody'
 import { DiffFile, DiffHunk, DiffLine, type DiffResponse } from './api'
 import { EXPANDER_ROW, UNIFIED_CODE_CLASS, SBS_CODE, type BodyShape } from './lib/diffMetrics'
 
@@ -46,6 +46,42 @@ function wholeFile(): DiffFile {
   for (let i = 42; i <= 81; i++) lines.push(ctx(`context line ${i}`, i))
   return file({ expanded: true, additions: 1, deletions: 1, hunks: [hunk(lines)] })
 }
+
+describe('context reveal animation keys', () => {
+  it('keeps the growing run mounted when showing all remaining lines', () => {
+    const lines = wholeFile().hunks.flatMap((part) => part.lines)
+    const leadId = regionKey(lines[0])
+    const initial = buildSegments(lines, new Map()).find((seg) => seg.regionId === leadId)
+    expect(initial?.kind).toBe('topedge')
+
+    const reveal: RevealMap = new Map([[leadId, { bot: 40 }]])
+    const expanded = buildSegments(lines, reveal).find((seg) => seg.key === 'cb0')
+    expect(expanded).toMatchObject({ kind: 'lines', lines: lines.slice(0, 40) })
+  })
+
+  it('keeps the bar and opposite context mounted throughout the final reveal', () => {
+    const lines = [add('before', 1)]
+    for (let i = 2; i <= 11; i++) lines.push(ctx(`context ${i}`, i))
+    lines.push(add('after', 12))
+    const id = regionKey(lines[1])
+
+    const closing: RevealMap = new Map([[id, {
+      top: 10,
+      closingHidden: 4,
+      closingSide: 'top',
+    }]])
+    expect(buildSegments(lines, closing).map((seg) => [seg.key, seg.kind, seg.closing])).toEqual([
+      ['b0', 'lines', undefined],
+      ['ct1', 'lines', undefined],
+      ['g1', 'gap', true],
+      ['cb1', 'lines', undefined],
+      ['b11', 'lines', undefined],
+    ])
+
+    const settled: RevealMap = new Map([[id, { top: 10, settled: true }]])
+    expect(buildSegments(lines, settled).map((seg) => seg.key)).toEqual(['b0', 'c1', 'b11'])
+  })
+})
 
 // Two windowed `-U3` hunks with a gap between them - the other render branch.
 function windowedFile(): DiffFile {

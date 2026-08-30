@@ -409,6 +409,20 @@ func TestProjectionKeepsInterruptedTurnOverProtocolFailure(t *testing.T) {
 	}
 }
 
+func TestProjectionRetainsRunningTurnStartTime(t *testing.T) {
+	p := Projection{Version: ProjectionVersion, Subagents: map[string]SubagentState{}, Queue: map[string]QueuedState{}}
+	started := time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC)
+	apply(&p, Event{Seq: 1, Type: "turn_started", Timestamp: started, Payload: json.RawMessage(`{"id":"turn","status":"running"}`)})
+	if p.Turn == nil || p.Turn.StartedAt == nil || !p.Turn.StartedAt.Equal(started) {
+		t.Fatalf("turn start = %+v, want %s", p.Turn, started)
+	}
+
+	apply(&p, Event{Seq: 2, Type: "turn_completed", Timestamp: started.Add(time.Second), Payload: json.RawMessage(`{"id":"turn","status":"completed"}`)})
+	if p.Turn == nil || p.Turn.StartedAt != nil {
+		t.Fatalf("settled turn retained running start = %+v", p.Turn)
+	}
+}
+
 func TestAppendSourceDeduplicatesProviderReplay(t *testing.T) {
 	root := t.TempDir()
 	s, err := Open(root, "head")
