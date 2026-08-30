@@ -5058,6 +5058,9 @@ components:
         subject:
           type: string
           description: First line of the commit message
+        parent_sha:
+          type: string
+          description: Full SHA of the commit's first parent, when it has one
         author_name:
           type: string
         author_email:

@@ -2974,11 +2974,16 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 	resp := make(api.GetAgentCommits200JSONResponse, len(commits))
 	for i, c := range commits {
 		subject := c.Subject
+		var parentSHA *string
+		if len(c.Parents) > 0 {
+			parentSHA = &c.Parents[0]
+		}
 		resp[i] = api.CommitInfo{
 			Sha:         c.SHA,
 			ShortSha:    c.ShortSHA,
 			Message:     c.Message,
 			Subject:     &subject,
+			ParentSha:   parentSHA,
 			AuthorName:  c.AuthorName,
 			AuthorEmail: c.AuthorEmail,
 			Timestamp:   c.Timestamp,
@@ -3185,11 +3190,16 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 			return nil
 		}
 		subject := c.Subject
+		var parentSHA *string
+		if len(c.Parents) > 0 {
+			parentSHA = &c.Parents[0]
+		}
 		return &api.CommitInfo{
 			Sha:         c.SHA,
 			ShortSha:    c.ShortSHA,
 			Message:     c.Message,
 			Subject:     &subject,
+			ParentSha:   parentSHA,
 			AuthorName:  c.AuthorName,
 			AuthorEmail: c.AuthorEmail,
 			Timestamp:   c.Timestamp,

@@ -25,6 +25,13 @@ and `web/src/DiffViewer.tsx`):
   set (each set's files in a masonry grid). The agent-page
   `ArtifactsPanel` is two-sided (base+head refs); `RepositoryArtifactsView` is the
   single-ref sibling used by the repository browser.
+- The commit range selectors keep every right-side commit selectable. Choosing a
+  right endpoint that is not newer than the current left endpoint moves left to
+  that commit's first parent, producing a one-commit diff; an already-valid
+  multi-commit range stays intact. Commit responses carry `parent_sha` so the
+  oldest commit uses its immutable parent rather than resolving a base branch
+  name that may have advanced since the branch split. Shift-click and commit
+  chips use the same parent-selection helper.
 - Sticky-header coordination: `DiffViewer` publishes `--sticky-changes-h` via a
   ResizeObserver; `--sticky-section-h`, `FILE_STICKY_TOP` (DiffViewer) and
   `STICKY_CARD_TOP` (CollapsibleCard) dock section headers under it. The file-list

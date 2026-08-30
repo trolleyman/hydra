@@ -19,6 +19,10 @@ export type CommitInfo = {
      * First line of the commit message
      */
     subject?: string;
+    /**
+     * Full SHA of the commit's first parent, when it has one
+     */
+    parent_sha?: string;
     author_name: string;
     author_email: string;
     /**

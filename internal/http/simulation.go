@@ -1976,9 +1976,10 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				// hover card's height cap has to bite and the card has to scroll
 				// rather than run off the screen. Also the only fixture with
 				// nested lists, a fenced block and a table in a commit message.
-				Sha:      "9f8e7d6c5b4a39281706fedcba9876543210abcd",
-				ShortSha: "9f8e7d6",
-				Subject:  ptr("Rework the artifact pipeline end to end"),
+				Sha:       "9f8e7d6c5b4a39281706fedcba9876543210abcd",
+				ShortSha:  "9f8e7d6",
+				ParentSha: ptr("abcd1234efgh5678ijkl9012mnop3456qrst7890"),
+				Subject:   ptr("Rework the artifact pipeline end to end"),
 				Message: "Rework the artifact pipeline end to end\n\n" +
 					"The generator, the uploader and the viewer each had their own\n" +
 					"idea of what an artifact was, so a run could produce a file the\n" +
@@ -2036,9 +2037,10 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 				// the selectors: markdown body, paragraph reflow (no <br> per
 				// wrapped line) and the height cap that makes a tall card scroll
 				// instead of running off the bottom of the screen.
-				Sha:      "abcd1234efgh5678ijkl9012mnop3456qrst7890",
-				ShortSha: "abcd123",
-				Subject:  ptr("Add feature X"),
+				Sha:       "abcd1234efgh5678ijkl9012mnop3456qrst7890",
+				ShortSha:  "abcd123",
+				ParentSha: ptr("bcde1234efgh5678ijkl9012mnop3456qrst7890"),
+				Subject:   ptr("Add feature X"),
 				Message: "Add feature X\n\n" +
 					"The uploader had no way to express \"retry this, but not\n" +
 					"forever\", so a flaky object store took the whole run down with\n" +
@@ -2062,6 +2064,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 			{
 				Sha:         "bcde1234efgh5678ijkl9012mnop3456qrst7890",
 				ShortSha:    "bcde123",
+				ParentSha:   ptr("cdef1234efgh5678ijkl9012mnop3456qrst7890"),
 				Subject:     ptr("Fix bug Y"),
 				Message:     "Fix bug Y",
 				AuthorName:  "Agent Claude",
@@ -2071,6 +2074,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 			{
 				Sha:         "cdef1234efgh5678ijkl9012mnop3456qrst7890",
 				ShortSha:    "cdef123",
+				ParentSha:   ptr("defg1234efgh5678ijkl9012mnop3456qrst7890"),
 				Subject:     ptr("Refactor Z"),
 				Message:     "Refactor Z",
 				AuthorName:  "Agent Claude",
@@ -2080,6 +2084,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 			{
 				Sha:         "defg1234efgh5678ijkl9012mnop3456qrst7890",
 				ShortSha:    "defg123",
+				ParentSha:   ptr("0123456789abcdef0123456789abcdef01234567"),
 				Subject:     ptr("Initial work for feature X"),
 				Message:     "Initial work for feature X",
 				AuthorName:  "Agent Claude",
@@ -2099,6 +2104,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 			{
 				Sha:         "beefcafe0123456789abcdef0123456789abcdef",
 				ShortSha:    "beefcaf",
+				ParentSha:   ptr("cafebabe0123456789abcdef0123456789abcdef"),
 				Subject:     ptr("Cover the giving-up path with a test"),
 				Message:     "Cover the giving-up path with a test",
 				AuthorName:  "Agent Claude",
@@ -2110,6 +2116,7 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 			{
 				Sha:         "cafebabe0123456789abcdef0123456789abcdef",
 				ShortSha:    "cafebab",
+				ParentSha:   ptr("0123456789abcdef0123456789abcdef01234567"),
 				Subject:     ptr("Add jittered backoff helper to the uploader"),
 				Message:     "Add jittered backoff helper to the uploader\n\nBase 100ms, doubled per attempt, +/- 50% jitter, capped at 5 attempts.",
 				AuthorName:  "Agent Claude",

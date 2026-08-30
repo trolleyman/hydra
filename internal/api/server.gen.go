@@ -1775,6 +1775,9 @@ type CommitInfo struct {
 	// Message Full commit message
 	Message string `json:"message"`
 
+	// ParentSha Full SHA of the commit's first parent, when it has one
+	ParentSha *string `json:"parent_sha,omitempty"`
+
 	// Sha Full 40-character commit SHA
 	Sha string `json:"sha"`
 

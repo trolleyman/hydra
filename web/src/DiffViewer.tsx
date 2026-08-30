@@ -84,6 +84,7 @@ import { Markdown } from './lib/MarkdownRenderer'
 import { useCopyFlash } from './lib/useCopyFlash'
 import { CopyStateIcon } from './components/CopyStateIcon'
 import { mergeBaseInstruction } from './lib/mergeBaseInstruction'
+import { commitIdx, commitParentSelection, reconcileRightSelection, type LeftSel, type RightSel } from './lib/commitRange'
 
 // ── Syntax highlighting helpers ───────────────────────────────────────────────
 
@@ -2589,13 +2590,6 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
 
 // ── Commit selector types & helpers ───────────────────────────────────────────
 
-type LeftSel = { type: 'base' } | { type: 'latest' } | { type: 'commit'; sha: string }
-type RightSel = { type: 'uncommitted' } | { type: 'latest' } | { type: 'commit'; sha: string }
-
-function commitIdx(sha: string, commits: CommitInfo[]): number {
-  return commits.findIndex((c) => c.sha === sha)
-}
-
 type DiffParams = { baseRef?: string; headRef?: string; ignoreWhitespace?: boolean; includeUncommitted?: boolean }
 
 // buildDiffParams maps the left/right selectors to the getAgentDiff query
@@ -2604,7 +2598,7 @@ type DiffParams = { baseRef?: string; headRef?: string; ignoreWhitespace?: boole
 function buildDiffParams(leftSel: LeftSel, rightSel: RightSel, ignoreWhitespace: boolean, commits: CommitInfo[]): DiffParams {
   const params: DiffParams = {}
   if (ignoreWhitespace) params.ignoreWhitespace = true
-  if (leftSel.type === 'commit') params.baseRef = leftSel.sha
+  if (leftSel.type === 'commit' || (leftSel.type === 'base' && leftSel.sha)) params.baseRef = leftSel.sha
   else if (leftSel.type === 'latest' && commits.length > 0) params.baseRef = commits[0].sha
   if (rightSel.type === 'uncommitted') params.includeUncommitted = true
   else if (rightSel.type === 'commit') params.headRef = rightSel.sha
@@ -3046,11 +3040,10 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
 
 // ── Right commit selector ─────────────────────────────────────────────────────
 
-const RightSelector = memo(function RightSelector({ commits, selected, onChange, left, hasUncommitted, onSelectOnly }: {
+const RightSelector = memo(function RightSelector({ commits, selected, onChange, hasUncommitted, onSelectOnly }: {
   commits: CommitInfo[]
   selected: RightSel
   onChange: (v: RightSel) => void
-  left: LeftSel
   hasUncommitted?: boolean
   // Shift-click: set BOTH sides to show only this commit (parent -> commit).
   onSelectOnly: (sha: string) => void
@@ -3081,14 +3074,6 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
     ? <CommitLabel commit={commits.find((c) => c.sha === selected.sha)} sha={selected.sha} />
     : <span className="max-w-[150px] truncate">{selected.type === 'uncommitted' ? 'Latest changes' : 'Latest commit'}</span>
 
-  const validCommits = commits.filter((_, idx) => {
-    if (left.type === 'base') return true
-    if (left.type === 'latest') return false // all commits are before 'latest'
-    const li = commitIdx(left.sha, commits)
-    return li === -1 || idx < li
-  })
-  const latestCommitValid = left.type !== 'latest'
-
   return (
     <div ref={ref} className="relative">
       <button
@@ -3117,9 +3102,8 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
               {selected.type === 'uncommitted' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
             <button
-              onClick={() => { if (latestCommitValid) { onChange({ type: 'latest' }); setOpen(false) } }}
-              disabled={!latestCommitValid}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${selected.type === 'latest' ? 'bg-blue-50 dark:bg-blue-900/20' : latestCommitValid ? 'hover:bg-gray-50 dark:hover:bg-gray-700' : ''}`}
+              onClick={() => { onChange({ type: 'latest' }); setOpen(false) }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors cursor-pointer ${selected.type === 'latest' ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <span className="font-medium text-gray-800 dark:text-gray-200">Latest commit</span>
@@ -3127,12 +3111,12 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
               {selected.type === 'latest' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
           </div>
-          {validCommits.length > 0 && (
+          {commits.length > 0 && (
             <div className="max-h-64 overflow-y-auto py-1">
               <p className="px-3 py-1 text-2xs text-gray-400 dark:text-gray-500 font-medium">
-                Commits · {validCommits.length}
+                Commits · {commits.length}
               </p>
-              {validCommits.map((c) => (
+              {commits.map((c) => (
                 <CustomTooltip key={c.sha} side="left" width={COMMIT_TIP_WIDTH} content={<CommitTooltipContent commit={c} />}>
                   <button
                     onClick={(e) => {
@@ -3151,7 +3135,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
               ))}
             </div>
           )}
-          {validCommits.length > 0 && <ShiftClickHint />}
+          {commits.length > 0 && <ShiftClickHint />}
         </div>
       )}
     </div>
@@ -4266,11 +4250,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // newest-first, so the parent is the NEXT entry - or the branch point, for the
   // oldest commit on the branch.
   const handleSelectOnly = useCallback((sha: string) => {
-    const idx = commitIdx(sha, commits)
-    if (idx === -1) return
-    setLeftSel(idx + 1 < commits.length ? { type: 'commit', sha: commits[idx + 1].sha } : { type: 'base' })
+    const parent = commitParentSelection(sha, commits)
+    if (!parent) return
+    setLeftSel(parent)
     setRightSel({ type: 'commit', sha })
   }, [commits])
+
+  const handleRightChange = useCallback((newRight: RightSel) => {
+    const next = reconcileRightSelection(leftSel, newRight, commits)
+    setLeftSel(next.left)
+    setRightSel(next.right)
+  }, [commits, leftSel])
 
   // Correct invalid selection combos DURING RENDER (the adjust-state-during-render
   // idiom) rather than in an effect: React re-renders immediately and the guards make
@@ -4312,7 +4302,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     // the parent), guarded to fire once per nonce, alongside a smooth-scroll side
     // effect - so it belongs in an effect, not render.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLeftSel(idx + 1 < commits.length ? { type: 'commit', sha: commits[idx + 1].sha } : { type: 'base' })
+    setLeftSel(commitParentSelection(sel.sha, commits) ?? { type: 'base' })
     setRightSel({ type: 'commit', sha: sel.sha })
     // Bring the Changes bar + file list into view in whichever scroll context
     // hosts us (the inspector pane, or the archived page's main scroll).
@@ -5604,8 +5594,8 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           <div className="flex items-center gap-3">
             <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} onSelectOnly={handleSelectOnly} />
             <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><ArrowRightLeft className='w-6 h-6' strokeWidth='1.5' /></span>
-            <RightSelector commits={commits} selected={rightSel} onChange={setRightSel}
-              left={leftSel} hasUncommitted={diff?.uncommitted_changes} onSelectOnly={handleSelectOnly} />
+            <RightSelector commits={commits} selected={rightSel} onChange={handleRightChange}
+              hasUncommitted={diff?.uncommitted_changes} onSelectOnly={handleSelectOnly} />
           </div>
 
           {resetBtn}
