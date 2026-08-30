@@ -13,7 +13,8 @@ Two halves that only work together:
    `TabKind = 'review'` in `AgentTerminal.tsx`.
 2. **A server-side comment system** - **BUILT.** Comments are no longer ephemeral
    text piped into an agent's context: they are durable, numbered, line-anchored
-   objects that agents read and append to through tools.
+   objects that agents read and append to through tools. A comment permalink uses
+   the fragment `#comment-N`; older `?comment=N` links remain readable.
    `internal/reviewstore/comments.go`, `internal/http/review_comments.go`,
    `reviewq.OpComments` / `OpAddComment`, `web/src/lib/reviewComments.ts`.
 
@@ -573,7 +574,7 @@ Assignment is safe because every write already goes through the daemon - the web
 client does not write the store directly, and `reviewq`
 (`internal/reviewq/reviewq.go`) is already the daemon-mediated channel agent
 writes arrive on. The permalink is
-`/project/<p>/agent/<h>?comment=4`, and the head is already in the path.
+`/project/<p>/agent/<h>#comment-4`, and the head is already in the path.
 
 The tradeoff to accept knowingly: sequential ids are only meaningful **within a
 head**. If comments ever need to move between heads or be aggregated
@@ -748,7 +749,7 @@ starts with Y.
 
 ### Permalinks
 
-`?comment=4` on the agent page. The number is the whole address - the head is
+`#comment-4` on the agent page. The number is the whole address - the head is
 already in the path, and a number is stable and never reused - so the link is
 short enough to paste into a message and still means one exact thing months
 later. Landing on one jumps to it and marks it read. The jump keys on the number
@@ -1020,7 +1021,7 @@ same batching principle as the notify-by-id line the agent gets. Not built.
 | Numbering FORGE comments into the same sequence | **built** (`sidecar.go`, assigned on first sight) |
 | Resolve, for a Hydra comment and a forge thread alike | **built** (local-only for the forge, and says so) |
 | Per-comment read state + the open/new navigator | **built** |
-| Permalink (`?comment=4`) | **built** (`validateSearch` on the agent route) |
+| Permalink (`#comment-4`) | **built** (legacy `?comment=4` is also accepted) |
 | Agent replies to a comment by number | **built** (`reviewq.OpNote` takes a number) |
 | Avatars (agent mark / forge picture / monogram) | **built** (`components/Avatar.tsx`; no image is hosted or proxied) |
 | Third origin badge for agent-authored notes | new (`ReviewThreadCard.tsx` knows only `forge` / `local_only`) |

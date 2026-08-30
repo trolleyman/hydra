@@ -135,6 +135,9 @@ interface ChatProps {
   reconnectAttempt: number
   onStatusUpdate?: (status: string) => void
   onDiffRefresh?: (headMoved: boolean) => void
+  // A review-comment tool changed Hydra's numbered comment store. Kept separate
+  // from onDiffRefresh because no worktree content changed.
+  onReviewCommentsChanged?: () => void
   // Clicking a commit chip: point the diff viewer at just that commit (and
   // reveal the diff pane). Absent -> chips render non-clickable.
   onSelectCommit?: (sha: string) => void
@@ -2883,6 +2886,7 @@ function scriptBannerRows(section: Extract<ScriptSection, { kind: 'banners' }>):
 // by its own extension and numbered by its own line numbers, the script's `echo`
 // separators coloured as the strings they are, and anything unattributed left as
 // the plain terminal text it was.
+// eslint-disable-next-line react-refresh/only-export-components -- exported for focused rendering tests
 export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
   const rows: ScriptOutputRow[] = []
   for (const section of sections) {
@@ -6739,7 +6743,7 @@ const SettledMessages = memo(
     a.subagents === b.subagents,
 )
 
-export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onSelectCommit, review }: ChatProps) {
+export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onReviewCommentsChanged, onSelectCommit, review }: ChatProps) {
   // The key for everything this pane stores per CONVERSATION rather than per
   // head: the composer draft and its attachments, the composer height, the
   // transcript scroll offset, and the local plan mirror. A review pane is a
@@ -7134,6 +7138,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 
   const onStatusUpdateRef = useRef<(status: string) => void>(() => {})
   const onDiffRefreshRef = useRef(onDiffRefresh)
+  const onReviewCommentsChangedRef = useRef(onReviewCommentsChanged)
   // The current head status, read from inside the WS reducer closure (which is
   // pinned to its own render) to decide at replay_done whether a still-"working"
   // sub-agent is genuinely live or just stale replayed history (item 5).
@@ -7152,6 +7157,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       onStatusUpdate?.(nextStatus)
     }
     onDiffRefreshRef.current = onDiffRefresh
+    onReviewCommentsChangedRef.current = onReviewCommentsChanged
     isTurnRunningRef.current = isTurnRunning
     questionMayBeLiveRef.current = isTurnRunning || status === AgentStatus.NEEDS_INPUT
     smoothStreamRef.current = smoothStream
@@ -8860,6 +8866,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
 						const toolName = typeof event.payload?.name === 'string' ? event.payload.name : ''
 						if (toolID && toolName && event.payload && 'input' in event.payload) {
 							patchToolMetadata(toolID, toolName, event.payload.input)
+						}
+						if (event.type === 'tool_completed' && (
+							toolName === 'mcp__hydra__reply_to_review_comment' ||
+							toolName === 'mcp__hydra__resolve_review_comments'
+						)) {
+							onReviewCommentsChangedRef.current?.()
 						}
 					}
 					if (event.type === 'tool_delta') {

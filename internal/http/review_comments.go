@@ -70,6 +70,17 @@ func (s *Server) AddReviewComment(ctx context.Context, request api.AddReviewComm
 		Attachments: attachments,
 		Image:       image,
 	}
+	// A reply belongs to its parent's thread and anchor. The browser sends only
+	// the durable parent number; accepting a second path/line here would let the
+	// two disagree and render the reply as a separate conversation.
+	if c.ReplyTo > 0 {
+		parent, ok := reviewstore.FindComment(projectRoot, head.ID, c.ReplyTo)
+		if !ok || parent.IsDraft() {
+			return commentBadRequest("the comment being replied to does not exist or is still a draft"), nil
+		}
+		c.Path, c.Line, c.OldSide = parent.Path, parent.Line, parent.OldSide
+		c.Commit, c.Diff, c.Context, c.HunkHash = parent.Commit, parent.Diff, parent.Context, parent.HunkHash
+	}
 	stored, err := reviewstore.AppendComment(projectRoot, head.ID, c)
 	if err != nil {
 		return commentBadRequest(fmt.Sprintf("the comment could not be saved: %v", err)), nil

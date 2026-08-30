@@ -295,3 +295,21 @@ export async function sendReviewComment(
   })
   return { comments: all(res), notified: res.notified ?? null, toReviewer: res.notified_reviewer === true }
 }
+
+// Reply to an existing Hydra-native comment. The parent owns the anchor, so the
+// reply only needs its number and body; published immediately, like a direct
+// line comment, so the addressed agent can read it at once.
+export async function replyToReviewComment(
+  projectId: string | null,
+  agentId: string,
+  number: number,
+  body: string,
+): Promise<{ comments: PendingReviewComment[]; notified: string | null; toReviewer: boolean }> {
+  if (!projectId) return { comments: [], notified: null, toReviewer: false }
+  const res = await api.default.addReviewComment(projectId, agentId, {
+    body,
+    reply_to: number,
+    publish: true,
+  })
+  return { comments: all(res), notified: res.notified ?? null, toReviewer: res.notified_reviewer === true }
+}

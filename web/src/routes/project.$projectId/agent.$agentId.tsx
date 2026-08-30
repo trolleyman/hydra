@@ -8,7 +8,7 @@ import { AgentDetail } from '../../components/AgentDetail'
 import { resetProjectView } from '../../lib/projectView'
 import type { AgentCommand } from '../../lib/agentCommands'
 
-// `?comment=4` is a permalink to one review comment (docs/review-agent.md). The
+// `#comment-4` is a permalink to one review comment (docs/review-agent.md). The
 // number is the whole address: it is stable, never reused, and the head is
 // already in the path, so a link is short enough to paste into a message and
 // still mean one exact thing months later.
@@ -35,7 +35,21 @@ export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
 
 function AgentPage() {
   const { projectId, agentId } = useParams({ from: '/project/$projectId/agent/$agentId' })
-  const { comment: focusComment, line: focusLine, action } = useSearch({ from: '/project/$projectId/agent/$agentId' })
+  const { comment: legacyFocusComment, line: focusLine, action } = useSearch({ from: '/project/$projectId/agent/$agentId' })
+  const [hashFocusComment, setHashFocusComment] = useState(() => {
+    const match = /^#comment-(\d+)$/.exec(window.location.hash)
+    return match ? Number(match[1]) : undefined
+  })
+  useEffect(() => {
+    const read = () => {
+      const match = /^#comment-(\d+)$/.exec(window.location.hash)
+      setHashFocusComment(match ? Number(match[1]) : undefined)
+    }
+    window.addEventListener('hashchange', read)
+    return () => window.removeEventListener('hashchange', read)
+  }, [])
+  // Query links shipped before fragment permalinks remain valid.
+  const focusComment = hashFocusComment ?? legacyFocusComment
   // Per-field selectors (not a whole-store subscription): the store refreshes
   // near-constantly while an agent works, and a whole-store subscribe would
   // re-render this page - and the whole AgentDetail subtree - on every one.

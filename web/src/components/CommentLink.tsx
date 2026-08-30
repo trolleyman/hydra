@@ -7,7 +7,7 @@ import { CommentIdentityContext } from './commentIdentity'
 // a comment and going to look at it are one click apart. A real <a href> - so
 // copy-link-address, middle-click and paste-into-a-message all behave - whose
 // plain click is handled in-app: the number IS the address, and navigating to
-// `?comment=N` would push a history entry to scroll a diff that is already on the
+// following `#comment-N` would push a history entry to scroll a diff already on the
 // page, then do nothing at all the second time you clicked the same link. Without
 // a mounted diff for this head (a sub-agent view, a page with no diff) the href is
 // followed and the page honours the number on load. See lib/reviewCommentLink.

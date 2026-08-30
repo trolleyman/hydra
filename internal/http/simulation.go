@@ -1552,6 +1552,15 @@ func (s *SimulationServer) AddReviewComment(w http.ResponseWriter, r *http.Reque
 		Image:     body.Image,
 		CreatedAt: time.Now().Format(time.RFC3339),
 	}
+	if c.ReplyTo != nil {
+		for _, parent := range simCommentsByHead[id] {
+			if parent.Number == *c.ReplyTo {
+				c.Path, c.Line, c.OldSide = parent.Path, parent.Line, parent.OldSide
+				c.Commit, c.Diff, c.Context, c.HunkHash = parent.Commit, parent.Diff, parent.Context, parent.HunkHash
+				break
+			}
+		}
+	}
 	if body.Publish != nil && *body.Publish {
 		c.Status = api.Published
 		c.PublishedAt = ptr(c.CreatedAt)
