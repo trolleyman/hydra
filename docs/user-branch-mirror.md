@@ -5,7 +5,7 @@ Status: design plan, not implemented. Discussed 2026-07-07/08.
 ## Problem
 
 `hydra/<id>` is checked out by the head's worktree
-(`.hydra/local/worktrees/<id>`), so git refuses to check it out in the main
+(`<state-dir>/projects/<project-id>/worktrees/<id>`), so git refuses to check it out in the main
 repo. The user wants to `git checkout hydra/<id>` in their main checkout and
 have it follow along as the agent commits, so they can build/run/edit next to
 the agent's work.

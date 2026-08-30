@@ -11,9 +11,10 @@ Hydra stores agent and conversation history in one user-scoped database shared
 by CLI, browser-server, and desktop clients. Its native locations are
 `$XDG_STATE_HOME/hydra/db.sqlite3` on Linux (falling back to
 `~/.local/state/hydra`), `~/Library/Application Support/Hydra/db.sqlite3` on
-macOS, and `%LOCALAPPDATA%\Hydra\db.sqlite3` on Windows. Project-local
-`.hydra/local` directories continue to hold worktrees, caches, artifacts, logs,
-and other project-specific runtime files.
+macOS, and `%LOCALAPPDATA%\Hydra\db.sqlite3` on Windows. The same state root
+holds project-specific worktrees, caches, artifacts, logs, and sidecars under
+`projects/<stable-project-id>/`. Development uses the checkout's `.hydra/local`
+as that state root through `HYDRA_STATE_DIR`.
 
 ```shellsession
 $ hydra help

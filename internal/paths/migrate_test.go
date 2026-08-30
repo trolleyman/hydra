@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/trolleyman/hydra/internal/statepath"
 )
 
 // writeFile creates parent dirs and writes a file, failing the test on error.
@@ -20,7 +22,6 @@ func writeFile(t *testing.T, path, content string) {
 }
 
 func TestMigrateHydraLayout_MovesFlatDirs(t *testing.T) {
-	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "")
 	root := t.TempDir()
 	hydra := GetHydraDirFromProjectRoot(root)
 
@@ -71,7 +72,6 @@ func TestMigrateHydraLayout_MovesFlatDirs(t *testing.T) {
 }
 
 func TestMigrateHydraLayout_ConflictLeavesOldInPlace(t *testing.T) {
-	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "")
 	root := t.TempDir()
 	hydra := GetHydraDirFromProjectRoot(root)
 
@@ -92,7 +92,6 @@ func TestMigrateHydraLayout_ConflictLeavesOldInPlace(t *testing.T) {
 }
 
 func TestMigrateHydraLayout_RepairsWorktrees(t *testing.T) {
-	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "")
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -264,25 +263,17 @@ func TestMigrateClaudeSessionDirsIn_ConflictLeavesOldInPlace(t *testing.T) {
 	}
 }
 
-func TestHydraInstanceLocalDirFollowsRuntimeNamespace(t *testing.T) {
+func TestProjectStateDirUsesRegisteredProjectID(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "")
-	production := GetHydraInstanceLocalDirFromProjectRoot(root)
-	if production != GetHydraLocalDirFromProjectRoot(root) {
-		t.Fatalf("production instance root = %q, want %q", production, GetHydraLocalDirFromProjectRoot(root))
+	stateRoot := t.TempDir()
+	t.Setenv("HYDRA_STATE_DIR", stateRoot)
+	if got := GetProjectStateDirFromProjectRoot(root); got != GetHydraLocalDirFromProjectRoot(root) {
+		t.Fatalf("unregistered project root = %q, want %q", got, GetHydraLocalDirFromProjectRoot(root))
 	}
 
-	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "checkout-dev:/repo")
-	first := GetHydraInstanceLocalDirFromProjectRoot(root)
-	if first == production || filepath.Dir(first) != filepath.Join(production, "instances") {
-		t.Fatalf("development instance root = %q, want child of %q", first, filepath.Join(production, "instances"))
-	}
-	if again := GetHydraInstanceLocalDirFromProjectRoot(root); again != first {
-		t.Fatalf("instance root is not stable: %q then %q", first, again)
-	}
-
-	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "checkout-dev:/other")
-	if other := GetHydraInstanceLocalDirFromProjectRoot(root); other == first {
-		t.Fatalf("different namespaces shared instance root %q", other)
+	statepath.RegisterProject("stable-id", root)
+	want := filepath.Join(stateRoot, "projects", "stable-id")
+	if got := GetProjectStateDirFromProjectRoot(root); got != want {
+		t.Fatalf("registered project root = %q, want %q", got, want)
 	}
 }

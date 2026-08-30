@@ -3,7 +3,6 @@ package projects
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +10,9 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/google/uuid"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/statepath"
 )
 
 // GetOrCreateInstanceUUID returns the persistent UUID for this Hydra instance,
@@ -65,32 +66,49 @@ type ProjectInfo struct {
 	Hidden bool `json:"hidden,omitempty"`
 }
 
-// Manager persists the list of known projects to ~/.config/hydra/projects.json.
+// Manager persists the list of known projects in Hydra's runtime database.
+// filePath is retained only by isolated unit tests and as the one-time legacy
+// import source for installations upgrading from projects.json.
 type Manager struct {
 	mu       sync.Mutex
 	filePath string
+	store    *db.Store
 	projects []ProjectInfo
 }
 
-// NewManager creates a Manager backed by the default config file.
-func NewManager() (*Manager, error) {
+// NewManager creates a SQLite-backed Manager. The JSON file is read only when
+// the database has no project rows, as a one-time upgrade import.
+func NewManager(store *db.Store) (*Manager, error) {
+	if store == nil {
+		return nil, errtrace.Wrap(fmt.Errorf("project manager requires a database store"))
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("get user config dir: %w", err))
 	}
 	dir := filepath.Join(configDir, "hydra")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("create config dir: %w", err))
-	}
-	m := &Manager{filePath: filepath.Join(dir, "projects.json")}
+	m := &Manager{filePath: filepath.Join(dir, "projects.json"), store: store}
 	if err := m.load(); err != nil {
 		return nil, errtrace.Wrap(err)
 	}
 	return m, nil
 }
 
-// load reads the project list from disk. Missing file is not an error.
+// load reads SQLite first, falling back to the legacy JSON import source only
+// when the database catalogue is empty. A missing legacy file is not an error.
 func (m *Manager) load() error {
+	if m.store != nil {
+		rows, err := m.store.ListProjects()
+		if err != nil {
+			return errtrace.Wrap(fmt.Errorf("read projects from database: %w", err))
+		}
+		if len(rows) > 0 {
+			m.projects = projectsFromRows(rows)
+			m.registerPaths()
+			return nil
+		}
+	}
+
 	data, err := os.ReadFile(m.filePath)
 	if os.IsNotExist(err) {
 		return nil
@@ -101,12 +119,24 @@ func (m *Manager) load() error {
 	if err := json.Unmarshal(data, &m.projects); err != nil {
 		return errtrace.Wrap(err)
 	}
-
+	if m.store != nil {
+		if err := m.save(); err != nil {
+			return errtrace.Wrap(fmt.Errorf("import projects into database: %w", err))
+		}
+	}
+	m.registerPaths()
 	return nil
 }
 
-// save writes the project list to disk.
+// save persists the complete ordered project list.
 func (m *Manager) save() error {
+	if m.store != nil {
+		rows := make([]db.Project, len(m.projects))
+		for i, p := range m.projects {
+			rows[i] = db.Project{ID: p.ID, Path: p.Path, Name: p.Name, Builtin: p.Builtin, Hidden: p.Hidden, Position: i}
+		}
+		return errtrace.Wrap(m.store.ReplaceProjects(rows))
+	}
 	data, err := json.MarshalIndent(m.projects, "", "  ")
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("marshal projects: %w", err))
@@ -115,6 +145,20 @@ func (m *Manager) save() error {
 		return errtrace.Wrap(fmt.Errorf("write projects file: %w", err))
 	}
 	return nil
+}
+
+func projectsFromRows(rows []db.Project) []ProjectInfo {
+	projects := make([]ProjectInfo, len(rows))
+	for i, p := range rows {
+		projects[i] = ProjectInfo{ID: p.ID, Path: p.Path, Name: p.Name, Builtin: p.Builtin, Hidden: p.Hidden}
+	}
+	return projects
+}
+
+func (m *Manager) registerPaths() {
+	for _, p := range m.projects {
+		statepath.RegisterProject(p.ID, p.Path)
+	}
 }
 
 // ListProjects returns all registered projects (caller gets a copy).
@@ -164,6 +208,7 @@ func (m *Manager) RemoveProject(id string) (bool, error) {
 				m.projects = append(m.projects[:i], append([]ProjectInfo{p}, m.projects[i:]...)...)
 				return false, errtrace.Wrap(err)
 			}
+			statepath.UnregisterProject(p.Path)
 			return true, nil
 		}
 	}
@@ -263,13 +308,6 @@ func (m *Manager) AddProject(path string) (ProjectInfo, error) {
 		return m.projects[i], nil
 	}
 
-	// Migrate a project added at runtime (e.g. via the web UI) from the old flat
-	// .hydra/<dir> layout to .hydra/local/<dir> before its worktrees/DB are used.
-	// Best-effort: a failure here shouldn't block registering the project.
-	if err := paths.MigrateHydraLayout(path); err != nil {
-		log.Printf("warn: migrate .hydra layout in %s: %v", path, err)
-	}
-
 	id := m.generateID(path)
 	name := filepath.Base(path)
 	p := ProjectInfo{ID: id, Path: path, Name: name}
@@ -279,6 +317,7 @@ func (m *Manager) AddProject(path string) (ProjectInfo, error) {
 		m.projects = m.projects[:len(m.projects)-1]
 		return ProjectInfo{}, errtrace.Wrap(err)
 	}
+	statepath.RegisterProject(p.ID, p.Path)
 	return p, nil
 }
 

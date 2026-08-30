@@ -82,20 +82,22 @@ func claudeArgv(extra ...string) []string {
 
 func TestAgentArgv(t *testing.T) {
 	cases := []struct {
-		agent  AgentType
-		resume bool
-		prompt string
-		want   []string
+		agent     AgentType
+		resume    bool
+		prompt    string
+		sessionID string
+		want      []string
 	}{
 		// Codex disables its own sandbox/approvals (it runs inside Hydra's
-		// sandbox); the task is a positional argument and resume continues the
-		// most recent session in the cwd.
-		{AgentTypeCodex, false, "do a thing", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "do a thing"}},
-		{AgentTypeCodex, false, "", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"}},
-		{AgentTypeCodex, true, "ignored on resume", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
+		// sandbox); the task is a positional argument and resume names the
+		// persisted conversation explicitly when available.
+		{AgentTypeCodex, false, "do a thing", "", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "do a thing"}},
+		{AgentTypeCodex, false, "", "", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust"}},
+		{AgentTypeCodex, true, "ignored on resume", "thread-123", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "thread-123"}},
+		{AgentTypeCodex, true, "ignored on resume", "", []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust", "resume", "--last"}},
 	}
 	for _, c := range cases {
-		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false, "", "")
+		got, err := AgentArgv(c.agent, c.resume, "system prompt is ignored for codex", c.prompt, "", false, c.sessionID, "")
 		if err != nil {
 			t.Fatalf("AgentArgv(%q, resume=%v) error: %v", c.agent, c.resume, err)
 		}

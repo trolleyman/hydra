@@ -112,7 +112,7 @@ export function TestsEditor({
         </label>
       </div>
 
-      <div className="ml-10 mb-5">
+      <div id="test-notifications" className="ml-10 mb-5 scroll-mt-6">
         <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
           <input
             type="checkbox"
@@ -125,7 +125,7 @@ export function TestsEditor({
             <InfoTooltip title="Failing-test notifications">
               <p>When a runner settles failing, Hydra sends the head one line naming it. The agent fetches the output itself with its <code>get_test_logs</code> tool, so a failure costs one short message rather than a transcript full of log.</p>
               <p className="mt-1.5">It only fires while the head is <strong>idle</strong>, so it can never interrupt a turn or start a fix-fail-fix loop, and the same failure is only reported once per commit - a re-run of a red suite is silent.</p>
-              <p className="mt-1.5">This spends an extra agent turn whenever a new commit remains red, so it is opt-in. Default: off.</p>
+              <p className="mt-1.5">Turn it on when a failing suite should proactively wake an idle agent. Default: off.</p>
             </InfoTooltip>
           </span>
         </label>

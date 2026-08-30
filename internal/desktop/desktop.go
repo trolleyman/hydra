@@ -14,6 +14,7 @@ import (
 
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/daemon"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/desktopcontract"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
@@ -76,7 +77,12 @@ func ResolveServer(ctx context.Context, rawURL, projectRoot string) (string, err
 		}
 		return appURL.String(), nil
 	}
-	manager, err := projects.NewManager()
+	store, err := db.OpenGlobal("")
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	defer store.Close()
+	manager, err := projects.NewManager(store)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}

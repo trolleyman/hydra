@@ -23,6 +23,9 @@ pre_prompt = '''
 - Run `mage tidy` before committing Go changes and fix any warnings it reports
 - After changing web code, run `cd web && aube run lint` (`npm run lint` off aube) and fix the errors AND warnings you introduced. It runs `tsc -b` before eslint, so it typechecks too - eslint alone does NOT, and a type error will otherwise only surface at `mage build`.
 - After changing Go code, run `go test ./...` and make sure it passes
+- When writing docs, can you ideally not refer to how things _were_, just refer to how they _are_, especially after a change. That way the docs reflect present reality.
+- When making changes, also update the docs to reflect those changes.
+- When making git commits - have the message be not just 1 line, unless it's a basic change. Explain a bit more about what the change is
 - Verify web UI changes end-to-end (real rendered app, console + DOM, not just tests) by booting the simulation server and driving it with Playwright:
   - `cd web && aube run build`, then from the repo root `HYDRA_API_ADDR=localhost:<random high port> go run ./ server --simulation`. The go binary embeds web/dist at compile time, so restart it after every frontend rebuild. Simulation serves mock data from internal/http/simulation.go plus all four WS endpoints (events/terminal/tests/artifacts).
   - Useful pages: /project/sim-project/agent/agent-1 (8-file diff, largest, incl. a >1000-changed-lines hidden "Load diff" file), agent-2 (small diff incl. a plaintext .txt file, tests panel data), agent-md (markdown / running-tests states).
@@ -30,10 +33,7 @@ pre_prompt = '''
   - The agent page scrolls in an inner pane `[data-main-scroll]`, not the window - scroll via pane.scrollTop. Diff file cards: `div.border.rounded-lg.mb-4`; lazily-unmounted bodies contain `[data-lazy-placeholder]`; code rows match `span.font-mono.text-xs.leading-5` (~4 spans per diff line).
   - Capture page.on('console') and page.on('pageerror') - console cleanliness is often the thing being verified. Known pre-existing sim-server 404 noise to ignore: /uploads/projects/*/blob, /folder-picker/available.
   - A screenshot you intend to SHOW the user: take it with `deviceScaleFactor: 2` on the browser context and save it as `<name>@2x.png`. The chat lays an image out at its logical size (pixels / the @Nx in its name), so a 2x shot is the same size as a 1x one but stays sharp on a HiDPI display. Measure, don't eyeball: an image is only crisp if its rendered content box is exactly natural px / density (getComputedStyle width vs naturalWidth) - a fractional ratio means it is being resampled.
-  - Show the user a relevant light + dark capture in chat for every visually reviewable UI change. Use the real simulation app when behavior, surrounding layout or state matters. For an isolated styling treatment, use `cd web && node scripts/capture-theme-snippet.ts --html <throwaway-file> --output /tmp/<name>` after the production build, then delete the throwaway HTML; see `docs/screenshots.md`.
-  - When writing docs, can you ideally not refer to how things _were_, just refer to how they _are_, especially after a change. That way the docs reflect present reality.
-  - When making changes, also update the docs to reflect those changes.
-  - When making git commits - have the message be not just 1 line, unless it's a basic change. Explain a bit more about what the change is'''
+  - Show the user a relevant light + dark capture in chat for every visually reviewable UI change. Use the real simulation app when behavior, surrounding layout or state matters. For an isolated styling treatment, use `cd web && node scripts/capture-theme-snippet.ts --html <throwaway-file> --output /tmp/<name>` after the production build, then delete the throwaway HTML; see `docs/screenshots.md`.'''
 
 ## custom project icon shown in the web UI's project switcher and dropdown: an emoji, a lucide-react icon name (e.g. "Rocket"), or an image path/URL ending in .png/.svg/.ico/.jpg. Empty = the default folder icon.
 icon = "web/public/icon.png"
@@ -576,7 +576,7 @@ type = "stdout"
 # squash = true                # request squash-on-merge
 # delete_remote_branch = true  # tell the forge to delete on merge
 # require_local_tests = true   # gate Publish on local [[tests]] like merge is
-# publish_when_green = false   # arm new heads to auto-open a draft MR when green
+# auto_push = true             # automatically push after an MR is linked
 # protected_branches = ["main"] # warn before a direct LOCAL merge into these
 
 [resources]

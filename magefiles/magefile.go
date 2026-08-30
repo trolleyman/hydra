@@ -492,32 +492,17 @@ func ensureToolsEnv() {
 	}
 }
 
-func useDevelopmentDatabase() error {
+func useDevelopmentState() error {
 	projectRoot, err := paths.GetProjectRootFromCwd()
 	if err != nil {
 		return errtrace.Wrap(err)
 	}
-	if os.Getenv("HYDRA_DB_PATH") == "" {
-		dbPath := paths.GetDBPathFromProjectRoot(projectRoot)
-		if err := os.Setenv("HYDRA_DB_PATH", dbPath); err != nil {
+	if os.Getenv("HYDRA_STATE_DIR") == "" {
+		stateDir := paths.GetHydraLocalDirFromProjectRoot(projectRoot)
+		if err := os.Setenv("HYDRA_STATE_DIR", stateDir); err != nil {
 			return errtrace.Wrap(err)
 		}
-		fmt.Printf("%sdev database:%s %s\n", colorDim, colorReset, displayPath(dbPath))
-	}
-	return nil
-}
-
-func useDevelopmentRuntime() error {
-	projectRoot, err := paths.GetProjectRootFromCwd()
-	if err != nil {
-		return errtrace.Wrap(err)
-	}
-	if os.Getenv("HYDRA_RUNTIME_NAMESPACE") == "" {
-		namespace := "checkout-dev:" + projectRoot
-		if err := os.Setenv("HYDRA_RUNTIME_NAMESPACE", namespace); err != nil {
-			return errtrace.Wrap(err)
-		}
-		fmt.Printf("%sdev runtime:%s isolated for %s\n", colorDim, colorReset, displayPath(projectRoot))
+		fmt.Printf("%sdev state:%s %s\n", colorDim, colorReset, displayPath(stateDir))
 	}
 	return nil
 }
@@ -526,8 +511,7 @@ const desktopLocalEnv = "HYDRA_DESKTOP_LOCAL"
 
 func useProductionDesktopRuntime() error {
 	for _, key := range []string{
-		"HYDRA_DB_PATH",
-		"HYDRA_RUNTIME_NAMESPACE",
+		"HYDRA_STATE_DIR",
 		"HYDRA_API_ADDR",
 		"HYDRA_DESKTOP_SERVICE",
 		"HYDRA_DESKTOP_READY_FILE",
@@ -543,10 +527,7 @@ func useProductionDesktopRuntime() error {
 
 func Run() error {
 	ensureToolsEnv()
-	if err := useDevelopmentRuntime(); err != nil {
-		return errtrace.Wrap(err)
-	}
-	if err := useDevelopmentDatabase(); err != nil {
+	if err := useDevelopmentState(); err != nil {
 		return errtrace.Wrap(err)
 	}
 	addGoBuildDeps()
@@ -555,12 +536,12 @@ func Run() error {
 	return errtrace.Wrap(runV("go", args...))
 }
 
-// ResetMachineState removes Hydra's machine-wide head database and stale
+// ResetMachineState clears Hydra's machine-wide head catalogue and stale
 // production daemon IPC after an explicit confirmation. Project registration,
 // configuration, logs, Git refs/worktrees, transcripts, uploads, and the rest of
-// each project's .hydra/local tree are deliberately preserved.
+// each project's state tree are deliberately preserved.
 func ResetMachineState() error {
-	restoreEnv := temporarilyUnsetEnv("HYDRA_DB_PATH", "HYDRA_RUNTIME_NAMESPACE")
+	restoreEnv := temporarilyUnsetEnv("HYDRA_STATE_DIR")
 	defer restoreEnv()
 
 	projectRoot, err := paths.GetProjectRootFromCwd()
@@ -594,10 +575,16 @@ func ResetMachineState() error {
 		return nil
 	}
 
-	for _, candidate := range []string{databasePath, databasePath + "-wal", databasePath + "-shm"} {
-		if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) {
-			return errtrace.Wrap(fmt.Errorf("remove %s: %w", candidate, err))
-		}
+	store, err := db.OpenGlobal("")
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("open global database: %w", err))
+	}
+	if err := store.ClearAgents(); err != nil {
+		_ = store.Close()
+		return errtrace.Wrap(fmt.Errorf("clear head catalogue: %w", err))
+	}
+	if err := store.Close(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("close global database: %w", err))
 	}
 	if err := removeProductionRuntimeFiles(filepath.Dir(socketPath)); err != nil {
 		return errtrace.Wrap(err)
@@ -809,10 +796,7 @@ func RunDesktop() error {
 // checkout-local database and runtime used by mage run.
 func RunDesktopLocal() error {
 	ensureToolsEnv()
-	if err := useDevelopmentRuntime(); err != nil {
-		return errtrace.Wrap(err)
-	}
-	if err := useDevelopmentDatabase(); err != nil {
+	if err := useDevelopmentState(); err != nil {
 		return errtrace.Wrap(err)
 	}
 	if err := os.Setenv(desktopLocalEnv, "1"); err != nil {
@@ -838,7 +822,7 @@ func runDesktop(local bool) error {
 		}
 		return errtrace.Wrap(runV(binary))
 	case "darwin":
-		// Execute the bundle binary so local mode's database and runtime namespace
+		// Execute the bundle binary so local mode's state directory
 		// reach the bundled backend. LaunchServices does not reliably preserve a
 		// terminal process's environment.
 		return errtrace.Wrap(runV(filepath.Join(".", "dist", "macos", "Hydra.app", "Contents", "MacOS", "Hydra")))
@@ -854,8 +838,8 @@ func runDesktop(local bool) error {
 }
 
 // runDesktopLinuxDevelopment keeps Mage alive across Ctrl+C so it can stop the
-// detached daemon in this run's HYDRA_RUNTIME_NAMESPACE. The hidden stop command
-// inherits that namespace and only stops a desktop-managed daemon. It therefore
+// detached daemon selected by this run's HYDRA_STATE_DIR. The hidden stop
+// command inherits that directory and only stops a desktop-managed daemon. It therefore
 // leaves both the global daemon and an existing mage run daemon untouched.
 func runDesktopLinuxDevelopment(binary string) error {
 	ctx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

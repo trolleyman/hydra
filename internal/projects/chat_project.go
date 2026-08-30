@@ -8,6 +8,7 @@ import (
 	"braces.dev/errtrace"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/statepath"
 )
 
 // ChatProjectID is the fixed project ID of the built-in chat project.
@@ -52,8 +53,9 @@ icon = "` + chatProjectIcon + `"
 // $XDG_DATA_HOME/hydra/chat, defaulting to ~/.local/share/hydra/chat.
 //
 // It lives under the *data* dir rather than state or cache because it holds
-// notes the user writes and may want backed up; only Hydra's own bookkeeping
-// (projects.json, the instance UUID) belongs in the config dir.
+// notes the user writes and may want backed up. Project registration lives in
+// the state database; only configuration such as the instance UUID uses the
+// config directory.
 func ChatPath() (string, error) {
 	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
 		return filepath.Join(dir, "hydra", "chat"), nil
@@ -141,6 +143,7 @@ func (m *Manager) upsertBuiltin(id, path, name string) (ProjectInfo, error) {
 	kept := m.projects[:0]
 	for _, existing := range m.projects {
 		if existing.Builtin && existing.ID != id {
+			statepath.UnregisterProject(existing.Path)
 			changed = true
 			continue
 		}
@@ -172,6 +175,7 @@ func (m *Manager) upsertBuiltin(id, path, name string) (ProjectInfo, error) {
 			return ProjectInfo{}, errtrace.Wrap(err)
 		}
 	}
+	statepath.RegisterProject(p.ID, p.Path)
 	return p, nil
 }
 

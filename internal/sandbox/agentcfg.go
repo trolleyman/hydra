@@ -713,13 +713,11 @@ func ListCodexMCPServers(data []byte) []MCPServer {
 // user turns from stdin, and the task prompt is sent as the first stdin
 // message (see SpawnHead) rather than as argv.
 //
-// resumeSessionID (Claude only) resumes that exact conversation with
-// --resume <id> instead of --continue. Load-bearing for the chat->terminal
-// mode toggle: the interactive TUI's --continue skips conversations recorded
-// by -p/stream-json runs ("No conversation found to continue",
-// spike-verified), while an explicit --resume <id> loads them fine. Callers
-// pass the newest non-sidechain transcript's id
-// (claudestream.LatestSessionID); empty falls back to --continue.
+// resumeSessionID resumes an exact Claude or Codex conversation. For Claude it
+// selects --resume <id> instead of --continue; this is load-bearing for the
+// chat->terminal mode toggle because --continue skips conversations recorded by
+// -p/stream-json runs. For Codex it selects `resume <id>` instead of cwd-scoped
+// `resume --last`, so moving a worktree does not strand its conversation.
 //
 // strictMCPConfigPath (Claude only) is the IN-SANDBOX path of the rendered
 // allow-list config from BuildStrictMCPConfig. Non-empty switches the launch to
@@ -837,8 +835,11 @@ func AgentArgv(agentType AgentType, resume bool, systemPrompt, prompt, model str
 			argv = append(argv, "--model", model)
 		}
 		if resume {
-			// `resume --last` continues the most recent recorded session in this
-			// cwd without the interactive session picker.
+			if resumeSessionID != "" {
+				return append(argv, "resume", resumeSessionID), nil
+			}
+			// Legacy rows may lack a recorded conversation id. Keep the old
+			// cwd-scoped behavior as their non-interactive fallback.
 			return append(argv, "resume", "--last"), nil
 		}
 		if prompt != "" {

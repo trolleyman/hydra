@@ -7,8 +7,7 @@ import (
 
 func TestProductionEnvironmentClearsInheritedDevelopmentState(t *testing.T) {
 	keys := []string{
-		"HYDRA_DB_PATH",
-		"HYDRA_RUNTIME_NAMESPACE",
+		"HYDRA_STATE_DIR",
 		"HYDRA_API_ADDR",
 		"HYDRA_DESKTOP_SERVICE",
 		"HYDRA_DESKTOP_READY_FILE",
@@ -29,15 +28,11 @@ func TestProductionEnvironmentClearsInheritedDevelopmentState(t *testing.T) {
 
 func TestLocalEnvironmentPreservesDevelopmentState(t *testing.T) {
 	t.Setenv(desktopLocalEnv, "1")
-	t.Setenv("HYDRA_DB_PATH", "/checkout/db.sqlite3")
-	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "checkout-dev:test")
+	t.Setenv("HYDRA_STATE_DIR", "/checkout/state")
 
 	useProductionEnvironmentByDefault()
 
-	if got := os.Getenv("HYDRA_DB_PATH"); got != "/checkout/db.sqlite3" {
-		t.Fatalf("HYDRA_DB_PATH = %q", got)
-	}
-	if got := os.Getenv("HYDRA_RUNTIME_NAMESPACE"); got != "checkout-dev:test" {
-		t.Fatalf("HYDRA_RUNTIME_NAMESPACE = %q", got)
+	if got := os.Getenv("HYDRA_STATE_DIR"); got != "/checkout/state" {
+		t.Fatalf("HYDRA_STATE_DIR = %q", got)
 	}
 }

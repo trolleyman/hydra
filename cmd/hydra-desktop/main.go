@@ -20,8 +20,7 @@ func useProductionEnvironmentByDefault() {
 		return
 	}
 	for _, key := range []string{
-		"HYDRA_DB_PATH",
-		"HYDRA_RUNTIME_NAMESPACE",
+		"HYDRA_STATE_DIR",
 		"HYDRA_API_ADDR",
 		"HYDRA_DESKTOP_SERVICE",
 		"HYDRA_DESKTOP_READY_FILE",
@@ -40,7 +39,7 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "__stop-daemon" {
 		config := desktop.CurrentLaunchConfig()
-		if os.Getenv("HYDRA_RUNTIME_NAMESPACE") == "" && config.BackendLifetime != "command-owned" {
+		if os.Getenv("HYDRA_STATE_DIR") == "" && config.BackendLifetime != "command-owned" {
 			fmt.Fprintln(os.Stderr, "hydra-desktop: refusing daemon cleanup without a command-owned launch")
 			os.Exit(1)
 		}

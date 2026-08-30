@@ -97,6 +97,9 @@ describe('Tooltip - card variant', () => {
       act(() => void vi.advanceTimersByTime(0))
       expect(screen.getByText('OS Sandbox')).toBeInTheDocument()
       expect(screen.getByText('sandbox details')).toBeInTheDocument()
+      const surface = screen.getByRole('tooltip')
+      expect(surface).toHaveClass('animate-tooltip-card-in')
+      expect(surface).not.toHaveClass('animate-popover-in')
 
       // Leaving the trigger starts a grace period rather than hiding at once...
       fireEvent.mouseLeave(span)

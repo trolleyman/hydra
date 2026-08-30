@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
+	"github.com/trolleyman/hydra/internal/statepath"
 )
 
 // newUploadServer builds a Server backed by a real temp project so resolveProjectRoot
@@ -24,6 +26,7 @@ func newUploadServer(t *testing.T) (*Server, string, string) {
 	home := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", home)
 	t.Setenv("HOME", home)
+	t.Setenv(statepath.Environment, home)
 
 	root := t.TempDir()
 	norm, err := paths.NormalizePath(root)
@@ -31,7 +34,12 @@ func newUploadServer(t *testing.T) (*Server, string, string) {
 		t.Fatalf("normalize: %v", err)
 	}
 
-	pm, err := projects.NewManager()
+	store, err := db.Open(root)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	pm, err := projects.NewManager(store)
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -39,6 +47,7 @@ func newUploadServer(t *testing.T) (*Server, string, string) {
 	if err != nil {
 		t.Fatalf("add project: %v", err)
 	}
+	t.Cleanup(func() { statepath.UnregisterProject(norm) })
 
 	s := &Server{ProjectRoot: norm, ProjectsManager: pm}
 	return s, proj.ID, norm

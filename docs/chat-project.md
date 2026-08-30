@@ -19,10 +19,12 @@ that always exists.
 
 - **It is a real git repo, not a worktree-less head.** See "Why not a
   worktree-less head" below - this is the load-bearing decision.
-- **Stored at `~/.local/share/hydra/chat`** (`$XDG_DATA_HOME/hydra/chat`).
-  It holds notes the user writes and may want backed up, so it is *data*
-  (`share`), not *state* (logs, caches, MRU order). `projects.json` stays in
-  `~/.config/hydra`, keeping the config/data split clean.
+- **Its Git repository is stored at `~/.local/share/hydra/chat`**
+  (`$XDG_DATA_HOME/hydra/chat`). It holds notes the user writes and may want
+  backed up, so the repository is *data* (`share`), not generated state. Its
+  registration lives in Hydra's SQLite database, and its worktrees, caches,
+  uploads, and other generated files live under
+  `<state-dir>/projects/_chat/`.
 - **Its project ID is `_chat`** - collision-proof by construction, see below.
 - **Created automatically at daemon boot**, never via the add-project flow, and
   it skips the trust modal: trust is a decision about unknown code the user
@@ -173,9 +175,10 @@ white page; keeping it means the failure mode is merely the old behaviour.
   "any *non-builtin* projects". This is the class of bug that silently degrades
   first-run without failing a test, so grep for `projects.length` and
   `projects.some` when touching this.
-- **Project IDs are never filesystem paths.** The ID is only ever a lookup key
-  into `projects.json`; paths come from `ProjectInfo.Path` and `.hydra` state
-  keys off `sha256(projectRoot)`. So a bogus or hostile ID in a URL cannot
+- **Project IDs are stable directory names, not arbitrary filesystem paths.**
+  The SQLite catalogue maps each validated ID to `ProjectInfo.Path`, while
+  generated project state lives under `projects/<id>`. So a bogus or hostile ID
+  in a URL cannot
   traverse anywhere - it just 404s. No route guard is needed, and
   `/project/_chat/` *should* be visitable, since the dropdown, the Ctrl+`
   switcher and deep links all navigate by exactly that URL.
@@ -192,7 +195,7 @@ white page; keeping it means the failure mode is merely the old behaviour.
 
 1. `ProjectInfo.Builtin` + `EnsureChatProject` (git init, initial commit,
    register with the fixed ID), called from `runtime.go` right after
-   `projects.NewManager()`.
+  `projects.NewManager(store)`.
 2. `builtin` through the API (`api/openapi.yaml` -> `mage generate:go` + the web
    client).
 3. `/` redirect; delete the two dead-end empty states.

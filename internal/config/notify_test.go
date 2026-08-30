@@ -10,10 +10,10 @@ func TestNotifyTestFailuresDefaultsOff(t *testing.T) {
 		t.Error("a nil config should not notify (the default is off)")
 	}
 	if (&Config{}).NotifyTestFailures() {
-		t.Error("no [notify] table should not notify")
+		t.Error("no [notify] table should leave notifications off")
 	}
 	if (&Config{Notify: &NotifyConfig{}}).NotifyTestFailures() {
-		t.Error("an empty [notify] table should not notify")
+		t.Error("an empty [notify] table should leave notifications off")
 	}
 	off := false
 	if (&Config{Notify: &NotifyConfig{TestFailures: &off}}).NotifyTestFailures() {
@@ -37,6 +37,6 @@ func TestNotifyMergesAcrossLayers(t *testing.T) {
 	// And a layer that says nothing about notify leaves the earlier answer alone.
 	base.Merge(Config{})
 	if base.NotifyTestFailures() {
-		t.Error("a layer with no [notify] table reset the setting")
+		t.Error("a layer with no [notify] table reset the explicit off setting")
 	}
 }

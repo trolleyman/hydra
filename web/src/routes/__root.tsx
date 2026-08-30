@@ -463,7 +463,7 @@ function RootLayout() {
   // Paint the selected project's icon into the tab, so one-tab-per-project
   // setups are tellable apart (matches the OS notification icon).
   useProjectFavicon(currentProjectId)
-  const { refetchStatus, canRestart, canUpdate, version, spawnedAt } = useSystemStatus()
+  const { refetchStatus, canRestart, canUpdate, spawnedAt } = useSystemStatus()
 
   // Auto-clear an agent's unread dot when it's the one currently open AND the
   // page is actually in front of the user. Covers both opening an unread agent
@@ -1353,12 +1353,7 @@ function RootLayout() {
               // when no project is selected).
               return (
                 <Tooltip
-                  content={
-                    <>
-                      <div>{settingsActive ? 'Close settings' : 'Settings'}</div>
-                      {version && <div className="font-mono text-gray-500 dark:text-gray-400">Server {version}</div>}
-                    </>
-                  }
+                  content={settingsActive ? 'Close settings' : 'Settings'}
                 >
                   {settingsActive ? (
                     <button

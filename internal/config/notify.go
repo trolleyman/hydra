@@ -15,13 +15,12 @@ package config
 type NotifyConfig struct {
 	// TestFailures wakes the head when one of its test runners settles FAILING.
 	//
-	// Off by default because every notification spends an agent turn. When opted
-	// in, it is gated: it fires solely while
-	// the head is IDLE, so it cannot interrupt a turn, and it is deduped per
-	// (runner, commit), so re-running the same red suite is silent. The message is
-	// one line naming the runner - the agent pulls the detail with get_test_logs,
-	// a tool it already has - so a failure costs one turn, not a transcript full
-	// of log. nil = off.
+	// Opt-in because each notification spends a model turn. When enabled, it fires
+	// solely while the head is IDLE, so it cannot interrupt a turn, and it is
+	// deduped per (runner, commit), so re-running the same red suite is silent. The
+	// message is one line naming the runner - the agent pulls the detail with
+	// get_test_logs, a tool it already has - so a failure costs one turn, not a
+	// transcript full of log. nil = off.
 	TestFailures *bool `toml:"test_failures"`
 }
 

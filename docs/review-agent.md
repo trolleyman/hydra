@@ -227,7 +227,7 @@ path means a new transcript, so the reviewer forgets everything on every
 re-acquire. Holding a slot forever instead just starves a 4-slot pool.
 
 So the reviewer wants a **dedicated, persistent directory** -
-`.hydra/local/review-checkouts/<head-id>/` - created once and checked out forward in place.
+`<state-dir>/projects/<project-id>/review-checkouts/<head-id>/` - created once and checked out forward in place.
 The pool is for ephemeral runs; a conversational reviewer is not one. See
 [Surviving a restart](#surviving-a-restart), which turns out to be the same
 requirement.
@@ -456,7 +456,7 @@ Decisions inside that shape:
 
   Dropping the tree is only safe because neither provider keeps its history
   inside it - Claude's transcript is `~/.claude/projects/<slug of the checkout
-  PATH>`, Codex's thread id is a file in `.hydra/local/cache` - and the path is
+  PATH>`, Codex's thread id is a file in the project's state `cache` directory - and the path is
   derived from `(projectRoot, headID)`. So `EnsureReviewCheckout` rebuilds the
   same path on the next open and `--continue` picks the review back up. This is
   the same stable-path requirement that ruled out a pooled checkout, arrived at
@@ -925,7 +925,7 @@ the model; the marker is for you.
 A comment can carry files - normally a screenshot of the thing being pointed at.
 Attach them with the paperclip in the comment box, or by pasting or dropping onto
 it; they ride on `Comment.Attachments`, a list of absolute paths under the
-project's `.hydra/local/uploads`, and the head reads the files itself because
+project's `<state-dir>/projects/<project-id>/uploads`, and the head reads the files itself because
 that path resolves identically on the host and inside every agent sandbox.
 `RenderForAgent` puts them after the body as "Attachments (read these files):" -
 after, because a picture illustrates a remark rather than replacing it, and the
@@ -1087,7 +1087,7 @@ reports on code that never existed.
    the comment store (1-2), so the reviewer currently talks but cannot leave a
    finding anchored to a line. `internal/heads/reviewslot.go`
    (`StartReviewSession`, `EnsureReviewCheckout` at
-   `.hydra/local/review-checkouts/<head-id>/`, `RemoveReviewCheckout` /
+   `<state-dir>/projects/<project-id>/review-checkouts/<head-id>/`, `RemoveReviewCheckout` /
    `RemoveReviewSessionDir` on kill/purge), `?review=true` routing in
    `internal/http/terminal.go`, and the Review tab in `AgentTerminal.tsx`.
 6. **@-mentions**, if wanted - `@<head-id>` / `@self` on a comment, routing

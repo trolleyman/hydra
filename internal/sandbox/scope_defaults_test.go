@@ -32,13 +32,13 @@ func TestDefaultCPUQuotasScaleWithHost(t *testing.T) {
 }
 
 func TestScopeUnitsAreNamespacedByRuntimeInstance(t *testing.T) {
-	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "")
+	t.Setenv("HYDRA_STATE_DIR", "")
 	production := ScopeUnit("test", "go")
 	if !strings.HasPrefix(production, productionScopeUnitPrefix) || strings.HasPrefix(production, instanceScopeUnitPrefix) {
 		t.Fatalf("production scope = %q", production)
 	}
 
-	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "checkout-dev:/repo")
+	t.Setenv("HYDRA_STATE_DIR", t.TempDir())
 	development := ScopeUnit("test", "go")
 	if development == production || !strings.HasPrefix(development, instanceScopeUnitPrefix) {
 		t.Fatalf("development scope = %q, production = %q", development, production)

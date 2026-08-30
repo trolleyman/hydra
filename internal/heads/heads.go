@@ -1336,15 +1336,17 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// saved with (and any in-session change), avoiding a cache-missing re-read.
 	// head.ChatMode relaunches in whatever mode the head is currently set to,
 	// so a mode toggled while the session was down takes effect here.
-	// Claude resumes by explicit session id (the newest non-sidechain
-	// transcript): the TUI's --continue can't see conversations recorded by a
-	// chat-mode (-p/stream-json) run, so this is what makes the chat->terminal
-	// toggle actually restore the conversation. Empty (fresh head, no
-	// transcript yet) falls back to --continue.
+	// Resume by explicit conversation id where the provider supports it. Claude's
+	// newest non-sidechain transcript id makes chat->terminal toggles work; Codex's
+	// persisted id keeps resume independent of the worktree path. Legacy rows with
+	// no id retain each CLI's cwd-scoped fallback.
 	resumeSession := ""
-	if head.AgentType == sandbox.AgentTypeClaude {
+	switch head.AgentType {
+	case sandbox.AgentTypeClaude:
 		dir := filepath.Join(home, ".claude", "projects", paths.ClaudeProjectsSlug(worktreePath))
 		resumeSession = claudestream.LatestSessionID(dir)
+	case sandbox.AgentTypeCodex:
+		resumeSession = head.ConversationID
 	}
 	argv, err := sandbox.AgentArgv(head.AgentType, true, launchPrePrompt, "", "", head.ChatMode, resumeSession, seed.MCPConfigPath)
 	if err != nil {

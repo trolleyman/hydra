@@ -60,8 +60,9 @@ The command is given:
 | `HYDRA_ARTIFACT_SOURCE` | The checkout directory. |
 | `HYDRA_ARTIFACT_REF`    | The resolved git ref. |
 
-Results are cached per commit under `.hydra/local/artifacts/out/<name>/<version-key>`
-(gitignored, never committed), so re-viewing a diff is free.
+Results are cached per commit under
+`<state-dir>/projects/<project-id>/artifacts/out/<name>/<version-key>`, so
+re-viewing a diff is free.
 
 ## Streaming outputs (`::hydra:artifact::`)
 

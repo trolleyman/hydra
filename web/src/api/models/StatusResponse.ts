@@ -10,6 +10,14 @@ export type StatusResponse = {
     sandbox_error?: string | null;
     version?: string;
     /**
+     * Git commit embedded in the running server binary, when available.
+     */
+    git_commit?: string;
+    /**
+     * Absolute Hydra state directory containing the SQLite database and per-project state trees.
+     */
+    database_directory?: string;
+    /**
      * Native desktop shell compatibility protocol.
      */
     desktop_protocol?: number;

@@ -2411,7 +2411,7 @@ type NetworkConfigMode string
 
 // NewReviewCommentBody defines model for NewReviewCommentBody.
 type NewReviewCommentBody struct {
-	// Attachments Absolute paths under the project's .hydra/local/uploads, from the upload endpoint. Anything outside that directory is rejected.
+	// Attachments Absolute paths under the project's uploads directory in Hydra's state root, from the upload endpoint. Anything outside that directory is rejected.
 	Attachments *[]string `json:"attachments,omitempty"`
 	Body        string    `json:"body"`
 	Commit      *string   `json:"commit,omitempty"`
@@ -3110,7 +3110,7 @@ type ResourceLimits struct {
 
 // ReviewComment One durable, numbered review comment. The number is the handle everything else uses ("fix #3") - one token for a model, speakable by a person, and never reused.
 type ReviewComment struct {
-	// Attachments Absolute paths of files attached to the comment, under the project's .hydra/local/uploads. A separate field rather than paths pasted into the body because a draft's body is edited in a textarea (raw paths would be in it) and because copy-as-markdown and the forge-publish path must not leak them. The path resolves identically on the host and inside every agent sandbox, so the agent reads the file directly; the browser renders it through the uploads blob endpoint.
+	// Attachments Absolute paths of files attached to the comment, under the project's uploads directory in Hydra's state root. A separate field rather than paths pasted into the body because a draft's body is edited in a textarea (raw paths would be in it) and because copy-as-markdown and the forge-publish path must not leak them. The path resolves identically on the host and inside every agent sandbox, so the agent reads the file directly; the browser renders it through the uploads blob endpoint.
 	Attachments *[]string `json:"attachments,omitempty"`
 
 	// Author "user" | "reviewer" | "agent".
@@ -3681,6 +3681,9 @@ type StatusResponse struct {
 	// CanUpdate Whether the server can rebuild itself from source and restart into the result. Requires the daemon's project root to be a Hydra checkout with mage available.
 	CanUpdate *bool `json:"can_update,omitempty"`
 
+	// DatabaseDirectory Absolute Hydra state directory containing the SQLite database and per-project state trees.
+	DatabaseDirectory *string `json:"database_directory,omitempty"`
+
 	// DefaultProjectId Project ID of the default (CWD) project
 	DefaultProjectId *string `json:"default_project_id,omitempty"`
 
@@ -3689,6 +3692,9 @@ type StatusResponse struct {
 
 	// Development Whether the server is being served out of a Hydra source checkout, which is what enables developer affordances such as the Chrome DevTools workspace endpoint.
 	Development *bool `json:"development,omitempty"`
+
+	// GitCommit Git commit embedded in the running server binary, when available.
+	GitCommit *string `json:"git_commit,omitempty"`
 
 	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`
