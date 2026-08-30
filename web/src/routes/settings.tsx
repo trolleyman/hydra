@@ -115,7 +115,7 @@ function SettingsPage() {
           has no header of its own. Browser preferences apply instantly, and
           About has no editable settings. */}
       {tab === 'user' && <SettingsSaveAction dirty={hasUnsavedChanges} saving={saving} onSave={handleSave} />}
-      <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
+      <div className="flex-1 overflow-auto [scrollbar-gutter:stable] bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
           <ScopeTabs
             tabs={[
