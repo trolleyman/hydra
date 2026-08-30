@@ -85,6 +85,9 @@ type Server struct {
 	ProjectsManager *projects.Manager
 	Sessions        *session.Registry
 	DB              *db.Store
+	// BackendLifetime identifies whether this process is persistent or owned by
+	// the desktop development command that launched it.
+	BackendLifetime string
 	// ChatQueues holds chat-mode heads' queued (not-yet-sent) user messages,
 	// daemon-side and disk-persisted (see heads.ChatQueueManager). nil disables
 	// queueing (messages always send straight through).
@@ -970,6 +973,11 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 	projectRoot := s.ProjectRoot
 	defaultProjectID := s.DefaultProject.ID
 	development := s.servingFromSource()
+	backendLifetime := s.BackendLifetime
+	if backendLifetime == "" {
+		backendLifetime = "persistent"
+	}
+	backendLifetimeValue := api.StatusResponseBackendLifetime(backendLifetime)
 	canRestart := s.SelfUpdate != nil && s.SelfUpdate.CanRestart()
 	canUpdate := s.SelfUpdate != nil && s.SelfUpdate.CanUpdate()
 
@@ -985,6 +993,7 @@ func (s *Server) GetStatus(_ context.Context, _ api.GetStatusRequestObject) (api
 		Version:           &v,
 		GitCommit:         &commit,
 		DatabaseDirectory: &databaseDirectory,
+		BackendLifetime:   &backendLifetimeValue,
 		DesktopProtocol:   &desktopProtocol,
 		BuildId:           &buildID,
 		RuntimeOs:         &runtimeOS,
@@ -1923,11 +1932,19 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 			}, nil
 		}
 		filesystemMode = string(api.FocusedFilesystemEdit)
+		allowCommits = true
 		if request.Body.FilesystemMode != nil {
 			filesystemMode = string(*request.Body.FilesystemMode)
 		}
 		if request.Body.AllowCommits != nil {
 			allowCommits = *request.Body.AllowCommits
+		}
+		if filesystemMode == string(api.FocusedFilesystemReadonly) && allowCommits {
+			return api.SpawnAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "read-only project directory agents cannot allow commits",
+			}, nil
 		}
 	}
 
@@ -2148,6 +2165,21 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 		if request.Body.FilesystemMode != nil {
 			v := string(*request.Body.FilesystemMode)
 			mode = &v
+		}
+		effectiveMode := head.FilesystemMode
+		if mode != nil {
+			effectiveMode = *mode
+		}
+		effectiveAllowCommits := head.AllowCommits
+		if request.Body.AllowCommits != nil {
+			effectiveAllowCommits = *request.Body.AllowCommits
+		}
+		if effectiveMode == string(api.FocusedFilesystemReadonly) && effectiveAllowCommits {
+			return api.UpdateAgent400JSONResponse{
+				Code:    400,
+				Error:   api.ErrorResponseErrorBadRequest,
+				Details: "read-only project directory agents cannot allow commits",
+			}, nil
 		}
 		if err := s.DB.UpdateFocusedPermissions(head.ID, mode, request.Body.AllowCommits); err != nil {
 			return nil, errtrace.Wrap(err)

@@ -348,7 +348,6 @@ function MergeWhenGreenPill({ agent, onCancel, disabled }: { agent: AgentRespons
       <Tooltip
         side="bottom"
         offset={8}
-        delay={0}
         content={`Merges into ${toBranch} on its own - but only once the agent is finished (not mid-task) and its tests pass. Waiting on ${waitingOn}.`}
       >
         <span className="inline-flex items-center gap-2 cursor-help">
@@ -451,7 +450,7 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
   // Icon-only: the shield color/glyph carries the signal at a glance; the label
   // and full explanation live in the tooltip (row real estate is precious).
   return (
-    <Tooltip title={`Network access - ${c.label}`} content={c.tip} delay={0} pin className="shrink-0">
+    <Tooltip title={`Network access - ${c.label}`} content={c.tip} className="shrink-0">
       {/* min-h-5 matches the text chips' height (text-xs line + py-0.5) - an
           icon-only chip would otherwise sit a few px shorter than its
           neighbours. */}
@@ -468,8 +467,6 @@ function GitIsolationBadge({ mode, projectCheckout = false }: { mode?: string; p
   return (
     <Tooltip
       title="Git access - .git read-only"
-      delay={0}
-      pin
       content={projectCheckout
         ? "The project checkout's .git stays read-only. Allow commits grants Hydra's commit tool for deliberate commits without giving the agent unrestricted .git writes."
         : "This head's .git is bound read-only in the sandbox, so the agent cannot write it - no in-sandbox commit, add, stash, or object destruction, and it cannot damage the main repo or a sibling head. Commits are staged and made host-side (the git_commit tool) onto the head's own branch."}
@@ -497,11 +494,8 @@ function WorkspaceBadge({
     if (!agent.branch_name) return null
     return (
       <Tooltip
-        width={320}
-        delay={0}
-        pin
         title="Workspace - isolated worktree"
-        content={<><span className="block">Changes are isolated on this head's own branch and worktree.</span><span className="mt-2 block break-all font-mono">{agent.branch_name}</span></>}
+        content={<><span className="block">Changes are isolated on this head's own branch and worktree.</span><span className="mt-2 block break-all">{agent.branch_name}</span></>}
         className="shrink-0"
       >
         <button type="button" aria-label={`Isolated worktree: ${agent.branch_name}`} className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
@@ -513,14 +507,11 @@ function WorkspaceBadge({
 
   return (
     <Tooltip
-      width={340}
-      delay={0}
-      pin
       title="Workspace - project directory"
       content={(
         <div className="space-y-3">
           <p>This chat works directly in the shared project directory. Changes are project changes, not an isolated agent worktree.</p>
-          {agent.project_path && <p className="break-all font-mono text-xs text-gray-500 dark:text-gray-400">{agent.project_path}</p>}
+          {agent.project_path && <p className="break-all text-xs text-gray-500 dark:text-gray-400">{agent.project_path}</p>}
         </div>
       )}
       className="shrink-0"
@@ -542,20 +533,24 @@ function ProjectCheckoutPermissions({
   onUpdate: (patch: { filesystem_mode?: FocusedFilesystemMode; allow_commits?: boolean }) => void
 }) {
   if (!agent.focused || agent.archived) return null
+  const readOnly = agent.filesystem_mode === FocusedFilesystemMode.FocusedFilesystemReadonly
   return (
     <>
       <SegmentedControl
         label="Project files"
         value={agent.filesystem_mode ?? FocusedFilesystemMode.FocusedFilesystemEdit}
         disabled={saving}
-        onChange={(filesystemMode) => onUpdate({ filesystem_mode: filesystemMode })}
+        onChange={(filesystemMode) => onUpdate({
+          filesystem_mode: filesystemMode,
+          ...(filesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly ? { allow_commits: false } : {}),
+        })}
         options={[
-          { value: FocusedFilesystemMode.FocusedFilesystemEdit, label: 'Edit' },
+          { value: FocusedFilesystemMode.FocusedFilesystemEdit, label: 'Editable' },
           { value: FocusedFilesystemMode.FocusedFilesystemReadonly, label: 'Read-only' },
         ]}
       />
-      <label className="flex h-7 shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-2.5 text-xs text-gray-600 dark:border-gray-600 dark:text-gray-300">
-        <input type="checkbox" checked={agent.allow_commits === true} disabled={saving} onChange={(event) => onUpdate({ allow_commits: event.target.checked })} />
+      <label className={`flex h-7 shrink-0 items-center gap-2 rounded-lg border px-2.5 text-xs ${readOnly ? 'cursor-not-allowed border-gray-200 text-gray-400 dark:border-gray-700 dark:text-gray-500' : 'cursor-pointer border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}>
+        <input type="checkbox" checked={!readOnly && agent.allow_commits === true} disabled={saving || readOnly} onChange={(event) => onUpdate({ allow_commits: event.target.checked })} />
         <span className="whitespace-nowrap optical-center">Allow commits</span>
       </label>
     </>
@@ -565,8 +560,7 @@ function ProjectCheckoutPermissions({
 // AgentStatusChip is the head's live status badge with an explainer behind it:
 // the labels are short and internal ("needs_input", "waiting", "errored"), so the
 // chip says WHICH state and the tooltip says what that state means and what it
-// wants from you. It opens instantly and can be pinned by clicking - the only
-// way to read it on a touch device. An unmapped status has no prose, so it stays
+// wants from you. An unmapped status has no prose, so it stays
 // a bare chip rather than opening an empty box. No heading: it would be the
 // status word, which the chip an inch above the tooltip already says.
 function AgentStatusChip({ status }: { status: string }) {
@@ -575,7 +569,7 @@ function AgentStatusChip({ status }: { status: string }) {
   const chip = <Badge className={badge.className} containerClassName="shrink-0">{badge.label}</Badge>
   if (!help) return chip
   return (
-    <Tooltip width={300} content={help} delay={0} pin className="shrink-0">
+    <Tooltip content={help} className="shrink-0">
       {/* The chip is a plain span, so the tooltip needs a focusable trigger of
           its own for keyboard parity. */}
       <button type="button" aria-label={`What "${badge.label}" means`} className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">

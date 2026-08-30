@@ -444,6 +444,12 @@ const (
 	ShellCwd ShellCwdEventType = "shell_cwd"
 )
 
+// Defines values for StatusResponseBackendLifetime.
+const (
+	CommandOwned StatusResponseBackendLifetime = "command-owned"
+	Persistent   StatusResponseBackendLifetime = "persistent"
+)
+
 // Defines values for SubagentCompletedEventType.
 const (
 	SubagentCompleted SubagentCompletedEventType = "subagent_completed"
@@ -3681,6 +3687,9 @@ type SpawnAgentRequest struct {
 
 // StatusResponse defines model for StatusResponse.
 type StatusResponse struct {
+	// BackendLifetime Ownership of the running backend process. A persistent backend can outlive its current desktop windows; a command-owned backend stops when the command that launched it exits.
+	BackendLifetime *StatusResponseBackendLifetime `json:"backend_lifetime,omitempty"`
+
 	// BuildId Backend build identity displayed in compatibility errors.
 	BuildId *string `json:"build_id,omitempty"`
 
@@ -3725,6 +3734,9 @@ type StatusResponse struct {
 	UptimeSeconds *float32 `json:"uptime_seconds,omitempty"`
 	Version       *string  `json:"version,omitempty"`
 }
+
+// StatusResponseBackendLifetime Ownership of the running backend process. A persistent backend can outlive its current desktop windows; a command-owned backend stops when the command that launched it exits.
+type StatusResponseBackendLifetime string
 
 // SubagentCompletedEvent defines model for SubagentCompletedEvent.
 type SubagentCompletedEvent struct {

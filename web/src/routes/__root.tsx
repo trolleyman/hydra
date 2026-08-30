@@ -255,6 +255,7 @@ function RootLayout() {
   // which, while an agent is streaming output, is about once a second.
   const projects = useProjectStore((s) => s.projects)
   const selectedProjectId = useProjectStore((s) => s.selectedProjectId)
+  const backendLifetime = useProjectStore((s) => s.systemStatus?.backend_lifetime)
   const setProjects = useProjectStore((s) => s.setProjects)
   const setSelectedProjectId = useProjectStore((s) => s.setSelectedProjectId)
   const addAgent = useAgentStore((s) => s.addAgent)
@@ -1127,9 +1128,11 @@ function RootLayout() {
                         reads "up to date" instead of emptying. */}
                     <div className="min-h-7 px-2.5 mt-0.5 pb-1 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                       <GitBranch className="w-3.5 h-3.5 shrink-0" />
-                      <span className="font-mono truncate" title={pushStatus?.branch || undefined}>
-                        {pushStatus ? (pushStatus.branch || 'detached') : '...'}
-                      </span>
+                      <Tooltip content={pushStatus?.branch || ''} className="min-w-0">
+                        <span className="block truncate font-mono">
+                          {pushStatus ? (pushStatus.branch || 'detached') : '...'}
+                        </span>
+                      </Tooltip>
                       <div className="flex-1" />
                       {/* Uncommitted-changes warning: the project checkout is dirty
                           (e.g. a Settings save rewrote .hydra/config.toml). Click to
@@ -1220,8 +1223,16 @@ function RootLayout() {
           <div className="group border-t border-gray-200 dark:border-gray-700 px-2 py-2 flex items-center gap-1.5 shrink-0">
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
             {hasDesktopBridge() && (
-              <Tooltip content={desktopKeepRunning ? 'Hydra backend stays running after windows close' : 'Hydra backend stops with the last window'}>
-                <span className={`shrink-0 w-2 h-2 rounded-full ${desktopKeepRunning ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+              <Tooltip content={
+                backendLifetime === 'command-owned'
+                  ? 'Command-owned backend - stops when the desktop command exits'
+                  : backendLifetime == null
+                    ? 'Checking backend lifetime...'
+                    : desktopKeepRunning
+                      ? 'Hydra backend stays running after windows close'
+                      : 'Hydra backend stops with the last window'
+              }>
+                <span className={`shrink-0 w-2 h-2 rounded-full ${backendLifetime !== 'command-owned' && desktopKeepRunning ? 'bg-emerald-500' : 'bg-gray-400'}`} />
               </Tooltip>
             )}
             {canRestart && (

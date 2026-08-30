@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -52,6 +53,16 @@ func TestSimulationIncludesFocusedChats(t *testing.T) {
 	}
 	if !foundArchivedFocused {
 		t.Error("archived focused fixture missing or incorrectly branch-backed")
+	}
+}
+
+func TestSimulationRejectsCommitsInReadOnlyMode(t *testing.T) {
+	s := &SimulationServer{}
+	body := []byte(`{"filesystem_mode":"readonly","allow_commits":true}`)
+	recorder := httptest.NewRecorder()
+	s.UpdateAgent(recorder, httptest.NewRequest("PATCH", "/api/projects/sim-project/agents/focused-edit", bytes.NewReader(body)), "sim-project", "focused-edit")
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("update status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
 	}
 }
 

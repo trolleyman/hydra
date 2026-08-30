@@ -17,6 +17,7 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/desktop"
 	"github.com/trolleyman/hydra/internal/events"
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/git"
@@ -318,6 +319,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		ProjectsManager: pm,
 		Sessions:        reg,
 		DB:              store,
+		BackendLifetime: desktop.CurrentLaunchConfig().BackendLifetime,
 		StartTime:       time.Now(),
 		SelfUpdate:      newSelfUpdateManager(projectRoot),
 		Artifacts:       artifactReg,
