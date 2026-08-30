@@ -1,4 +1,4 @@
-# Hydra for Windows and focused chat windows
+# Hydra for Windows and project-checkout chats
 
 Status: **shared focused-session foundation and initial Windows shell built;
 native validation and Windows agent runtime unbuilt.** This document adapts the
@@ -16,14 +16,14 @@ depends on the Windows runtime phases below.
 
 ## Product shape
 
-Ship one standalone Hydra application for Windows with the same two window types
-planned for macOS:
+Ship one standalone Hydra application for Windows with one responsive React
+shell. A window may open any normal Hydra route. The New chat window command
+opens a project-checkout draft and existing chats use their canonical agent
+route; windowing is not a separate UI mode.
 
-- **Full Hydra** - the existing project, head, diff, test, artifact, preview,
-  publish, and review interface.
-- **Focused chat** - a small structured-chat window attached directly to one
-  registered project's real directory, with Edit/Read-only and guarded-commit
-  controls and none of the worktree review chrome.
+Project-checkout chats run directly in one registered project's real directory.
+Their workspace chip exposes Edit/Read-only and Allow commits, and their agent
+view omits worktree review chrome.
 
 Both surfaces remain React routes served by the existing Go backend. The native
 shell owns Windows lifecycle and integration; it must not fork chat rendering or
@@ -49,15 +49,13 @@ The following base is already merged and must be reused unchanged:
 - immediate authorization changes for the independent commit toggle;
 - guarded commits which revalidate the real checkout's branch and HEAD;
 - the focused option in the existing spawn composer;
-- the reusable chat-only React layout and focused permission controls;
+- the reusable chat-only agent layout and workspace permission card;
 - simulation fixtures for editable, read-only, working, and archived focused
   sessions.
 
-Still shared and unbuilt are first-message draft creation, a dedicated
-chrome-free focused route, project/history switching, native close confirmation,
-the concurrent-editor warning, native notification events, and backend-derived
-capabilities. These should land once for every desktop shell, not in Windows UI
-code.
+Still shared and unbuilt are first-message draft creation, the concurrent-editor
+warning, native notification events, and backend-derived capabilities. These
+should land once for every desktop shell, not in Windows UI code.
 
 ## Windows-specific decisions
 
@@ -217,9 +215,10 @@ it is not the runtime hidden inside the standalone app.
 
 ### Phase 0: freeze the shared desktop contract
 
-- [x] Land the dedicated focused route and first-message creation flow.
-- Land the project and history switcher, backend capabilities, and semantic
-  notification events.
+- [x] Land the project-checkout draft route, canonical agent navigation, and
+  first-message creation flow.
+- Land backend capabilities and semantic notification events. Project and
+  conversation navigation use the shared responsive shell.
 - Define the remaining native bridge messages for notification state, app
   version, and app activation. New-window, close-request, active-project, and
   active-turn state messages are defined; AppKit and WebView2 consume the window
@@ -238,12 +237,12 @@ model or duplicate the permission/commit implementation.
 - [x] Add a self-contained development publish script which packages the
       production frontend, bundled Go executable, and caller-supplied official
       PortableGit payload for x64 or arm64.
-- [x] Share one backend and persistent WebView2 profile across full and focused
-      windows, with native new-window commands and notification-area lifecycle.
+- [x] Share one backend and persistent WebView2 profile across every window,
+      with native new-window commands and notification-area lifecycle.
 - [x] Restore and compile the Windows Forms/WebView2 project from Linux with the
       .NET 8 SDK and Windows targeting enabled; real-Windows runtime validation
       remains required below.
-- [ ] Open two full windows and two focused windows against simulation on real
+- [ ] Open several windows at full and chat routes against simulation on real
       Windows and prove shared cookies, storage, WebSockets, and session state.
 - [ ] Prove app commands: New full window, New chat window, Settings, and Exit.
 - [ ] Prove deep-link/notification activation, native close interception, tray
@@ -305,10 +304,10 @@ setup helper after an ordinary Windows consent prompt, explain failures, and
 offer WSL2 documentation. The helper performs only setup/repair/removal; it does
 not run the Hydra UI or daemon elevated.
 
-### Phase 4: finish focused-window lifecycle
+### Phase 4: finish project-checkout chat lifecycle
 
-- Create an untitled focused window immediately and atomically create its head
-  on first submit.
+- Create an untitled project-checkout draft immediately and atomically create
+  its head on first submit.
 - Select the frontmost full window's project, falling back to persisted last
   project, and make the directory immutable after creation.
 - Implement history and project switching with Stop and switch, Keep running,
@@ -414,7 +413,7 @@ and the automation/manual boundary.
   proven compatible with its packaging constraints.
 - Arbitrary unregistered folders, conversation directory migration, and
   importing arbitrary provider history.
-- Branch/review/test/artifact/preview chrome inside the focused window.
+- A worktree inspector inside a project-checkout agent view.
 
 ## Open implementation questions
 

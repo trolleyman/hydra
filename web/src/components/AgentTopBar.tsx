@@ -46,6 +46,9 @@ export interface AgentTopBarAction {
   variant?: AgentTopBarVariant
   danger?: boolean
   disabled?: boolean
+  // Keep this action icon-only even when the toolbar has room for labels. Used
+  // for secondary window/navigation actions whose tooltip carries the label.
+  iconOnly?: boolean
   // Lowlit keyboard-shortcut hint (e.g. "Ctrl+M"), shown right-aligned in the
   // overflow menu and folded into a button's tooltip - only on devices with a
   // physical keyboard (see useFinePointer).
@@ -146,6 +149,7 @@ function ActionLabel({ a }: { a: AgentTopBarAction }) {
 
 // Render a single action button.
 function ActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: 'labels' | 'icons'; showShortcut: boolean }) {
+  const effectiveMode = a.iconOnly ? 'icons' : mode
   return (
     // shrink-0 rides the wrapper too: it is now the toolbar row's flex child.
     <Tooltip content={actionTitle(a, showShortcut)} side="bottom" className="shrink-0">
@@ -154,10 +158,10 @@ function ActionButton({ a, mode, showShortcut }: { a: AgentTopBarAction; mode: '
         disabled={a.disabled}
         onClick={a.onClick}
         aria-label={a.label}
-        className={actionBtnClass(mode, a)}
+        className={actionBtnClass(effectiveMode, a)}
       >
         {a.icon}
-        {mode === 'labels' && <ActionLabel a={a} />}
+        {effectiveMode === 'labels' && <ActionLabel a={a} />}
       </button>
     </Tooltip>
   )
@@ -501,9 +505,9 @@ function AdaptiveActions({
         {actions.map((a, i) => (
           <span key={`l-${a.label}`} ref={(el) => { labeledRefs.current[i] = el }} className="shrink-0 inline-flex">
             {a.render ?? (
-              <button className={actionBtnClass('labels', a)} tabIndex={-1}>
+              <button className={actionBtnClass(a.iconOnly ? 'icons' : 'labels', a)} tabIndex={-1}>
                 {a.icon}
-                <ActionLabel a={a} />
+                {!a.iconOnly && <ActionLabel a={a} />}
                 {/* Reserve the split chevron's width so the fit calc accounts for it. */}
                 {a.menu && <span className="inline-block w-7" />}
               </button>

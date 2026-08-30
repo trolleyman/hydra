@@ -1,4 +1,4 @@
-# Hydra for macOS and focused chat windows
+# Hydra for macOS and project-checkout chats
 
 Status: **shared focused-session foundation and initial macOS shell built; native
 validation pending.** This
@@ -31,50 +31,49 @@ The cross-platform base now includes:
   Windows backends (with enforcement implemented by the non-stub backends);
 - guarded focused commits which capture and revalidate both branch and HEAD,
   while rejecting every other host-mediated Git mutation;
-- a focused option in the normal spawn UI and a shared chat-only agent layout
-  with edit/read-only and commit controls. The layout does not mount the diff,
-  tests, artifacts, previews, publish, merge, or review inspector.
+- a project-checkout option in the normal spawn UI and a shared chat-only agent
+  layout. Its workspace chip contains Edit/Read-only and Allow commits controls.
+  The layout does not mount the diff, tests, artifacts, previews, publish,
+  merge, or review inspector;
 - simulation fixtures for editable, read-only, actively working, and archived
   focused chats, including mutable permission controls for browser testing.
+- one responsive application shell for browser tabs, full native windows, and
+  chat windows. Existing conversations use their canonical agent URL; a new
+  project-checkout chat uses `/focused/$projectId` only for its initial draft.
 
 This is the intended branch point for platform agents. Native notification
 bridges, signing, and OS-specific sandbox completion are not part of this shared
 base.
-The immediate empty draft, separate chrome-free window route, history/project
-switcher, native close confirmation, and concurrent-editor warning also remain
-to be built. Today a focused head is created by submitting Hydra's existing
-spawn composer, then opens in the shared chat-only layout.
+First-message draft creation, a concurrent-editor warning, and complete native
+validation remain to be built. Today a project-checkout head is created by
+submitting the existing composer, then opens in the shared chat layout.
 
-The macOS branch now also contains an AppKit/WKWebView development shell under
+The macOS implementation also contains an AppKit/WKWebView development shell under
 `desktop/macos`. It reuses a compatible server on the default loopback address
 or launches the bundled backend once on an OS-assigned port, using an atomic
-readiness record to discover the URL. Full and focused windows share WebKit
-state and one backend. The focused window currently opens the ordinary project
-composer with Focused/Edit selected; it does not yet provide the immediate
-untitled composer or chrome-free route. See `desktop/macos/README.md` for build
-and hardware validation instructions.
+readiness record to discover the URL. All windows share WebKit state, one
+backend, and the same responsive React shell. A new chat window opens the
+ordinary composer with Project checkout/Edit selected. See
+`desktop/macos/README.md` for build and hardware validation instructions.
 
 ## Product in one sentence
 
-Ship one `Hydra.app`, backed by one shared local Hydra service, with two window
-types:
+Ship one `Hydra.app`, backed by one shared local Hydra service and one responsive
+application UI. Any canonical project or agent route can be displayed in the
+main window, another native window, or an ordinary browser tab. Opening a chat
+window is a presentation choice, not a separate chat product.
 
-- **Full Hydra** - the existing project, head, diff, test, artifact, preview and
-  review interface.
-- **Focused chat** - a clean single-conversation window attached directly to a
-  registered project's real directory, with no branch, worktree, diff, merge,
-  test, artifact or review chrome.
-
-Both window types see the same projects and conversations. A focused chat is a
-real Hydra session, so it can be found and reopened from full Hydra as well as
-from the focused window's history menu.
+A project-checkout chat is instead a workspace choice: it runs directly in a
+registered project's directory and has no owned branch, worktree, merge, or
+review inspector. It remains a normal Hydra session in the normal agent list and
+agent route.
 
 ## Agreed decisions
 
 ### One app and one service
 
-- Full Hydra and focused chat ship in one macOS app bundle.
-- The app may open several full or focused windows.
+- Hydra and project-checkout chat ship in one macOS app bundle.
+- The app may open several windows at arbitrary Hydra routes.
 - Every window connects to one shared local backend. Opening a second window
   must not start a second daemon, database, agent registry or network proxy.
 - Closing the last window does not automatically terminate the backend. Hydra
@@ -84,16 +83,16 @@ from the focused window's history menu.
 - The existing browser-served UI remains supported. The desktop app is another
   trusted client of the same backend, not a fork of it.
 
-### A focused chat belongs to one project forever
+### A project-checkout chat belongs to one project forever
 
 - A focused chat runs in the real root directory of one registered Hydra
   project. It does not receive a linked worktree or a Hydra branch.
 - The directory is fixed when the first message creates the session. An existing
   conversation never changes directory and is never migrated between projects.
-- A new focused window initially selects the project active in the frontmost
-  full-Hydra window. If there is no such window, it uses Hydra's persisted last
-  project.
-- The selected project and display path remain visible in the focused window.
+- A new project-chat window initially selects the project active in the
+  frontmost Hydra window. If there is no such window, it uses Hydra's persisted
+  last project.
+- The selected project and display path remain visible in the shared shell.
 - Before the first message, the user may select a different registered project.
 - Choosing another project from an existing chat creates a new untitled chat in
   that project. It does not repurpose the current conversation.
@@ -111,7 +110,7 @@ experience is sound.
 
 ### Conversation creation and history
 
-- Opening a focused window produces an untitled draft immediately. There is no
+- Opening a new project-chat window produces an untitled draft immediately. There is no
   required spawn prompt or setup form before the composer appears.
 - The first submitted message atomically creates the backend session and starts
   the provider.
@@ -123,12 +122,13 @@ experience is sound.
 - Importing or resuming arbitrary pre-existing Claude CLI conversations is not
   part of the first version. Exact provider conversation IDs should still be
   persisted so Hydra-created sessions resume normally.
-- The history menu lists focused chats, grouped or filtered by project, and can
-  reopen one in a new focused window.
+- Project-checkout chats appear in the normal project agent list and can be
+  reopened at their canonical route in the current window, a new window, or a
+  browser tab.
 
 ### Provider-neutral chat
 
-Focused chat uses the existing provider-neutral event contract. Claude and
+Project-checkout chat uses the existing provider-neutral event contract. Claude and
 Codex remain supported, and adding the desktop surface must not introduce a
 Claude-shaped browser protocol. The first implementation may concentrate its
 manual validation on Claude, but session APIs and persisted records must carry
@@ -178,19 +178,23 @@ that fact visible but does not attempt locking or conflict resolution in the
 first version. Read-only focused sessions may safely run alongside writers,
 subject to the ordinary fact that their reads can observe files changing.
 
-## Focused window experience
+## Chat window experience
 
-The initial surface contains only:
+Every window renders Hydra's normal responsive shell. A wide chat window keeps
+the global top bar and agent list; a phone-sized window naturally collapses to
+the chat with the normal sidebar and inspector navigation controls. There is no
+second project/history toolbar and no `desktop=focused` presentation mode.
 
-- the current project name and display path;
-- an untitled/current conversation title;
-- conversation history access, likely a compact menu button;
-- the provider and model selector;
-- the Edit/Read-only indicator and control;
-- the Allow commits toggle;
-- the structured chat transcript;
-- the composer and attachments;
-- a compact connection/running state.
+An existing chat window loads the canonical agent route. A new project-checkout
+chat window loads the project draft, then navigates to that same canonical route
+after spawn. In a browser, the open-window action requests popup-style chrome,
+but browser policy decides whether it becomes a popup or tab.
+
+Workspace state is visible in both the agent metadata and agent list:
+
+- a branch chip means an isolated worktree;
+- a folder chip means the shared project checkout;
+- the project-checkout chip's card contains Edit/Read-only and Allow commits.
 
 The chat retains the existing high-value structured elements:
 
@@ -205,22 +209,19 @@ The chat retains the existing high-value structured elements:
 - sandbox and network status;
 - errors and resume state.
 
-Project settings, including the full sandbox/network policy editor, do not need
-to fit into the first focused window. Initially the window may show the resolved
-policy read-only and link to that project's settings in a full Hydra window.
+Project settings, including the full sandbox/network policy editor, remain in
+the normal shared navigation rather than being duplicated in the chat view.
 
-The focused route should be its own small component tree rather than a CSS mode
-that hides most of `AgentDetail`. `AgentChat` and its supporting controls should
-be extracted or composed where necessary, but the focused view must not mount
-`DiffViewer`, tests, artifacts, previews, review integration or the full sidebar
-and merely conceal them.
+The project-checkout agent view composes the normal `AgentDetail` metadata and
+chat surfaces but does not mount the worktree inspector. The application shell
+itself is shared and responds to the available window width.
 
-### Closing a focused window
+### Closing a chat window
 
 Closing an idle chat window closes only the window. The saved conversation
 remains available in history.
 
-Closing a focused window during an active turn presents:
+Closing a chat window during an active turn presents:
 
 - **Interrupt and close**;
 - **Keep running in background**;
@@ -237,7 +238,7 @@ The native layer has a deliberately narrow job:
 - own application, window and menu-bar lifecycle;
 - start or discover the one shared Hydra backend;
 - open full and focused webview windows at the appropriate internal routes;
-- communicate the frontmost full window's project to a new focused window;
+- communicate the frontmost window's project to a new project-chat window;
 - provide native Open, New Full Window and New Chat Window commands;
 - bridge native notifications and notification clicks;
 - implement Quit semantics and active-session confirmation;
@@ -395,8 +396,8 @@ how to display them. Initial notifications are:
 - an active turn failed;
 - a background session was interrupted or exited unexpectedly.
 
-Clicking a notification opens or focuses the corresponding focused chat window,
-or the same conversation in full Hydra if that is where it is already visible.
+Clicking a notification opens or focuses a window at the conversation's
+canonical agent route.
 Notifications should be suppressed when the relevant conversation window is
 frontmost. The menu-bar icon should indicate whether work is running or waiting
 for input without becoming a second session-management UI.
@@ -486,26 +487,23 @@ Status: the shared permission contract, controlled stop/resume on a filesystem
 mode change, immediate commit authorization, and branch/HEAD guarded commit are
 built. OS-specific sandbox validation and the concurrent-editor warning remain.
 
-### Phase 4: build the focused web route
+### Phase 4: build the project-checkout chat flow
 
-- Add the focused window route and small layout.
-- Extract/reuse structured chat without mounting the full agent inspector.
-- Add project/path display, pre-first-message project selection, history,
-  provider/model controls, mode control and commit toggle.
+- Add the project-checkout draft route and reuse the normal responsive shell.
+- Reuse structured chat without mounting the worktree inspector.
+- Add project/path display, provider/model controls, and workspace permission
+  controls.
 - Add project-switch behavior with Stop and switch / Keep running / Cancel.
 - Add close-window active-turn confirmation through the native bridge, with a
   browser-safe fallback dialog for development.
 - Make every focused conversation discoverable and openable from full Hydra.
 
-Status: the reusable chat-only layout and its permission controls are built. A
-dedicated `/focused/<project>` route now opens the empty focused composer and
-creates the branchless session only when its first prompt is submitted; the
-resulting agent route retains the chrome-free desktop presentation across
-reloads. The compact window now has project and live focused-history selectors,
-New Chat/Full Hydra actions, and a transport-neutral bridge used by AppKit and
-WebView2 with browser fallbacks. Stop-and-switch behavior remains. Linux now
-consumes the shared new-window and close operations too. Live and loaded
-archived focused history share the selector.
+Status: the reusable chat-only layout and its permission card are built. The
+`/focused/<project>` route opens the project-checkout composer and creates the
+branchless session when its first prompt is submitted. It then navigates to the
+canonical agent route in the normal responsive shell. New-window and close
+operations use a transport-neutral bridge with browser fallbacks. Linux consumes
+the shared operations too. Stop-and-switch behavior remains.
 AppKit and WebView2 now offer Stop and close,
 Close and keep running, and Cancel for an active focused turn; stopping happens
 through the authenticated page before native code permits the close.
@@ -519,7 +517,7 @@ through the authenticated page before native code permits the close.
 - Add recovery UI for backend launch failure, incompatible versions and a stale
   ownership record.
 
-Status: New Full Window/New Focused Chat commands, shared-daemon ownership,
+Status: New Hydra Window/New Project Chat commands, shared-daemon ownership,
 last-window persistence, incompatible-version refusal, backend-exit reporting,
 and active-session Quit confirmation are implemented in the initial shell.
 Frontmost-project tracking, menu-bar state, native notifications, and richer
@@ -589,10 +587,10 @@ Frontend and desktop end-to-end validation must cover:
 
 - launch to an immediately usable composer;
 - first message creates and titles the session;
-- several full/focused windows share one backend;
+- several windows at full and chat routes share one backend;
 - project selection is fixed after session creation;
 - project switch choices behave correctly for idle and active turns;
-- focused history reopens the original project-bound conversation;
+- the normal agent list reopens the original project-bound conversation;
 - Edit/Read-only restart state is understandable and input-safe;
 - commit permission changes without restart;
 - approval/question notifications focus the right window;
@@ -616,7 +614,7 @@ the automation/manual boundary.
 - Importing arbitrary Claude CLI history.
 - A native Swift rewrite of the React chat UI.
 - Branch creation, merge, publish, review, tests, artifacts or previews inside
-  the focused window.
+  the project-checkout agent view.
 - Automatic locking or reconciliation between two edit-mode focused sessions in
   the same project.
 - Treating prompt instructions as a substitute for read-only enforcement.
