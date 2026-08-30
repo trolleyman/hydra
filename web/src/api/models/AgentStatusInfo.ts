@@ -22,7 +22,7 @@ export type AgentStatusInfo = {
      */
     reason?: string;
     /**
-     * Short human-readable description of the agent's current action, derived from status_log.jsonl (present while running)
+     * Short human-readable description of the agent's latest meaningful action (present while running; derived from status_log.jsonl hooks or provider-native item events)
      */
     activity?: string;
     /**

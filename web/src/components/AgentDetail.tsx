@@ -23,7 +23,8 @@ import type { Attachment } from '../lib/spawnDrafts'
 import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, ExternalLink } from 'lucide-react'
+import { openChatWindow } from '../lib/desktopBridge'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -634,7 +635,6 @@ const AgentMetaRow = memo(function AgentMetaRow({
   // its id (the branch minus the `hydra/` prefix - the prefix is on every head,
   // so it's noise), and how long ago it was created, on the right. The full
   // branch name is what the copy button beside the id gives you.
-  const headId = agent.branch_name?.replace(/^hydra\//, '') || agent.id
   const identityLine = (
     // min-h-7 (the height of the pane's collapse toggle, and of the inspector
     // bar's "Changes" row across the divider) so this line's contents centre on
@@ -659,12 +659,9 @@ const AgentMetaRow = memo(function AgentMetaRow({
       </Tooltip>
       {agent.agent_status && <AgentStatusChip status={agent.agent_status.status} />}
       {agent.branch_name && (
-        <BranchTag
-          branch={agent.branch_name}
-          label={headId}
-          icon={false}
-          className="ml-1 text-sm font-mono text-gray-700 dark:text-gray-200"
-        />
+        <Tooltip content={<span><span className="block font-semibold">Worktree branch</span><span className="font-mono">{agent.branch_name}</span></span>}>
+          <span className="shrink-0 text-gray-400 dark:text-gray-500"><GitBranch className="w-3.5 h-3.5" /></span>
+        </Tooltip>
       )}
       {agent.created_at !== 0 && agent.created_at !== undefined && (
         // ml-auto: pinned to the right edge of the row, whatever is on the left.
@@ -2031,6 +2028,7 @@ export function AgentDetail({
           onGenerate: generateTitle,
         }}
         actions={[
+          { label: 'Open chat window', icon: <ExternalLink className="w-4 h-4" />, onClick: () => openChatWindow(projectId ?? undefined, agent.id), variant: 'segment' },
           ...(agent.focused ? [] : mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: unreadAppearance.label, icon: unreadAppearance.icon, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: renameAppearance.label, icon: renameAppearance.icon, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },

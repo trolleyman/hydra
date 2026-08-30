@@ -738,7 +738,7 @@ type AgentStatusChangedEventType string
 
 // AgentStatusInfo defines model for AgentStatusInfo.
 type AgentStatusInfo struct {
-	// Activity Short human-readable description of the agent's current action, derived from status_log.jsonl (present while running)
+	// Activity Short human-readable description of the agent's latest meaningful action (present while running; derived from status_log.jsonl hooks or provider-native item events)
 	Activity *string `json:"activity,omitempty"`
 
 	// Event The hook event that triggered this status (SessionStart, Stop, SessionEnd, or polling)

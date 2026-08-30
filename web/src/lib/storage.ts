@@ -118,6 +118,9 @@ export const StorageKeys = {
   // backgrounded or unfocused. Absent = off (the default; enabling requires an
   // explicit user gesture so the OS permission prompt has one). See lib/notifyPrefs.
   desktopNotifications: 'hydra-desktop-notifications',
+  // '0' when closing the final native window should also stop a desktop-owned
+  // backend. Absent = keep it running, matching an installed desktop app.
+  desktopKeepRunning: 'hydra-desktop-keep-running',
 
   diffSideBySide: 'hydra-diff-side-by-side',
   diffIgnoreWhitespace: 'hydra-diff-ignore-whitespace',

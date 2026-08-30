@@ -969,7 +969,7 @@ export const SpawnForm = memo(function SpawnForm({
     // the one remembered pick with no representation outside this panel (the
     // agent and model both show on the picker trigger beside it).
     const nonDefaults: string[] = []
-    if (focused) nonDefaults.push(`Workspace: focused (${focusedFilesystemMode})`)
+    if (focused) nonDefaults.push(`Worktree: off (${focusedFilesystemMode})`)
     if (focused && focusedAllowCommits) nonDefaults.push('Commits: allowed')
     if (adopt) nonDefaults.push(`Pull request: #${adopt.id}`)
     if (showBranch && baseBranch && defaultBranch && baseBranch !== defaultBranch) {
@@ -1005,14 +1005,14 @@ export const SpawnForm = memo(function SpawnForm({
         {canFocus && (
           <>
             <SettingsGroupLabel className="mb-1.5">Workspace</SettingsGroupLabel>
-            {!focusedOnly && <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
-              <button type="button" aria-pressed={!focused} onClick={() => setFocused(false)} className={modeSegment(!focused)}>
-                branch
-              </button>
-              <button type="button" aria-pressed={focused} onClick={() => { setFocused(true); setChatMode(true); setAdopt(null) }} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(focused)}`}>
-                focused
-              </button>
-            </div>}
+            {!focusedOnly && <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
+              <input type="checkbox" checked={!focused} onChange={(event) => {
+                const useWorktree = event.target.checked
+                setFocused(!useWorktree)
+                if (!useWorktree) { setChatMode(true); setAdopt(null) }
+              }} className="rounded border-gray-300 dark:border-gray-600" />
+              Use an isolated worktree
+            </label>}
             {focused && (
               <div className="mt-2 space-y-2">
                 <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">

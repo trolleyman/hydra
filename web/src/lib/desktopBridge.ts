@@ -1,12 +1,13 @@
 export type DesktopMessage =
-  | { type: 'new-full-window' }
-  | { type: 'new-focused-window'; projectId?: string }
+  | { type: 'show-main-window' }
+  | { type: 'new-chat-window'; projectId?: string; agentId?: string }
   | { type: 'active-project'; projectId: string }
   | { type: 'window-state'; projectId?: string; agentId?: string; activeTurn: boolean }
   | { type: 'close-window'; force?: boolean }
   | { type: 'show-notification'; title: string; body: string; tag: string; url: string }
   | { type: 'dismiss-notification'; tag: string }
   | { type: 'pick-folder'; requestId: string }
+  | { type: 'keep-running'; enabled: boolean }
 
 export type DesktopCommand = { type: 'stop-and-close' }
 
@@ -37,6 +38,10 @@ export function hasDesktopBridge(): boolean {
   return !!desktop.webkit?.messageHandlers?.hydra || !!desktop.chrome?.webview
 }
 
+export function setDesktopKeepRunning(enabled: boolean): boolean {
+  return postDesktopMessage({ type: 'keep-running', enabled })
+}
+
 export function postDesktopMessage(message: DesktopMessage): boolean {
   if (typeof window === 'undefined') return false
   const desktop = window as DesktopWindow
@@ -54,12 +59,15 @@ export function postDesktopMessage(message: DesktopMessage): boolean {
 }
 
 export function openFullWindow(): void {
-  if (!postDesktopMessage({ type: 'new-full-window' })) window.open('/', '_blank', 'noopener')
+  if (!postDesktopMessage({ type: 'show-main-window' })) window.open('/', 'hydra-main', 'noopener')
 }
 
-export function openFocusedWindow(projectId?: string): void {
-  if (postDesktopMessage({ type: 'new-focused-window', projectId })) return
-  window.open(projectId ? `/focused/${encodeURIComponent(projectId)}` : '/', '_blank', 'noopener')
+export function openChatWindow(projectId?: string, agentId?: string): void {
+  if (postDesktopMessage({ type: 'new-chat-window', projectId, agentId })) return
+  const url = projectId && agentId
+    ? `/project/${encodeURIComponent(projectId)}/agent/${encodeURIComponent(agentId)}?desktop=focused`
+    : projectId ? `/focused/${encodeURIComponent(projectId)}` : '/'
+  window.open(url, '_blank', 'noopener')
 }
 
 export function closeDesktopWindow(): void {
