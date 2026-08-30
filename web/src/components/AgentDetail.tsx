@@ -844,7 +844,7 @@ export function AgentDetail({
   // its unread dot lit.
   onUnselect?: () => void
   onRefresh?: () => void
-  // `?comment=4` from the URL: a permalink to one review comment. Passed down to
+  // `#comment-4` from the URL: a permalink to one review comment. Passed down to
   // the diff, which scrolls to it and flashes it once it has a diff to find it in.
   focusComment?: number
   focusLine?: string
@@ -884,11 +884,15 @@ export function AgentDetail({
   // viewer re-snapshots the per-commit artifacts (screenshots) on commit - not
   // on every uncommitted working-tree edit, which would rebuild them needlessly.
   const [artifactRefreshTrigger, setArtifactRefreshTrigger] = useState(0)
+  const [reviewRefreshTrigger, setReviewRefreshTrigger] = useState(0)
   // Stable identity so the memo'd AgentTerminal doesn't re-render on every
   // live tick of the agent (this component re-renders on each one).
   const handleDiffRefresh = useCallback((headMoved: boolean) => {
     setDiffRefreshTrigger((t) => t + 1)
     if (headMoved) setArtifactRefreshTrigger((t) => t + 1)
+  }, [])
+  const handleReviewCommentsChanged = useCallback(() => {
+    setReviewRefreshTrigger((t) => t + 1)
   }, [])
   // ── Two-pane split layout ──────────────────────────────────────────────────
   // On a WIDE viewport it's the real two-pane split (working pane +
@@ -2191,6 +2195,7 @@ export function AgentDetail({
                   reconnectSignal={restartSignal}
                   onRefresh={onRefresh}
                   onDiffRefresh={handleDiffRefresh}
+                  onReviewCommentsChanged={handleReviewCommentsChanged}
                   onSelectCommit={handleSelectCommit}
                 />
               </div>
@@ -2220,6 +2225,7 @@ export function AgentDetail({
               projectId={projectId}
               externalRefreshTrigger={diffRefreshTrigger}
               externalArtifactRefresh={artifactRefreshTrigger}
+              externalReviewRefresh={reviewRefreshTrigger}
               externalCommitSelect={commitSelect}
               changesLeading={changesLeadingButton}
             />
@@ -2293,6 +2299,7 @@ export function AgentDetail({
                 reconnectSignal={restartSignal}
                 onRefresh={onRefresh}
                 onDiffRefresh={handleDiffRefresh}
+                onReviewCommentsChanged={handleReviewCommentsChanged}
                 onSelectCommit={handleSelectCommit}
               />
               </div>
@@ -2307,6 +2314,7 @@ export function AgentDetail({
                 leadingInline
                 externalRefreshTrigger={diffRefreshTrigger}
                 externalArtifactRefresh={artifactRefreshTrigger}
+                externalReviewRefresh={reviewRefreshTrigger}
                 externalCommitSelect={commitSelect}
               />
             </div>

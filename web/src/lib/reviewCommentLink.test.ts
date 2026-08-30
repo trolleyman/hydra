@@ -3,11 +3,11 @@ import { commentPermalink, jumpToReviewComment, registerCommentJump } from './re
 
 describe('commentPermalink', () => {
   it('addresses a comment by head and number', () => {
-    expect(commentPermalink('proj', 'agent-1', 4)).toBe(`${window.location.origin}/project/proj/agent/agent-1?comment=4`)
+    expect(commentPermalink('proj', 'agent-1', 4)).toBe(`${window.location.origin}/project/proj/agent/agent-1#comment-4`)
   })
 
   it('escapes ids and survives a missing project', () => {
-    expect(commentPermalink(null, 'a/b', 1)).toBe(`${window.location.origin}/project/_/agent/a%2Fb?comment=1`)
+    expect(commentPermalink(null, 'a/b', 1)).toBe(`${window.location.origin}/project/_/agent/a%2Fb#comment-1`)
   })
 })
 

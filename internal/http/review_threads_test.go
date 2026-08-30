@@ -89,6 +89,34 @@ func TestMergeLocalNotes(t *testing.T) {
 	}
 }
 
+func TestMarkWrittenForgeNoteRead(t *testing.T) {
+	root := t.TempDir()
+	old := 4
+	written := 5
+	concurrent := 6
+	resp := api.ReviewThreadsResponse{Threads: []api.ReviewThread{{
+		Id: "t1", Path: "a.go", Line: 12,
+		Notes: []api.ReviewThreadNote{
+			{Id: "old", Number: &old, Body: "existing", Origin: api.Forge},
+			{Id: "mine", Number: &written, Body: "my reply", Origin: api.Forge},
+			{Id: "theirs", Number: &concurrent, Body: "arrived concurrently", Origin: api.Forge},
+		},
+	}}}
+
+	markWrittenForgeNoteRead(root, "h1", &resp, map[string]bool{"old": true}, "t1", "", 0, "my reply")
+
+	if resp.Threads[0].Notes[1].Read == nil || !*resp.Threads[0].Notes[1].Read {
+		t.Fatal("the note written by the user was not returned as read")
+	}
+	if resp.Threads[0].Notes[2].Read != nil {
+		t.Fatal("a concurrently fetched reviewer note was marked read")
+	}
+	read := reviewstore.ReadSet(root, "h1")
+	if !read[written] || read[concurrent] {
+		t.Fatalf("persisted read set = %v, want only %d", read, written)
+	}
+}
+
 func TestReviewStoreRoundTrip(t *testing.T) {
 	root := t.TempDir()
 

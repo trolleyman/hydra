@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, LoaderCircle, Mail, Quote, Sparkles } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { Check, Copy, EllipsisVertical, EyeOff, FileText, Link2, LoaderCircle, Mail, MessageSquare, Quote, Sparkles } from 'lucide-react'
 import type { ReviewThread, ReviewThreadNote } from '../api'
 import { Markdown } from '../lib/MarkdownRenderer'
 import { Tooltip } from './Tooltip'
@@ -11,7 +12,7 @@ import { renderCommentSource } from '../lib/mentionHighlight'
 import { copyWithToast } from '../lib/copyToast'
 import { Avatar } from './Avatar'
 import { commentAsMarkdown } from '../lib/reviewComments'
-import { useIsCurrentComment } from '../lib/reviewCommentLink'
+import { VisitedCommentsContext } from '../lib/reviewCommentLink'
 
 // The actions a thread card can perform, supplied by the diff viewer through
 // context (see reviewThreadContext) so the memo'd hunks between them never need
@@ -31,7 +32,7 @@ export interface ReviewThreadActions {
   // comment takes, because they share one numbering. Local to Hydra; it is never
   // sent to the forge.
   setResolved?: (number: number, resolved: boolean) => Promise<void>
-  // commentHref is the Hydra permalink to ONE comment (`?comment=N`), and
+  // commentHref is the Hydra permalink to ONE comment (`#comment-N`), and
   // openComment jumps to it in place. Both, because a permalink has two jobs: the
   // href makes right-click-copy and middle-click work the way a link should, and
   // the click handler keeps an in-app jump from reloading the page.
@@ -118,12 +119,45 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
   const [replying, setReplying] = useState(() => !!actions.draft.load(thread.id))
   const [busy, setBusy] = useState<'forge' | 'local' | 'agent' | 'resolve' | null>(null)
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
+  const menuAnchors = useRef(new Map<string, HTMLButtonElement>())
+  const menuPanelRef = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; above: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const forge = providerLabel(actions.provider)
   // HighlightedTextarea has no autoFocus of its own (it forwards a ref to the
   // real textarea), so opening the box focuses it here - with the caret after a
   // restored draft rather than selecting it, so typing appends.
   const replyRef = useRef<HTMLTextAreaElement>(null)
+
+  const positionMenu = useCallback((noteID: string) => {
+    const trigger = menuAnchors.current.get(noteID)?.getBoundingClientRect()
+    if (!trigger) return
+    const pad = 8
+    const gap = 4
+    const width = 224
+    const height = menuPanelRef.current?.getBoundingClientRect().height ?? 0
+    const roomBelow = window.innerHeight - trigger.bottom - gap - pad
+    const above = height > 0 && height > roomBelow && trigger.top - gap - pad > roomBelow
+    const top = above
+      ? Math.max(pad, trigger.top - gap - height)
+      : Math.min(trigger.bottom + gap, Math.max(pad, window.innerHeight - height - pad))
+    const left = Math.min(Math.max(pad, trigger.right - width), window.innerWidth - width - pad)
+    setMenuPos((prev) => prev && prev.top === top && prev.left === left && prev.above === above
+      ? prev
+      : { top, left, above })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return
+    positionMenu(menuOpen)
+    const update = () => positionMenu(menuOpen)
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [menuOpen, menuPos, positionMenu])
   useEffect(() => {
     if (!replying) return
     const el = replyRef.current
@@ -158,20 +192,17 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
 
   const btn = 'px-2 py-1 text-3xs font-medium rounded transition-colors cursor-pointer disabled:opacity-50'
 
-  // The review cursor lands on a thread by its FIRST numbered note - the number
-  // the navigator and a permalink both use for it - and the whole card carries
-  // the mark, because a thread is one stop however many notes are under it. Same
-  // amber as a Hydra comment's: which side of the review something came from is
-  // the card's colour, and where you are standing must read the same on both.
+  // The pager treats a thread as one stop, but a permalink or clicked handle can
+  // name any note inside it. The focus cue belongs to that exact numbered note,
+  // not to every other remark in the conversation.
   const anchorNumber = thread.notes.map((n) => n.number).find((n): n is number => n != null)
-  const current = useIsCurrentComment(anchorNumber ?? -1)
+  const focusedComment = useContext(VisitedCommentsContext)
 
   return (
     <div
+      id={anchorNumber == null ? undefined : `comment-${anchorNumber}`}
       data-comment-card={anchorNumber}
-      className={`border-y px-4 py-2 ${current
-        ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]'
-        : 'border-violet-200 dark:border-violet-900/60 bg-violet-50/40 dark:bg-violet-950/20'}`}
+      className="border-y border-violet-200 bg-violet-50/40 px-4 py-2 dark:border-violet-900/60 dark:bg-violet-950/20"
     >
       <div className="min-w-0">
         <div className="min-w-0">
@@ -180,7 +211,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
             // authors, so a single icon for the whole card could only ever be a
             // generic speech bubble saying nothing. Everything else in the note
             // hangs off it, and the footer below indents to match.
-            <div key={n.id} className={`flex items-start gap-2 ${i > 0 ? 'mt-2 pt-2 border-t border-violet-200/60 dark:border-violet-900/40' : ''}`}>
+            <div key={n.id} data-review-note={n.number} className={`flex items-start gap-2 transition-[background-color,box-shadow] duration-700 ease-out ${i > 0 ? 'mt-2 pt-2 border-t border-violet-200/60 dark:border-violet-900/40' : ''} ${n.number === focusedComment ? '-mx-4 px-4 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]' : ''}`}>
               <Avatar
                 name={n.author || 'someone'}
                 avatarUrl={n.avatar_url}
@@ -224,8 +255,32 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                   {n.number != null && (
                     <span className="flex items-center gap-1">
                       {n.read === false && <span className="h-1.5 w-1.5 rounded-full bg-blue-500" title="Unread" />}
-                      <span className="font-mono text-2xs text-gray-400 dark:text-gray-500">#{n.number}</span>
+                      {n.number != null && actions.commentHref && (
+                        <a
+                          href={actions.commentHref(n.number)}
+                          onClick={(e) => {
+                            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+                            e.preventDefault()
+                            actions.openComment?.(n.number!)
+                          }}
+                          className="font-mono text-2xs text-gray-400 hover:text-gray-600 hover:underline dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
+                        >
+                          #{n.number}
+                        </a>
+                      )}
                     </span>
+                  )}
+                  {i === thread.notes.length - 1 && !replying && (
+                    <Tooltip content="Reply" side="top">
+                      <button
+                        type="button"
+                        onClick={() => setReplying(true)}
+                        aria-label="Reply"
+                        className="inline-flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                      </button>
+                    </Tooltip>
                   )}
                   <OriginBadge note={n} provider={actions.provider} />
                   {/* Every note gets the menu, not just the first: the thing you
@@ -236,20 +291,30 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                   <div className="relative flex items-center">
                       <Tooltip content={i === 0 ? 'Thread actions' : 'Comment actions'} side="top">
                         <button
+                          ref={(el) => { if (el) menuAnchors.current.set(n.id, el); else menuAnchors.current.delete(n.id) }}
                           type="button"
                           aria-label={i === 0 ? 'Thread actions' : 'Comment actions'}
-                          onClick={() => setMenuOpen(menuOpen === n.id ? null : n.id)}
+                          onClick={() => {
+                            if (menuOpen === n.id) { setMenuOpen(null); return }
+                            positionMenu(n.id)
+                            setMenuOpen(n.id)
+                          }}
                           className="inline-flex items-center justify-center w-5 h-5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-violet-100 dark:hover:bg-violet-900/40 cursor-pointer"
                         >
                           <EllipsisVertical className="w-3.5 h-3.5" />
                         </button>
                       </Tooltip>
-                      {menuOpen === n.id && (
+                      {menuOpen === n.id && menuPos && createPortal(
                         <>
                           {/* Click-away layer: a thread card can sit anywhere in a long
                               diff, so the menu closes on any outside click. */}
-                          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(null)} />
-                          <div className="absolute right-0 top-5 z-50 w-56 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg py-1">
+                          <div className="fixed inset-0 z-[9998]" onClick={() => setMenuOpen(null)} />
+                          <div
+                            ref={menuPanelRef}
+                            data-portal-menu
+                            style={{ top: menuPos.top, left: menuPos.left, '--popover-origin': menuPos.above ? 'bottom right' : 'top right' } as CSSProperties}
+                            className="fixed z-[9999] w-56 max-h-[calc(100vh-1rem)] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg py-1 animate-popover-in"
+                          >
                             {/* This comment's own permalink, first, because it is the
                                 thing you came to this menu for. */}
                             {n.number != null && actions.commentHref && (
@@ -349,7 +414,8 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
                               </>
                             )}
                           </div>
-                        </>
+                        </>,
+                        document.body,
                       )}
                     </div>
                 </span>
@@ -377,15 +443,6 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
             )}
             {thread.outdated && (
               <span className="text-3xs text-amber-700 dark:text-amber-300">outdated</span>
-            )}
-            {!replying && (
-              <button
-                type="button"
-                onClick={() => setReplying(true)}
-                className="text-3xs text-violet-700 dark:text-violet-300 hover:underline cursor-pointer"
-              >
-                Reply
-              </button>
             )}
             {/* Resolving a forge thread is a LOCAL mark (the tooltip above says
                 so). It still earns its place: it is what takes the thread out of
