@@ -3219,14 +3219,6 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
       content={
         <div>
           <p className="font-semibold mb-1">Uncommitted changes</p>
-          <div className="flex items-center gap-2 mb-1 text-gray-600 dark:text-gray-300">
-            {groups.map((g) => (
-              <span key={g.type} className="flex items-center gap-1" aria-label={`${g.count} ${g.type} file${g.count === 1 ? '' : 's'}`}>
-                <SharedChangeTypeIcon type={g.type} className="w-3.5 h-3.5" />
-                <span className="optical-center tabular-nums">{g.count}</span>
-              </span>
-            ))}
-          </div>
           {groups.map((g) => (
             <div key={g.type}>
               {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => {
@@ -3248,6 +3240,7 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
                       <Icon className={`inline-block h-[1em] w-[1em] align-[calc(0.5cap_-_0.5em)] ${className}`} />
                     </span>
                     <span className="min-w-0 break-words"><WrappablePathName path={f} /></span>
+                    <SharedChangeTypeIcon type={g.type} className="w-3.5 h-3.5" />
                   </div>
                 )
               })}
