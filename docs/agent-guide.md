@@ -86,8 +86,11 @@ and makes oapi-codegen prefix the whole enum - see the enum-collision note).
 
 All tooltips go through `web/src/components/Tooltip.tsx`. Short control labels
 and longer explainers use the same content-sized surface, 600ms delay, fade and
-generous maximum width. Longer explainers can provide a `title`; `InfoTooltip`
-is the preset for the `i` trigger next to a section heading.
+generous maximum width. Compact hints are centered by default, and shortcut
+keycaps share the label's row. Longer explainers can provide a `title`, which
+also selects prose-style left alignment; untitled path or list content uses
+`align="left"`. `InfoTooltip` is the preset for the `i` trigger next to a section
+heading.
 
 Every tooltip can be entered: the short grace period between leaving the trigger
 and entering the box keeps it open so text can be selected and links clicked.

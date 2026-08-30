@@ -431,9 +431,11 @@ and no window action implicitly interrupts a head.
 - [x] Route notification clicks to the exact project/agent URL. Secondary
   process deep-link handoff to an already-running instance still needs an
   installed-session test.
-- [x] Bridge GTK clipboard textures into the attachment-aware chat composer so
-  Ctrl+V uploads copied images even when WebKitGTK omits them from the web paste
-  event. Text paste stays on WebKitGTK's native path.
+- [x] Bridge GTK clipboard textures into the attachment-aware chat and spawn
+  composers so Ctrl+V uploads copied images even when WebKitGTK omits them from
+  the web paste event. Text paste stays on WebKitGTK's native path. The focused
+  textarea opts into the bridge, so a sidebar spawn form mounted beside chat
+  cannot consume that chat's paste.
 - Keep desktop attachments on the normal local upload path. "Upload" here is a
   same-machine transfer into the project's ignored Hydra state, not a remote
   network upload. The copy gives the attachment a stable, browser-servable path
