@@ -511,9 +511,11 @@ branchless session when its first prompt is submitted. It then navigates to the
 canonical agent route in the normal responsive shell. New-window and close
 operations use a transport-neutral bridge with browser fallbacks. Linux consumes
 the shared operations too. Stop-and-switch behavior remains.
-AppKit and WebView2 now offer Stop and close,
+AppKit and WebView2 now offer Stop Session and Close,
 Close and keep running, and Cancel for an active focused turn; stopping happens
-through the authenticated page before native code permits the close.
+through the authenticated page before native code permits the close. It stops
+only the provider process and retains the head, worktree, branch and conversation
+for automatic resume when the head is opened later.
 
 ### Phase 5: desktop lifecycle and notifications
 

@@ -727,6 +727,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/projects/{project_id}/agents/{agent_id}/stop/session:
+    post:
+      summary: Stop just the agent process (keeps the worktree, branch and conversation)
+      description: >-
+        Stops the running CLI process (claude/codex/...) without archiving the
+        head or removing its worktree, branch, DB record or transcript. Opening
+        the head later resumes its existing conversation automatically.
+      operationId: stopAgentSession
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+          description: Project ID
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content (agent process stopped; head retained)
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (agent is archived)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/projects/{project_id}/agents/{agent_id}/resume:
     post:
       summary: Resume an archived (killed/merged) agent, restoring its conversation

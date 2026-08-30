@@ -247,12 +247,12 @@ static gboolean hydra_close_request(GtkWindow *gtk_window, gpointer data) {
 	char *title = g_strdup_printf("%u agent%s %s running", count, count == 1 ? "" : "s", count == 1 ? "is" : "are");
 	GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", title);
 	g_free(title);
-	const char *persistent_buttons[] = { "Cancel", "Close and leave running", "Stop and close", NULL };
-	const char *owned_buttons[] = { "Cancel", "Close and stop", NULL };
+	const char *persistent_buttons[] = { "Cancel", "Close and leave running", "Stop session and close", NULL };
+	const char *owned_buttons[] = { "Cancel", "Close and stop sessions", NULL };
 	if (stops_backend) {
 		gtk_alert_dialog_set_detail(dialog, count == 1
-			? "Closing the last window stops the desktop backend and this agent."
-			: "Closing the last window stops the desktop backend and these agents.");
+			? "Closing the last window stops the desktop backend and this agent session. The head and worktree are retained."
+			: "Closing the last window stops the desktop backend and these agent sessions. Their heads and worktrees are retained.");
 		gtk_alert_dialog_set_buttons(dialog, owned_buttons);
 	} else {
 		gtk_alert_dialog_set_detail(dialog, "Closing this window can leave the agent running in the background.");
@@ -435,10 +435,10 @@ static void hydra_quit(GSimpleAction *action, GVariant *parameter, gpointer data
 	GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", title);
 	g_free(title);
 	gtk_alert_dialog_set_detail(dialog, command_owned
-		? "Quitting stops the command-owned desktop backend and its running agents."
+		? "Quitting stops the command-owned desktop backend and its running agent sessions. Heads and worktrees are retained."
 		: "Quitting closes Hydra windows but leaves the shared backend and agents running.");
 	const char *persistent_buttons[] = { "Cancel", "Quit and leave running", NULL };
-	const char *owned_buttons[] = { "Cancel", "Quit and stop", NULL };
+	const char *owned_buttons[] = { "Cancel", "Quit and stop sessions", NULL };
 	gtk_alert_dialog_set_buttons(dialog, command_owned ? owned_buttons : persistent_buttons);
 	gtk_alert_dialog_set_cancel_button(dialog, 0);
 	gtk_alert_dialog_choose(dialog, gtk_application_get_active_window(desktop->app), NULL, hydra_quit_choice, desktop);

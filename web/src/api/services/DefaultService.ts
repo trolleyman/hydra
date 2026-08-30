@@ -526,6 +526,32 @@ export class DefaultService {
         });
     }
     /**
+     * Stop just the agent process (keeps the worktree, branch and conversation)
+     * Stops the running CLI process (claude/codex/...) without archiving the head or removing its worktree, branch, DB record or transcript. Opening the head later resumes its existing conversation automatically.
+     * @param projectId Project ID
+     * @param agentId
+     * @returns void
+     * @throws ApiError
+     */
+    public stopAgentSession(
+        projectId: string,
+        agentId: string,
+    ): CancelablePromise<void> {
+        return this.httpRequest.request({
+            method: 'POST',
+            url: '/api/projects/{project_id}/agents/{agent_id}/stop/session',
+            path: {
+                'project_id': projectId,
+                'agent_id': agentId,
+            },
+            errors: {
+                404: `Not Found`,
+                409: `Conflict (agent is archived)`,
+                500: `Internal Server Error`,
+            },
+        });
+    }
+    /**
      * Resume an archived (killed/merged) agent, restoring its conversation
      * Revives a killed or merged agent: recreates its worktree and branch off the current base, un-archives the record, and relaunches the agent so it continues from its saved conversation transcript (the file changes start fresh on a clean branch). Depends on the host conversation transcript still existing.
      * @param projectId Project ID

@@ -946,11 +946,11 @@ function RootLayout() {
     if (!desktopWindow || !currentProjectId || !selectedAgentId) return
     return onDesktopCommand((command) => {
       if (command.type !== 'stop-and-close') return
-      void api.default.killAgent(currentProjectId, selectedAgentId)
+      void api.default.stopAgentSession(currentProjectId, selectedAgentId)
         .then(() => postDesktopMessage({ type: 'close-window', force: true }))
         .catch((error) => useToastStore.getState().show({
           type: 'error',
-          message: `Could not stop the agent: ${error instanceof Error ? error.message : String(error)}`,
+          message: `Could not stop the agent session: ${error instanceof Error ? error.message : String(error)}`,
         }))
     })
   }, [desktopWindow, currentProjectId, selectedAgentId])

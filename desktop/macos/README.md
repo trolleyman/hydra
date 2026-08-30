@@ -38,7 +38,8 @@ from a terminal. Finder launches do not inherit shell environment variables.
 - Cmd+N opens a full Hydra window. Cmd+Shift+N opens the dedicated focused draft
   route, which creates its branchless session on first submit.
 - Focused windows expose project and live/loaded archived history controls plus
-  Stop and close / Close and keep running / Cancel for an active turn.
+  Stop Session and Close / Close and Keep Running / Cancel for an active turn.
+  Stopping retains the head, worktree, branch and conversation.
 - Closing all windows leaves the app and app-owned backend running. Use the Dock
   or File menu to open another window.
 - Explicit Quit stops an app-owned backend. If active sessions are found, Hydra

@@ -41,7 +41,8 @@ For shell development without rebuilding the bundled Go executable, set
 - Every window shares one backend and one persistent WebView2 user-data folder.
 - Ctrl+N opens a full window. Ctrl+Shift+N opens the focused project composer.
 - Focused windows expose project and live/loaded archived history controls plus
-  Stop and close / Close and keep running / Cancel for an active turn.
+  Stop Session and Close / Close and Keep Running / Cancel choices for an active
+  turn. Stopping retains the head, worktree, branch and conversation.
 - Closing every window leaves the notification-area icon and app-owned backend
   alive. Its menu can open a new full/focused window or exit Hydra.
 - Exit stops an app-owned backend after confirming when sessions are active. A

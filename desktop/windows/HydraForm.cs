@@ -145,7 +145,7 @@ internal sealed class HydraForm : Form
         if (!allowClose && eventArgs.CloseReason == CloseReason.UserClosing && activeTurn)
         {
             var answer = MessageBox.Show(
-                "This agent is still working. Choose Yes to stop it and close, No to close while leaving it running, or Cancel to stay.",
+                "This agent is still working. Choose Yes to stop its session and close while retaining the head, worktree and conversation; No leaves it running; Cancel stays.",
                 "Close this window?",
                 MessageBoxButtons.YesNoCancel,
                 MessageBoxIcon.Warning);

@@ -7345,6 +7345,9 @@ type ServerInterface interface {
 	// Reply to a review thread on this head's MR
 	// (POST /api/projects/{project_id}/agents/{agent_id}/review/threads/{thread_id}/reply)
 	ReplyToReviewThread(w http.ResponseWriter, r *http.Request, projectId string, agentId string, threadId string)
+	// Stop just the agent process (keeps the worktree, branch and conversation)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/stop/session)
+	StopAgentSession(w http.ResponseWriter, r *http.Request, projectId string, agentId string)
 	// Get the test-runner verdict(s) for a head's branch
 	// (GET /api/projects/{project_id}/agents/{agent_id}/tests)
 	GetAgentTests(w http.ResponseWriter, r *http.Request, projectId string, agentId string, params GetAgentTestsParams)
@@ -9250,6 +9253,40 @@ func (siw *ServerInterfaceWrapper) ReplyToReviewThread(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// StopAgentSession operation middleware
+func (siw *ServerInterfaceWrapper) StopAgentSession(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "project_id" -------------
+	var projectId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project_id", r.PathValue("project_id"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "agent_id" -------------
+	var agentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agent_id", r.PathValue("agent_id"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agent_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopAgentSession(w, r, projectId, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetAgentTests operation middleware
 func (siw *ServerInterfaceWrapper) GetAgentTests(w http.ResponseWriter, r *http.Request) {
 
@@ -10422,6 +10459,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads", wrapper.GetReviewThreads)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads", wrapper.CreateReviewComment)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/review/threads/{thread_id}/reply", wrapper.ReplyToReviewThread)
+	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/stop/session", wrapper.StopAgentSession)
 	m.HandleFunc("GET "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/tests", wrapper.GetAgentTests)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/unread", wrapper.MarkAgentUnread)
 	m.HandleFunc("POST "+options.BaseURL+"/api/projects/{project_id}/agents/{agent_id}/update-from-base", wrapper.UpdateAgentFromBase)
@@ -12283,6 +12321,50 @@ func (response ReplyToReviewThread404JSONResponse) VisitReplyToReviewThreadRespo
 	return json.NewEncoder(w).Encode(response)
 }
 
+type StopAgentSessionRequestObject struct {
+	ProjectId string `json:"project_id"`
+	AgentId   string `json:"agent_id"`
+}
+
+type StopAgentSessionResponseObject interface {
+	VisitStopAgentSessionResponse(w http.ResponseWriter) error
+}
+
+type StopAgentSession204Response struct {
+}
+
+func (response StopAgentSession204Response) VisitStopAgentSessionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type StopAgentSession404JSONResponse ErrorResponse
+
+func (response StopAgentSession404JSONResponse) VisitStopAgentSessionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type StopAgentSession409JSONResponse ErrorResponse
+
+func (response StopAgentSession409JSONResponse) VisitStopAgentSessionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type StopAgentSession500JSONResponse ErrorResponse
+
+func (response StopAgentSession500JSONResponse) VisitStopAgentSessionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetAgentTestsRequestObject struct {
 	ProjectId string `json:"project_id"`
 	AgentId   string `json:"agent_id"`
@@ -13458,6 +13540,9 @@ type StrictServerInterface interface {
 	// Reply to a review thread on this head's MR
 	// (POST /api/projects/{project_id}/agents/{agent_id}/review/threads/{thread_id}/reply)
 	ReplyToReviewThread(ctx context.Context, request ReplyToReviewThreadRequestObject) (ReplyToReviewThreadResponseObject, error)
+	// Stop just the agent process (keeps the worktree, branch and conversation)
+	// (POST /api/projects/{project_id}/agents/{agent_id}/stop/session)
+	StopAgentSession(ctx context.Context, request StopAgentSessionRequestObject) (StopAgentSessionResponseObject, error)
 	// Get the test-runner verdict(s) for a head's branch
 	// (GET /api/projects/{project_id}/agents/{agent_id}/tests)
 	GetAgentTests(ctx context.Context, request GetAgentTestsRequestObject) (GetAgentTestsResponseObject, error)
@@ -14952,6 +15037,33 @@ func (sh *strictHandler) ReplyToReviewThread(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ReplyToReviewThreadResponseObject); ok {
 		if err := validResponse.VisitReplyToReviewThreadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StopAgentSession operation middleware
+func (sh *strictHandler) StopAgentSession(w http.ResponseWriter, r *http.Request, projectId string, agentId string) {
+	var request StopAgentSessionRequestObject
+
+	request.ProjectId = projectId
+	request.AgentId = agentId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StopAgentSession(ctx, request.(StopAgentSessionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StopAgentSession")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StopAgentSessionResponseObject); ok {
+		if err := validResponse.VisitStopAgentSessionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
