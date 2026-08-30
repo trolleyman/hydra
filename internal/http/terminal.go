@@ -268,6 +268,15 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent not found", http.StatusNotFound)
 		return
 	}
+	// A normal head without its worktree is being killed/merged (or is otherwise
+	// degraded) and cannot host an agent, shell, or reviewer session. Reject it
+	// before the WebSocket upgrade so an in-flight reconnect cannot recreate a
+	// namespace host against a checkout teardown just removed.
+	if head.Branch != nil && head.Worktree == nil {
+		log.Printf("terminal ws: agent %q has no live worktree", agentID)
+		http.Error(w, "agent has no live worktree", http.StatusConflict)
+		return
+	}
 
 	log.Printf("terminal ws: found head: %s", head.ID)
 

@@ -137,6 +137,7 @@ func TestRuntimeNamespaceCannotTraverse(t *testing.T) {
 
 func TestDesktopDaemonIsManaged(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("INVOCATION_ID", "")
 	t.Setenv("HYDRA_DESKTOP_SERVICE", "1")
 	root := t.TempDir()
 	if err := WriteDaemonFiles(root); err != nil {

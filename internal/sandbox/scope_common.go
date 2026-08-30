@@ -2,13 +2,33 @@ package sandbox
 
 import (
 	"hash/fnv"
+	"os"
 	"strconv"
 	"strings"
 )
 
-// scopeUnitPrefix namespaces every transient unit we create so SweepOrphanScopes
-// can find our leftovers without touching unrelated user scopes.
-const scopeUnitPrefix = "hydra-"
+const (
+	productionScopeUnitPrefix = "hydra-"
+	instanceScopeUnitPrefix   = "hydra-instance-"
+)
+
+// scopeUnitPrefix namespaces every transient unit by daemon instance so one
+// development daemon cannot stop or reuse another daemon's live scopes.
+func scopeUnitPrefix() string {
+	namespace := strings.TrimSpace(os.Getenv("HYDRA_RUNTIME_NAMESPACE"))
+	if namespace == "" {
+		return productionScopeUnitPrefix
+	}
+	return instanceScopeUnitPrefix + ScopeHash(namespace) + "-"
+}
+
+func scopeBelongsToCurrentInstance(unit string) bool {
+	prefix := scopeUnitPrefix()
+	if prefix == productionScopeUnitPrefix {
+		return strings.HasPrefix(unit, prefix) && !strings.HasPrefix(unit, instanceScopeUnitPrefix)
+	}
+	return strings.HasPrefix(unit, prefix)
+}
 
 // ScopeCPUWeight and ScopeIOWeight are the default relative cgroup weights
 // applied to a workload scope when its project's config leaves them unset. They
@@ -144,7 +164,7 @@ type ScopeLimits struct {
 // workload starting would tear down the other's *live* cgroup. Hashing the
 // unsanitized id keeps the readable name and makes the collision impossible.
 func ScopeUnit(kind, id string) string {
-	name := scopeUnitPrefix
+	name := scopeUnitPrefix()
 	if kind != "" {
 		name += kind + "-"
 	}
