@@ -6747,14 +6747,13 @@ const SettledMessages = memo(
     // below.
     const rows = useMemo(
       () => {
-        let previousWasUser = false
-        return planStepRows(items, subByToolUse, grouped).map((r) => {
+        const stepRows = planStepRows(items, subByToolUse, grouped)
+        return stepRows.map((r, index) => {
           if (r.row !== 'item') {
-            previousWasUser = false
             return <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={row} />
           }
-          const tightBefore = previousWasUser && r.item.kind === 'user'
-          previousWasUser = r.item.kind === 'user'
+          const previous = stepRows[index - 1]
+          const tightBefore = previous?.row === 'item' && previous.item.kind === 'user' && r.item.kind === 'user'
           return row(r.item, true, tightBefore)
         })
       },
@@ -11237,7 +11236,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                           : 'bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
                       }`}
                     >
-                      <Send className="w-4 h-4" />
+                      <ArrowUp className="w-4 h-4" />
                     </button>
                   </Tooltip>
                 )}
