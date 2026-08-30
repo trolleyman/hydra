@@ -90,10 +90,11 @@ function encodePath(p: string): string {
   return p.split('/').map(encodeURIComponent).join('/')
 }
 
-// Links should be discoverable without turning every filename in an agent's
-// explanation into a bright-blue interruption. The underline arrives on hover
-// and keyboard focus, while the resting colour stays inside the prose palette.
-const LINK_CLASS = 'text-stone-700 dark:text-stone-200 decoration-stone-400/70 underline-offset-2 hover:underline focus-visible:underline'
+// Links sit one neutral colour step above the surrounding prose at the same
+// weight, with a fine dotted underline that becomes solid on interaction. A
+// linked code chip owns its own bordered shape, so suppress the underline there
+// and strengthen its neutral border instead.
+const LINK_CLASS = 'text-stone-800 dark:text-stone-100 underline decoration-dotted decoration-stone-400/70 dark:decoration-stone-500/80 underline-offset-2 hover:decoration-solid focus-visible:decoration-solid [&:has(>code)]:no-underline [&>code]:border-stone-400/70 dark:[&>code]:border-stone-500/70'
 
 // FileLink keeps the author's exact Markdown label in the prose, then uses the
 // tooltip for the richer file treatment shared with repository surfaces: a
