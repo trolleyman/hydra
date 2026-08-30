@@ -2,9 +2,10 @@ package sandbox
 
 import (
 	"hash/fnv"
-	"os"
 	"strconv"
 	"strings"
+
+	"github.com/trolleyman/hydra/internal/statepath"
 )
 
 const (
@@ -12,10 +13,10 @@ const (
 	instanceScopeUnitPrefix   = "hydra-instance-"
 )
 
-// scopeUnitPrefix namespaces every transient unit by daemon instance so one
+// scopeUnitPrefix namespaces every transient unit by state root so one
 // development daemon cannot stop or reuse another daemon's live scopes.
 func scopeUnitPrefix() string {
-	namespace := strings.TrimSpace(os.Getenv("HYDRA_RUNTIME_NAMESPACE"))
+	namespace := statepath.RuntimeIsolationKey()
 	if namespace == "" {
 		return productionScopeUnitPrefix
 	}

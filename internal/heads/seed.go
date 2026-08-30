@@ -17,6 +17,7 @@ import (
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
+	"github.com/trolleyman/hydra/internal/statepath"
 )
 
 // SandboxHydraBinPath is the well-known path the hydra binary is bound to inside
@@ -86,6 +87,12 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 	}
 
 	res := &seedResult{}
+	if projectID, ok := statepath.ProjectID(projectRoot); ok {
+		res.Env = append(res.Env,
+			statepath.ProjectEnvironment+"="+projectID,
+			statepath.ProjectRootEnvironment+"="+projectRoot,
+		)
+	}
 
 	// Per-head status JSON + log, kept at their real host paths and made
 	// writable so the agent writes them directly (the poller reads the same

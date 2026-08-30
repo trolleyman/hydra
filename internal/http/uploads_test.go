@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/projects"
 )
@@ -31,7 +32,12 @@ func newUploadServer(t *testing.T) (*Server, string, string) {
 		t.Fatalf("normalize: %v", err)
 	}
 
-	pm, err := projects.NewManager()
+	store, err := db.Open(root)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	pm, err := projects.NewManager(store)
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}

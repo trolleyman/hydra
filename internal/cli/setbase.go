@@ -9,6 +9,7 @@ import (
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/projects"
 )
 
 func init() {
@@ -38,6 +39,9 @@ with git from the head's worktree, e.g.:
 
 		store, err := db.OpenGlobal(projectRoot)
 		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		if _, err := projects.NewManager(store); err != nil {
 			return errtrace.Wrap(err)
 		}
 

@@ -15,7 +15,7 @@ import (
 // per head and are reclaimed on teardown instead of accumulating on the host's
 // shared /tmp.
 func headTmpDir(projectRoot, id string) string {
-	return filepath.Join(paths.GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "tmp", id)
+	return filepath.Join(paths.GetProjectStateDirFromProjectRoot(projectRoot), "tmp", id)
 }
 
 // HeadTmpDir returns the host-side path of a head's private /tmp dir, or ""
@@ -54,7 +54,9 @@ func removeHeadTmpDir(projectRoot, id string) {
 	if projectRoot == "" || id == "" {
 		return
 	}
-	if err := os.RemoveAll(headTmpDir(projectRoot, id)); err != nil {
+	dir := headTmpDir(projectRoot, id)
+	if err := os.RemoveAll(dir); err != nil {
 		log.Printf("warn: head tmp: remove for %s: %v", id, err)
 	}
+	_ = os.Remove(filepath.Dir(dir))
 }

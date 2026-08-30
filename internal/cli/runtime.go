@@ -91,8 +91,6 @@ func chatContextResolver(store *db.Store) chat.ContextResolver {
 // setupRuntime opens the DB, builds the session registry + HTTP server, starts
 // the background pollers, and returns a ready-to-serve handler.
 func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, error) {
-	worktreesDir := paths.GetWorktreesDirFromProjectRoot(projectRoot)
-	log.Printf("Worktrees: %s", worktreesDir)
 	// The daemon usually outlives whatever terminal started it, so say where the
 	// log persists rather than leaving it to be discovered.
 	if p := LogFilePath(); p != "" {
@@ -154,7 +152,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		}
 	})
 
-	pm, err := projects.NewManager()
+	pm, err := projects.NewManager(store)
 	if err != nil {
 		return nil, errtrace.Wrap(err)
 	}
@@ -174,6 +172,8 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 	} else {
 		log.Printf("Chat project: %s (%s)", chatProject.Name, chatProject.Path)
 	}
+	worktreesDir := paths.GetWorktreesDirFromProjectRoot(projectRoot)
+	log.Printf("Worktrees: %s", worktreesDir)
 
 	// One artifacts Manager per registered project, created lazily on first use.
 	artifactReg := artifacts.NewRegistry()

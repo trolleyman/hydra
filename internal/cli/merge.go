@@ -13,6 +13,7 @@ import (
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/projects"
 )
 
 var mergeFlags struct {
@@ -40,6 +41,9 @@ var mergeCmd = &cobra.Command{
 
 		store, err := db.OpenGlobal(projectRoot)
 		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		if _, err := projects.NewManager(store); err != nil {
 			return errtrace.Wrap(err)
 		}
 

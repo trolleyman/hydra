@@ -55,8 +55,8 @@ func pragmas(queryOnly bool) string {
 	return p
 }
 
-// Open opens a project-local database. Development commands use it to keep their
-// head catalogue separate from production; production clients use OpenGlobal.
+// Open opens the legacy project-local database used by isolated tests and
+// recovery code. Runtime clients use OpenGlobal with the selected state root.
 func Open(projectRoot string) (*Store, error) {
 	// Move a pre-existing flat .hydra/<dir> layout under .hydra/local first, so the
 	// DB (and worktrees etc.) are found at their new home rather than recreated empty.
@@ -115,7 +115,7 @@ func openPath(dbPath string) (*Store, error) {
 	if err := migrateLegacyReviewColumns(gormDB); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("migrate legacy review columns: %w", err))
 	}
-	if err := gormDB.AutoMigrate(&Agent{}); err != nil {
+	if err := gormDB.AutoMigrate(&Agent{}, &Project{}); err != nil {
 		return nil, errtrace.Wrap(fmt.Errorf("auto migrate: %w", err))
 	}
 

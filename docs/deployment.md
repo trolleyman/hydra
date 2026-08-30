@@ -230,11 +230,11 @@ itself, and `HYDRA_API_ADDR` covers exposing a port.
 What remains, because each does a genuinely different job:
 
 - `mage run` - foreground, for debugging the daemon itself. It explicitly uses
-  an ignored `.hydra/local/instances/<namespace>/state/db.sqlite3` and a
-  checkout-specific runtime namespace. The database, worktrees, per-head
-  sidecars, daemon IPC, and Linux scope units are isolated from production and
-  other checkout namespaces. Set `HYDRA_DB_PATH` to override the database
-  location.
+  the checkout's ignored `.hydra/local` as `HYDRA_STATE_DIR`, with the database
+  at `db.sqlite3` and project sidecars under `projects/<project-id>`. A
+  checkout-specific runtime namespace also isolates daemon IPC and Linux scope
+  units from production and other checkouts. Set `HYDRA_STATE_DIR` to override
+  the whole state root; the same resolved path supplies the runtime isolation key.
 - `mage buildDesktop` / `mage runDesktop` / `mage runDesktopLocal` - dispatch to
   the native desktop app for the host OS: GTK/WebKitGTK on Linux,
   AppKit/WKWebView on macOS, and Windows Forms/WebView2 on Windows. `runDesktop`
@@ -272,16 +272,17 @@ What remains, because each does a genuinely different job:
   loop and is a different mechanism, not a duplicate.
 - `mage demo` - simulation mode. `runSimulationServer` (`internal/cli/server.go`)
   returns *before* `setupRuntime` / `serveUnixSocket`, so it touches no daemon
-  socket, DB, `projects.json` or scope sweep. It is the one genuinely isolated
+  socket, DB, project catalogue, or scope sweep. It is the one genuinely isolated
   second instance, and it simulates an update - phases, a streaming log, and a
   failure every third run - so the panel can be driven without a real build.
 
 `mage resetMachineState` is the last-resort local recovery command for a broken
 machine catalogue. It refuses to run while the production daemon is reachable,
 prints the affected database, and requires an explicit `y`. It removes the
-global SQLite database and stale production daemon IPC. It preserves checkout-
-local development databases, project registration and configuration, logs, Git
-branches and worktrees, transcripts, uploads, and all other project-local state.
+head rows in the global SQLite database and stale production daemon IPC. It
+preserves checkout-local development databases, project registration and
+configuration, logs, Git branches and worktrees, transcripts, uploads, and all
+other project state.
 The preserved heads no longer appear in Hydra because their catalogue records
 are gone.
 

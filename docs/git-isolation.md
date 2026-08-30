@@ -87,7 +87,7 @@ host. The sandbox cannot reach the daemon socket, so it uses the same **file-cha
 the gate approval flow uses (a writable per-head request dir + polling), not the socket.
 
 - **Channel** (`internal/gitq`): `paths.GetGitopsDir(projectRoot, id)` ->
-  `.hydra/local/gitops/<id>`, bound writable into the sandbox and pointed at by
+  `<state-dir>/projects/<project-id>/gitops/<id>`, bound writable into the sandbox and pointed at by
   `HYDRA_GITOPS_DIR`. Each request is a `gitq.Request` with an `Op` tag
   (`commit`/`reset`/`revert`/`add`/`rebase`/`cherry_pick`/...) plus op-specific
   fields, one `<reqid>.req.json` / `<reqid>.result.json` pair.

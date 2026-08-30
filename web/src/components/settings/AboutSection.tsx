@@ -46,7 +46,7 @@ export function AboutSection() {
           <Detail icon={<AppWindow className="h-4 w-4" />} label="Runtime" value={`${runtime} on ${platform}`} />
           <Detail icon={<Server className="h-4 w-4" />} label="Server status" value={status?.status || 'Connecting...'} />
           <div className="sm:col-span-2">
-            <Detail icon={<Database className="h-4 w-4" />} label="Database directory" value={databaseDirectory} mono />
+            <Detail icon={<Database className="h-4 w-4" />} label="State directory" value={databaseDirectory} mono />
           </div>
         </div>
       </div>

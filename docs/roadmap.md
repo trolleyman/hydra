@@ -81,7 +81,8 @@ before starting. Grouped by area.
   project's agents should not read. The cost is real and accepted - version-pinned
   artifacts like the webfonts are byte-identical everywhere, so each project pays
   its own 19s build once instead of the machine paying it once. Somewhere like
-  `<project>/.hydra/local/agent-cache/`, kept clear of `.hydra/local/cache/`,
+  `<state-dir>/projects/<project-id>/agent-cache/`, kept clear of that project's
+  `cache/`,
   which is already Hydra's own per-head scratch (849 gate-policy/mcp-catalog
   files) and not a user-facing cache.
 
@@ -368,12 +369,11 @@ before starting. Grouped by area.
   trade. Until then a restart stops running heads, they resume with `--continue`,
   and the UI confirms first. See [deployment.md](deployment.md).
 
-- [ ] **Make a second Hydra instance survivable** (only if wanted - see
-  [deployment.md](deployment.md) for why one instance is probably right).
-  `SweepOrphanScopes` (`internal/sandbox/scope_linux.go:160`) reaps *all*
-  `hydra-*.scope` units at daemon boot, so a second instance kills the first's
-  live agent sandboxes; needs a per-instance scope prefix. Plus an instance name
-  namespacing `~/.config/hydra/projects.json`, `uuid.txt`, the shared
-  `~/.local/share/hydra/logs/hydra.log` and the daemon runtime key, and a
-  templated `hydra@<instance>.service`. Note simulation mode (`mage demo`) is
-  already fully isolated and covers most frontend work.
+- [ ] **Add first-class named Hydra instances**, if wanted. Explicit
+  `HYDRA_STATE_DIR` instances already isolate their database, project trees,
+  daemon runtime, and transient scope prefix by the resolved state path. A named
+  installed instance would still need to namespace `uuid.txt`, the shared
+  `~/.local/share/hydra/logs/hydra.log`, and its systemd service as
+  `hydra@<instance>.service`. See [deployment.md](deployment.md) for why one
+  installed instance is probably right. Simulation mode (`mage demo`) is already
+  fully isolated and covers most frontend work.

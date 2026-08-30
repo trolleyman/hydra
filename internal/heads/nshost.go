@@ -8,14 +8,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/nshost"
-	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/scope"
 	"github.com/trolleyman/hydra/internal/session"
@@ -109,21 +110,35 @@ func ensureNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 
 // launchNamespaceHost does the actual (slow) work of starting a supervisor bwrap:
 // it reuses base verbatim (same binds, masks, network, writable COW) but runs
-// __sandbox-init instead of the agent, and additionally exposes the control-socket
-// dir writable so its listener is reachable from the daemon via the same
-// bind-mounted path.
+// __sandbox-init instead of the agent, and exposes only the control-socket dir
+// at a short private path so its listener remains reachable from the daemon.
 func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost, error) {
-	sockDir := paths.GetNamespaceSocketDirFromProjectRoot(projectRoot, id)
-	if err := os.MkdirAll(sockDir, 0o700); err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("create ns socket dir: %w", err))
+	sockDir, err := daemon.NamespaceHostSocketDir(id)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
 	}
 	sockPath := filepath.Join(sockDir, "control.sock")
 	_ = os.Remove(sockPath)
 
 	hostOpts := base
-	hostOpts.Argv = []string{SandboxHydraBinPath, "__sandbox-init", "--socket", sockPath}
+	sandboxSockPath := sockPath
+	if runtime.GOOS == "linux" && !hostOpts.NoSandbox {
+		// HardenGUI hides the rest of XDG_RUNTIME_DIR from the sandbox. Expose
+		// only this socket directory at a fixed path inside the head's private
+		// /tmp; the daemon continues to dial the short host runtime path.
+		const sandboxSockDir = "/tmp/hydra-nshost"
+		hostOpts.Binds = append(append([]sandbox.Bind(nil), base.Binds...), sandbox.Bind{
+			Source: sockDir,
+			Target: sandboxSockDir,
+		})
+		sandboxSockPath = filepath.Join(sandboxSockDir, "control.sock")
+	} else {
+		// Seatbelt has no bind-mount mechanism, so the supervisor uses the host
+		// path directly and receives the narrow write grant it needs.
+		hostOpts.WritablePaths = append(append([]string(nil), base.WritablePaths...), sockDir)
+	}
+	hostOpts.Argv = []string{SandboxHydraBinPath, "__sandbox-init", "--socket", sandboxSockPath}
 	hostOpts.PreSpawnScript = "" // the supervisor itself runs no pre-spawn hook
-	hostOpts.WritablePaths = append(append([]string(nil), base.WritablePaths...), sockDir)
 
 	spec, err := sandbox.BuildSpec(hostOpts)
 	if err != nil {
@@ -211,6 +226,7 @@ func watchNamespaceHost(id string, h *nsHost, e *nsHostEntry) {
 		h.cleanup()
 	}
 	_ = os.RemoveAll(h.sockDir)
+	_ = os.Remove(filepath.Dir(h.sockDir))
 	close(h.done)
 }
 

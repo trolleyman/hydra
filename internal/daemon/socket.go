@@ -4,15 +4,16 @@
 package daemon
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/statepath"
 )
-
-const runtimeNamespaceEnv = "HYDRA_RUNTIME_NAMESPACE"
 
 // runtimeDir returns a per-user directory for hydra runtime files (the control
 // socket, lock, daemon log). It prefers XDG_RUNTIME_DIR, then TMPDIR, then /tmp.
@@ -24,11 +25,11 @@ func runtimeDir() string {
 	return namespacedRuntimeDir(filepath.Join(base, fmt.Sprintf("hydra-%d", os.Getuid())))
 }
 
-// namespacedRuntimeDir gives development and test instances their own complete
-// daemon control plane. Hashing the caller-supplied namespace keeps it opaque
-// and prevents path separators or traversal from escaping the runtime directory.
+// namespacedRuntimeDir gives an explicit development state root its own complete
+// daemon control plane. Hashing the resolved state path keeps it opaque and
+// prevents path separators or traversal from escaping the runtime directory.
 func namespacedRuntimeDir(base string) string {
-	namespace := os.Getenv(runtimeNamespaceEnv)
+	namespace := statepath.RuntimeIsolationKey()
 	if namespace == "" {
 		return base
 	}
@@ -45,6 +46,37 @@ func ensureRuntimeDir() (string, error) {
 	// Best-effort tighten perms in case it pre-existed with looser bits.
 	_ = os.Chmod(dir, 0o700)
 	return dir, nil
+}
+
+// NamespaceHostSocketDir creates a short, random directory for one head's
+// namespace-supervisor socket. The capability-like random key avoids encoding
+// project or head identity in runtime filenames. A directory is used because
+// Linux sandboxes bind only this one socket location into the head.
+func NamespaceHostSocketDir(_ string) (string, error) {
+	dir, err := ensureRuntimeDir()
+	if err != nil {
+		return "", errtrace.Wrap(err)
+	}
+	key := make([]byte, 12)
+	if _, err := rand.Read(key); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("generate namespace-host socket key: %w", err))
+	}
+	sockDir := filepath.Join(dir, "head-control", hex.EncodeToString(key))
+	const socketName = "control.sock"
+	const portableUnixSocketPathMax = 103
+	if len(filepath.Join(sockDir, socketName)) > portableUnixSocketPathMax {
+		// XDG_RUNTIME_DIR is normally the short /run/user/<uid>, but callers may
+		// override it with an arbitrarily long path. Keep a bounded last resort
+		// rather than allowing bind(2) to fail with an opaque EINVAL.
+		base := filepath.Join("/tmp", fmt.Sprintf("hydra-%d", os.Getuid()))
+		dir = namespacedRuntimeDir(base)
+		sockDir = filepath.Join(dir, "head-control", hex.EncodeToString(key))
+	}
+	if err := os.MkdirAll(sockDir, 0o700); err != nil {
+		return "", errtrace.Wrap(fmt.Errorf("create namespace-host runtime dir: %w", err))
+	}
+	_ = os.Chmod(sockDir, 0o700)
+	return sockDir, nil
 }
 
 // SocketPath returns the user-global daemon socket. projectRoot is retained in

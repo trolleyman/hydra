@@ -158,6 +158,26 @@ func RemoveAgentStatusFiles(projectRoot, id string) {
 	removeState("chat queue", paths.GetChatQueueJsonFromProjectRoot(projectRoot, id))
 	removeState("chat events", paths.GetChatEventsJSONLFromProjectRoot(projectRoot, id))
 	removeState("chat state", paths.GetChatStateJSONFromProjectRoot(projectRoot, id))
+	// Remove category directories when this was their final head. All of these
+	// are recreated lazily on the next write, so empty sidecar scaffolding does
+	// not accumulate as heads come and go.
+	for _, dir := range []string{
+		paths.GetStatusDirFromProjectRoot(projectRoot),
+		paths.GetStatusLogDirFromProjectRoot(projectRoot),
+		paths.GetBuildLogDirFromProjectRoot(projectRoot),
+		paths.GetReviewDirFromProjectRoot(projectRoot),
+		paths.GetReviewReqRootDir(projectRoot),
+		paths.GetAgentReqRootDir(projectRoot),
+		filepath.Dir(paths.GetReviewThreadsJson(projectRoot, id)),
+		filepath.Dir(paths.GetReviewNotesJson(projectRoot, id)),
+		paths.GetSubagentsBaseDirFromProjectRoot(projectRoot),
+		filepath.Dir(paths.GetApprovalsDirFromProjectRoot(projectRoot, id)),
+		paths.GetChatQueueDirFromProjectRoot(projectRoot),
+		paths.GetChatEventsDirFromProjectRoot(projectRoot),
+		paths.GetChatStateDirFromProjectRoot(projectRoot),
+	} {
+		_ = os.Remove(dir)
+	}
 	stateRemovedMu.RLock()
 	notify := onStateRemoved
 	stateRemovedMu.RUnlock()

@@ -59,7 +59,7 @@ export type ReviewComment = {
      */
     read?: boolean;
     /**
-     * Absolute paths of files attached to the comment, under the project's .hydra/local/uploads. A separate field rather than paths pasted into the body because a draft's body is edited in a textarea (raw paths would be in it) and because copy-as-markdown and the forge-publish path must not leak them. The path resolves identically on the host and inside every agent sandbox, so the agent reads the file directly; the browser renders it through the uploads blob endpoint.
+     * Absolute paths of files attached to the comment, under the project's uploads directory in Hydra's state root. A separate field rather than paths pasted into the body because a draft's body is edited in a textarea (raw paths would be in it) and because copy-as-markdown and the forge-publish path must not leak them. The path resolves identically on the host and inside every agent sandbox, so the agent reads the file directly; the browser renders it through the uploads blob endpoint.
      *
      */
     attachments?: Array<string>;

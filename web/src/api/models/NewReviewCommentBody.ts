@@ -14,7 +14,7 @@ export type NewReviewCommentBody = {
     hunk_hash?: string;
     reply_to?: number;
     /**
-     * Absolute paths under the project's .hydra/local/uploads, from the upload endpoint. Anything outside that directory is rejected.
+     * Absolute paths under the project's uploads directory in Hydra's state root, from the upload endpoint. Anything outside that directory is rejected.
      *
      */
     attachments?: Array<string>;

@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/projects"
 	"github.com/trolleyman/hydra/internal/session"
 	"github.com/trolleyman/hydra/internal/tui"
 )
@@ -28,6 +29,9 @@ func runTUI(_ *cobra.Command, _ []string) error {
 
 	store, err := db.OpenGlobal(projectRoot)
 	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	if _, err := projects.NewManager(store); err != nil {
 		return errtrace.Wrap(err)
 	}
 

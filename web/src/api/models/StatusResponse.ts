@@ -14,7 +14,7 @@ export type StatusResponse = {
      */
     git_commit?: string;
     /**
-     * Absolute directory containing the running server's SQLite database.
+     * Absolute Hydra state directory containing the SQLite database and per-project state trees.
      */
     database_directory?: string;
     /**

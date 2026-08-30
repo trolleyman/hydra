@@ -1,32 +1,17 @@
 package db
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"braces.dev/errtrace"
+	"github.com/trolleyman/hydra/internal/statepath"
 )
-
-const pathEnvironment = "HYDRA_DB_PATH"
 
 // GlobalPath returns Hydra's user-scoped database path using the native state
 // location for the current platform.
 func GlobalPath() (string, error) {
-	if override := strings.TrimSpace(os.Getenv(pathEnvironment)); override != "" {
-		path, err := filepath.Abs(override)
-		if err != nil {
-			return "", errtrace.Wrap(fmt.Errorf("resolve %s: %w", pathEnvironment, err))
-		}
-		return path, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", errtrace.Wrap(fmt.Errorf("get home directory: %w", err))
-	}
-	return errtrace.Wrap2(globalPath(runtime.GOOS, os.Getenv("XDG_STATE_HOME"), os.Getenv("LOCALAPPDATA"), home))
+	return errtrace.Wrap2(statepath.DatabasePath())
 }
 
 func globalPath(goos, xdgStateHome, localAppData, home string) (string, error) {

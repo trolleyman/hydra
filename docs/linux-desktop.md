@@ -178,10 +178,10 @@ by desktop and CLI builds:
 The agent/history SQLite database is user-global on every platform: under the
 Linux state directory above, `~/Library/Application Support/Hydra` on macOS,
 and `%LOCALAPPDATA%\Hydra` on Windows. CLI, browser-server, and desktop builds
-open the same store. Project-local `.hydra/local` remains the home of worktrees,
-caches, artifacts, tests, logs, and per-head sidecars. Checkout development
-runtimes keep those generated files under a namespace-specific
-`.hydra/local/instances/` subtree; their databases remain independent and are
+open the same store. That state root also holds worktrees, caches, artifacts,
+tests, logs, and per-head sidecars under `projects/<stable-project-id>/`.
+Checkout development runtimes use the checkout's `.hydra/local` as their whole
+state root, so their databases and project trees remain independent and are
 never imported into production state.
 
 ### Provider and tool discovery
