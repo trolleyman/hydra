@@ -29,11 +29,24 @@ func useProductionEnvironmentByDefault() {
 	}
 }
 
+// The desktop executable also embeds the backend CLI. A desktop-managed daemon
+// binds its own executable into each sandbox, so the in-sandbox supervisor,
+// hooks, and MCP server must be dispatched to cli.Run instead of recursively
+// launching another desktop window.
+func isBackendCommand(arg string) bool {
+	switch arg {
+	case "__daemon", "__sandbox-init", "__desktop-connect", "__desktop-active", "mcp", "gate", "trigger-hook", "host-run":
+		return true
+	default:
+		return false
+	}
+}
+
 func main() {
 	// daemon.EnsureRunning starts os.Executable with this hidden command. Carry
 	// the ordinary backend entrypoint in the desktop binary so it can manage its
 	// own daemon without a second Hydra installation.
-	if len(os.Args) > 1 && os.Args[1] == "__daemon" {
+	if len(os.Args) > 1 && isBackendCommand(os.Args[1]) {
 		cli.Run()
 		return
 	}
