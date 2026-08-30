@@ -1025,9 +1025,8 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
   // entry reflects (and toggles) in place of a close button on the tab itself.
   const reviewTabOpen = tabs.some(t => t.kind === 'review')
 
-  // While a chat tab is showing, the panel sheds its terminal-window costume
-  // (dark chrome, traffic lights) and follows the app theme like the chat pane
-  // inside it; bash tabs bring the terminal look back. Keyed off what the active
+  // While a chat tab is showing, the panel follows the app theme like the chat
+  // pane inside it; bash tabs bring the terminal palette back. Keyed off what the active
   // tab RENDERS, not off the head's mode: the review slot is a chat pane whatever
   // mode the head runs in, and dressing it as a terminal window was leaving a
   // chat transcript sitting inside dark terminal chrome.
@@ -1072,17 +1071,8 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
             : 'border-gray-700 dark:border-gray-600 bg-gray-800/80'
         }`}
       >
-        {/* Traffic lights: terminal-window dressing only */}
-        {!chatActive && (
-          <div className="flex gap-1.5 shrink-0">
-            <span className="w-3 h-3 rounded-full bg-red-500/70" />
-            <span className="w-3 h-3 rounded-full bg-yellow-500/70" />
-            <span className="w-3 h-3 rounded-full bg-green-500/70" />
-          </div>
-        )}
-
         {/* Tabs */}
-        <div className={`flex items-center gap-0.5 ${chatActive ? '' : 'ml-2'}`}>
+        <div className="flex items-center gap-0.5">
           {tabs.map(tab => (
             <div key={tab.id} className="flex items-center">
               <button
@@ -1094,7 +1084,7 @@ function AgentTerminalImpl({ agentId, agentType, projectId, chatMode, fill, reco
                 // glance at the tab strip answers that, where a violet-washed
                 // transcript would just be tiring to read and would fight the chat's
                 // warm palette.
-                className={`px-2.5 py-0.5 text-xs font-mono rounded transition-colors cursor-pointer ${
+                className={`px-2.5 py-0.5 text-xs rounded transition-colors cursor-pointer ${
                   tab.kind === 'review'
                     ? activeTabId === tab.id
                       ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300'

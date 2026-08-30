@@ -158,6 +158,8 @@ and `web/src/DiffViewer.tsx`):
   chat Plan disclosure). Switching through Chat, Review and Bash tabs preserves
   whether the Plan is open, and the panel waits for a measured pane width before
   mounting so it does not briefly lay itself out at an impossible width.
+- Chat, Review and Bash tab labels use the interface font. The shell palette
+  distinguishes terminal content without decorative window traffic lights.
 - `web/src/lib/storage.ts` is the `StorageKeys` registry. The left sidebar's
   state is two independent flags in the zustand `useSidebarStore`
   (`web/src/lib/sidebar.ts`): a persisted desktop `desktopCollapsed` preference
