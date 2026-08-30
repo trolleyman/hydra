@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseMatchLines, parseScriptSteps, splitScriptOutput, type ScriptStep } from './shellSections'
+import { consecutiveMatchLines, parseMatchLines, parseScriptSteps, splitScriptOutput, type ScriptStep } from './shellSections'
 
 function kinds(script: string) {
   return (parseScriptSteps(script) ?? []).map((s) => s.kind)
@@ -1014,6 +1014,16 @@ describe('splitScriptOutput over ANSI', () => {
 })
 
 describe('parseMatchLines', () => {
+  it('separates non-contiguous matches before stateful highlighting', () => {
+    const [open, later, adjacent] = parseMatchLines([
+      'docs/a.md:3:**opening bold',
+      'docs/a.md:18:ordinary later match',
+      'docs/a.md:19:the next source line',
+    ], [])
+    expect(consecutiveMatchLines(open, later)).toBe(false)
+    expect(consecutiveMatchLines(later, adjacent)).toBe(true)
+  })
+
   it('reads grep line numbers off a single file', () => {
     expect(parseMatchLines(['12:const a = 1', '40-  // context', '--', 'noise'], ['a.ts'])).toEqual([
       { path: '', num: '12', text: 'const a = 1', separator: false },

@@ -1792,6 +1792,18 @@ export interface MatchLine {
   separator: boolean
 }
 
+// Whether two search rows are adjacent source lines and may safely be handed to
+// a stateful syntax highlighter as one run. Search results are usually sparse:
+// treating line 3 and line 18 of a Markdown file as neighbours lets an opening
+// `**` whose close was on omitted line 4 leak into line 18. With no numbers the
+// gap is unknowable, so retain the existing grouping; the highlighter then has
+// no more reliable boundary to follow.
+export function consecutiveMatchLines(prev: MatchLine, next: MatchLine): boolean {
+  if (prev.path !== next.path) return false
+  if (!prev.num || !next.num) return true
+  return Number(next.num) === Number(prev.num) + 1
+}
+
 // grep writes `NNN:` before a matched line and `NNN-` before a context line
 // (-A/-B/-C), and puts `path:` in front of both when it searched more than one
 // file - with the SAME separator it used after the number, so a context line
