@@ -41,7 +41,7 @@ import {
 } from 'lucide-react'
 import { SiGit } from '@icons-pack/react-simple-icons'
 import { Link } from '@tanstack/react-router'
-import { AgentStatus, type AgentResponse, type ChatEventUnion, type ChatFrame } from '../api'
+import { AgentStatus, type ChatEventUnion, type ChatFrame } from '../api'
 import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../lib/chatEvents'
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
@@ -84,7 +84,6 @@ import { CommitCard } from './CommitCard'
 import { ChangeStats } from './ChangeStats'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
-import { RelativeTime } from './LiveTime'
 import { ChatAgentTypeContext } from '../lib/chatAgentType'
 import { type Attachment, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
@@ -120,6 +119,8 @@ import { CommentIdentityContext } from './commentIdentity'
 import { BranchPill } from './BranchPill'
 import { FilePathLabel } from './FilePathLabel'
 import { onDesktopImagePaste } from '../lib/desktopBridge'
+import { chatRepositoryRef } from '../lib/chatRepositoryRef'
+import { ResumeDivider } from './ResumeDivider'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -6760,14 +6761,6 @@ const SettledMessages = memo(
     a.subagents === b.subagents,
 )
 
-// A regular head browses the isolated branch it owns. A focused head is
-// deliberately branchless and works in the registered project checkout, so its
-// links follow that checkout's HEAD instead of inventing a hydra/<id> ref that
-// Git cannot resolve.
-export function agentChatRepositoryRef(agent: Pick<AgentResponse, 'branch_name'> | undefined): string {
-  return agent?.branch_name ?? 'HEAD'
-}
-
 export function ChatPane({ agentId, agentType, projectId, active, reconnectAttempt, onStatusUpdate, onDiffRefresh, onReviewCommentsChanged, onSelectCommit, review }: ChatProps) {
   // The key for everything this pane stores per CONVERSATION rather than per
   // head: the composer draft and its attachments, the composer height, the
@@ -7114,8 +7107,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       return agent.focused ? agent.project_path : agent.worktree_path ?? null
     },
   )
-  const repositoryRef = useAgentStore((s) => agentChatRepositoryRef(
-    s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId),
+  const repositoryRef = useAgentStore((s) => chatRepositoryRef(
+    (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name,
   ))
   // memo'd: <Markdown> is memo'd on its props, so a fresh object each render
   // would re-parse every rendered message on every keystroke in the composer.
@@ -10607,18 +10600,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           </div>
         )
       case 'resumed':
-        return (
-          <div className="flex items-center gap-2.5 select-none" aria-label="Agent resumed">
-            <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
-            <span
-              className="optical-center text-2xs text-stone-400 dark:text-stone-500"
-              title={item.resumedAt == null ? undefined : new Date(item.resumedAt).toLocaleString()}
-            >
-              Resumed{item.resumedAt == null ? null : <> <RelativeTime createdAt={item.resumedAt / 1000} /></>}
-            </span>
-            <div className="h-px flex-1 bg-stone-200 dark:bg-white/10" />
-          </div>
-        )
+        return <ResumeDivider resumedAt={item.resumedAt} />
       case 'assistant':
         return <div className={`max-w-[95%] chat-font ${serif ? 'chat-serif' : 'chat-leading'}`}>{renderAssistantText(item.text)}</div>
       case 'thinking':
@@ -10826,6 +10808,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     while (ci < chips.length) out.push(chips[ci++])
     return out
   }, [visibleItems, commitChips, replayDone, allHistoryLoaded])
+  const conversationResumedAt = useMemo(() => {
+    if (!allHistoryLoaded) return undefined
+    for (const item of visibleItems) {
+      const timestamp = itemTsRef.current.get(item.id)
+      if (timestamp != null) return timestamp
+    }
+    return undefined
+  }, [visibleItems, allHistoryLoaded])
   // The in-flight streamed reply is the LAST ROW of the transcript, not a
   // separate node underneath it: it carries the id its settled event will land
   // on, so the swap is an in-place update of one row (see liveId). Rendering it
@@ -10967,7 +10957,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
           onCopy={copyTranscriptAsMarkdown}
           className="h-full overflow-y-auto [overflow-anchor:none]"
         >
-          <div ref={contentRef} className="mx-auto max-w-5xl px-4 py-3 flex flex-col gap-3">
+          <div
+            ref={contentRef}
+            className={`mx-auto max-w-5xl px-4 pb-3 flex flex-col gap-3 ${hasSubagents || planVisible ? 'pt-14' : 'pt-3'}`}
+          >
           {viewSub ? (
             <SubagentChatView sub={viewSub} tool={viewSubTool} worktree={worktreePath} links={subagentLinks} />
           ) : (
@@ -10989,9 +10982,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             </div>
           )}
           {replayDone && allHistoryLoaded && items.length > 0 && (
-            <div className="text-center py-1 text-2xs text-stone-300 dark:text-stone-600 select-none">
-              Beginning of conversation
-            </div>
+            <ResumeDivider resumedAt={conversationResumedAt} ariaLabel="Conversation resumed" />
           )}
           <SettledMessages
             items={mergedItems}
