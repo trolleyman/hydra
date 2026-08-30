@@ -3198,17 +3198,17 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
   const summary = diff?.uncommitted_summary
   if (!summary || (summary.tracked_count === 0 && summary.untracked_count === 0)) return null
 
-  const groups: { heading: string; count: number; files: string[] }[] = []
+  const groups: { type: 'modified' | 'untracked'; count: number; files: string[] }[] = []
   if (summary.tracked_count > 0) {
     groups.push({
-      heading: `${summary.tracked_count} tracked file${summary.tracked_count !== 1 ? 's' : ''} modified`,
+      type: 'modified',
       count: summary.tracked_count,
       files: summary.tracked_files ?? [],
     })
   }
   if (summary.untracked_count > 0) {
     groups.push({
-      heading: `${summary.untracked_count} untracked file${summary.untracked_count !== 1 ? 's' : ''}`,
+      type: 'untracked',
       count: summary.untracked_count,
       files: summary.untracked_files ?? [],
     })
@@ -3220,8 +3220,11 @@ function UncommittedButton({ diff, onJumpToUncommitted }: {
         <div>
           <p className="font-semibold mb-1">Uncommitted changes</p>
           {groups.map((g) => (
-            <div key={g.heading} className="mt-1 first:mt-0">
-              <p className="text-gray-600 dark:text-gray-300">{g.heading}</p>
+            <div key={g.type} className="mt-1 first:mt-0">
+              <p className="flex items-center gap-1 text-gray-600 dark:text-gray-300">
+                <SharedChangeTypeIcon type={g.type} className="w-3.5 h-3.5" />
+                <span className="optical-center tabular-nums">{g.count}</span>
+              </p>
               {g.files.slice(0, UNCOMMITTED_TOOLTIP_FILES).map((f) => {
                 // The per-filetype icon from the diff's file list stands in for the
                 // "- " bullet these rows used to carry: it marks the row just as
