@@ -2,7 +2,7 @@ import { createFileRoute, useParams } from '@tanstack/react-router'
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../../stores/apiClient'
 import { formatError } from '../../api/format_error'
-import { refreshReviewConfig, useProjectStore } from '../../stores/projectStore'
+import { refreshReviewConfig, selectProject, useProjectStore } from '../../stores/projectStore'
 import type { ConfigResponse, AgentResponse } from '../../api'
 import { useDialogStore } from '../../stores/dialogStore'
 import { useToastStore } from '../../stores/toastStore'
@@ -36,7 +36,7 @@ const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
 
 function ProjectSettingsPage() {
   const { projectId } = useParams({ from: '/project/$projectId/settings' })
-  const { projects } = useProjectStore()
+  const selectedProject = useProjectStore((s) => selectProject(s, projectId))
   // The visible tab. `scope` lags behind it as the last *config* tab, so the
   // fetched config (and any unsaved draft) survives a detour via Browser.
   const [tab, setTab] = useState<SettingsTab>('project')
@@ -50,8 +50,6 @@ function ProjectSettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [testAgent, setTestAgent] = useState<AgentResponse | null>(null)
   const [testing, setTesting] = useState(false)
-
-  const selectedProject = projects.find(p => p.id === projectId)
 
   const hasUnsavedChanges = useMemo(() => {
     if (!config || !baseConfig) return false

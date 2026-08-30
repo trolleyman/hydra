@@ -45,7 +45,7 @@ import { AgentStatus, type ChatEventUnion, type ChatFrame } from '../api'
 import { asChatEvent, eventItemID, eventMessageID, isSidechainEvent } from '../lib/chatEvents'
 import type { ChatProviderContext, ChatToolStartedPayload } from '../api'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
-import { useAgentStore } from '../stores/agentStore'
+import { selectAgent, selectLiveAgent, useAgentStore } from '../stores/agentStore'
 import { Markdown, type RepoLinkContext } from '../lib/MarkdownRenderer'
 import { stripAnsi, hasAnsi, ansiToHtml } from '../lib/ansi'
 import { dropNoopCd, formatBashForDisplay, leadingBashComment, parseHostRunScript, unwrapBashLoginCommand } from '../lib/bashFormat'
@@ -2559,6 +2559,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
       </div>
     )
   }
+  const commentsByNumber = new Map(parsed.comments.map((comment) => [comment.number, comment]))
   return (
     <div className="space-y-1.5">
       {parsed.preamble && (
@@ -2568,7 +2569,7 @@ function ReviewCommentsPanel({ text }: { text: string }) {
         // A reply to a comment shown above it is drawn as a thread: indented
         // under its parent, and headed by what it answers rather than by the
         // file, which is the parent's line repeated verbatim.
-        const parent = parsed.comments.find((p) => p.number === c.replyTo)
+        const parent = commentsByNumber.get(c.replyTo)
         const sameAnchor = parent != null && parent.path === c.path && parent.line === c.line
           && parent.image?.file === c.image?.file && parent.image?.position === c.image?.position
         return (
@@ -7055,7 +7056,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // it (item 20).
   const lastScrollRef = useRef({ top: 0, pinned: true })
 
-  const headStatus = useAgentStore((s) => s.agents.find((a) => a.id === agentId)?.agent_status?.status)
+  const headStatus = useAgentStore((s) => selectLiveAgent(s, agentId)?.agent_status?.status)
   // A review slot has no db.Agent row, so its lifecycle comes from this pane's
   // socket. Using the owning head's status here made a finished reviewer offer
   // to queue messages whenever the head itself was still working.
@@ -7072,7 +7073,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // (__root's auto-clear effect), and effects run after render, so by the time
   // any effect of ours could read the store the answer would always be "read".
   const unreadNow = useAgentStore((s) => {
-    const a = s.agents.find((x) => x.id === agentId)
+    const a = selectLiveAgent(s, agentId)
     return a ? !!a.has_unread_changes : null
   })
   const [openedUnread, setOpenedUnread] = useState<{ key: string; unread: boolean | null }>(
@@ -7102,13 +7103,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // project root and deliberately has no Hydra worktree of its own.
   const worktreePath = useAgentStore(
     (s) => {
-      const agent = s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId)
+      const agent = selectAgent(s, agentId)
       if (!agent || review) return agent?.worktree_path ?? null
       return agent.focused ? agent.project_path : agent.worktree_path ?? null
     },
   )
   const repositoryRef = useAgentStore((s) => chatRepositoryRef(
-    (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name,
+    selectAgent(s, agentId)?.branch_name,
   ))
   // memo'd: <Markdown> is memo'd on its props, so a fresh object each render
   // would re-parse every rendered message on every keystroke in the composer.
@@ -7129,7 +7130,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // has no db.Agent row to carry one), and seeding it here is what put the head's
   // to-do chip on the reviewer's transcript. Its own plan arrives live.
   const serverPlan = useAgentStore(
-    (s) => (review ? undefined : (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.plan),
+    (s) => (review ? undefined : selectAgent(s, agentId)?.plan),
   )
   useEffect(() => {
     const seeded = seedLocalPlan(projectId, stateId, serverPlan)
@@ -7149,7 +7150,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // is still on the placeholder, so the right model shows on load before any
   // live system:init lands. The live stream stays authoritative from there.
   const serverModel = useAgentStore(
-    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.model,
+    (s) => selectAgent(s, agentId)?.model,
   )
   useEffect(() => {
     // Adopt the daemon-captured model only while the selector is still on its

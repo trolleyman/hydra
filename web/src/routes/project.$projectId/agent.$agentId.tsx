@@ -1,8 +1,8 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { createFileRoute, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { LoaderCircle } from 'lucide-react'
-import { useAgentStore } from '../../stores/agentStore'
-import { useProjectStore } from '../../stores/projectStore'
+import { selectAgent, selectLiveAgent, useAgentStore } from '../../stores/agentStore'
+import { selectProject, useProjectStore } from '../../stores/projectStore'
 import { api } from '../../stores/apiClient'
 import { AgentDetail } from '../../components/AgentDetail'
 import { resetProjectView } from '../../lib/projectView'
@@ -50,12 +50,13 @@ function AgentPage() {
   // near-constantly while an agent works, and a whole-store subscribe would
   // re-render this page - and the whole AgentDetail subtree - on every one.
   const agents = useAgentStore((s) => s.agents)
+  const liveAgent = useAgentStore((s) => selectLiveAgent(s, agentId))
+  const agent = useAgentStore((s) => selectAgent(s, agentId))
   const loading = useAgentStore((s) => s.loading)
   const removeAgent = useAgentStore((s) => s.removeAgent)
   const setAgents = useAgentStore((s) => s.setAgents)
-  const archived = useAgentStore((s) => s.archived)
   const upsertArchived = useAgentStore((s) => s.upsertArchived)
-  const projects = useProjectStore((s) => s.projects)
+  const project = useProjectStore((s) => selectProject(s, projectId))
   const navigate = useNavigate()
 
   const isMounted = useRef(true)
@@ -83,10 +84,6 @@ function AgentPage() {
   // the lazily-loaded history list. On a cold load / hard refresh to an archived
   // agent's URL, neither is populated, so we fall back to a one-shot getAgent
   // (which returns archived records too) before declaring the agent missing.
-  const liveAgent = agents.find((a) => a.id === agentId)
-  const agent = liveAgent ?? archived.find((a) => a.id === agentId)
-
-  const project = projects.find((p) => p.id === projectId)
   const agentsLoaded =
     project != null && !loading && agents.every((a) => a.project_path === project.path)
 

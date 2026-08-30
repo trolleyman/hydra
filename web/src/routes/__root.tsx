@@ -1,8 +1,8 @@
 import { createRootRoute, Link, Outlet, useNavigate, useParams, useLocation } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState, useCallback, memo, type WheelEvent, type RefObject } from 'react'
 import { api } from '../stores/apiClient'
-import { ensureReviewConfig, useProjectStore, visibleProjects } from '../stores/projectStore'
-import { useAgentStore } from '../stores/agentStore'
+import { ensureReviewConfig, selectProject as selectProjectById, useProjectStore, visibleProjects } from '../stores/projectStore'
+import { selectAgent, selectLiveAgent, useAgentStore } from '../stores/agentStore'
 import { usePageActive } from '../lib/usePageActive'
 import { useEventStream } from '../lib/useEventStream'
 import { useAgentPolling } from '../lib/useAgentPolling'
@@ -271,7 +271,7 @@ function RootLayout() {
   const [composerAgentType, setComposerAgentType] = useState<AgentTypeOption>(readDefaultAgentType)
   const selectedAgentType = useAgentStore((s) => {
     if (!selectedAgentId) return undefined
-    return (s.agents.find((a) => a.id === selectedAgentId) ?? s.archived.find((a) => a.id === selectedAgentId))?.agent_type
+    return selectAgent(s, selectedAgentId)?.agent_type
   })
   // Keep the last Claude/Codex choice while another agent type is in front.
   // The ref starts at Claude so the footer has a useful, stable default before
@@ -295,16 +295,16 @@ function RootLayout() {
   // - the selected agent's unread bit drives the auto-clear effect below;
   // - its display name and the project's unread count feed the tab title.
   const selectedAgentUnread = useAgentStore((s) =>
-    selectedAgentId ? !!s.agents.find((a) => a.id === selectedAgentId)?.has_unread_changes : false,
+    selectedAgentId ? !!selectLiveAgent(s, selectedAgentId)?.has_unread_changes : false,
   )
   const selectedAgentName = useAgentStore((s) => {
     if (!selectedAgentId) return undefined
-    const a = s.agents.find((x) => x.id === selectedAgentId)
+    const a = selectLiveAgent(s, selectedAgentId)
     return a ? a.title || a.id : undefined
   })
   const currentProjectUnread = useAgentStore((s) => s.agents.reduce((n, a) => n + (a.has_unread_changes ? 1 : 0), 0))
   const selectedAgentActiveTurn = useAgentStore((s) =>
-    selectedAgentId ? s.agents.find((agent) => agent.id === selectedAgentId)?.session_status === 'running' : false,
+    selectedAgentId ? selectLiveAgent(s, selectedAgentId)?.session_status === 'running' : false,
   )
 
   // Record every project you land on (via dropdown, switcher, direct nav, or
@@ -504,7 +504,7 @@ function RootLayout() {
   // Build the rest of the title from the current view: project, then the open
   // agent (its title, falling back to id) or the repository browser. Computed as
   // primitive strings so the effect only fires when the displayed text changes.
-  const currentProject = projects.find((p) => p.id === currentProjectId)
+  const currentProject = useProjectStore((s) => currentProjectId ? selectProjectById(s, currentProjectId) : undefined)
   const titleProjectName = currentProject?.name
   const titleAgentName = selectedAgentName
   const onRepository = /\/repository(\/|$)/.test(location.pathname)
