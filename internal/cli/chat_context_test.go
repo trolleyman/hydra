@@ -43,6 +43,25 @@ func TestChatContextResolverResolvesTheReviewSlot(t *testing.T) {
 	if head.Worktree != root {
 		t.Errorf("focused head working directory = %q, want project root %q", head.Worktree, root)
 	}
+	if !head.ProjectDirectory {
+		t.Error("focused head context was not marked as project-directory mode")
+	}
+
+	if err := store.CreateAgent(&db.Agent{
+		ID: "worktree-head", ProjectPath: root, AgentType: "claude", BranchName: "hydra/worktree-head",
+	}); err != nil {
+		t.Fatalf("create worktree agent: %v", err)
+	}
+	worktree, ok := resolve("worktree-head")
+	if !ok {
+		t.Fatal("worktree head did not resolve")
+	}
+	if worktree.ProjectDirectory {
+		t.Error("worktree head context was marked as project-directory mode")
+	}
+	if want := paths.GetWorktreeDirFromProjectRoot(root, "worktree-head"); worktree.Worktree != want {
+		t.Errorf("worktree head working directory = %q, want %q", worktree.Worktree, want)
+	}
 
 	review, ok := resolve(heads.ReviewSessionID("fix-the"))
 	if !ok {

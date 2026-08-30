@@ -235,7 +235,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
         <GitMerge className="w-3 h-3 shrink-0" />
         <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
-        <ChangeStats additions={item.additions} deletions={item.deletions} />
+        <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
       </button>
       <Expandable open={expanded && shown > 0} className="w-full">
         <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
@@ -253,7 +253,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
               <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
               <span className="min-w-0 flex-1 truncate optical-center">{m.subject}</span>
-              <ChangeStats additions={m.additions} deletions={m.deletions} />
+              <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px" />
             </div>
           ))}
           {shown < count && (
@@ -6970,10 +6970,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [allHistoryLoaded, setAllHistoryLoaded] = useState(false)
   const pendingPrependRef = useRef<number | null>(null)
-  // One load per arrival at the top threshold. Holding the native scrollbar
-  // thumb at the top must not turn each anchored prepend into another request.
+  // One load per arrival at the top threshold. An anchored prepend that moves
+  // the viewport clear re-arms it, so holding the native thumb at the top can
+  // intentionally keep paging without duplicate requests from one position.
   const historyThresholdArmedRef = useRef(true)
-  const scrollbarDraggingRef = useRef(false)
   // Composer attachments live in the undo history (`present.attachments`, above)
   // so a paste-turned-chip is undoable together with its text marker.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
@@ -7234,7 +7234,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     setAllHistoryLoaded(false)
     pendingPrependRef.current = null
     historyThresholdArmedRef.current = true
-    scrollbarDraggingRef.current = false
     pinnedRef.current = true
 
     let nextId = 1
@@ -9239,27 +9238,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if (!el) return
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0 || !isVerticalScrollbarPointer(el, event.clientX)) return
-      scrollbarDraggingRef.current = true
       stopFollow()
       if (wheelRafRef.current != null) cancelAnimationFrame(wheelRafRef.current)
       wheelRafRef.current = null
       pinnedRef.current = false
       setPinned(false)
     }
-    const onPointerEnd = () => {
-      if (!scrollbarDraggingRef.current) return
-      scrollbarDraggingRef.current = false
-      // Re-arm only after the thumb has left the load zone. Releasing it at the
-      // top keeps the current page as the one response to this drag.
-      if (el.scrollTop >= 300) historyThresholdArmedRef.current = true
-    }
     el.addEventListener('pointerdown', onPointerDown)
-    window.addEventListener('pointerup', onPointerEnd)
-    window.addEventListener('pointercancel', onPointerEnd)
     return () => {
       el.removeEventListener('pointerdown', onPointerDown)
-      window.removeEventListener('pointerup', onPointerEnd)
-      window.removeEventListener('pointercancel', onPointerEnd)
     }
   }, [])
 
@@ -9772,7 +9759,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const threshold = historyThresholdTransition(
         el.scrollTop,
         historyThresholdArmedRef.current,
-        scrollbarDraggingRef.current,
       )
       historyThresholdArmedRef.current = threshold.armed
       if (threshold.request) requestOlderHistory()
@@ -10628,7 +10614,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
                 <span className="truncate optical-center">{item.subject}</span>
-                <ChangeStats additions={item.additions} deletions={item.deletions} />
+                <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
               </div>
             </Tooltip>
           </div>

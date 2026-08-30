@@ -352,6 +352,12 @@ Pretending every changed SHA was newly committed would leave stale or duplicate
 chips. The commits endpoint is still the source for the diff selector and the
 full branch inventory; it is not the source of chat chronology.
 
+When a worktree fast-forwards onto its base, the incoming commits collapse into
+one expandable `Merged <base> - N commits` row. Project-directory heads work on
+the checked-out branch itself, so an ordinary commit advances both `HEAD` and the
+branch tip; those commits remain ordinary one-commit rows. Genuine merge commits
+still use the expandable merge row in either mode.
+
 ## Queued messages
 
 A queued message lives only in the checkpointed queue projection and rides in

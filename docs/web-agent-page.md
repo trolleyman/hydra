@@ -162,7 +162,10 @@ and `web/src/DiffViewer.tsx`):
 - A pinned running chat follows new output until the user takes control. Wheel
   movement and a pointer press in the native scrollbar gutter cancel the active
   follow animation before scrolling begins, so dragging the thumb never fights
-  a streaming update. Reaching the bottom explicitly reacquires the pin.
+  a streaming update. History loading fires once per arrival in the top zone;
+  an anchored prepend re-arms it after moving the preserved content clear, so a
+  thumb held at the top deliberately continues paging. Reaching the bottom
+  explicitly reacquires the pin.
 - Keyboard hints use the shared `Kbd` / `ShortcutHint` components. Their fixed
   cap box optically lowers the glyph within the font line box, keeping fonts
   with asymmetric ascent/descent metrics vertically centred.

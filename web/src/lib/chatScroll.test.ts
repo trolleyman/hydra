@@ -31,16 +31,17 @@ describe('isVerticalScrollbarPointer', () => {
 })
 
 describe('historyThresholdTransition', () => {
-  it('requests only once while a scrollbar drag remains in the load zone', () => {
-    const first = historyThresholdTransition(20, true, true)
+  it('requests only once during an uninterrupted stay in the load zone', () => {
+    const first = historyThresholdTransition(20, true)
     expect(first).toEqual({ armed: false, request: true })
-    expect(historyThresholdTransition(20, first.armed, true)).toEqual({ armed: false, request: false })
-    // An anchored prepend can move the viewport away from the top, but the held
-    // thumb must not re-arm paging until the drag ends.
-    expect(historyThresholdTransition(600, first.armed, true)).toEqual({ armed: false, request: false })
+    expect(historyThresholdTransition(20, first.armed)).toEqual({ armed: false, request: false })
   })
 
-  it('re-arms after an ordinary scroll leaves the load zone', () => {
-    expect(historyThresholdTransition(600, false, false)).toEqual({ armed: true, request: false })
+  it('re-arms after an anchored prepend leaves the load zone', () => {
+    const clear = historyThresholdTransition(600, false)
+    expect(clear).toEqual({ armed: true, request: false })
+    // A thumb held at the top pulls the viewport back after that anchor move;
+    // this is an intentional request for the next page.
+    expect(historyThresholdTransition(0, clear.armed)).toEqual({ armed: false, request: true })
   })
 })
