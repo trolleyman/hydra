@@ -6637,6 +6637,9 @@ interface SettledMessagesProps {
 interface SettledRowProps {
   item: ChatItem
   animate: boolean
+  // Consecutive user bubbles read as one authored run, not separate turns.
+  // The transcript's outer gap remains for every other transition.
+  tightBefore?: boolean
   renderItem: (item: ChatItem, shellCwd?: string | null) => ReactNode
   shellCwd: string | null
   serif: boolean
@@ -6654,13 +6657,13 @@ function isChatMessage(item: ChatItem): boolean {
 }
 
 const SettledRow = memo(
-  function SettledRow({ item, animate, renderItem, shellCwd }: SettledRowProps) {
+  function SettledRow({ item, animate, tightBefore, renderItem, shellCwd }: SettledRowProps) {
     return (
       <div
         // Marks the row as a scroll target for alignToLastMessage; absent on
         // rows it should skip, so a plain querySelectorAll finds the candidates.
         data-chat-message={isChatMessage(item) ? '' : undefined}
-        className={animate ? 'animate-chat-item-in' : undefined}
+        className={[tightBefore && '-mt-2', animate && 'animate-chat-item-in'].filter(Boolean).join(' ') || undefined}
       >
         {renderItem(item, shellCwd)}
       </div>
@@ -6669,6 +6672,7 @@ const SettledRow = memo(
   (a, b) =>
     a.item === b.item &&
     a.animate === b.animate &&
+    a.tightBefore === b.tightBefore &&
     a.renderItem === b.renderItem &&
     a.shellCwd === b.shellCwd &&
     a.serif === b.serif &&
@@ -6688,11 +6692,12 @@ const SettledMessages = memo(
     // step group is handed the group's own answer for it: a step that lands
     // while the group is open fades in like any other message, one revealed by
     // opening the group does not (see StepGroup).
-    const row = (item: ChatItem, animate = true) => (
+    const row = (item: ChatItem, animate = true, tightBefore = false) => (
       <SettledRow
         key={item.id}
         item={item}
         animate={animate && liveFromId != null && item.id >= liveFromId && !('noEntrance' in item && item.noEntrance)}
+        tightBefore={tightBefore}
         renderItem={renderItem}
         shellCwd={(item.kind === 'tool' && shellCwds.get(item.toolUseId)) || null}
         serif={serif}
@@ -6709,14 +6714,18 @@ const SettledMessages = memo(
     // per row 60 times a second. The deps are exactly this component's memo keys
     // below.
     const rows = useMemo(
-      () =>
-        planStepRows(items, subByToolUse, grouped).map((r) =>
-          r.row === 'item' ? (
-            row(r.item)
-          ) : (
-            <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={row} />
-          ),
-        ),
+      () => {
+        let previousWasUser = false
+        return planStepRows(items, subByToolUse, grouped).map((r) => {
+          if (r.row !== 'item') {
+            previousWasUser = false
+            return <StepGroup key={`steps-${r.id}`} items={r.items} liveFrom={liveFromId} renderRow={row} />
+          }
+          const tightBefore = previousWasUser && r.item.kind === 'user'
+          previousWasUser = r.item.kind === 'user'
+          return row(r.item, true, tightBefore)
+        })
+      },
       // eslint-disable-next-line react-hooks/exhaustive-deps -- `row` is a per-render closure over these same deps
       [items, grouped, liveFromId, renderItem, serif, connected, worktreePath, subByToolUse, subagents, shellCwds],
     )
@@ -11177,15 +11186,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                   </Tooltip>
                 )}
                 {isTurnRunning && (
-                  <Tooltip variant="card" content="Send now steers the running agent at its next input boundary. It does not interrupt the current turn, and the message cannot be recalled." side="top">
+                  <Tooltip content="Send now" side="top">
                     <button
                       onClick={() => send(false)}
                       disabled={!canSend}
                       aria-label="Send message now"
-                      className={`p-1.5 rounded-lg transition-colors ${
+                      className={`p-1.5 rounded-full transition-colors ${
                         canSend
-                          ? 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-white/[0.06] dark:hover:text-stone-200 cursor-pointer'
-                          : 'text-stone-300 dark:text-stone-600 cursor-default'
+                          ? `${ACCENT_BG} text-white cursor-pointer`
+                          : 'bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
                       }`}
                     >
                       <Send className="w-4 h-4" />
