@@ -1550,6 +1550,7 @@ func (s *SimulationServer) AddReviewComment(w http.ResponseWriter, r *http.Reque
 		// Carried through, or a pin placed on a picture comes back anchored to
 		// nothing and disappears the moment it is saved.
 		Image:     body.Image,
+		Read:      ptr(true),
 		CreatedAt: time.Now().Format(time.RFC3339),
 	}
 	if c.ReplyTo != nil {
@@ -1706,6 +1707,9 @@ func (s *SimulationServer) PublishReviewComments(w http.ResponseWriter, r *http.
 		}
 		c.Status = api.Published
 		c.PublishedAt = ptr(time.Now().Format(time.RFC3339))
+		// Drafts are authored by the user, so publishing one cannot make it news
+		// to that same user. Keep simulation behavior aligned with commentsResponse.
+		c.Read = ptr(true)
 		published = append(published, *c)
 	}
 	simCommentMu.Unlock()

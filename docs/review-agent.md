@@ -739,9 +739,10 @@ it was written, and publishing does not change it - but until it is published
 nobody else can cite it, so putting a handle on it would invite quoting something
 the agent cannot look up. The chip is the one state worth calling out: the
 difference between something the agent has been told and something only you can
-see is not otherwise visible on the card. Every draft card also carries Submit
-review, which publishes the whole queued batch from where it is being written;
-the toolbar popover remains the place to inspect that batch as a list.
+see is not otherwise visible on the card. Every draft card also carries the same
+Submit review control as the Changes toolbar in a footer at its bottom right. It
+publishes the whole queued batch from where it is being written; the toolbar
+popover remains the place to inspect that batch as a list.
 
 **A reply can join the draft review or be sent immediately.** Add to agent review
 stores it as a draft under the published parent, while Comment to agent publishes
@@ -761,7 +762,9 @@ already in the path, and a number is stable and never reused - so the link is
 short enough to paste into a message and still means one exact thing months
 later. Landing on one jumps to it and marks it read. The jump keys on the number
 rather than on the diff, so a background refresh cannot yank the view back to the
-anchor after you have scrolled away.
+anchor after you have scrolled away. Its amber focus cue stays fully visible long
+enough to orient you, then fades back to the card's normal colour instead of
+ending in a hard visual cut.
 
 Three ways to get one, because people reach for different ones:
 

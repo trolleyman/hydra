@@ -170,7 +170,7 @@ export function ReviewThreadCard({ thread, actions }: { thread: ReviewThread; ac
     <div
       id={anchorNumber == null ? undefined : `comment-${anchorNumber}`}
       data-comment-card={anchorNumber}
-      className={`border-y px-4 py-2 ${current
+      className={`border-y px-4 py-2 transition-[background-color,border-color,box-shadow] duration-700 ease-out ${current
         ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]'
         : 'border-violet-200 dark:border-violet-900/60 bg-violet-50/40 dark:bg-violet-950/20'}`}
     >

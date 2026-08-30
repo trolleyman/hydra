@@ -18,7 +18,7 @@ import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Folder, FolderOpen, X, GitMergeConflict, Bot, FileDiff as FileDiffIcon, Files as FilesIcon,
-  ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
+  ArrowRightLeft, MessageSquarePlus, MessageSquare, MessagesSquare, Pencil, Trash2, FolderSync,
   CircleCheck, ArrowUp, ArrowDown, MailOpen, Paperclip,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
@@ -227,7 +227,7 @@ interface NativeCommentReplyActions {
   start?: (number: number) => void
 }
 const NativeCommentReplyContext = createContext<NativeCommentReplyActions | null>(null)
-const DraftReviewSubmitContext = createContext<{ submit: () => void; submitting: boolean } | null>(null)
+const DraftReviewSubmitContext = createContext<{ submit: () => void; submitting: boolean; count: number } | null>(null)
 
 // True when a drag is carrying real files, so dragging a text selection over a
 // comment box doesn't light it up as a drop target.
@@ -271,7 +271,7 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
   return (
-    <div id={`comment-${comment.number}`} data-comment-card={comment.number} className={`border-y px-4 py-2 ${
+    <div id={`comment-${comment.number}`} data-comment-card={comment.number} className={`border-y px-4 py-2 transition-[background-color,border-color,box-shadow] duration-700 ease-out ${
       current
         ? 'border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-400/10 shadow-[inset_3px_0_0_0_#f59e0b]'
         : sent
@@ -357,17 +357,6 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
                   </span>
                 ) : (
                   <span className="ml-0.5 flex items-center gap-0.5">
-                    {draftReview && (
-                      <Tooltip content="Publish every queued comment in this review" side="top">
-                        <button
-                          disabled={draftReview.submitting}
-                          onClick={draftReview.submit}
-                          className="mr-1 rounded border border-blue-300 px-1.5 py-0.5 text-3xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/30"
-                        >
-                          {draftReview.submitting ? 'Submitting...' : 'Submit review'}
-                        </button>
-                      </Tooltip>
-                    )}
                     <Tooltip content="Edit comment" side="top">
                       <button
                         onClick={onEdit}
@@ -413,6 +402,23 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
             <div className="mt-1 flex items-start gap-1 text-2xs text-amber-700 dark:text-amber-300">
               <TriangleAlert className="w-3 h-3 mt-px shrink-0" />
               <span>The diff around this line changed after this comment was queued; it will still be sent with its original context.</span>
+            </div>
+          )}
+          {!sent && draftReview && (
+            <div className="mt-2 flex justify-end">
+              <Tooltip content="Review queued comments and submit them all at once" side="top">
+                <button
+                  disabled={draftReview.submitting}
+                  onClick={draftReview.submit}
+                  className="flex h-7 items-center gap-1.5 rounded-md bg-blue-600 px-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+                >
+                  <MessagesSquare className="h-3.5 w-3.5" />
+                  <span>{draftReview.submitting ? 'Submitting...' : 'Submit review'}</span>
+                  <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-white/25 px-1 text-3xs leading-none tabular-nums">
+                    {draftReview.count}
+                  </span>
+                </button>
+              </Tooltip>
             </div>
           )}
         </div>
@@ -4798,7 +4804,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     focusTimerRef.current = window.setTimeout(() => {
       setFocusedComment((current) => current === number ? null : current)
       focusTimerRef.current = null
-    }, 1800)
+    }, 2600)
   }, [])
   useEffect(() => () => {
     if (focusTimerRef.current != null) window.clearTimeout(focusTimerRef.current)
@@ -5049,6 +5055,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const draftReviewSubmit = useMemo(() => ({
     submit: () => void submitReview(queuedComments.map((c) => c.number)),
     submitting: submittingReview,
+    count: queuedComments.length,
   }), [submitReview, queuedComments, submittingReview])
 
   // Which queued comments have gone stale: the diff under them changed since they
