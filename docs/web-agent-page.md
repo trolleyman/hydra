@@ -88,7 +88,10 @@ and `web/src/DiffViewer.tsx`):
   per file ('\n'-joined lines in one `pre-wrap` cell wrap exactly as one row
   each); side-by-side needs a read per pair, because a row is as tall as its
   taller half. Runs through `queueMeasure`'s idle queue, so it lands shortly
-  after load rather than during a scroll. The row classes live in `diffMetrics`
+  after load rather than during a scroll. WebKit has no `requestIdleCallback`, so
+  its timer fallback budgets each slice from actual elapsed time and yields
+  between expensive file measurements instead of blocking the desktop view. The
+  row classes live in `diffMetrics`
   so the replica and the real rows can't drift; `DiffViewer.test.tsx` renders a
   body and asserts `bodyShape` predicted its row/expander counts. In-tree images
   are the one body that can't be predicted (`estimateVisibleRows` is the crude
