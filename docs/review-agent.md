@@ -767,7 +767,9 @@ later. Landing on one jumps to it and marks it read. The jump keys on the number
 rather than on the diff, so a background refresh cannot yank the view back to the
 anchor after you have scrolled away. Its amber focus cue stays fully visible long
 enough to orient you, then fades back to the card's normal colour instead of
-ending in a hard visual cut.
+ending in a hard visual cut. In a forge thread the cue sits on the exact numbered
+note the link names, while Previous/Next still treats the conversation as one
+navigation stop.
 
 Three ways to get one, because people reach for different ones:
 
@@ -781,7 +783,9 @@ Three ways to get one, because people reach for different ones:
   location is an opinion about nothing) and **Mark unread**, which is the only way
   a comment becomes new again. Thread-wide actions ("Resolve with agent", the
   thread's forge link) stay on the first note, where they describe the whole
-  conversation.
+  conversation. The menu is portalled and viewport-positioned because forge
+  notes render inside the diff file's overflow clip; keeping it in the note's DOM
+  subtree would cut the menu off at the next code row.
 - **The link button** on Hydra's own comments.
 
 Two UI details that were wrong and are worth remembering:
