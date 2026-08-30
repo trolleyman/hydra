@@ -28,10 +28,12 @@ export interface MarkdownComposerProps {
   onSelectionChange?: (editor: Editor) => void
   onKeyDown?: (event: KeyboardEvent, context: MarkdownComposerKeyContext) => boolean | void
   onPaste?: (event: ClipboardEvent, editor: Editor) => boolean | void
+  onDrop?: (event: DragEvent, editor: Editor) => boolean | void
   editable?: boolean
   autoFocus?: boolean
   placeholder?: string
   ariaLabel?: string
+  dataDesktopImagePaste?: boolean
   spellCheck?: boolean
   className?: string
   attachmentRegistry?: AttachmentRegistry
@@ -135,10 +137,12 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
   onSelectionChange,
   onKeyDown,
   onPaste,
+  onDrop,
   editable = true,
   autoFocus = false,
   placeholder,
   ariaLabel = 'Message',
+  dataDesktopImagePaste = false,
   spellCheck = false,
   className = '',
   attachmentRegistry,
@@ -149,6 +153,7 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
   const onEditorRef = useRef(onEditor)
   const onKeyDownRef = useRef(onKeyDown)
   const onPasteRef = useRef(onPaste)
+  const onDropRef = useRef(onDrop)
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onDocumentChangeRef = useRef(onDocumentChange)
   const literalPasteRef = useRef(false)
@@ -173,6 +178,7 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
   onEditorRef.current = onEditor
   onKeyDownRef.current = onKeyDown
   onPasteRef.current = onPaste
+  onDropRef.current = onDrop
   onSelectionChangeRef.current = onSelectionChange
   onDocumentChangeRef.current = onDocumentChange
 
@@ -194,6 +200,7 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
         role: 'textbox',
         'aria-multiline': 'true',
         spellcheck: String(spellCheck),
+        ...(dataDesktopImagePaste ? { 'data-desktop-image-paste': '' } : {}),
         ...(placeholder ? { 'data-placeholder': placeholder } : {}),
       },
       handleKeyDown: (_view, event): boolean => {
@@ -254,6 +261,15 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
           })
         }
         return onPasteRef.current?.(event, editor) === true
+      },
+      handleDOMEvents: {
+        // File drops must be intercepted before ProseMirror's built-in drop
+        // handler asks the document for a text insertion coordinate. WebKitGTK
+        // file drags can otherwise insert their local URI as prose, and jsdom
+        // has no elementFromPoint for that coordinate lookup.
+        drop: (_view, event): boolean => (
+          editor ? onDropRef.current?.(event, editor) === true : false
+        ),
       },
     },
     onUpdate: ({ editor: updated }) => {

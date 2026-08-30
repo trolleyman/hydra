@@ -479,7 +479,7 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     })))
 
     await screen.findByLabelText('Remove image1.png')
-    expect(ta.value).toBe('[image1.png]')
+    expect(composerValue(ta)).toBe('[image1.png]')
     expect(ta).toHaveAttribute('data-desktop-image-paste')
   })
 
@@ -491,7 +491,7 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
 
     await screen.findByLabelText('Remove diagram.png')
     await screen.findByLabelText('Remove notes.txt')
-    expect(ta.value).toBe('')
+    expect(composerValue(ta)).toBe('[diagram.png][notes.txt]')
   })
 
   it('redo (Ctrl+Shift+Z) replays an undone paste', async () => {

@@ -175,23 +175,23 @@ describe('Tooltip', () => {
     }
   })
 
-  it('keeps an unpinned card open when its selectable content is clicked', () => {
+  it('keeps selectable tooltip content open when it is clicked', () => {
     vi.useFakeTimers()
     try {
       const { container } = render(
-        <Tooltip variant="card" pin={false} content={<p>select this text</p>}>
+        <Tooltip content={<p>select this text</p>}>
           <button>commit</button>
         </Tooltip>,
       )
       const span = wrapper(container)
       fireEvent.mouseEnter(span)
-      act(() => void vi.advanceTimersByTime(0))
+      act(() => void vi.advanceTimersByTime(600))
 
       const body = screen.getByText('select this text')
       fireEvent.click(body)
 
       expect(body).toBeInTheDocument()
-      expect(body.parentElement).toHaveClass('select-text')
+      expect(body.closest('[role="tooltip"]')).toHaveClass('select-text')
     } finally {
       vi.useRealTimers()
     }
