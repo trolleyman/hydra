@@ -1592,11 +1592,32 @@ function GapCount({ hidden, onClick }: { hidden: number; onClick: () => void }) 
 // GapExpander sits between two changes. Both ⌄ (reveal more after the upper
 // change) and ⌃ (reveal more before the lower change) live together on the left;
 // the "··· N lines ···" label reveals the whole gap.
+function AnimatedExpanderRow({ closing, children }: { closing?: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !closing || typeof el.animate !== 'function') return
+    const animation = el.animate(
+      [
+        { height: `${el.getBoundingClientRect().height}px`, opacity: 1 },
+        { height: '0px', opacity: 0 },
+      ],
+      { duration: CONTEXT_REVEAL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)', fill: 'forwards' },
+    )
+    return () => animation.cancel()
+  }, [closing])
+  return (
+    <div ref={ref} className={`overflow-hidden ${closing ? 'pointer-events-none' : ''}`}>
+      <div className={EXPANDER_ROW}>{children}</div>
+    </div>
+  )
+}
+
 function GapExpander({ seg, label, onDown, onUp, onAll }: {
   seg: RenderSeg; label: ContextLabel | undefined; onDown: () => void; onUp: () => void; onAll: () => void
 }) {
   return (
-    <div className={EXPANDER_ROW} data-context-expander>
+    <AnimatedExpanderRow closing={seg.closing}>
       <div className={EXPANDER_BTNS}>
         <Tooltip side="top" content={`Expand down ${EXPAND_STEP} lines`}>
           <button onClick={onDown} className={EXPANDER_BTN}><ChevronDown className="w-3 h-3" /></button>
@@ -1607,7 +1628,7 @@ function GapExpander({ seg, label, onDown, onUp, onAll }: {
       </div>
       <GapCount hidden={seg.hidden!} onClick={onAll} />
       <HunkContextLabel label={label} />
-    </div>
+    </AnimatedExpanderRow>
   )
 }
 
@@ -1619,7 +1640,7 @@ function EdgeExpander({ seg, label, onStep, onAll }: {
 }) {
   const up = seg.kind === 'topedge'
   return (
-    <div className={EXPANDER_ROW} data-context-expander>
+    <AnimatedExpanderRow closing={seg.closing}>
       <div className={EXPANDER_BTNS}>
         <Tooltip side="top" content={`Expand ${up ? 'up' : 'down'} ${EXPAND_STEP} lines`}>
           <button onClick={onStep} className={EXPANDER_BTN}>
@@ -1629,7 +1650,7 @@ function EdgeExpander({ seg, label, onStep, onAll }: {
       </div>
       <GapCount hidden={seg.hidden!} onClick={onAll} />
       <HunkContextLabel label={label} />
-    </div>
+    </AnimatedExpanderRow>
   )
 }
 
@@ -1658,14 +1679,12 @@ const FILE_COLLAPSE_MS = 200
 // height behind once it finishes. Reduced-motion users get the immediate update.
 const CONTEXT_REVEAL_MS = 180
 
-function AnimatedContextRun({ lineCount, absorbRemovedExpander, children }: {
+function AnimatedContextRun({ lineCount, children }: {
   lineCount: number
-  absorbRemovedExpander: boolean
   children: ReactNode
 }) {
   const ref = useRef<HTMLDivElement | null>(null)
   const previous = useRef<{ count: number; height: number } | null>(null)
-  const adjacentExpanderHeight = useRef(0)
   const animation = useRef<Animation | null>(null)
 
   useLayoutEffect(() => {
@@ -1674,10 +1693,6 @@ function AnimatedContextRun({ lineCount, absorbRemovedExpander, children }: {
     const nextHeight = el.scrollHeight
     const prev = previous.current
     previous.current = { count: lineCount, height: nextHeight }
-    const adjacent = [el.previousElementSibling, el.nextElementSibling]
-      .find((sibling) => sibling?.hasAttribute('data-context-expander'))
-    if (adjacent) adjacentExpanderHeight.current = adjacent.getBoundingClientRect().height
-
     animation.current?.cancel()
     animation.current = null
     if (!prev || lineCount <= prev.count || nextHeight <= prev.height) return
@@ -1685,17 +1700,13 @@ function AnimatedContextRun({ lineCount, absorbRemovedExpander, children }: {
 
     animation.current = el.animate(
       [
-        // On the final reveal the now-unneeded expander unmounts in this same
-        // render. Start the growing run one expander-row taller to absorb that
-        // lost space; otherwise the content below jumps up by the row's height
-        // before beginning its downward glide.
-        { height: `${prev.height + (absorbRemovedExpander ? adjacentExpanderHeight.current : 0)}px`, opacity: 0.72 },
+        { height: `${prev.height}px`, opacity: 0.72 },
         { height: `${nextHeight}px`, opacity: 1 },
       ],
       { duration: CONTEXT_REVEAL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
     )
     return () => animation.current?.cancel()
-  }, [lineCount, absorbRemovedExpander])
+  }, [lineCount])
 
   return <div ref={ref} className="overflow-hidden">{children}</div>
 }
@@ -2075,12 +2086,45 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segments, hunksSig, lang, highlightedOld, highlightedNew])
 
-  const setRegion = useCallback((id: string, patch: { top?: number; bot?: number }) => {
+  const closingTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  useEffect(() => () => {
+    closingTimers.current.forEach((timer) => clearTimeout(timer))
+    closingTimers.current.clear()
+  }, [])
+  const setRegion = useCallback((id: string, patch: { top?: number; bot?: number }, seg?: RenderSeg) => {
+    const nextTop = patch.top ?? seg?.top ?? 0
+    const nextBot = patch.bot ?? seg?.bot ?? 0
+    const closing = !!seg?.length && seg.length - nextTop - nextBot <= MIN_COLLAPSE_GAP
+      && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     setReveal((prev) => {
       const next = new Map(prev)
-      next.set(id, { ...(next.get(id) ?? {}), ...patch })
+      next.set(id, {
+        ...(next.get(id) ?? {}),
+        ...patch,
+        closingHidden: closing ? seg?.hidden : undefined,
+        closingSide: closing ? (patch.top != null ? 'top' : 'bot') : undefined,
+        settled: false,
+      })
       return next
     })
+    const oldTimer = closingTimers.current.get(id)
+    if (oldTimer) clearTimeout(oldTimer)
+    if (closing) {
+      closingTimers.current.set(id, setTimeout(() => {
+        setReveal((prev) => {
+          const next = new Map(prev)
+          const value = next.get(id)
+          if (value) next.set(id, {
+            ...value,
+            closingHidden: undefined,
+            closingSide: undefined,
+            settled: true,
+          })
+          return next
+        })
+        closingTimers.current.delete(id)
+      }, CONTEXT_REVEAL_MS))
+    }
   }, [])
 
   // Revealing context never touches the scroll. Both directions insert lines on
@@ -2148,8 +2192,8 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   // read-only repo view keeps no "Add to review" button at all.
   const addToReviewForHunk = onAddToReview ? onAddToReviewForFile : undefined
 
-  const renderLines = (lines: DiffLine[], key: string, absorbRemovedExpander = false) => (
-    <AnimatedContextRun key={key} lineCount={lines.length} absorbRemovedExpander={absorbRemovedExpander}>
+  const renderLines = (lines: DiffLine[], key: string) => (
+    <AnimatedContextRun key={key} lineCount={lines.length}>
       {sideBySide
       ? <SideBySideHunk hunk={synthHunk(lines)} path={file.path} highlightedOld={highlightedOld} highlightedNew={highlightedNew}
         wordRangesOld={wordRangesOld} wordRangesNew={wordRangesNew} comments={commentsByLine}
@@ -2326,25 +2370,21 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
             // client-side (no network), per-region, with whole-file highlighting.
             <div className="overflow-hidden">
               {segments.map((seg) => {
-                if (seg.kind === 'lines') {
-                  const revealRun = /^(ct|cb)(\d+)$/.exec(seg.key)
-                  const expanderStillPresent = revealRun && segments.some((part) => part.key === `g${revealRun[2]}`)
-                  return renderLines(seg.lines!, seg.key, !!revealRun && !expanderStillPresent)
-                }
+                if (seg.kind === 'lines') return renderLines(seg.lines!, seg.key)
                 if (seg.kind === 'gap') return (
                   <GapExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
-                    onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP })}
-                    onUp={() => setRegion(seg.regionId!, { bot: seg.bot! + EXPAND_STEP })}
-                    onAll={() => setRegion(seg.regionId!, { top: seg.length! })} />
+                    onDown={() => setRegion(seg.regionId!, { top: seg.top! + EXPAND_STEP }, seg)}
+                    onUp={() => setRegion(seg.regionId!, { bot: seg.bot! + EXPAND_STEP }, seg)}
+                    onAll={() => setRegion(seg.regionId!, { top: seg.length! }, seg)} />
                 )
                 // topedge reveals upward (toward line 1), botedge downward; both
                 // grow away from the expander row without moving the scroll.
                 return (
                   <EdgeExpander key={seg.key} seg={seg} label={contextLabels.get(seg.key)}
                     onStep={() => setRegion(seg.regionId!, seg.kind === 'topedge'
-                      ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP })}
+                      ? { bot: seg.bot! + EXPAND_STEP } : { top: seg.top! + EXPAND_STEP }, seg)}
                     onAll={() => setRegion(seg.regionId!, seg.kind === 'topedge'
-                      ? { bot: seg.length! } : { top: seg.length! })} />
+                      ? { bot: seg.length! } : { top: seg.length! }, seg)} />
                 )
               })}
             </div>

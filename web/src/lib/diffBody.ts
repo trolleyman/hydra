@@ -184,7 +184,13 @@ export function isContiguous(lines: DiffLine[]): boolean {
 // How many context lines a region currently shows at its top (adjacent to the
 // preceding change) and bottom (adjacent to the following change). Absent ⇒
 // region uses its default.
-export type RevealMap = Map<string, { top?: number; bot?: number }>
+export type RevealMap = Map<string, {
+  top?: number
+  bot?: number
+  closingHidden?: number
+  closingSide?: 'top' | 'bot'
+  settled?: boolean
+}>
 
 export interface RenderSeg {
   kind: 'lines' | 'gap' | 'topedge' | 'botedge'
@@ -196,6 +202,7 @@ export interface RenderSeg {
   bot?: number     // resolved context lines shown at the region's bottom
   length?: number  // total lines in the region
   context?: DiffLine // enclosing function/section line of the code just below the gap
+  closing?: boolean // the fully-revealed expander is playing its exit animation
 }
 
 // Takes just the line numbers, so a caller can name a region it hasn't got the
@@ -296,8 +303,16 @@ export function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderS
     const isTrail = ri === runs.length - 1
     const id = regionKey(fullLines[run.s])
     const ov = reveal.get(id)
-    const top = Math.min(L, ov?.top ?? (isLead ? 0 : CTX))
-    const bot = Math.min(L - top, ov?.bot ?? (isTrail ? 0 : CTX))
+    const requestedTop = ov?.top ?? (isLead ? 0 : CTX)
+    const requestedBot = ov?.bot ?? (isTrail ? 0 : CTX)
+    // During the expander's exit, preserve the already-visible lines on the
+    // opposite side instead of merging the entire run into the growing side.
+    // Otherwise that small opposite segment unmounts immediately and creates a
+    // second, subtler jump while the main segment is still expanding.
+    const closingBot = Math.min(L, requestedBot)
+    const closingTop = Math.min(L, requestedTop)
+    const top = ov?.closingSide === 'top' ? L - closingBot : Math.min(L, requestedTop)
+    const bot = ov?.closingSide === 'bot' ? L - closingTop : Math.min(L - top, requestedBot)
     const hidden = L - top - bot
     if (hidden <= MIN_COLLAPSE_GAP) {
       // Keep the growing side's key when a reveal consumes the final hidden
@@ -305,12 +320,34 @@ export function buildSegments(fullLines: DiffLine[], reveal: RevealMap): RenderS
       // render where the expander disappears instead of remounting the run and
       // snapping straight to its full height. Short runs that were never
       // collapsed keep their neutral key.
-      const key = ov?.bot != null && ov.top == null
+      const key = ov?.settled
+        ? `c${run.s}`
+        : ov?.bot != null && ov.top == null
         ? `cb${run.s}`
         : ov?.top != null
           ? `ct${run.s}`
           : `c${run.s}`
-      segs.push({ kind: 'lines', key, lines: fullLines.slice(run.s, run.e) })
+      // Keep the expander in the tree for one short exit animation. The line run
+      // above/below it is already growing to full height, so collapsing the old
+      // row at the same time makes the handoff continuous instead of replacing
+      // a blue bar with clipped code in one frame.
+      if (ov?.closingHidden != null) {
+        if (top > 0) segs.push({ kind: 'lines', key: `ct${run.s}`, lines: fullLines.slice(run.s, run.s + top) })
+        const closing = {
+          kind: isLead ? 'topedge' as const : isTrail ? 'botedge' as const : 'gap' as const,
+          key: `g${run.s}`,
+          regionId: id,
+          hidden: ov.closingHidden,
+          top,
+          bot,
+          length: L,
+          closing: true,
+        }
+        segs.push(closing)
+        if (bot > 0) segs.push({ kind: 'lines', key: `cb${run.s}`, lines: fullLines.slice(run.e - bot, run.e) })
+      } else {
+        segs.push({ kind: 'lines', key, lines: fullLines.slice(run.s, run.e) })
+      }
       return
     }
     if (top > 0) segs.push({ kind: 'lines', key: `ct${run.s}`, lines: fullLines.slice(run.s, run.s + top) })

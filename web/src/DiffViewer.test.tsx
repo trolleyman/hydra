@@ -58,6 +58,29 @@ describe('context reveal animation keys', () => {
     const expanded = buildSegments(lines, reveal).find((seg) => seg.key === 'cb0')
     expect(expanded).toMatchObject({ kind: 'lines', lines: lines.slice(0, 40) })
   })
+
+  it('keeps the bar and opposite context mounted throughout the final reveal', () => {
+    const lines = [add('before', 1)]
+    for (let i = 2; i <= 11; i++) lines.push(ctx(`context ${i}`, i))
+    lines.push(add('after', 12))
+    const id = regionKey(lines[1])
+
+    const closing: RevealMap = new Map([[id, {
+      top: 10,
+      closingHidden: 4,
+      closingSide: 'top',
+    }]])
+    expect(buildSegments(lines, closing).map((seg) => [seg.key, seg.kind, seg.closing])).toEqual([
+      ['b0', 'lines', undefined],
+      ['ct1', 'lines', undefined],
+      ['g1', 'gap', true],
+      ['cb1', 'lines', undefined],
+      ['b11', 'lines', undefined],
+    ])
+
+    const settled: RevealMap = new Map([[id, { top: 10, settled: true }]])
+    expect(buildSegments(lines, settled).map((seg) => seg.key)).toEqual(['b0', 'c1', 'b11'])
+  })
 })
 
 // Two windowed `-U3` hunks with a gap between them - the other render branch.
