@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hasNativeFolderPicker, hasNativeNotifications, onDesktopCommand, onDesktopImagePaste, openChatWindow, postDesktopMessage } from './desktopBridge'
+import { hasNativeFolderPicker, hasNativeNotifications, isCompactChatWindow, onDesktopCommand, onDesktopImagePaste, openChatWindow, postDesktopMessage } from './desktopBridge'
 
 describe('desktopBridge', () => {
   afterEach(() => {
@@ -47,11 +47,14 @@ describe('desktopBridge', () => {
   it('requires explicit capabilities for platform-specific bridge features', () => {
     expect(hasNativeNotifications()).toBe(false)
     expect(hasNativeFolderPicker()).toBe(false)
+    expect(isCompactChatWindow()).toBe(false)
     ;(window as Window & { hydraDesktopCapabilities?: object }).hydraDesktopCapabilities = {
       nativeNotifications: true,
       nativeFolderPicker: false,
+      compactChatWindow: true,
     }
     expect(hasNativeNotifications()).toBe(true)
     expect(hasNativeFolderPicker()).toBe(false)
+    expect(isCompactChatWindow()).toBe(true)
   })
 })

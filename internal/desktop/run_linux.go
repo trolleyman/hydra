@@ -20,6 +20,8 @@ typedef struct {
 	char *project_id;
 	char *agent_id;
 	gboolean active_turn;
+	guint running_agent_count;
+	gboolean command_owned_backend;
 	gboolean image_paste_target;
 	gboolean force_close;
 } HydraWindow;
@@ -41,14 +43,14 @@ typedef struct {
 	WebKitWebView *web_view;
 } HydraImagePasteRequest;
 
-static void hydra_open_window_at(HydraDesktop *desktop, const char *uri);
+static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolean compact_chat);
 
 static void hydra_show_main_window(HydraDesktop *desktop) {
 	if (desktop->primary_window != NULL) {
 		gtk_window_present(desktop->primary_window);
 		return;
 	}
-	hydra_open_window_at(desktop, desktop->uri);
+	hydra_open_window_at(desktop, desktop->uri, FALSE);
 	desktop->primary_window = gtk_application_get_active_window(desktop->app);
 }
 
@@ -64,6 +66,15 @@ static gboolean hydra_boolean_property(JSCValue *value, const char *name) {
 	gboolean result = jsc_value_is_boolean(property) && jsc_value_to_boolean(property);
 	g_object_unref(property);
 	return result;
+}
+
+static guint hydra_unsigned_property(JSCValue *value, const char *name) {
+	JSCValue *property = jsc_value_object_get_property(value, name);
+	double number = jsc_value_is_number(property) ? jsc_value_to_double(property) : 0;
+	g_object_unref(property);
+	if (number <= 0) return 0;
+	if (number >= G_MAXUINT) return G_MAXUINT;
+	return (guint)number;
 }
 
 static gboolean hydra_same_origin(HydraDesktop *desktop, const char *candidate) {
@@ -196,7 +207,7 @@ static void hydra_pick_folder(HydraWindow *window, const char *request_id) {
 static void hydra_notification_open(GSimpleAction *action, GVariant *parameter, gpointer data) {
 	HydraDesktop *desktop = data;
 	const char *uri = g_variant_get_string(parameter, NULL);
-	if (hydra_same_origin(desktop, uri)) hydra_open_window_at(desktop, uri);
+	if (hydra_same_origin(desktop, uri)) hydra_open_window_at(desktop, uri, FALSE);
 }
 
 static void hydra_show_notification(HydraWindow *window, JSCValue *value) {
@@ -228,11 +239,25 @@ static void hydra_close_choice(GObject *source, GAsyncResult *result, gpointer d
 
 static gboolean hydra_close_request(GtkWindow *gtk_window, gpointer data) {
 	HydraWindow *window = data;
-	if (window->force_close || !window->active_turn) return FALSE;
-	GtkAlertDialog *dialog = gtk_alert_dialog_new("This agent is still running");
-	gtk_alert_dialog_set_detail(dialog, "Closing the window can leave the agent running in the background.");
-	const char *buttons[] = { "Cancel", "Close and leave running", "Stop and close", NULL };
-	gtk_alert_dialog_set_buttons(dialog, buttons);
+	gboolean last_window = g_list_length(gtk_application_get_windows(window->desktop->app)) == 1;
+	if (!last_window) return FALSE;
+	gboolean stops_backend = window->command_owned_backend && last_window;
+	guint count = stops_backend ? window->running_agent_count : (window->active_turn ? 1 : 0);
+	if (window->force_close || count == 0) return FALSE;
+	char *title = g_strdup_printf("%u agent%s %s running", count, count == 1 ? "" : "s", count == 1 ? "is" : "are");
+	GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", title);
+	g_free(title);
+	const char *persistent_buttons[] = { "Cancel", "Close and leave running", "Stop and close", NULL };
+	const char *owned_buttons[] = { "Cancel", "Close and stop", NULL };
+	if (stops_backend) {
+		gtk_alert_dialog_set_detail(dialog, count == 1
+			? "Closing the last window stops the desktop backend and this agent."
+			: "Closing the last window stops the desktop backend and these agents.");
+		gtk_alert_dialog_set_buttons(dialog, owned_buttons);
+	} else {
+		gtk_alert_dialog_set_detail(dialog, "Closing this window can leave the agent running in the background.");
+		gtk_alert_dialog_set_buttons(dialog, persistent_buttons);
+	}
 	gtk_alert_dialog_set_cancel_button(dialog, 0);
 	gtk_alert_dialog_set_default_button(dialog, 1);
 	gtk_alert_dialog_choose(dialog, gtk_window, NULL, hydra_close_choice, window);
@@ -256,7 +281,7 @@ static void hydra_script_message(WebKitUserContentManager *manager, JSCValue *va
 				? g_strdup_printf("/focused/%s", escaped)
 				: g_strdup_printf("/project/%s/agent/%s", escaped, escaped_agent);
 			char *uri = hydra_origin_url(window->desktop, path);
-			hydra_open_window_at(window->desktop, uri);
+			hydra_open_window_at(window->desktop, uri, TRUE);
 			g_free(uri); g_free(path); g_free(escaped); g_free(escaped_agent);
 		}
 		g_free(project); g_free(agent);
@@ -268,6 +293,8 @@ static void hydra_script_message(WebKitUserContentManager *manager, JSCValue *va
 		window->project_id = hydra_string_property(value, "projectId");
 		window->agent_id = hydra_string_property(value, "agentId");
 		window->active_turn = hydra_boolean_property(value, "activeTurn");
+		window->running_agent_count = hydra_unsigned_property(value, "runningAgentCount");
+		window->command_owned_backend = hydra_boolean_property(value, "commandOwnedBackend");
 	} else if (g_strcmp0(type, "image-paste-target") == 0) {
 		window->image_paste_target = hydra_boolean_property(value, "enabled");
 	} else if (g_strcmp0(type, "close-window") == 0) {
@@ -314,18 +341,25 @@ static void hydra_window_destroy(GtkWidget *widget, gpointer data) {
 	g_free(window);
 }
 
-static void hydra_open_window_at(HydraDesktop *desktop, const char *uri) {
+static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolean compact_chat) {
 	GtkWidget *window = gtk_application_window_new(desktop->app);
 	gtk_window_set_title(GTK_WINDOW(window), "Hydra");
-	gtk_window_set_default_size(GTK_WINDOW(window), 1280, 820);
+	gtk_window_set_default_size(GTK_WINDOW(window), compact_chat ? 940 : 1280, compact_chat ? 780 : 820);
 
 	WebKitUserContentManager *manager = webkit_user_content_manager_new();
-	WebKitUserScript *capabilities = webkit_user_script_new(
-		"window.hydraDesktopCapabilities={nativeNotifications:true,nativeFolderPicker:true};"
+	char *capability_prefix = g_strdup_printf(
+		"window.hydraDesktopCapabilities={nativeNotifications:true,nativeFolderPicker:true,compactChatWindow:%s};",
+		compact_chat ? "true" : "false");
+	char *capability_script = g_strconcat(capability_prefix,
 		"document.addEventListener('focusin',event=>window.webkit.messageHandlers.hydra.postMessage({type:'image-paste-target',enabled:!!event.target?.hasAttribute?.('data-desktop-image-paste')}),true);"
 		"document.addEventListener('focusout',()=>queueMicrotask(()=>window.webkit.messageHandlers.hydra.postMessage({type:'image-paste-target',enabled:!!document.activeElement?.hasAttribute?.('data-desktop-image-paste')})),true);"
 		"window.addEventListener('DOMContentLoaded',()=>window.webkit.messageHandlers.hydra.postMessage({type:'keep-running',enabled:localStorage.getItem('hydra-desktop-keep-running')!=='0'}))",
+		NULL);
+	WebKitUserScript *capabilities = webkit_user_script_new(
+		capability_script,
 		WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, NULL, NULL);
+	g_free(capability_prefix);
+	g_free(capability_script);
 	webkit_user_content_manager_add_script(manager, capabilities);
 	webkit_user_script_unref(capabilities);
 	WebKitWebView *web_view = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
@@ -367,14 +401,14 @@ static void hydra_new_chat(GSimpleAction *action, GVariant *parameter, gpointer 
 	char *escaped = g_uri_escape_string(window->project_id, NULL, FALSE);
 	char *path = g_strdup_printf("/focused/%s", escaped);
 	char *uri = hydra_origin_url(desktop, path);
-	hydra_open_window_at(desktop, uri);
+	hydra_open_window_at(desktop, uri, TRUE);
 	g_free(uri); g_free(path); g_free(escaped);
 }
 
 static void hydra_settings(GSimpleAction *action, GVariant *parameter, gpointer data) {
 	HydraDesktop *desktop = data;
 	char *uri = hydra_origin_url(desktop, "/settings");
-	hydra_open_window_at(desktop, uri);
+	hydra_open_window_at(desktop, uri, FALSE);
 	g_free(uri);
 }
 
@@ -388,16 +422,24 @@ static void hydra_quit_choice(GObject *source, GAsyncResult *result, gpointer da
 
 static void hydra_quit(GSimpleAction *action, GVariant *parameter, gpointer data) {
 	HydraDesktop *desktop = data;
-	gboolean active = FALSE;
+	guint active = 0;
+	gboolean command_owned = FALSE;
 	for (GList *item = gtk_application_get_windows(desktop->app); item != NULL; item = item->next) {
 		HydraWindow *window = g_object_get_data(G_OBJECT(item->data), "hydra-window");
-		if (window != NULL && window->active_turn) { active = TRUE; break; }
+		if (window == NULL) continue;
+		command_owned = command_owned || window->command_owned_backend;
+		if (window->running_agent_count > active) active = window->running_agent_count;
 	}
 	if (!active) { g_application_quit(G_APPLICATION(desktop->app)); return; }
-	GtkAlertDialog *dialog = gtk_alert_dialog_new("Agents are still running");
-	gtk_alert_dialog_set_detail(dialog, "Quitting closes Hydra windows but leaves the shared backend and agents running.");
-	const char *buttons[] = { "Cancel", "Quit and leave running", NULL };
-	gtk_alert_dialog_set_buttons(dialog, buttons);
+	char *title = g_strdup_printf("%u agent%s %s running", active, active == 1 ? "" : "s", active == 1 ? "is" : "are");
+	GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", title);
+	g_free(title);
+	gtk_alert_dialog_set_detail(dialog, command_owned
+		? "Quitting stops the command-owned desktop backend and its running agents."
+		: "Quitting closes Hydra windows but leaves the shared backend and agents running.");
+	const char *persistent_buttons[] = { "Cancel", "Quit and leave running", NULL };
+	const char *owned_buttons[] = { "Cancel", "Quit and stop", NULL };
+	gtk_alert_dialog_set_buttons(dialog, command_owned ? owned_buttons : persistent_buttons);
 	gtk_alert_dialog_set_cancel_button(dialog, 0);
 	gtk_alert_dialog_choose(dialog, gtk_application_get_active_window(desktop->app), NULL, hydra_quit_choice, desktop);
 	g_object_unref(dialog);
@@ -418,7 +460,7 @@ static int hydra_command_line(GApplication *application, GApplicationCommandLine
 	char **argv = g_application_command_line_get_arguments(command_line, &argc);
 	const char *uri = argc > 1 && hydra_same_origin(desktop, argv[1]) ? argv[1] : desktop->uri;
 	if (g_strcmp0(uri, desktop->uri) == 0) hydra_show_main_window(desktop);
-	else hydra_open_window_at(desktop, uri);
+	else hydra_open_window_at(desktop, uri, FALSE);
 	g_strfreev(argv);
 	return 0;
 }

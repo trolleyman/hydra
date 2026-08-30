@@ -42,7 +42,8 @@ import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
-import { hasDesktopBridge, onDesktopCommand, postDesktopMessage, setDesktopKeepRunning } from '../lib/desktopBridge'
+import { hasDesktopBridge, isCompactChatWindow, onDesktopCommand, postDesktopMessage, setDesktopKeepRunning } from '../lib/desktopBridge'
+import { agentHasActiveTurn, desktopRunningAgentCount } from '../lib/desktopCloseState'
 import type { AgentCommand } from '../lib/agentCommands'
 
 export const Route = createRootRoute({
@@ -237,6 +238,12 @@ function RootLayout() {
   const mobileSidebarOpen = useSidebarStore((s) => s.mobileOpen)
   const toggleSidebar = useSidebarStore((s) => s.toggle)
   const isDesktopViewport = useMediaQuery(SIDEBAR_DESKTOP_QUERY)
+  const [compactSidebarCollapsed, setCompactSidebarCollapsed] = useState(isCompactChatWindow)
+  const effectiveDesktopCollapsed = desktopCollapsed || compactSidebarCollapsed
+  const handleToggleSidebar = useCallback(() => {
+    if (isDesktopViewport && compactSidebarCollapsed) setCompactSidebarCollapsed(false)
+    else toggleSidebar()
+  }, [compactSidebarCollapsed, isDesktopViewport, toggleSidebar])
   // When adding a project, the user first reviews its repo-controlled
   // .hydra/config.toml (which can run code) before it's registered. This holds
   // the pending review; its callbacks resolve the in-flight add (see
@@ -304,8 +311,9 @@ function RootLayout() {
   })
   const currentProjectUnread = useAgentStore((s) => s.agents.reduce((n, a) => n + (a.has_unread_changes ? 1 : 0), 0))
   const selectedAgentActiveTurn = useAgentStore((s) =>
-    selectedAgentId ? s.agents.find((agent) => agent.id === selectedAgentId)?.session_status === 'running' : false,
+    selectedAgentId ? agentHasActiveTurn(s.agents.find((agent) => agent.id === selectedAgentId)) : false,
   )
+  const runningAgentCount = desktopRunningAgentCount(projects, selectedAgentActiveTurn)
 
   // Record every project you land on (via dropdown, switcher, direct nav, or
   // boot restore) so the Ctrl+` switcher can order by last-visited.
@@ -627,7 +635,7 @@ function RootLayout() {
     [projects, currentProjectId],
   )
   const { state: switcherState, setIndex: switcherSetIndex, commit: switcherCommit } =
-    useGlobalShortcuts({ projects: switcherProjects, currentProjectId, selectProject })
+    useGlobalShortcuts({ projects: switcherProjects, currentProjectId, selectProject, toggleSidebar: handleToggleSidebar })
 
   // restartErrorText pulls the server's own explanation out of an ApiError, so a
   // 403 reads as "not running from a Hydra checkout" rather than "Forbidden".
@@ -911,7 +919,7 @@ function RootLayout() {
   // top bar toggle's icon/tooltip. On desktop the toggle only renders while
   // the sidebar is hidden (the sidebar's own sync row hosts the hide button);
   // on mobile it stays as a true toggle.
-  const sidebarVisible = isDesktopViewport ? !desktopCollapsed : mobileSidebarOpen
+  const sidebarVisible = isDesktopViewport ? !effectiveDesktopCollapsed : mobileSidebarOpen
 
   // Native windows render the same responsive routes as the browser. The bridge
   // only adds native lifecycle behavior; it does not select a separate shell.
@@ -929,8 +937,10 @@ function RootLayout() {
       projectId: currentProjectId ?? undefined,
       agentId: selectedAgentId,
       activeTurn: selectedAgentActiveTurn,
+      runningAgentCount,
+      commandOwnedBackend: backendLifetime === 'command-owned',
     })
-  }, [desktopWindow, currentProjectId, selectedAgentId, selectedAgentActiveTurn])
+  }, [desktopWindow, currentProjectId, selectedAgentId, selectedAgentActiveTurn, runningAgentCount, backendLifetime])
 
   useEffect(() => {
     if (!desktopWindow || !currentProjectId || !selectedAgentId) return
@@ -959,7 +969,7 @@ function RootLayout() {
           <button
             type="button"
             aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
-            onClick={toggleSidebar}
+            onClick={handleToggleSidebar}
             className="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
           >
             {isDesktopViewport ? (
@@ -1006,7 +1016,7 @@ function RootLayout() {
           reflowing); the mobile panel slides off-canvas via translate. The top
           bar's toggle reveals it again. */}
       <aside
-        style={{ width: desktopCollapsed ? 0 : sidebarWidth }}
+        style={{ width: effectiveDesktopCollapsed ? 0 : sidebarWidth }}
         className={`relative overflow-hidden max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:!w-full bg-white dark:bg-gray-800 flex shrink-0 ${sidebarResizing ? '' : 'transition-[width,transform,translate] duration-200'} ${mobileSidebarOpen ? 'translate-x-0' : 'max-md:-translate-x-full'}`}
       >
         {/* Inner content at a fixed width (the expanded sidebar width, or the full
@@ -1348,7 +1358,7 @@ function RootLayout() {
             but a couple of pixels of the thumb. Straddling the seam (3px over
             the sidebar, 7px over the content) leaves the scrollbar grabbable
             while keeping a comfortable drag target. */}
-        {!desktopCollapsed && (
+        {!effectiveDesktopCollapsed && (
           <div
             onPointerDown={handleSidebarResizeStart}
             title="Drag to resize"

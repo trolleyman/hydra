@@ -397,8 +397,10 @@ foreground `mage run` daemon alive. A directly launched installed desktop keeps
 its global backend running according to the preference in Settings. The native
 application has one primary Hydra window; further activations present it, while
 additional windows may open new or existing conversations using the same
-responsive routes. The same URLs open in a browser when no native bridge is
-present.
+responsive routes. A native New Chat window starts at 940 x 780 with its sidebar
+collapsed; expanding it is local to that window and does not overwrite the main
+window's saved sidebar preference. The same URLs open in a browser when no
+native bridge is present.
 Daemon control and web listeners become ready before best-effort recovery of
 previously running heads. Slow or broken provider/sandbox recovery therefore
 appears in the daemon log without making the desktop report a false startup
@@ -414,8 +416,13 @@ timeout.
 - [x] Add native New Window/New Chat/Settings commands, project handoff, a
   constrained [`hydra://` deep-link grammar](desktop-deep-links.md), and
   active-window close confirmation.
-- [x] Make Quit warn about active turns and explicitly leave the shared backend
-  and agents running, regardless of which client originally launched it.
+- [x] Guard only the last window while agents are actively working. Finished or
+  waiting heads may retain a reusable sandbox process without triggering the
+  guard, and closing a secondary window never offers to stop its shared head.
+- [x] Make close and Quit copy follow backend ownership. Installed persistent
+  backends can leave agents running; command-owned Mage desktop runs say that
+  closing the last window stops the backend and use a single Close and stop
+  action. Dialog titles report the number of active agents.
 - Keep browser-safe dialogs and navigation paths for every essential action.
 
 Exit criterion: windows at full and chat routes support the agreed lifecycle,
