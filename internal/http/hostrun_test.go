@@ -43,12 +43,12 @@ func TestRunApprovedHostCommandNonZeroExit(t *testing.T) {
 	}
 }
 
-func TestRunApprovedHostCommandNoWorktree(t *testing.T) {
+func TestRunApprovedHostCommandNoWorkingDirectory(t *testing.T) {
 	dir := t.TempDir()
 	runApprovedHostCommand(dir, "nw", "", "echo hi")
 	res, ok, _ := gate.ReadHostRunResult(dir, "nw")
 	if !ok || res.Error == "" || res.ExitCode == 0 {
-		t.Fatalf("missing worktree should yield an error result, got ok=%v %+v", ok, res)
+		t.Fatalf("missing working directory should yield an error result, got ok=%v %+v", ok, res)
 	}
 }
 

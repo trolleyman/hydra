@@ -248,7 +248,7 @@ describe('selectionToMarkdown', () => {
         <div data-copy-code>
           {lines.map((l, i) => (
             <span key={i}>
-              <span style={{ userSelect: 'none' }}>{i + 1}</span>
+              <span data-copy-skip style={{ userSelect: 'none' }}>{i + 1}</span>
               <span data-copy-line>{l}</span>
             </span>
           ))}
@@ -263,13 +263,13 @@ describe('selectionToMarkdown', () => {
   it('keeps the newlines and indentation of a pre panel', () => {
     const { container } = render(
       <div>
-        <div>Output</div>
+        <div data-copy-skip style={{ userSelect: 'none' }}>Output</div>
         <pre>{'ok\n    indented\n\nlast'}</pre>
       </div>,
     )
     const range = document.createRange()
     range.selectNodeContents(container)
-    expect(selectionToMarkdown(sel(range))).toBe('Output\nok\n    indented\n\nlast')
+    expect(selectionToMarkdown(sel(range))).toBe('ok\n    indented\n\nlast')
   })
 
   it('skips control labels, which a drag cannot select anyway', () => {

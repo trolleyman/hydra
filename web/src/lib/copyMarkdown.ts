@@ -42,7 +42,9 @@ const BLOCK_TAGS = new Set([
 const VOID_CONTENT = new Set(['IMG', 'BR', 'HR', 'INPUT', 'VIDEO'])
 
 // Never contribute text: decorative icons, and anything explicitly hidden.
-// data-copy-skip is the opt-out for chrome that would otherwise read as content.
+// data-copy-skip is the deterministic opt-out for chrome that would otherwise
+// read as content. Keep it even beside `user-select: none`: WebKitGTK can still
+// include those nodes when a drag crosses grid rows or block boundaries.
 //
 // BUTTON (and the other form controls) are here because a drag cannot select
 // their label in the first place - browsers make control text unselectable, so

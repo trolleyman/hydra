@@ -19,7 +19,7 @@
 pre_prompt = '''
 - `rg` searches RECURSIVELY by default - `rg pat internal/` and `rg pat` already walk the tree, and there is no `-r` for it. In `rg`, `-r` is `--replace`: `rg -rn "pat" dir` silently rewrites every match to `n` and prints no line numbers, which looks like a search that found odd results rather than like a mistake. Reach for `--hidden`, `--no-ignore` or `-u` when the default is skipping files you want. (`-r`/`-R` for recursion is `grep`.)
 - Use aube if it is available, otherwise npm. For one-off tools use `aubx <tool>` (aube's npx, short for `aube exec`) when on aube, else `npx <tool>`. Run standalone TypeScript scripts (web/scripts, web/e2e) with `node` directly - Node strips the types; aube is a package manager only and cannot run them.
-- Check using mage build before committing
+- Run focused tests before each logical commit. Run `mage build` once after the implementation is complete, before the final commit and handoff; repeat it earlier only at a meaningful integration checkpoint.
 - Run `mage tidy` before committing Go changes and fix any warnings it reports
 - After changing web code, run `cd web && aube run lint` (`npm run lint` off aube) and fix the errors AND warnings you introduced. It runs `tsc -b` before eslint, so it typechecks too - eslint alone does NOT, and a type error will otherwise only surface at `mage build`.
 - After changing Go code, run `go test ./...` and make sure it passes
