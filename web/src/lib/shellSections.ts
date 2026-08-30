@@ -1576,7 +1576,9 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
   // one its maximum from the left is exactly the false boundary this module
   // exists not to draw.
   const capped = bounds.reduce<number | null>((sum, b) => (sum == null || b == null ? null : sum + b), 0)
-  if (capped != null && slice.length < capped) return languageOnlyDistribution(producers, slice)
+  const selfBoundedEdge = searchExtent(producers[0], slice, lo, hi, 'start') != null
+    || searchExtent(producers[producers.length - 1], slice, lo, hi, 'end') != null
+  if (capped != null && slice.length < capped && !selfBoundedEdge) return languageOnlyDistribution(producers, slice)
   // Whether the counts leave no room for a producer to have fallen short of its
   // range: every one of them bounded, and the bounds adding up to exactly what
   // came back. Short of that, a `sed -n 1,20p f` prints twenty lines or however
@@ -1604,8 +1606,13 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
 
   let head = 0
   for (; head < producers.length; head++) {
-    const limit = bounds[head]
-      ?? searchExtent(producers[head], slice, lo, hi, 'start')
+    // A bounded search still identifies its actual rows by their path/number
+    // prefixes. Prefer that evidence over `| head -500`, which is only a
+    // maximum: taking the cap first lets a short search swallow the file view
+    // after it and leaves both stretches as anonymous terminal output.
+    const search = searchExtent(producers[head], slice, lo, hi, 'start')
+    const limit = search
+      ?? bounds[head]
       ?? diskExtent(producers[head], slice, lo, hi, 'start')
     if (limit == null) break
     const n = Math.min(limit, hi - lo)
@@ -1613,19 +1620,20 @@ function distribute(producers: ScriptStep[], slice: string[], failed: ReadonlySe
     if (!fits(producers[head], lo)) { exact[head] = true; continue }
     out[head] = slice.slice(lo, lo + n)
     lo += n
-    if (vouched(producers[head], bounds[head])) exact[head] = true
+    if (search != null || vouched(producers[head], bounds[head])) exact[head] = true
   }
   let tail = producers.length - 1
   for (; tail > head; tail--) {
-    const limit = bounds[tail]
-      ?? searchExtent(producers[tail], slice, lo, hi, 'end')
+    const search = searchExtent(producers[tail], slice, lo, hi, 'end')
+    const limit = search
+      ?? bounds[tail]
       ?? diskExtent(producers[tail], slice, lo, hi, 'end')
     if (limit == null) break
     const n = Math.min(limit, hi - lo)
     if (!fits(producers[tail], hi - n)) { exact[tail] = true; continue }
     out[tail] = slice.slice(hi - n, hi)
     hi -= n
-    if (vouched(producers[tail], bounds[tail])) exact[tail] = true
+    if (search != null || vouched(producers[tail], bounds[tail])) exact[tail] = true
   }
   // More than one producer with no bound of its own leaves a boundary nothing
   // in the script pins down - the common case, and why those separators matter.

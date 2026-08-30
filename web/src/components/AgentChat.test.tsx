@@ -146,6 +146,18 @@ describe('sectioned search output', () => {
     expect(rows).toHaveLength(2)
     expect(rows[1].html).not.toContain('token bold')
   })
+
+  it('keeps each source path with its line number in the gutter model', () => {
+    const rows = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n reconcile internal/chat internal/heads',
+      match: { paths: ['internal/chat', 'internal/heads'], numbered: true },
+      lines: ['internal/chat/manager.go:560:func (w *worker) reconcileCommits() {'],
+    }])
+
+    expect(rows[0]).toMatchObject({ file: 'internal/chat/manager.go', num: '560' })
+    expect(rows[0].html).toContain('token keyword')
+  })
 })
 
 async function connectedComposer(): Promise<HTMLTextAreaElement> {

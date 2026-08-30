@@ -2741,9 +2741,6 @@ interface ScriptOutputRow {
   // said went wrong (lib/buildOutput). There is no grammar to
   // run over those, just shapes, so they arrive as spans.
   spans?: OutputSpan[]
-  // The `path:` a multi-file search printed in front of the line, shown lowlit
-  // so the file it names does not read as part of the line's code.
-  prefix?: string
   // A prefix the tool wrote in its OWN colours rather than one to lowlight - the
   // commit, author and date in front of each line of a blame.
   prefixSpans?: OutputSpan[]
@@ -2785,7 +2782,6 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
     run.forEach((l, i) => rows.push({
       num: l.num,
       html: html[i] ?? '',
-      prefix: l.path || undefined,
       file: l.path || onlyPath || undefined,
       tone: 'code',
     }))
@@ -3035,13 +3031,12 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
                 // right tool here (see the tooltip conventions in CLAUDE.md).
                 title={row.file ? (row.num ? `${row.file}:${row.num}` : row.file) : undefined}
                 className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
-              >{row.num}</span>
+              >{row.file && row.num ? `${row.file}:${row.num}` : row.num}</span>
             )}
             <span
               data-copy-line
               className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
             >
-              {row.prefix && <span className="text-stone-400 dark:text-stone-500">{row.prefix}:</span>}
               {row.prefixSpans?.map((sp, j) => <span key={j} className={sp.cls}>{sp.text}</span>)}
               {row.prefixSpans && ' '}
               {row.spans
