@@ -15,19 +15,19 @@ package config
 type NotifyConfig struct {
 	// TestFailures wakes the head when one of its test runners settles FAILING.
 	//
-	// On by default, which is only safe because of the gate: it fires solely while
-	// the head is IDLE, so it cannot interrupt a turn, and it is deduped per
-	// (runner, commit), so re-running the same red suite is silent. The message is
-	// one line naming the runner - the agent pulls the detail with get_test_logs,
-	// a tool it already has - so a failure costs one turn, not a transcript full
-	// of log. nil = on.
+	// Opt-in because each notification spends a model turn. When enabled, it fires
+	// solely while the head is IDLE, so it cannot interrupt a turn, and it is
+	// deduped per (runner, commit), so re-running the same red suite is silent. The
+	// message is one line naming the runner - the agent pulls the detail with
+	// get_test_logs, a tool it already has - so a failure costs one turn, not a
+	// transcript full of log. nil = off.
 	TestFailures *bool `toml:"test_failures"`
 }
 
 // NotifyTestFailures reports whether a failing test run should wake the head.
 func (c *Config) NotifyTestFailures() bool {
 	if c == nil || c.Notify == nil || c.Notify.TestFailures == nil {
-		return true
+		return false
 	}
 	return *c.Notify.TestFailures
 }

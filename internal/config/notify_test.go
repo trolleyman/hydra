@@ -2,18 +2,18 @@ package config
 
 import "testing"
 
-// The default is ON, and it has to survive every way of not saying anything -
+// The default is OFF, and it has to survive every way of not saying anything -
 // no [notify] table at all, an empty one, or a layer that sets something else.
-func TestNotifyTestFailuresDefaultsOn(t *testing.T) {
+func TestNotifyTestFailuresDefaultsOff(t *testing.T) {
 	var nilCfg *Config
-	if !nilCfg.NotifyTestFailures() {
-		t.Error("a nil config should notify (the default is on)")
+	if nilCfg.NotifyTestFailures() {
+		t.Error("a nil config should not notify (the default is off)")
 	}
-	if !(&Config{}).NotifyTestFailures() {
-		t.Error("no [notify] table should notify")
+	if (&Config{}).NotifyTestFailures() {
+		t.Error("no [notify] table should leave notifications off")
 	}
-	if !(&Config{Notify: &NotifyConfig{}}).NotifyTestFailures() {
-		t.Error("an empty [notify] table should notify")
+	if (&Config{Notify: &NotifyConfig{}}).NotifyTestFailures() {
+		t.Error("an empty [notify] table should leave notifications off")
 	}
 	off := false
 	if (&Config{Notify: &NotifyConfig{TestFailures: &off}}).NotifyTestFailures() {
@@ -37,6 +37,6 @@ func TestNotifyMergesAcrossLayers(t *testing.T) {
 	// And a layer that says nothing about notify leaves the earlier answer alone.
 	base.Merge(Config{})
 	if base.NotifyTestFailures() {
-		t.Error("a layer with no [notify] table reset the setting")
+		t.Error("a layer with no [notify] table reset the explicit off setting")
 	}
 }
