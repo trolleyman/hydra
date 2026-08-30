@@ -5,8 +5,12 @@
 # Everything NOT listed here is checked in and must stay: the two upstream
 # licences, and noto-sans-math-arrows.woff2 (a hand-picked face, not generated).
 
-# Cut from the Iosevka releases.
+# Cut from patched Nerd Font releases.
 iosevka-*.woff2
+fira-code-*.woff2
+jetbrains-mono-*.woff2
+ibm-plex-mono-*.woff2
+source-code-pro-*.woff2
 
 # The Nerd Fonts symbol fallback, appended to every mono stack.
 nerd-symbols-*.woff2

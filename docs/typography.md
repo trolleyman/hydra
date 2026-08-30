@@ -39,6 +39,12 @@ a separate plain-Iosevka option: its grid-unsafe symbols are the only meaningful
 difference, while using a size-adjusted fallback for its Nerd glyphs makes marks
 such as Starship's branch icon visibly too small.
 
+Every other bundled monospace also uses its Nerd Font Mono build, under the
+ordinary family name shown in Settings. This keeps prompt icons at the patched
+font's intended visual size. `System mono` is the sole exception: its actual
+typeface belongs to the host OS, so Hydra cannot bundle a matching patched face
+and retains the size-adjusted Symbols Nerd Font fallback for it.
+
 ## Sizes are steps
 
 Each control stores a **signed whole number of pixels** ('-1', '2') and

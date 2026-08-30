@@ -21,7 +21,8 @@
 //     time - the .woff2 files are gitignored, not committed. A checkout that has
 //     never run that script falls through to the shared Nerd Symbols face and
 //     system monospace.
-//   - Everything else comes from the single Google Fonts stylesheet in
+//   - The other bundled mono choices use their patched Nerd Font Mono releases,
+//     built alongside Iosevka. Everything proportional comes from the single Google Fonts stylesheet in
 //     index.html. A @font-face is only fetched when a glyph actually needs it,
 //     so listing nine families costs one ~3KB stylesheet, not nine downloads.
 // Adding a family means touching BOTH this file and the source that serves it.
@@ -73,10 +74,10 @@ const serifStack = (family?: string) =>
   family ? `${ARROWS}, '${family}', ${SYSTEM_SERIF}` : `${ARROWS}, ${SYSTEM_SERIF}`
 
 // Every mono stack carries the Nerd Fonts symbol face (see the @font-face pair
-// in index.css). It is unicode-range-scoped to the private-use blocks, so it is
-// only ever consulted for a Powerline separator or a Devicon and every letter
-// still comes from the real family - but without it those code points are tofu
-// boxes in any font, because no normal monospace draws them.
+// in index.css). Bundled families contain their own correctly sized Nerd glyphs,
+// so this is normally reached only by System mono or for a private-use glyph a
+// patched source omitted. It remains unicode-range-scoped and cannot take over
+// ordinary letters.
 //
 // `cellEm` is the family's advance width as a fraction of the em, MEASURED at
 // 1000px rather than assumed: 0.5 for both Iosevka cuts, 0.6 for everything else
@@ -129,10 +130,10 @@ export const FONT_OPTIONS: FontOption[] = [
     note: 'Narrow, terminal-safe Nerd Font',
     features: IOSEVKA_FEATURES,
   },
-  { id: 'fira-code', label: 'Fira Code', category: 'mono', stack: monoStack('Fira Code', 60), note: 'Ligatures for => and !=' },
-  { id: 'jetbrains-mono', label: 'JetBrains Mono', category: 'mono', stack: monoStack('JetBrains Mono', 60), note: 'Tall x-height, roomy' },
-  { id: 'ibm-plex-mono', label: 'IBM Plex Mono', category: 'mono', stack: monoStack('IBM Plex Mono', 60), note: 'Warmer, slightly wider' },
-  { id: 'source-code-pro', label: 'Source Code Pro', category: 'mono', stack: monoStack('Source Code Pro', 60), note: 'Plain and unfussy' },
+  { id: 'fira-code', label: 'Fira Code', category: 'mono', stack: monoStack('Fira Code', 60), note: 'Nerd Font with => and != ligatures' },
+  { id: 'jetbrains-mono', label: 'JetBrains Mono', category: 'mono', stack: monoStack('JetBrains Mono', 60), note: 'Roomy Nerd Font with a tall x-height' },
+  { id: 'ibm-plex-mono', label: 'IBM Plex Mono', category: 'mono', stack: monoStack('IBM Plex Mono', 60), note: 'Warmer, slightly wider Nerd Font' },
+  { id: 'source-code-pro', label: 'Source Code Pro', category: 'mono', stack: monoStack('Source Code Pro', 60), note: 'Plain and unfussy Nerd Font' },
 ]
 
 export const FONT_BY_ID: Map<string, FontOption> = new Map(FONT_OPTIONS.map((f) => [f.id, f]))
@@ -178,10 +179,8 @@ export const FONT_ROLE_SPEC: Record<FontRole, FontRoleSpec> = {
     cssVar: '--app-font-code',
     categories: ['mono'],
     // Fira Code, matching the terminal - one monospace across the app unless the
-    // user says otherwise. It also comes off the Google Fonts stylesheet, where
-    // Iosevka is self-hosted from public/fonts and only exists once
-    // scripts/build-fonts.ts has run, so this is the choice that renders as
-    // intended in a fresh checkout too.
+    // user says otherwise. All bundled mono faces are generated into
+    // public/fonts by scripts/build-fonts.ts before a production build.
     defaultId: 'fira-code',
   },
   terminal: {

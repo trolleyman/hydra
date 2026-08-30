@@ -8,11 +8,11 @@
 // rather than re-cut: the CSS is fetched once, each .woff2 it points at is
 // downloaded, and the urls are rewritten to /fonts/google/. See vendorGoogle.
 //
-// The other two are not on Google Fonts at all, so we cut our own:
+// The patched families are not served as webfonts, so we cut our own:
 //
-//   Iosevka                 the terminal-safe Iosevka Term Nerd Font Mono build.
-//                           It embeds correctly sized Nerd/Powerline glyphs and
-//                           keeps every glyph inside one terminal cell.
+//   Bundled mono families   patched Nerd Font Mono builds. They embed correctly
+//                           sized Nerd/Powerline glyphs instead of relying on a
+//                           size-adjusted fallback face.
 //   Nerd Fonts symbols      NOT an offered family - a fallback face appended to
 //                           every mono stack, scoped by unicode-range to the
 //                           private-use blocks. Without it every Powerline
@@ -23,11 +23,11 @@
 // time. `npm run build` runs this first (see the prebuild script), and it is a
 // no-op once the cache stamp matches.
 //
-// A real build costs around two minutes, nearly all of it CPU spent subsetting,
+// A real build costs around nine minutes, nearly all of it CPU spent subsetting,
 // and a fresh worktree has no output and no stamp - so with a worktree per head
 // that cost would be paid repeatedly for identical bytes. The built faces are therefore also
 // kept in ~/.cache/hydra/fonts/<signature>/: the first build anywhere fills it
-// and every worktree after that copies (~7MB, ~0.06s) without touching the
+// and every worktree after that copies (~14MB, ~0.1s) without touching the
 // network or a subsetter. Only a version bump or an edit to the subsets below
 // changes the signature and pays the real cost again.
 //
@@ -40,9 +40,9 @@
 //  1. We never download the full patched-font release zip. The central directory lives
 //     at the END of the file, and GitHub's asset host honours Range requests,
 //     so we read the directory, look up the four faces we want, and range-fetch
-//     only those members (~13MB each) - about 52MB of face data instead of the
-//     complete archive.
-//  2. We subset. A full Iosevka face covers most of Unicode. Code, diffs and a
+//     only those members. Across the five families that is under 100MB of face
+//     data instead of several complete release archives.
+//  2. We subset. A full patched face covers far more Unicode than Hydra needs. Code, diffs and a
 //     terminal need Latin, punctuation, box drawing, block elements, arrows and
 //     the handful of symbols this UI draws - see SUBSET_RANGES. That cuts each
 //     patched face from ~13MB to ~750KB.
@@ -67,14 +67,10 @@ const NERD_FONTS_VERSION = '3.4.0'
 // everything the UI asks for, and the wider ranges in Google's own snippets
 // triple the stylesheet for faces nothing renders.
 const GOOGLE_QUERY =
-  'family=Fira+Code:wght@400..700' +
-  '&family=IBM+Plex+Mono:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700' +
-  '&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700' +
+  'family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700' +
   '&family=Inter:ital,opsz,wght@0,14..32,400..700;1,14..32,400..700' +
-  '&family=JetBrains+Mono:ital,wght@0,400..700;1,400..700' +
   '&family=Merriweather:ital,opsz,wght@0,18..144,300..900;1,18..144,300..900' +
   '&family=Roboto+Flex:slnt,wght@-10..0,100..1000' +
-  '&family=Source+Code+Pro:ital,wght@0,400..700;1,400..700' +
   '&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..700' +
   '&display=swap'
 
@@ -100,21 +96,26 @@ const STAMP = join(WEB_DIR, '.fonts-build.json')
 
 const FORCE = process.argv.includes('--force')
 
-// The four faces a webfont needs: the browser synthesises nothing and we ask
-// for nothing else (no light/medium/extended widths - a code font is read at
-// one weight plus bold, with italic for comments).
+// The four faces a webfont may need. Fira Code has no italic source face, so the
+// browser synthesises its uncommon italic use just as it did for the old Google
+// variable face.
 const FACES = [
   { file: 'Regular', weight: 400, style: 'normal' },
   { file: 'Bold', weight: 700, style: 'normal' },
   { file: 'Italic', weight: 400, style: 'italic' },
   { file: 'BoldItalic', weight: 700, style: 'italic' },
 ] as const
+const UPRIGHT_FACES = FACES.filter((face) => face.style === 'normal')
 
 // The patched face to cut, and the slug used for the output filenames. The Nerd
 // Fonts release calls it IosevkaTermNerdFontMono; Hydra exposes the shorter
 // Iosevka name because there is no second Iosevka cut in the catalogue.
 const FAMILIES = [
-  { archive: 'IosevkaTerm', memberPrefix: 'IosevkaTermNerdFontMono', family: 'Iosevka', slug: 'iosevka' },
+  { archive: 'IosevkaTerm', memberPrefix: 'IosevkaTermNerdFontMono', family: 'Iosevka', slug: 'iosevka', faces: FACES },
+  { archive: 'FiraCode', memberPrefix: 'FiraCodeNerdFontMono', family: 'Fira Code', slug: 'fira-code', faces: UPRIGHT_FACES },
+  { archive: 'JetBrainsMono', memberPrefix: 'JetBrainsMonoNerdFontMono', family: 'JetBrains Mono', slug: 'jetbrains-mono', faces: FACES },
+  { archive: 'IBMPlexMono', memberPrefix: 'BlexMonoNerdFontMono', family: 'IBM Plex Mono', slug: 'ibm-plex-mono', faces: FACES },
+  { archive: 'SourceCodePro', memberPrefix: 'SauceCodeProNerdFontMono', family: 'Source Code Pro', slug: 'source-code-pro', faces: FACES },
 ] as const
 
 // What survives subsetting. Kept deliberately generous for the terminal - a TUI
@@ -331,10 +332,10 @@ async function vendorGoogle(): Promise<Record<string, number>> {
 const cps = codepoints()
 const text = cps.map((cp) => String.fromCodePoint(cp)).join('')
 const nerdText = expand(NERD_RANGES)
-const iosevkaText = text + nerdText
+const patchedText = text + nerdText
 const NERD_OUTPUT = 'nerd-symbols-400-normal.woff2'
 const outputs = [
-  ...FAMILIES.flatMap(({ slug }) => FACES.map((f) => `${slug}-${f.weight}-${f.style}.woff2`)),
+  ...FAMILIES.flatMap(({ slug, faces }) => faces.map((f) => `${slug}-${f.weight}-${f.style}.woff2`)),
   NERD_OUTPUT,
   GOOGLE_CSS,
 ]
@@ -347,7 +348,7 @@ const signature = createHash('sha256')
     JSON.stringify({
       nerd: NERD_FONTS_VERSION,
       families: FAMILIES.map((f) => [f.archive, f.memberPrefix]),
-      faces: FACES.map((f) => f.file),
+      faces: FAMILIES.map((f) => f.faces.map((face) => face.file)),
       codepoints: cps,
       nerdCodepoints: nerdText.length,
       google: GOOGLE_QUERY,
@@ -356,14 +357,14 @@ const signature = createHash('sha256')
   .digest('hex')
   .slice(0, 16)
 
-// A build costs around two minutes, nearly all of it CPU spent subsetting - and
+// A build costs around nine minutes, nearly all of it CPU spent subsetting - and
 // the outputs are gitignored, so EVERY fresh worktree would pay it again. Hydra
 // gives each head its own worktree despite the bytes being identical whenever
 // the signature is.
 //
 // So the built faces are also kept outside the checkout, keyed by that
 // signature. The first build anywhere fills the cache; every worktree after it
-// copies (~7MB, milliseconds) and touches neither the network nor a subsetter.
+// copies (~14MB, milliseconds) and touches neither the network nor a subsetter.
 // ~/.cache is bound writable inside a Hydra sandbox, so heads both read and
 // populate it.
 const CACHE_ROOT = join(
@@ -424,7 +425,7 @@ function saveToCache(sizes: Record<string, number>): void {
     return
   }
   // Old signatures are dead weight once nothing builds them - a version bump
-  // would otherwise leave roughly 7MB behind for every version ever built.
+  // would otherwise leave roughly 14MB behind for every version ever built.
   try {
     for (const entry of readdirSync(CACHE_ROOT)) {
       if (entry !== signature) rmSync(join(CACHE_ROOT, entry), { recursive: true, force: true })
@@ -480,16 +481,16 @@ if (!FORCE) {
     process.exit(0)
   }
 }
-console.log(`fonts: cutting Iosevka + symbols from Nerd Fonts v${NERD_FONTS_VERSION}`)
+console.log(`fonts: cutting ${FAMILIES.length} patched families + symbols from Nerd Fonts v${NERD_FONTS_VERSION}`)
 
 const sizes: Record<string, number> = {}
-for (const { archive, memberPrefix, family, slug } of FAMILIES) {
+for (const { archive, memberPrefix, family, slug, faces } of FAMILIES) {
   const url = `https://github.com/ryanoasis/nerd-fonts/releases/download/v${NERD_FONTS_VERSION}/${archive}.zip`
   console.log(`  ${family}: reading directory of ${url.split('/').pop()}`)
   const size = contentLength(url)
   const entries = readCentralDirectory(url, size)
 
-  for (const face of FACES) {
+  for (const face of faces) {
     const memberName = `${memberPrefix}-${face.file}.ttf`
     const member = entries.get(memberName)
     if (!member) {
@@ -502,7 +503,7 @@ for (const { archive, memberPrefix, family, slug } of FAMILIES) {
     // subset-font keeps every OpenType layout feature (it inverts harfbuzz's
     // layout-feature set), so Iosevka's ligation and character-variant tags -
     // calt, VLAC, VSAB, cvNN, which src/lib/fonts.ts turns on - survive the cut.
-    const subset = await subsetFont(source, iosevkaText, { targetFormat: 'woff2' })
+    const subset = await subsetFont(source, patchedText, { targetFormat: 'woff2' })
     const name = `${slug}-${face.weight}-${face.style}.woff2`
     writeFileSync(join(OUT_DIR, name), subset)
     sizes[name] = subset.length
@@ -514,10 +515,9 @@ for (const { archive, memberPrefix, family, slug } of FAMILIES) {
 }
 
 // The Nerd Fonts symbol face. Upstream's "Symbols Only" package is exactly this
-// job - the patch glyphs with no Latin at all - so one face covers every mono
-// family we offer instead of swapping each one for its patched twin (the
-// patched Iosevka release alone is a 357MB zip, and there is no patched build
-// for the system monospace at all).
+// job - patch glyphs with no Latin at all. Bundled families now contain their
+// own correctly sized glyphs; this remains necessary for System mono and as a
+// last-resort fallback for a code point a patched source does not contain.
 //
 // Regular only: these are icons, and neither a bold nor an italic of an icon is
 // a thing anyone needs.
