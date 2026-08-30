@@ -40,15 +40,14 @@ const DefaultUploadMaxBytes = int64(1) << 30 // 1 GiB
 // The response is api.UploadResponse. Path is the absolute host path of the
 // stored file. Crucially, that same path is valid *inside* every agent sandbox:
 // the whole host filesystem is bind-mounted read-only at the same locations (see
-// internal/sandbox/linux.go "--ro-bind / /"), and the uploads dir lives under
-// <projectRoot>/.hydra which is neither masked (masks are $HOME-relative) nor
-// overlaid with tmpfs. So inserting this path into an agent's prompt/terminal
-// lets it read the file directly - an agent-agnostic mechanism that works for
-// Claude, Gemini and Copilot alike.
+// internal/sandbox/linux.go "--ro-bind / /"). The uploads directory in Hydra's
+// state root is not masked or overlaid with tmpfs. So inserting this path into
+// an agent's prompt/terminal lets it read the file directly - an agent-agnostic
+// mechanism that works for Claude, Gemini and Copilot alike.
 
 // HandleUpload accepts a multipart file upload (a pasted image, or any attached
-// file) and stores it under <projectRoot>/.hydra/local/uploads. Documented in
-// api/openapi.yaml under the `manual` tag but hand-served: it consumes
+// file) and stores it under the project's directory in Hydra's state root.
+// Documented in api/openapi.yaml under the `manual` tag but hand-served: it consumes
 // multipart/form-data rather than JSON. Taking the response type from the
 // generated package is what keeps the spec honest - a change to one is a compile
 // error in the other.

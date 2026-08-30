@@ -755,7 +755,7 @@ try {
             route.fulfill({
               status: 200,
               contentType: 'application/json',
-              body: JSON.stringify({ path: '/sim/.hydra/local/uploads/pasted-text-1.txt', filename: 'pasted-text-1.txt' }),
+              body: JSON.stringify({ path: '/sim/.hydra/local/projects/sim-project/uploads/1782072241514128486-pasted-text-1.txt', filename: '1782072241514128486-pasted-text-1.txt' }),
             }),
           )
           // Fire a real paste (a populated DataTransfer on a 'paste' event) into

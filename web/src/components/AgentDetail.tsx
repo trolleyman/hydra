@@ -18,9 +18,8 @@ import { TopBarPortal } from './TopBarPortal'
 import { AttachmentChips } from './AttachmentChips'
 import { CollapseSlide } from './CollapseSlide'
 import { Lightbox } from './Lightbox'
-import { uploadBlobUrl } from '../api/uploads'
-import type { Attachment } from '../lib/spawnDrafts'
 import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
+import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
 import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, ExternalLink } from 'lucide-react'
@@ -47,49 +46,8 @@ import { pillText } from '../lib/branchPills'
 import type { AgentCommand } from '../lib/agentCommands'
 import { agentPrimaryActionAppearances } from './agentPrimaryActions'
 
-// Matches an upload path the spawn form embeds in a prompt: any token containing
-// the uploads dir followed by the on-disk filename (sanitized to [A-Za-z0-9._-]
-// by uniqueUploadName, so the run stops cleanly at trailing punctuation).
 // Shared style for the split layout's divider-flanking pane-collapse toggles.
 const PANE_TOGGLE_CLS = 'flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer shrink-0'
-
-const UPLOAD_PATH_RE = /\S*\.hydra\/local\/uploads\/[A-Za-z0-9._-]+/g
-const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif|ico|tiff?)$/i
-
-// Splits a submitted prompt into its display text and the upload attachments it
-// references. The paths (appended by the spawn form, usually as trailing lines)
-// are lifted out and shown as chips instead of raw links; the leftover text is
-// tidied so removing them doesn't leave dangling blank lines.
-function parsePrompt(prompt: string, projectId: string | null): { text: string; attachments: Attachment[] } {
-  const seen = new Set<string>()
-  const attachments: Attachment[] = []
-  let id = 0
-  for (const m of prompt.matchAll(UPLOAD_PATH_RE)) {
-    const full = m[0]
-    if (seen.has(full)) continue
-    seen.add(full)
-    const base = full.split('/').pop() ?? full
-    const blob = uploadBlobUrl(projectId, base)
-    attachments.push({
-      id: id++,
-      // Drop the "<unixnano>-" prefix uniqueUploadName adds, for a tidy label.
-      filename: base.replace(/^\d+-/, ''),
-      path: full,
-      // Every stored upload can be served back, whatever it is - the thumbnail is
-      // the image-only part.
-      url: blob,
-      previewUrl: IMAGE_EXT_RE.test(base) ? blob : undefined,
-      size: 0,
-      uploading: false,
-    })
-  }
-  const text = prompt
-    .replace(UPLOAD_PATH_RE, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-  return { text, attachments }
-}
 
 // memo: AgentDetail re-renders on every live tick of its agent, but the prompt
 // never changes after spawn - no need to re-parse/re-render its markdown.
@@ -99,7 +57,7 @@ function parsePrompt(prompt: string, projectId: string | null): { text: string; 
 // CollapsiblePrompt's card - so this stays a bare content fragment, shared so the
 // two never drift.
 const PromptContent = memo(function PromptContent({ prompt, projectId }: { prompt: string; projectId: string | null }) {
-  const { text, attachments } = useMemo(() => parsePrompt(prompt, projectId), [prompt, projectId])
+  const { text, attachments } = useMemo(() => parseUploadAttachments(prompt, projectId), [prompt, projectId])
   // Index into the openable attachments while the lightbox is open; clicking any
   // chip opens it here, mirroring the spawn form.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
@@ -165,7 +123,7 @@ const CollapsiblePrompt = memo(function CollapsiblePrompt({ prompt, projectId, a
       return next
     })
   }, [projectId, agentId])
-  const preview = useMemo(() => parsePrompt(prompt, projectId).text.replace(/\s+/g, ' ').trim(), [prompt, projectId])
+  const preview = useMemo(() => parseUploadAttachments(prompt, projectId).text.replace(/\s+/g, ' ').trim(), [prompt, projectId])
   return (
     <div className="shrink-0 mb-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 overflow-hidden">
       <button
