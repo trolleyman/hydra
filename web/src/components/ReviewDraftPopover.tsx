@@ -14,7 +14,7 @@
 // way to hold it back was to delete it and rewrite it later.
 
 import { useEffect, useRef, useState } from 'react'
-import { MessagesSquare, Trash2, Send, TriangleAlert, X } from 'lucide-react'
+import { ChevronDown, MessagesSquare, Trash2, Send, TriangleAlert, X } from 'lucide-react'
 import type { PendingReviewComment } from '../lib/reviewComments'
 import { Tooltip } from './Tooltip'
 import { getFileIcon } from '../lib/fileIcons'
@@ -75,6 +75,7 @@ export function ReviewDraftPopover({ comments, projectId, staleIds, submitting, 
       <Tooltip content="Review queued comments and submit them all at once" side="bottom">
         <button
           onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
           className="flex items-center gap-1.5 h-7 px-2 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer shadow-sm"
         >
           <MessagesSquare className="w-3.5 h-3.5" />
@@ -85,11 +86,12 @@ export function ReviewDraftPopover({ comments, projectId, staleIds, submitting, 
           {staleCount > 0 && (
             <TriangleAlert className="w-3.5 h-3.5 text-amber-200" />
           )}
+          <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
         </button>
       </Tooltip>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 z-[60] w-[22rem] max-w-[90vw] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl">
+        <div className="absolute right-0 top-full mt-1.5 z-[60] w-[22rem] max-w-[90vw] rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl animate-popover-in [--popover-origin:top_right]">
           <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
               Review comments <span className="text-gray-400 dark:text-gray-500 tabular-nums">{comments.length}</span>

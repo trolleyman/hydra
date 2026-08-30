@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, createContext, useContext, Fragment, useMemo, memo, type ComponentType, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, createContext, useContext, Fragment, useMemo, memo, type ComponentProps, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, linkOptions, useNavigate, type LinkProps } from '@tanstack/react-router'
 import { canHighlight, highlightHtml, highlightLines } from './lib/highlightCore'
@@ -18,7 +18,7 @@ import {
   Plus, Calendar, TriangleAlert,
   ChevronDown, ChevronUp, ChevronRight, ChevronLeft, Check, LoaderCircle, RefreshCw, RotateCcw,
   Folder, FolderOpen, X, GitMergeConflict, Bot, FileDiff as FileDiffIcon, Files as FilesIcon,
-  ArrowRightLeft, MessageSquarePlus, MessageSquare, MessagesSquare, Pencil, Trash2, FolderSync,
+  ArrowRightLeft, MessageSquarePlus, MessageSquare, Pencil, Trash2, FolderSync,
   CircleCheck, ArrowUp, ArrowDown, MailOpen, Paperclip,
   SquarePlus, SquareMinus, SquareArrowRight, SquareArrowOutUpRight,
   PanelLeftClose, PanelLeftOpen,
@@ -227,7 +227,7 @@ interface NativeCommentReplyActions {
   start?: (number: number) => void
 }
 const NativeCommentReplyContext = createContext<NativeCommentReplyActions | null>(null)
-const DraftReviewSubmitContext = createContext<{ submit: () => void; submitting: boolean; count: number } | null>(null)
+const DraftReviewPopoverContext = createContext<ComponentProps<typeof ReviewDraftPopover> | null>(null)
 
 // True when a drag is carrying real files, so dragging a text selection over a
 // comment box doesn't light it up as a drop target.
@@ -266,7 +266,7 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
   )
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const reply = useContext(NativeCommentReplyContext)
-  const draftReview = useContext(DraftReviewSubmitContext)
+  const draftReview = useContext(DraftReviewPopoverContext)
   const [lightboxOrigin, setLightboxOrigin] = useState<Element | null>(null)
   const openable = openableAttachments(attachments)
   const lightboxItems = attachmentLightboxItems(attachments)
@@ -406,19 +406,7 @@ function QueuedCommentCard({ comment, stale, projectId, you, onEdit, onRemove, o
           )}
           {!sent && draftReview && (
             <div className="mt-2 flex justify-end">
-              <Tooltip content="Review queued comments and submit them all at once" side="top">
-                <button
-                  disabled={draftReview.submitting}
-                  onClick={draftReview.submit}
-                  className="flex h-7 items-center gap-1.5 rounded-md bg-blue-600 px-2 text-xs font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
-                >
-                  <MessagesSquare className="h-3.5 w-3.5" />
-                  <span>{draftReview.submitting ? 'Submitting...' : 'Submit review'}</span>
-                  <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-white/25 px-1 text-3xs leading-none tabular-nums">
-                    {draftReview.count}
-                  </span>
-                </button>
-              </Tooltip>
+              <ReviewDraftPopover {...draftReview} />
             </div>
           )}
         </div>
@@ -5052,12 +5040,6 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       setSubmittingReview(false)
     }
   }, [agent.id, projectId, submittingReview, showSentToast])
-  const draftReviewSubmit = useMemo(() => ({
-    submit: () => void submitReview(queuedComments.map((c) => c.number)),
-    submitting: submittingReview,
-    count: queuedComments.length,
-  }), [submitReview, queuedComments, submittingReview])
-
   // Which queued comments have gone stale: the diff under them changed since they
   // were added (the anchoring hunk's content hash no longer matches, or the line
   // is gone from the current comparison entirely). Recomputed against the LIVE
@@ -5073,6 +5055,15 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     }
     return stale
   }, [diff, queuedComments])
+  const draftReviewPopover = useMemo<ComponentProps<typeof ReviewDraftPopover>>(() => ({
+    comments: queuedComments,
+    projectId,
+    staleIds: staleReviewIds,
+    submitting: submittingReview,
+    onSubmit: submitReview,
+    onRemove: removeQueuedComment,
+    onJump: handleJumpToComment,
+  }), [queuedComments, projectId, staleReviewIds, submittingReview, submitReview, removeQueuedComment, handleJumpToComment])
 
   const [isResizing, setIsResizing] = useState(false)
   const startResizing = useCallback((e: React.MouseEvent) => {
@@ -5547,7 +5538,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
         reason as the thread actions above: the comment cards are the far side
         of two memo'd hunk components, and a cursor threaded through as a prop
         would re-render every line of every file each time it moved. */}
-    <DraftReviewSubmitContext.Provider value={draftReviewSubmit}>
+    <DraftReviewPopoverContext.Provider value={draftReviewPopover}>
     <NativeCommentReplyContext.Provider value={nativeReplyActions}>
     <VisitedCommentsContext.Provider value={focusedComment}>
     <div ref={rootRef} className={inspector ? undefined : 'mt-4'} style={{ '--sticky-changes-h': `${changesBarH}px`, '--sticky-files-h': diff ? `${filesHeaderH}px` : '0px' } as CSSProperties}>
@@ -5757,7 +5748,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     </div>
     </VisitedCommentsContext.Provider>
     </NativeCommentReplyContext.Provider>
-    </DraftReviewSubmitContext.Provider>
+    </DraftReviewPopoverContext.Provider>
     </ReviewThreadContext.Provider>
     </CommentIdentityContext.Provider>
   )

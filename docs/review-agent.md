@@ -740,9 +740,10 @@ nobody else can cite it, so putting a handle on it would invite quoting somethin
 the agent cannot look up. The chip is the one state worth calling out: the
 difference between something the agent has been told and something only you can
 see is not otherwise visible on the card. Every draft card also carries the same
-Submit review control as the Changes toolbar in a footer at its bottom right. It
-publishes the whole queued batch from where it is being written; the toolbar
-popover remains the place to inspect that batch as a list.
+Submit review popover as the Changes toolbar in a footer at its bottom right.
+Both instances are the shared `ReviewDraftPopover`, including the chevron,
+selection list, held-back state, anchored entrance motion and submission path, so
+the review can be inspected and published without returning to the toolbar.
 
 **A reply can join the draft review or be sent immediately.** Add to agent review
 stores it as a draft under the published parent, while Comment to agent publishes
