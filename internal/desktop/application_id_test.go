@@ -13,7 +13,7 @@ func TestLinuxDesktopEntryMatchesApplicationID(t *testing.T) {
 	if !ok {
 		t.Fatal("resolve test source path")
 	}
-	desktopEntry := filepath.Join(filepath.Dir(filename), "..", "..", "desktop", "linux", linuxApplicationID)
+	desktopEntry := filepath.Join(filepath.Dir(filename), "..", "..", "desktop", "linux", linuxApplicationID+".desktop")
 	contents, err := os.ReadFile(desktopEntry)
 	if err != nil {
 		t.Fatalf("read Linux desktop entry: %v", err)
