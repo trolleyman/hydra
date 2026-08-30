@@ -528,7 +528,7 @@ stale-ownership recovery remain.
 - Produce universal or separate arm64/amd64 builds as appropriate.
 - [x] Put the shared agent/history database under
   `~/Library/Application Support/Hydra/db.sqlite3`, with transactional import
-  from retained project-local databases for desktop and CLI users.
+  independently from checkout-local development databases.
 - Define the remaining application support, cache, and log locations using
   macOS conventions without breaking existing CLI users.
 - Sign and notarize the app and bundled executable.

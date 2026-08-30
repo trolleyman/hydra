@@ -43,6 +43,7 @@ import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
 import { closeDesktopWindow, onDesktopCommand, openFocusedWindow, openFullWindow, postDesktopMessage } from '../lib/desktopBridge'
+import type { AgentCommand } from '../lib/agentCommands'
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -115,6 +116,8 @@ const AgentSidebarList = memo(function AgentSidebarList({
   archivedCollapsed,
   onToggleArchivedCollapsed,
   onDeselect,
+  onAgentAction,
+  reviewProvider,
   archivedSentinelRef,
 }: {
   currentProjectId: string | null | undefined
@@ -122,6 +125,8 @@ const AgentSidebarList = memo(function AgentSidebarList({
   archivedCollapsed: boolean
   onToggleArchivedCollapsed: () => void
   onDeselect: () => void
+  onAgentAction: (agent: AgentResponse, action: AgentCommand) => void
+  reviewProvider?: string
   archivedSentinelRef: RefObject<HTMLDivElement | null>
 }) {
   // Select the raw arrays (stable identity across a no-op refresh via the store's
@@ -156,6 +161,8 @@ const AgentSidebarList = memo(function AgentSidebarList({
               selected={agent.id === selectedAgentId}
               projectId={currentProjectId}
               onDeselect={onDeselect}
+              onAction={onAgentAction}
+              reviewProvider={reviewProvider}
             />
           ))
         )}
@@ -189,6 +196,8 @@ const AgentSidebarList = memo(function AgentSidebarList({
                   selected={agent.id === selectedAgentId}
                   projectId={currentProjectId}
                   onDeselect={onDeselect}
+                  onAction={onAgentAction}
+                  reviewProvider={reviewProvider}
                 />
               ))}
           </>
@@ -844,6 +853,27 @@ function RootLayout() {
     if (currentProjectId) navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
   }, [currentProjectId, navigate])
 
+  // A context-menu command targets the row that was clicked, independently of
+  // whichever agent is currently open. Mark-unread can complete in place; the
+  // other commands navigate to the agent and let AgentDetail run its existing
+  // action/confirmation flow.
+  const handleAgentAction = useCallback((agent: AgentResponse, action: AgentCommand) => {
+    if (!currentProjectId) return
+    if (action === 'mark-unread') {
+      useAgentStore.getState().markUnread(agent.id)
+      api.default.markAgentUnread(currentProjectId, agent.id).catch(() => {})
+      if (agent.id === selectedAgentId) {
+        navigate({ to: '/project/$projectId', params: { projectId: currentProjectId } })
+      }
+      return
+    }
+    navigate({
+      to: '/project/$projectId/agent/$agentId',
+      params: { projectId: currentProjectId, agentId: agent.id },
+      search: { action },
+    })
+  }, [currentProjectId, navigate, selectedAgentId])
+
   // Deselect the project entirely (dropdown "deselect" action).
   const handleProjectDeselect = useCallback(() => {
     setSelectedProjectId(null)
@@ -1218,6 +1248,8 @@ function RootLayout() {
             archivedCollapsed={archivedCollapsed}
             onToggleArchivedCollapsed={toggleArchivedCollapsed}
             onDeselect={handleAgentDeselect}
+            onAgentAction={handleAgentAction}
+            reviewProvider={reviewConfig?.provider}
             archivedSentinelRef={archivedSentinelRef}
           />
 

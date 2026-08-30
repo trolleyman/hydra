@@ -328,7 +328,7 @@ heads plus loaded archived history; Stop-and-switch project changes remain.
 
 The shared agent/history database location is already implemented as
 `%LOCALAPPDATA%\Hydra\db.sqlite3`, including transactional import from retained
-project-local databases. Installer and native-runtime validation remain.
+checkout-local development databases. Installer and native-runtime validation remain.
 
 - Choose the packaging model from the Phase 1/installer spike and document the
   rejected option.

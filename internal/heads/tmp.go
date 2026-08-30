@@ -15,7 +15,7 @@ import (
 // per head and are reclaimed on teardown instead of accumulating on the host's
 // shared /tmp.
 func headTmpDir(projectRoot, id string) string {
-	return filepath.Join(paths.GetHydraLocalDirFromProjectRoot(projectRoot), "tmp", id)
+	return filepath.Join(paths.GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "tmp", id)
 }
 
 // HeadTmpDir returns the host-side path of a head's private /tmp dir, or ""

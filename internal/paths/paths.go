@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"os"
@@ -162,8 +163,22 @@ func GetHydraLocalDirFromProjectRoot(projectRoot string) string {
 	return filepath.Join(GetHydraDirFromProjectRoot(projectRoot), "local")
 }
 
+// GetHydraInstanceLocalDirFromProjectRoot returns the generated-state root for
+// the current daemon instance. Production keeps the historical .hydra/local
+// layout; an explicit development runtime namespace receives a stable isolated
+// subtree so it cannot operate on production worktrees or sidecars.
+func GetHydraInstanceLocalDirFromProjectRoot(projectRoot string) string {
+	base := GetHydraLocalDirFromProjectRoot(projectRoot)
+	namespace := strings.TrimSpace(os.Getenv("HYDRA_RUNTIME_NAMESPACE"))
+	if namespace == "" {
+		return base
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("uid=%d\x00%s", os.Getuid(), namespace)))
+	return filepath.Join(base, "instances", fmt.Sprintf("%x", sum[:8]))
+}
+
 func GetWorktreesDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "worktrees")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "worktrees")
 }
 
 func GetWorktreeDirFromProjectRoot(projectRoot, id string) string {
@@ -171,13 +186,13 @@ func GetWorktreeDirFromProjectRoot(projectRoot, id string) string {
 }
 
 func GetStateDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "state")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "state")
 }
 
 // GetArtifactsDirFromProjectRoot returns the (gitignored) directory holding
 // generated diff artifacts (screenshots etc.) and their ephemeral checkouts.
 func GetArtifactsDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "artifacts")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "artifacts")
 }
 
 // GetTestsDirFromProjectRoot returns the (gitignored) directory holding per-head
@@ -185,20 +200,20 @@ func GetArtifactsDirFromProjectRoot(projectRoot string) string {
 // checkouts. Mirrors GetArtifactsDirFromProjectRoot for the test gate (see PLAN
 // #68); kept separate so the two generators don't share a slot pool dir.
 func GetTestsDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "tests")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "tests")
 }
 
 // GetUploadsDirFromProjectRoot returns the (gitignored) directory holding files
 // pasted/attached to prompts. It sits under .hydra/local so it's readable
 // read-only inside agent sandboxes at the same absolute path.
 func GetUploadsDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "uploads")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "uploads")
 }
 
 // GetCacheDirFromProjectRoot returns the (gitignored) directory holding generated
 // caches (e.g. the captured Gemini default system prompt, keyed by CLI version).
 func GetCacheDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "cache")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "cache")
 }
 
 func GetDBPathFromProjectRoot(projectRoot string) string {
@@ -206,14 +221,14 @@ func GetDBPathFromProjectRoot(projectRoot string) string {
 }
 
 func GetStatusDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "status")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "status")
 }
 
 // GetNamespaceSocketDirFromProjectRoot returns the (gitignored) directory holding
 // a head's namespace-host control socket. Like the other generated dirs it sits
 // under .hydra/local; the sockets themselves are recreated on each launch.
 func GetNamespaceSocketDirFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "ns", id)
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "ns", id)
 }
 
 func GetStatusJsonFromProjectRoot(projectRoot, id string) string {
@@ -228,14 +243,14 @@ func GetStatusJsonFromProjectRoot(projectRoot, id string) string {
 // head literally named "<id>_review" (see PLAN #26). status.json stays the base
 // name in status/ (nothing else shares that dir now, so it can't collide).
 func GetStatusLogDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "status-log")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "status-log")
 }
 func GetStatusLogFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetStatusLogDirFromProjectRoot(projectRoot), id+".jsonl")
 }
 
 func GetBuildLogDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "build-log")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "build-log")
 }
 
 // GetChatQueueDirFromProjectRoot returns the directory holding per-head chat
@@ -243,7 +258,7 @@ func GetBuildLogDirFromProjectRoot(projectRoot string) string {
 // status/<id>_queue.json suffix) keeps the id the whole filename, so no head id
 // ending in "_queue" can collide with another head's file.
 func GetChatQueueDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "queue")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "queue")
 }
 
 // GetChatQueueJsonFromProjectRoot returns the per-head file holding a chat-mode
@@ -257,7 +272,7 @@ func GetChatQueueJsonFromProjectRoot(projectRoot, id string) string {
 // GetChatEventsDirFromProjectRoot returns the directory containing the
 // provider-neutral, sequenced chat event logs. Each head owns one JSONL file.
 func GetChatEventsDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "chat-events")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "chat-events")
 }
 
 func GetChatEventsJSONLFromProjectRoot(projectRoot, id string) string {
@@ -268,7 +283,7 @@ func GetChatEventsJSONLFromProjectRoot(projectRoot, id string) string {
 // chat-state checkpoints. They are kept separate from event logs so a partial
 // checkpoint replacement can never damage durable history.
 func GetChatStateDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "chat-state")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "chat-state")
 }
 
 func GetChatStateJSONFromProjectRoot(projectRoot, id string) string {
@@ -284,7 +299,7 @@ func GetBuildLogFromProjectRoot(projectRoot, id string) string {
 // reload/resume can show "Thought for Xs" without the browser timing it. Lives
 // at .hydra/local/thinking/.
 func GetChatThinkingDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "thinking")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "thinking")
 }
 
 // GetChatThinkingJsonFromProjectRoot returns a chat-mode head's thinking-duration
@@ -300,7 +315,7 @@ func GetChatThinkingJsonFromProjectRoot(projectRoot, id string) string {
 // the agent's identity comes from the channel, never a self-reported id. Lives
 // at .hydra/local/review/<id>.json.
 func GetReviewDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "review")
 }
 func GetReviewJsonFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetReviewDirFromProjectRoot(projectRoot), id+".json")
@@ -319,7 +334,7 @@ func GetReviewJsonFromProjectRoot(projectRoot, id string) string {
 // head's is not, which is why it needs an explicit session id). Lives at
 // .hydra/local/review-checkouts/<id>/.
 func GetReviewCheckoutsBaseDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-checkouts")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "review-checkouts")
 }
 func GetReviewCheckoutDirFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetReviewCheckoutsBaseDirFromProjectRoot(projectRoot), id)
@@ -331,7 +346,7 @@ func GetReviewCheckoutDirFromProjectRoot(projectRoot, id string) string {
 // genuine finish from "the turn ended but sub-agents are still working". Lives
 // at .hydra/local/subagents/<id>/.
 func GetSubagentsBaseDirFromProjectRoot(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "subagents")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "subagents")
 }
 func GetSubagentsDirFromProjectRoot(projectRoot, id string) string {
 	return filepath.Join(GetSubagentsBaseDirFromProjectRoot(projectRoot), id)
@@ -342,7 +357,7 @@ func GetSubagentsDirFromProjectRoot(projectRoot, id string) string {
 // here (the dir is made writable at its real host path, like status.json) and
 // the daemon writes back decisions. Lives under .hydra/local/approvals/<id>.
 func GetApprovalsDirFromProjectRoot(projectRoot, id string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "approvals", id)
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "approvals", id)
 }
 
 // GetReviewThreadsJson returns the per-head cache of the MR's review threads,
@@ -350,7 +365,7 @@ func GetApprovalsDirFromProjectRoot(projectRoot, id string) string {
 // the conversation when a live read fails. Lives at
 // .hydra/local/review-threads/<id>.json.
 func GetReviewThreadsJson(projectRoot, id string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-threads", id+".json")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "review-threads", id+".json")
 }
 
 // GetReviewNotesJson returns the per-head store of LOCAL-ONLY review notes -
@@ -358,7 +373,7 @@ func GetReviewThreadsJson(projectRoot, id string) string {
 // to a reviewer, or a note to self). Lives at
 // .hydra/local/review-notes/<id>.json.
 func GetReviewNotesJson(projectRoot, id string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-notes", id+".json")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "review-notes", id+".json")
 }
 
 // GetReviewCommentsJson returns the per-head store of Hydra's OWN review
@@ -367,21 +382,21 @@ func GetReviewNotesJson(projectRoot, id string) string {
 // GetReviewNotesJson, which holds replies to a FORGE thread and cannot exist
 // without one. Lives at .hydra/local/review-comments/<id>.json.
 func GetReviewCommentsJson(projectRoot, id string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-comments", id+".json")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "review-comments", id+".json")
 }
 
 // GetReviewCommentsDir returns the directory holding every head's review
 // comments (.hydra/local/review-comments). Scanned to find which artifact cache
 // entries are still referenced by a comment, without needing the head list.
 func GetReviewCommentsDir(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-comments")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "review-comments")
 }
 
 // GetReviewReqRootDir returns the parent dir holding every head's review-refresh
 // channel (.hydra/local/review-req). The daemon's review-request watcher scans it
 // to find heads asking for a forge refresh.
 func GetReviewReqRootDir(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "review-req")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "review-req")
 }
 
 // GetReviewReqDir returns the per-head directory used for the on-demand review
@@ -396,7 +411,7 @@ func GetReviewReqDir(projectRoot, id string) string {
 // GetAgentReqRootDir returns the parent holding each head's daemon-mediated
 // discovery and collaboration channel.
 func GetAgentReqRootDir(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "agent-req")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "agent-req")
 }
 
 // GetAgentReqDir returns one head's request/result channel. Its directory name
@@ -409,7 +424,7 @@ func GetAgentReqDir(projectRoot, id string) string {
 // channel (.hydra/local/gitops). The daemon's gitops watcher scans it to find
 // heads with pending git-operation requests.
 func GetGitopsRootDir(projectRoot string) string {
-	return filepath.Join(GetHydraLocalDirFromProjectRoot(projectRoot), "gitops")
+	return filepath.Join(GetHydraInstanceLocalDirFromProjectRoot(projectRoot), "gitops")
 }
 
 // GetGitopsDir returns the per-head directory used for the host-mediated git

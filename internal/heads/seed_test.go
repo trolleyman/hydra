@@ -10,6 +10,7 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 	"github.com/trolleyman/hydra/internal/gate"
+	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
@@ -108,7 +109,7 @@ func TestSeedHeadStrictMCPConfig(t *testing.T) {
 	if !bind.ReadOnly {
 		t.Errorf("strict MCP config is bound writable; the agent must not be able to grant itself a server")
 	}
-	if want := filepath.Join(projectRoot, ".hydra", "local", "cache", "strict-head-mcp-config.json"); bind.Source != want {
+	if want := filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "strict-head-mcp-config.json"); bind.Source != want {
 		t.Errorf("bind source = %q, want the per-head %q", bind.Source, want)
 	}
 	if srv := readMCPServer(t, bind.Source, gate.HydraControlServer); srv["command"] != SandboxHydraBinPath {

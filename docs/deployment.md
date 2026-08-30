@@ -11,8 +11,8 @@ way to run the server. The restart button *is* the deploy.
 The service uses Hydra's user-global SQLite database, shared with CLI and
 desktop clients. It lives in `$XDG_STATE_HOME/hydra/db.sqlite3` on Linux,
 `~/Library/Application Support/Hydra/db.sqlite3` on macOS, and
-`%LOCALAPPDATA%\Hydra\db.sqlite3` on Windows. On first open, registered legacy
-project-local databases are imported transactionally and retained unchanged.
+`%LOCALAPPDATA%\Hydra\db.sqlite3` on Windows. Checkout-local development
+databases are independent and are never imported into production state.
 
 ## What this is, and isn't
 
@@ -230,10 +230,11 @@ itself, and `HYDRA_API_ADDR` covers exposing a port.
 What remains, because each does a genuinely different job:
 
 - `mage run` - foreground, for debugging the daemon itself. It explicitly uses
-  the checkout's ignored `.hydra/local/state/db.sqlite3` and a checkout-specific
-  runtime namespace, keeping development history and IPC isolated from the
-  OS-standard user-global database and stable runtime socket used by installed
-  CLI and desktop builds. Set `HYDRA_DB_PATH` to override the database location.
+  an ignored `.hydra/local/instances/<namespace>/state/db.sqlite3` and a
+  checkout-specific runtime namespace. The database, worktrees, per-head
+  sidecars, daemon IPC, and Linux scope units are isolated from production and
+  other checkout namespaces. Set `HYDRA_DB_PATH` to override the database
+  location.
 - `mage buildDesktop` / `mage runDesktop` / `mage runDesktopLocal` - dispatch to
   the native desktop app for the host OS: GTK/WebKitGTK on Linux,
   AppKit/WKWebView on macOS, and Windows Forms/WebView2 on Windows. `runDesktop`
@@ -260,10 +261,8 @@ What remains, because each does a genuinely different job:
   beside it. Stop the older process first; stale legacy socket files are removed
   automatically. This prevents two daemon versions from managing the same heads
   or migrating and writing the same state concurrently.
-  The production global database import also qualifies colliding project-local
-  head IDs deterministically, and a newly registered legacy project is imported
-  before it is exposed through the API. Explicit development databases never
-  perform that production migration. Desktop-owned ephemeral authentication is
+  Checkout-local databases remain independent and are never imported into the
+  production database. Desktop-owned ephemeral authentication is
   carried in the process environment across an in-app re-exec, so an existing
   webview cookie remains valid after an update.
 - `mage devFast` - Vite HMR in front of the Go API. Hot-module-replacement is
@@ -273,6 +272,15 @@ What remains, because each does a genuinely different job:
   socket, DB, `projects.json` or scope sweep. It is the one genuinely isolated
   second instance, and it simulates an update - phases, a streaming log, and a
   failure every third run - so the panel can be driven without a real build.
+
+`mage resetMachineState` is the last-resort local recovery command for a broken
+machine catalogue. It refuses to run while the production daemon is reachable,
+prints the affected database, and requires an explicit `y`. It removes the
+global SQLite database and stale production daemon IPC. It preserves checkout-
+local development databases, project registration and configuration, logs, Git
+branches and worktrees, transcripts, uploads, and all other project-local state.
+The preserved heads no longer appear in Hydra because their catalogue records
+are gone.
 
 ## Not built: carrying agent PTYs across a restart
 
@@ -327,14 +335,11 @@ nest - so any attempt at this needs testing on the host with real heads.
   commit it is about to build so it is never a surprise.
 - **No file watcher.** `mage devFast` covers fast iteration; auto-restarting a
   server that stops every running head is not something to automate.
-- **One instance, not two.** An earlier draft of this doc proposed a dev instance
-  beside a prod one. Untying minify from sourcemap removed the debuggability
-  argument, and `SweepOrphanScopes` (`internal/sandbox/scope_linux.go`) is global
-  - it reaps *all* `hydra-*.scope` units at daemon boot, so a second instance
-  would kill the first's live sandboxes. Reviving it would need a per-instance
-  scope prefix, plus namespacing for `~/.config/hydra/projects.json`, `uuid.txt`,
-  the shared `~/.local/share/hydra/logs/hydra.log`, the daemon runtime key, and a
-  templated `hydra@<instance>.service`.
+- **Production and checkout development can coexist.** A checkout runtime
+  namespace selects its own project-local generated-state subtree, daemon IPC,
+  database, and Linux scope prefix. `SweepOrphanScopes` only reaps scopes owned
+  by the current namespace. Multiple windows without a development namespace
+  intentionally attach to the one production daemon for that OS user.
 - **The CLI's binary-stamp auto-upgrade leaves a service-managed daemon alone.**
   It used to SIGTERM it and respawn it detached, which left systemd's unit
   inactive with an unsupervised daemon behind it. The daemon stamps

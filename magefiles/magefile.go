@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -24,6 +25,8 @@ import (
 	"github.com/magefile/mage/sh"
 	"github.com/magefile/mage/target"
 	"github.com/trolleyman/hydra/internal/config"
+	"github.com/trolleyman/hydra/internal/daemon"
+	"github.com/trolleyman/hydra/internal/db"
 	"github.com/trolleyman/hydra/internal/git"
 	"github.com/trolleyman/hydra/internal/paths"
 	"github.com/trolleyman/hydra/internal/service"
@@ -539,16 +542,101 @@ func useProductionDesktopRuntime() error {
 
 func Run() error {
 	ensureToolsEnv()
-	if err := useDevelopmentDatabase(); err != nil {
+	if err := useDevelopmentRuntime(); err != nil {
 		return errtrace.Wrap(err)
 	}
-	if err := useDevelopmentRuntime(); err != nil {
+	if err := useDevelopmentDatabase(); err != nil {
 		return errtrace.Wrap(err)
 	}
 	addGoBuildDeps()
 	args := append([]string{"run"}, goBuildTags(false)...)
 	args = append(args, "./", "server")
 	return errtrace.Wrap(runV("go", args...))
+}
+
+// ResetMachineState removes Hydra's machine-wide head database and stale
+// production daemon IPC after an explicit confirmation. Project registration,
+// configuration, logs, Git refs/worktrees, transcripts, uploads, and the rest of
+// each project's .hydra/local tree are deliberately preserved.
+func ResetMachineState() error {
+	restoreEnv := temporarilyUnsetEnv("HYDRA_DB_PATH", "HYDRA_RUNTIME_NAMESPACE")
+	defer restoreEnv()
+
+	projectRoot, err := paths.GetProjectRootFromCwd()
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	socketPath, err := daemon.SocketPath(projectRoot)
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("resolve production daemon socket: %w", err))
+	}
+	if conn, dialErr := net.DialTimeout("unix", socketPath, 250*time.Millisecond); dialErr == nil {
+		_ = conn.Close()
+		return errtrace.Wrap(errors.New("the production Hydra daemon is running; quit the desktop app and stop the Hydra service before resetting machine state"))
+	}
+
+	databasePath, err := db.GlobalPath()
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("resolve global database: %w", err))
+	}
+	fmt.Printf("%s%sReset Hydra machine state?%s\n\n", colorBold, colorYellow, colorReset)
+	fmt.Printf("This removes the production head catalogue from:\n  %s\n", displayPath(databasePath))
+	fmt.Printf("\nIt also removes stale production daemon IPC in:\n  %s\n", displayPath(filepath.Dir(socketPath)))
+	fmt.Println("\nGit branches/worktrees, transcripts, uploads, logs, project registration,")
+	fmt.Println("and configuration are preserved. Existing heads will no longer appear in Hydra.")
+	fmt.Print("\nContinue? [y/N]: ")
+
+	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	if !strings.EqualFold(strings.TrimSpace(answer), "y") {
+		fmt.Println("Reset cancelled.")
+		return nil
+	}
+
+	for _, candidate := range []string{databasePath, databasePath + "-wal", databasePath + "-shm"} {
+		if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) {
+			return errtrace.Wrap(fmt.Errorf("remove %s: %w", candidate, err))
+		}
+	}
+	if err := removeProductionRuntimeFiles(filepath.Dir(socketPath)); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	fmt.Println("Hydra machine state reset complete.")
+	return nil
+}
+
+func removeProductionRuntimeFiles(dir string) error {
+	for _, name := range []string{"daemon.sock", "daemon.lock", "daemon.log", "daemon.pid", "daemon.info", "daemon.web"} {
+		path := filepath.Join(dir, name)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return errtrace.Wrap(fmt.Errorf("remove production daemon runtime file %s: %w", path, err))
+		}
+	}
+	return nil
+}
+
+func temporarilyUnsetEnv(keys ...string) func() {
+	type value struct {
+		text string
+		set  bool
+	}
+	values := make(map[string]value, len(keys))
+	for _, key := range keys {
+		text, set := os.LookupEnv(key)
+		values[key] = value{text: text, set: set}
+		_ = os.Unsetenv(key)
+	}
+	return func() {
+		for _, key := range keys {
+			original := values[key]
+			if original.set {
+				_ = os.Setenv(key, original.text)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		}
+	}
 }
 
 // BuildDesktop builds the native desktop application for the host platform.
@@ -705,10 +793,10 @@ func RunDesktop() error {
 // checkout-local database and runtime used by mage run.
 func RunDesktopLocal() error {
 	ensureToolsEnv()
-	if err := useDevelopmentDatabase(); err != nil {
+	if err := useDevelopmentRuntime(); err != nil {
 		return errtrace.Wrap(err)
 	}
-	if err := useDevelopmentRuntime(); err != nil {
+	if err := useDevelopmentDatabase(); err != nil {
 		return errtrace.Wrap(err)
 	}
 	if err := os.Setenv(desktopLocalEnv, "1"); err != nil {

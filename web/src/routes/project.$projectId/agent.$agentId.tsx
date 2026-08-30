@@ -6,6 +6,7 @@ import { useProjectStore } from '../../stores/projectStore'
 import { api } from '../../stores/apiClient'
 import { AgentDetail } from '../../components/AgentDetail'
 import { resetProjectView } from '../../lib/projectView'
+import type { AgentCommand } from '../../lib/agentCommands'
 
 // `?comment=4` is a permalink to one review comment (docs/review-agent.md). The
 // number is the whole address: it is stable, never reused, and the head is
@@ -17,21 +18,24 @@ import { resetProjectView } from '../../lib/projectView'
 // address because the agent diff shows every changed file on one route.
 export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
   component: AgentPage,
-  validateSearch: (search: Record<string, unknown>): { comment?: number; line?: string; desktop?: 'focused' } => {
-    const out: { comment?: number; line?: string; desktop?: 'focused' } = {}
+  validateSearch: (search: Record<string, unknown>): { comment?: number; line?: string; desktop?: 'focused'; action?: AgentCommand } => {
+    const out: { comment?: number; line?: string; desktop?: 'focused'; action?: AgentCommand } = {}
     const raw = Number(search.comment)
     if (Number.isInteger(raw) && raw > 0) out.comment = raw
     // Validated by shape on read (parseLineParam), not here: an unparseable value
     // should leave the URL alone rather than be silently dropped from it.
     if (typeof search.line === 'string' && search.line) out.line = search.line
     if (search.desktop === 'focused') out.desktop = 'focused'
+    if (search.action === 'publish' || search.action === 'merge' || search.action === 'rename' || search.action === 'restart' || search.action === 'kill') {
+      out.action = search.action
+    }
     return out
   },
 })
 
 function AgentPage() {
   const { projectId, agentId } = useParams({ from: '/project/$projectId/agent/$agentId' })
-  const { comment: focusComment, line: focusLine } = useSearch({ from: '/project/$projectId/agent/$agentId' })
+  const { comment: focusComment, line: focusLine, action } = useSearch({ from: '/project/$projectId/agent/$agentId' })
   // Per-field selectors (not a whole-store subscription): the store refreshes
   // near-constantly while an agent works, and a whole-store subscribe would
   // re-render this page - and the whole AgentDetail subtree - on every one.
@@ -188,6 +192,15 @@ function AgentPage() {
       onRefresh={handleRefresh}
       focusComment={focusComment}
       focusLine={focusLine}
+      requestedAction={action}
+      onActionHandled={() => {
+        navigate({
+          to: '/project/$projectId/agent/$agentId',
+          params: { projectId, agentId },
+          search: (prev) => ({ ...prev, action: undefined }),
+          replace: true,
+        })
+      }}
     />
   )
 }

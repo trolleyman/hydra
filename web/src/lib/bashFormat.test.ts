@@ -271,6 +271,16 @@ describe('parseHostRunScript', () => {
     expect(parseHostRunScript('/tmp/hydra-internal host-run -- git count-objects -vH')).toBe('git count-objects -vH')
   })
 
+  it('ignores Codex\'s leading description comment', () => {
+    expect(parseHostRunScript(`# Record the completed follow-on work on this dedicated branch
+/tmp/hydra-internal host-run --why "Stage and commit the completed work." -- git add -A && git commit -m "Add rich-text Markdown composer"`)).toBe('git add -A')
+  })
+
+  it('does not find a host run after another shell operation', () => {
+    expect(parseHostRunScript(`echo preparing
+/tmp/hydra-internal host-run -- git status`)).toBeNull()
+  })
+
   // The sandbox shell parses the agent's line first, so an unquoted pipe or
   // redirection never reaches host-run's argv - and so must not appear in the
   // chat as part of the host command. The approval card, built from the real

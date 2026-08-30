@@ -107,6 +107,33 @@ func TestSlotPoolAffinityAndReuse(t *testing.T) {
 	p.Release(s3)
 }
 
+func TestSlotPoolRecreatesMissingFreeSlot(t *testing.T) {
+	repo := initRepo(t)
+	sha := commitFile(t, repo, "marker.txt", "A")
+	p := newTestPool(t, repo, maxSlots)
+
+	s1, err := p.Acquire(sha, false)
+	if err != nil {
+		t.Fatalf("first acquire: %v", err)
+	}
+	p.Release(s1)
+	if err := os.RemoveAll(s1.Path()); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := p.Acquire(sha, false)
+	if err != nil {
+		t.Fatalf("acquire after external slot removal: %v", err)
+	}
+	if s2 != s1 {
+		t.Fatalf("missing slot was replaced in memory instead of repaired")
+	}
+	if got := readMarker(t, s2.Path()); got != "A" {
+		t.Fatalf("recreated slot content = %q, want A", got)
+	}
+	p.Release(s2)
+}
+
 // TestSlotPoolCap verifies the pool never exceeds its cap and that a blocked
 // acquire unblocks once a slot is released.
 func TestSlotPoolCap(t *testing.T) {

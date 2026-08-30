@@ -293,7 +293,7 @@ func SweepOrphanScopes() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, systemctlPath, "--user", "list-units", "--all",
-		"--plain", "--no-legend", "--type=scope", scopeUnitPrefix+"*.scope").Output()
+		"--plain", "--no-legend", "--type=scope", scopeUnitPrefix()+"*.scope").Output()
 	if err != nil {
 		return
 	}
@@ -301,7 +301,7 @@ func SweepOrphanScopes() {
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
 		f := strings.Fields(sc.Text())
-		if len(f) > 0 && strings.HasPrefix(f[0], scopeUnitPrefix) && strings.HasSuffix(f[0], ".scope") {
+		if len(f) > 0 && scopeBelongsToCurrentInstance(f[0]) && strings.HasSuffix(f[0], ".scope") {
 			units = append(units, f[0])
 		}
 	}

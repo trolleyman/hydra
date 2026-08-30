@@ -120,7 +120,7 @@ func (p *Pool) Acquire(sha string, cleanIgnored bool) (*Slot, error) {
 		//    Only when the caller doesn't need ignored files wiped (see above).
 		if !cleanIgnored {
 			for i, s := range p.free {
-				if s.sha == sha {
+				if s.sha == sha && slotDirExists(s.path) {
 					p.free = append(p.free[:i], p.free[i+1:]...)
 					p.mu.Unlock()
 					return s, nil
@@ -198,7 +198,20 @@ func (p *Pool) create(s *Slot, sha string) error {
 // true wipes them too for a pristine tree (`git clean -fdx`). A freshly created
 // slot is pristine already, so only this reuse path needs the clean.
 func (p *Pool) checkout(s *Slot, sha string, cleanIgnored bool) error {
+	info, err := os.Stat(s.path)
+	if os.IsNotExist(err) || (err == nil && !info.IsDir()) {
+		return errtrace.Wrap(p.create(s, sha))
+	}
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
 	if err := git.CheckoutDetached(s.path, sha); err != nil {
+		// A startup cleanup from an older concurrent daemon can remove the slot
+		// after the stat above but before git enters it. Recreate that disposable
+		// checkout rather than leaving the in-memory slot permanently stale.
+		if _, statErr := os.Stat(s.path); os.IsNotExist(statErr) {
+			return errtrace.Wrap(p.create(s, sha))
+		}
 		return errtrace.Wrap(err)
 	}
 	if err := git.CleanWorktree(s.path, cleanIgnored); err != nil {
@@ -206,6 +219,11 @@ func (p *Pool) checkout(s *Slot, sha string, cleanIgnored bool) error {
 	}
 	s.sha = sha
 	return nil
+}
+
+func slotDirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // removeFromAll drops s from the all-slots list by identity. Caller holds p.mu.

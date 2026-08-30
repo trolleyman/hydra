@@ -126,8 +126,9 @@ runtime socket and OS-standard global database. It actively clears inherited
 development database, runtime, and listener variables, so this remains true when
 it is invoked from a terminal opened by a development Hydra. `mage run` and
 `mage runDesktopLocal` instead use the checkout-local development database and
-the same checkout-specific runtime socket, so they can intentionally share one
-development backend. A directly launched Linux desktop build also defaults to
+the same checkout-specific runtime socket and generated-state subtree, so they
+can intentionally share one development backend without touching production
+heads. A directly launched Linux desktop build also defaults to
 production state; local mode requires the marker supplied by `runDesktopLocal`.
 Runtime
 sockets stay in the OS runtime directory rather than persistent database storage;

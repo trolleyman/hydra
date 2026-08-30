@@ -1,6 +1,9 @@
 package sandbox
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDefaultCPUQuotasScaleWithHost(t *testing.T) {
 	tests := []struct {
@@ -25,5 +28,22 @@ func TestDefaultCPUQuotasScaleWithHost(t *testing.T) {
 		if got := DefaultBackgroundCPUQuota(tt.cpus); got != tt.bg {
 			t.Errorf("%d CPUs: background quota got %d, want %d", tt.cpus, got, tt.bg)
 		}
+	}
+}
+
+func TestScopeUnitsAreNamespacedByRuntimeInstance(t *testing.T) {
+	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "")
+	production := ScopeUnit("test", "go")
+	if !strings.HasPrefix(production, productionScopeUnitPrefix) || strings.HasPrefix(production, instanceScopeUnitPrefix) {
+		t.Fatalf("production scope = %q", production)
+	}
+
+	t.Setenv("HYDRA_RUNTIME_NAMESPACE", "checkout-dev:/repo")
+	development := ScopeUnit("test", "go")
+	if development == production || !strings.HasPrefix(development, instanceScopeUnitPrefix) {
+		t.Fatalf("development scope = %q, production = %q", development, production)
+	}
+	if !scopeBelongsToCurrentInstance(development) || scopeBelongsToCurrentInstance(production) {
+		t.Fatalf("instance ownership mismatch: development=%q production=%q", development, production)
 	}
 }

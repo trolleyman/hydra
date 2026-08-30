@@ -147,15 +147,20 @@ describe('diagnosticSpans', () => {
   const of = (line: string) => diagnosticSpans(line).map((s) => [s.text, tag(s.cls)])
 
   it('reads a tool complaining about what it was asked to do', () => {
-    // The file it could not read is the news, so it reads at full strength; the
-    // tool that is talking is furniture, and the reason is the verdict.
+    // The file is lowlit like paths elsewhere; the phrase naming what happened
+    // stays at full strength, the tool is furniture, and the reason is the
+    // verdict.
     expect(of("sed: can't read web/src/lib/fileIcons.ts: No such file or directory")).toEqual([
       ['sed', 'dim'], [': ', 'dim'],
-      ["can't read web/src/lib/fileIcons.ts: ", ''],
+      ["can't read ", ''], ['web/src/lib/fileIcons.ts', 'dim'], [': ', 'dim'],
       ['No such file or directory', 'fail'],
     ])
     expect(of('cat: docs/missing.md: No such file or directory')).toEqual([
-      ['cat', 'dim'], [': ', 'dim'], ['docs/missing.md: ', ''], ['No such file or directory', 'fail'],
+      ['cat', 'dim'], [': ', 'dim'], ['docs/missing.md', 'dim'], [': ', 'dim'], ['No such file or directory', 'fail'],
+    ])
+    expect(of('rg: Magefile.go: No such file or directory (os error 2)')).toEqual([
+      ['rg', 'dim'], [': ', 'dim'], ['Magefile.go', 'dim'], [': ', 'dim'],
+      ['No such file or directory (os error 2)', 'fail'],
     ])
   })
 
