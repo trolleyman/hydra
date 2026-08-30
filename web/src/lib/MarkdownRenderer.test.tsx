@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest'
-import { render } from '@testing-library/react'
+import { act, fireEvent, render } from '@testing-library/react'
 import { Markdown } from './MarkdownRenderer'
 
 // jsdom implements no media loading: the off-screen size probe behind a markdown
@@ -134,6 +134,20 @@ describe('Markdown', () => {
       )
       expect(container.querySelector('a')).toHaveTextContent('controller.go')
       expect(container.querySelector('a')).not.toHaveTextContent('... /')
+    })
+
+    it('preserves an absolute path for a chat file tooltip', () => {
+      vi.useFakeTimers()
+      try {
+        const { container } = render(
+          <Markdown text="[README](/home/callum/code/hydra/README.md)" linkCtx={ctx} />,
+        )
+        fireEvent.mouseEnter(container.querySelector('a')!.parentElement!)
+        act(() => void vi.advanceTimersByTime(600))
+        expect(document.body.textContent).toContain('/home/callum/code/hydra/')
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 

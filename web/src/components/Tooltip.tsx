@@ -378,7 +378,7 @@ export function Tooltip({
         <div
           ref={boxRef}
           role="tooltip"
-          className={`fixed z-[9999] -translate-x-1/2 select-text break-words rounded-lg border p-2 text-left text-2xs text-gray-700 shadow-lg transition-opacity duration-150 ease-out motion-reduce:transition-none dark:text-gray-200 ${surface} ${opaque ? 'opacity-100' : 'pointer-events-none opacity-0'} ${inDark ? 'dark' : ''} ${pos.placement === 'top' ? '-translate-y-full' : ''}`}
+          className={`fixed z-[9999] inline-flex -translate-x-1/2 flex-col items-stretch select-text break-words rounded-lg border p-2 text-left text-2xs text-gray-700 shadow-lg transition-opacity duration-150 ease-out motion-reduce:transition-none dark:text-gray-200 ${surface} ${opaque ? 'opacity-100' : 'pointer-events-none opacity-0'} ${inDark ? 'dark' : ''} ${pos.placement === 'top' ? '-translate-y-full' : ''}`}
           style={{
             top: pos.top,
             left: pos.left,

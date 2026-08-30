@@ -18,7 +18,7 @@ import { IMAGE_REFLOW_MS, markSelfReflow } from './selfReflow'
 import { agentFileUrl, uploadBlobUrl } from '../api/uploads'
 import { ansiToHtml, ansiToText, hasAnsi } from './ansi'
 import { renderCommentMentions } from './mentionHighlight'
-import { getFileIcon } from './fileIcons'
+import { FilePathLabel } from '../components/FilePathLabel'
 
 // Shared read-only markdown renderer. Wraps react-markdown + remark-gfm so every
 // rendered-markdown surface (chat messages, the AgentView prompt, README file
@@ -105,19 +105,10 @@ function FileLink({ href, path, onClick, children }: {
   onClick: (e: React.MouseEvent<HTMLAnchorElement>) => void
   children?: ReactNode
 }) {
-  const filename = path.split('/').pop() || path
-  const directory = path.slice(0, Math.max(0, path.length - filename.length))
-  const { Icon } = getFileIcon(filename)
   return (
     <Tooltip
       content={(
-        <span className="inline-flex items-center gap-1.5 font-mono">
-          <Icon className="w-3.5 h-3.5 shrink-0 opacity-60" aria-hidden="true" />
-          <span>
-            {directory && <span className="opacity-55">{directory}</span>}
-            <span>{filename}</span>
-          </span>
-        </span>
+        <FilePathLabel path={path} nativeTitle={false} />
       )}
     >
       <a className={LINK_CLASS} href={href} onClick={onClick}>{children}</a>
@@ -147,6 +138,7 @@ function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ct
     path = path.slice(0, -line[0].length)
     if (!lineHash) lineHash = `#L${line[1]}`
   }
+  const authoredPath = path
   if (ctx.worktreePath && (path === ctx.worktreePath || path.startsWith(ctx.worktreePath + '/'))) {
     path = path.slice(ctx.worktreePath.length).replace(/^\/+/, '')
   }
@@ -163,7 +155,11 @@ function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ct
     })
   }
   if (fileChip && resolved) {
-    return <FileLink href={url} path={resolved} onClick={onClick}>{children}</FileLink>
+    // Preserve an authored absolute path in the tooltip even though navigation
+    // uses its repo-relative equivalent. Relative links show the resolved repo
+    // path, which is more useful than an unresolved ../ sequence.
+    const displayPath = authoredPath.startsWith('/') ? authoredPath : resolved
+    return <FileLink href={url} path={displayPath} onClick={onClick}>{children}</FileLink>
   }
   return <a className={LINK_CLASS} href={url} onClick={onClick}>{children}</a>
 }

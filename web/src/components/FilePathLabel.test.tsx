@@ -11,4 +11,10 @@ describe('FilePathLabel', () => {
     expect(screen.getByText('README.md')).toHaveClass('text-stone-700')
     expect(screen.getByTitle('docs/guide/README.md')).toBeInTheDocument()
   })
+
+  it('can suppress its native title inside a shared tooltip', () => {
+    const { container } = render(<FilePathLabel path="/home/callum/README.md" nativeTitle={false} />)
+    expect(container.querySelector('[title]')).toBeNull()
+    expect(screen.getByText('/home/callum/')).toHaveClass('text-stone-400')
+  })
 })
