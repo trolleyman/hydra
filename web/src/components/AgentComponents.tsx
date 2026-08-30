@@ -289,13 +289,13 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
         // baseline-aligned but have different font metrics, so even at an identical
         // `line-height` their inline boxes distribute that height differently around
         // the baseline and the line box's union can exceed it - making a code line
-        // taller than a plain one. Pinning line-height (a previous fix) wasn't enough
-        // for that reason. Instead lock a fixed `h-4` and center the content
-        // (`flex items-center`), clipping any overflow, so the row is exactly 1rem
-        // tall whichever font the activity uses. The activity span carries `truncate`
+        // taller than a plain one. Lock both the row and its line-height to `h-4`
+        // / `leading-4`, then center the content and clip any horizontal overflow,
+        // so the row is exactly 1rem tall whichever font the activity uses. The
+        // activity span carries `truncate`
         // (+ `min-w-0` so it can shrink inside the flex row) for the horizontal
         // ellipsis; the timestamp is `shrink-0` so it always stays fully visible.
-        <div className="mt-0.5 ml-4 h-4 flex items-center gap-2 overflow-hidden text-2xs text-gray-400 dark:text-gray-500">
+        <div className="mt-0.5 ml-4 h-4 flex items-center gap-2 overflow-hidden text-2xs leading-4 text-gray-400 dark:text-gray-500">
           <span className="min-w-0 flex-1 truncate">
             {!archived && agent.agent_status
               ? renderMarkdown(agentStatusDetail(agent), { dollarCommand: true, singleLine: true })

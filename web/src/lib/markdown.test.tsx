@@ -23,6 +23,12 @@ describe('renderMarkdown', () => {
     expect(container.textContent).toBe('a \\ b')
   })
 
+  it('renders an escaped heading marker literally', () => {
+    const { container } = render(<span>{renderMarkdown('\\# Run backend tests')}</span>)
+    expect(container.textContent).toBe('# Run backend tests')
+    expect(container.querySelector('strong')).toBeNull()
+  })
+
   it('leaves a backslash before a non-metachar untouched (Windows paths)', () => {
     const { container } = render(<span>{renderMarkdown('C:\\Users\\x')}</span>)
     expect(container.textContent).toBe('C:\\Users\\x')

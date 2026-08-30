@@ -221,7 +221,7 @@ func TestControllerReportsLatestThing(t *testing.T) {
 	c.OnLine([]byte(`{"method":"item/completed","params":{"item":{"id":"message","type":"agentMessage","text":"The improved status is implemented.\n\nTests pass."}}}`))
 	c.OnLine([]byte(`{"id":7,"method":"item/tool/requestUserInput","params":{"questions":[{"id":"q1","question":"Which status behavior should Codex use?"},{"id":"q2","question":"Anything else?"}]}}`))
 
-	wantActivities := []string{"# Run backend tests", "Editing activity.go", "Using Get head status"}
+	wantActivities := []string{`\# Run backend tests`, "Editing activity.go", "Using Get head status"}
 	if !reflect.DeepEqual(activities, wantActivities) {
 		t.Fatalf("activities = %#v, want %#v", activities, wantActivities)
 	}

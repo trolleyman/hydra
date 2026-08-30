@@ -119,7 +119,7 @@ const HEADING_RE = /^(#{1,6}[ \t]+)([^\n]*)/
 // styles (CommonMark escapes all ASCII punctuation; we stay minimal so e.g. a
 // Windows path `C:\Users` is untouched). Backslash itself is escapable so a
 // literal backslash before a metachar can be written unambiguously.
-const ESCAPABLE = new Set(['`', '*', '_', '~', '\\'])
+const ESCAPABLE = new Set(['`', '*', '_', '~', '#', '\\'])
 
 // parseInline splits text into styled/plain segments. The concatenation of all
 // segments' source (marker + value + marker, marker + pad + value + pad + marker
@@ -557,4 +557,3 @@ export function renderMarkdownSource(text: string): ReactNode {
     )
   })
 }
-
