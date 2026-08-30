@@ -333,12 +333,16 @@ static gboolean hydra_decide_policy(WebKitWebView *web_view, WebKitPolicyDecisio
 	return TRUE;
 }
 
-static void hydra_window_destroy(GtkWidget *widget, gpointer data) {
+static void hydra_window_free(gpointer data) {
 	HydraWindow *window = data;
-	if (window->desktop->primary_window == GTK_WINDOW(widget)) window->desktop->primary_window = NULL;
 	g_free(window->project_id);
 	g_free(window->agent_id);
 	g_free(window);
+}
+
+static void hydra_window_destroy(GtkWidget *widget, gpointer data) {
+	HydraWindow *window = data;
+	if (window->desktop->primary_window == GTK_WINDOW(widget)) window->desktop->primary_window = NULL;
 }
 
 static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolean compact_chat) {
@@ -370,7 +374,10 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolea
 	state->desktop = desktop;
 	state->window = window;
 	state->web_view = web_view;
-	g_object_set_data(G_OBJECT(window), "hydra-window", state);
+	// Keep native callback state until the GtkWindow is finalized. The destroy
+	// signal fires while child WebKit objects are still unwinding, so freeing it
+	// there leaves their signal callbacks with a stale pointer.
+	g_object_set_data_full(G_OBJECT(window), "hydra-window", state, hydra_window_free);
 	webkit_user_content_manager_register_script_message_handler(
 		webkit_web_view_get_user_content_manager(web_view), "hydra", NULL);
 	g_signal_connect(webkit_web_view_get_user_content_manager(web_view),
