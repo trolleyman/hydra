@@ -95,6 +95,9 @@ Run the server:
 mage run
 ```
 
+The development server stamps the current `HEAD` into its build information,
+which is shown in Settings -> About alongside the development runtime details.
+
 Build the experimental Linux desktop shell separately, then open a registered
 project. It reuses the user-global daemon or starts the bundled backend:
 

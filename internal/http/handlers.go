@@ -43,7 +43,15 @@ import (
 
 const version = "0.1.0"
 
+// buildGitCommit is stamped by development launchers that cannot rely on Go's
+// automatic VCS build settings. Packaged builds still fall back to those
+// settings, so ordinary `go build` invocations need no linker flags.
+var buildGitCommit string
+
 func gitCommit() string {
+	if buildGitCommit != "" {
+		return buildGitCommit
+	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return ""
