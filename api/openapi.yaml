@@ -3724,6 +3724,12 @@ components:
         version:
           type: string
           example: "1.0.0"
+        git_commit:
+          type: string
+          description: Git commit embedded in the running server binary, when available.
+        database_directory:
+          type: string
+          description: Absolute directory containing the running server's SQLite database.
         desktop_protocol:
           type: integer
           description: Native desktop shell compatibility protocol.

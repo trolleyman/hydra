@@ -3681,6 +3681,9 @@ type StatusResponse struct {
 	// CanUpdate Whether the server can rebuild itself from source and restart into the result. Requires the daemon's project root to be a Hydra checkout with mage available.
 	CanUpdate *bool `json:"can_update,omitempty"`
 
+	// DatabaseDirectory Absolute directory containing the running server's SQLite database.
+	DatabaseDirectory *string `json:"database_directory,omitempty"`
+
 	// DefaultProjectId Project ID of the default (CWD) project
 	DefaultProjectId *string `json:"default_project_id,omitempty"`
 
@@ -3689,6 +3692,9 @@ type StatusResponse struct {
 
 	// Development Whether the server is being served out of a Hydra source checkout, which is what enables developer affordances such as the Chrome DevTools workspace endpoint.
 	Development *bool `json:"development,omitempty"`
+
+	// GitCommit Git commit embedded in the running server binary, when available.
+	GitCommit *string `json:"git_commit,omitempty"`
 
 	// ProjectRoot Absolute path to the default project root (server CWD)
 	ProjectRoot *string `json:"project_root,omitempty"`

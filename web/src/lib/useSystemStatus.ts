@@ -12,8 +12,6 @@ export interface SystemStatus {
   canRestart: boolean
   // Whether it can also rebuild itself from source first.
   canUpdate: boolean
-  // Build/version identifier reported by the running server.
-  version: string | null
   // Server boot time as a client epoch (ms), or null until the first status lands.
   // A ref so the once-per-second uptime ticker can advance the label without the
   // caller threading extra state.
@@ -31,14 +29,12 @@ export function useSystemStatus(): SystemStatus {
   const [, setTick] = useState(0)
   const [canRestart, setCanRestart] = useState(false)
   const [canUpdate, setCanUpdate] = useState(false)
-  const [version, setVersion] = useState<string | null>(null)
 
   const handleStatus = useCallback((status: StatusResponse) => {
     const { setSystemStatus, setProjects, setSelectedProjectId } = useProjectStore.getState()
     setSystemStatus(status)
     setCanRestart(status.can_restart ?? false)
     setCanUpdate(status.can_update ?? false)
-    setVersion(status.version ?? null)
     if (status.uptime_seconds != null && spawnedAt.current === null) {
       spawnedAt.current = Date.now() - status.uptime_seconds * 1000
       setTick((n) => n + 1) // one render to mount the self-ticking <Uptime> label
@@ -70,5 +66,5 @@ export function useSystemStatus(): SystemStatus {
     { intervalMs: EVENT_FALLBACK_MS, onData: handleStatus, trackLoading: false },
   )
 
-  return { refetchStatus, canRestart, canUpdate, version, spawnedAt }
+  return { refetchStatus, canRestart, canUpdate, spawnedAt }
 }

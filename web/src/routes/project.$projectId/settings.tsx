@@ -15,13 +15,14 @@ import { ProjectIconSection } from '../../components/settings/ProjectIconSection
 import { RemoveProjectSection } from '../../components/settings/RemoveProjectSection'
 import { BrowserSections } from '../../components/settings/BrowserSections'
 import { ScopeTabs, SettingsSaveAction } from '../../components/settings/shared'
+import { AboutSection } from '../../components/settings/AboutSection'
 
 export const Route = createFileRoute('/project/$projectId/settings')({
   component: ProjectSettingsPage,
 })
 
 type SettingsScope = 'project' | 'local' | 'user'
-type SettingsTab = SettingsScope | 'browser'
+type SettingsTab = SettingsScope | 'browser' | 'about'
 
 const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
   project:
@@ -30,6 +31,7 @@ const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
     'This project, just you - stored in the untracked .hydra/config.local.toml and layered on top of the project config (lists combine, pre-prompts append, other values override). For personal overrides you do not want to commit.',
   user: 'Every project on this machine - stored in ~/.config/hydra/config.toml.',
   browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
+  about: '',
 }
 
 function ProjectSettingsPage() {
@@ -131,7 +133,7 @@ function ProjectSettingsPage() {
   // config state, so moving to or from it needs no guard.
   function switchTab(t: SettingsTab) {
     if (t === tab) return
-    if (t !== 'browser' && t !== scope) {
+    if (t !== 'browser' && t !== 'about' && t !== scope) {
       if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Discard them?')) return
       setScope(t)
     }
@@ -141,9 +143,9 @@ function ProjectSettingsPage() {
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
       {/* Save lives in the global top bar beside its "Settings" crumb - the page
-          has no header of its own. Nothing to save on the Browser tab, whose
-          preferences apply instantly. */}
-      {tab !== 'browser' && <SettingsSaveAction dirty={hasUnsavedChanges} saving={saving} onSave={handleSave} />}
+          has no header of its own. Browser preferences apply instantly, and
+          About has no editable settings. */}
+      {tab !== 'browser' && tab !== 'about' && <SettingsSaveAction dirty={hasUnsavedChanges} saving={saving} onSave={handleSave} />}
       <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
           {/* Scope tabs: which settings store the page edits. Kept outside the
@@ -154,12 +156,15 @@ function ProjectSettingsPage() {
               { id: 'local' as SettingsTab, label: 'Local' },
               { id: 'user' as SettingsTab, label: 'User' },
               { id: 'browser' as SettingsTab, label: 'Browser' },
+              { id: 'about' as SettingsTab, label: 'About' },
             ]}
             active={tab}
             onSelect={switchTab}
             description={TAB_DESCRIPTIONS[tab]}
           />
-          {tab === 'browser' ? (
+          {tab === 'about' ? (
+            <AboutSection />
+          ) : tab === 'browser' ? (
             <BrowserSections />
           ) : loading ? (
             <div className="py-8 text-gray-500">Loading configuration...</div>
