@@ -10,6 +10,7 @@ import { InlineCode, InlineCodeEditing } from './InlineCode'
 import { HighlightedCodeBlock } from './CodeBlock'
 import { TableShortcut } from './TableShortcut'
 import { InteractiveTable } from './Table'
+import { HydraReference, hydrateReferences } from './Reference'
 
 // Hydra deliberately supports *italic* as a typing convenience but not
 // _italic_. Underscores are too common in identifiers, paths and agent output.
@@ -41,6 +42,7 @@ export function createRichEditorExtensions(attachmentRegistry?: AttachmentRegist
   }),
   TableShortcut,
   Attachment.configure({ registry: attachmentRegistry }),
+  HydraReference,
   InlineCode,
   InlineCodeEditing,
   Markdown,
@@ -52,7 +54,7 @@ export const richEditorExtensions = createRichEditorExtensions()
 const markdownManager = new MarkdownManager({ extensions: richEditorExtensions })
 
 export function parseRichMarkdown(markdown: string): JSONContent {
-  return markdownManager.parse(markdown)
+  return hydrateReferences(markdownManager.parse(markdown))
 }
 
 export function serializeRichMarkdown(document: JSONContent): string {
@@ -73,8 +75,8 @@ export function createRichEditor(options: RichEditorOptions = {}): Editor {
   const editor = new Editor({
     element: options.element,
     extensions: createRichEditorExtensions(options.attachmentRegistry, options.interactiveNodeViews),
-    content: options.content ?? options.markdown ?? '',
-    contentType: options.content ? 'json' : 'markdown',
+    content: options.content ?? parseRichMarkdown(options.markdown ?? ''),
+    contentType: 'json',
     editable: options.editable ?? true,
     injectCSS: false,
     autofocus: false,

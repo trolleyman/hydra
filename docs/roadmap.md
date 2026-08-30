@@ -198,10 +198,11 @@ before starting. Grouped by area.
 
 ## Web
 
-- [ ] **Structured rich-text composer.** Replace the prompt textarea's
-  source-shaped Markdown overlay with a compact Tiptap/ProseMirror editor: real
+- [x] **Structured rich-text composer.** The prompt surfaces use a compact
+  Tiptap/ProseMirror editor: real
   editable inline-code spans with predictable inside/outside cursor positions,
-  formatting commands, code blocks and attachment nodes placed in the sentence.
+  formatting commands, code blocks, structured Hydra references, a start-of-line
+  command menu and attachment nodes placed in the sentence.
   Markdown stays the backend interchange format and Tiptap stays behind a
   Hydra-owned API. Design, interaction tables, migration and gated build order:
   [rich-text-composer.md](rich-text-composer.md).

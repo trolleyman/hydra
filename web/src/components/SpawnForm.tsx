@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, memo, lazy, Suspense } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, memo, lazy, Suspense } from 'react'
 import { api } from '../stores/apiClient'
 import { FocusedFilesystemMode, type AgentResponse, type SpawnAgentRequest, type RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
@@ -13,7 +13,8 @@ import { Kbd } from './Kbd'
 import { Lightbox } from './Lightbox'
 import { AttachmentChips } from './AttachmentChips'
 import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
-import type { RichComposerHandle } from '../lib/rich-editor/RichComposer'
+import type { MarkdownComposerHandle } from '../lib/rich-editor/MarkdownComposer'
+import type { ComposerReference } from '../lib/rich-editor/Reference'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
@@ -33,7 +34,7 @@ import { fetchBranches, peekBranches } from '../lib/branchCache'
 import type { Editor } from '@tiptap/core'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
-const RichComposer = lazy(() => import('../lib/rich-editor/RichComposer').then((module) => ({ default: module.RichComposer })))
+const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
 
 // Native desktop focused windows land on the ordinary project route for the
 // first implementation phase, but ask its composer to start in focused mode.
@@ -420,7 +421,11 @@ export const SpawnForm = memo(function SpawnForm({
     void refreshBranches(false)
   }, [refreshBranches])
 
-  const richComposerRef = useRef<RichComposerHandle>(null)
+  const richComposerRef = useRef<MarkdownComposerHandle>(null)
+  const composerReferences = useMemo<ComposerReference[]>(
+    () => (branches ?? []).map((branch) => ({ kind: 'branch', value: branch.name })),
+    [branches],
+  )
   const promptElementRef = useRef<HTMLElement | null>(null)
   const promptScrollCleanupRef = useRef<(() => void) | null>(null)
   // The resizable element is the whole card (textarea + footer), so the drag
@@ -1144,13 +1149,15 @@ export const SpawnForm = memo(function SpawnForm({
               className={`w-full flex-1 min-h-0 overflow-hidden ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
             >
               <Suspense fallback={<div className="h-full px-3 pt-2.5 text-xs text-gray-400">Loading editor...</div>}>
-                <RichComposer
+                <MarkdownComposer
                   ref={richComposerRef}
                   value={prompt}
                   onChange={handlePromptChange}
                   onEditor={bindPromptEditor}
                   onKeyDown={handleRichKeyDown}
                   onPaste={(event) => { handlePaste(event); return event.defaultPrevented }}
+                  references={composerReferences}
+                  onRequestFiles={() => fileInputRef.current?.click()}
                   placeholder={disabled ? 'Select a project first...' : 'Describe a task...'}
                   editable={!loading && !disabled}
                   ariaLabel="Describe a task"
@@ -1225,13 +1232,15 @@ export const SpawnForm = memo(function SpawnForm({
                 className={`w-full flex-1 min-h-0 overflow-hidden ${dragOver ? 'ring-2 ring-blue-400 rounded' : ''}`}
               >
                 <Suspense fallback={<div className="h-full px-4 pt-4 text-sm text-gray-400">Loading editor...</div>}>
-                  <RichComposer
+                  <MarkdownComposer
                     ref={richComposerRef}
                     value={prompt}
                     onChange={handlePromptChange}
                     onEditor={bindPromptEditor}
                     onKeyDown={handleRichKeyDown}
                     onPaste={(event) => { handlePaste(event); return event.defaultPrevented }}
+                    references={composerReferences}
+                    onRequestFiles={() => fileInputRef.current?.click()}
                     placeholder="Describe what you need..."
                     editable={!loading}
                     ariaLabel="Describe what you need"

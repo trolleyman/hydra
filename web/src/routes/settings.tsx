@@ -13,18 +13,16 @@ import {
 import { useUnsavedChangesGuard } from '../lib/unsavedChanges'
 import { BrowserSections } from '../components/settings/BrowserSections'
 import { ScopeTabs, SettingsSaveAction } from '../components/settings/shared'
-import { RichTextLab } from '../components/settings/RichTextLab'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
 })
 
-type GlobalSettingsTab = 'user' | 'browser' | 'rich-text'
+type GlobalSettingsTab = 'user' | 'browser'
 
 const TAB_DESCRIPTIONS: Record<GlobalSettingsTab, string> = {
   user: 'Every project on this machine - stored in ~/.config/hydra/config.toml. Open a project\'s settings to configure that project itself.',
   browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
-  'rich-text': 'An unsaved hands-on lab for the proposed rich chat composer and its Markdown boundary.',
 }
 
 function SettingsPage() {
@@ -121,15 +119,12 @@ function SettingsPage() {
             tabs={[
               { id: 'user' as GlobalSettingsTab, label: 'User' },
               { id: 'browser' as GlobalSettingsTab, label: 'Browser' },
-              { id: 'rich-text' as GlobalSettingsTab, label: 'Rich text lab' },
             ]}
             active={tab}
             onSelect={setTab}
             description={TAB_DESCRIPTIONS[tab]}
           />
-          {tab === 'rich-text' ? (
-            <RichTextLab />
-          ) : tab === 'browser' ? (
+          {tab === 'browser' ? (
             <BrowserSections />
           ) : !effectiveProjectId ? (
             <div className="py-8 text-gray-500">Add a project to view user settings.</div>

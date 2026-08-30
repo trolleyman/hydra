@@ -1,15 +1,15 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RichComposer, type RichComposerHandle } from './RichComposer'
+import { MarkdownComposer, type MarkdownComposerHandle } from './MarkdownComposer'
 import { createRef } from 'react'
 
 afterEach(cleanup)
 
-describe('RichComposer', () => {
+describe('MarkdownComposer', () => {
   it('exposes Markdown as its controlled value', async () => {
     const changed = vi.fn()
-    const ref = createRef<RichComposerHandle>()
-    const view = render(<RichComposer ref={ref} value="Hello" onChange={changed} />)
+    const ref = createRef<MarkdownComposerHandle>()
+    const view = render(<MarkdownComposer ref={ref} value="Hello" onChange={changed} />)
 
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
     const editor = ref.current!.editor!
@@ -17,7 +17,7 @@ describe('RichComposer', () => {
     await waitFor(() => expect(changed).toHaveBeenLastCalledWith('Hello **world**'))
     const localChangeCount = changed.mock.calls.length
 
-    view.rerender(<RichComposer ref={ref} value="## External" onChange={changed} />)
+    view.rerender(<MarkdownComposer ref={ref} value="## External" onChange={changed} />)
     await waitFor(() => expect(ref.current!.editor!.getJSON().content?.[0]).toMatchObject({
       type: 'heading',
       attrs: expect.objectContaining({ level: 2 }),
@@ -27,8 +27,8 @@ describe('RichComposer', () => {
 
   it('keeps Tiptap out of the keyboard callback context value', async () => {
     const onKeyDown = vi.fn(() => true)
-    const ref = createRef<RichComposerHandle>()
-    render(<RichComposer ref={ref} value="draft" onChange={() => {}} onKeyDown={onKeyDown} />)
+    const ref = createRef<MarkdownComposerHandle>()
+    render(<MarkdownComposer ref={ref} value="draft" onChange={() => {}} onKeyDown={onKeyDown} />)
 
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
     ref.current!.editor!.view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
@@ -40,9 +40,9 @@ describe('RichComposer', () => {
   })
 
   it('restores a structured draft without reparsing its attachment as text', async () => {
-    const ref = createRef<RichComposerHandle>()
+    const ref = createRef<MarkdownComposerHandle>()
     render(
-      <RichComposer
+      <MarkdownComposer
         ref={ref}
         value="Before [cat.png] after"
         initialDocument={{
@@ -65,9 +65,9 @@ describe('RichComposer', () => {
   })
 
   it('uses only plain text for Ctrl+Shift+V, even when files and HTML are present', async () => {
-    const ref = createRef<RichComposerHandle>()
+    const ref = createRef<MarkdownComposerHandle>()
     const onPaste = vi.fn(() => true)
-    const { getByRole } = render(<RichComposer ref={ref} value="" onChange={() => {}} onPaste={onPaste} />)
+    const { getByRole } = render(<MarkdownComposer ref={ref} value="" onChange={() => {}} onPaste={onPaste} />)
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
     const textbox = getByRole('textbox')
     fireEvent.keyDown(textbox, { key: 'v', ctrlKey: true, shiftKey: true })
@@ -83,8 +83,8 @@ describe('RichComposer', () => {
   })
 
   it('keeps supported structure from ordinary HTML paste and drops source styling', async () => {
-    const ref = createRef<RichComposerHandle>()
-    const { getByRole } = render(<RichComposer ref={ref} value="" onChange={() => {}} />)
+    const ref = createRef<MarkdownComposerHandle>()
+    const { getByRole } = render(<MarkdownComposer ref={ref} value="" onChange={() => {}} />)
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
     fireEvent.paste(getByRole('textbox'), {
       clipboardData: {
@@ -105,9 +105,9 @@ describe('RichComposer', () => {
   })
 
   it('turns a URL pasted over selected prose into a link', async () => {
-    const ref = createRef<RichComposerHandle>()
+    const ref = createRef<MarkdownComposerHandle>()
     const changed = vi.fn()
-    const { getByRole } = render(<RichComposer ref={ref} value="label" onChange={changed} />)
+    const { getByRole } = render(<MarkdownComposer ref={ref} value="label" onChange={changed} />)
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
     ref.current!.editor!.commands.setTextSelection({ from: 1, to: 6 })
     fireEvent.paste(getByRole('textbox'), {
@@ -121,8 +121,8 @@ describe('RichComposer', () => {
   })
 
   it('renders the language picker inside a code block and applies highlighting', async () => {
-    const ref = createRef<RichComposerHandle>()
-    const view = render(<RichComposer ref={ref} value={'```\nconst answer = 1\n```'} onChange={() => {}} />)
+    const ref = createRef<MarkdownComposerHandle>()
+    const view = render(<MarkdownComposer ref={ref} value={'```\nconst answer = 1\n```'} onChange={() => {}} />)
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
 
     fireEvent.change(view.getByRole('combobox', { name: 'Code block language' }), {
@@ -133,8 +133,8 @@ describe('RichComposer', () => {
   })
 
   it('shows accessible controls on a focused table and reshapes it', async () => {
-    const ref = createRef<RichComposerHandle>()
-    const view = render(<RichComposer ref={ref} value={'| A | B |\n| --- | --- |\n| 1 | 2 |'} onChange={() => {}} />)
+    const ref = createRef<MarkdownComposerHandle>()
+    const view = render(<MarkdownComposer ref={ref} value={'| A | B |\n| --- | --- |\n| 1 | 2 |'} onChange={() => {}} />)
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
 
     ref.current!.editor!.commands.setTextSelection(3)
@@ -146,5 +146,37 @@ describe('RichComposer', () => {
     expect(ref.current!.editor!.getJSON().content?.[0].content?.[0].content).toHaveLength(3)
     fireEvent.click(view.getByRole('button', { name: 'Delete table' }))
     expect(ref.current!.editor!.getJSON().content?.some((node) => node.type === 'table')).toBe(false)
+  })
+
+  it('discovers slash commands at the start of an empty block', async () => {
+    const ref = createRef<MarkdownComposerHandle>()
+    const view = render(<MarkdownComposer ref={ref} value="" onChange={() => {}} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+
+    ref.current!.editor!.commands.insertContent('/co')
+    const menu = await view.findByRole('listbox', { name: 'Block commands' })
+    expect(menu).toHaveTextContent('Code block')
+    fireEvent.click(view.getByRole('option', { name: 'Code block' }))
+    expect(ref.current!.editor!.getJSON().content?.[0].type).toBe('codeBlock')
+  })
+
+  it('inserts a catalog reference as a structured Markdown node', async () => {
+    const ref = createRef<MarkdownComposerHandle>()
+    const changed = vi.fn()
+    const view = render(
+      <MarkdownComposer
+        ref={ref}
+        value=""
+        onChange={changed}
+        references={[{ kind: 'branch', value: 'hydra/feature' }]}
+      />,
+    )
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+
+    ref.current!.editor!.commands.insertContent('@branch:feat')
+    await view.findByRole('listbox', { name: 'References' })
+    fireEvent.click(view.getByRole('option', { name: /hydra\/feature/ }))
+    await waitFor(() => expect(changed).toHaveBeenLastCalledWith('@branch[hydra/feature]'))
+    expect(ref.current!.editor!.getJSON().content?.[0].content?.[0].type).toBe('hydraReference')
   })
 })

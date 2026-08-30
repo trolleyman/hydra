@@ -15,14 +15,13 @@ import { ProjectIconSection } from '../../components/settings/ProjectIconSection
 import { RemoveProjectSection } from '../../components/settings/RemoveProjectSection'
 import { BrowserSections } from '../../components/settings/BrowserSections'
 import { ScopeTabs, SettingsSaveAction } from '../../components/settings/shared'
-import { RichTextLab } from '../../components/settings/RichTextLab'
 
 export const Route = createFileRoute('/project/$projectId/settings')({
   component: ProjectSettingsPage,
 })
 
 type SettingsScope = 'project' | 'local' | 'user'
-type SettingsTab = SettingsScope | 'browser' | 'rich-text'
+type SettingsTab = SettingsScope | 'browser'
 
 const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
   project:
@@ -31,7 +30,6 @@ const TAB_DESCRIPTIONS: Record<SettingsTab, string> = {
     'This project, just you - stored in the untracked .hydra/config.local.toml and layered on top of the project config (lists combine, pre-prompts append, other values override). For personal overrides you do not want to commit.',
   user: 'Every project on this machine - stored in ~/.config/hydra/config.toml.',
   browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
-  'rich-text': 'An unsaved hands-on lab for the proposed rich chat composer and its Markdown boundary.',
 }
 
 function ProjectSettingsPage() {
@@ -133,7 +131,7 @@ function ProjectSettingsPage() {
   // config state, so moving to or from it needs no guard.
   function switchTab(t: SettingsTab) {
     if (t === tab) return
-    if (t !== 'browser' && t !== 'rich-text' && t !== scope) {
+    if (t !== 'browser' && t !== scope) {
       if (hasUnsavedChanges && !window.confirm('You have unsaved changes. Discard them?')) return
       setScope(t)
     }
@@ -156,15 +154,12 @@ function ProjectSettingsPage() {
               { id: 'local' as SettingsTab, label: 'Local' },
               { id: 'user' as SettingsTab, label: 'User' },
               { id: 'browser' as SettingsTab, label: 'Browser' },
-              { id: 'rich-text' as SettingsTab, label: 'Rich text lab' },
             ]}
             active={tab}
             onSelect={switchTab}
             description={TAB_DESCRIPTIONS[tab]}
           />
-          {tab === 'rich-text' ? (
-            <RichTextLab />
-          ) : tab === 'browser' ? (
+          {tab === 'browser' ? (
             <BrowserSections />
           ) : loading ? (
             <div className="py-8 text-gray-500">Loading configuration...</div>

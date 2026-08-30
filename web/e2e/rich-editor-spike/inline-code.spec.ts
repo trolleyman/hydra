@@ -222,6 +222,22 @@ test('a focused table exposes controls, announces mutations, and scrolls narrowl
   expect(geometry.scroll).toBeGreaterThan(geometry.client)
 })
 
+test('the discovery menus create blocks and structured references', async ({ page }) => {
+  const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
+  await interactive.click()
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
+  await page.keyboard.press('Backspace')
+  await page.keyboard.type('/quo')
+  await expect(page.getByRole('listbox', { name: 'Block commands' })).toBeVisible()
+  await page.keyboard.press('Enter')
+  await expect(interactive.locator('blockquote')).toBeVisible()
+
+  await page.keyboard.type('@branch:rich')
+  await expect(page.getByRole('listbox', { name: 'References' })).toBeVisible()
+  await page.keyboard.press('Enter')
+  await expect(interactive.locator('[data-hydra-reference="branch"]')).toHaveText('@hydra/rich-text')
+})
+
 test('Right exits a code capsule at the end of the paragraph', async ({ page }) => {
   await reset(page, paragraph(code('a')))
   await select(page, 3)

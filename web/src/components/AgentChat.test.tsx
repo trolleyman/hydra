@@ -6,7 +6,7 @@ import { AgentStatus, type AgentResponse } from '../api'
 import { useAgentStore } from '../stores/agentStore'
 import { formatBashForDisplay, leadingBashComment } from '../lib/bashFormat'
 import { toolResultName, trimWorktreePaths } from '../lib/chatPathDisplay'
-import { editorForRichComposer } from '../lib/rich-editor/mountedEditors'
+import { editorForMarkdownComposer } from '../lib/rich-editor/mountedEditors'
 import { optimisticEchoIndex } from '../lib/optimisticEcho'
 
 describe('optimistic user echo reconciliation', () => {
@@ -146,7 +146,7 @@ describe('Bash card summary comments', () => {
 })
 
 async function connectedComposer(): Promise<HTMLElement> {
-  // RichComposer is a production lazy chunk. Under the full parallel test run,
+  // MarkdownComposer is a production lazy chunk. Under the full parallel test run,
   // transforming that chunk can exceed Testing Library's 1s default even
   // though the websocket and editor mount normally.
   const composer = await screen.findByRole('textbox', {}, { timeout: 5_000 })
@@ -155,11 +155,11 @@ async function connectedComposer(): Promise<HTMLElement> {
 }
 
 function setComposerValue(composer: HTMLElement, value: string) {
-  editorForRichComposer(composer)!.commands.setContent(value, { contentType: 'markdown' })
+  editorForMarkdownComposer(composer)!.commands.setContent(value, { contentType: 'markdown' })
 }
 
 function composerValue(composer: HTMLElement): string {
-  return editorForRichComposer(composer)!.getText()
+  return editorForMarkdownComposer(composer)!.getText()
 }
 
 describe('review composer status', () => {
@@ -351,8 +351,12 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     const ta = await connectedComposer()
 
     // Type into the composer (a coalesced undo step), then paste an image.
-    setComposerValue(ta, 'look at this ')
+    editorForMarkdownComposer(ta)!.commands.insertContent('look at this ')
     expect(composerValue(ta)).toBe('look at this ')
+    // MarkdownComposer delivers its controlled Markdown in a microtask after
+    // ProseMirror finishes appended transactions. A real paste is a later DOM
+    // event; let the simulated typing event reach the host before firing it.
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Paste with the caret at the end (jsdom doesn't move it on a controlled
     // re-render), so the marker lands after the typed text.
@@ -369,7 +373,7 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
   it('shows a contextual language selector while the caret is in a code block', async () => {
     renderChat()
     const composer = await connectedComposer()
-    const editor = editorForRichComposer(composer)!
+    const editor = editorForMarkdownComposer(composer)!
     editor.commands.setContent('```javascript\nconst x = 1\n```', { contentType: 'markdown' })
     editor.commands.setTextSelection(2)
 

@@ -76,6 +76,17 @@ describe('rich editor Markdown interchange', () => {
     expect(serializeRichMarkdown(document)).toBe('Run `some_tool` now')
   })
 
+  it('round trips Hydra references through readable Markdown', () => {
+    const markdown = 'Review @file[web/src/App.tsx] on @branch[main] with @agent[reviewer].'
+    const document = parseRichMarkdown(markdown)
+    expect(document.content?.[0].content?.filter((node) => node.type === 'hydraReference')).toEqual([
+      expect.objectContaining({ attrs: expect.objectContaining({ kind: 'file', value: 'web/src/App.tsx' }) }),
+      expect.objectContaining({ attrs: expect.objectContaining({ kind: 'branch', value: 'main' }) }),
+      expect.objectContaining({ attrs: expect.objectContaining({ kind: 'agent', value: 'reviewer' }) }),
+    ])
+    expect(serializeRichMarkdown(document)).toBe(markdown)
+  })
+
   it('chooses a safe variable-length code delimiter', () => {
     expect(serializeInlineCode('a ` b')).toBe('``a ` b``')
     expect(serializeInlineCode('`edge`')).toBe('`` `edge` ``')

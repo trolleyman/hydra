@@ -72,7 +72,8 @@ import { ResizeGrip } from './ResizeGrip'
 import { formatError } from '../api/format_error'
 import { AttachmentChips } from './AttachmentChips'
 import { HighlightedTextarea } from './HighlightedTextarea'
-import type { RichComposerHandle, RichComposerKeyContext } from '../lib/rich-editor/RichComposer'
+import type { MarkdownComposerHandle, MarkdownComposerKeyContext } from '../lib/rich-editor/MarkdownComposer'
+import type { ComposerReference } from '../lib/rich-editor/Reference'
 import { AttachmentRegistry } from '../lib/rich-editor/AttachmentRegistry'
 import { restoreAttachment, type ComposerAttachment } from '../lib/rich-editor/Attachment'
 import { applyEdit, enterEdit, ensureCaretVisible } from '../lib/textareaEdit'
@@ -116,7 +117,7 @@ import { buildEditRows, hasLineNumbers, parseEditPatch, type EditHunk } from '..
 import { renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS } from '../lib/wordDiff'
 import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from '../lib/whitespaceMarks'
 
-const RichComposer = lazy(() => import('../lib/rich-editor/RichComposer').then((module) => ({ default: module.RichComposer })))
+const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
 
 function composerAttachment(attachment: Attachment): ComposerAttachment {
   const lower = attachment.filename.toLowerCase()
@@ -7070,7 +7071,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // grows across the 0.22s disclosure animation, not in one step.
   const contentRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const richComposerRef = useRef<RichComposerHandle>(null)
+  const richComposerRef = useRef<MarkdownComposerHandle>(null)
   const richComposerHostRef = useRef<HTMLDivElement>(null)
   const focusComposer = useCallback((position: 'start' | 'end' | number = 'end') => {
     if (inputRef.current.startsWith('!')) {
@@ -7159,6 +7160,14 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const branchName = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
   )
+  const knownHeadRecords = useAgentStore((s) => s.agents)
+  const knownHeads = useMemo(() => knownHeadRecords.map((agent) => agent.id), [knownHeadRecords])
+  const composerReferences = useMemo<ComposerReference[]>(() => [
+    { kind: 'branch', value: branchName },
+    { kind: 'agent', value: agentId },
+    ...knownHeads.filter((id) => id !== agentId).map((id) => ({ kind: 'agent' as const, value: id })),
+    ...Object.values(subagents).filter((sub) => !knownHeads.includes(sub.agentId)).map((sub) => ({ kind: 'agent' as const, value: sub.agentId })),
+  ], [agentId, branchName, knownHeads, subagents])
   // memo'd: <Markdown> is memo'd on its props, so a fresh object each render
   // would re-parse every rendered message on every keystroke in the composer.
   // agentId lets a markdown image resolve against this head's files.
@@ -10275,7 +10284,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     return true
   }
 
-  function onRichComposerKeyDown(e: KeyboardEvent, context: RichComposerKeyContext): boolean {
+  function onMarkdownComposerKeyDown(e: KeyboardEvent, context: MarkdownComposerKeyContext): boolean {
     // Tiptap owns rich-document undo/redo, including inline attachment nodes.
     // The explicit snapshot history remains for the dedicated shell textarea.
     if (slashMatches.length > 0) {
@@ -11247,7 +11256,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
             ) : (
               <div ref={richComposerHostRef} className="w-full overflow-hidden" style={{ height: composerHeight }} data-rich-chat-composer>
                 <Suspense fallback={<div className="h-full px-3.5 pt-2.5 text-sm leading-5 text-stone-400">Loading editor...</div>}>
-                  <RichComposer
+                  <MarkdownComposer
                     ref={richComposerRef}
                     value={input}
                     initialDocument={initialRichDocument}
@@ -11265,8 +11274,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       if (editor) syncAttachmentsIntoDocument(editor)
                     }}
                     attachmentRegistry={attachmentRegistry}
+                    references={composerReferences}
+                    onRequestFiles={() => fileInputRef.current?.click()}
                     onChange={handleRichInputChange}
-                    onKeyDown={onRichComposerKeyDown}
+                    onKeyDown={onMarkdownComposerKeyDown}
                     onPaste={(event) => {
                       const files = extractFiles(event.clipboardData)
                       if (files.length === 0) return false

@@ -7,6 +7,6 @@ export function registerMountedEditor(editor: Editor): () => void {
   return () => mountedEditors.delete(editor.view.dom)
 }
 
-export function editorForRichComposer(element: HTMLElement): Editor | undefined {
+export function editorForMarkdownComposer(element: HTMLElement): Editor | undefined {
   return mountedEditors.get(element)
 }

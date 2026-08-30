@@ -8,7 +8,7 @@ retains `HighlightedTextarea` for its deliberately separate `!` shell mode.
 Markdown remains Hydra's interchange format and files/images can live at their
 document positions.
 
-The proposed foundation is the open-source Tiptap editor on ProseMirror. Tiptap
+The editor uses open-source Tiptap on ProseMirror. Tiptap
 is an implementation detail, not Hydra's public editor API. The first build step
 is a bounded spike: prove the unusual inline-code caret semantics before the rest
 of the composer is moved onto it.
@@ -45,27 +45,21 @@ Completed 2026-08-29:
 - Completed the initial block schema: level 1-3 headings, bullet/ordered/task
   lists, blockquotes, fenced code and hard breaks all share the same Markdown
   parser/serializer. Task item checked state has explicit round-trip coverage.
-- Added a production Settings -> Rich text lab tab on both Settings routes. It
-  synchronizes the new structured editor, the current `HighlightedTextarea` and
-  Hydra's current rendered chat Markdown through one canonical Markdown value.
-  It also exposes formatting controls and local attachment-node insertion. This
-  is the first production-bundle consumer, so `THIRD_PARTY_NOTICES.md` now
-  carries the Tiptap, ProseMirror and Marked MIT notices.
+- `THIRD_PARTY_NOTICES.md` carries the Tiptap, ProseMirror and Marked MIT
+  notices required by the production bundle.
 - Refined inline-code presentation from a whole-capsule active outline to a
   quiet edge-caret indicator. Empty capsules now occupy only a compact typing
   slot, and the regular E2E runner explicitly excludes the fixture that requires
   the dedicated rich-editor server.
 - Made a third consecutive backtick upgrade the empty inline capsule into a
-  fenced code block. The lab exposes the block's language attribute through a
-  selector, keeping language choice in the structured document and Markdown.
+  fenced code block. The block's language selector keeps language choice in the
+  structured document and Markdown.
 - Added open-source TableKit support with GFM Markdown parsing/serialization,
   an insert action, contextual row/column/delete controls and an overflow-safe
-  editable table surface in the Settings lab. The lazy lab chunk is now 196.6 KB
-  gzip, up 15.1 KB from the pre-table build.
-- Added a Hydra-owned controlled `RichComposer` React adapter. Its public value
-  is Markdown and its event surface does not expose ProseMirror state, while an
-  optional editor handle supports host formatting controls. The Settings lab
-  now consumes this adapter instead of constructing Tiptap directly.
+  editable table surface in production composers.
+- Added a Hydra-owned controlled `MarkdownComposer` React adapter. Its public
+  value is Markdown and its event surface does not expose ProseMirror state, while an
+  optional editor handle supports host formatting controls.
 - Added document attachment NodeViews backed by the external registry. Chips
   show uploading/failed state, retry failed uploads, remove with a structural
   transaction, cancel/restart work across undo/redo and expose resolved paths in
@@ -108,9 +102,8 @@ Completed 2026-08-29:
   Markdown request boundary, per-project drafts, large-paste/file workflow,
   combined prompt/attachment history, resizing and submit shortcuts while
   gaining the same marks, inline code, blocks and tables as production chat.
-- Fixed the follow-up production polish: the Settings lab now mounts instead of
-  waiting on its own editor callback, outer document margins no longer move the
-  first composer line, an empty code capsule has a visible overlaid minimum size
+- Fixed the follow-up production polish: outer document margins no longer move
+  the first composer line, an empty code capsule has a visible overlaid minimum size
   without reserving layout width, and provider-assigned echo ids reconcile with
   the existing optimistic user bubble by text fallback.
 - Added `| ` at the start of an otherwise empty paragraph as a two-column table
@@ -120,10 +113,10 @@ Completed 2026-08-29:
   Tab/Shift+Tab, exits from its final line with ArrowDown and unwraps when empty
   with Backspace. Focused production tables expose compact row/column/delete
   controls with polite accessibility announcements and narrow-width scrolling.
-  The 24-case behavior fixture runs in Chromium, Firefox and WebKit (70 passing,
-  two engine-unsupported clipboard-permission checks skipped). The final lazy
-  `RichComposer` chunk is 229.48 KB minified / 75.56 KB gzip, a 0.58 KB gzip
-  increase over the pre-hardening build.
+  The behavior fixture runs in Chromium, Firefox and WebKit (engine-unsupported
+  clipboard-permission checks are skipped). The lazy `MarkdownComposer` chunk,
+  including reference discovery and the command menu, is 234.38 KB minified /
+  77.28 KB gzip.
 
 The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
@@ -175,14 +168,14 @@ Hydra components must not accept or return Tiptap `Editor`, `Node` or
 `Transaction` objects in their ordinary API:
 
 ```ts
-interface RichComposerValue {
+interface MarkdownComposerValue {
   markdown: string
   attachments: ComposerAttachment[]
 }
 
-interface RichComposerProps {
-  value: RichComposerValue
-  onChange: (value: RichComposerValue) => void
+interface MarkdownComposerProps {
+  value: MarkdownComposerValue
+  onChange: (value: MarkdownComposerValue) => void
   onSubmit: () => void
   onUpload: (file: File, id: string) => Promise<UploadedAttachment>
 }
@@ -411,7 +404,7 @@ token seeds its language. Code blocks:
 - Offer "Attach as file" for a paste over the large-paste threshold.
 
 The language picker, live syntax highlighting, indentation and explicit
-exit/unwrap handling are built in production composers and the Settings lab.
+exit/unwrap handling are built in production composers.
 
 ## Links and later extensions
 
@@ -419,14 +412,15 @@ Pasting a URL over selected text creates a link; pasting it at a caret inserts
 the URL. Rich HTML paste keeps safe supported structure but drops source colours,
 fonts, classes and scripts.
 
-High-value follow-ups are `@file`, `@branch`, `@commit` and `@agent` reference
-nodes. A file reference can open Hydra's repository/diff view while serializing
-to readable Markdown for agents that know nothing about structured references.
+`@file`, `@branch`, `@commit` and `@agent` reference nodes serialize as readable
+`@kind[value]` Markdown, so agents and the backend need no structured-message
+protocol. Known branches and agents are suggested while files and commits accept
+an explicit value.
 
-A `/` menu may offer Text, Heading, List, Task list, Quote, Code block and Attach
-file, but only at the start of an empty block. Defer URL cards, remote embeds,
+A `/` menu offers Text, Heading, List, Task list, Quote, Code block, Table and
+Attach file at the start of an empty block. Defer URL cards, remote embeds,
 math, collaboration and comments inside the composer. Tables are included in
-the initial schema and lab, with production/mobile interaction still to prove.
+the production schema with contextual controls and narrow-width scrolling.
 
 ## Clipboard contract
 
@@ -471,7 +465,7 @@ mark their updates `addToHistory: false`. This replaces, rather than layers on,
 Persist a versioned draft:
 
 ```ts
-interface RichComposerDraftV1 {
+interface MarkdownComposerDraftV1 {
   version: 1
   doc: JSONContent
   attachments: PersistedDraftAttachment[]
@@ -640,14 +634,13 @@ for exhaustive selection cases so failures are not coupled to chat WebSockets.
 
 ## Optional follow-ups
 
-The first release is complete. Choose follow-ups from actual use rather than
-expanding it speculatively. The strongest candidates are reference nodes
-(`@file`, `@commit`, `@branch`, `@agent`), a small start-of-line `/` menu, and a
-shared static viewer that can reuse more node presentation between the editor
-and sent bubbles. Math remains explicitly deferred until its Markdown boundary
-and renderer agree.
+The first release, structured references and start-of-line command menu are
+complete. Choose further work from actual use rather than expanding it
+speculatively. A shared static viewer can reuse more node presentation between
+the editor and sent bubbles. Math remains explicitly deferred until its Markdown
+boundary and renderer agree.
 
-Package extraction is also deferred. `RichComposer` is already a reusable
+Package extraction is also deferred. `MarkdownComposer` is already a reusable
 Hydra-owned API with no ProseMirror state in its public value contract; turn it
 into a workspace or external package only after another product surface proves
 which host hooks are genuinely general.
@@ -671,9 +664,6 @@ which host hooks are genuinely general.
    removal and versioned draft restoration are built.
 5. **Block subset - DONE.** Headings 1-3, bullet/ordered/task lists,
    blockquotes, fenced code and hard breaks are registered and round-trip tested.
-5a. **Settings evaluation lab - DONE.** The structured editor, old composer and
-    rendered chat Markdown are live-synchronized for hands-on comparison without
-    saving or sending data.
 6. **Chat integration - DONE.** The active-agent composer now uses the
    lazy rich adapter for normal messages and retains the source textarea for
    shell mode. Send, queue recall, uploads, paste markers, drafts, resizing,
@@ -691,8 +681,8 @@ which host hooks are genuinely general.
    manipulation and announcements, narrow layout, three-engine selection/IME
    validation and final bundle measurement are complete.
 10. **Broader surfaces.** Evaluate review replies and image-pin notes separately.
-11. **Optional discovery.** Evaluate reference nodes, a start-of-line `/` menu
-    and tighter static-view reuse from real production feedback.
+11. **Optional discovery - DONE.** Structured Hydra references and a
+     start-of-line `/` menu are available in chat and Spawn.
 12. **Extraction decision.** Audit Hydra imports and extract a workspace or
     external package only when a non-chat consumer proves the host boundary.
 

@@ -140,6 +140,8 @@
 .rich-text-surface .composer-attachment-action:hover { background: rgb(0 0 0 / 0.08); }
 .dark .rich-text-surface .composer-attachment-action:hover { background: rgb(255 255 255 / 0.1); }
 .rich-text-surface .composer-attachment-remove { font-family: var(--font-mono); }
+.rich-text-surface .composer-reference { display: inline-flex; align-items: center; max-width: 18em; margin: 0 0.1em; border: 1px solid var(--color-violet-200); border-radius: 999px; background: var(--color-violet-50); padding: 0.08em 0.45em; overflow: hidden; color: var(--color-violet-700); font-family: var(--font-mono); font-size: 0.9em; line-height: 1; text-overflow: ellipsis; vertical-align: baseline; white-space: nowrap; }
+.dark .rich-text-surface .composer-reference { border-color: rgb(167 139 250 / 0.35); background: rgb(139 92 246 / 0.12); color: var(--color-violet-300); }
 
 /* Iosevka and Iosevka Term, self-hosted. They are the only offered families that
    are not on Google Fonts, so scripts/build-fonts.ts cuts them from the upstream
