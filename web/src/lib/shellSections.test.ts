@@ -339,6 +339,7 @@ describe('parseScriptSteps', () => {
     const script = 'wc -l a.py b.py &&\nsed -n 1,3p a.py'
     const output = ['  30 a.py', '  12 b.py', '  42 total', 'import os', 'x = 1', 'y = 2'].join('\n')
     const sections = splitScriptOutput(steps(script), output)
+    console.log(JSON.stringify({ parsed: steps(script), sections }, null, 2))
     expect(sections?.map((s) => [s.kind, s.lines.length])).toEqual([['disk', 3], ['view', 3]])
     expect(sections?.[1]).toMatchObject({ kind: 'view', view: { path: 'a.py', start: 1, end: 3 } })
   })
@@ -1142,6 +1143,58 @@ rg -n "Desktop" magefiles Magefile.go`
     expect(matches.flatMap((section) => section.lines)).toContain(
       'magefiles/magefile.go:701:    return errtrace.Wrap(runDesktop(false))',
     )
+  })
+
+  it('separates capped searches from the file view between them', () => {
+    const script = `rg -n "commit_created|reconcileCommits" internal/chat internal/heads | head -500
+sed -n '520,523p' internal/chat/manager.go
+rg -n "NewManager" internal/cli internal/http | head -140`
+    const output = [
+      'internal/chat/manager.go:25:// commit_created mention',
+      'internal/heads/heads.go:47:// reconcileCommits mention',
+      'func codexLineThreads(line []byte) (threadID, startedThread string) {',
+      '\tvar msg codexMessage',
+      '\tif json.Unmarshal(line, &msg) != nil {',
+      '\t\treturn "", ""',
+      'internal/cli/runtime.go:208:\tchatEvents := chat.NewManager(chatContextResolver(store))',
+    ].join('\n')
+
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections?.map((section) => section.kind)).toEqual(['matches', 'view', 'matches'])
+    expect(sections?.[1]).toMatchObject({
+      kind: 'view',
+      view: { path: 'internal/chat/manager.go', start: 520, end: 523 },
+    })
+  })
+
+  it('uses the richest compatible JS-family grammar when source boundaries are unknown', () => {
+    const script = `rg -n "extractFiles" web/src/api/*.test.ts | head -120
+sed -n '1,10p' web/src/api/uploads.test.ts
+sed -n '1,10p' web/src/DiffViewer.tsx
+sed -n '1,10p' web/src/components/AgentTerminal.tsx`
+    const output = [
+      "import { describe } from 'vitest'",
+      'type Props = { value: string }',
+      'export function Panel(props: Props) {',
+      '  return <div>{props.value}</div>',
+      '}',
+    ].join('\n')
+
+    const sections = splitScriptOutput(steps(script), output)
+    expect(sections).toHaveLength(1)
+    expect(sections?.[0]).toMatchObject({
+      kind: 'view',
+      view: { path: 'source.tsx', start: null, languageOnly: true },
+    })
+  })
+
+  it.each([
+    ['sed -n 1,2p a.js\nsed -n 1,2p b.jsx', 'source.jsx'],
+    ['sed -n 1,2p a.js\nsed -n 1,2p b.ts', 'source.ts'],
+    ['sed -n 1,2p a.js\nsed -n 1,2p b.jsx\nsed -n 1,2p c.ts\nsed -n 1,2p d.tsx', 'source.tsx'],
+  ])('chooses a compatible grammar for %s', (commands, path) => {
+    const sections = splitScriptOutput(steps(commands), 'const value = 1\nconst other = 2')
+    expect(sections?.[0]).toMatchObject({ kind: 'view', view: { path, languageOnly: true } })
   })
 
   it('reads both numbered shapes out of one section', () => {

@@ -8,7 +8,7 @@ import { type TerminalEvent, AgentStatus } from '../api'
 import { RefreshCw, Plus, X, ChevronDown, Shield, ShieldOff, Eye, Check } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { ResizeGrip } from './ResizeGrip'
-import { uploadFile, extractFiles } from '../api/uploads'
+import { uploadFile, extractFiles, hasFilePayload } from '../api/uploads'
 import { copyWithToast } from '../lib/copyToast'
 import { useAgentStore } from '../stores/agentStore'
 import { fileUrlToWorktreeRelative, isTrustedLinkUrl } from '../lib/repoLink'
@@ -631,9 +631,8 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     // the agent's prompt. Only file drags are intercepted; a text/URL drag is
     // left to xterm. Listeners live on the container (el) so the drop zone
     // covers the whole pane, not just xterm's focus textarea.
-    const isFileDrag = (dt: DataTransfer | null) => !!dt && Array.from(dt.types).includes('Files')
     const onDragOver = (ev: DragEvent) => {
-      if (!isFileDrag(ev.dataTransfer)) return
+      if (!hasFilePayload(ev.dataTransfer)) return
       ev.preventDefault()
       if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy'
       setDragActive(true)
@@ -645,7 +644,7 @@ function TerminalPane({ agentId, projectId, shell, sandboxed, shellId, active, r
     }
     const onDrop = (ev: DragEvent) => {
       setDragActive(false)
-      if (!isFileDrag(ev.dataTransfer)) return
+      if (!hasFilePayload(ev.dataTransfer)) return
       ev.preventDefault()
       const files = extractFiles(ev.dataTransfer)
       if (files.length > 0) void handlePastedFiles(files)

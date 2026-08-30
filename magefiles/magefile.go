@@ -780,20 +780,39 @@ func RunDesktop() error {
 		return errtrace.Wrap(err)
 	}
 	fmt.Printf("%sdesktop launch:%s %s\n", colorDim, colorReset, launchConfig.String())
-	// A prior command-owned desktop daemon would otherwise keep running the old
-	// binary after this rebuild. Replace only desktop-owned production daemons;
-	// foreground and systemd-owned servers remain authoritative.
-	if daemon.IsDesktopManaged("") {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := daemon.StopDaemon(ctx, ""); err != nil {
-			return errtrace.Wrap(fmt.Errorf("stop previous desktop development backend: %w", err))
-		}
-	}
+	// Remember whether the production daemon belongs to systemd. Development
+	// temporarily replaces it with the just-built desktop binary, then restores
+	// the service when the desktop command exits.
+	systemdManaged := runtime.GOOS == "linux" && daemon.IsServiceManaged("") && !daemon.IsDesktopManaged("")
+	restoreSystemd := systemdManaged && exec.Command("systemctl", "--user", "is-active", "--quiet", "hydra.service").Run() == nil
 	if err := BuildDesktop(); err != nil {
 		return errtrace.Wrap(err)
 	}
-	return errtrace.Wrap(runDesktop(false))
+	if restoreSystemd {
+		if err := runV("systemctl", "--user", "stop", "hydra.service"); err != nil {
+			return errtrace.Wrap(fmt.Errorf("stop production Hydra service for desktop development: %w", err))
+		}
+	}
+	// A prior command-owned desktop daemon would otherwise keep running the old
+	// binary after this rebuild. Stop it only after the replacement has built.
+	if systemdManaged || daemon.IsDesktopManaged("") {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := daemon.StopDaemon(ctx, ""); err != nil {
+			cancel()
+			var restoreErr error
+			if restoreSystemd {
+				restoreErr = runV("systemctl", "--user", "start", "hydra.service")
+			}
+			return errtrace.Wrap(errors.Join(fmt.Errorf("stop previous desktop development backend: %w", err), restoreErr))
+		}
+		cancel()
+	}
+	runErr := runDesktop(false)
+	if restoreSystemd {
+		restoreErr := runV("systemctl", "--user", "start", "hydra.service")
+		return errtrace.Wrap(errors.Join(runErr, restoreErr))
+	}
+	return errtrace.Wrap(runErr)
 }
 
 // RunDesktopLocal builds and runs the native desktop application with the
@@ -861,13 +880,10 @@ func runDesktopLinuxDevelopment(binary string) error {
 	select {
 	case runErr = <-done:
 	case <-ctx.Done():
-		_ = cmd.Process.Signal(os.Interrupt)
-		select {
-		case runErr = <-done:
-		case <-time.After(5 * time.Second):
-			_ = cmd.Process.Kill()
-			runErr = <-done
-		}
+		// Ctrl+C is an instruction to end the development shell, not a native
+		// window close request (which may prompt while a head is active).
+		_ = cmd.Process.Kill()
+		runErr = <-done
 	}
 	cleanup := exec.Command(binary, "__stop-daemon")
 	cleanup.Stdout = os.Stdout

@@ -192,7 +192,7 @@ export type { SetProjectHiddenRequest } from './models/SetProjectHiddenRequest';
 export type { SetProjectIconRequest } from './models/SetProjectIconRequest';
 export { ShellCwdEvent } from './models/ShellCwdEvent';
 export type { SpawnAgentRequest } from './models/SpawnAgentRequest';
-export type { StatusResponse } from './models/StatusResponse';
+export { StatusResponse } from './models/StatusResponse';
 export { SubagentCompletedEvent } from './models/SubagentCompletedEvent';
 export { SubagentStartedEvent } from './models/SubagentStartedEvent';
 export { SubagentUpdatedEvent } from './models/SubagentUpdatedEvent';

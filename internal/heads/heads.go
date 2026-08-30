@@ -496,6 +496,9 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		if opts.FilesystemMode != string(api.FocusedFilesystemEdit) && opts.FilesystemMode != string(api.FocusedFilesystemReadonly) {
 			return nil, errtrace.Wrap(fmt.Errorf("unknown focused filesystem mode %q", opts.FilesystemMode))
 		}
+		if opts.FilesystemMode == string(api.FocusedFilesystemReadonly) && opts.AllowCommits {
+			return nil, errtrace.Wrap(errors.New("read-only focused heads cannot allow commits"))
+		}
 	}
 	// Resolve the head ID. Auto-generated IDs are derived from the prompt and
 	// uniquified against the whole shared DB (IDs are a global primary key

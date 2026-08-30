@@ -240,6 +240,12 @@ What remains, because each does a genuinely different job:
   AppKit/WKWebView on macOS, and Windows Forms/WebView2 on Windows. `runDesktop`
   uses production state, matching a directly launched or installed build, and
   clears development runtime/database variables inherited from its terminal.
+  On Linux, `runDesktop` temporarily stops an active `hydra.service` after the
+  replacement desktop binary has built, runs that exact binary as the
+  command-owned backend, and starts the service again when the command exits.
+  This prevents a development shell from silently attaching to an older
+  installed backend. Ctrl+C force-closes the development window, stops its
+  backend, and performs that service restoration.
   `runDesktopLocal` uses the same checkout-local development database and
   worktree-specific daemon runtime namespace as `mage run` (socket, lock, PID,
   ownership metadata, listener record, and log). It can therefore run beside an

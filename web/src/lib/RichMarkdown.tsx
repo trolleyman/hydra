@@ -20,6 +20,7 @@ import { renderCommentMentions } from './mentionHighlight'
 import { getFileIcon } from './fileIcons'
 import type { Attachment } from './spawnDrafts'
 import { parseRichMarkdownTree } from './richMarkdownParser'
+import { FilePathLabel } from '../components/FilePathLabel'
 
 // Shared read-only Markdown boundary. Markdown is the source of truth; parsing
 // produces a private syntax tree used only for this render. Chat messages, the
@@ -140,19 +141,11 @@ function FileLink({ href, path, onClick, children }: {
   children?: ReactNode
 }) {
   const filename = path.split('/').pop() || path
-  const directory = path.slice(0, Math.max(0, path.length - filename.length))
   const { Icon } = getFileIcon(filename)
   return (
     <Tooltip
-      width={480}
       content={(
-        <span className="inline-flex items-center gap-1.5 font-mono">
-          <Icon className="w-3.5 h-3.5 shrink-0 opacity-60" aria-hidden="true" />
-          <span>
-            {directory && <span className="opacity-55">{directory}</span>}
-            <span>{filename}</span>
-          </span>
-        </span>
+        <FilePathLabel path={path} nativeTitle={false} />
       )}
     >
       <a
@@ -189,6 +182,7 @@ function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ct
     path = path.slice(0, -line[0].length)
     if (!lineHash) lineHash = `#L${line[1]}`
   }
+  const authoredPath = path
   if (ctx.worktreePath && (path === ctx.worktreePath || path.startsWith(ctx.worktreePath + '/'))) {
     path = path.slice(ctx.worktreePath.length).replace(/^\/+/, '')
   }
@@ -208,7 +202,11 @@ function RepoLink({ href, ctx, children, fileChip = false }: { href?: string; ct
   const resolvedName = resolved.split('/').pop() ?? resolved
   const fileLabel = label === resolved || label === resolvedName || label.includes('/')
   if (fileChip && resolved && fileLabel) {
-    return <FileLink href={url} path={resolved} onClick={onClick}>{children}</FileLink>
+    // Preserve an authored absolute path in the tooltip even though navigation
+    // uses its repo-relative equivalent. Relative links show the resolved repo
+    // path, which is more useful than an unresolved ../ sequence.
+    const displayPath = authoredPath.startsWith('/') ? authoredPath : resolved
+    return <FileLink href={url} path={displayPath} onClick={onClick}>{children}</FileLink>
   }
   return <a className={LINK_CLASS} href={url} onClick={onClick}>{children}</a>
 }

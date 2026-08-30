@@ -123,7 +123,6 @@ export function ClaudeUsageIndicator({ agentType }: { agentType: 'claude' | 'cod
 
   const tip = (
     <div className="text-xs leading-relaxed">
-      <div className="font-semibold">{agentType === 'codex' ? 'Codex' : 'Claude'} usage</div>
       {session != null && (
         <div>
           Session: {Math.round(session)}% left
@@ -147,7 +146,7 @@ export function ClaudeUsageIndicator({ agentType }: { agentType: 'claude' | 'cod
   )
 
   return (
-    <Tooltip content={tip}>
+    <Tooltip title={`${agentType === 'codex' ? 'Codex' : 'Claude'} usage`} content={tip}>
       <button
         onClick={() => fetchUsage(true)}
         disabled={loading}

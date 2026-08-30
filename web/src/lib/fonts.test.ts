@@ -63,7 +63,7 @@ describe('font catalogue', () => {
   // swap glyphs nobody asked to change.
   it('only carries OpenType features on the fonts that asked for them', () => {
     const withFeatures = FONT_OPTIONS.filter((f) => f.features).map((f) => f.id)
-    expect(withFeatures).toEqual(['iosevka', 'iosevka-term'])
+    expect(withFeatures).toEqual(['iosevka'])
     for (const id of withFeatures) {
       expect(FONT_BY_ID.get(id)!.features).toBe("'calt' 1, 'VLAC' 2, 'VSAB' 3, 'cv10' 6")
     }
@@ -71,7 +71,7 @@ describe('font catalogue', () => {
 
   it('reports `normal` features for a font that sets none', () => {
     expect(fontFeaturesFor('code', 'fira-code')).toBe('normal')
-    expect(fontFeaturesFor('terminal', 'iosevka-term')).toBe(FONT_BY_ID.get('iosevka-term')!.features)
+    expect(fontFeaturesFor('terminal', 'iosevka')).toBe(FONT_BY_ID.get('iosevka')!.features)
     // ...including when the id is rejected and the role default steps in.
     expect(fontFeaturesFor('ui', 'iosevka')).toBe('normal')
   })
@@ -124,6 +124,12 @@ describe('loadFont', () => {
   it('reads a stored id back', () => {
     localStorage.setItem(StorageKeys.fontCode, 'fira-code')
     expect(loadFont('code')).toBe('fira-code')
+  })
+
+  it('migrates the old Iosevka Term choice to Iosevka', () => {
+    localStorage.setItem(StorageKeys.fontTerminal, 'iosevka-term')
+    expect(loadFont('terminal')).toBe('iosevka')
+    expect(localStorage.getItem(StorageKeys.fontTerminal)).toBe('iosevka')
   })
 
   it('ignores a stored id the role does not offer', () => {

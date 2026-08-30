@@ -431,6 +431,9 @@ and no window action implicitly interrupts a head.
 - [x] Route notification clicks to the exact project/agent URL. Secondary
   process deep-link handoff to an already-running instance still needs an
   installed-session test.
+- [x] Bridge GTK clipboard textures into the attachment-aware chat composer so
+  Ctrl+V uploads copied images even when WebKitGTK omits them from the web paste
+  event. Text paste stays on WebKitGTK's native path.
 - Add optional StatusNotifier integration without making it required.
 - Verify accessibility, IME, clipboard, drag/drop, high-DPI, multi-monitor, and
   dark/light theme behavior across representative GNOME and KDE sessions.

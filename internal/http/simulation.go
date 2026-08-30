@@ -1184,6 +1184,10 @@ func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, p
 	if body.AllowCommits != nil {
 		allowCommits = *body.AllowCommits
 	}
+	if mode == api.FocusedFilesystemReadonly && allowCommits {
+		api.WriteError(w, http.StatusBadRequest, "Read-only project directory agents cannot allow commits")
+		return
+	}
 	if body.CheckoutBranch != nil && *body.CheckoutBranch != "main" && *body.CheckoutBranch != "release" {
 		api.WriteError(w, http.StatusBadRequest, "Unknown simulated checkout branch")
 		return

@@ -36,3 +36,25 @@ func TestLocalEnvironmentPreservesDevelopmentState(t *testing.T) {
 		t.Fatalf("HYDRA_STATE_DIR = %q", got)
 	}
 }
+
+func TestIsBackendCommand(t *testing.T) {
+	for _, command := range []string{
+		"__daemon",
+		"__sandbox-init",
+		"__desktop-connect",
+		"__desktop-active",
+		"mcp",
+		"gate",
+		"trigger-hook",
+		"host-run",
+	} {
+		if !isBackendCommand(command) {
+			t.Errorf("isBackendCommand(%q) = false", command)
+		}
+	}
+	for _, command := range []string{"", "--url", "--project", "--diagnostics", "hydra://settings"} {
+		if isBackendCommand(command) {
+			t.Errorf("isBackendCommand(%q) = true", command)
+		}
+	}
+}

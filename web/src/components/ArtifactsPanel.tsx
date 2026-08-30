@@ -5,7 +5,7 @@ import { apiErrorBody, formatError } from '../api/format_error'
 import { PanelError } from './PanelError'
 import type { ArtifactSet, ArtifactFile, ArtifactLogLine, ArtifactsFrame } from '../api'
 import { ArtifactFile as ArtifactFileNS, ArtifactSide } from '../api'
-import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, SquarePlus, SquareMinus, SquareDot, Download, FileArchive, FileText } from 'lucide-react'
+import { LoaderCircle, Image as ImageIcon, ChevronDown, TriangleAlert, RefreshCw, ScrollText, Download, FileArchive, FileText } from 'lucide-react'
 import { InfoTooltip } from './InfoTooltip'
 import { Tooltip } from './Tooltip'
 import { SettingsPopover, SettingsGroupLabel, SettingsOptionRow } from './SettingsPopover'
@@ -30,6 +30,7 @@ import { applyABShortcut } from '../lib/abShortcuts'
 import { LiveLogPanes, PersistedLogView } from './ArtifactLogView'
 import { LiveLogProvider, useLiveLogStore } from './artifactLogStore'
 import { ElapsedTime } from './ElapsedTime'
+import { ChangeTypeIcon } from './ChangeTypeIcon'
 
 const CHANGE_LABEL: Record<string, string> = {
   added: 'added',
@@ -42,17 +43,7 @@ const CHANGE_LABEL: Record<string, string> = {
 // viewer's file-list icons: green [+] added, red [-] removed, amber [•] modified.
 // Unchanged files (revealed only via the changes filter) get no icon.
 function ArtifactChangeIcon({ type, className = 'w-3.5 h-3.5' }: { type: string; className?: string }) {
-  const cls = `${className} shrink-0`
-  switch (type) {
-    case 'added':
-      return <SquarePlus className={`${cls} text-green-600 dark:text-green-400`} />
-    case 'removed':
-      return <SquareMinus className={`${cls} text-red-600 dark:text-red-400`} />
-    case 'modified':
-      return <SquareDot className={`${cls} text-amber-600 dark:text-amber-400`} />
-    default:
-      return null
-  }
+  return <ChangeTypeIcon type={type} className={className} />
 }
 
 // partialFailedSide reports which single side of a set failed while the other
@@ -1632,7 +1623,7 @@ function ArtifactsPanelImpl({ projectId, agentId, baseRef, headRef, includeUncom
             syntax, sidecar schema, per-format comparison rules) lives in
             docs/artifacts.md; it ran to ~900 words here, which rendered a
             1248px-tall card that ran clean off a phone screen. */}
-        <InfoTooltip title="Artifacts" width={480}>
+        <InfoTooltip title="Artifacts">
           <p>Artifacts are visual snapshots - typically screenshots, or videos (screen recordings) - rendered from your code so you can see what a change <em>looks like</em>, side by side with the base branch.</p>
           <p>Each one is produced by a project-defined <strong>artifact script</strong>, configured in <code className="text-blue-300">.hydra/config.toml</code> under <code className="text-blue-300">[[artifacts]]</code>. Hydra runs it against both the base ref and the head ref (or your uncommitted working tree) and compares the images it writes. Results are cached per commit, so re-viewing a diff is free.</p>
           <p>A script with no visual changes - or one still generating - collapses to a single header row; click it to expand. The <strong>build log</strong> button (the scroll icon in the card header) shows both sides' output; <strong>refresh</strong> beside it re-runs that script, handy to retry a failure or re-render when nothing visibly changed.</p>

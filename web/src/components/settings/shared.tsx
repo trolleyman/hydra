@@ -173,10 +173,10 @@ export function ScopeTabs<T extends string>({
 // ── EnabledToggle ─────────────────────────────────────────────────────────────
 // A small on/off switch used to enable or disable a single artifact or service
 // without deleting it. Green + "Enabled" when on; muted + "Disabled" when off.
-export function EnabledToggle({ enabled, onChange }: { enabled: boolean; onChange: (v: boolean) => void }) {
+export function EnabledToggle({ enabled, onChange, disabled = false }: { enabled: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <label className="relative inline-flex items-center cursor-pointer select-none">
-      <input type="checkbox" className="sr-only peer" checked={enabled} onChange={(e) => onChange(e.target.checked)} />
+    <label className={`relative inline-flex items-center select-none ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+      <input type="checkbox" className="sr-only peer" checked={enabled} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <div className="w-9 h-5 bg-gray-300 dark:bg-gray-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-400/40 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
       <span className={`ml-2 text-xs font-semibold ${enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400 dark:text-gray-500'}`}>
         {enabled ? 'Enabled' : 'Disabled'}

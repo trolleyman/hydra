@@ -408,7 +408,7 @@ function TestsPanelImpl({ projectId, agentId, repoRef, headRef, includeUncommitt
         {/* Info trigger before the status chip: the chip comes and goes (and
             rewidths as runners finish), which would otherwise shift the `i`
             sideways out from under a stationary cursor. */}
-        <InfoTooltip title="Tests" width={520}>
+        <InfoTooltip title="Tests">
           <p>Per-runner pass/fail verdicts for the selected commit - the diff viewer's <strong>after</strong> side (a commit, or your uncommitted working tree), defaulting to the branch tip. Single-sided: there's no before/after comparison.</p>
           <p>Each runner is a project-defined <code className="text-blue-300">[tests.&lt;name&gt;]</code> command in <code className="text-blue-300">.hydra/config.toml</code>. Hydra runs it against the ref, parses the report it writes to <code className="text-blue-300">$HYDRA_TEST_OUTPUT</code> (JUnit XML or Hydra-JSON; otherwise a plain pass/fail from the exit code), and caches the verdict per commit. The verdict <strong>soft-gates the merge button</strong> - a failing run needs a force-merge.</p>
           <p>Expand a card for its cases as a location tree - <strong>passed and skipped cases are hidden by default</strong> (grouping by result hides nothing; its sections fold them away instead); the status filter (right) reveals them, and the search box fuzzy-matches case paths and names. Node tallies always count everything beneath, filtered or not. The changes cog offers grouping by result and by class/describe scope. The <strong>build log</strong> (the scroll icon) is the runner's stdout/stderr, streamed live while it runs. The refresh icon re-runs that runner, discarding the cached verdict.</p>

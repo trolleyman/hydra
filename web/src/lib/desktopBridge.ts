@@ -3,6 +3,7 @@ export type DesktopMessage =
   | { type: 'new-chat-window'; projectId?: string; agentId?: string }
   | { type: 'active-project'; projectId: string }
   | { type: 'window-state'; projectId?: string; agentId?: string; activeTurn: boolean }
+  | { type: 'image-paste-target'; enabled: boolean }
   | { type: 'close-window'; force?: boolean }
   | { type: 'show-notification'; title: string; body: string; tag: string; url: string }
   | { type: 'dismiss-notification'; tag: string }
@@ -10,6 +11,12 @@ export type DesktopMessage =
   | { type: 'keep-running'; enabled: boolean }
 
 export type DesktopCommand = { type: 'stop-and-close' }
+
+interface DesktopImagePaste {
+  base64: string
+  mediaType: string
+  name: string
+}
 
 interface DesktopWindow extends Window {
   hydraDesktopCapabilities?: {
@@ -116,4 +123,17 @@ export function onDesktopCommand(handler: (command: DesktopCommand) => void): ()
   const listener = (event: Event) => handler((event as CustomEvent<DesktopCommand>).detail)
   window.addEventListener('hydra-desktop-command', listener)
   return () => window.removeEventListener('hydra-desktop-command', listener)
+}
+
+export function onDesktopImagePaste(handler: (file: File) => void): () => void {
+  const listener = (event: Event) => {
+    const detail = (event as CustomEvent<DesktopImagePaste>).detail
+    if (!detail?.base64 || !detail.mediaType.startsWith('image/')) return
+    const binary = window.atob(detail.base64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    handler(new File([bytes], detail.name || 'image.png', { type: detail.mediaType }))
+  }
+  window.addEventListener('hydra-desktop-image-paste', listener)
+  return () => window.removeEventListener('hydra-desktop-image-paste', listener)
 }

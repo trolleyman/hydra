@@ -89,6 +89,20 @@ function imagePasteEvent() {
   }
 }
 
+function webkitFileDropEvent() {
+  const image = new File([new Uint8Array([1, 2, 3])], 'diagram.png', { type: 'image/png' })
+  const notes = new File(['details'], 'notes.txt', { type: 'text/plain' })
+  return {
+    dataTransfer: {
+      items: [image, notes].map((file) => ({ kind: 'file', type: file.type, getAsFile: () => file })),
+      files: [],
+      types: ['text/uri-list'],
+      getData: () => 'file:///home/callum/diagram.png',
+      dropEffect: 'none',
+    },
+  }
+}
+
 // A fresh agent id per render: the composer's draft attachments live in an
 // in-memory cache keyed by agent, which would otherwise leak chips (and the
 // image-number counter) from one test into the next.
@@ -156,6 +170,18 @@ describe('sectioned search output', () => {
 
     expect(rows).toHaveLength(2)
     expect(rows[1].html).not.toContain('token bold')
+  })
+
+  it('keeps each source path with its line number in the gutter model', () => {
+    const rows = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n reconcile internal/chat internal/heads',
+      match: { paths: ['internal/chat', 'internal/heads'], numbered: true },
+      lines: ['internal/chat/manager.go:560:func (w *worker) reconcileCommits() {'],
+    }])
+
+    expect(rows[0]).toMatchObject({ file: 'internal/chat/manager.go', num: '560' })
+    expect(rows[0].html).toContain('token keyword')
   })
 })
 
@@ -238,6 +264,26 @@ describe('composer status and actions', () => {
     const sendMessage = await screen.findByRole('button', { name: 'Send message' })
     expect(sendMessage.className).toBe(sendNow.className)
     expect(sendMessage.querySelector('svg')).toHaveClass('lucide-arrow-up')
+  })
+
+  it('spaces queued bubbles like consecutive user messages', async () => {
+    renderChat()
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => {
+      ws.emit({
+        type: 'chat_event',
+        event: { seq: 1, type: 'user_message', timestamp: '', payload: { id: 'user-1', content: 'first' } },
+      })
+      ws.emit({ type: 'replay_done' })
+      ws.emit({
+        type: 'queue',
+        messages: [{ id: 'queued-1', content: [{ type: 'text', text: 'second' }] }],
+      })
+    })
+
+    await screen.findByText('second')
+    expect(document.querySelector('[data-queued-messages]')).toHaveClass('-mt-2')
   })
 
   it('keeps a fatal connection error visible instead of reconnecting forever', async () => {
@@ -421,6 +467,31 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     fireEvent.keyDown(ta, { key: 'z', ctrlKey: true })
     expect(composerValue(ta)).toBe('')
     expect(screen.queryByLabelText('Remove image1.png')).toBeNull()
+  })
+
+  it('accepts a native desktop clipboard image through the same attachment path', async () => {
+    renderChat()
+    const ta = await connectedComposer()
+    ta.focus()
+
+    act(() => window.dispatchEvent(new CustomEvent('hydra-desktop-image-paste', {
+      detail: { base64: 'AQID', mediaType: 'image/png', name: 'image.png' },
+    })))
+
+    await screen.findByLabelText('Remove image1.png')
+    expect(ta.value).toBe('[image1.png]')
+    expect(ta).toHaveAttribute('data-desktop-image-paste')
+  })
+
+  it('attaches WebKit file drops instead of inserting their URI text', async () => {
+    renderChat()
+    const ta = await connectedComposer()
+
+    fireEvent.drop(ta, webkitFileDropEvent())
+
+    await screen.findByLabelText('Remove diagram.png')
+    await screen.findByLabelText('Remove notes.txt')
+    expect(ta.value).toBe('')
   })
 
   it('redo (Ctrl+Shift+Z) replays an undone paste', async () => {

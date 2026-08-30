@@ -56,7 +56,7 @@ The macOS implementation also contains an AppKit/WKWebView development shell und
 or launches the bundled backend once on an OS-assigned port, using an atomic
 readiness record to discover the URL. All windows share WebKit state, one
 backend, and the same responsive React shell. A new chat window opens the
-ordinary composer with Project checkout/Edit selected. See
+ordinary composer with Project directory/Edit selected. See
 `desktop/macos/README.md` for build and hardware validation instructions.
 
 ## Product in one sentence
@@ -196,8 +196,8 @@ but browser policy decides whether it becomes a popup or tab.
 Workspace state is visible in both the agent metadata and agent list:
 
 - a branch chip means an isolated worktree;
-- a folder chip means the shared project checkout;
-- Edit/Read-only and Allow commits sit immediately after the project-checkout
+- a folder chip means the shared project directory;
+- Edit/Read-only and Allow commits sit immediately after the project-directory
   chip;
 - test, network, Git access, checked-out branch, and Terminal/Chat follow in the
   configuration strip.

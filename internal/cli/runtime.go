@@ -17,6 +17,7 @@ import (
 	"github.com/trolleyman/hydra/internal/config"
 	"github.com/trolleyman/hydra/internal/daemon"
 	"github.com/trolleyman/hydra/internal/db"
+	"github.com/trolleyman/hydra/internal/desktop"
 	"github.com/trolleyman/hydra/internal/events"
 	"github.com/trolleyman/hydra/internal/gate"
 	"github.com/trolleyman/hydra/internal/git"
@@ -63,9 +64,13 @@ type daemonRuntime struct {
 func chatContextResolver(store *db.Store) chat.ContextResolver {
 	return func(id string) (chat.HeadContext, bool) {
 		if agent, err := store.GetAgent(id); err == nil && agent != nil {
+			workingDir := paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID)
+			if agent.BranchName == "" {
+				workingDir = agent.ProjectPath
+			}
 			return chat.HeadContext{
 				ProjectRoot: agent.ProjectPath,
-				Worktree:    paths.GetWorktreeDirFromProjectRoot(agent.ProjectPath, agent.ID),
+				Worktree:    workingDir,
 				Prompt:      agent.Prompt,
 				AgentType:   agent.AgentType,
 				Plan:        agent.Plan,
@@ -318,6 +323,7 @@ func setupRuntime(ctx context.Context, projectRoot string) (*daemonRuntime, erro
 		ProjectsManager: pm,
 		Sessions:        reg,
 		DB:              store,
+		BackendLifetime: desktop.CurrentLaunchConfig().BackendLifetime,
 		StartTime:       time.Now(),
 		SelfUpdate:      newSelfUpdateManager(projectRoot),
 		Artifacts:       artifactReg,

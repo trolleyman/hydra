@@ -3766,6 +3766,13 @@ components:
         database_directory:
           type: string
           description: Absolute Hydra state directory containing the SQLite database and per-project state trees.
+        backend_lifetime:
+          type: string
+          enum: [persistent, command-owned]
+          description: >-
+            Ownership of the running backend process. A persistent backend can
+            outlive its current desktop windows; a command-owned backend stops
+            when the command that launched it exits.
         desktop_protocol:
           type: integer
           description: Native desktop shell compatibility protocol.
@@ -4120,7 +4127,8 @@ components:
           type: boolean
           description: >-
             Initially authorize Hydra's guarded commit operation for a focused
-            head. Ignored for ordinary worktree heads.
+            head. Defaults to true for editable focused heads, must be false in
+            read-only mode, and is ignored for ordinary worktree heads.
         ephemeral:
           type: boolean
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
@@ -4182,7 +4190,8 @@ components:
           type: boolean
           description: >-
             Enable or disable guarded commits for a focused head immediately.
-            Rejected for ordinary worktree heads.
+            Must be false in read-only mode. Rejected for ordinary worktree
+            heads.
 
     AgentStatus:
       type: string

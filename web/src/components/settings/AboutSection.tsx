@@ -28,6 +28,9 @@ export function AboutSection() {
     : 'Unknown'
   const databaseDirectory = status?.database_directory || 'Unavailable'
   const runtime = hasDesktopBridge() ? 'Desktop app' : 'Web browser'
+  const backendOwnership = status?.backend_lifetime === 'command-owned'
+    ? 'Command-owned'
+    : status?.backend_lifetime === 'persistent' ? 'Standalone' : 'Unknown'
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
@@ -45,6 +48,7 @@ export function AboutSection() {
           <Detail icon={<GitCommitHorizontal className="h-4 w-4" />} label="Git commit" value={commit} mono />
           <Detail icon={<AppWindow className="h-4 w-4" />} label="Runtime" value={`${runtime} on ${platform}`} />
           <Detail icon={<Server className="h-4 w-4" />} label="Server status" value={status?.status || 'Connecting...'} />
+          <Detail icon={<Server className="h-4 w-4" />} label="Backend ownership" value={backendOwnership} />
           <div className="sm:col-span-2">
             <Detail icon={<Database className="h-4 w-4" />} label="State directory" value={databaseDirectory} mono />
           </div>

@@ -1,4 +1,4 @@
-import { Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
+import { Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -63,7 +63,7 @@ import { highlightHtml, highlightLines, splitHighlightedLines } from '../lib/hig
 import { escapeText } from '../lib/prismHtml'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
-import { agentFileUrl, uploadFile, extractFiles, isImageFile } from '../api/uploads'
+import { agentFileUrl, uploadFile, extractFiles, hasFilePayload, isImageFile } from '../api/uploads'
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
@@ -85,7 +85,8 @@ import { Lightbox } from './Lightbox'
 import { ToolApproval } from './ToolApproval'
 import { UrlText } from './HostName'
 import { Tooltip } from './Tooltip'
-import { CommitCard, CommitStats, COMMIT_CARD_WIDTH } from './CommitCard'
+import { CommitCard } from './CommitCard'
+import { ChangeStats } from './ChangeStats'
 import { WorkSpark } from './WorkSpark'
 import { ShortcutHint } from './Kbd'
 import { RelativeTime } from './LiveTime'
@@ -99,7 +100,6 @@ import { useImageCommentStore } from '../stores/imageCommentStore'
 // highlighted by, item 3) now lives in lib/fileKind, beside the file-type
 // classifier, so the lightbox's text viewer highlights by the same table.
 import { langFromPath } from '../lib/fileKind'
-import { getFileIcon } from '../lib/fileIcons'
 import { useComposerHistory, makeSnapshot } from '../lib/composerHistory'
 import { loadChatAttachments, saveChatAttachments } from '../lib/chatDrafts'
 import { loadPlan, parseServerPlan, savePlan, seedLocalPlan } from '../lib/planStore'
@@ -144,6 +144,8 @@ import { parseReviewCommentsText, savedCommentNumber } from '../lib/reviewCommen
 import { CommentLink } from './CommentLink'
 import { CommentIdentityContext } from './commentIdentity'
 import { BranchPill } from './BranchPill'
+import { FilePathLabel } from './FilePathLabel'
+import { onDesktopImagePaste } from '../lib/desktopBridge'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -248,9 +250,6 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
   return (
     <div className="flex max-w-full flex-col items-center gap-1">
       <Tooltip
-        variant="card"
-        pin={false}
-        width={COMMIT_CARD_WIDTH}
         content={
           <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
         }
@@ -265,7 +264,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
           {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
           <GitMerge className="w-3 h-3 shrink-0" />
           <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
-          <CommitStats additions={item.additions} deletions={item.deletions} />
+          <ChangeStats additions={item.additions} deletions={item.deletions} />
         </button>
       </Tooltip>
       <Expandable open={expanded && shown > 0} className="w-full">
@@ -284,7 +283,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
               <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
               <span className="min-w-0 flex-1 truncate optical-center">{m.subject}</span>
-              <CommitStats additions={m.additions} deletions={m.deletions} />
+              <ChangeStats additions={m.additions} deletions={m.deletions} />
             </div>
           ))}
           {shown < count && (
@@ -1831,7 +1830,7 @@ const PlanPanel = memo(function PlanPanel({ todos, narrow, paired, fadeIn, saved
       // top edge and alignToLastMessage clears whichever is on screen.
       data-chat-overlay=""
       style={{ width: open ? 256 : chipW ?? undefined }}
-      className={`absolute top-2 right-3 ${paired ? 'max-w-[calc(50%-1rem)]' : 'max-w-[calc(100%-1.5rem)]'} overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white/90 dark:bg-[#2b2b28]/90 shadow-lg backdrop-blur transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
+      className={`absolute top-2 right-3 ${paired ? 'max-w-[calc(50%-1rem)]' : 'max-w-[calc(100%-1.5rem)]'} overflow-hidden rounded-lg border border-stone-200 dark:border-white/10 bg-white dark:bg-[#2b2b28] shadow-lg transition-[width] duration-200 ${animateIn ? 'animate-chat-item-in' : ''} ${open ? 'z-30' : 'z-20'}`}
     >
       {/* Invisible clone of the header at natural width - the collapsed chip
           width the open/close transition animates from/to (border included so
@@ -2538,10 +2537,6 @@ function ReviewCommentCard({
   // A pin names a picture where a line comment names a path, so both take the
   // same file line - icon, name, and the location in mono where ":12" sits.
   const anchorPath = path || image?.file || ''
-  const slash = anchorPath ? anchorPath.lastIndexOf('/') : -1
-  const directory = slash >= 0 ? anchorPath.slice(0, slash + 1) : ''
-  const fileName = anchorPath ? (slash >= 0 ? anchorPath.slice(slash + 1) : anchorPath) : ''
-  const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName || 'comment.txt')
   const [fromLabel, toLabel] = (diff ?? '').split(' -> ')
   const meta = (author && author !== 'user') || replyTo || resolved || diff
   return (
@@ -2550,11 +2545,7 @@ function ReviewCommentCard({
         <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
           {anchorPath ? (
             <>
-              <FileIcon className={`h-3.5 w-3.5 shrink-0 ${fileIconClass}`} />
-              <span className="min-w-0 truncate" title={anchorPath}>
-                {directory && <span className="text-stone-400 dark:text-stone-500">{directory}</span>}
-                <span className="text-stone-700 dark:text-stone-200">{fileName}</span>
-              </span>
+              <FilePathLabel path={anchorPath} className="flex-1" />
               {image ? (
                 <span className="shrink-0 font-mono text-stone-400 dark:text-stone-500">@ {image.position}</span>
               ) : line ? (
@@ -2650,19 +2641,11 @@ function FileChangesPanel({ changes, worktree }: { changes: unknown; worktree: s
         const kind = typeof kindObj?.type === 'string' ? kindObj.type : 'update'
         const diff = typeof change.diff === 'string' ? change.diff : ''
         const ChangeIcon = kind === 'add' ? SquarePlus : kind === 'delete' ? SquareMinus : SquareDot
-        const slash = path.lastIndexOf('/')
-        const directory = slash >= 0 ? path.slice(0, slash + 1) : ''
-        const fileName = slash >= 0 ? path.slice(slash + 1) : path
-        const { Icon: FileIcon, className: fileIconClass } = getFileIcon(fileName)
         return (
           <div key={`${path}:${i}`} className="overflow-hidden rounded-md border border-stone-200 dark:border-white/[0.07]">
             {showFileHeaders && (
               <div className="flex items-center gap-1.5 border-b border-stone-200 dark:border-white/[0.07] bg-stone-50/80 dark:bg-white/[0.025] px-2.5 py-1.5">
-                <FileIcon className={`h-3.5 w-3.5 shrink-0 ${fileIconClass}`} />
-                <span className="min-w-0 truncate font-medium">
-                  {directory && <span className="text-stone-400 dark:text-stone-500">{directory}</span>}
-                  <span className="text-stone-700 dark:text-stone-200">{fileName}</span>
-                </span>
+                <FilePathLabel path={path} className="flex-1 font-medium" />
                 <ChangeIcon className={`h-3.5 w-3.5 shrink-0 ${kind === 'add' ? 'text-emerald-500' : kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} aria-label={kind} />
               </div>
             )}
@@ -2797,9 +2780,6 @@ interface ScriptOutputRow {
   // said went wrong (lib/buildOutput). There is no grammar to
   // run over those, just shapes, so they arrive as spans.
   spans?: OutputSpan[]
-  // The `path:` a multi-file search printed in front of the line, shown lowlit
-  // so the file it names does not read as part of the line's code.
-  prefix?: string
   // A prefix the tool wrote in its OWN colours rather than one to lowlight - the
   // commit, author and date in front of each line of a blame.
   prefixSpans?: OutputSpan[]
@@ -2841,7 +2821,6 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
     run.forEach((l, i) => rows.push({
       num: l.num,
       html: html[i] ?? '',
-      prefix: l.path || undefined,
       file: l.path || onlyPath || undefined,
       tone: 'code',
     }))
@@ -3091,13 +3070,12 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
                 // right tool here (see the tooltip conventions in CLAUDE.md).
                 title={row.file ? (row.num ? `${row.file}:${row.num}` : row.file) : undefined}
                 className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
-              >{row.num}</span>
+              >{row.file && row.num ? `${row.file}:${row.num}` : row.num}</span>
             )}
             <span
               data-copy-line
               className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
             >
-              {row.prefix && <span className="text-stone-400 dark:text-stone-500">{row.prefix}:</span>}
               {row.prefixSpans?.map((sp, j) => <span key={j} className={sp.cls}>{sp.text}</span>)}
               {row.prefixSpans && ' '}
               {row.spans
@@ -3326,13 +3304,17 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
   const note = 'text-2xs text-stone-500 dark:text-stone-400'
   const sha = (value: string) => <span className="font-mono text-2xs text-stone-600 dark:text-stone-300">{value}</span>
 
-  // A "- " bulleted path row. LowlitPath is a FRAGMENT of two spans (dir + name),
-  // so it must sit inside its own element: dropping it straight into a flex row
-  // makes the gap apply BETWEEN the directory and the filename.
+  // Bullets are reserved for non-file sequences such as rebase steps. File
+  // lists use FilePathLabel's shared icon + lowlit-directory treatment.
   const bullet = (key: string, body: ReactNode) => (
     <div key={key} className="flex items-baseline gap-1.5">
       <span className="select-none text-stone-400 dark:text-stone-500">-</span>
       {body}
+    </div>
+  )
+  const fileRow = (key: string, filePath: string, trailing?: ReactNode) => (
+    <div key={key} className="flex min-w-0 items-center text-2xs">
+      <FilePathLabel path={filePath} trailing={trailing} />
     </div>
   )
 
@@ -3358,7 +3340,7 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
           <RichMarkdown text={str('message')} hardBreaks={false} />
         </div>
         {paths.length > 0 && (
-          <div className="space-y-0.5">{paths.map((p) => bullet(p, <span><LowlitPath path={path(p)} /></span>))}</div>
+          <div className="space-y-0.5">{paths.map((p) => fileRow(p, path(p)))}</div>
         )}
       </div>
     )
@@ -3370,17 +3352,13 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
     const specs = gitAddSpecs(input)
     return (
       <div className="space-y-0.5">
-        {specs.map((s) =>
-          bullet(
-            s.path,
-            <span>
-              <LowlitPath path={path(s.path)} />
-              {s.lines.length > 0 && (
-                <span className="ml-1.5 font-mono text-3xs text-stone-500 dark:text-stone-400">lines {s.lines.join(', ')}</span>
-              )}
-            </span>,
-          ),
-        )}
+        {specs.map((s) => fileRow(
+          s.path,
+          path(s.path),
+          s.lines.length > 0
+            ? <span className="shrink-0 font-mono text-3xs text-stone-500 dark:text-stone-400">lines {s.lines.join(', ')}</span>
+            : null,
+        ))}
       </div>
     )
   }
@@ -3391,7 +3369,7 @@ function GitToolFields({ tool, input, worktree }: { tool: string; input: Record<
       return (
         <div className="space-y-1.5">
           <div className={note}>Unstaged these paths; the branch did not move</div>
-          <div className="space-y-0.5">{unstage.map((p) => bullet(p, <span><LowlitPath path={path(p)} /></span>))}</div>
+          <div className="space-y-0.5">{unstage.map((p) => fileRow(p, path(p)))}</div>
         </div>
       )
     }
@@ -5982,7 +5960,6 @@ const ChatUserMessage = memo(function ChatUserMessage({
           line, which says who really sent it and why. */}
       {auto && (
         <Tooltip
-          variant="card"
           title={auto.label}
           side="top"
           content={
@@ -7144,6 +7121,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // rAF handle + last frame time for the smooth bottom-follow (see followBottom).
   const followRafRef = useRef<number | null>(null)
   const followPrevTimeRef = useRef(0)
+  // Coarse mouse-wheel notches arrive as large isolated deltas on Linux and
+  // make a long transcript hop a few lines at a time. Track a separate glide
+  // target for those; precision touchpads retain their native pixel scrolling.
+  const wheelRafRef = useRef<number | null>(null)
+  const wheelTargetRef = useRef(0)
+  const wheelPrevTimeRef = useRef(0)
   // The previous scroll event's offset, for telling an UPWARD user scroll apart
   // from our own (possibly lagging) pin-to-bottom writes - see onScroll.
   const prevScrollTopRef = useRef(0)
@@ -7201,10 +7184,15 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // textarea applies the rules itself; this composer needs the flag because it
   // owns Enter (which sends), so the fence-body step is its call to make.
   const autoPair = useAutoPairStore((s) => s.enabled)
-  // The head's worktree, for trimming absolute paths in tool cards (item 19).
-  // Falls back to the archived list for a finished head.
+  // The checkout the head works in, for trimming absolute paths in tool cards
+  // and recognising the shell's default directory. A focused head works in the
+  // project root and deliberately has no Hydra worktree of its own.
   const worktreePath = useAgentStore(
-    (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.worktree_path ?? null,
+    (s) => {
+      const agent = s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId)
+      if (!agent || review) return agent?.worktree_path ?? null
+      return agent.focused ? agent.project_path : agent.worktree_path ?? null
+    },
   )
   const branchName = useAgentStore(
     (s) => (s.agents.find((a) => a.id === agentId) ?? s.archived.find((a) => a.id === agentId))?.branch_name ?? `hydra/${agentId}`,
@@ -9332,6 +9320,87 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
   }
 
+  // Smooth discrete wheel notches without taking over precision touchpads or
+  // nested scroll regions (code blocks, tool output, tooltip bodies). CSS
+  // scroll-behavior only affects programmatic scrolling, not wheel input, so
+  // this small rAF glide is needed for the Linux mouse-wheel case.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+
+    const nestedCanScroll = (target: EventTarget | null, delta: number) => {
+      let node = target instanceof Element ? target : null
+      while (node && node !== el) {
+        const style = getComputedStyle(node)
+        if (
+          (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+          node.scrollHeight > node.clientHeight + 1 &&
+          (delta < 0 ? node.scrollTop > 0 : node.scrollTop + node.clientHeight < node.scrollHeight - 1)
+        ) return true
+        node = node.parentElement
+      }
+      return false
+    }
+
+    const stopWheel = () => {
+      if (wheelRafRef.current != null) cancelAnimationFrame(wheelRafRef.current)
+      wheelRafRef.current = null
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      if (
+        event.ctrlKey ||
+        event.metaKey ||
+        Math.abs(event.deltaY) <= Math.abs(event.deltaX) ||
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ) return
+
+      // DOM_DELTA_LINE/PAGE is always a discrete wheel. Chromium on Linux
+      // commonly reports a mouse notch as a large integral pixel delta instead.
+      const coarse = event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL ||
+        (Number.isInteger(event.deltaY) && Math.abs(event.deltaY) >= 40)
+      if (!coarse || nestedCanScroll(event.target, event.deltaY)) return
+
+      event.preventDefault()
+      stopFollow()
+      pinnedRef.current = false
+      setPinned(false)
+
+      const amount = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? event.deltaY * 32
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? event.deltaY * el.clientHeight * 0.9
+          : event.deltaY
+      const max = Math.max(0, el.scrollHeight - el.clientHeight)
+      if (wheelRafRef.current == null) wheelTargetRef.current = el.scrollTop
+      wheelTargetRef.current = Math.max(0, Math.min(max, wheelTargetRef.current + amount))
+
+      if (wheelRafRef.current != null) return
+      wheelPrevTimeRef.current = performance.now()
+      const step = (now: number) => {
+        wheelRafRef.current = null
+        const dt = Math.min(Math.max(now - wheelPrevTimeRef.current, 0), 50)
+        wheelPrevTimeRef.current = now
+        const distance = wheelTargetRef.current - el.scrollTop
+        if (Math.abs(distance) <= 0.5) {
+          el.scrollTop = wheelTargetRef.current
+          return
+        }
+        el.scrollTop += distance * (1 - Math.exp(-dt / 55))
+        wheelRafRef.current = requestAnimationFrame(step)
+      }
+      wheelRafRef.current = requestAnimationFrame(step)
+    }
+
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      stopWheel()
+    }
+    // The handler deliberately reads live refs; rebinding it on every chat
+    // render would interrupt a glide while streamed tokens arrive.
+  }, [])
+
   // followBottom keeps a pinned view at the bottom as content arrives. This
   // used to be a bare `scrollTop = scrollHeight`, so every new message, thought
   // or tool card teleported the viewport and you lost your place in the text.
@@ -9405,6 +9474,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   useEffect(
     () => () => {
       if (followRafRef.current != null) cancelAnimationFrame(followRafRef.current)
+      if (wheelRafRef.current != null) cancelAnimationFrame(wheelRafRef.current)
     },
     [],
   )
@@ -9949,12 +10019,19 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     if ((shellComposer || !richComposerRef.current?.editor) && pasteMarkers && names.length > 0) insertPasteMarkers(names)
   }
 
+  const handleDesktopImagePaste = useEffectEvent((file: File) => {
+    const rich = richComposerRef.current?.editor?.view.dom
+    const active = document.activeElement
+    if (active !== textareaRef.current && (!rich || !active || !rich.contains(active))) return
+    const names = addFiles([file])
+    if ((shellComposer || !richComposerRef.current?.editor) && pasteMarkers && names.length > 0) insertPasteMarkers(names)
+  })
+  useEffect(() => onDesktopImagePaste(handleDesktopImagePaste), [])
+
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files) addFiles(Array.from(e.target.files))
     e.target.value = ''
   }
-
-  const isFileDrag = (dt: DataTransfer | null) => !!dt && Array.from(dt.types).includes('Files')
 
   const uploading = documentAttachments.some((a) => a.uploading)
   const readyAttachments = documentAttachments.filter((a) => a.path && !a.error)
@@ -10691,9 +10768,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return (
           <div className="flex justify-center">
             <Tooltip
-              variant="card"
-              pin={false}
-              width={COMMIT_CARD_WIDTH}
               content={
                 <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
               }
@@ -10710,7 +10784,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
                 <span className="truncate optical-center">{item.subject}</span>
-                <CommitStats additions={item.additions} deletions={item.deletions} />
+                <ChangeStats additions={item.additions} deletions={item.deletions} />
               </div>
             </Tooltip>
           </div>
@@ -10831,8 +10905,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       case 'result':
         if (item.isError) {
           return (
-            <div className="rounded-lg border border-red-300/70 bg-red-50 dark:border-red-900/70 dark:bg-red-950/30 px-3 py-1.5 text-xs text-red-600 dark:text-red-300 whitespace-pre-wrap break-words">
-              {item.errorText || 'The turn ended with an error.'}
+            <div className="select-none rounded-lg border border-red-300/70 bg-red-50 px-3 py-1.5 text-xs text-red-600 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-300">
+              <span className="select-text whitespace-pre-wrap break-words">{item.errorText || 'The turn ended with an error.'}</span>
             </div>
           )
         }
@@ -11005,6 +11079,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   const renderItemRef = useRef(renderChatItem)
   renderItemRef.current = renderChatItem
   const renderItem = useCallback((item: ChatItem, shellCwd?: string | null) => renderItemRef.current(item, shellCwd), [])
+  const queueTouchesUser = mergedItems.at(-1)?.kind === 'user'
+    && !liveItem
+    && stream?.kind !== 'thinking'
+    && !(isTurnRunning && replayDone && !lastIsResult)
 
   return (
     // Every tool card below can pick up a parked security-gate approval for THIS
@@ -11028,7 +11106,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       className="relative flex-1 min-h-0 flex flex-col text-[calc(13px_+_var(--app-font-chat-step,_0px))] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
       onKeyDown={onPaneKeyDown}
       onDragOver={(e) => {
-        if (!isFileDrag(e.dataTransfer)) return
+        if (!hasFilePayload(e.dataTransfer)) return
         e.preventDefault()
         e.dataTransfer.dropEffect = 'copy'
         setDragActive(true)
@@ -11039,7 +11117,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }}
       onDrop={(e) => {
         setDragActive(false)
-        if (!isFileDrag(e.dataTransfer)) return
+        if (!hasFilePayload(e.dataTransfer)) return
         e.preventDefault()
         addFiles(extractFiles(e.dataTransfer))
       }}
@@ -11166,7 +11244,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
               bubbles reads as one group, so they sit tighter (gap-1) than the
               gap-3 between distinct turns (item 51). */}
           {pendingSends.length > 0 && (
-            <div className="flex flex-col gap-1">
+            <div data-queued-messages className={`flex flex-col gap-1 ${queueTouchesUser ? '-mt-2' : ''}`}>
               {pendingSends.map((p) => (
                 <div key={`pending-${p.id}`} className="group relative animate-chat-item-in">
                   {/* Flush right, exactly where the message will land once it
@@ -11323,6 +11401,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 onChange={(e) => handleInputChange(e.target.value)}
                 onKeyDown={onComposerKeyDown}
                 onPaste={handlePaste}
+                data-desktop-image-paste
                 renderContent={renderComposerBackdrop}
                 placeholder={connected ? 'Run a shell command...' : 'Connecting...'}
                 disabled={!connected}
@@ -11331,7 +11410,8 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 wrapperStyle={{ height: composerHeight }}
                 textColorClassName="text-stone-800 dark:text-stone-100"
                 caretClassName="caret-stone-800 dark:caret-stone-100"
-                textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 placeholder-stone-400 dark:placeholder-stone-500 disabled:opacity-50"
+                placeholderClassName="text-stone-400 dark:text-stone-500"
+                textClassName="px-3.5 pt-2.5 pb-1 text-sm leading-5 disabled:opacity-50"
               />
             ) : (
               <div ref={richComposerHostRef} className="w-full overflow-hidden" style={{ height: composerHeight }} data-rich-chat-composer>
@@ -11364,10 +11444,20 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       handlePaste(event)
                       return true
                     }}
+                    onDrop={(event) => {
+                      const files = extractFiles(event.dataTransfer)
+                      if (files.length === 0) return false
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDragActive(false)
+                      addFiles(files)
+                      return true
+                    }}
                     editable={connected}
                     spellCheck={composerSpellcheck}
                     placeholder={connected ? (review ? 'Ask about the diff...' : 'Write a message...') : 'Connecting...'}
                     ariaLabel="Message"
+                    dataDesktopImagePaste
                     className="h-full overflow-y-auto px-3.5 pt-2.5 pb-1 text-sm leading-5 text-stone-800 caret-stone-800 dark:text-stone-100 dark:caret-stone-100"
                   />
                 </Suspense>

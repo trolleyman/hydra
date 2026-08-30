@@ -25,7 +25,7 @@ export type UpdateAgentRequest = {
     chat_mode?: boolean;
     filesystem_mode?: FocusedFilesystemMode;
     /**
-     * Enable or disable guarded commits for a focused head immediately. Rejected for ordinary worktree heads.
+     * Enable or disable guarded commits for a focused head immediately. Must be false in read-only mode. Rejected for ordinary worktree heads.
      */
     allow_commits?: boolean;
 };

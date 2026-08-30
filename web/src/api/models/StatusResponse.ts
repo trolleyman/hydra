@@ -18,6 +18,10 @@ export type StatusResponse = {
      */
     database_directory?: string;
     /**
+     * Ownership of the running backend process. A persistent backend can outlive its current desktop windows; a command-owned backend stops when the command that launched it exits.
+     */
+    backend_lifetime?: StatusResponse.backend_lifetime;
+    /**
      * Native desktop shell compatibility protocol.
      */
     desktop_protocol?: number;
@@ -65,4 +69,13 @@ export type StatusResponse = {
      */
     can_update?: boolean;
 };
+export namespace StatusResponse {
+    /**
+     * Ownership of the running backend process. A persistent backend can outlive its current desktop windows; a command-owned backend stops when the command that launched it exits.
+     */
+    export enum backend_lifetime {
+        PERSISTENT = 'persistent',
+        COMMAND_OWNED = 'command-owned',
+    }
+}
 

@@ -175,24 +175,23 @@
 .composer-reference { display: inline-flex; align-items: center; gap: 0.25em; max-width: 18em; margin: 0 0.1em; border: 1px solid var(--color-violet-200); border-radius: 999px; background: var(--color-violet-50); padding: 0.08em 0.45em; overflow: hidden; color: var(--color-violet-700); font-family: var(--font-mono); font-size: 0.9em; line-height: 1; text-overflow: ellipsis; vertical-align: baseline; white-space: nowrap; }
 .dark .composer-reference { border-color: rgb(167 139 250 / 0.35); background: rgb(139 92 246 / 0.12); color: var(--color-violet-300); }
 
-/* Iosevka and Iosevka Term, self-hosted. They are the only offered families that
-   are not on Google Fonts, so scripts/build-fonts.ts cuts them from the upstream
-   release: four faces each, subset to Latin + punctuation + box drawing + the
-   symbols this UI and a TUI actually draw (~200KB a face instead of ~1MB).
+/* Patched monospace families, self-hosted. Each is its Nerd Font Mono build, so
+   Powerline/Nerd glyphs such as Starship's branch mark are embedded at the
+   font's intended size. Iosevka uses the terminal-safe Term cut so wide symbols
+   stay inside one cell. scripts/build-fonts.ts subsets the faces to Latin +
+   punctuation + box drawing + the symbols this UI and a TUI draw.
 
    The .woff2 files these point at are NOT in the repo. They are gitignored and
    fetched + subset at build time (`npm run build-fonts`, which `npm run build`
    runs first and which no-ops once its cache stamp matches), so the checkout
-   stays free of 1.7MB of binaries. A build with no network and no cache leaves
+   stays free of several MB of binaries. A build with no network and no cache leaves
    them missing, and the stacks in src/lib/fonts.ts fall through to the system
    monospace - degraded, but not broken.
 
    See src/lib/fonts.ts for the catalogue and public/fonts/OFL.txt for the licence.
 
-   Term differs from the default release in one way that matters here: its wide
-   symbols are drawn one character cell across rather than two, which is what
-   keeps a terminal's columns lined up. Plain Iosevka is the default for code;
-   the terminal defaults to Fira Code instead, for the emoji-width reason
+   The UI calls the family simply Iosevka because the grid-unsafe plain cut is no
+   longer offered. The terminal defaults to Fira Code instead, for the emoji-width reason
    spelled out on FONT_ROLE_SPEC.terminal in src/lib/fonts.ts.
 
    Only 400 and 700 are cut. A weight in between (font-semibold, 600) is
@@ -202,19 +201,28 @@
 @font-face { font-family: 'Iosevka'; src: url('/fonts/iosevka-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
 @font-face { font-family: 'Iosevka'; src: url('/fonts/iosevka-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
 @font-face { font-family: 'Iosevka'; src: url('/fonts/iosevka-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
-@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
-@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
-@font-face { font-family: 'Iosevka Term'; src: url('/fonts/iosevka-term-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Fira Code'; src: url('/fonts/fira-code-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Fira Code'; src: url('/fonts/fira-code-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('/fonts/jetbrains-mono-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('/fonts/jetbrains-mono-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('/fonts/jetbrains-mono-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('/fonts/jetbrains-mono-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('/fonts/ibm-plex-mono-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('/fonts/ibm-plex-mono-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('/fonts/ibm-plex-mono-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('/fonts/ibm-plex-mono-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Source Code Pro'; src: url('/fonts/source-code-pro-400-normal.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Source Code Pro'; src: url('/fonts/source-code-pro-700-normal.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Source Code Pro'; src: url('/fonts/source-code-pro-400-italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Source Code Pro'; src: url('/fonts/source-code-pro-700-italic.woff2') format('woff2'); font-weight: 700; font-style: italic; font-display: swap; }
 
-/* Nerd Fonts symbols - a FALLBACK face, not an offered family. Agents and TUIs
+/* Nerd Fonts symbols - a FALLBACK face, not an offered family. System mono has
+   no bundled font Hydra can patch, and a patched source may omit an uncommon
+   private-use mark. Agents and TUIs
    print Powerline separators, Devicons, Codicons and Seti file-type icons out of
    the Unicode private-use area, and no normal monospace font has them, so
    without this every one of them is a tofu box. Upstream's "Symbols Only"
-   package is built for exactly this (its own README calls it a fallback), which
-   means one face covers every mono family the selector offers instead of
-   swapping each for its patched twin - the patched Iosevka release alone is a
-   357MB zip, and the system monospace has no patched build at all.
+   package is built for exactly this (its own README calls it a fallback).
 
    `unicode-range` keeps it scoped to the private-use blocks, so it is never
    consulted for a letter and never downloaded by anyone who does not render one.
@@ -746,6 +754,9 @@ body {
   scrollbar-width: thin;
   scrollbar-color: rgba(107, 114, 128, 0.5) transparent; /* gray-500 thumb */
 }
+.dark * {
+  scrollbar-color: rgba(156, 163, 175, 0.7) transparent; /* gray-400 thumb */
+}
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -766,6 +777,16 @@ body {
 }
 *::-webkit-scrollbar-thumb:hover {
   background-color: rgba(107, 114, 128, 0.8);
+}
+*::-webkit-scrollbar-thumb:active {
+  background-color: rgba(75, 85, 99, 0.95);
+}
+.dark *::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.7); /* gray-400 */
+}
+.dark *::-webkit-scrollbar-thumb:hover,
+.dark *::-webkit-scrollbar-thumb:active {
+  background-color: rgba(209, 213, 219, 0.9); /* gray-300 */
 }
 
 /* The terminal font's OpenType features (Settings -> Browser -> Fonts). xterm
@@ -948,21 +969,10 @@ body {
   animation: popover-in 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Explanatory tooltip cards contain prose meant to be read immediately. Fade
-   them without scaling so glyphs and rules stay on fixed pixels as they appear. */
-@keyframes tooltip-card-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-.animate-tooltip-card-in {
-  animation: tooltip-card-in 0.1s ease-out;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .animate-chat-item-in,
   .animate-chat-sheet-up,
   .animate-popover-in,
-  .animate-tooltip-card-in,
   .work-spark,
   .work-spark-spoke,
   .repo-file-in { animation: none; }
@@ -1075,6 +1085,6 @@ body {
    preserve the four footer controls by collapsing the model chip to its provider
    icon; its full label returns as soon as there is room for it. */
 .compact-spawn-form { container-type: inline-size; }
-@container (max-width: 220px) {
+@container (max-width: 190px) {
   .compact-spawn-model-label { display: none; }
 }

@@ -40,6 +40,9 @@ func TestChatContextResolverResolvesTheReviewSlot(t *testing.T) {
 	if head.Prompt == "" || head.Plan == "" {
 		t.Errorf("head context lost its seeds: %+v", head)
 	}
+	if head.Worktree != root {
+		t.Errorf("focused head working directory = %q, want project root %q", head.Worktree, root)
+	}
 
 	review, ok := resolve(heads.ReviewSessionID("fix-the"))
 	if !ok {
