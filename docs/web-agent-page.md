@@ -103,6 +103,12 @@ and `web/src/DiffViewer.tsx`):
   carry the chosen size rather than a literal `text-xs` - see
   `CODE_TEXT`/`CODE_LEADING` in `diffMetrics` and the size note in
   `web/src/lib/fonts.ts`.
+- In the native WebKit desktop view, the Files section uses borders and
+  backgrounds for separation without box shadows on its sticky header, file
+  list, pager or diff cards. WebKit repaints those shadows across the
+  changing/scrolling diff at a much higher cost than Chromium; even a small
+  visible file can otherwise make the desktop inspector scroll at roughly half
+  frame rate. Browsers and the Chromium desktop bridge retain the shadows.
 - **When a prediction is wrong anyway, the correction must not be visible.** The
   prediction is exact for a plain file body but not for everything in one -
   `bodyShape` does not model inline review-comment rows, so a file carrying a

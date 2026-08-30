@@ -88,6 +88,7 @@ import { CopyStateIcon } from './components/CopyStateIcon'
 import { mergeBaseInstruction } from './lib/mergeBaseInstruction'
 import { commitIdx, commitParentSelection, reconcileRightSelection, type LeftSel, type RightSel } from './lib/commitRange'
 import { createArrayIndex } from './lib/arrayIndex'
+import { hasWebKitDesktopBridge } from './lib/desktopBridge'
 
 const indexCommits = createArrayIndex<CommitInfo, string>((commit) => commit.sha)
 const indexDiffFiles = createArrayIndex<DiffFile, string>((file) => file.path)
@@ -1851,6 +1852,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   openInRepo?: (path: string) => LinkProps
 }) {
   const lang = getLanguage(file.path, firstFileLine(file))
+  const fileSurfaceShadow = hasWebKitDesktopBridge() ? '' : ' shadow-sm'
 
   const [reveal, setReveal] = useState<RevealMap>(new Map())
 
@@ -2322,7 +2324,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
       // (scrolls "too far"). +16 lands the card border exactly at the sticky
       // bar stack's bottom edge, so the header sits flush and line 1 is visible.
       style={headless ? undefined : { scrollMarginTop: `calc(${FILE_STICKY_TOP} + 16px)` }}
-      className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}
+      className={headless ? '' : `border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900${fileSurfaceShadow}`}
     >
       {!headless && (
         // Sticky header: pins flush below the Changes toolbar (FILE_STICKY_TOP, the
@@ -3691,6 +3693,7 @@ export function diffMetaKey(d: DiffResponse): string {
 // selectors, then tests, previews, artifacts, and the diff itself), just
 // without the top margin - the pane's own padding supplies it.
 function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, externalReviewRefresh, externalCommitSelect, inspector, changesLeading, leadingInline, focusComment, focusLine }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; externalReviewRefresh?: number; externalCommitSelect?: { sha: string; nonce: number } | null; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean; focusComment?: number; focusLine?: string }) {
+  const fileSurfaceShadow = hasWebKitDesktopBridge() ? '' : ' shadow-sm'
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
   const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
@@ -5322,7 +5325,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             and clips it while the column tweens to 0 - which is why the drag
             handle can't live in here (see below), hence the wrapper above. */}
         <div
-          className="flex flex-col border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 shadow-sm"
+          className={`flex flex-col border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800${fileSurfaceShadow}`}
           style={{ borderWidth: filesListHidden ? 0 : undefined }}
         >
           <div data-file-list className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
@@ -5354,17 +5357,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               <button
                 onClick={() => goToOrderPos(singleOrderPos - 1)}
                 disabled={singleOrderPos <= 0}
-                className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
+                className={`flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors${fileSurfaceShadow}`}
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-xs text-gray-500 dark:text-gray-400 shadow-sm font-medium">
+              <div className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-xs text-gray-500 dark:text-gray-400 font-medium${fileSurfaceShadow}`}>
                 {singleOrderPos + 1} / {diff.files.length}
               </div>
               <button
                 onClick={() => goToOrderPos(singleOrderPos + 1)}
                 disabled={singleOrderPos >= diff.files.length - 1}
-                className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
+                className={`flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors${fileSurfaceShadow}`}
               >
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -5469,7 +5472,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // z-[22]: above the file cards' own sticky headers (z-20), which are later
       // in the DOM and would otherwise paint OVER this section header while
       // docking; below the Changes bar's z-[25].
-      className="sticky z-[22] flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
+      className={`sticky z-[22] flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800${fileSurfaceShadow}`}
     >
       <FilesIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
       <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Files</h3>

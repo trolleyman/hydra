@@ -53,6 +53,10 @@ export function hasDesktopBridge(): boolean {
   return !!desktop.webkit?.messageHandlers?.hydra || !!desktop.chrome?.webview
 }
 
+export function hasWebKitDesktopBridge(): boolean {
+  return typeof window !== 'undefined' && !!(window as DesktopWindow).webkit?.messageHandlers?.hydra
+}
+
 export function isCompactChatWindow(): boolean {
   return typeof window !== 'undefined' && (window as DesktopWindow).hydraDesktopCapabilities?.compactChatWindow === true
 }
