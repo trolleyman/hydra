@@ -34,8 +34,9 @@ project-checkout draft; existing conversations open their ordinary agent URL.
 The available width determines the layout, rather than a dedicated window mode.
 
 A project-checkout chat is attached directly to one registered project's real
-directory and omits the worktree inspector. Its workspace chip contains the
-Edit/Read-only and Allow commits controls.
+directory and omits the worktree inspector. Edit/Read-only and Allow commits sit
+beside its workspace chip; the normal configuration strip retains test, network,
+Git access, checked-out branch, and run mode.
 
 Several windows share one local Hydra backend and one set of projects, sessions,
 and conversation history. Closing a window does not stop its head. Explicit Quit

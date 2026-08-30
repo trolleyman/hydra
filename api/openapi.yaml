@@ -4117,6 +4117,13 @@ components:
             update-from-base and the diff view) but does NOT move existing
             commits. Rebasing the agent's branch onto the new base, if desired,
             is left to the user. Must be an existing ref.
+        checkout_branch:
+          type: string
+          description: >-
+            Switch the shared project checkout to this existing local branch.
+            Valid only for a focused/project-checkout head. This performs a
+            normal non-forced Git checkout, so local changes are preserved when
+            possible and a conflicting switch fails rather than discarding work.
         chat_mode:
           type: boolean
           description: >-

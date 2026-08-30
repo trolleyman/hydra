@@ -4478,6 +4478,9 @@ type UpdateAgentRequest struct {
 	// ChatMode Switch the head between terminal and chat mode (Claude and Codex only; rejected for other agent types). When the value changes, a live process is relaunched and its provider conversation is resumed.
 	ChatMode *bool `json:"chat_mode,omitempty"`
 
+	// CheckoutBranch Switch the shared project checkout to this existing local branch. Valid only for a focused/project-checkout head. This performs a normal non-forced Git checkout, so local changes are preserved when possible and a conflicting switch fails rather than discarding work.
+	CheckoutBranch *string `json:"checkout_branch,omitempty"`
+
 	// FilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
 	FilesystemMode *FocusedFilesystemMode `json:"filesystem_mode,omitempty"`
 

@@ -22,8 +22,9 @@ opens a project-checkout draft and existing chats use their canonical agent
 route; windowing is not a separate UI mode.
 
 Project-checkout chats run directly in one registered project's real directory.
-Their workspace chip exposes Edit/Read-only and Allow commits, and their agent
-view omits worktree review chrome.
+Edit/Read-only and Allow commits sit beside their workspace chip; test, network,
+Git access, checked-out branch, and run mode remain in the normal configuration
+strip. Their agent view omits worktree review chrome.
 
 Both surfaces remain React routes served by the existing Go backend. The native
 shell owns Windows lifecycle and integration; it must not fork chat rendering or
@@ -49,7 +50,7 @@ The following base is already merged and must be reused unchanged:
 - immediate authorization changes for the independent commit toggle;
 - guarded commits which revalidate the real checkout's branch and HEAD;
 - the focused option in the existing spawn composer;
-- the reusable chat-only agent layout and workspace permission card;
+- the reusable chat-only agent layout and inline workspace permission controls;
 - simulation fixtures for editable, read-only, working, and archived focused
   sessions.
 

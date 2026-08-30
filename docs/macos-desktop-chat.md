@@ -32,9 +32,12 @@ The cross-platform base now includes:
 - guarded focused commits which capture and revalidate both branch and HEAD,
   while rejecting every other host-mediated Git mutation;
 - a project-checkout option in the normal spawn UI and a shared chat-only agent
-  layout. Its workspace chip contains Edit/Read-only and Allow commits controls.
-  The layout does not mount the diff, tests, artifacts, previews, publish,
-  merge, or review inspector;
+  layout. Its identity row places Edit/Read-only and Allow commits beside the
+  project-checkout workspace chip. The configuration strip retains test,
+  network, Git, checked-out branch, and Terminal/Chat controls. The layout does
+  not mount the diff, artifacts, previews, publish, merge, or review inspector;
+- a project-checkout branch selector which performs a normal non-forced checkout
+  in the shared root and preserves Git's dirty-tree protection;
 - simulation fixtures for editable, read-only, actively working, and archived
   focused chats, including mutable permission controls for browser testing.
 - one responsive application shell for browser tabs, full native windows, and
@@ -194,7 +197,10 @@ Workspace state is visible in both the agent metadata and agent list:
 
 - a branch chip means an isolated worktree;
 - a folder chip means the shared project checkout;
-- the project-checkout chip's card contains Edit/Read-only and Allow commits.
+- Edit/Read-only and Allow commits sit immediately after the project-checkout
+  chip;
+- test, network, Git access, checked-out branch, and Terminal/Chat follow in the
+  configuration strip.
 
 The chat retains the existing high-value structured elements:
 

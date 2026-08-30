@@ -5,7 +5,7 @@ import { BranchSelector } from './BranchSelector'
 import { SettingsPopover, SettingsGroupLabel, SettingsSelect } from './SettingsPopover'
 import { formatError } from '../api/format_error'
 import { uploadFile, extractFiles, isImageFile } from '../api/uploads'
-import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal, GitBranch, X, Lock } from 'lucide-react'
+import { Zap, LoaderCircle, Paperclip, Check, MessageSquare, SquareTerminal, GitBranch, FolderGit2, X, Lock } from 'lucide-react'
 import { AgentTypeIcon } from './AgentTypeIcon'
 import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
@@ -32,6 +32,7 @@ import type { ReviewRef } from '../api/models/ReviewRef'
 import { type AgentTypeOption, readModelMap, readDefaultAgentType, readDefaultChatMode } from '../lib/spawnDefaults'
 import { fetchBranches, peekBranches } from '../lib/branchCache'
 import { orderModelProviders, recordModelProviderUse } from '../lib/modelProviderRecency'
+import { SegmentedControl } from './SegmentedControl'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 
@@ -988,13 +989,6 @@ export const SpawnForm = memo(function SpawnForm({
     if (!focused && gitIsolation) {
       nonDefaults.push(`Git isolation: ${GIT_ISOLATION_OPTS.find((o) => o.id === gitIsolation)?.label ?? gitIsolation}`)
     }
-    // A two-option segmented control: a chat-mode head opens the web chat view,
-    // otherwise the head runs in a terminal. `chatMode === false` selects the
-    // terminal segment.
-    const modeSegment = (active: boolean) =>
-      `flex items-center gap-1.5 px-2.5 py-1 font-medium transition-colors cursor-pointer ${active
-        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300'
-        : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}`
     return (
       <SettingsPopover
         label="Spawn options"
@@ -1035,16 +1029,15 @@ export const SpawnForm = memo(function SpawnForm({
         )}
         {showChat && !focused && <SettingsGroupLabel className="mb-1.5">Run mode</SettingsGroupLabel>}
         {showChat && !focused && (
-          <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
-            <button type="button" aria-pressed={!chatMode} onClick={() => setChatMode(false)} className={modeSegment(!chatMode)}>
-              <SquareTerminal className="w-3.5 h-3.5" />
-              terminal
-            </button>
-            <button type="button" aria-pressed={chatMode} onClick={() => setChatMode(true)} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(chatMode)}`}>
-              <MessageSquare className="w-3.5 h-3.5" />
-              chat
-            </button>
-          </div>
+          <SegmentedControl<'terminal' | 'chat'>
+            label="Run mode"
+            value={chatMode ? 'chat' : 'terminal'}
+            onChange={(value) => setChatMode(value === 'chat')}
+            options={[
+              { value: 'terminal', label: 'Terminal', icon: <SquareTerminal className="h-3.5 w-3.5" /> },
+              { value: 'chat', label: 'Chat', icon: <MessageSquare className="h-3.5 w-3.5" /> },
+            ]}
+          />
         )}
         {showChat && !focused && (
           <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
@@ -1071,24 +1064,32 @@ export const SpawnForm = memo(function SpawnForm({
           <>
             {!focused && <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />}
             <SettingsGroupLabel className="mb-1.5">Workspace</SettingsGroupLabel>
-            {!focusedOnly && <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
-              <input type="checkbox" checked={!focused} onChange={(event) => {
-                const useWorktree = event.target.checked
-                setFocused(!useWorktree)
-                if (!useWorktree) { setChatMode(true); setAdopt(null) }
-              }} className="rounded border-gray-300 dark:border-gray-600" />
-              Isolated worktree
-            </label>}
+            {!focusedOnly && (
+              <SegmentedControl<'worktree' | 'project'>
+                label="Workspace"
+                value={focused ? 'project' : 'worktree'}
+                onChange={(value) => {
+                  const projectCheckout = value === 'project'
+                  setFocused(projectCheckout)
+                  if (projectCheckout) { setChatMode(true); setAdopt(null) }
+                }}
+                options={[
+                  { value: 'worktree', label: 'Worktree', icon: <GitBranch className="h-3.5 w-3.5" /> },
+                  { value: 'project', label: 'Project checkout', icon: <FolderGit2 className="h-3.5 w-3.5" /> },
+                ]}
+              />
+            )}
             {focused && (
               <div className={focusedOnly ? 'space-y-2' : 'mt-2 space-y-2'}>
-                <div className="inline-flex items-center rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden text-xs">
-                  <button type="button" aria-pressed={focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit} onClick={() => setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemEdit)} className={modeSegment(focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit)}>
-                    Edit
-                  </button>
-                  <button type="button" aria-pressed={focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly} onClick={() => setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemReadonly)} className={`border-l border-gray-200 dark:border-gray-600 ${modeSegment(focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly)}`}>
-                    Read-only
-                  </button>
-                </div>
+                <SegmentedControl
+                  label="Project files"
+                  value={focusedFilesystemMode}
+                  onChange={setFocusedFilesystemMode}
+                  options={[
+                    { value: FocusedFilesystemMode.FocusedFilesystemEdit, label: 'Edit' },
+                    { value: FocusedFilesystemMode.FocusedFilesystemReadonly, label: 'Read-only' },
+                  ]}
+                />
                 <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
                   <input
                     type="checkbox"
