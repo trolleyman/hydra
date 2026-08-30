@@ -11210,7 +11210,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                           : 'bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
                       }`}
                     >
-                      <Send className="w-4 h-4" />
+                      <ArrowUp className="w-4 h-4" />
                     </button>
                   </Tooltip>
                 )}
