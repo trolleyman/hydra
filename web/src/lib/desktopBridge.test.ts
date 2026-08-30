@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hasNativeFolderPicker, hasNativeNotifications, hasWebKitDesktopBridge, isCompactChatWindow, onDesktopCommand, onDesktopImagePaste, openChatWindow, postDesktopMessage } from './desktopBridge'
+import { hasNativeFolderPicker, hasNativeNotifications, hasWebKitDesktopBridge, isCompactChatWindow, onDesktopImagePaste, openChatWindow, postDesktopMessage } from './desktopBridge'
 
 describe('desktopBridge', () => {
   afterEach(() => {
@@ -8,16 +8,6 @@ describe('desktopBridge', () => {
     delete (window as Window & { chrome?: unknown }).chrome
     vi.restoreAllMocks()
   })
-  it('delivers native commands and removes the listener', () => {
-    const handler = vi.fn()
-    const remove = onDesktopCommand(handler)
-    window.dispatchEvent(new CustomEvent('hydra-desktop-command', { detail: { type: 'stop-and-close' } }))
-    expect(handler).toHaveBeenCalledWith({ type: 'stop-and-close' })
-    remove()
-    window.dispatchEvent(new CustomEvent('hydra-desktop-command', { detail: { type: 'stop-and-close' } }))
-    expect(handler).toHaveBeenCalledTimes(1)
-  })
-
   it('turns a native clipboard texture into a browser File', () => {
     const handler = vi.fn()
     const remove = onDesktopImagePaste(handler)

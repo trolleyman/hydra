@@ -12,6 +12,14 @@ describe('Codex bash display', () => {
     expect(formatBashForDisplay("bash -lc 'pwd'", 'packages/chat ui')).toBe("cd 'packages/chat ui'\npwd")
   })
 
+  it.each([
+    ['~', 'cd ~\npwd'],
+    ['~/dawdawdaw', 'cd ~/dawdawdaw\npwd'],
+    ['~/path with spaces', "cd ~/'path with spaces'\npwd"],
+  ])('keeps the home expansion executable in %j', (cwd, expected) => {
+    expect(formatBashForDisplay('pwd', cwd)).toBe(expected)
+  })
+
   it('does not duplicate an explicit cd', () => {
     expect(formatBashForDisplay("bash -lc 'cd web && bun test'", '/repo')).toBe('cd web &&\nbun test')
   })

@@ -426,9 +426,9 @@ timeout.
   waiting heads may retain a reusable sandbox process without triggering the
   guard, and closing a secondary window never offers to stop its shared head.
 - [x] Make close and Quit copy follow backend ownership. Installed persistent
-  backends can leave agents running; command-owned Mage desktop runs say that
-  closing the last window stops the backend and use a single Close and stop
-  action. Dialog titles report the number of active agents.
+  backends leave agents running when a window closes. Command-owned Mage desktop
+  runs explain that closing the last window stops the backend. Dialog titles
+  report the number of active agents.
 - Keep browser-safe dialogs and navigation paths for every essential action.
 
 Exit criterion: windows at full and chat routes support the agreed lifecycle,
