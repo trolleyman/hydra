@@ -86,6 +86,18 @@ export function extractFiles(dt: DataTransfer | null): File[] {
   return out
 }
 
+// WebKitGTK can advertise a filesystem drag through file-kind items while its
+// `types` list contains only text/uri-list. Looking only for the Chromium-style
+// "Files" type lets the browser perform its default drop, which inserts a local
+// path as text instead of handing Hydra the file bytes. The item/file lists are
+// the stronger signal and cover images and every other attachment type.
+export function hasFilePayload(dt: DataTransfer | null): boolean {
+  if (!dt) return false
+  if (dt.files?.length > 0) return true
+  if (dt.items && Array.from(dt.items).some((item) => item.kind === 'file')) return true
+  return Array.from(dt.types).some((type) => type.toLowerCase() === 'files')
+}
+
 export function isImageFile(file: File): boolean {
   return IMAGE_RE.test(file.type)
 }

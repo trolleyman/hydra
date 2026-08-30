@@ -80,7 +80,7 @@ import { Lightbox } from './components/Lightbox'
 import { attachmentLightboxItems, openableAttachments } from './lib/attachmentLightbox'
 import { attachmentFromPath } from './lib/draftAttachments'
 import { useAttachmentUploads } from './lib/useAttachmentUploads'
-import { extractFiles } from './api/uploads'
+import { extractFiles, hasFilePayload } from './api/uploads'
 import { renderCommentSource } from './lib/mentionHighlight'
 import { Markdown } from './lib/MarkdownRenderer'
 import { useCopyFlash } from './lib/useCopyFlash'
@@ -234,8 +234,6 @@ const DraftReviewPopoverContext = createContext<ComponentProps<typeof ReviewDraf
 
 // True when a drag is carrying real files, so dragging a text selection over a
 // comment box doesn't light it up as a drop target.
-const isFileDrag = (dt: DataTransfer | null) => !!dt && Array.from(dt.types).includes('Files')
-
 // One queued comment shown inline beneath its diff line: the authored text rendered
 // as markdown (matching how it lands in the agent chat), with edit + remove. A
 // stale comment (its diff moved since it was queued) gets a warning but still reads.
@@ -531,10 +529,10 @@ function CommentRow({ initialText = '', initialAttachments, projectId, onSubmit,
         ? 'border-blue-400 bg-blue-100/60 dark:border-blue-600 dark:bg-blue-900/30'
         : 'border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/10'
         }`}
-      onDragOver={(e) => { if (isFileDrag(e.dataTransfer)) { e.preventDefault(); setDragOver(true) } }}
+      onDragOver={(e) => { if (hasFilePayload(e.dataTransfer)) { e.preventDefault(); setDragOver(true) } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false) }}
       onDrop={(e) => {
-        if (!isFileDrag(e.dataTransfer)) return
+        if (!hasFilePayload(e.dataTransfer)) return
         e.preventDefault()
         setDragOver(false)
         addFiles(extractFiles(e.dataTransfer))

@@ -78,6 +78,20 @@ function imagePasteEvent() {
   }
 }
 
+function webkitFileDropEvent() {
+  const image = new File([new Uint8Array([1, 2, 3])], 'diagram.png', { type: 'image/png' })
+  const notes = new File(['details'], 'notes.txt', { type: 'text/plain' })
+  return {
+    dataTransfer: {
+      items: [image, notes].map((file) => ({ kind: 'file', type: file.type, getAsFile: () => file })),
+      files: [],
+      types: ['text/uri-list'],
+      getData: () => 'file:///home/callum/diagram.png',
+      dropEffect: 'none',
+    },
+  }
+}
+
 // A fresh agent id per render: the composer's draft attachments live in an
 // in-memory cache keyed by agent, which would otherwise leak chips (and the
 // image-number counter) from one test into the next.
@@ -429,6 +443,17 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     await screen.findByLabelText('Remove image1.png')
     expect(ta.value).toBe('[image1.png]')
     expect(ta).toHaveAttribute('data-desktop-image-paste')
+  })
+
+  it('attaches WebKit file drops instead of inserting their URI text', async () => {
+    renderChat()
+    const ta = await connectedComposer()
+
+    fireEvent.drop(ta, webkitFileDropEvent())
+
+    await screen.findByLabelText('Remove diagram.png')
+    await screen.findByLabelText('Remove notes.txt')
+    expect(ta.value).toBe('')
   })
 
   it('redo (Ctrl+Shift+Z) replays an undone paste', async () => {

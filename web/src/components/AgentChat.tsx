@@ -63,7 +63,7 @@ import { highlightHtml, highlightLines, splitHighlightedLines } from '../lib/hig
 import { escapeText } from '../lib/prismHtml'
 import { closeWebSocket } from '../lib/ws'
 import { getWsUrl } from '../lib/terminalWs'
-import { agentFileUrl, uploadFile, extractFiles, isImageFile } from '../api/uploads'
+import { agentFileUrl, uploadFile, extractFiles, hasFilePayload, isImageFile } from '../api/uploads'
 import { densityFromPath, logicalSize } from '../lib/imageDensity'
 import { inSelfReflow, markSelfReflow } from '../lib/selfReflow'
 import { pasteMarkerText } from '../lib/pastedText'
@@ -9895,8 +9895,6 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     e.target.value = ''
   }
 
-  const isFileDrag = (dt: DataTransfer | null) => !!dt && Array.from(dt.types).includes('Files')
-
   const uploading = attachments.some((a) => a.uploading)
   const readyAttachments = attachments.filter((a) => a.path && !a.error)
   // Every attachment is openable, in chip order - the lightbox navigates this list
@@ -10897,7 +10895,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       className="relative flex-1 min-h-0 flex flex-col text-[calc(13px_+_var(--app-font-chat-step,_0px))] text-stone-800 dark:text-stone-100 bg-[#faf9f5] dark:bg-[#262624]"
       onKeyDown={onPaneKeyDown}
       onDragOver={(e) => {
-        if (!isFileDrag(e.dataTransfer)) return
+        if (!hasFilePayload(e.dataTransfer)) return
         e.preventDefault()
         e.dataTransfer.dropEffect = 'copy'
         setDragActive(true)
@@ -10908,7 +10906,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       }}
       onDrop={(e) => {
         setDragActive(false)
-        if (!isFileDrag(e.dataTransfer)) return
+        if (!hasFilePayload(e.dataTransfer)) return
         e.preventDefault()
         addFiles(extractFiles(e.dataTransfer))
       }}
