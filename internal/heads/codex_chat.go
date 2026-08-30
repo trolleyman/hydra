@@ -48,19 +48,20 @@ func startCodexChatController(reg *session.Registry, store *db.Store, projectRoo
 				log.Printf("warn: mark Codex turn running for %s: %v", id, err)
 			}
 		},
-		OnActivity: func() {
-			if store == nil {
-				writeCodexSlotRunning(projectRoot, id)
-				return
-			}
-			if err := MarkPromptSubmitted(store, projectRoot, id); err != nil {
-				log.Printf("warn: mark Codex item activity running for %s: %v", id, err)
-			}
+		OnActivity: func(detail string) {
+			writeCodexLatest(projectRoot, id, api.Running, detail, boolPtr(false))
 		},
-		OnNeedsInput: func() {
+		OnMessage: func(message string) {
+			writeCodexLatest(projectRoot, id, api.Running, message, nil)
+		},
+		OnNeedsInput: func(question string) {
 			ts := time.Now().Format(time.RFC3339Nano)
 			event := "request_user_input"
 			info := &api.AgentStatusInfo{Status: api.NeedsInput, Event: &event, Timestamp: ts}
+			if question != "" {
+				info.LastMessage = stringPtr(question)
+				info.LastMessageIsSuggestedNextMessage = boolPtr(false)
+			}
 			if err := WriteAgentStatus(projectRoot, id, info); err != nil {
 				log.Printf("warn: mark Codex user-input request for %s: %v", id, err)
 				return
@@ -123,6 +124,32 @@ func writeCodexSlotRunning(projectRoot, id string) {
 		log.Printf("warn: mark Codex slot activity running for %s: %v", id, err)
 	}
 }
+
+// writeCodexLatest persists Codex's newest meaningful transcript item in both
+// status fields. Activity drives the line while the turn is running;
+// LastMessage carries the same item across the running -> finished edge. A
+// later assistant message naturally replaces the preceding tool description.
+func writeCodexLatest(projectRoot, id string, status api.AgentStatus, detail string, suggested *bool) {
+	ts := time.Now().Format(time.RFC3339Nano)
+	info := &api.AgentStatusInfo{Status: status, Timestamp: ts}
+	if detail != "" {
+		info.Activity = stringPtr(detail)
+		info.LastMessage = stringPtr(detail)
+		info.LastMessageIsSuggestedNextMessage = suggested
+	} else if current := ReadAgentStatus(projectRoot, id); current != nil {
+		// Reasoning and the start of an agent-message item are lifecycle edges,
+		// not newer user-facing things. Keep the previous tool/message visible
+		// until Codex supplies actual message text.
+		info.Activity = current.Activity
+		info.LastMessage = current.LastMessage
+		info.LastMessageIsSuggestedNextMessage = current.LastMessageIsSuggestedNextMessage
+	}
+	if err := WriteAgentStatus(projectRoot, id, info); err != nil {
+		log.Printf("warn: persist Codex latest activity for %s: %v", id, err)
+	}
+}
+
+func boolPtr(value bool) *bool { return &value }
 
 func codexSlotConversationIDPath(projectRoot, id string) string {
 	return filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), id+"-codex-conversation-id")

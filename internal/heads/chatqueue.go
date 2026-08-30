@@ -414,10 +414,20 @@ func (m *ChatQueueManager) OnTurnEnd(id string) {
 		status = api.Running
 	}
 	ts := time.Now().Format(time.RFC3339Nano)
-	if err := WriteAgentStatus(root, id, &api.AgentStatusInfo{
+	settled := &api.AgentStatusInfo{
 		Status:    status,
 		Timestamp: ts,
-	}); err != nil {
+	}
+	// Preserve the provider's newest item across the turn-end write. Codex puts
+	// its latest tool/message directly in status.json; replacing the file with a
+	// bare status here would lose it before the poller can persist the sidebar
+	// line. Hook-based providers are unaffected (their log remains authoritative).
+	if current := ReadAgentStatus(root, id); current != nil {
+		settled.Activity = current.Activity
+		settled.LastMessage = current.LastMessage
+		settled.LastMessageIsSuggestedNextMessage = current.LastMessageIsSuggestedNextMessage
+	}
+	if err := WriteAgentStatus(root, id, settled); err != nil {
 		log.Printf("warn: write post-turn status for %s: %v", id, err)
 	}
 	// Deliberately do NOT write the DB status here. The JSON status poller owns
