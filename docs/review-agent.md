@@ -746,6 +746,9 @@ selection list, held-back state, anchored entrance motion and submission path, s
 the review can be inspected and published without returning to the toolbar. Its
 panel is portalled and viewport-positioned: the inline trigger lives inside the
 diff file's rounded overflow clip, where an in-place popup would be cut off.
+Selecting a draft marks its card with the transient focus cue and uses the
+remeasuring diff scroll path; this matters for a comment on an unchanged file,
+whose off-diff card can grow while its source context is still loading.
 
 **A reply can join the draft review or be sent immediately.** Add to agent review
 stores it as a draft under the published parent, while Comment to agent publishes

@@ -4439,13 +4439,20 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       const find = () => document.querySelector<HTMLElement>(`[data-offdiff-comment="${c.number}"]`)
       const card = find()
       if (card) {
-        card.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        // Off-diff cards fetch their source context while the jump is in flight,
+        // so their height can still change after the first measurement. Use the
+        // same remeasuring helper as file navigation instead of a one-shot native
+        // smooth scroll that can strand the comment below the viewport.
+        scrollCardToTop(card)
       } else {
         // Not on screen: the only way an off-diff comment is missing its card is
         // that it is resolved and the section is hiding those. A permalink to a
         // resolved comment has to land, so reveal them and scroll once it mounts.
         setShowResolvedOffDiff(true)
-        requestAnimationFrame(() => find()?.scrollIntoView({ block: 'center', behavior: 'smooth' }))
+        requestAnimationFrame(() => {
+          const revealed = find()
+          if (revealed) scrollCardToTop(revealed)
+        })
       }
       return
     }
@@ -5062,8 +5069,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     submitting: submittingReview,
     onSubmit: submitReview,
     onRemove: removeQueuedComment,
-    onJump: handleJumpToComment,
-  }), [queuedComments, projectId, staleReviewIds, submittingReview, submitReview, removeQueuedComment, handleJumpToComment])
+    onJump: (comment) => {
+      visit(comment.number)
+      handleJumpToComment(comment)
+    },
+  }), [queuedComments, projectId, staleReviewIds, submittingReview, submitReview, removeQueuedComment, handleJumpToComment, visit])
 
   const [isResizing, setIsResizing] = useState(false)
   const startResizing = useCallback((e: React.MouseEvent) => {

@@ -229,7 +229,8 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
       >
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
         <GitMerge className="w-3 h-3 shrink-0" />
-        <span className="truncate optical-center">{label}</span>
+        <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
+        <CommitStats additions={item.additions} deletions={item.deletions} />
       </button>
       <Expandable open={expanded && shown > 0} className="w-full">
         <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
@@ -246,7 +247,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
               <GitCommitHorizontal className="w-3 h-3 shrink-0" />
               {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
               <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
-              <span className="truncate optical-center">{m.subject}</span>
+              <span className="min-w-0 flex-1 truncate optical-center">{m.subject}</span>
               <CommitStats additions={m.additions} deletions={m.deletions} />
             </div>
           ))}
