@@ -53,14 +53,6 @@ export function hasDesktopBridge(): boolean {
   return !!desktop.webkit?.messageHandlers?.hydra || !!desktop.chrome?.webview
 }
 
-// Linux WebKitGTK and macOS WKWebView expose the same WebKit message-handler
-// transport. Keep this narrower than hasDesktopBridge: Windows WebView2 uses
-// Chromium and does not need WebKit-specific rendering workarounds.
-export function hasWebKitDesktopBridge(): boolean {
-  if (typeof window === 'undefined') return false
-  return !!(window as DesktopWindow).webkit?.messageHandlers?.hydra
-}
-
 export function isCompactChatWindow(): boolean {
   return typeof window !== 'undefined' && (window as DesktopWindow).hydraDesktopCapabilities?.compactChatWindow === true
 }

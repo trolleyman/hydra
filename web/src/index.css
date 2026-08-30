@@ -867,28 +867,6 @@ body {
   }
 }
 
-/* WebKitGTK/WKWebView repaint the Files surface on every animation frame, even
-   when the animation is a tiny status mark elsewhere. AgentDetail adds the root
-   class while the inspector is visible; :has narrows the workaround to a loaded
-   Files diff, since an empty Changes inspector does not have the costly surface.
-   Keep the useful still states (striped progress, spinner shape, spark mark), but
-   stop their decorative loops so a settled Files diff also settles the paint loop. */
-.hydra-webkit-diff-open:has([data-file-card]) .animate-status-pulse,
-.hydra-webkit-diff-open:has([data-file-card]) .animate-barber-pole,
-.hydra-webkit-diff-open:has([data-file-card]) .animate-gradient,
-.hydra-webkit-diff-open:has([data-file-card]) .animate-shimmer,
-.hydra-webkit-diff-open:has([data-file-card]) .animate-spin,
-.hydra-webkit-diff-open:has([data-file-card]) .animate-pulse,
-.hydra-webkit-diff-open:has([data-file-card]) .work-spark,
-.hydra-webkit-diff-open:has([data-file-card]) .work-spark-spoke,
-.hydra-webkit-diff-open:has([data-file-card]) .chat-text-shimmer {
-  animation: none !important;
-}
-.hydra-webkit-diff-open:has([data-file-card]) .chat-text-shimmer {
-  background-image: none;
-  color: inherit;
-}
-
 /* --- ANSI terminal output (ansiToHtml) ------------------------------------ */
 
 /* SGR colours rendered from bash tool output. Two palettes - a darker set for
