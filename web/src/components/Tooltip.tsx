@@ -292,8 +292,13 @@ export function Tooltip({
     if (!overTooltip.current && !overTrigger.current) hide()
   }, [card, hide])
 
-  const handleClick = useCallback(() => {
+  const handleClick = useCallback((e: React.MouseEvent) => {
     if (!card) return
+    // The card is portalled to document.body but remains a React child of this
+    // wrapper, so its clicks bubble through this handler. They are interaction
+    // with the card, not a second click on the trigger: keep it open so text can
+    // be selected and links or other card content can be used.
+    if (e.target instanceof Node && boxRef.current?.contains(e.target)) return
     // The trigger's own click is the action (pin={false}): get out of its way.
     // Pinning here would leave the card sitting over whatever that click just
     // scrolled to or opened, with the pointer already elsewhere.
@@ -451,7 +456,7 @@ export function Tooltip({
                   light mode here so it stays legible on white (descendant selector
                   wins on specificity, no caller changes needed). Scrolls when
                   computePos has capped the card's height against the viewport. */}
-              <div className="text-gray-600 dark:text-gray-300 space-y-2 overflow-y-auto min-h-0 [&_code]:text-blue-700 dark:[&_code]:text-blue-300">
+              <div className="select-text text-gray-600 dark:text-gray-300 space-y-2 overflow-y-auto min-h-0 [&_code]:text-blue-700 dark:[&_code]:text-blue-300">
                 {content}
               </div>
               {arrow(pos.placement)}

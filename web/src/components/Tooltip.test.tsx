@@ -176,6 +176,28 @@ describe('Tooltip - card variant', () => {
     }
   })
 
+  it('keeps an unpinned card open when its selectable content is clicked', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(
+        <Tooltip variant="card" pin={false} content={<p>select this text</p>}>
+          <button>commit</button>
+        </Tooltip>,
+      )
+      const span = wrapper(container)
+      fireEvent.mouseEnter(span)
+      act(() => void vi.advanceTimersByTime(0))
+
+      const body = screen.getByText('select this text')
+      fireEvent.click(body)
+
+      expect(body).toBeInTheDocument()
+      expect(body.parentElement).toHaveClass('select-text')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('dismisses after the grace period when the pointer never reaches the card', () => {
     vi.useFakeTimers()
     try {

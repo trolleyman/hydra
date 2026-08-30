@@ -243,17 +243,26 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
   const shown = item.merged?.length ?? 0
   return (
     <div className="flex max-w-full flex-col items-center gap-1">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-full`}
-        title={expanded ? 'Hide merged commits' : 'Show merged commits'}
+      <Tooltip
+        variant="card"
+        pin={false}
+        width={COMMIT_CARD_WIDTH}
+        content={
+          <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
+        }
       >
-        {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
-        <GitMerge className="w-3 h-3 shrink-0" />
-        <span className="truncate optical-center">{label}</span>
-      </button>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-label={`${expanded ? 'Hide' : 'Show'} merged commits: ${label}`}
+          className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-full`}
+        >
+          {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
+          <GitMerge className="w-3 h-3 shrink-0" />
+          <span className="truncate optical-center">{label}</span>
+        </button>
+      </Tooltip>
       <Expandable open={expanded && shown > 0} className="w-full">
         <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
           {item.merged!.map((m) => (
