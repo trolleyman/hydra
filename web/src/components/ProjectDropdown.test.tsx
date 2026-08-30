@@ -1,14 +1,18 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { render, screen, fireEvent, cleanup } from '@testing-library/react'
+import { describe, it, expect, afterEach, vi } from 'vitest'
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { ProjectDropdown } from './ProjectDropdown'
 import type { ProjectInfo } from '../api'
+import { api } from '../stores/apiClient'
 
 // Component test for the project switcher's keyboard dismissal (Esc closes the
 // open dropdown, mirroring the existing outside-click behaviour). The native
 // folder picker's availability probe swallows its own errors and resolves false,
 // and ServiceHealthWarning no-ops for a null project id, so no mocking is needed
 // beyond the no-op callbacks.
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 const projects: ProjectInfo[] = [
   { id: 'a', name: 'Alpha', path: '/tmp/alpha' } as ProjectInfo,
@@ -89,5 +93,82 @@ describe('ProjectDropdown - hidden projects', () => {
     // one "Hide".
     expect(screen.getByLabelText('Show Bravo in the project list')).toBeInTheDocument()
     expect(screen.getByLabelText('Hide Alpha from the project list')).toBeInTheDocument()
+  })
+})
+
+describe('ProjectDropdown - editing projects', () => {
+  it('only offers add-project actions before the first user project or in edit mode', () => {
+    renderDropdown()
+    fireEvent.click(screen.getByLabelText('Select project'))
+
+    expect(screen.queryByText('Open folder...')).toBeNull()
+    fireEvent.click(screen.getByText('Edit list'))
+    expect(screen.getByText('Open folder...')).toBeInTheDocument()
+  })
+
+  it('offers add-project actions when only the built-in project exists', () => {
+    renderDropdown([
+      { id: '_chat', name: 'Just chatting', path: '/tmp/chat', builtin: true } as ProjectInfo,
+    ])
+    fireEvent.click(screen.getByLabelText('Select project'))
+
+    expect(screen.getByText('Open folder...')).toBeInTheDocument()
+  })
+
+  it('renames a user project inline', async () => {
+    const rename = vi.spyOn(api.default, 'renameProject').mockResolvedValue(undefined)
+    renderDropdown()
+    fireEvent.click(screen.getByLabelText('Select project'))
+    fireEvent.click(screen.getByText('Edit list'))
+    fireEvent.click(screen.getByLabelText('Rename Alpha'))
+
+    const input = screen.getByLabelText('New name for Alpha')
+    fireEvent.change(input, { target: { value: '  Apollo  ' } })
+    fireEvent.click(screen.getByLabelText('Save name for Alpha'))
+
+    await waitFor(() => expect(rename).toHaveBeenCalledWith('a', { name: 'Apollo' }))
+  })
+
+  it('does not offer to rename a built-in project', () => {
+    renderDropdown([
+      { id: '_chat', name: 'Just chatting', path: '/tmp/chat', builtin: true, hidden: true } as ProjectInfo,
+    ])
+    fireEvent.click(screen.getByLabelText('Select project'))
+    fireEvent.click(screen.getByText('Edit list'))
+
+    expect(screen.queryByLabelText('Rename Just chatting')).toBeNull()
+  })
+
+  it('shows path status as an in-field warning instead of shifting text', async () => {
+    vi.spyOn(api.default, 'resolvePath').mockResolvedValue({
+      path: '/home/test/missing',
+      display_path: '~/missing',
+      exists: false,
+      is_dir: false,
+      is_git_repo: false,
+    })
+    renderDropdown()
+    fireEvent.click(screen.getByLabelText('Select project'))
+    fireEvent.click(screen.getByText('Edit list'))
+    fireEvent.click(screen.getByText('Open folder...'))
+    fireEvent.change(screen.getByLabelText('Folder path'), { target: { value: 'missing' } })
+
+    const warning = 'Does not exist yet - you will be asked to create it.'
+    expect(await screen.findByLabelText(warning)).toBeInTheDocument()
+    expect(screen.queryByText(warning)).toBeNull()
+  })
+
+  it('puts native browse beside the folder field', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ available: true }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ))
+    renderDropdown()
+    fireEvent.click(screen.getByLabelText('Select project'))
+    fireEvent.click(screen.getByText('Edit list'))
+    fireEvent.click(screen.getByText('Open folder...'))
+
+    expect(await screen.findByLabelText('Browse folders')).toBeInTheDocument()
+    expect(screen.queryByText('Browse...')).toBeNull()
   })
 })

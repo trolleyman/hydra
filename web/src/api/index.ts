@@ -145,6 +145,7 @@ export { QueueMessageRemovedEvent } from './models/QueueMessageRemovedEvent';
 export { ReasoningCompletedEvent } from './models/ReasoningCompletedEvent';
 export { ReasoningDeltaEvent } from './models/ReasoningDeltaEvent';
 export { ReasoningDurationEvent } from './models/ReasoningDurationEvent';
+export type { RenameProjectRequest } from './models/RenameProjectRequest';
 export type { ReorderProjectsRequest } from './models/ReorderProjectsRequest';
 export type { RepositoryArtifactFile } from './models/RepositoryArtifactFile';
 export { RepositoryArtifactResponse } from './models/RepositoryArtifactResponse';

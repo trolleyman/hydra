@@ -78,8 +78,9 @@ type SimulationServer struct {
 	// being persisted. That is enough to drive the whole flow (hide in edit mode
 	// -> the row leaves the list -> show it again) against the real endpoint.
 	// Nothing is hidden at boot, so every other page and screenshot is unchanged.
-	hiddenMu       sync.Mutex
-	hiddenProjects map[string]bool
+	projectListMu   sync.Mutex
+	hiddenProjects  map[string]bool
+	renamedProjects map[string]string
 
 	// askRunning is true while agent-ask's answered turn is streaming. The chat's
 	// live "working" indicator keys off the AGENT RECORD's status (the store's
@@ -96,8 +97,8 @@ type simFocusedPermissions struct {
 
 // setSimHidden records a project as hidden (or shown again) for this process.
 func (s *SimulationServer) setSimHidden(id string, hidden bool) {
-	s.hiddenMu.Lock()
-	defer s.hiddenMu.Unlock()
+	s.projectListMu.Lock()
+	defer s.projectListMu.Unlock()
 	if s.hiddenProjects == nil {
 		s.hiddenProjects = map[string]bool{}
 	}
@@ -106,9 +107,27 @@ func (s *SimulationServer) setSimHidden(id string, hidden bool) {
 
 // simHidden reports whether a project has been hidden this session.
 func (s *SimulationServer) simHidden(id string) bool {
-	s.hiddenMu.Lock()
-	defer s.hiddenMu.Unlock()
+	s.projectListMu.Lock()
+	defer s.projectListMu.Unlock()
 	return s.hiddenProjects[id]
+}
+
+func (s *SimulationServer) setSimName(id, name string) {
+	s.projectListMu.Lock()
+	defer s.projectListMu.Unlock()
+	if s.renamedProjects == nil {
+		s.renamedProjects = map[string]string{}
+	}
+	s.renamedProjects[id] = name
+}
+
+func (s *SimulationServer) simName(id, fallback string) string {
+	s.projectListMu.Lock()
+	defer s.projectListMu.Unlock()
+	if name := s.renamedProjects[id]; name != "" {
+		return name
+	}
+	return fallback
 }
 
 // setSimApproval parks (or with "" clears) the picked approval kind.
@@ -284,6 +303,7 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 	for i := range resp {
 		hidden := s.simHidden(resp[i].Id)
 		resp[i].Hidden = &hidden
+		resp[i].Name = s.simName(resp[i].Id, resp[i].Name)
 	}
 	api.WriteJSON(w, http.StatusOK, resp)
 }
@@ -293,6 +313,22 @@ func (s *SimulationServer) ListProjects(w http.ResponseWriter, r *http.Request) 
 // 204 still lets the dropdown's drag-to-reorder be exercised end to end (the
 // client keeps its own optimistic order until the server disagrees).
 func (s *SimulationServer) ReorderProjects(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// RenameProject keeps the label in memory so the simulation exercises the same
+// refetch-driven rename flow as the real server.
+func (s *SimulationServer) RenameProject(w http.ResponseWriter, r *http.Request, projectId string) {
+	var body api.RenameProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
+		api.WriteError(w, http.StatusBadRequest, "project name is required")
+		return
+	}
+	if projectId == projects.ChatProjectID {
+		api.WriteError(w, http.StatusBadRequest, "built-in projects cannot be renamed")
+		return
+	}
+	s.setSimName(projectId, strings.TrimSpace(body.Name))
 	w.WriteHeader(http.StatusNoContent)
 }
 
