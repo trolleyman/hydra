@@ -183,13 +183,23 @@ describe('RichMarkdown', () => {
   })
 
   describe('Hydra document nodes', () => {
-    it('renders structured file, commit, branch and agent references as semantic chips', () => {
-      const { container } = render(
-        <RichMarkdown text="[web/src/App.tsx](hydra://file/web/src/App.tsx) [abc1234](hydra://commit/abc1234) [main](hydra://branch/main) [reviewer](hydra://agent/reviewer)" />,
-      )
-      expect([...container.querySelectorAll('[data-hydra-reference]')].map((node) => node.getAttribute('data-hydra-reference')))
-        .toEqual(['file', 'commit', 'branch', 'agent'])
-      expect(container.querySelector('[data-reference-value="web/src/App.tsx"]')).toHaveTextContent('web/src/App.tsx')
+    it('renders structured references as semantic chips with shared tooltips', () => {
+      vi.useFakeTimers()
+      try {
+        const { container } = render(
+          <RichMarkdown text="[web/src/App.tsx](hydra://file/web/src/App.tsx) [abc1234](hydra://commit/abc1234) [main](hydra://branch/main) [reviewer](hydra://agent/reviewer)" />,
+        )
+        expect([...container.querySelectorAll('[data-hydra-reference]')].map((node) => node.getAttribute('data-hydra-reference')))
+          .toEqual(['file', 'commit', 'branch', 'agent'])
+        expect(container.querySelector('[data-reference-value="web/src/App.tsx"]')).toHaveTextContent('web/src/App.tsx')
+        const commit = container.querySelector('[data-hydra-reference="commit"]')!
+        expect(commit).not.toHaveAttribute('title')
+        fireEvent.mouseEnter(commit.parentElement!)
+        act(() => void vi.advanceTimersByTime(600))
+        expect(document.body.querySelector('[role="tooltip"]')).toHaveTextContent('commit: abc1234')
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('continues to render legacy structured reference syntax', () => {

@@ -274,21 +274,25 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
       <Expandable open={expanded && shown > 0} className="w-full">
         <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
           {item.merged!.map((m) => (
-            <div
+            <Tooltip
               key={m.sha}
-              role={clickable ? 'button' : undefined}
-              tabIndex={clickable ? 0 : undefined}
-              onClick={clickable ? () => onSelectCommit?.(m.sha) : undefined}
-              onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectCommit?.(m.sha) } } : undefined}
-              className={`flex items-center gap-1.5 rounded px-1 py-0.5 text-2xs text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
-              title={clickable ? `Show ${m.shortSha} in the diff view` : m.shortSha}
+              className="w-full"
+              content={<CommitCard commit={{ shortSha: m.shortSha, message: m.subject, additions: m.additions, deletions: m.deletions }} />}
             >
-              <GitCommitHorizontal className="w-3 h-3 shrink-0" />
-              {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
-              <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
-              <span className="min-w-0 flex-1 truncate optical-center">{m.subject}</span>
-              <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px" />
-            </div>
+              <div
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onClick={clickable ? () => onSelectCommit?.(m.sha) : undefined}
+                onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectCommit?.(m.sha) } } : undefined}
+                className={`flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-2xs text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
+              >
+                <GitCommitHorizontal className="w-3 h-3 shrink-0" />
+                {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
+                <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
+                <span className="min-w-0 flex-1 truncate optical-center">{m.subject}</span>
+                <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px" />
+              </div>
+            </Tooltip>
           ))}
           {shown < count && (
             <div className="px-1 py-0.5 text-2xs italic text-stone-400 dark:text-stone-500">

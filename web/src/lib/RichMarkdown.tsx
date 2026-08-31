@@ -103,15 +103,16 @@ function StructuredReference({ kind, value }: { kind: string; value: string }) {
   const file = kind === 'file' ? getFileIcon(value.split('/').pop() ?? value).Icon : null
   const Icon = file ?? (kind === 'commit' ? GitCommitHorizontal : kind === 'branch' ? GitBranch : Bot)
   return (
-    <span
-      className={`composer-reference composer-reference-${kind}`}
-      data-hydra-reference={kind}
-      data-reference-value={value}
-      title={`${kind}: ${value}`}
-    >
-      <Icon className="h-[1em] w-[1em] shrink-0 opacity-60" aria-hidden="true" />
-      <span className="truncate">{value}</span>
-    </span>
+    <Tooltip content={`${kind}: ${value}`}>
+      <span
+        className={`composer-reference composer-reference-${kind}`}
+        data-hydra-reference={kind}
+        data-reference-value={value}
+      >
+        <Icon className="h-[1em] w-[1em] shrink-0 opacity-60" aria-hidden="true" />
+        <span className="truncate">{value}</span>
+      </span>
+    </Tooltip>
   )
 }
 

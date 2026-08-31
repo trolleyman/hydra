@@ -78,8 +78,10 @@ Completed 2026-08-29:
   migrated at their existing `[filename]` markers.
 - Added presentation-only tokens to rendered chat Markdown: backtick-wrapped
   commit-shaped hashes get a commit chip, and repository links whose visible
-  label is the filename/path get a navigable file chip. The composer, copied
-  Markdown and submission value remain literal.
+  label is the filename/path get a navigable file chip. Structured file, commit,
+  branch and agent references use the shared selectable tooltip surface instead
+  of native browser titles. The composer, copied Markdown and submission value
+  remain literal.
 - Hardened production paste semantics. Files retain first refusal during normal
   paste, supported HTML structure is accepted through the schema while source
   styling/scripts are discarded, and URL-over-selection creates a link.

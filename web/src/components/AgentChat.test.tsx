@@ -1366,7 +1366,7 @@ describe('a message sent after a commit lands under it', () => {
     }
   })
 
-  it('lowers stats in a merge pill and its expanded commit rows', async () => {
+  it('shows stats and the shared commit tooltip on expanded merge rows', async () => {
     renderChat()
     await connectedComposer()
     const ws = sockets[0]
@@ -1393,8 +1393,22 @@ describe('a message sent after a commit lands under it', () => {
     const pill = await screen.findByRole('button', { name: /Merged main - 1 commit/ })
     expect(screen.getByLabelText('10 lines added, 2 lines removed')).toHaveClass('top-px')
     fireEvent.click(pill)
-    await screen.findByText('The merged change')
+    const subject = await screen.findByText('The merged change')
     expect(screen.getByLabelText('8 lines added, 1 lines removed')).toHaveClass('top-px')
+
+    vi.useFakeTimers()
+    try {
+      const row = subject.closest('[role="button"]')!
+      expect(row).not.toHaveAttribute('title')
+      fireEvent.mouseEnter(row.parentElement!)
+      act(() => void vi.advanceTimersByTime(600))
+      const tooltip = screen.getByRole('tooltip')
+      expect(tooltip).toHaveTextContent('child12')
+      expect(tooltip).toHaveTextContent('The merged change')
+      expect(tooltip.querySelector('[aria-label="8 lines added, 1 lines removed"]')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
