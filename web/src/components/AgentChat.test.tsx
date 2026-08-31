@@ -1305,6 +1305,8 @@ describe('a message sent after a commit lands under it', () => {
     expect(screen.getByLabelText('36 lines added, 5 lines removed')).toHaveClass('top-px')
     expect(row?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[16px]')
     expect(row?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(1)
+    fireEvent.mouseEnter(row?.parentElement as HTMLElement)
+    expect(await screen.findByRole('tooltip', {}, { timeout: 1200 })).toHaveClass('text-left')
 
     fireEvent.change(ta, { target: { value: 'ship it' } })
     fireEvent.keyDown(ta, { key: 'Enter' })
@@ -1363,6 +1365,7 @@ describe('a message sent after a commit lands under it', () => {
 
     fireEvent.mouseEnter(subject.closest('[role="button"]')?.parentElement as HTMLElement)
     expect(await screen.findByText('Merged Author', {}, { timeout: 1200 })).toBeInTheDocument()
+    expect(screen.getByRole('tooltip')).toHaveClass('text-left')
   })
 })
 
