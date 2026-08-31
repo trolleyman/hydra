@@ -15,6 +15,7 @@ Hydra is an AI orchestration platform for managing autonomous agents (Heads).
 Use `mage` for development tasks.
 
 - `mage build`: Build both Go backend and TypeScript frontend.
+- `mage test`: Run Go, web unit/component, and Playwright e2e tests.
 - `mage buildGoDeps && go run ./`: Build + run hydra (add commands after ./ as needed)
 - `mage run`: Build dependencies and run the server.
 - `mage tidy`: Run `go mod tidy`, `go fmt`, and `errtrace`.

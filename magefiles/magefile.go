@@ -259,6 +259,30 @@ func runInDirV(dir string, cmd string, args ...string) error {
 	return nil
 }
 
+// runInDirWithEnvV runs a command in a specific directory with environment
+// overrides and stdout/stderr forwarded.
+func runInDirWithEnvV(dir string, env map[string]string, cmd string, args ...string) error {
+	cmdLine := []string{
+		"pushd", displayPath(dir), "&&",
+		cmd,
+	}
+	cmdLine = append(cmdLine, args...)
+	cmdLine = append(cmdLine, "&&", "popd")
+	printCmdLine(cmdLine)
+	c := exec.Command(cmd, args...)
+	c.Dir = dir
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	c.Env = os.Environ()
+	for key, value := range env {
+		c.Env = append(c.Env, key+"="+value)
+	}
+	if err := c.Run(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("failed to run %q in %q: %w", cmd, dir, err))
+	}
+	return nil
+}
+
 // Custom error to break out of filepath.Walk early when a newer file is found.
 var errFoundNewer = errors.New("found newer file")
 
@@ -900,6 +924,41 @@ func runDesktopLinuxDevelopment(binary string) error {
 
 func Build() {
 	mg.Deps(BuildGo, BuildWeb)
+}
+
+// Test runs the complete local test suite: Go packages, web unit/component
+// tests, and Playwright smoke tests against the built simulation app.
+func Test() error {
+	mg.Deps(BuildGoDownload)
+	if err := runV("go", "test", "./..."); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := EnsureWebDependencies(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := runInDirV("web", webPM(), "run", "test"); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := BuildWeb(); err != nil {
+		return errtrace.Wrap(err)
+	}
+	if err := runInDirV("web", webPX(), "playwright", "install", "chromium"); err != nil {
+		return errtrace.Wrap(err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("choose e2e port: %w", err))
+	}
+	port := fmt.Sprint(listener.Addr().(*net.TCPAddr).Port)
+	if err := listener.Close(); err != nil {
+		return errtrace.Wrap(fmt.Errorf("release e2e port: %w", err))
+	}
+	return errtrace.Wrap(runInDirWithEnvV(
+		"web",
+		map[string]string{"CI": "1", "E2E_PORT": port},
+		webPM(), "run", "test:e2e",
+	))
 }
 
 // Deploy groups commands for exposing Hydra beyond localhost.
@@ -1546,6 +1605,14 @@ func webPM() string {
 		}
 	})
 	return webPMName
+}
+
+// webPX returns the package executor paired with webPM.
+func webPX() string {
+	if webPM() == "aube" {
+		return "aubx"
+	}
+	return "npx"
 }
 
 // EnsureWebDependencies installs frontend dependencies only when the committed

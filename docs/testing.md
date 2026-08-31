@@ -1,6 +1,9 @@
 # Testing internals - the agent test gate
 
-Run the Go suite with standard tooling: `go test ./...`.
+Run the complete local suite with `mage test`. It runs Go tests, web
+unit/component tests, builds the simulation app, and runs the Playwright smoke
+suite on a dynamically allocated loopback port. Run only the Go suite with
+`go test ./...`.
 
 This doc covers how Hydra ingests and renders a project's `[tests.<name>]` runner
 output. You only need it when touching `internal/tests`, the tests panel
