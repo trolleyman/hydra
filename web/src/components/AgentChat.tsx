@@ -11422,10 +11422,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       onClick={() => send(false)}
                       disabled={!canSend}
                       aria-label="Send message now"
-                      className={`p-1.5 rounded-full transition-colors ${
+                      className={`rounded-full border p-[5px] transition-colors ${
                         canSend
-                          ? `${ACCENT_BG} text-white cursor-pointer`
-                          : 'bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
+                          ? 'border-[#c96442] bg-white text-[#c96442] hover:bg-[#c96442]/10 dark:bg-[#30302e] dark:hover:bg-[#c96442]/15 cursor-pointer'
+                          : 'border-transparent bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
                       }`}
                     >
                       <ArrowUp className="w-4 h-4" />
