@@ -2,8 +2,16 @@ import { AppWindow, Database, GitCommitHorizontal, Server } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useProjectStore } from '../../stores/projectStore'
 import { hasDesktopBridge } from '../../lib/desktopBridge'
+import { DirectoryTooltip } from '../DirectoryTooltip'
 
-function Detail({ icon, label, value, mono = false }: { icon: ReactNode; label: string; value: string; mono?: boolean }) {
+function Detail({ icon, label, value, mono = false, directory = false }: {
+  icon: ReactNode
+  label: string
+  value: string
+  mono?: boolean
+  directory?: boolean
+}) {
+  const valueClassName = `${mono ? 'font-mono text-xs' : 'text-sm'} mt-0.5 truncate font-medium text-gray-900 dark:text-gray-100`
   return (
     <div className="flex min-w-0 items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-gray-500 shadow-sm ring-1 ring-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:ring-gray-700">
@@ -11,9 +19,19 @@ function Detail({ icon, label, value, mono = false }: { icon: ReactNode; label: 
       </div>
       <div className="min-w-0">
         <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
-        <div className={`${mono ? 'font-mono text-xs' : 'text-sm'} mt-0.5 truncate font-medium text-gray-900 dark:text-gray-100`} title={value}>
-          {value}
-        </div>
+        {directory ? (
+          <DirectoryTooltip path={value} className="min-w-0 max-w-full">
+            <button
+              type="button"
+              aria-label={`${label}: ${value}`}
+              className={`${valueClassName} block min-w-0 max-w-full cursor-help text-left`}
+            >
+              {value}
+            </button>
+          </DirectoryTooltip>
+        ) : (
+          <div className={valueClassName} title={value}>{value}</div>
+        )}
       </div>
     </div>
   )
@@ -52,7 +70,7 @@ export function AboutSection() {
           <Detail icon={<AppWindow className="h-4 w-4" />} label="Runtime" value={`${runtime} on ${platform}`} />
           <Detail icon={<Server className="h-4 w-4" />} label="Server status" value={status?.status || 'Connecting...'} />
           <Detail icon={<Server className="h-4 w-4" />} label="Backend ownership" value={backendOwnership} />
-          <Detail icon={<Database className="h-4 w-4" />} label="State directory" value={databaseDirectory} mono />
+          <Detail icon={<Database className="h-4 w-4" />} label="State directory" value={databaseDirectory} directory />
         </div>
       </div>
     </div>

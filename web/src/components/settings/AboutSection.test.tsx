@@ -19,4 +19,13 @@ describe('AboutSection', () => {
 
     expect(backendDetail?.parentElement).toBe(directoryDetail?.parentElement)
   })
+
+  it('renders the state directory as a normal-font directory tooltip trigger', () => {
+    render(<AboutSection />)
+
+    const trigger = screen.getByRole('button', { name: /^State directory:/ })
+    expect(trigger).toHaveClass('text-sm')
+    expect(trigger).not.toHaveClass('font-mono')
+    expect(trigger).not.toHaveAttribute('title')
+  })
 })
