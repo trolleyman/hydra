@@ -206,7 +206,7 @@ describe('sectioned search output', () => {
       lines: ['3:**Status: shared project-directory session', '18:ordinary later match'],
     }])
 
-    const code = rows.filter((row) => !row.header)
+    const code = rows.filter((row) => !row.header && !row.divider)
     expect(code).toHaveLength(2)
     expect(code[1].html).not.toContain('token bold')
   })
@@ -236,8 +236,8 @@ describe('sectioned search output', () => {
       ],
     }])
 
-    expect(rows.map((row) => row.header?.label ?? row.num)).toEqual([
-      'fileabc.txt', '41', '101', 'a/b/filebcd.txt', '1',
+    expect(rows.map((row) => row.header?.label ?? (row.divider ? 'divider' : row.num))).toEqual([
+      'fileabc.txt', '41', 'divider', '101', 'a/b/filebcd.txt', '1',
     ])
   })
 
@@ -254,6 +254,20 @@ describe('sectioned search output', () => {
     expect(screen.getAllByText('web/src/')).not.toHaveLength(0)
     expect(container.querySelectorAll('.border-t')).toHaveLength(3)
     expect(container.querySelectorAll('.border-b')).toHaveLength(3)
+  })
+
+  it('renders one inset rule between nonconsecutive matches in the same file', () => {
+    const rows = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n value a.ts',
+      match: { paths: ['a.ts'], numbered: true },
+      lines: ['4:first', '5:second', '19:later'],
+    }])
+    const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    expect(rows.filter((row) => row.divider)).toHaveLength(1)
+    const divider = container.querySelector('[data-copy-skip].border-t')
+    expect(divider).toHaveClass('mx-2.5')
   })
 })
 

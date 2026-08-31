@@ -99,10 +99,13 @@ than the command's own 1..N numbers; both dividing rules still form one vertical
 line. When the code-line-number preference hides the command gutter, output keeps
 its own intrinsic width.
 
-Source-aware output groups each file beneath its shared file-path label. A header
+Source-aware output groups each file beneath its shared, sans-serif file-path
+label. A header
 has an inset rule immediately above and below it, with no outer vertical margin;
 file and directory labels use the shared path tooltip treatments. Search results
-are grouped by each path their output names. The structural header and its rules
+are grouped by each path their output names. A nonconsecutive jump between
+matches in the same file gets one inset rule at the omitted-line boundary. The
+structural header and its rules
 carry `data-copy-skip`, leaving copied source free of presentation chrome.
 
 Agents introduce a boundary the command cannot otherwise prove by printing one

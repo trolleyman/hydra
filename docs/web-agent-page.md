@@ -176,7 +176,8 @@ and `web/src/DiffViewer.tsx`):
 - Bash inspection output is sectioned by `web/src/lib/shellSections.ts`. Plain
   file reads such as `sed -n '40,80p'` render with syntax highlighting and the
   file's real line numbers beneath a ruled, tooltip-bearing file header. Numbered
-  searches group consecutive results under the path each row names. Adjacent
+  searches group consecutive results under the sans-serif path each row names;
+  an inset rule marks each nonconsecutive jump within that file. Adjacent
   bounded reads keep their requested starts when their exact range lengths
   account for all returned lines. When a boundary may fall at EOF, agents print
   a static typed marker such as

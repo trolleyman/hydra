@@ -2767,10 +2767,17 @@ export interface ScriptOutputRow {
   // `--- text ---` marker, or file provenance already present in the output.
   // It occupies the whole grid width; the ordinary row fields stay empty.
   header?: { kind: 'text' | 'file' | 'dir'; label: string }
+  // A source discontinuity inside one file, most often two sparse rg matches.
+  // The inset rule says omitted lines sit here without adding copyable text.
+  divider?: true
 }
 
 function scriptHeader(kind: 'text' | 'file' | 'dir', label: string): ScriptOutputRow {
   return { num: '', html: '', tone: 'plain', header: { kind, label } }
+}
+
+function scriptDivider(): ScriptOutputRow {
+  return { num: '', html: '', tone: 'plain', divider: true }
 }
 
 // scriptMatchRows renders a search's output: the file line numbers grep printed
@@ -2818,7 +2825,13 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
       continue
     }
     const lang = line.path ? langFromPath(line.path) : only
-    if (lang !== runLang || (previous && !consecutiveMatchLines(previous, line))) flush()
+    const discontinuous = previous && !consecutiveMatchLines(previous, line)
+    if (lang !== runLang || discontinuous) {
+      flush()
+      const previousPath = previous?.path || onlyPath
+      const nextPath = line.path || onlyPath
+      if (discontinuous && previousPath && previousPath === nextPath) rows.push(scriptDivider())
+    }
     runLang = lang
     run.push(line)
     previous = line
@@ -3086,6 +3099,8 @@ export function ScriptOutputPanel({ rows, gutterDigits }: { rows: ScriptOutputRo
           <Fragment key={i}>
             {row.header ? (
               <ScriptOutputHeader header={row.header} gutter={gutter} />
+            ) : row.divider ? (
+              <ScriptOutputDivider gutter={gutter} />
             ) : <>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
             {gutter && (row.file ? (
@@ -3130,13 +3145,13 @@ function ScriptOutputHeader({ header, gutter }: {
   const label = header.kind === 'file'
     ? (
         <Tooltip content={<FilePathLabel path={header.label} nativeTitle={false} />} align="left">
-          <FilePathLabel path={header.label} nativeTitle={false} />
+          <FilePathLabel path={header.label} nativeTitle={false} className="font-sans" />
         </Tooltip>
       )
     : header.kind === 'dir'
       ? (
           <DirectoryTooltip path={header.label}>
-            <span className="inline-flex min-w-0 items-center gap-1.5 text-stone-700 dark:text-stone-200">
+            <span className="inline-flex min-w-0 items-center gap-1.5 font-sans text-stone-700 dark:text-stone-200">
               <Folder className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
               <span className="truncate">{header.label}</span>
             </span>
@@ -3152,6 +3167,15 @@ function ScriptOutputHeader({ header, gutter }: {
       <div className="flex min-h-5 min-w-0 items-center px-2.5 py-0.5">{label}</div>
       <div className="mx-2.5 border-b border-stone-200 dark:border-white/[0.06]" />
     </div>
+  )
+}
+
+function ScriptOutputDivider({ gutter }: { gutter: boolean }) {
+  return (
+    <div
+      data-copy-skip
+      className={`${gutter ? 'col-span-2' : 'col-span-1'} mx-2.5 border-t border-stone-200 dark:border-white/[0.06]`}
+    />
   )
 }
 
