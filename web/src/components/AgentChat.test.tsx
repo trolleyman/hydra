@@ -1346,12 +1346,13 @@ describe('a message sent after a commit lands under it', () => {
     fireEvent.click(pill)
     const subject = await screen.findByText('The merged change')
     expect(screen.getByLabelText('8 lines added, 1 lines removed')).toHaveClass('top-px')
-    expect(pill).toHaveClass('rounded-b-none', 'border-b-0')
+    expect(pill).toHaveClass('z-10', 'rounded-b-none', 'border-b-0')
     expect(subject.parentElement).toHaveClass('items-baseline')
     expect(subject.closest('[role="button"]')).not.toHaveAttribute('title')
 
     const list = subject.closest('.rounded-b-md')
-    expect(list?.parentElement).not.toHaveClass('-mt-px')
+    expect(list?.parentElement).toHaveClass('-mt-px')
+    expect(list).not.toHaveClass('border-t-0')
     expect(list?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[10px]')
     expect(list?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(2)
 

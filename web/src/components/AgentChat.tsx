@@ -241,7 +241,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-full ${expanded && shown > 0 ? 'rounded-t-lg rounded-b-none border-b-0' : 'rounded-full'}`}
+        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-full ${expanded && shown > 0 ? 'relative z-10 rounded-t-lg rounded-b-none border-b-0' : 'rounded-full'}`}
         title={expanded ? 'Hide merged commits' : 'Show merged commits'}
       >
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
@@ -249,8 +249,8 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         <span className="min-w-0 flex-1 truncate optical-center">{label}</span>
         <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
       </button>
-      <Expandable open={expanded && shown > 0} className="w-full">
-        <div className="flex w-full flex-col rounded-b-md border border-t-0 border-stone-200 bg-stone-50/60 px-2 py-1.5 dark:border-white/[0.08] dark:bg-white/[0.02]">
+      <Expandable open={expanded && shown > 0} className="-mt-px w-full">
+        <div className="flex w-full flex-col rounded-b-md border border-stone-200 bg-stone-50/60 px-2 py-1.5 dark:border-white/[0.08] dark:bg-white/[0.02]">
           <div className="relative flex w-full flex-col">
             <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[10px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
             {item.merged!.map((m) => (
