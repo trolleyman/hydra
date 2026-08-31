@@ -32,6 +32,20 @@ describe('parseScriptSteps', () => {
     })
   })
 
+  it('reads typed output headings without changing their labels', () => {
+    expect(steps("printf '%s\\n' '--- [text] lowercase diagnostics ---'")[0]).toEqual({
+      kind: 'marker',
+      text: '--- [text] lowercase diagnostics ---',
+      section: { kind: 'text', label: 'lowercase diagnostics' },
+    })
+    expect(steps("echo '--- [file] a/b/lowercase name.ts ---'")[0]).toMatchObject({
+      section: { kind: 'file', label: 'a/b/lowercase name.ts' },
+    })
+    expect(steps("printf '%s\\n' '--- [dir] web/src/ ---'")[0]).toMatchObject({
+      section: { kind: 'dir', label: 'web/src/' },
+    })
+  })
+
   it('refuses an echo that is not a constant line of its own', () => {
     // A variable, a substitution, and the flags that change what is printed.
     expect(kinds('echo "$file"\ncat a.go')).toEqual(['unknown', 'view'])
@@ -815,6 +829,36 @@ describe('splitScriptOutput', () => {
     ])
     expect(sections?.[0]).toMatchObject({ view: { path: 'docs/web-agent-page.md', start: 145, end: 180 } })
     expect(sections?.[1]).toMatchObject({ view: { path: 'docs/macos-desktop-chat.md', start: 164, end: 182 } })
+  })
+
+  it('uses a typed file heading as an exact boundary between short reads', () => {
+    const script = [
+      "sed -n '1,4p' file1.txt",
+      "printf '%s\\n' '--- [file] file2.txt ---'",
+      "sed -n '1,4p' file2.txt",
+      "rg -n 'abc|def' *.txt",
+    ].join('\n')
+    const output = [
+      'line 1', 'line 2',
+      '--- [file] file2.txt ---',
+      'other 1', 'other 2',
+      'fileabc.txt:41:match',
+    ].join('\n')
+    const sections = splitScriptOutput(steps(script), output)
+
+    expect(sections?.map((section) => section.kind)).toEqual(['view', 'section', 'view', 'matches'])
+    expect(sections?.[1]).toMatchObject({
+      section: { kind: 'file', label: 'file2.txt' },
+      lines: ['--- [file] file2.txt ---'],
+    })
+  })
+
+  it('does not guess which duplicate typed marker came from printf', () => {
+    const script = "cat notes.txt\nprintf '%s\\n' '--- [text] repeated ---'\nmage build"
+    const output = 'before\n--- [text] repeated ---\nafter\n--- [text] repeated ---\nbuild output'
+    const sections = splitScriptOutput(steps(script), output)
+
+    expect(sections?.some((section) => section.kind === 'section')).not.toBe(true)
   })
 
   it('keeps a shortened sed gutter between numbered rg results', () => {

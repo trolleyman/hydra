@@ -175,13 +175,17 @@ and `web/src/DiffViewer.tsx`):
   explicit.
 - Bash inspection output is sectioned by `web/src/lib/shellSections.ts`. Plain
   file reads such as `sed -n '40,80p'` render with syntax highlighting and the
-  file's real line numbers. Adjacent bounded reads keep their requested starts
-  when their exact range lengths account for all returned lines. Agents put a
-  path-labelled constant `echo` separator between adjacent reads whose ranges
-  may end at EOF, giving the renderer an explicit boundary while leaving source
-  text clean for highlighting and copying. In a script where a numbered search
-  immediately precedes a read of the same file, repeated search rows can pin the
-  read's start
+  file's real line numbers beneath a ruled, tooltip-bearing file header. Numbered
+  searches group consecutive results under the path each row names. Adjacent
+  bounded reads keep their requested starts when their exact range lengths
+  account for all returned lines. When a boundary may fall at EOF, agents print
+  a static typed marker such as
+  `printf '%s\n' '--- [file] web/src/App.tsx ---'`; `[text]` preserves an ordinary
+  heading exactly and `[dir]` selects the shared directory treatment. A constant
+  `echo` is accepted, while `printf` is the canonical cross-shell spelling. The
+  parser only consumes a typed marker when it can correlate it unambiguously with
+  the constant-printing command. In a script where a numbered search immediately
+  precedes a read of the same file, repeated search rows can pin the read's start
   even when an open-ended command ran before both: the search text and number
   must agree with the corresponding line in the read before the gutter is shown.
 - Bash command cards render commands relative to the head's worktree or a review

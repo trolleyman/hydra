@@ -190,7 +190,7 @@ describe('sectioned search output', () => {
     }])
     const { container } = render(<ScriptOutputPanel rows={rows} />)
 
-    const gutters = container.querySelectorAll('[data-copy-skip]')
+    const gutters = container.querySelectorAll('[data-copy-skip].min-h-4')
     expect(gutters).toHaveLength(2)
     for (const gutter of gutters) {
       expect(gutter).toHaveClass('w-full')
@@ -206,8 +206,9 @@ describe('sectioned search output', () => {
       lines: ['3:**Status: shared project-directory session', '18:ordinary later match'],
     }])
 
-    expect(rows).toHaveLength(2)
-    expect(rows[1].html).not.toContain('token bold')
+    const code = rows.filter((row) => !row.header)
+    expect(code).toHaveLength(2)
+    expect(code[1].html).not.toContain('token bold')
   })
 
   it('keeps each source path with its line number in the gutter model', () => {
@@ -218,8 +219,41 @@ describe('sectioned search output', () => {
       lines: ['internal/chat/manager.go:560:func (w *worker) reconcileCommits() {'],
     }])
 
-    expect(rows[0]).toMatchObject({ file: 'internal/chat/manager.go', num: '560' })
-    expect(rows[0].html).toContain('token keyword')
+    expect(rows[0]).toMatchObject({ header: { kind: 'file', label: 'internal/chat/manager.go' } })
+    expect(rows[1]).toMatchObject({ file: 'internal/chat/manager.go', num: '560' })
+    expect(rows[1].html).toContain('token keyword')
+  })
+
+  it('groups search matches under exact file headings', () => {
+    const rows = scriptOutputRows([{
+      kind: 'matches',
+      command: "rg -n 'abc|def' *.txt",
+      match: { paths: [], numbered: true },
+      lines: [
+        'fileabc.txt:41:line 41 awad',
+        'fileabc.txt:101:line 101 rawr',
+        'a/b/filebcd.txt:1:line 1 awdaa',
+      ],
+    }])
+
+    expect(rows.map((row) => row.header?.label ?? row.num)).toEqual([
+      'fileabc.txt', '41', '101', 'a/b/filebcd.txt', '1',
+    ])
+  })
+
+  it('renders typed headings between inset rules without changing case', () => {
+    const rows = scriptOutputRows([
+      { kind: 'section', section: { kind: 'text', label: 'lowercase diagnostics' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'file', label: 'a/b/file.txt' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'dir', label: 'web/src/' }, lines: ['marker'] },
+    ])
+    const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    expect(screen.getByText('lowercase diagnostics')).toBeInTheDocument()
+    expect(container.textContent).toContain('a/b/file.txt')
+    expect(screen.getAllByText('web/src/')).not.toHaveLength(0)
+    expect(container.querySelectorAll('.border-t')).toHaveLength(3)
+    expect(container.querySelectorAll('.border-b')).toHaveLength(3)
   })
 })
 

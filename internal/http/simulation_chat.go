@@ -565,11 +565,12 @@ var simChatEvents = []simNorm{
 	// than anonymous terminal text - see web/src/lib/fileViewCommand.ts.
 	simTool("toolu_sim_sed", "Bash", simRaw(`{"command":"sed -n 40,53p internal/chat/claude.go"}`)),
 	simToolOut("toolu_sim_sed", "type claudeMessage struct {\n\tType    string          `json:\"type\"`\n\tSubtype string          `json:\"subtype,omitempty\"`\n\tMessage json.RawMessage `json:\"message,omitempty\"`\n\tUsage   json.RawMessage `json:\"usage,omitempty\"`\n}\n\n// isAPIErrorMessage reports whether an assistant event is the CLI's own\n// \"API Error\" placeholder rather than a model reply.\nfunc isAPIErrorMessage(msg claudeMessage) bool {\n\tif msg.Type != \"assistant\" {\n\t\treturn false\n\t}\n\treturn strings.HasPrefix(text(msg), \"API Error\")"),
-	// Two reads in one call, separated by the `echo` marker agents use to tell
-	// them apart. The card splits the output back at that marker and gives each
-	// file its own numbered block.
-	simTool("toolu_sim_sed2", "Bash", simRaw(`{"command":"sed -n 1,4p web/src/lib/lineRange.ts; echo '--- 8< ---'; sed -n 10,16p web/src/lib/lineRange.ts"}`)),
-	simToolOut("toolu_sim_sed2", "// Line-range selection shared by the repository file view and the diff viewer:\n// a URL hash like #L5 (one line) or #L5-L10 (a range), GitHub-style. start is\n// always <= end.\n\n--- 8< ---\nexport function parseLineRange(hash: string): LineRange | null {\n  const m = /^#?L(\\d+)(?:-L?(\\d+))?/.exec(hash || '')\n  if (!m) return null\n  const a = parseInt(m[1], 10)\n  const b = m[2] ? parseInt(m[2], 10) : a\n  return { start: Math.min(a, b), end: Math.max(a, b) }\n}"),
+	// Two reads and a numbered search in one call. The typed printf marker makes
+	// the potentially-short read boundary explicit; the UI consumes it into the
+	// same ruled file header it derives automatically from each command and from
+	// the paths carried by rg's rows.
+	simTool("toolu_sim_sed2", "Bash", simRaw(`{"command":"sed -n '1,4p' web/src/lib/lineRange.ts\nprintf '%s\\n' '--- [file] internal/artifacts/backoff.go ---'\nsed -n '9,12p' internal/artifacts/backoff.go\nrg -n 'parseLineRange|sleepBackoff' web/src/lib/lineRange.ts internal/artifacts/backoff.go"}`)),
+	simToolOut("toolu_sim_sed2", "// Line-range selection shared by the repository file view and the diff viewer:\n// a URL hash like #L5 (one line) or #L5-L10 (a range), GitHub-style. start is\n// always <= end.\n\n--- [file] internal/artifacts/backoff.go ---\nfunc sleepBackoff(attempt int) {\n\tbase := 100 * time.Millisecond\n\td := base << attempt\n\ttime.Sleep(d)\nweb/src/lib/lineRange.ts:10:export function parseLineRange(hash: string): LineRange | null {\ninternal/artifacts/backoff.go:9:func sleepBackoff(attempt int) {"),
 	// An investigation script: a `cd`, greps, a tail, and the `echo` headings an
 	// agent writes between them. Not a pure read, so the card stays a Bash card -
 	// but its OUTPUT is split back at those headings and each stretch rendered as

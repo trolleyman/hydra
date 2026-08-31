@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/trolleyman/hydra/internal/sandbox"
 )
 
 func ptr(s string) *string { return &s }
@@ -17,6 +19,15 @@ func TestDefaultPrePromptRequiresStructuredQuestions(t *testing.T) {
 	}
 	if !strings.Contains(DefaultPrePrompt, "Do not ask the question only in a plain chat message") {
 		t.Error("DefaultPrePrompt does not require structured questions instead of plain chat")
+	}
+}
+
+func TestFinalPrePromptDocumentsOutputSections(t *testing.T) {
+	prompt := BuildFinalPrePrompt(Config{}, string(sandbox.AgentTypeClaude))
+	for _, command := range []string{"--- [text] <text> ---", "--- [file] <path> ---", "--- [dir] <path> ---"} {
+		if !strings.Contains(prompt, command) {
+			t.Errorf("final pre-prompt does not document %q", command)
+		}
 	}
 }
 

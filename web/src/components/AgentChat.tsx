@@ -13,6 +13,7 @@ import {
   Eye,
   FilePen,
   FileText,
+  Folder,
   GitMerge,
   Globe,
   History,
@@ -118,6 +119,7 @@ import { CommentLink } from './CommentLink'
 import { CommentIdentityContext } from './commentIdentity'
 import { BranchPill } from './BranchPill'
 import { FilePathLabel } from './FilePathLabel'
+import { DirectoryTooltip } from './DirectoryTooltip'
 import { onDesktopImagePaste } from '../lib/desktopBridge'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { ResumeDivider } from './ResumeDivider'
@@ -2761,6 +2763,14 @@ export interface ScriptOutputRow {
   // 'code' is a line of some file, 'marker' a separator the script echoed, and
   // 'plain' output nothing could be said about.
   tone: 'code' | 'marker' | 'plain'
+  // A structural heading generated from a typed constant marker, a legacy
+  // `--- text ---` marker, or file provenance already present in the output.
+  // It occupies the whole grid width; the ordinary row fields stay empty.
+  header?: { kind: 'text' | 'file' | 'dir'; label: string }
+}
+
+function scriptHeader(kind: 'text' | 'file' | 'dir', label: string): ScriptOutputRow {
+  return { num: '', html: '', tone: 'plain', header: { kind, label } }
 }
 
 // scriptMatchRows renders a search's output: the file line numbers grep printed
@@ -2780,11 +2790,17 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   let run: MatchLine[] = []
   let runLang = ''
   let previous: MatchLine | null = null
+  let headerPath = ''
   // The file every line of the section came from, when the search named exactly
   // one - a line's own `path:` prefix says it otherwise, and is shown.
   const onlyPath = section.match.paths.length === 1 ? section.match.paths[0] : ''
   const flush = () => {
     if (run.length === 0) return
+    const path = run[0].path || onlyPath
+    if (path && path !== headerPath) {
+      rows.push(scriptHeader('file', path))
+      headerPath = path
+    }
     const html = highlightLines(run.map((l) => l.text).join('\n'), runLang || 'plaintext')
     run.forEach((l, i) => rows.push({
       num: l.num,
@@ -2872,7 +2888,7 @@ function scriptBannerRows(section: Extract<ScriptSection, { kind: 'banners' }>):
     if (!banner) { run.push(line); continue }
     flush()
     path = banner[1]
-    rows.push({ num: '', html: `<span class="token string">${escapeText(line)}</span>`, tone: 'marker' })
+    rows.push(scriptHeader('file', path))
   }
   flush()
   return rows
@@ -2886,9 +2902,20 @@ function scriptBannerRows(section: Extract<ScriptSection, { kind: 'banners' }>):
 // eslint-disable-next-line react-refresh/only-export-components -- exported for focused rendering tests
 export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
   const rows: ScriptOutputRow[] = []
+  const add = (next: ScriptOutputRow[]) => {
+    for (const row of next) {
+      const previous = rows[rows.length - 1]?.header
+      if (row.header && previous?.kind === row.header.kind && previous.label === row.header.label) continue
+      rows.push(row)
+    }
+  }
   for (const section of sections) {
+    if (section.kind === 'section') {
+      add([scriptHeader(section.section.kind, section.section.label)])
+      continue
+    }
     if (section.kind === 'matches') {
-      rows.push(...scriptMatchRows(section))
+      add(scriptMatchRows(section))
       continue
     }
     if (section.kind === 'git') {
@@ -2902,11 +2929,11 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       continue
     }
     if (section.kind === 'blame') {
-      rows.push(...scriptBlameRows(section))
+      add([scriptHeader('file', section.path), ...scriptBlameRows(section)])
       continue
     }
     if (section.kind === 'banners') {
-      rows.push(...scriptBannerRows(section))
+      add(scriptBannerRows(section))
       continue
     }
     if (section.kind === 'disk') {
@@ -2963,6 +2990,11 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       continue
     }
     if (section.kind === 'marker') {
+      const heading = section.lines.length === 1 ? /^--- (.+) ---$/.exec(section.lines[0]) : null
+      if (heading) {
+        add([scriptHeader('text', heading[1])])
+        continue
+      }
       // A separator is the string the script printed, so it takes the string
       // colour whatever the terminal did with it.
       highlightLines(section.lines.join('\n'), 'plaintext').forEach((line) => rows.push({
@@ -2974,6 +3006,7 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
     }
     const view = section.view
     const file = view.languageOnly ? undefined : view.path
+    if (file) add([scriptHeader('file', file)])
     // A `cat -n` brought its own numbers; a range knows where it started; a
     // plain `tail` counts back from an end nothing here knows, so it gets the
     // highlighting without the gutter.
@@ -2989,7 +3022,7 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
     const counted = view.numbered ? [] : viewLineNumbers(view, code.length)
     const nums = code.map((_, i) => own[i] || counted[i] || '')
     const html = highlightLines(code.join('\n'), langFromPath(view.path) || 'plaintext')
-    nums.forEach((num, i) => rows.push({ num, html: html[i] ?? '', file, tone: 'code' }))
+    add(nums.map((num, i) => ({ num, html: html[i] ?? '', file, tone: 'code' })))
   }
   return rows
 }
@@ -3036,8 +3069,9 @@ export function ScriptOutputPanel({ rows, gutterDigits }: { rows: ScriptOutputRo
   // prefix are metadata, so - like the line-number column - they stay unmarked.
   const marked = useMemo(() => rows.map((r) => (r.html ? markWhitespace(r.html, ws) : r.html)), [rows, ws])
   const gutter = rows.some((r) => r.num !== '')
+  const headers = rows.some((r) => r.header)
   return (
-    <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
+    <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto ${headers ? '' : 'py-1.5'}`}>
       {/* data-copy-code / data-copy-line: the rows are grid cells, not block
           elements, so without them a copy hands over every line run together
           (see lib/copyMarkdown). */}
@@ -3050,6 +3084,9 @@ export function ScriptOutputPanel({ rows, gutterDigits }: { rows: ScriptOutputRo
       >
         {rows.map((row, i) => (
           <Fragment key={i}>
+            {row.header ? (
+              <ScriptOutputHeader header={row.header} gutter={gutter} />
+            ) : <>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
             {gutter && (row.file ? (
               <Tooltip
@@ -3078,9 +3115,42 @@ export function ScriptOutputPanel({ rows, gutterDigits }: { rows: ScriptOutputRo
                 ? row.spans.map((s, j) => <OutputSpanText key={j} cls={s.cls} text={s.text} ws={ws} />)
                 : <span dangerouslySetInnerHTML={{ __html: marked[i] }} />}
             </span>
+            </>}
           </Fragment>
         ))}
       </div>
+    </div>
+  )
+}
+
+function ScriptOutputHeader({ header, gutter }: {
+  header: NonNullable<ScriptOutputRow['header']>
+  gutter: boolean
+}) {
+  const label = header.kind === 'file'
+    ? (
+        <Tooltip content={<FilePathLabel path={header.label} nativeTitle={false} />} align="left">
+          <FilePathLabel path={header.label} nativeTitle={false} />
+        </Tooltip>
+      )
+    : header.kind === 'dir'
+      ? (
+          <DirectoryTooltip path={header.label}>
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-stone-700 dark:text-stone-200">
+              <Folder className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
+              <span className="truncate">{header.label}</span>
+            </span>
+          </DirectoryTooltip>
+        )
+      : <span className="text-stone-600 dark:text-stone-300">{header.label}</span>
+  return (
+    <div
+      data-copy-skip
+      className={`${gutter ? 'col-span-2' : 'col-span-1'} min-w-0 select-none`}
+    >
+      <div className="mx-2.5 border-t border-stone-200 dark:border-white/[0.06]" />
+      <div className="flex min-h-5 min-w-0 items-center px-2.5 py-0.5">{label}</div>
+      <div className="mx-2.5 border-b border-stone-200 dark:border-white/[0.06]" />
     </div>
   )
 }

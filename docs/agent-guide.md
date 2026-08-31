@@ -99,6 +99,20 @@ than the command's own 1..N numbers; both dividing rules still form one vertical
 line. When the code-line-number preference hides the command gutter, output keeps
 its own intrinsic width.
 
+Source-aware output groups each file beneath its shared file-path label. A header
+has an inset rule immediately above and below it, with no outer vertical margin;
+file and directory labels use the shared path tooltip treatments. Search results
+are grouped by each path their output names. The structural header and its rules
+carry `data-copy-skip`, leaving copied source free of presentation chrome.
+
+Agents introduce a boundary the command cannot otherwise prove by printing one
+static marker: `printf '%s\n' '--- [text] <text> ---'`, `--- [file] <path> ---`,
+or `--- [dir] <path> ---`. The value is displayed exactly as written. A constant
+`echo` is accepted, but `printf` is the canonical cross-shell spelling. The
+parser correlates the marker with that constant-printing command; a marker-shaped
+line read from a file is source, and an ambiguous duplicate typed marker is left
+as ordinary output rather than guessed.
+
 ### Test status wording: three layers, three vocabularies
 
 A test status is shown at three different scopes, and each one has its own words.
