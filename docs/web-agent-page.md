@@ -177,7 +177,9 @@ and `web/src/DiffViewer.tsx`):
   file reads such as `sed -n '40,80p'` render with syntax highlighting and the
   file's real line numbers beneath a ruled, tooltip-bearing file header. Numbered
   searches group consecutive results under the sans-serif path each row names;
-  an inset rule marks each nonconsecutive jump within that file. Adjacent
+  an inset rule marks each nonconsecutive jump within that file. Every typed text,
+  file, and directory header sticks to the output scroller's top until the next
+  header replaces it. Adjacent
   bounded reads keep their requested starts when their exact range lengths
   account for all returned lines. When a boundary may fall at EOF, agents print
   a static typed marker such as

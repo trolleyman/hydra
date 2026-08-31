@@ -100,13 +100,13 @@ line. When the code-line-number preference hides the command gutter, output keep
 its own intrinsic width.
 
 Source-aware output groups each file beneath its shared, sans-serif file-path
-label. A header
-has an inset rule immediately above and below it, with no outer vertical margin;
-file and directory labels use the shared path tooltip treatments. Search results
-are grouped by each path their output names. A nonconsecutive jump between
-matches in the same file gets one inset rule at the omitted-line boundary. The
-structural header and its rules
-carry `data-copy-skip`, leaving copied source free of presentation chrome.
+label. Every text, file, and directory header sticks to the top of the output
+scroller until the next header replaces it. A header has an inset rule
+immediately above and below it, with no outer vertical margin; file and directory
+labels use the shared path tooltip treatments. Search results are grouped by each
+path their output names. A nonconsecutive jump between matches in the same file
+gets one inset rule at the omitted-line boundary. The structural header and its
+rules carry `data-copy-skip`, leaving copied source free of presentation chrome.
 
 Agents introduce a boundary the command cannot otherwise prove by printing one
 static marker: `printf '%s\n' '--- [text] <text> ---'`, `--- [file] <path> ---`,

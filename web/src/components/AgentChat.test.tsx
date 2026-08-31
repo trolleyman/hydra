@@ -254,6 +254,11 @@ describe('sectioned search output', () => {
     expect(screen.getAllByText('web/src/')).not.toHaveLength(0)
     expect(container.querySelectorAll('.border-t')).toHaveLength(3)
     expect(container.querySelectorAll('.border-b')).toHaveLength(3)
+    const headings = container.querySelectorAll('[data-copy-skip].sticky')
+    expect(headings).toHaveLength(3)
+    for (const heading of headings) {
+      expect(heading).toHaveClass('top-0', 'z-10', 'bg-[#fdfcf9]', 'dark:bg-[#1d1c1a]')
+    }
   })
 
   it('renders one inset rule between nonconsecutive matches in the same file', () => {
