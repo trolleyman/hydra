@@ -389,7 +389,11 @@ an earlier desktop-managed development backend so rebuilt code is loaded, then
 stops its backend when the app exits or the command receives Ctrl+C. It clears
 inherited development runtime,
 database, and listener variables, including when launched from a terminal opened
-inside a development Hydra. `mage runDesktopLocal` uses the
+inside a development Hydra. On Linux, both Mage runners use and register the
+hidden user-local application identity `org.trolleyman.hydra.Devel`, including
+its Hydra icon. The separate identity leaves an installed
+`org.trolleyman.hydra` desktop entry, icon, and deep-link handler unchanged.
+`mage runDesktopLocal` uses the
 checkout-local development database and a worktree-specific daemon runtime
 namespace while exercising this same random-port path. `mage run` uses that same
 development namespace, so the two local commands can deliberately share a

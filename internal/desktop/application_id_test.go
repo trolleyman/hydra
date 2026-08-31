@@ -9,6 +9,7 @@ import (
 )
 
 func TestLinuxDesktopEntryMatchesApplicationID(t *testing.T) {
+	t.Setenv(LaunchConfigEnv, "")
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("resolve test source path")
@@ -27,5 +28,19 @@ func TestLinuxDesktopEntryMatchesApplicationID(t *testing.T) {
 		if !strings.Contains(text, "\n"+field+"\n") {
 			t.Errorf("Linux desktop entry does not contain %q", field)
 		}
+	}
+}
+
+func TestLinuxApplicationIDUsesSeparateDevelopmentIdentity(t *testing.T) {
+	t.Setenv(LaunchConfigEnv, "")
+	if got := LinuxApplicationID(); got != linuxApplicationID {
+		t.Fatalf("installed application ID = %q, want %q", got, linuxApplicationID)
+	}
+
+	if err := SetLaunchConfig(LaunchConfig{State: "global", BackendLifetime: "command-owned", Build: "development"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := LinuxApplicationID(); got != linuxDevelopmentApplicationID {
+		t.Fatalf("development application ID = %q, want %q", got, linuxDevelopmentApplicationID)
 	}
 }

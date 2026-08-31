@@ -680,6 +680,55 @@ func BuildDesktopLinux() error {
 	return errtrace.Wrap(sh.Copy(filepath.Join(icons, "org.trolleyman.hydra.png"), filepath.Join("web", "public", "android-chrome-512x512.png")))
 }
 
+// registerLinuxDevelopmentDesktopIntegration gives direct Mage launches a
+// discoverable Freedesktop identity without replacing an installed Hydra app.
+// NoDisplay keeps this association-only entry out of application launchers.
+func registerLinuxDevelopmentDesktopIntegration(binary string) error {
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return errtrace.Wrap(err)
+		}
+		dataHome = filepath.Join(home, ".local", "share")
+	}
+	applicationID := desktop.LinuxApplicationID()
+	applications := filepath.Join(dataHome, "applications")
+	icons := filepath.Join(dataHome, "icons", "hicolor", "512x512", "apps")
+	for _, directory := range []string{applications, icons} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	absBinary, err := filepath.Abs(binary)
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	desktopEntry := fmt.Sprintf(`[Desktop Entry]
+Type=Application
+Name=Hydra (Development)
+Exec=%s %%u
+Icon=%s
+Terminal=false
+NoDisplay=true
+StartupNotify=true
+StartupWMClass=%s
+`, quoteDesktopExecArgument(absBinary), applicationID, applicationID)
+	if err := os.WriteFile(filepath.Join(applications, applicationID+".desktop"), []byte(desktopEntry), 0o644); err != nil {
+		return errtrace.Wrap(err)
+	}
+	icon, err := os.ReadFile(filepath.Join("web", "public", "android-chrome-512x512.png"))
+	if err != nil {
+		return errtrace.Wrap(err)
+	}
+	return errtrace.Wrap(os.WriteFile(filepath.Join(icons, applicationID+".png"), icon, 0o644))
+}
+
+func quoteDesktopExecArgument(value string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", `$`, `\$`, `%`, `%%`)
+	return `"` + replacer.Replace(value) + `"`
+}
+
 // BuildDesktopDeb builds an installable Ubuntu/Debian package for the host
 // architecture. The package uses the distro GTK/WebKitGTK runtime and leaves
 // user configuration, databases, and projects untouched on removal.
@@ -843,6 +892,11 @@ func runDesktop(local bool) error {
 	switch runtime.GOOS {
 	case "linux":
 		binary := filepath.Join(".", "dist", "linux", "hydra-desktop")
+		if desktop.CurrentLaunchConfig().Build == "development" {
+			if err := registerLinuxDevelopmentDesktopIntegration(binary); err != nil {
+				return errtrace.Wrap(fmt.Errorf("register Linux development desktop integration: %w", err))
+			}
+		}
 		if desktop.CurrentLaunchConfig().BackendLifetime == "command-owned" {
 			return errtrace.Wrap(runDesktopLinuxDevelopment(binary))
 		}
