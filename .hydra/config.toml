@@ -183,7 +183,8 @@ agent_messaging = true
 ## Codex-specific overrides: any of the settings above, applied only to codex agents.
 [codex]
 pre_prompt = '''
-- Do not use the Sites skills or Sites connector for Hydra web UI changes. This repository is not a Sites-managed project and has no `.openai/hosting.json`; use Hydra's production simulation app and Playwright workflow above for UI implementation and verification.'''
+- Do not use the Sites skills or Sites connector for Hydra web UI changes. This repository is not a Sites-managed project and has no `.openai/hosting.json`; use Hydra's production simulation app and Playwright workflow above for UI implementation and verification.
+- Do not use Codex's browser-control skill for Hydra web UI verification. It is not useful for this repository's local simulation workflow; use the project-local Playwright workflow above directly.'''
 
 ## [artifacts.<name>]: per-project scripts that render visual artifacts (e.g.
 ## screenshots) of a checkout. The diff viewer runs each against both sides of a
