@@ -315,6 +315,14 @@ Command, file-change, MCP, web-search and other item variants map to generic
 tool cards, and an unknown item type keeps a compact fallback card so protocol
 additions do not break the chat.
 
+A host-run card keeps the agent's `why` explanation in its expanded body as a
+durable part of the transcript, including after the request is allowed, denied,
+or withdrawn. While that agent page is open, the matching global host-run
+approval toast is hidden because the transcript card already carries the full
+request and decision controls. The toast remains live and appears if the user
+navigates away before answering. Approvals without an exact transcript surface,
+such as a proxy egress hold, remain visible as global cards.
+
 Codex runs with bypassed approvals because the process is already inside Hydra's
 sandbox, and app-server turns are configured equivalently. Server-request
 handling is still defensive: Hydra replies automatically only to the classes it
@@ -362,6 +370,31 @@ the resulting fast-forward or merge commit with the incoming branch. This works
 for both managed worktree branches and a project-directory chat whose checkout
 is on the destination branch. Ordinary project-directory commits have no
 incoming-branch hint and remain ordinary one-commit rows.
+
+## Project-directory Changes inspector
+
+A Head with `workspace_kind = project_directory` has the same Changes inspector
+as a `worktree` Head. It opens with the inspector hidden; **Show diff** reveals
+it when needed. When the Head is created, Hydra resolves the checkout's current `HEAD` and
+persists it as `workspace_base_ref`. The default selector range is **Chat start**
+to **Project directory**: the starting commit is the left side, and the shared
+project root - committed, staged, unstaged and untracked state together - is the
+right side. Selecting Latest commit or an individual commit pins the right side
+to that committed ref instead.
+
+This is deliberately a project-state comparison, not an ownership claim. The
+directory is shared, so edits made by another Head, a user shell or an editor are
+visible too. A checkout that was already dirty when the chat started also shows
+those edits: the durable baseline is the starting commit, not a hidden snapshot
+of the initial dirty tree. Switching the shared checkout to another branch does
+not rewrite the baseline; the inspector continues to show the literal tree
+difference from the chat's starting commit.
+
+Tests and previews resolve the selected right side. Diff artifacts resolve both
+selected sides, so their before/after matches the code comparison. The project-directory
+Head remains branchless throughout: commit inventory walks from
+`workspace_base_ref` to the shared checkout's `HEAD`, and uncommitted reads use
+the project root rather than synthesizing a Hydra worktree.
 
 ## Queued messages
 

@@ -42,7 +42,13 @@ import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
-import { hasDesktopBridge, isCompactChatWindow, postDesktopMessage, setDesktopKeepRunning } from '../lib/desktopBridge'
+import {
+  hasDesktopBridge,
+  isCompactChatWindow,
+  onDesktopCommand,
+  postDesktopMessage,
+  setDesktopKeepRunning,
+} from '../lib/desktopBridge'
 import { agentHasActiveTurn, desktopRunningAgentCount } from '../lib/desktopCloseState'
 import type { AgentCommand } from '../lib/agentCommands'
 
@@ -239,8 +245,14 @@ function RootLayout() {
   const toggleSidebar = useSidebarStore((s) => s.toggle)
   const isDesktopViewport = useMediaQuery(SIDEBAR_DESKTOP_QUERY)
   const [compactSidebarCollapsed, setCompactSidebarCollapsed] = useState(isCompactChatWindow)
+  // Arm the transition only for an explicit toggle. Responsive classes change
+  // as soon as the md media query crosses, independently of React's media-query
+  // state; leaving a transition permanently attached makes that layout change
+  // briefly slide/shrink the mobile panel into the desktop column (or back).
+  const [sidebarTransitioning, setSidebarTransitioning] = useState(false)
   const effectiveDesktopCollapsed = desktopCollapsed || compactSidebarCollapsed
   const handleToggleSidebar = useCallback(() => {
+    setSidebarTransitioning(true)
     if (isDesktopViewport && compactSidebarCollapsed) setCompactSidebarCollapsed(false)
     else toggleSidebar()
   }, [compactSidebarCollapsed, isDesktopViewport, toggleSidebar])
@@ -942,6 +954,18 @@ function RootLayout() {
     })
   }, [desktopWindow, currentProjectId, selectedAgentId, selectedAgentActiveTurn, runningAgentCount, backendLifetime])
 
+  useEffect(() => {
+    if (!desktopWindow || !currentProjectId || !selectedAgentId) return
+    return onDesktopCommand((command) => {
+      if (command.type !== 'stop-and-close') return
+      void api.default.stopAgentSession(currentProjectId, selectedAgentId)
+        .then(() => postDesktopMessage({ type: 'close-window', force: true }))
+        .catch((error) => useToastStore.getState().show({
+          type: 'error',
+          message: `Could not stop the agent session: ${error instanceof Error ? error.message : String(error)}`,
+        }))
+    })
+  }, [desktopWindow, currentProjectId, selectedAgentId])
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
       {/* Global top bar: sidebar toggle (while hidden), project icon + selector,
@@ -1004,7 +1028,13 @@ function RootLayout() {
           bar's toggle reveals it again. */}
       <aside
         style={{ width: effectiveDesktopCollapsed ? 0 : sidebarWidth }}
-        className={`relative overflow-hidden max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:!w-full bg-white dark:bg-gray-800 flex shrink-0 ${sidebarResizing ? '' : 'transition-[width,transform,translate] duration-200'} ${mobileSidebarOpen ? 'translate-x-0' : 'max-md:-translate-x-full'}`}
+        onTransitionEnd={(event) => {
+          if (event.target === event.currentTarget) setSidebarTransitioning(false)
+        }}
+        onTransitionCancel={(event) => {
+          if (event.target === event.currentTarget) setSidebarTransitioning(false)
+        }}
+        className={`relative overflow-hidden max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:!w-full bg-white dark:bg-gray-800 flex shrink-0 ${sidebarTransitioning && !sidebarResizing ? 'transition-[width,transform,translate] duration-200' : ''} ${mobileSidebarOpen ? 'translate-x-0' : 'max-md:-translate-x-full'}`}
       >
         {/* Inner content at a fixed width (the expanded sidebar width, or the full
             panel width below md) so the collapse width-tween clips it instead of

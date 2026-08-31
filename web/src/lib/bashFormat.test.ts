@@ -12,6 +12,18 @@ describe('Codex bash display', () => {
     expect(formatBashForDisplay("bash -lc 'pwd'", 'packages/chat ui')).toBe("cd 'packages/chat ui'\npwd")
   })
 
+  it('puts a non-default working directory after the leading description comment', () => {
+    expect(formatBashForDisplay('# Complete the rendered check\nnode scripts/verify.ts', 'web')).toBe(
+      '# Complete the rendered check\ncd web\nnode scripts/verify.ts',
+    )
+  })
+
+  it('does not add a working directory before an explicit cd after a description', () => {
+    expect(formatBashForDisplay('# Run the web checks\ncd web && bun test', 'packages')).toBe(
+      '# Run the web checks\ncd web &&\nbun test',
+    )
+  })
+
   it.each([
     ['~', 'cd ~\npwd'],
     ['~/dawdawdaw', 'cd ~/dawdawdaw\npwd'],

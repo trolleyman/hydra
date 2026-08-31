@@ -149,6 +149,7 @@ import { onDesktopImagePaste } from '../lib/desktopBridge'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { ResumeDivider } from './ResumeDivider'
 import { historyThresholdTransition, isVerticalScrollbarPointer } from '../lib/chatScroll'
+import { useFeatureFlagsStore } from '../lib/featureFlags'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -4059,6 +4060,22 @@ const ToolCard = memo(function ToolCard({
             <CodePanel code={rawJson} lang="json" />
           ) : (
             <>
+              {/* A host-run explanation must survive the request settling. The
+                  temporary ToolApproval controls deliberately do not repeat it;
+                  after Allow/Deny those controls disappear, so the tool's own
+                  input is the durable record of why the command was requested.
+                  Keep it in the body as well as the truncated header summary,
+                  where long explanations can be read in full. */}
+              {isHostRun && description && (
+                <div>
+                  <div className="mb-0.5 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                    Why
+                  </div>
+                  <div className={`${PANEL_CLASS} border-l-2 border-l-amber-300 dark:border-l-amber-500/50 px-2.5 py-1.5 whitespace-pre-wrap text-stone-700 dark:text-stone-200 leading-relaxed`}>
+                    {description}
+                  </div>
+                </div>
+              )}
               {isBash ? (
                 <div>
                   {interactiveTranscript && (
@@ -7179,13 +7196,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // owns Enter (which sends), so the fence-body step is its call to make.
   const autoPair = useAutoPairStore((s) => s.enabled)
   // The checkout the head works in, for trimming absolute paths in tool cards
-  // and recognising the shell's default directory. A focused head works in the
+  // and recognising the shell's default directory. A project-directory Head works in the
   // project root and deliberately has no Hydra worktree of its own.
   const worktreePath = useAgentStore(
     (s) => {
       const agent = selectAgent(s, agentId)
       if (!agent || review) return agent?.worktree_path ?? null
-      return agent.focused ? agent.project_path : agent.worktree_path ?? null
+      return agent.workspace_kind === 'project_directory' ? agent.project_path : agent.worktree_path ?? null
     },
   )
   const repositoryRef = useAgentStore((s) => chatRepositoryRef(
@@ -7256,6 +7273,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // per-frame flush via a ref so a mid-stream toggle takes effect on the next
   // frame without re-running the reducer effect.
   const smoothStream = useChatStreamStore((s) => s.smooth)
+  const smoothChatWheel = useFeatureFlagsStore((s) => s.smoothChatWheel)
 
   const onStatusUpdateRef = useRef<(status: string) => void>(() => {})
   const onDiffRefreshRef = useRef(onDiffRefresh)
@@ -9345,6 +9363,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // scroll-behavior only affects programmatic scrolling, not wheel input, so
   // this small rAF glide is needed for the Linux mouse-wheel case.
   useEffect(() => {
+    if (!smoothChatWheel) return
     const el = scrollRef.current
     if (!el) return
 
@@ -9419,7 +9438,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
     // The handler deliberately reads live refs; rebinding it on every chat
     // render would interrupt a glide while streamed tokens arrive.
-  }, [])
+  }, [smoothChatWheel])
 
   // followBottom keeps a pinned view at the bottom as content arrives. This
   // used to be a bare `scrollTop = scrollHeight`, so every new message, thought

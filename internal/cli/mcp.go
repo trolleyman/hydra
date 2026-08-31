@@ -232,7 +232,7 @@ func runGitOp(req gitq.Request) gitq.Result {
 // gitOpViaDaemon submits req to the daemon's gitops watcher and blocks for the
 // result over the writable gitq dir + polling.
 func gitOpViaDaemon(dir string, req gitq.Request) gitq.Result {
-	// A branchless focused head sets HYDRA_BRANCH empty and works in the real
+	// A branchless project-directory head sets HYDRA_BRANCH empty and works in the real
 	// project checkout. Capture both identities at request time so the daemon can
 	// refuse a commit if the user changes branch or advances HEAD in the gap.
 	if os.Getenv("HYDRA_BRANCH") == "" {

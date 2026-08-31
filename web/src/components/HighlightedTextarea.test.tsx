@@ -1,8 +1,6 @@
 import { render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { HighlightedTextarea } from './HighlightedTextarea'
-
-afterEach(() => vi.restoreAllMocks())
 
 describe('HighlightedTextarea', () => {
   it('renders a caret-safe visible placeholder in the backdrop', () => {
@@ -24,12 +22,13 @@ describe('HighlightedTextarea', () => {
     expect(visiblePlaceholder).toHaveClass('pl-0.5', 'text-stone-400')
   })
 
-  it('sizes the visible backdrop from the textarea padding box', () => {
-    vi.spyOn(HTMLTextAreaElement.prototype, 'clientWidth', 'get').mockReturnValue(197)
-
+  it('gives both text layers the same stable scroll column', () => {
     const { container } = render(<HighlightedTextarea value="A wrapping prompt" onChange={() => {}} />)
 
     const backdrop = container.querySelector<HTMLElement>('[aria-hidden="true"]')
-    expect(backdrop).toHaveStyle({ right: 'auto', width: '197px' })
+    const textarea = screen.getByRole('textbox')
+    expect(backdrop).toHaveClass('highlighted-textarea-backdrop', 'overflow-y-scroll')
+    expect(backdrop).toHaveStyle({ scrollbarGutter: 'stable' })
+    expect(textarea).toHaveStyle({ scrollbarGutter: 'stable' })
   })
 })

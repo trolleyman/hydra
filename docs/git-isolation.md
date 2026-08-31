@@ -142,6 +142,9 @@ own own-branch guard, so they're safe on codex/gemini without it.
   and **`git_merge_continue`** / **`git_merge_abort`** finish it. `continue` stages the
   still-unmerged paths itself (git won't conclude a merge while any remain) but refuses
   if any of them still contain `<<<<<<<` markers, so a conflict can't be committed raw.
+  Other edited paths stay outside the merge commit; stage them with **`git_add`** before
+  continuing when resolving the merge requires a semantic change to a file Git did not
+  mark conflicted. The completion summary reports any changes that remain afterward.
 
 Raw `git commit` and `git merge` calls are proactively denied by the command gate in
 both Git isolation modes. The denial points at the matching tool, including
@@ -195,7 +198,7 @@ can't just be skipped. The intended escape valve is the existing **host-run** ha
 it): `git submodule update --init` runs host-side against the real writable `.git`,
 approval-gated. That covers the once-per-head setup without building submodule/lfs
 -specific tooling. The command runs from the head's effective working directory:
-an ordinary head's linked worktree, or the registered project root for a focused
+an ordinary head's linked worktree, or the registered project root for a project-directory
 head. Caveats: it is approval-gated (a click per op, fine for setup, wrong for a
 hot loop), and it runs **unsandboxed** - so avoid asking for `bun install` (that runs
 all npm postinstall scripts on the host, a supply-chain vector); prefer narrow
@@ -303,6 +306,13 @@ collision.)
   (`git.EnsureTrackRemote` -> `POST /api/projects/{id}/track-remote`), which
   idempotently configures the local `hydra-agents` remote, so the shown command
   stays short.
+
+Guarded commits run their staging and commit writes with
+`core.fsync=committed`, so Git flushes the objects and ref update before Hydra
+answers the tool call. Hydra then walks the new commit's own object closure with
+`rev-list --missing=error` before reporting success. This makes a desktop/backend
+shutdown immediately after tool completion safe and turns an incomplete object
+write into an error at the commit boundary rather than a later `git gc` failure.
 
 ## Open questions / not yet built
 

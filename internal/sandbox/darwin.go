@@ -74,7 +74,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	for _, p := range expandAll(opts.RestoreRO, home) {
 		fmt.Fprintf(&b, "(allow file-read* %s)\n", sbPathRule(p))
 	}
-	// The base profile grants writes under WORK_DIR. A focused read-only session
+	// The base profile grants writes under WORK_DIR. A project-directory read-only session
 	// runs in the real project root, so carve that grant back out after every
 	// config-driven allow. Seatbelt is last-match-wins.
 	if opts.WorkingDirReadOnly {

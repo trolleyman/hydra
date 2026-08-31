@@ -94,6 +94,14 @@ export const StorageKeys = {
   // ~quarter-second chunks (the claude CLI flushes deltas ~5x/sec). Client-only,
   // global (localStorage, like Theme). See lib/chatPrefs.
   chatSmoothStreaming: 'hydra-chat-smooth-streaming',
+  // Opt-in feature flag for easing coarse desktop mouse-wheel input in the chat
+  // transcript. Absent = off, so normal browser scrolling remains the baseline.
+  // See lib/featureFlags.ts + AgentChat.
+  featureSmoothChatWheel: 'hydra-feature-smooth-chat-wheel',
+  // Opt-in feature flag for Hydra's thin, button-less scrollbar styling.
+  // Absent = off, leaving every non-terminal scroll container to the browser/OS.
+  // See lib/featureFlags.ts + index.css.
+  featureCustomScrollbars: 'hydra-feature-custom-scrollbars',
   // 'off' when the user has turned OFF the line-number gutter on multi-line code
   // blocks - the chat transcript (a Bash command, a tool's JSON input) and the
   // security approval card's command box. Default (absent) = on: the numbers tell

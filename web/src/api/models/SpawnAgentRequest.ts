@@ -3,7 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AdoptMRRequest } from './AdoptMRRequest';
-import type { FocusedFilesystemMode } from './FocusedFilesystemMode';
+import type { ProjectDirectoryFilesystemMode } from './ProjectDirectoryFilesystemMode';
+import type { WorkspaceKind } from './WorkspaceKind';
 export type SpawnAgentRequest = {
     /**
      * The prompt to give to the agent
@@ -35,12 +36,12 @@ export type SpawnAgentRequest = {
      */
     chat_mode?: boolean;
     /**
-     * Run directly in the registered project's real root instead of creating a Hydra branch and linked worktree. Focused heads require structured chat mode and remain branchless for their whole life.
+     * Select where the Head works. `worktree` creates an isolated Hydra branch and linked worktree (the default); `project_directory` runs directly in the registered project's root, requires structured chat mode, and remains branchless for its whole life.
      */
-    focused?: boolean;
-    filesystem_mode?: FocusedFilesystemMode;
+    workspace_kind?: WorkspaceKind;
+    filesystem_mode?: ProjectDirectoryFilesystemMode;
     /**
-     * Initially authorize Hydra's guarded commit operation for a focused head. Defaults to true for editable focused heads, must be false in read-only mode, and is ignored for ordinary worktree heads.
+     * Initially authorize Hydra's guarded commit operation for a project-directory Head. Defaults to true for editable project-directory Heads, must be false in read-only mode, and is ignored for worktree Heads.
      */
     allow_commits?: boolean;
     /**

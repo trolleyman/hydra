@@ -154,15 +154,15 @@ describe('chat repository links', () => {
     expect(chatRepositoryRef('hydra/feature')).toBe('hydra/feature')
   })
 
-  it('uses the project checkout for a branchless focused head', () => {
+  it('uses the project checkout for a project-directory Head', () => {
     expect(chatRepositoryRef(null)).toBe('HEAD')
   })
 })
 
 describe('Bash card summary comments', () => {
   it('uses Codex\'s leading shell comment as the concise summary', () => {
-    expect(leadingBashComment('# Verify the focused-head invariant and roadmap update\nrg -n "Branch == nil" docs/roadmap.md'))
-      .toBe('Verify the focused-head invariant and roadmap update')
+    expect(leadingBashComment('# Verify the workspace-kind invariant and roadmap update\nrg -n "Branch == nil" docs/roadmap.md'))
+      .toBe('Verify the workspace-kind invariant and roadmap update')
   })
 
   it('does not promote shebangs or later script comments', () => {
@@ -180,9 +180,9 @@ describe('sectioned search output', () => {
   it('does not leak Markdown bold across omitted source lines', () => {
     const rows = scriptOutputRows([{
       kind: 'matches',
-      command: 'rg -n focused docs/a.md',
+      command: 'rg -n project-directory docs/a.md',
       match: { paths: ['docs/a.md'], numbered: true },
-      lines: ['3:**Status: shared focused-session', '18:ordinary later match'],
+      lines: ['3:**Status: shared project-directory session', '18:ordinary later match'],
     }])
 
     expect(rows).toHaveLength(2)
@@ -713,6 +713,29 @@ describe('an expanded tool card survives its run becoming a step group', () => {
     act(() => sockets[1].emit({ type: 'replay_done' }))
     call(sockets[1], 'toolu_refold', 'Read')
     expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('keeps a settled host-run explanation in the expanded body', async () => {
+    const why = 'The sandbox cannot inspect the host listener table, so this read-only command has to run outside it.'
+    renderChat()
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => ws.emit({ type: 'replay_done' }))
+    act(() => {
+      const emit = (type: string, payload: unknown) =>
+        ws.emit({ type: 'chat_event', event: { seq: ++seq, type, timestamp: '', payload } })
+      emit('tool_started', { id: 'toolu_hostrun_why', name: 'mcp__hydra__host_run', input: { command: 'ss -Hltn', why } })
+      emit('tool_completed', { id: 'toolu_hostrun_why', content: 'DENIED by the user.' })
+    })
+
+    const hostRun = cardHeader('Host run')
+    expect(hostRun).toBeDefined()
+    expect(screen.queryByText('Why')).toBeNull()
+    act(() => hostRun!.click())
+    expect(screen.getByText('Why')).toBeVisible()
+    // The selector distinguishes the durable body block from the header summary,
+    // which deliberately carries the same explanation in truncated form.
+    expect(screen.getByText(why, { selector: 'div' })).toBeVisible()
   })
 })
 

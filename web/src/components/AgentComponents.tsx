@@ -36,7 +36,7 @@ function AgentContextMenu({
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const items = agentPrimaryActionAppearances({ agent, provider }).filter(
-    (item) => !agent.focused || (item.command !== 'publish' && item.command !== 'merge'),
+    (item) => agent.workspace_kind !== 'project_directory' || (item.command !== 'publish' && item.command !== 'merge'),
   )
   const left = Math.min(x, window.innerWidth - CONTEXT_MENU_WIDTH - 8)
   const top = Math.min(y, window.innerHeight - CONTEXT_MENU_HEIGHT - 8)
@@ -264,7 +264,7 @@ export const AgentSidebarItem = memo(function AgentSidebarItem({
             {agentStatusBadge(agent.agent_status.status).label}
           </Badge>
         )}
-        {agent.focused && (
+        {agent.workspace_kind === 'project_directory' && (
           <Tooltip
             content={agent.project_path
               ? <>Project directory: {agent.project_path}</>

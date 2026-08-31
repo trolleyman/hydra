@@ -18,12 +18,12 @@ import type { AgentCommand } from '../../lib/agentCommands'
 // address because the agent diff shows every changed file on one route.
 export const Route = createFileRoute('/project/$projectId/agent/$agentId')({
   component: AgentPage,
-  validateSearch: (search: Record<string, unknown>): { line?: string; desktop?: 'focused'; action?: AgentCommand } => {
-    const out: { line?: string; desktop?: 'focused'; action?: AgentCommand } = {}
+  validateSearch: (search: Record<string, unknown>): { line?: string; desktop?: 'compact'; action?: AgentCommand } => {
+    const out: { line?: string; desktop?: 'compact'; action?: AgentCommand } = {}
     // Validated by shape on read (parseLineParam), not here: an unparseable value
     // should leave the URL alone rather than be silently dropped from it.
     if (typeof search.line === 'string' && search.line) out.line = search.line
-    if (search.desktop === 'focused') out.desktop = 'focused'
+    if (search.desktop === 'compact') out.desktop = 'compact'
     if (search.action === 'publish' || search.action === 'merge' || search.action === 'rename' || search.action === 'restart' || search.action === 'kill') {
       out.action = search.action
     }

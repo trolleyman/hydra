@@ -17,4 +17,4 @@ Exec=hydra-desktop
 
 [Desktop Action NewChat]
 Name=New chat
-Exec=hydra-desktop hydra://focused/_chat
+Exec=hydra-desktop hydra://project-directory/_chat

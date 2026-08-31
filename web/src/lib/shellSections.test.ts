@@ -819,7 +819,7 @@ describe('splitScriptOutput', () => {
 
   it('keeps a shortened sed gutter between numbered rg results', () => {
     const script = [
-      'rg -n "focused-(edit|read|active)|Focused" internal/http/simulation.go | head -80',
+      'rg -n "project-directory-(edit|read|active)|Project-directory" internal/http/simulation.go | head -80',
       "sed -n '1,220p' web/scripts/lib/screenshotReady.ts",
       'rg -n "seedScreenshotTheme|settleScreenshot" web/scripts | head -40',
     ].join('\n')
@@ -832,8 +832,8 @@ describe('splitScriptOutput', () => {
       'export async function settleScreenshot() {}',
     ]
     const output = [
-      '483:// simFocusedAgents exercise focused sessions',
-      '499:\t\t\tId: "focused-edit"',
+      '483:// simProjectDirectoryAgents exercise project-directory sessions',
+      '499:\t\t\tId: "project-directory-edit"',
       ...source,
       'web/scripts/capture-theme-snippet.ts:5:import { settleScreenshot } from \'./lib/screenshotReady.ts\'',
       'web/scripts/lib/screenshotReady.ts:8:export async function seedScreenshotTheme() {}',

@@ -27,7 +27,7 @@ describe('desktopBridge', () => {
     expect(hasWebKitDesktopBridge()).toBe(false)
   })
 
-  it('distinguishes WebKit desktop shells from Windows WebView2', () => {
+  it('distinguishes WebKit desktop from the Chromium desktop bridge', () => {
     ;(window as Window & { chrome?: object }).chrome = { webview: { postMessage: vi.fn() } }
     expect(hasWebKitDesktopBridge()).toBe(false)
     delete (window as Window & { chrome?: unknown }).chrome

@@ -44,6 +44,29 @@ func write(t *testing.T, dir, name, content string) {
 	}
 }
 
+func TestGuardedCommitFlushesAndVerifiesNewObjects(t *testing.T) {
+	dir, _ := opRepo(t)
+	write(t, dir, "durable.txt", "durable\n")
+	trace := filepath.Join(t.TempDir(), "git-trace.json")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+
+	ok, msg := GuardedCommit(dir, "hydra/test", "durable commit", nil, false, false)
+	if !ok {
+		t.Fatalf("commit failed: %s", msg)
+	}
+	data, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Count(got, "core.fsync=committed") < 2 {
+		t.Errorf("git add and commit should both request durable writes; trace:\n%s", got)
+	}
+	if !strings.Contains(got, "--missing=error") {
+		t.Errorf("commit should verify its new object closure; trace:\n%s", got)
+	}
+}
+
 func TestGuardedResetSoftUncommit(t *testing.T) {
 	dir, run := opRepo(t)
 	write(t, dir, "a.txt", "a\n")
@@ -250,6 +273,9 @@ func TestGuardedMergeDefaultSubject(t *testing.T) {
 // the whole point of having a merge tool rather than reusing cherry-pick.
 func TestGuardedMergeLeavesConflictInProgress(t *testing.T) {
 	dir, run := opRepo(t)
+	write(t, dir, "semantic.txt", "base\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "semantic base")
 	run("checkout", "-q", "-b", "feature")
 	write(t, dir, "c.txt", "theirs\n")
 	run("add", "-A")
@@ -278,9 +304,13 @@ func TestGuardedMergeLeavesConflictInProgress(t *testing.T) {
 	}
 
 	write(t, dir, "c.txt", "resolved\n")
+	write(t, dir, "semantic.txt", "additional semantic resolution\n")
 	ok, msg = GuardedMergeContinue(dir, "hydra/test")
 	if !ok {
 		t.Fatalf("continue after resolving failed: %s", msg)
+	}
+	if !strings.Contains(msg, "semantic.txt") || !strings.Contains(msg, "outside the merge commit") || !strings.Contains(msg, "git_add") {
+		t.Errorf("continue should report other unstaged resolution edits, got %q", msg)
 	}
 	if mergeInProgress(dir) {
 		t.Error("the merge should be concluded")
@@ -290,6 +320,16 @@ func TestGuardedMergeLeavesConflictInProgress(t *testing.T) {
 	}
 	if body := run("show", "HEAD:c.txt"); body != "resolved" {
 		t.Errorf("merged c.txt = %q, want the resolution", body)
+	}
+	if body := run("show", "HEAD:semantic.txt"); body != "base" {
+		t.Errorf("merge should not sweep in semantic.txt automatically, got %q", body)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "semantic.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := strings.TrimSpace(string(data)); body != "additional semantic resolution" {
+		t.Errorf("semantic.txt worktree edit was lost, got %q", body)
 	}
 }
 

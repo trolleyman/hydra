@@ -68,8 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         openWindow(kind: .full)
     }
 
-    @objc private func newFocusedWindow() {
-        openWindow(kind: .focused)
+    @objc private func newProjectDirectoryWindow() {
+        openWindow(kind: .projectDirectory)
     }
 
     @objc private func backendExited(_ notification: Notification) {
@@ -120,10 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         guard windows.first(where: { $0.window === sender })?.activeTurn == true else { return true }
         let alert = NSAlert()
         alert.messageText = "Close this window?"
-        alert.informativeText = "This agent is still working. Closing the window leaves it running in the background."
+        alert.informativeText = "This agent is still working. Stop Session retains its head, worktree, branch and conversation. Opening the head later resumes it automatically."
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Close and Keep Running")
-        alert.addButton(withTitle: "Stop and Close")
+        alert.addButton(withTitle: "Stop Session and Close")
         let answer = alert.runModal()
         if answer == .alertThirdButtonReturn {
             windows.first(where: { $0.window === sender })?.requestStopAndClose()
@@ -165,9 +165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         let fileMenu = NSMenu(title: "File")
         let full = fileMenu.addItem(withTitle: "New Hydra Window", action: #selector(newFullWindow), keyEquivalent: "n")
         full.target = self
-        let focused = fileMenu.addItem(withTitle: "New Project Chat", action: #selector(newFocusedWindow), keyEquivalent: "n")
-        focused.keyEquivalentModifierMask = [.command, .shift]
-        focused.target = self
+        let projectDirectory = fileMenu.addItem(withTitle: "New Project Chat", action: #selector(newProjectDirectoryWindow), keyEquivalent: "n")
+        projectDirectory.keyEquivalentModifierMask = [.command, .shift]
+        projectDirectory.target = self
         fileItem.submenu = fileMenu
 
         NSApp.mainMenu = mainMenu

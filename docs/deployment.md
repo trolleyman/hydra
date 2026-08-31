@@ -257,6 +257,11 @@ What remains, because each does a genuinely different job:
   bundled backend. A
   desktop-started backend asks the OS for a free loopback port and publishes the
   result; it does not depend on port 26600 being available.
+  A desktop window's Stop Session and Close action stops only the provider CLI
+  process. It retains the head, worktree, branch, database record and transcript;
+  opening that head later uses the normal attach-time automatic resume. Kill and
+  merge remain the only ordinary lifecycle actions that archive the head and
+  remove its worktree.
   Windows packaging takes its required PortableGit directory from
   `HYDRA_PORTABLE_GIT`. `mage buildDesktopLinux`, `buildDesktopMac`, and
   `buildDesktopWindows` select a platform explicitly; `buildDesktopAll` is the

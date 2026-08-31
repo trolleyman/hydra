@@ -71,7 +71,7 @@ type Request struct {
 	Op    Op     `json:"op,omitempty"`
 	TS    string `json:"ts"`
 	// ExpectedBranch/ExpectedHead snapshot the real checkout at request time for
-	// a focused head. The daemon rejects the operation if another application
+	// a project-directory head. The daemon rejects the operation if another application
 	// switches or advances the checkout before it executes.
 	ExpectedBranch string `json:"expected_branch,omitempty"`
 	ExpectedHead   string `json:"expected_head,omitempty"`

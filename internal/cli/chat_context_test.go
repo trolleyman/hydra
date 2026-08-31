@@ -44,7 +44,7 @@ func TestChatContextResolverResolvesTheReviewSlot(t *testing.T) {
 		t.Errorf("project-directory head worktree = %q, want nil", *head.Worktree)
 	}
 	if head.WorkingDirectory() != root {
-		t.Errorf("focused head working directory = %q, want project root %q", head.WorkingDirectory(), root)
+		t.Errorf("project-directory head working directory = %q, want project root %q", head.WorkingDirectory(), root)
 	}
 
 	if err := store.CreateAgent(&db.Agent{

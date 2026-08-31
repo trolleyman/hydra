@@ -8,6 +8,20 @@ and `web/src/DiffViewer.tsx`):
   its own scroll context, the inspector's marked `[data-inspector-scroll]`) and a
   simpler archived-agent view with a single `[data-main-scroll]` container.
   Layout changes must handle both.
+- A live Head whose API `workspace_kind` is `project_directory` uses the same
+  inspector pane as an isolated `worktree` Head. It enters with the inspector
+  collapsed, with that entry state resolved before the reused split-pane DOM is
+  painted so the inspector does not animate out after navigation. **Show diff**
+  reveals it without changing the persisted
+  worktree-pane preference. Its default
+  comparison is `Chat start -> Project directory`:
+  the left ref is the immutable `workspace_base_ref` captured at spawn, and the
+  right side is the shared checkout including uncommitted and untracked files.
+  The inspector describes project state, not changes owned exclusively by that
+  chat. Tests and previews use the selected right side; artifacts use both sides.
+- Agent-to-agent navigation applies the destination pane widths without a
+  transition. Width and screen-stack transitions are reserved for explicit pane
+  toggles within the currently selected agent.
 - The agent page has no in-page header bar: both paths portal their status dot,
   title (inline rename) and action toolbar into the **global top bar** in
   `__root.tsx` via `TopBarPortal` (`web/src/lib/topBarSlot.ts` holds the slot
@@ -103,6 +117,12 @@ and `web/src/DiffViewer.tsx`):
   carry the chosen size rather than a literal `text-xs` - see
   `CODE_TEXT`/`CODE_LEADING` in `diffMetrics` and the size note in
   `web/src/lib/fonts.ts`.
+- In the native WebKit desktop view, the Files section uses borders and
+  backgrounds for separation without box shadows on its sticky header, file
+  list, pager or diff cards. WebKit repaints those shadows across the
+  changing/scrolling diff at a much higher cost than Chromium; even a small
+  visible file can otherwise make the desktop inspector scroll at roughly half
+  frame rate. Browsers and the Chromium desktop bridge retain the shadows.
 - **When a prediction is wrong anyway, the correction must not be visible.** The
   prediction is exact for a plain file body but not for everything in one -
   `bodyShape` does not model inline review-comment rows, so a file carrying a
@@ -163,8 +183,13 @@ and `web/src/DiffViewer.tsx`):
   must agree with the corresponding line in the read before the gutter is shown.
 - Bash command cards render commands relative to the head's worktree or a review
   agent's detached checkout. A command that ran elsewhere gets a reproducible
-  `cd` preamble; home-relative preambles keep `~` outside quotes so the shell
-  expands it.
+  `cd` preamble; when the script starts with a description comment, that comment
+  stays first and the preamble follows it. Home-relative preambles keep `~`
+  outside quotes so the shell expands it.
+- The spawn composer uploads attachments against its selected project. A
+  desktop-native image paste that arrives before any project is selected is
+  ignored; when selection restoration and paste overlap, the current project
+  store supplies the upload identity rather than a placeholder route.
 - A fully loaded transcript starts with a ruled `Conversation began <time> ago`
   divider styled like the `Resumed <time> ago` process-resume divider. Its exact
   timestamp uses the shared selectable Tooltip rather than a native browser
@@ -177,7 +202,8 @@ and `web/src/DiffViewer.tsx`):
   a streaming update. History loading fires once per arrival in the top zone;
   an anchored prepend re-arms it after moving the preserved content clear, so a
   thumb held at the top deliberately continues paging. Reaching the bottom
-  explicitly reacquires the pin.
+  explicitly reacquires the pin. The optional coarse-wheel easing layer is a
+  default-off browser feature flag, independent from bottom following.
 - Keyboard hints use the shared `Kbd` / `ShortcutHint` components. Their fixed
   cap box optically lowers the glyph within the font line box, keeping fonts
   with asymmetric ascent/descent metrics vertically centred.
@@ -185,17 +211,14 @@ and `web/src/DiffViewer.tsx`):
   the operational detail: review creation names the PR/MR forge, merge names the
   target branch, restart says which state is preserved, and kill says that the
   worktree is deleted.
-- The shared confirmation dialog is opaque as soon as it mounts. While it is
-  open, underlying native scrollbar chrome becomes transparent without removing
-  its gutter; this prevents WebKitGTK from compositing scroll thumbs through the
-  modal without shifting the page.
-- A visible, loaded Files diff pauses decorative infinite animations in the
-  WebKit desktop shells. WebKitGTK and WKWebView otherwise repaint the Files
-  surface for tiny status, progress and chat animations after the diff has fully
-  settled. An empty Changes inspector leaves animation running. `AgentDetail`
-  owns the `hydra-webkit-diff-open` root class; the file-card condition lives in
-  `index.css`. Closing the diff restores motion, and browsers plus Windows
-  WebView2 are unaffected.
+- The shared confirmation dialog is opaque as soon as it mounts. While a modal
+  dialog or fullscreen file lightbox is open, underlying native scrollbar chrome
+  becomes transparent without removing its gutter; this prevents WebKitGTK from
+  compositing scroll thumbs through the overlay without shifting the page. The
+  lightbox's transparency backing shrink-wraps the displayed media, so viewport
+  height clamping cannot expose checkerboard beside an opaque image. Hydra's thin
+  app-wide scrollbar treatment is a separate default-off browser feature flag;
+  otherwise scrollbars use native browser and operating-system chrome.
 - The primary Merge action preflights the existing per-runner tests endpoint
   before opening its confirmation when the compact verdict is not already gated.
   This distinguishes no configured runners from an unknown verdict and catches a
@@ -220,8 +243,11 @@ and `web/src/DiffViewer.tsx`):
   (`web/src/lib/sidebar.ts`): a persisted desktop `desktopCollapsed` preference
   and a transient mobile `mobileOpen` (never persisted, so crossing the 768px
   breakpoint can't pop the sidebar open; below it the sidebar is a full-screen
-  panel under the top bar, no scrim). Sidebar *width* is plain `useState` in
-  `__root.tsx` persisted with `readLocal`/`writeLocal(StorageKeys.sidebarWidth)`.
+  panel under the top bar, no scrim). The slide/width transition is armed only
+  by an explicit toggle, so crossing the breakpoint swaps layouts without
+  animating the mobile panel into or out of the desktop column. Sidebar *width*
+  is plain `useState` in `__root.tsx` persisted with
+  `readLocal`/`writeLocal(StorageKeys.sidebarWidth)`.
   `forwardSidebarWheelToMain` (`__root.tsx`) forwards leftover sidebar wheel
   delta into `[data-main-scroll]` / `[data-inspector-scroll]`.
 - All resizing is hand-rolled pointer/mouse drag - no split-pane library: sidebar

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useEffectEvent, useCallback, useMemo, memo, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../stores/apiClient'
-import { FocusedFilesystemMode, type AgentResponse, type SpawnAgentRequest, type RepositoryBranch } from '../api'
+import { ProjectDirectoryFilesystemMode, WorkspaceKind, type AgentResponse, type SpawnAgentRequest, type RepositoryBranch } from '../api'
 import { BranchSelector } from './BranchSelector'
 import { SettingsPopover, SettingsGroupLabel, SettingsSelect } from './SettingsPopover'
 import { formatError } from '../api/format_error'
@@ -42,12 +42,12 @@ import { onDesktopImagePaste } from '../lib/desktopBridge'
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
 
-// Native desktop focused windows land on the ordinary project route for the
-// first implementation phase, but ask its composer to start in focused mode.
+// Native desktop project-directory windows can ask an ordinary project composer
+// to start in project-directory mode.
 // The query is only an initial default; the visible Workspace control remains
 // authoritative and the URL carries no session identity.
-function readDesktopFocusedDraft(): boolean {
-  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new_focused') === '1'
+function readDesktopProjectDirectoryDraft(): boolean {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new_project_directory') === '1'
 }
 
 // The base branch to start on before the branch list has loaded, from the shared
@@ -222,21 +222,21 @@ export const SpawnForm = memo(function SpawnForm({
   onAgentTypeChange,
   compact = false,
   disabled = false,
-  focusedOnly = false,
+  projectDirectoryOnly = false,
 }: {
   projectId: string | null
   onSpawned?: (agent: AgentResponse) => void
   onAgentTypeChange?: (agentType: AgentTypeOption) => void
   compact?: boolean
   disabled?: boolean
-  focusedOnly?: boolean
+  projectDirectoryOnly?: boolean
 }) {
-  // A dedicated project-checkout draft is a contextual default, not a modified
+  // A dedicated project-directory draft is a contextual default, not a modified
   // spawn option. Keep Reset and the settings-cog state aligned with that.
-  const focusedDefault = focusedOnly || readDesktopFocusedDraft()
+  const projectDirectoryDefault = projectDirectoryOnly || readDesktopProjectDirectoryDraft()
   const [agentType, setAgentType] = useState<AgentTypeOption>(() => {
     const remembered = readDefaultAgentType()
-    return focusedOnly && remembered !== 'claude' && remembered !== 'codex' ? 'claude' : remembered
+    return projectDirectoryOnly && remembered !== 'claude' && remembered !== 'codex' ? 'claude' : remembered
   })
   // Model alias for the CLI's --model flag ('' = the CLI's own default). Seeded
   // from the remembered map for the initial agent type; the picker sets agent +
@@ -245,13 +245,13 @@ export const SpawnForm = memo(function SpawnForm({
   // Chat mode: drive Claude or Codex via its structured protocol and
   // show a chat view instead of a terminal. Remembered like the agent/model;
   // defaults ON when the user has never touched the toggle (only 'false' opts out).
-  const [chatMode, setChatMode] = useState(() => focusedDefault || readDefaultChatMode())
-  // Focused sessions run directly in the project checkout instead of creating a
+  const [chatMode, setChatMode] = useState(() => projectDirectoryDefault || readDefaultChatMode())
+  // Project-directory sessions run directly in the project checkout instead of creating a
   // branch and worktree. Native desktop shells use the same spawn contract, and
   // full Hydra exposes it here so both surfaces create identical heads.
-  const [focused, setFocused] = useState(() => focusedDefault)
-  const [focusedFilesystemMode, setFocusedFilesystemMode] = useState(FocusedFilesystemMode.FocusedFilesystemEdit)
-  const [focusedAllowCommits, setFocusedAllowCommits] = useState(true)
+  const [projectDirectory, setProjectDirectory] = useState(() => projectDirectoryDefault)
+  const [projectDirectoryFilesystemMode, setProjectDirectoryFilesystemMode] = useState(ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemEdit)
+  const [projectDirectoryAllowCommits, setProjectDirectoryAllowCommits] = useState(true)
   // Per-head git-isolation override ('' = use the project's policy default, so the
   // request omits git_isolation). See docs/git-isolation.md. Not persisted: a locked
   // .git is a deliberate per-spawn choice, defaulted to the project policy.
@@ -343,13 +343,13 @@ export const SpawnForm = memo(function SpawnForm({
   }, [agentType, gitIsolation])
 
   useEffect(() => {
-    if (focusedOnly && agentType !== 'claude' && agentType !== 'codex') {
+    if (projectDirectoryOnly && agentType !== 'claude' && agentType !== 'codex') {
       setAgentType('claude')
       setModel(readModelMap().claude ?? '')
-    } else if (focused && agentType !== 'claude' && agentType !== 'codex') {
-      setFocused(false)
+    } else if (projectDirectory && agentType !== 'claude' && agentType !== 'codex') {
+      setProjectDirectory(false)
     }
-  }, [agentType, focused, focusedOnly])
+  }, [agentType, projectDirectory, projectDirectoryOnly])
 
   // Remember the chosen model per agent type so the next spawn of that agent
   // defaults to it (mirrors defaultAgentType).
@@ -512,7 +512,7 @@ export const SpawnForm = memo(function SpawnForm({
     const promptElement = promptElementRef.current
     if (!promptElement || promptElement.getAttribute('contenteditable') !== 'true') return
     // Don't steal focus if the user moved on during the spawn (clicked another
-    // control, or a navigation focused something on the new agent's page).
+    // control, or navigation focused something on the new agent's page).
     const active = document.activeElement
     if (active && active !== document.body && !cardRef.current?.contains(active)) return
     richComposerRef.current?.focus()
@@ -655,7 +655,18 @@ export const SpawnForm = memo(function SpawnForm({
     // The upload resolving isn't a user action, so patch this chip across the
     // whole timeline (reconcile) instead of pushing a new undo step - undoing to
     // an earlier snapshot still sees the settled path, not a stale "uploading...".
-    uploadFile(projectId, file)
+    // A native image-paste listener lives for the form's whole mount. During
+    // boot the compact form can mount before the selected project is restored,
+    // so an event callback created in that render may still see a null prop even
+    // though the project store and visible picker have since selected one. Read
+    // the store at event time as the fallback; never send the placeholder `_`
+    // project id, which can only produce a misleading 404.
+    const uploadProjectId = projectId ?? useProjectStore.getState().selectedProjectId
+    if (!uploadProjectId) {
+      reconcile(id, { uploading: false, error: 'Select a project before attaching files' })
+      return id
+    }
+    uploadFile(uploadProjectId, file)
       .then((res) => reconcile(id, { path: res.path, uploading: false }))
       .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
     return id
@@ -794,12 +805,16 @@ export const SpawnForm = memo(function SpawnForm({
 
   // WebKitGTK does not always expose a copied desktop image on the browser's
   // paste event. The native shell forwards that image separately; only the
-  // focused spawn composer may consume it because the compact spawn form can
+  // active spawn composer may consume it because the compact spawn form can
   // remain mounted alongside an agent's chat composer.
   const handleDesktopImagePaste = useEffectEvent((file: File) => {
     const rich = richComposerRef.current?.editor?.view.dom
     const active = document.activeElement
     if (!rich || !active || !rich.contains(active)) return
+    // Native paste is dispatched on window rather than by the disabled
+    // editor, so the browser cannot enforce the form's no-project guard for
+    // us. Ignore it when there is genuinely no selected project.
+    if (!projectId && !useProjectStore.getState().selectedProjectId) return
     const names = addFiles([file])
     if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
   })
@@ -844,7 +859,7 @@ export const SpawnForm = memo(function SpawnForm({
       // at the right size from its first paint instead of the 80x24 default (its
       // narrow-wrapped scrollback can't be re-flowed once a wide client attaches).
       const geom = spawnGeometry()
-      const focusedSession = focusedOnly || focused
+      const projectDirectorySession = projectDirectoryOnly || projectDirectory
       const req: SpawnAgentRequest = {
         prompt: finalPrompt,
         agent_type: agentType,
@@ -854,17 +869,17 @@ export const SpawnForm = memo(function SpawnForm({
         // Structured chat is available for Claude and Codex; send the choice
         // explicitly so turning the toggle off wins over the server-side
         // default-on, and a remembered value never leaks into another agent type.
-        ...(agentType === 'claude' || agentType === 'codex' ? { chat_mode: focusedSession || chatMode } : {}),
-        ...(focusedSession ? {
-          focused: true,
-          filesystem_mode: focusedFilesystemMode,
-          allow_commits: focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit && focusedAllowCommits,
+        ...(agentType === 'claude' || agentType === 'codex' ? { chat_mode: projectDirectorySession || chatMode } : {}),
+        ...(projectDirectorySession ? {
+          workspace_kind: WorkspaceKind.WorkspaceKindProjectDirectory,
+          filesystem_mode: projectDirectoryFilesystemMode,
+          allow_commits: projectDirectoryFilesystemMode === ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemEdit && projectDirectoryAllowCommits,
         } : {}),
         // Adopting a PR takes precedence over (and ignores) the base branch: the
         // server bases the head on the PR head and its target branch.
-        ...(!focusedSession && (adopt ? { adopt_mr: { id: adopt.id } } : baseBranch ? { base_branch: baseBranch } : {})),
+        ...(!projectDirectorySession && (adopt ? { adopt_mr: { id: adopt.id } } : baseBranch ? { base_branch: baseBranch } : {})),
         // Omit git_isolation when '' so the server applies the project policy default.
-        ...(!focusedSession && gitIsolation ? { git_isolation: gitIsolation } : {}),
+        ...(!projectDirectorySession && gitIsolation ? { git_isolation: gitIsolation } : {}),
         ...(geom.cols ? { cols: geom.cols } : {}),
         rows: geom.rows,
       }
@@ -952,9 +967,9 @@ export const SpawnForm = memo(function SpawnForm({
     setBaseBranch(defaultBranch)
     setChatMode(true)
     setGitIsolation('')
-    setFocused(focusedDefault)
-    setFocusedFilesystemMode(FocusedFilesystemMode.FocusedFilesystemEdit)
-    setFocusedAllowCommits(true)
+    setProjectDirectory(projectDirectoryDefault)
+    setProjectDirectoryFilesystemMode(ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemEdit)
+    setProjectDirectoryAllowCommits(true)
   }
 
   // Both spawn layouts collapse the per-spawn options into a single settings cog,
@@ -963,11 +978,11 @@ export const SpawnForm = memo(function SpawnForm({
   // first makes that change feel anchored instead of moving the switch itself.
   function renderSpawnSettings() {
     const showChat = agentType === 'claude' || agentType === 'codex'
-    const canFocus = showChat
-    const adoptControl = focused ? null : renderAdoptControl()
+    const supportsProjectDirectory = showChat
+    const adoptControl = projectDirectory ? null : renderAdoptControl()
     // While adopting a PR the base branch is the PR's target, chosen server-side,
     // so the base-branch section is suppressed (mirrors renderAdoptControl).
-    const showBranch = !!branches && branches.length > 0 && !isBuiltinProject && !adopt && !focused
+    const showBranch = !!branches && branches.length > 0 && !isBuiltinProject && !adopt && !projectDirectory
     // What is set to something other than its default, in the popover's own
     // order. Everything in here is invisible once the panel closes, so the cog
     // wears the "on" look and this list becomes its tooltip - a spawn that
@@ -976,14 +991,14 @@ export const SpawnForm = memo(function SpawnForm({
     // the one remembered pick with no representation outside this panel (the
     // agent and model both show on the picker trigger beside it).
     const nonDefaults: string[] = []
-    if (focused && !focusedDefault) nonDefaults.push(`Workspace: project directory (${focusedFilesystemMode})`)
-    if (focused && focusedAllowCommits) nonDefaults.push('Commits: allowed')
+    if (projectDirectory && !projectDirectoryDefault) nonDefaults.push(`Workspace: project directory (${projectDirectoryFilesystemMode})`)
+    if (projectDirectory && projectDirectoryAllowCommits) nonDefaults.push('Commits: allowed')
     if (adopt) nonDefaults.push(`Pull request: #${adopt.id}`)
     if (showBranch && baseBranch && defaultBranch && baseBranch !== defaultBranch) {
       nonDefaults.push(`Base branch: ${baseBranch}`)
     }
-    if (showChat && !focused && !chatMode) nonDefaults.push('Run mode: terminal')
-    if (!focused && gitIsolation) {
+    if (showChat && !projectDirectory && !chatMode) nonDefaults.push('Run mode: terminal')
+    if (!projectDirectory && gitIsolation) {
       nonDefaults.push(`Git isolation: ${GIT_ISOLATION_OPTS.find((o) => o.id === gitIsolation)?.label ?? gitIsolation}`)
     }
     return (
@@ -1001,17 +1016,17 @@ export const SpawnForm = memo(function SpawnForm({
         onReset={nonDefaults.length > 0 ? resetSpawnOptions : undefined}
         resetLabel="Reset spawn options to their defaults"
       >
-        {canFocus && (
+        {supportsProjectDirectory && (
           <>
             <SettingsGroupLabel className="mb-1.5">Workspace</SettingsGroupLabel>
-            {!focusedOnly && (
+            {!projectDirectoryOnly && (
               <SegmentedControl<'worktree' | 'project'>
                 label="Workspace"
-                value={focused ? 'project' : 'worktree'}
+                value={projectDirectory ? 'project' : 'worktree'}
                 onChange={(value) => {
-                  const projectCheckout = value === 'project'
-                  setFocused(projectCheckout)
-                  if (projectCheckout) { setChatMode(true); setAdopt(null) }
+                  const useProjectDirectory = value === 'project'
+                  setProjectDirectory(useProjectDirectory)
+                  if (useProjectDirectory) { setChatMode(true); setAdopt(null) }
                 }}
                 options={[
                   { value: 'worktree', label: 'Worktree', icon: <GitBranch className="h-3.5 w-3.5" /> },
@@ -1020,33 +1035,33 @@ export const SpawnForm = memo(function SpawnForm({
                 className="w-full [&>button]:flex-1 [&>button]:justify-center"
               />
             )}
-            {focused && (
-              <div className={focusedOnly ? 'space-y-2' : 'mt-2 space-y-2'}>
+            {projectDirectory && (
+              <div className={projectDirectoryOnly ? 'space-y-2' : 'mt-2 space-y-2'}>
                 <SegmentedControl
                   label="Project files"
-                  value={focusedFilesystemMode}
+                  value={projectDirectoryFilesystemMode}
                   onChange={(filesystemMode) => {
-                    setFocusedFilesystemMode(filesystemMode)
-                    setFocusedAllowCommits(filesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit)
+                    setProjectDirectoryFilesystemMode(filesystemMode)
+                    setProjectDirectoryAllowCommits(filesystemMode === ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemEdit)
                   }}
                   options={[
-                    { value: FocusedFilesystemMode.FocusedFilesystemEdit, label: 'Editable' },
-                    { value: FocusedFilesystemMode.FocusedFilesystemReadonly, label: 'Read-only' },
+                    { value: ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemEdit, label: 'Editable' },
+                    { value: ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemReadonly, label: 'Read-only' },
                   ]}
                 />
-                <label className={`flex items-center gap-2 text-xs ${focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly ? 'cursor-not-allowed text-gray-400 dark:text-gray-500' : 'cursor-pointer text-gray-600 dark:text-gray-300'}`}>
+                <label className={`flex items-center gap-2 text-xs ${projectDirectoryFilesystemMode === ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemReadonly ? 'cursor-not-allowed text-gray-400 dark:text-gray-500' : 'cursor-pointer text-gray-600 dark:text-gray-300'}`}>
                   <input
                     type="checkbox"
-                    checked={focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemEdit && focusedAllowCommits}
-                    disabled={focusedFilesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly}
-                    onChange={(e) => setFocusedAllowCommits(e.target.checked)}
+                    checked={projectDirectoryFilesystemMode === ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemEdit && projectDirectoryAllowCommits}
+                    disabled={projectDirectoryFilesystemMode === ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemReadonly}
+                    onChange={(e) => setProjectDirectoryAllowCommits(e.target.checked)}
                     className="rounded border-gray-300 disabled:cursor-not-allowed dark:border-gray-600"
                   />
                   Allow commits
                 </label>
               </div>
             )}
-            {!focused && <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />}
+            {!projectDirectory && <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />}
           </>
         )}
         {adoptControl && (
@@ -1071,8 +1086,8 @@ export const SpawnForm = memo(function SpawnForm({
             <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
           </>
         )}
-        {showChat && !focused && <SettingsGroupLabel className="mb-1.5">Run mode</SettingsGroupLabel>}
-        {showChat && !focused && (
+        {showChat && !projectDirectory && <SettingsGroupLabel className="mb-1.5">Run mode</SettingsGroupLabel>}
+        {showChat && !projectDirectory && (
           <SegmentedControl<'terminal' | 'chat'>
             label="Run mode"
             value={chatMode ? 'chat' : 'terminal'}
@@ -1083,7 +1098,7 @@ export const SpawnForm = memo(function SpawnForm({
             ]}
           />
         )}
-        {showChat && !focused && (
+        {showChat && !projectDirectory && (
           <div className="my-2.5 border-t border-gray-100 dark:border-gray-700" />
         )}
         {/* Git isolation (per-head override; Default inherits the project policy,
@@ -1091,8 +1106,8 @@ export const SpawnForm = memo(function SpawnForm({
             popover, as a dropdown: its options carry two-line explanations that
             crowded out the other controls when listed inline. See
             docs/git-isolation.md. */}
-        {!focused && <SettingsGroupLabel className="mb-1.5">Git isolation</SettingsGroupLabel>}
-        {!focused && <SettingsSelect
+        {!projectDirectory && <SettingsGroupLabel className="mb-1.5">Git isolation</SettingsGroupLabel>}
+        {!projectDirectory && <SettingsSelect
           label="Git isolation"
           value={gitIsolation}
           onChange={setGitIsolation}
@@ -1199,7 +1214,7 @@ export const SpawnForm = memo(function SpawnForm({
                     <Paperclip className="w-3 h-3" />
                   </button>
                 </Tooltip>
-                <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" agents={focusedOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
+                <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} size="sm" agents={projectDirectoryOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
               </div>
               {renderSpawnSettings()}
               <button
@@ -1292,7 +1307,7 @@ export const SpawnForm = memo(function SpawnForm({
                     </button>
                   </Tooltip>
                   {/* Agent + model picker (icon trigger + grouped dropdown) */}
-                  <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} agents={focusedOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
+                  <AgentModelPicker agent={agentType} model={model} onChange={handleAgentModelChange} agents={projectDirectoryOnly ? AGENT_TYPES.filter((a) => a.id === 'claude' || a.id === 'codex') : AGENT_TYPES} />
                   {renderSpawnSettings()}
                 </div>
                 <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">

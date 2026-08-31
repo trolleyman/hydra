@@ -88,6 +88,7 @@ import { CopyStateIcon } from './components/CopyStateIcon'
 import { mergeBaseInstruction } from './lib/mergeBaseInstruction'
 import { commitIdx, commitParentSelection, reconcileRightSelection, type LeftSel, type RightSel } from './lib/commitRange'
 import { createArrayIndex } from './lib/arrayIndex'
+import { hasWebKitDesktopBridge } from './lib/desktopBridge'
 
 const indexCommits = createArrayIndex<CommitInfo, string>((commit) => commit.sha)
 const indexDiffFiles = createArrayIndex<DiffFile, string>((file) => file.path)
@@ -1851,6 +1852,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
   openInRepo?: (path: string) => LinkProps
 }) {
   const lang = getLanguage(file.path, firstFileLine(file))
+  const fileSurfaceShadow = hasWebKitDesktopBridge() ? '' : ' shadow-sm'
 
   const [reveal, setReveal] = useState<RevealMap>(new Map())
 
@@ -2322,7 +2324,7 @@ export const FileDiff = memo(function FileDiff({ file, sideBySide, wordHighlight
       // (scrolls "too far"). +16 lands the card border exactly at the sticky
       // bar stack's bottom edge, so the header sits flush and line 1 is visible.
       style={headless ? undefined : { scrollMarginTop: `calc(${FILE_STICKY_TOP} + 16px)` }}
-      className={headless ? '' : 'border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900 shadow-sm'}
+      className={headless ? '' : `border border-gray-200 dark:border-gray-700 rounded-lg mb-4 bg-white dark:bg-gray-900${fileSurfaceShadow}`}
     >
       {!headless && (
         // Sticky header: pins flush below the Changes toolbar (FILE_STICKY_TOP, the
@@ -2905,11 +2907,12 @@ function ShiftClickHint() {
 // memo (both selectors): they sit in the always-visible Changes toolbar, whose
 // owner re-renders on every diff/panel state change; their props only change
 // when the commit list or the selection itself does.
-const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, baseBranch, rightSel, onSelectOnly }: {
+const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, baseLabel, baseHint, rightSel, onSelectOnly }: {
   commits: CommitInfo[]
   selected: LeftSel
   onChange: (v: LeftSel) => void
-  baseBranch: string
+  baseLabel: string
+  baseHint: string
   rightSel: RightSel
   // Shift-click: set BOTH sides to show only this commit (parent -> commit).
   onSelectOnly: (sha: string) => void
@@ -2938,7 +2941,7 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
 
   const label = selected.type === 'commit'
     ? <CommitLabel commit={indexCommits(commits).get(selected.sha)} sha={selected.sha} />
-    : <span className="max-w-[150px] truncate">{selected.type === 'base' ? baseBranch : 'Latest commit'}</span>
+    : <span className="max-w-[150px] truncate">{selected.type === 'base' ? baseLabel : 'Latest commit'}</span>
 
   // Determine which commits are valid for the left selector (must be older than right)
   const rightIdx = rightSel.type === 'commit' ? commitIdx(rightSel.sha, commits) : -1
@@ -3015,8 +3018,8 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
               className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer ${selected.type === 'base' ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
             >
               <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-              <span className="font-medium text-gray-800 dark:text-gray-200">{baseBranch}</span>
-              <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">branch point</span>
+              <span className="font-medium text-gray-800 dark:text-gray-200">{baseLabel}</span>
+              <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">{baseHint}</span>
               {selected.type === 'base' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
           </div>
@@ -3029,11 +3032,12 @@ const LeftSelector = memo(function LeftSelector({ commits, selected, onChange, b
 
 // ── Right commit selector ─────────────────────────────────────────────────────
 
-const RightSelector = memo(function RightSelector({ commits, selected, onChange, hasUncommitted, onSelectOnly }: {
+const RightSelector = memo(function RightSelector({ commits, selected, onChange, hasUncommitted, uncommittedLabel = 'Latest changes', onSelectOnly }: {
   commits: CommitInfo[]
   selected: RightSel
   onChange: (v: RightSel) => void
   hasUncommitted?: boolean
+  uncommittedLabel?: string
   // Shift-click: set BOTH sides to show only this commit (parent -> commit).
   onSelectOnly: (sha: string) => void
 }) {
@@ -3061,7 +3065,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
 
   const label = selected.type === 'commit'
     ? <CommitLabel commit={indexCommits(commits).get(selected.sha)} sha={selected.sha} />
-    : <span className="max-w-[150px] truncate">{selected.type === 'uncommitted' ? 'Latest changes' : 'Latest commit'}</span>
+    : <span className="max-w-[150px] truncate">{selected.type === 'uncommitted' ? uncommittedLabel : 'Latest commit'}</span>
 
   return (
     <div ref={ref} className="relative">
@@ -3086,7 +3090,7 @@ const RightSelector = memo(function RightSelector({ commits, selected, onChange,
                 }`}
             >
               <Plus className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-              <span className="font-medium text-gray-800 dark:text-gray-200">Latest changes</span>
+              <span className="font-medium text-gray-800 dark:text-gray-200">{uncommittedLabel}</span>
               <span className="text-gray-400 dark:text-gray-500 ml-auto text-3xs">incl. uncommitted</span>
               {selected.type === 'uncommitted' && <Check className="w-3 h-3 text-blue-500 shrink-0" />}
             </button>
@@ -3667,6 +3671,8 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.agent.id === next.agent.id &&
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
+  prev.agent.workspace_kind === next.agent.workspace_kind &&
+  prev.agent.workspace_base_ref === next.agent.workspace_base_ref &&
   prev.agent.worktree_path === next.agent.worktree_path &&
   prev.agent.review?.url === next.agent.review?.url &&
   prev.agent.review?.provider === next.agent.review?.provider &&
@@ -3691,9 +3697,12 @@ export function diffMetaKey(d: DiffResponse): string {
 // selectors, then tests, previews, artifacts, and the diff itself), just
 // without the top margin - the pane's own padding supplies it.
 function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, externalReviewRefresh, externalCommitSelect, inspector, changesLeading, leadingInline, focusComment, focusLine }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; externalReviewRefresh?: number; externalCommitSelect?: { sha: string; nonce: number } | null; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean; focusComment?: number; focusLine?: string }) {
+  const projectDirectory = agent.workspace_kind === 'project_directory'
+  const defaultRightSel: RightSel = projectDirectory ? { type: 'uncommitted' } : { type: 'latest' }
+  const fileSurfaceShadow = hasWebKitDesktopBridge() ? '' : ' shadow-sm'
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [leftSel, setLeftSel] = useState<LeftSel>({ type: 'base' })
-  const [rightSel, setRightSel] = useState<RightSel>({ type: 'latest' })
+  const [rightSel, setRightSel] = useState<RightSel>(defaultRightSel)
   const [diff, setDiff] = useState<DiffResponse | null>(null)
   const [loadingDiff, setLoadingDiff] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
@@ -3865,14 +3874,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [])
 
   useEffect(() => {
-    if (!agent.branch_name) return
+    if (!agent.branch_name && !projectDirectory) return
     api.default.getAgentCommits(projectId ?? '', agent.id)
       .then((c) => {
         setCommits(c)
         commitsRef.current = c
         lastCommitsSigRef.current = JSON.stringify(c.map((x) => x.sha))
       }).catch(() => setCommits([]))
-  }, [agent.id, agent.branch_name, projectId, refreshKey])
+  }, [agent.id, agent.branch_name, projectDirectory, projectId, refreshKey])
 
   // expandFileDiff: revealing context in a file the bulk response left windowed.
   //
@@ -3889,7 +3898,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   // requested windowed context when it declines to expand. So the fallback costs
   // no extra round-trip.
   const expandFileDiff = useCallback(async (path: string, context: number = 3) => {
-    if (!agent.branch_name) return
+    if (!agent.branch_name && !projectDirectory) return
 
     const params = buildDiffParams(leftSel, rightSel, ignoreWhitespace, commitsRef.current)
 
@@ -3928,7 +3937,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     } catch (e) {
       console.error('Failed to fetch file diff:', e)
     }
-  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, ignoreWhitespace])
+  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, ignoreWhitespace])
 
   // Compute hidden-file state from a fresh diff response.
   // Large files (HIDDEN_FILE_THRESHOLD changed lines) start hidden, unless the user has explicitly shown them.
@@ -3986,7 +3995,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   }, [])
 
   useEffect(() => {
-    if (!agent.branch_name) return
+    if (!agent.branch_name && !projectDirectory) return
     let cancelled = false
     // Legitimate data-fetch effect: reset to the loading state before the async
     // fetch. This can't move to render (it sits alongside the fileContextsRef write,
@@ -4018,7 +4027,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       .catch((e) => { if (!cancelled) { setDiffError(formatError(e)); setLoadingDiff(false) } })
 
     return () => { cancelled = true }
-  }, [agent.id, agent.branch_name, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles, reconcileFiles])
+  }, [agent.id, agent.branch_name, projectDirectory, projectId, leftSel, rightSel, refreshKey, ignoreWhitespace, applyHiddenFiles, reconcileFiles])
 
   // Version params for the artifacts panel, mirroring the diff request logic.
   // Artifacts (e.g. screenshots) don't care about whitespace, so pass false.
@@ -4148,7 +4157,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const silentRefreshRunningRef = useRef(false)
   const latestTriggerRef = useRef(0)
   useEffect(() => {
-    if (!externalRefreshTrigger || !agent.branch_name) return
+    if (!externalRefreshTrigger || (!agent.branch_name && !projectDirectory)) return
     // Always remember the most recent trigger so an in-flight fetch picks it up.
     latestTriggerRef.current = externalRefreshTrigger
     if (silentRefreshRunningRef.current) return
@@ -4503,7 +4512,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   })
 
   const handleComment = useCallback(async (path: string, lineNum: number, isNew: boolean, text: string, attachments: string[]) => {
-    const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
+    const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, projectDirectory ? 'Chat start' : agent.base_branch)
     const file = diffRef.current ? indexDiffFiles(diffRef.current.files).get(path) : undefined
     const block = diffContextBlock(path, findHunkForLine(file, lineNum, isNew), lineNum, isNew)
 
@@ -4527,14 +4536,14 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     } catch (e) {
       console.error('Failed to send comment:', e)
     }
-  }, [agent.id, agent.base_branch, projectId, showSentToast])
+  }, [agent.id, agent.base_branch, projectDirectory, projectId, showSentToast])
 
   // "Add to review": cache the comment (with a frozen context block + the current
   // hunk's hash for staleness detection) instead of sending it now. The batch is
   // flushed later by submitReview. Kept stable (refs + functional setState) so it
   // doesn't bust FileDiff's memo, just like handleComment.
   const handleAddToReview = useCallback((path: string, lineNum: number, isNew: boolean, text: string, attachments: string[]) => {
-    const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
+    const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, projectDirectory ? 'Chat start' : agent.base_branch)
     const file = diffRef.current ? indexDiffFiles(diffRef.current.files).get(path) : undefined
     const hunk = findHunkForLine(file, lineNum, isNew)
     addReviewComment(projectId, agent.id, {
@@ -4544,7 +4553,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     })
       .then(setReviewComments)
       .catch((e) => console.error('Failed to queue comment:', e))
-  }, [agent.id, agent.base_branch, projectId])
+  }, [agent.id, agent.base_branch, projectDirectory, projectId])
 
   // Pins on artifact pictures (docs/review-agent.md). The lightbox is a global
   // overlay with no idea which head opened it, so the page that DOES hold the
@@ -4558,7 +4567,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const submitImageComment = useCallback(async (image: ReviewImageAnchor, text: string, publish: boolean) => {
     // Resolved at write time, exactly as a line comment's is, so "latest commit"
     // cannot drift between placing the pin and publishing it.
-    const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, agent.base_branch)
+    const { fromLabel, toLabel } = resolveDiffLabels(leftSelRef.current, rightSelRef.current, commitsRef.current, projectDirectory ? 'Chat start' : agent.base_branch)
     const { comments, notified, toReviewer } = await addImageComment(projectId, agent.id, {
       image, text, diffLabel: `${fromLabel} -> ${toLabel}`, publish,
     })
@@ -4573,7 +4582,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       else if (notified) showSentToast(sentToAgentText(notifiedNumbers(notified), 1))
       else showSentToast(UNDELIVERED_COMMENT, 'warning')
     }
-  }, [projectId, agent.id, agent.base_branch, showSentToast])
+  }, [projectId, agent.id, agent.base_branch, projectDirectory, showSentToast])
   useEffect(() => {
     registerImageComments({ comments: reviewComments, submit: submitImageComment })
     // Clears only what THIS component registered. The chat's quote target and the
@@ -5076,6 +5085,10 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
   const totalDeletions = diff?.files.reduce((s, f) => s + f.deletions, 0) ?? 0
   const activeFilePath = singleFile && diff ? (diff.files[singleFileIdx]?.path ?? null) : null
   const hasExistingDiff = diff !== null
+  const comparisonBaseLabel = projectDirectory ? 'Chat start' : agent.base_branch
+  const comparisonBaseHint = projectDirectory
+    ? (agent.workspace_base_ref?.slice(0, 7) || 'starting commit')
+    : 'branch point'
 
   // The file order exactly as the sidebar lays it out for the current view, so
   // the single-file pager (prev/next) walks files in the SAME order the list
@@ -5140,7 +5153,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     ))
   }
 
-  if (!agent.branch_name) return null
+  if (!agent.branch_name && !projectDirectory) return null
 
   // ── Shared render fragments ────────────────────────────────────────────────
   // Assembled one way by the classic single-column stacked layout and another by
@@ -5165,10 +5178,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       )}
     </div>
   )
-  const resetBtn = !(leftSel.type === 'base' && rightSel.type === 'latest') && (
-    <Tooltip content={`Reset to ${agent.base_branch} -> latest`}>
+  const resetRightType = projectDirectory ? 'uncommitted' : 'latest'
+  const resetBtn = !(leftSel.type === 'base' && rightSel.type === resetRightType) && (
+    <Tooltip content={projectDirectory ? 'Reset to Chat start -> Project directory' : `Reset to ${agent.base_branch} -> latest`}>
       <button
-        onClick={() => { setLeftSel({ type: 'base' }); setRightSel({ type: 'latest' }) }}
+        onClick={() => { setLeftSel({ type: 'base' }); setRightSel(projectDirectory ? { type: 'uncommitted' } : { type: 'latest' }) }}
         className="flex items-center justify-center w-7 h-7 rounded-md text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer"
       >
         <RotateCcw className="w-3.5 h-3.5" />
@@ -5226,11 +5240,11 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
     </SettingsPopover>
   )
 
-  const testsPanelEl = agent.branch_name && projectId && (
+  const testsPanelEl = (agent.branch_name || projectDirectory) && projectId && (
     <TestsPanel
       projectId={projectId}
       agentId={agent.id}
-      repoRef={agent.branch_name ?? undefined}
+      repoRef={agent.branch_name ?? 'HEAD'}
       headRef={artifactParams.headRef}
       includeUncommitted={artifactParams.includeUncommitted}
       refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
@@ -5241,7 +5255,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       onScopeAvailable={setTestsHaveScope}
     />
   )
-  const previewPanelEl = agent.branch_name && projectId && (
+  const previewPanelEl = (agent.branch_name || projectDirectory) && projectId && (
     <PreviewPanel
       projectId={projectId}
       agentId={agent.id}
@@ -5250,7 +5264,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       refreshKey={refreshKey + (externalArtifactRefresh ?? 0)}
     />
   )
-  const artifactsPanelEl = agent.branch_name && (
+  const artifactsPanelEl = (agent.branch_name || projectDirectory) && (
     <ArtifactsPanel
       projectId={projectId}
       agentId={agent.id}
@@ -5322,7 +5336,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
             and clips it while the column tweens to 0 - which is why the drag
             handle can't live in here (see below), hence the wrapper above. */}
         <div
-          className="flex flex-col border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800 shadow-sm"
+          className={`flex flex-col border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800${fileSurfaceShadow}`}
           style={{ borderWidth: filesListHidden ? 0 : undefined }}
         >
           <div data-file-list className="overflow-y-auto max-h-[calc(100vh-140px)]">{renderSidebar(diff.files)}</div>
@@ -5354,17 +5368,17 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               <button
                 onClick={() => goToOrderPos(singleOrderPos - 1)}
                 disabled={singleOrderPos <= 0}
-                className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
+                className={`flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors${fileSurfaceShadow}`}
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-xs text-gray-500 dark:text-gray-400 shadow-sm font-medium">
+              <div className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-1 text-xs text-gray-500 dark:text-gray-400 font-medium${fileSurfaceShadow}`}>
                 {singleOrderPos + 1} / {diff.files.length}
               </div>
               <button
                 onClick={() => goToOrderPos(singleOrderPos + 1)}
                 disabled={singleOrderPos >= diff.files.length - 1}
-                className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shadow-sm"
+                className={`flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors${fileSurfaceShadow}`}
               >
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -5469,7 +5483,7 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
       // z-[22]: above the file cards' own sticky headers (z-20), which are later
       // in the DOM and would otherwise paint OVER this section header while
       // docking; below the Changes bar's z-[25].
-      className="sticky z-[22] flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800 shadow-sm"
+      className={`sticky z-[22] flex flex-wrap items-center gap-2 mb-2 min-h-[1.625rem] bg-gray-50 dark:bg-gray-900 -mx-1 px-1 py-1.5 border-b border-gray-200 dark:border-gray-800${fileSurfaceShadow}`}
     >
       <FilesIcon className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
       <h3 className="text-xs font-semibold tracking-wide text-gray-500 dark:text-gray-400">Files</h3>
@@ -5561,10 +5575,12 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
               never separates from its selectors - the whole "main → Latest commit"
               drops to the next line together when it can't fit beside the stats. */}
                     <div className="flex items-center gap-3">
-                      <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseBranch={agent.base_branch} rightSel={rightSel} onSelectOnly={handleSelectOnly} />
+                      <LeftSelector commits={commits} selected={leftSel} onChange={handleLeftChange} baseLabel={comparisonBaseLabel} baseHint={comparisonBaseHint} rightSel={rightSel} onSelectOnly={handleSelectOnly} />
                       <span className="text-gray-400 dark:text-gray-500 text-xs select-none"><ArrowRightLeft className='w-6 h-6' strokeWidth='1.5' /></span>
                       <RightSelector commits={commits} selected={rightSel} onChange={handleRightChange}
-                        hasUncommitted={diff?.uncommitted_changes} onSelectOnly={handleSelectOnly} />
+                        hasUncommitted={diff?.uncommitted_changes}
+                        uncommittedLabel={projectDirectory ? 'Project directory' : undefined}
+                        onSelectOnly={handleSelectOnly} />
                     </div>
 
                     {resetBtn}

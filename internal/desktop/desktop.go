@@ -55,8 +55,8 @@ func ApplyDeepLink(rawServerURL, rawLink string) (string, error) {
 		serverURL.Path = "/project/" + url.PathEscape(parts[1])
 	case len(parts) == 4 && parts[0] == "project" && parts[2] == "agent" && validID(parts[1]) && validID(parts[3]):
 		serverURL.Path = "/project/" + url.PathEscape(parts[1]) + "/agent/" + url.PathEscape(parts[3])
-	case len(parts) == 2 && parts[0] == "focused" && validID(parts[1]):
-		serverURL.Path = "/focused/" + url.PathEscape(parts[1])
+	case len(parts) == 2 && parts[0] == "project-directory" && validID(parts[1]):
+		serverURL.Path = "/project-directory/" + url.PathEscape(parts[1])
 	default:
 		return "", errtrace.Wrap(fmt.Errorf("unknown or unsafe Hydra deep link action"))
 	}

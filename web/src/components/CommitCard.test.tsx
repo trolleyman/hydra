@@ -7,11 +7,11 @@ describe('CommitCard', () => {
     const { container } = render(
       <CommitCard commit={{
         shortSha: 'a4a55eb',
-        message: 'desktop: add dedicated focused draft route\n\nPreserve **draft state** between routes.',
+        message: 'desktop: add dedicated project-directory draft route\n\nPreserve **draft state** between routes.',
       }} />,
     )
 
-    expect(screen.getByText('desktop: add dedicated focused draft route').tagName).toBe('P')
+    expect(screen.getByText('desktop: add dedicated project-directory draft route').tagName).toBe('P')
     expect(screen.getByText('draft state').tagName).toBe('STRONG')
     expect(container.querySelector('.text-sm')).toBeNull()
     expect(container.querySelector('[data-md-root]')).toHaveClass('text-xs')

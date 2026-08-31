@@ -36,7 +36,7 @@ not lose the event.
 
 ## Multiple displays, DPI, and appearance
 
-Open full and focused windows on displays with different scale factors. Move a
+Open full and project-directory chat windows on displays with different scale factors. Move a
 live window between them, detach/reconnect a display, sleep/wake, and relaunch.
 Verify window bounds remain reachable, WebView pixels and text are sharp, menus
 and popovers attach to the correct window, pointer coordinates remain correct,
@@ -69,4 +69,3 @@ Keep a short manual checklist for IME composition, screen-reader speech,
 notification click behavior, multi-display movement, visual scaling, and OS
 trust prompts. Record OS version, architecture, webview/runtime version, display
 scales, input method, assistive technology, and package version with the result.
-

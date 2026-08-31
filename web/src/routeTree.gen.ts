@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as FocusedProjectIdRouteImport } from './routes/focused.$projectId'
+import { Route as ProjectDirectoryProjectIdRouteImport } from './routes/project-directory.$projectId'
 import { Route as ProjectProjectIdRouteImport } from './routes/project.$projectId'
 import { Route as ProjectProjectIdIndexRouteImport } from './routes/project.$projectId/index'
 import { Route as ProjectProjectIdRepositoryRouteImport } from './routes/project.$projectId/repository'
@@ -30,11 +30,12 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
-const FocusedProjectIdRoute = FocusedProjectIdRouteImport.update({
-  id: '/focused/$projectId',
-  path: '/focused/$projectId',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const ProjectDirectoryProjectIdRoute =
+  ProjectDirectoryProjectIdRouteImport.update({
+    id: '/project-directory/$projectId',
+    path: '/project-directory/$projectId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ProjectProjectIdRoute = ProjectProjectIdRouteImport.update({
   id: '/project/$projectId',
   path: '/project/$projectId',
@@ -79,7 +80,7 @@ const ProjectProjectIdRepositorySplatRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
-  '/focused/$projectId': typeof FocusedProjectIdRoute
+  '/project-directory/$projectId': typeof ProjectDirectoryProjectIdRoute
   '/project/$projectId': typeof ProjectProjectIdRouteWithChildren
   '/project/$projectId/repository': typeof ProjectProjectIdRepositoryRouteWithChildren
   '/project/$projectId/settings': typeof ProjectProjectIdSettingsRoute
@@ -91,7 +92,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
-  '/focused/$projectId': typeof FocusedProjectIdRoute
+  '/project-directory/$projectId': typeof ProjectDirectoryProjectIdRoute
   '/project/$projectId/settings': typeof ProjectProjectIdSettingsRoute
   '/project/$projectId': typeof ProjectProjectIdIndexRoute
   '/project/$projectId/agent/$agentId': typeof ProjectProjectIdAgentAgentIdRoute
@@ -102,7 +103,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
-  '/focused/$projectId': typeof FocusedProjectIdRoute
+  '/project-directory/$projectId': typeof ProjectDirectoryProjectIdRoute
   '/project/$projectId': typeof ProjectProjectIdRouteWithChildren
   '/project/$projectId/repository': typeof ProjectProjectIdRepositoryRouteWithChildren
   '/project/$projectId/settings': typeof ProjectProjectIdSettingsRoute
@@ -116,7 +117,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/settings'
-    | '/focused/$projectId'
+    | '/project-directory/$projectId'
     | '/project/$projectId'
     | '/project/$projectId/repository'
     | '/project/$projectId/settings'
@@ -128,7 +129,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/settings'
-    | '/focused/$projectId'
+    | '/project-directory/$projectId'
     | '/project/$projectId/settings'
     | '/project/$projectId'
     | '/project/$projectId/agent/$agentId'
@@ -138,7 +139,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/settings'
-    | '/focused/$projectId'
+    | '/project-directory/$projectId'
     | '/project/$projectId'
     | '/project/$projectId/repository'
     | '/project/$projectId/settings'
@@ -151,7 +152,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SettingsRoute: typeof SettingsRoute
-  FocusedProjectIdRoute: typeof FocusedProjectIdRoute
+  ProjectDirectoryProjectIdRoute: typeof ProjectDirectoryProjectIdRoute
   ProjectProjectIdRoute: typeof ProjectProjectIdRouteWithChildren
 }
 
@@ -171,11 +172,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/focused/$projectId': {
-      id: '/focused/$projectId'
-      path: '/focused/$projectId'
-      fullPath: '/focused/$projectId'
-      preLoaderRoute: typeof FocusedProjectIdRouteImport
+    '/project-directory/$projectId': {
+      id: '/project-directory/$projectId'
+      path: '/project-directory/$projectId'
+      fullPath: '/project-directory/$projectId'
+      preLoaderRoute: typeof ProjectDirectoryProjectIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/project/$projectId': {
@@ -266,7 +267,7 @@ const ProjectProjectIdRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SettingsRoute: SettingsRoute,
-  FocusedProjectIdRoute: FocusedProjectIdRoute,
+  ProjectDirectoryProjectIdRoute: ProjectDirectoryProjectIdRoute,
   ProjectProjectIdRoute: ProjectProjectIdRouteWithChildren,
 }
 export const routeTree = rootRouteImport

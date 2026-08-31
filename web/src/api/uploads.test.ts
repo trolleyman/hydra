@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OpenAPI } from './core/OpenAPI'
 import { extractFiles, hasFilePayload, uploadFile } from './uploads'
@@ -22,6 +21,15 @@ describe('uploadFile', () => {
       'https://api.example.test/api/projects/hydra/uploads',
       expect.objectContaining({ method: 'POST', credentials: 'same-origin' }),
     )
+  })
+
+  it('does not request a placeholder route without a project', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(uploadFile(null, new File(['png'], 'image.png', { type: 'image/png' })))
+      .rejects.toThrow('Select a project before attaching files')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 

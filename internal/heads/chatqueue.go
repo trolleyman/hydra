@@ -169,7 +169,7 @@ type ChatQueueManager struct {
 	// OnTurnEnd consumes the mark and writes the resting status itself.
 	interrupted map[string]time.Time
 	// onEvent mirrors queue/input transitions into the normalized durable chat
-	// stream. Optional so focused queue tests and legacy callers stay lightweight.
+	// stream. Optional so project-directory queue tests and legacy callers stay lightweight.
 	onEvent func(id string, payload chat.Payload)
 }
 

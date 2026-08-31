@@ -16,6 +16,9 @@ type Agent struct {
 	// Git
 	BranchName string
 	BaseBranch string
+	// WorkspaceBaseRef is the starting commit for a project-directory head's shared-checkout
+	// comparison. Ordinary worktree heads leave it empty.
+	WorkspaceBaseRef string
 	// GitIsolation is the per-head git-isolation mode override (off/readonly; "" =
 	// use the agent-type policy default). See docs/git-isolation.md.
 	GitIsolation string
@@ -42,7 +45,7 @@ type Agent struct {
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	// Mutable; a change takes effect on the next session (re)launch.
 	ChatMode bool `gorm:"default:false"`
-	// Focused direct-directory permissions. See model_unix.go for details.
+	// Project-directory direct-directory permissions. See model_unix.go for details.
 	FilesystemMode string
 	AllowCommits   bool `gorm:"default:false"`
 

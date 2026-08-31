@@ -361,10 +361,10 @@ func (s *Store) UpdateAgentChatMode(id string, chatMode bool) error {
 	return errtrace.Wrap(result.Error)
 }
 
-// UpdateFocusedPermissions changes a branchless focused head's direct-directory
+// UpdateProjectDirectoryPermissions changes a branchless project-directory head's direct-directory
 // permissions. Nil fields are left unchanged so callers can toggle commit
 // authorization without restarting the filesystem sandbox.
-func (s *Store) UpdateFocusedPermissions(id string, filesystemMode *string, allowCommits *bool) error {
+func (s *Store) UpdateProjectDirectoryPermissions(id string, filesystemMode *string, allowCommits *bool) error {
 	updates := map[string]any{}
 	if filesystemMode != nil {
 		updates["filesystem_mode"] = *filesystemMode

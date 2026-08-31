@@ -210,7 +210,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// *shared* terminal, but every session here has its own dedicated PTY whose
 	// master is read only by the daemon, so there is nothing to escape to.
 
-	// Writable: the working directory is normally writable; focused read-only
+	// Writable: the working directory is normally writable; project-directory read-only
 	// sessions bind it read-only instead. Then apply config-driven paths.
 	addRWDir := func(p string) {
 		if p == "" {

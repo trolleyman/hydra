@@ -100,25 +100,25 @@ func waitForRestarts(t *testing.T, c *restartCapture, want int) {
 }
 
 func TestMaybeAutoRestartHead(t *testing.T) {
-	t.Run("focused head restarts without a worktree", func(t *testing.T) {
+	t.Run("project-directory head restarts without a worktree", func(t *testing.T) {
 		root := t.TempDir()
 		store, err := db.Open(root)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = store.Close() })
-		if err := store.CreateAgent(&db.Agent{ID: "focused", ProjectPath: root, AgentType: "claude", ChatMode: true, FilesystemMode: "edit"}); err != nil {
+		if err := store.CreateAgent(&db.Agent{ID: "project-directory", ProjectPath: root, AgentType: "claude", ChatMode: true, FilesystemMode: "edit"}); err != nil {
 			t.Fatal(err)
 		}
 		reg := session.NewRegistry()
 		c := captureRestarts(t)
-		MaybeAutoRestartHead(reg, store, session.Info{ID: "focused"})
+		MaybeAutoRestartHead(reg, store, session.Info{ID: "project-directory"})
 		waitForRestarts(t, c, 1)
 		c.mu.Lock()
 		head := c.calls[0]
 		c.mu.Unlock()
-		if !head.IsFocused() || head.WorkingDir() != root {
-			t.Fatalf("restarted with wrong focused head: %+v", head)
+		if !head.UsesProjectDirectory() || head.WorkingDir() != root {
+			t.Fatalf("restarted with wrong project-directory head: %+v", head)
 		}
 	})
 

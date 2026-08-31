@@ -72,9 +72,9 @@ func TestDrainCommitRequests(t *testing.T) {
 	}
 }
 
-func TestDrainFocusedCommitRequestsChecksPermissionAndSnapshot(t *testing.T) {
+func TestDrainProjectDirectoryCommitRequestsChecksPermissionAndSnapshot(t *testing.T) {
 	projectRoot := t.TempDir()
-	const id = "focused-1"
+	const id = "project-directory-1"
 	run := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", projectRoot}, args...)...)
@@ -104,7 +104,7 @@ func TestDrainFocusedCommitRequestsChecksPermissionAndSnapshot(t *testing.T) {
 	}
 	dir := paths.GetGitopsDir(projectRoot, id)
 
-	// Commit permission is independently opt-in, even for an editable focused
+	// Commit permission is independently opt-in, even for an editable project-directory
 	// chat. A denied request must not move HEAD.
 	if err := os.WriteFile(filepath.Join(projectRoot, "feature.txt"), []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -120,10 +120,10 @@ func TestDrainFocusedCommitRequestsChecksPermissionAndSnapshot(t *testing.T) {
 	}
 
 	allow := true
-	if err := store.UpdateFocusedPermissions(id, nil, &allow); err != nil {
+	if err := store.UpdateProjectDirectoryPermissions(id, nil, &allow); err != nil {
 		t.Fatal(err)
 	}
-	if err := gitq.WriteRequest(dir, gitq.Request{ReqID: "allowed", Op: gitq.OpCommit, Message: "focused commit", ExpectedBranch: "main", ExpectedHead: seedHead}); err != nil {
+	if err := gitq.WriteRequest(dir, gitq.Request{ReqID: "allowed", Op: gitq.OpCommit, Message: "project-directory commit", ExpectedBranch: "main", ExpectedHead: seedHead}); err != nil {
 		t.Fatal(err)
 	}
 	server.drainGitopsRequests(projectRoot)
@@ -132,8 +132,8 @@ func TestDrainFocusedCommitRequestsChecksPermissionAndSnapshot(t *testing.T) {
 		t.Fatalf("allowed commit result=%+v ok=%v err=%v", allowed, ok, err)
 	}
 	committedHead := run("rev-parse", "HEAD")
-	if committedHead == seedHead || run("log", "-1", "--pretty=%s") != "focused commit" {
-		t.Fatalf("focused commit did not advance HEAD: before=%s after=%s", seedHead, committedHead)
+	if committedHead == seedHead || run("log", "-1", "--pretty=%s") != "project-directory commit" {
+		t.Fatalf("project-directory commit did not advance HEAD: before=%s after=%s", seedHead, committedHead)
 	}
 
 	// A request captures both refs in the sandbox. If another actor advances the
