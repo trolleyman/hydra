@@ -2,7 +2,6 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
-  useLayoutEffect,
   useRef,
   type CSSProperties,
   type ReactNode,
@@ -88,33 +87,6 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
       bd.scrollLeft = ta.scrollLeft
     }
 
-    // A textarea's native editor can reserve a scrollbar gutter even when a
-    // same-sized overflow-hidden div with `scrollbar-gutter: stable` does not.
-    // That browser/platform difference makes the backdrop a few pixels wider:
-    // a word can fit on its previous line while the real caret has wrapped it
-    // onto the next one. Size the backdrop from the textarea's measured padding
-    // box instead. clientWidth already excludes the native scrollbar gutter;
-    // the border offset keeps both layers' padding origins aligned.
-    useLayoutEffect(() => {
-      const ta = innerRef.current
-      const bd = backdropRef.current
-      if (!ta || !bd) return
-
-      const syncBackdropBox = () => {
-        const width = ta.clientWidth
-        if (width === 0) return
-        const cs = getComputedStyle(ta)
-        bd.style.left = cs.borderLeftWidth
-        bd.style.right = 'auto'
-        bd.style.width = `${width}px`
-      }
-      syncBackdropBox()
-      if (typeof ResizeObserver === 'undefined') return
-      const observer = new ResizeObserver(syncBackdropBox)
-      observer.observe(ta)
-      return () => observer.disconnect()
-    }, [])
-
     // Auto-pairing (lib/autoPair), when the preference is on: a typed opener
     // brings its closer along, a typed closer steps over the one already there,
     // Backspace between an empty pair clears both, a mark typed over a selection
@@ -179,18 +151,21 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
         <div
           ref={backdropRef}
           aria-hidden="true"
-          // Width is synchronized from the textarea's clientWidth above rather
-          // than inferred with scrollbar-gutter: browsers do not consistently
-          // reserve that gutter on an overflow-hidden div.
+          // Make this a real vertical scroll container, just like the textarea.
+          // Some native textarea editors reserve their scrollbar INSIDE the
+          // reported client width, so measuring that width still leaves an
+          // overflow-hidden mirror a few pixels too wide. Giving both layers an
+          // actual, stable scroll column makes their wrap boundary identical;
+          // index.css keeps this backing scrollbar transparent.
           // overflow-anchor: none for the same reason ShellEditor's highlight
           // layer sets it: this layer is scroll-DRIVEN, so letting Chrome's
           // scroll anchoring adjust its scrollTop when the highlighted content
           // re-lays out is exactly a desync from the textarea below.
-          style={{ overflowAnchor: 'none' }}
+          style={{ scrollbarGutter: 'stable', overflowAnchor: 'none' }}
           // prompt-input-font pins Roboto Flex on BOTH layers so their metrics
           // match exactly and the backdrop's *italic* runs can slant via the
           // font's slnt axis without drifting the textarea caret (see index.css).
-          className={`prompt-input-font absolute inset-0 overflow-hidden pointer-events-none whitespace-pre-wrap break-words ${textColorClassName} ${textClassName}`}
+          className={`highlighted-textarea-backdrop prompt-input-font absolute inset-0 overflow-x-hidden overflow-y-scroll pointer-events-none whitespace-pre-wrap break-words ${textColorClassName} ${textClassName}`}
         >
           {value || !placeholderClassName
             ? renderContent(value)
