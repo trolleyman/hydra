@@ -609,6 +609,23 @@ func (w *worker) reconcileCommits(id, causalItemID, mergedRef string) {
 			return
 		}
 	}
+	// An amend is deliberately non-fast-forward, but it is still a commit the
+	// user just created and belongs in the transcript. Reflog evidence keeps this
+	// narrow: resets, checkouts and rebases continue to emit head_changed.
+	if oldHead != "" && git.IsDirectAmend(workingDir, oldHead, newHead) {
+		if c, err := git.GetCommitInfo(workingDir, newHead); err == nil {
+			commit := CommitCreated{}
+			commit.Head, commit.Sha, commit.ShortSha = newHead, c.SHA, c.ShortSHA
+			commit.Subject, commit.AuthorName = c.Subject, c.AuthorName
+			commit.AuthorEmail, commit.Timestamp = c.AuthorEmail, c.Timestamp
+			commit.Additions, commit.Deletions = c.Additions, c.Deletions
+			commit.CausalItemId = causalItemID
+			if _, _, err := w.store.AppendSource("git:commit:"+c.SHA, commit); err != nil {
+				log.Printf("warn: chat events: append amended commit for %s: %v", id, err)
+			}
+			return
+		}
+	}
 	moved := HeadChanged{}
 	moved.OldHead, moved.Head = oldHead, newHead
 	_, _ = w.store.Append(moved)

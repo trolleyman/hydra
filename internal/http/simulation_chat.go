@@ -763,6 +763,11 @@ var simChatEvents = []simNorm{
 	simTurnDone(simRaw(`{"input_tokens":312,"output_tokens":1526,"cache_read_input_tokens":21400,"cache_creation_input_tokens":1800}`), 0.2145),
 	// This commit lands after that turn's footer, before the closing mini-turn.
 	simCommit("beefcafe0123456789abcdef0123456789abcdef", "beefcaf", "Cover the giving-up path with a test", "2026-07-09T18:05:30.000Z"),
+	// The next command amends that commit. Both actions remain in transcript
+	// chronology, while the Changes selectors contain only this replacement SHA.
+	simTool("toolu_sim_amend", "Bash", simRaw(`{"command":"git commit --amend -m \"Cover uploader exhaustion and retry paths\"","description":"Amend the test commit"}`)).at("2026-07-09T18:05:31.000Z"),
+	simToolOut("toolu_sim_amend", "[head a11e0de] Cover uploader exhaustion and retry paths\n 2 files changed, 52 insertions(+), 9 deletions(-)").at("2026-07-09T18:05:32.000Z"),
+	simCommit("a11e0ded0123456789abcdef0123456789abcdef", "a11e0de", "Cover uploader exhaustion and retry paths", "2026-07-09T18:05:33.000Z"),
 	// ... and then the branch took main in, by fast-forward.
 	simBaseUpdate("2026-07-09T18:05:40.000Z"),
 	// A sibling head's attributed collaboration message. It stays on the user

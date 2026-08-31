@@ -2174,22 +2174,21 @@ func (s *SimulationServer) GetAgentCommits(w http.ResponseWriter, r *http.Reques
 		api.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
-	// agent-chat: two commits whose author dates interleave with the canned
-	// conversation's timestamps (simChatEvents), so the chat renders their
-	// commit chips mid-transcript - one after the Write card (18:01:30), one
-	// after the first turn's result footer (18:05:30).
+	// agent-chat: current branch history after the later commit was amended. The
+	// canned conversation retains both chronological chips, while this selector
+	// inventory exposes only the replacement SHA.
 	if id == "agent-chat" {
 		resp := api.GetAgentCommits200JSONResponse{
 			{
-				Sha:         "beefcafe0123456789abcdef0123456789abcdef",
-				ShortSha:    "beefcaf",
+				Sha:         "a11e0ded0123456789abcdef0123456789abcdef",
+				ShortSha:    "a11e0de",
 				ParentSha:   ptr("cafebabe0123456789abcdef0123456789abcdef"),
-				Subject:     ptr("Cover the giving-up path with a test"),
-				Message:     "Cover the giving-up path with a test",
+				Subject:     ptr("Cover uploader exhaustion and retry paths"),
+				Message:     "Cover uploader exhaustion and retry paths",
 				AuthorName:  "Agent Claude",
 				AuthorEmail: "claude@hydra.ai",
-				Timestamp:   "2026-07-09T18:05:30Z",
-				Additions:   49,
+				Timestamp:   "2026-07-09T18:05:33Z",
+				Additions:   52,
 				Deletions:   9,
 			},
 			{
