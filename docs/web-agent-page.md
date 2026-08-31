@@ -34,6 +34,9 @@ and `web/src/DiffViewer.tsx`):
   status, and workspace chip lead the identity row; project-directory heads place
   Edit/Read-only and Allow commits immediately after that chip. The configuration
   strip orders test verdict, network, Git access, branch selector, and run mode.
+  The explanatory status and workspace chips keep the ordinary default cursor.
+  A project-directory workspace tooltip pairs its project path with the shared
+  blue directory icon treatment.
   A worktree head's branch selector edits base-branch metadata. A project-directory
   head's selector performs a normal non-forced checkout in the shared project
   root, so Git refuses a switch that would overwrite local changes.
