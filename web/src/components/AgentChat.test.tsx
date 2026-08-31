@@ -173,20 +173,22 @@ describe('sectioned search output', () => {
       match: { paths: ['a.cs'], numbered: true },
       lines: ['9:first', '10:last'],
     }]
+    const rows = scriptOutputRows(sections)
 
-    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', sections, true)).toBe(2)
-    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', [{ ...sections[0], lines: ['99:first', '100:last'] }], true)).toBe(3)
-    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', sections, false)).toBeUndefined()
-    expect(sharedScriptGutterDigits('rg -n x a.cs', sections, true)).toBeUndefined()
+    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', rows, true)).toBe(2)
+    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', scriptOutputRows([{ ...sections[0], lines: ['99:first', '100:last'] }]), true)).toBe(3)
+    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', rows, false)).toBeUndefined()
+    expect(sharedScriptGutterDigits('rg -n x a.cs', rows, true)).toBeUndefined()
   })
 
   it('stretches tooltip-wrapped source numbers across the gutter track', () => {
-    const { container } = render(<ScriptOutputPanel sections={[{
+    const rows = scriptOutputRows([{
       kind: 'matches',
       command: 'rg -n x a.cs',
       match: { paths: ['a.cs'], numbered: true },
       lines: ['9:first', '10:last'],
-    }]} />)
+    }])
+    const { container } = render(<ScriptOutputPanel rows={rows} />)
 
     const gutters = container.querySelectorAll('[data-copy-skip]')
     expect(gutters).toHaveLength(2)

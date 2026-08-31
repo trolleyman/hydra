@@ -2719,7 +2719,7 @@ function ReadOutputPanel({ text, lang }: { text: string; lang: string }) {
 }
 
 // One rendered line of a shell script's sectioned output.
-interface ScriptOutputRow {
+export interface ScriptOutputRow {
   // The line's number in the file it came from ('' when it has none).
   num: string
   // The line's content, already highlighted.
@@ -2980,9 +2980,9 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
 // The command only participates when its line-number preference is enabled and
 // it is actually multiline; otherwise there is no upper gutter to align.
 // eslint-disable-next-line react-refresh/only-export-components -- exported for the focused layout-model test
-export function sharedScriptGutterDigits(command: string, sections: ScriptSection[], commandLineNumbers: boolean): number | undefined {
+export function sharedScriptGutterDigits(command: string, rows: ScriptOutputRow[], commandLineNumbers: boolean): number | undefined {
   if (!commandLineNumbers || !command.trimEnd().includes('\n')) return undefined
-  const outputDigits = scriptOutputRows(sections).reduce((max, row) => Math.max(max, row.num.length), 0)
+  const outputDigits = rows.reduce((max, row) => Math.max(max, row.num.length), 0)
   if (outputDigits === 0) return undefined
   const commandLines = command.replace(/\n$/, '').split('\n').length
   return Math.max(String(commandLines).length, outputDigits)
@@ -3008,8 +3008,7 @@ function OutputSpanText({ cls, text, ws }: { cls: string; text: string; ws: Whit
     : <span className={cls}>{text}</span>
 }
 
-export function ScriptOutputPanel({ sections, gutterDigits }: { sections: ScriptSection[]; gutterDigits?: number }) {
-  const rows = useMemo(() => scriptOutputRows(sections), [sections])
+export function ScriptOutputPanel({ rows, gutterDigits }: { rows: ScriptOutputRow[]; gutterDigits?: number }) {
   const ws = useWhitespaceMarks()
   // The whitespace-mark overlay over each row's already-highlighted code. The
   // `spans` path (git/disk/build output a tool wrote, not a file it read) is
@@ -3795,9 +3794,13 @@ const ToolCard = memo(function ToolCard({
     scriptSteps && renderedResult !== undefined
       ? splitScriptOutput(scriptSteps, renderedResult)
       : null
+  // Build the highlighted source-aware rows once. Their line numbers size the
+  // shared command/output gutter, and the same rows render the output below.
+  // Rebuilding them for each consumer would repeat syntax highlighting.
+  const scriptRows = scriptSections ? scriptOutputRows(scriptSections) : null
   const codeLineNumbers = useChatCodeLinesStore((s) => s.lineNumbers)
-  const sharedGutterDigits = scriptSections
-    ? sharedScriptGutterDigits(visibleCommand, scriptSections, codeLineNumbers)
+  const sharedGutterDigits = scriptRows
+    ? sharedScriptGutterDigits(visibleCommand, scriptRows, codeLineNumbers)
     : undefined
   // What the script's own `echo`s printed, for the output that gets NO sections:
   // a build log carrying ANSI, a script of steps too opaque to attribute. The
@@ -4186,8 +4189,8 @@ const ToolCard = memo(function ToolCard({
                           // was said - so it reads as a caption under it rather
                           // than as another block of tool output.
                           ? <div className="px-0.5 break-words chat-font text-3xs text-stone-400 dark:text-stone-500"><CommentRefText text={renderedResult} /></div>
-                        : scriptSections
-                          ? <ScriptOutputPanel sections={scriptSections} gutterDigits={sharedGutterDigits} />
+                        : scriptRows
+                          ? <ScriptOutputPanel rows={scriptRows} gutterDigits={sharedGutterDigits} />
                         : isRead && !item.isError
 								? <ReadOutputPanel text={renderedResult} lang={outputLang} />
 								: <OutputPanel text={renderedResult} lang={outputLang} isError={item.isError} markers={scriptMarkers} />
