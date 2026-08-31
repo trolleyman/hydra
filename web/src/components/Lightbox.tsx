@@ -27,6 +27,7 @@ import {
 } from '../lib/lightboxFlip'
 import { discoverMediaSize, rememberMediaSize } from '../lib/mediaSize'
 import { logicalSize } from '../lib/imageDensity'
+import { useOverlayScrollbarSuppression } from '../lib/useOverlayScrollbarSuppression'
 
 export interface LightboxItem {
   url: string
@@ -194,6 +195,10 @@ export function Lightbox({
   onIndexChange: (i: number) => void
   onClose: () => void
 }) {
+  // Native WebKitGTK scrollbars can be promoted above this fixed portal. Leave
+  // their gutters in place, but hide the chrome for the lightbox lifetime.
+  useOverlayScrollbarSuppression()
+
   const count = items.length
   // Navigation has a hard start and end - it does NOT wrap around. At the first image
   // there's no previous, at the last there's no next (the arrows/previews for those
@@ -982,7 +987,7 @@ export function Lightbox({
                   box), so the checkerboard layer behind it lines up with the picture -
                   and so the pin layer, which is `absolute inset-0` over this box, puts
                   a pin at the fraction of the PICTURE it was placed at. */}
-              <div className="relative">
+              <div data-lightbox-picture-surface className="relative inline-block">
                 <LightboxChecker className={chromeFade} />
                 <img
                   ref={imgRef}

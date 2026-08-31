@@ -666,14 +666,15 @@ body {
 }
 
 /* WebKitGTK may promote native scrollbars into a compositor layer above fixed
-   content, ignoring the dialog's z-index. Preserve their gutter (so opening a
-   dialog causes no layout shift) but hide the chrome for the dialog lifetime. */
-.hydra-dialog-open * {
+   content, ignoring the overlay's z-index. Preserve their gutter (so opening a
+   dialog or lightbox causes no layout shift) but hide the chrome while any modal
+   overlay is open. */
+.hydra-overlay-open * {
   scrollbar-color: transparent transparent;
 }
-.hydra-dialog-open *::-webkit-scrollbar-thumb,
-.hydra-dialog-open *::-webkit-scrollbar-thumb:hover,
-.hydra-dialog-open *::-webkit-scrollbar-thumb:active {
+.hydra-overlay-open *::-webkit-scrollbar-thumb,
+.hydra-overlay-open *::-webkit-scrollbar-thumb:hover,
+.hydra-overlay-open *::-webkit-scrollbar-thumb:active {
   background-color: transparent;
 }
 

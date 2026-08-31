@@ -42,6 +42,30 @@ function renderPlainLightbox() {
 }
 
 describe('Lightbox closing', () => {
+  it('suppresses underlying scrollbar chrome while open', () => {
+    const { unmount } = render(<Lightbox items={[plainImage]} index={0} onIndexChange={() => {}} onClose={() => {}} />)
+    expect(document.documentElement).toHaveClass('hydra-overlay-open')
+    unmount()
+    expect(document.documentElement).not.toHaveClass('hydra-overlay-open')
+  })
+
+  it('keeps scrollbar chrome suppressed until every overlay closes', () => {
+    const first = render(<Lightbox items={[plainImage]} index={0} onIndexChange={() => {}} onClose={() => {}} />)
+    const second = render(<Lightbox items={[plainImage]} index={0} onIndexChange={() => {}} onClose={() => {}} />)
+
+    first.unmount()
+    expect(document.documentElement).toHaveClass('hydra-overlay-open')
+    second.unmount()
+    expect(document.documentElement).not.toHaveClass('hydra-overlay-open')
+  })
+
+  it('shrink-wraps the transparency backing to the rendered image', () => {
+    renderPlainLightbox()
+    const surface = screen.getByAltText('shot.png').parentElement
+    expect(surface).toHaveAttribute('data-lightbox-picture-surface')
+    expect(surface).toHaveClass('inline-block')
+  })
+
   it('closes when the backdrop is pressed and clicked directly', () => {
     const { onClose, backdrop } = renderPlainLightbox()
     fireEvent.pointerDown(backdrop)
