@@ -64,6 +64,7 @@ describe('Lightbox closing', () => {
     const surface = screen.getByAltText('shot.png').parentElement
     expect(surface).toHaveAttribute('data-lightbox-picture-surface')
     expect(surface).toHaveClass('inline-block')
+    expect(screen.getByAltText('shot.png')).toHaveClass('h-auto')
   })
 
   it('closes when the backdrop is pressed and clicked directly', () => {
