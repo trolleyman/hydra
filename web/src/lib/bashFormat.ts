@@ -755,6 +755,18 @@ function quoteShellPath(path: string): string {
 
 export function formatBashForDisplay(command: string, cwd?: string, indent: number = DEFAULT_BASH_INDENT): string {
   const script = dropRedundantSemicolons(splitBashChains(dropNoopCd(stripLineContinuations(unwrapBashLoginCommand(command))), indent))
-  if (!cwd || cwd === '.' || /^\s*cd(?:\s|$)/.test(script)) return script
-  return `cd ${quoteShellPath(cwd)}\n${script}`
+  if (!cwd || cwd === '.') return script
+
+  // A leading comment is the tool card's human-readable description. Keep it
+  // first even when Hydra has to add the directory the command actually ran
+  // from; otherwise the synthetic `cd` visually demotes the description into
+  // the script body. An explicit cd immediately after the comment still wins.
+  const comment = leadingBashComment(script)
+  const firstBreak = comment ? script.indexOf('\n') : -1
+  const body = firstBreak >= 0 ? script.slice(firstBreak + 1) : script
+  if (/^\s*cd(?:\s|$)/.test(body)) return script
+  const preamble = `cd ${quoteShellPath(cwd)}`
+  return firstBreak >= 0
+    ? `${script.slice(0, firstBreak + 1)}${preamble}\n${body}`
+    : `${preamble}\n${script}`
 }

@@ -183,8 +183,13 @@ and `web/src/DiffViewer.tsx`):
   must agree with the corresponding line in the read before the gutter is shown.
 - Bash command cards render commands relative to the head's worktree or a review
   agent's detached checkout. A command that ran elsewhere gets a reproducible
-  `cd` preamble; home-relative preambles keep `~` outside quotes so the shell
-  expands it.
+  `cd` preamble; when the script starts with a description comment, that comment
+  stays first and the preamble follows it. Home-relative preambles keep `~`
+  outside quotes so the shell expands it.
+- The spawn composer uploads attachments against its selected project. A
+  desktop-native image paste that arrives before any project is selected is
+  ignored; when selection restoration and paste overlap, the current project
+  store supplies the upload identity rather than a placeholder route.
 - A fully loaded transcript starts with a ruled `Conversation began <time> ago`
   divider styled like the `Resumed <time> ago` process-resume divider. Its exact
   timestamp uses the shared selectable Tooltip rather than a native browser
