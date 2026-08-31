@@ -4022,6 +4022,22 @@ const ToolCard = memo(function ToolCard({
             <CodePanel code={rawJson} lang="json" />
           ) : (
             <>
+              {/* A host-run explanation must survive the request settling. While
+                  it is parked, ToolApproval repeats it beside the decision
+                  controls; after Allow/Deny those controls disappear, so the
+                  tool's own input is the durable record of why the command was
+                  requested. Keep it in the body as well as the truncated header
+                  summary, where long explanations can be read in full. */}
+              {isHostRun && description && (
+                <div>
+                  <div className="mb-0.5 text-3xs font-semibold tracking-wide text-stone-400 dark:text-stone-500 select-none">
+                    Why
+                  </div>
+                  <div className={`${PANEL_CLASS} border-l-2 border-l-amber-300 dark:border-l-amber-500/50 px-2.5 py-1.5 whitespace-pre-wrap text-stone-700 dark:text-stone-200 leading-relaxed`}>
+                    {description}
+                  </div>
+                </div>
+              )}
               {isBash ? (
                 <div>
                   {interactiveTranscript && (

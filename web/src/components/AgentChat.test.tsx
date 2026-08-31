@@ -682,6 +682,29 @@ describe('an expanded tool card survives its run becoming a step group', () => {
     call(sockets[1], 'toolu_refold', 'Read')
     expect(cardHeader('Read')).toHaveAttribute('aria-expanded', 'false')
   })
+
+  it('keeps a settled host-run explanation in the expanded body', async () => {
+    const why = 'The sandbox cannot inspect the host listener table, so this read-only command has to run outside it.'
+    renderChat()
+    await connectedComposer()
+    const ws = sockets[0]
+    act(() => ws.emit({ type: 'replay_done' }))
+    act(() => {
+      const emit = (type: string, payload: unknown) =>
+        ws.emit({ type: 'chat_event', event: { seq: ++seq, type, timestamp: '', payload } })
+      emit('tool_started', { id: 'toolu_hostrun_why', name: 'mcp__hydra__host_run', input: { command: 'ss -Hltn', why } })
+      emit('tool_completed', { id: 'toolu_hostrun_why', content: 'DENIED by the user.' })
+    })
+
+    const hostRun = cardHeader('Host run')
+    expect(hostRun).toBeDefined()
+    expect(screen.queryByText('Why')).toBeNull()
+    act(() => hostRun!.click())
+    expect(screen.getByText('Why')).toBeVisible()
+    // The selector distinguishes the durable body block from the header summary,
+    // which deliberately carries the same explanation in truncated form.
+    expect(screen.getByText(why, { selector: 'div' })).toBeVisible()
+  })
 })
 
 // History pages arrive NEWEST first, so a tool call whose tool_use and

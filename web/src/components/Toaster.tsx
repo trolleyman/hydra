@@ -1,4 +1,5 @@
 import React from 'react'
+import { useParams } from '@tanstack/react-router'
 import { Check, AlertCircle, TriangleAlert, Info, X } from 'lucide-react'
 import { useToastStore, ToastDismissContext, type Toast, type ToastType } from '../stores/toastStore'
 import { useProjectStore } from '../stores/projectStore'
@@ -9,6 +10,7 @@ import { withBranchPills } from '../lib/branchPills'
 import { highlightCode } from '../lib/markdown'
 import { TILE_TONE, TILE_BAR, TILE_GLYPH, type TileTone } from '../lib/tileTone'
 import { TOAST_CARD_WIDTH, TOAST_CARD_WIDTH_WIDE } from '../lib/toastLayout'
+import { approvalToastDuplicatesOpenAgent } from '../lib/toastVisibility'
 
 // Per-type visual identity: the icon and its tinted rounded square. The tint and
 // the countdown bar come from the shared tile table (lib/tileTone), which the
@@ -204,15 +206,27 @@ const ToastItem: React.FC<{ toast: Toast; onDismiss: () => void }> = ({ toast, o
 
 export const Toaster: React.FC = () => {
   const { toasts, dismiss, pause, resume } = useToastStore()
+  const routeParams = useParams({ strict: false }) as { projectId?: string; agentId?: string }
+  // A host command already has a complete, actionable approval surface on the
+  // matching transcript card. Do not float a second copy over that same card
+  // while its agent page is open. The toast stays in the store (rather than
+  // being dismissed), so navigating elsewhere immediately reveals it again if
+  // the request is still waiting. Other approval kinds remain global: egress in
+  // particular has no exact tool card to attach to.
+  const visibleToasts = toasts.filter((toast) => !approvalToastDuplicatesOpenAgent(
+    toast.approval,
+    routeParams.projectId,
+    routeParams.agentId,
+  ))
 
-  if (toasts.length === 0) return null
+  if (visibleToasts.length === 0) return null
 
   return (
     // z-[110] sits between the passive image lightbox (z-[100], which the approval
     // toasts must be visible over) and focused modal dialogs (z-[120], e.g. a
     // merge/kill confirmation, which must be visible over the toasts).
     <div className="fixed bottom-4 right-4 z-[110] flex flex-col gap-2 items-end">
-      {toasts.map((toast) => (
+      {visibleToasts.map((toast) => (
         // A transparent wrapper carries the hover handlers so every toast variant
         // (plain / transition / approval card) pauses uniformly - hovering freezes
         // the auto-dismiss timer and countdown bar until the pointer leaves.
