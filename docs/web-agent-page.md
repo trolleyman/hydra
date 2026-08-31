@@ -243,8 +243,11 @@ and `web/src/DiffViewer.tsx`):
   (`web/src/lib/sidebar.ts`): a persisted desktop `desktopCollapsed` preference
   and a transient mobile `mobileOpen` (never persisted, so crossing the 768px
   breakpoint can't pop the sidebar open; below it the sidebar is a full-screen
-  panel under the top bar, no scrim). Sidebar *width* is plain `useState` in
-  `__root.tsx` persisted with `readLocal`/`writeLocal(StorageKeys.sidebarWidth)`.
+  panel under the top bar, no scrim). The slide/width transition is armed only
+  by an explicit toggle, so crossing the breakpoint swaps layouts without
+  animating the mobile panel into or out of the desktop column. Sidebar *width*
+  is plain `useState` in `__root.tsx` persisted with
+  `readLocal`/`writeLocal(StorageKeys.sidebarWidth)`.
   `forwardSidebarWheelToMain` (`__root.tsx`) forwards leftover sidebar wheel
   delta into `[data-main-scroll]` / `[data-inspector-scroll]`.
 - All resizing is hand-rolled pointer/mouse drag - no split-pane library: sidebar
