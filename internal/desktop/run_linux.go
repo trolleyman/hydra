@@ -32,6 +32,9 @@ struct HydraDesktop {
 	const char *uri;
 	GUri *origin;
 	WebKitNetworkSession *network_session;
+	GKeyFile *browser_storage;
+	char *browser_storage_path;
+	guint browser_storage_flush;
 	gboolean keep_running;
 };
 
@@ -226,6 +229,53 @@ static void hydra_show_notification(HydraWindow *window, JSCValue *value) {
 	g_free(title); g_free(body); g_free(tag); g_free(uri);
 }
 
+static gboolean hydra_flush_browser_storage(gpointer data) {
+	HydraDesktop *desktop = data;
+	desktop->browser_storage_flush = 0;
+	GError *error = NULL;
+	if (!g_key_file_save_to_file(desktop->browser_storage, desktop->browser_storage_path, &error)) {
+		g_warning("could not save Hydra browser preferences: %s", error->message);
+		g_clear_error(&error);
+	}
+	return G_SOURCE_REMOVE;
+}
+
+static void hydra_save_browser_storage(HydraDesktop *desktop, const char *key, const char *value) {
+	if (key == NULL || !g_str_has_prefix(key, "hydra-")) return;
+	char *group = g_compute_checksum_for_string(G_CHECKSUM_SHA256, key, -1);
+	if (value == NULL) {
+		g_key_file_remove_group(desktop->browser_storage, group, NULL);
+	} else {
+		g_key_file_set_string(desktop->browser_storage, group, "key", key);
+		g_key_file_set_string(desktop->browser_storage, group, "value", value);
+	}
+	g_free(group);
+	if (desktop->browser_storage_flush == 0)
+		desktop->browser_storage_flush = g_timeout_add(150, hydra_flush_browser_storage, desktop);
+}
+
+static char *hydra_browser_storage_script(HydraDesktop *desktop) {
+	GString *script = g_string_new(
+		"(()=>{try{const d=s=>new TextDecoder().decode(Uint8Array.from(atob(s),c=>c.charCodeAt(0)));"
+	);
+	gsize count = 0;
+	char **groups = g_key_file_get_groups(desktop->browser_storage, &count);
+	for (gsize i = 0; i < count; i++) {
+		char *key = g_key_file_get_string(desktop->browser_storage, groups[i], "key", NULL);
+		char *value = g_key_file_get_string(desktop->browser_storage, groups[i], "value", NULL);
+		if (key != NULL && value != NULL) {
+			char *encoded_key = g_base64_encode((const guchar *)key, strlen(key));
+			char *encoded_value = g_base64_encode((const guchar *)value, strlen(value));
+			g_string_append_printf(script, "localStorage.setItem(d('%s'),d('%s'));", encoded_key, encoded_value);
+			g_free(encoded_key); g_free(encoded_value);
+		}
+		g_free(key); g_free(value);
+	}
+	g_strfreev(groups);
+	g_string_append(script, "}catch{}})();");
+	return g_string_free(script, FALSE);
+}
+
 static void hydra_close_choice(GObject *source, GAsyncResult *result, gpointer data) {
 	HydraWindow *window = data;
 	GError *error = NULL;
@@ -314,6 +364,11 @@ static void hydra_script_message(WebKitUserContentManager *manager, JSCValue *va
 	} else if (g_strcmp0(type, "keep-running") == 0) {
 		window->desktop->keep_running = hydra_boolean_property(value, "enabled");
 		hydra_keep_running = window->desktop->keep_running;
+	} else if (g_strcmp0(type, "browser-storage") == 0) {
+		char *key = hydra_string_property(value, "key");
+		char *stored_value = hydra_string_property(value, "value");
+		hydra_save_browser_storage(window->desktop, key, stored_value);
+		g_free(key); g_free(stored_value);
 	}
 	g_free(type);
 }
@@ -352,13 +407,20 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolea
 	gtk_window_set_default_size(GTK_WINDOW(window), compact_chat ? 940 : 1280, compact_chat ? 780 : 820);
 
 	WebKitUserContentManager *manager = webkit_user_content_manager_new();
+	char *browser_storage_script = hydra_browser_storage_script(desktop);
+	WebKitUserScript *browser_storage = webkit_user_script_new(
+		browser_storage_script,
+		WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, NULL, NULL);
+	webkit_user_content_manager_add_script(manager, browser_storage);
+	webkit_user_script_unref(browser_storage);
+	g_free(browser_storage_script);
 	char *capability_prefix = g_strdup_printf(
 		"window.hydraDesktopCapabilities={nativeNotifications:true,nativeFolderPicker:true,compactChatWindow:%s};",
 		compact_chat ? "true" : "false");
 	char *capability_script = g_strconcat(capability_prefix,
 		"document.addEventListener('focusin',event=>window.webkit.messageHandlers.hydra.postMessage({type:'image-paste-target',enabled:!!event.target?.hasAttribute?.('data-desktop-image-paste')}),true);"
 		"document.addEventListener('focusout',()=>queueMicrotask(()=>window.webkit.messageHandlers.hydra.postMessage({type:'image-paste-target',enabled:!!document.activeElement?.hasAttribute?.('data-desktop-image-paste')})),true);"
-		"window.addEventListener('DOMContentLoaded',()=>window.webkit.messageHandlers.hydra.postMessage({type:'keep-running',enabled:localStorage.getItem('hydra-desktop-keep-running')!=='0'}))",
+		"window.addEventListener('DOMContentLoaded',()=>{const h=window.webkit.messageHandlers.hydra;h.postMessage({type:'keep-running',enabled:localStorage.getItem('hydra-desktop-keep-running')!=='0'});for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(key?.startsWith('hydra-'))h.postMessage({type:'browser-storage',key,value:localStorage.getItem(key)})}})",
 		NULL);
 	WebKitUserScript *capabilities = webkit_user_script_new(
 		capability_script,
@@ -501,18 +563,32 @@ static void hydra_startup(GApplication *application, gpointer data) {
 	g_object_unref(menu);
 }
 
-static int hydra_desktop_run(const char *application_id, const char *uri, const char *data_directory, const char *cache_directory) {
+static int hydra_desktop_run(const char *application_id, const char *uri, const char *profile_directory) {
 	HydraDesktop desktop = { .uri = uri, .origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL), .keep_running = TRUE };
 	if (desktop.origin == NULL) return 2;
-	desktop.network_session = webkit_network_session_new(data_directory, cache_directory);
+	desktop.browser_storage = g_key_file_new();
+	desktop.browser_storage_path = g_build_filename(profile_directory, "browser-storage.ini", NULL);
+	GError *storage_error = NULL;
+	if (!g_key_file_load_from_file(desktop.browser_storage, desktop.browser_storage_path, G_KEY_FILE_NONE, &storage_error)) {
+		if (!g_error_matches(storage_error, G_FILE_ERROR, G_FILE_ERROR_NOENT))
+			g_warning("could not load Hydra browser preferences: %s", storage_error->message);
+		g_clear_error(&storage_error);
+	}
+	desktop.network_session = webkit_network_session_new_ephemeral();
 	GtkApplication *app = gtk_application_new(application_id, G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_signal_connect(app, "startup", G_CALLBACK(hydra_startup), &desktop);
 	g_signal_connect(app, "activate", G_CALLBACK(hydra_activate), &desktop);
 	g_signal_connect(app, "command-line", G_CALLBACK(hydra_command_line), &desktop);
 	char *argv[] = { "hydra-desktop", (char *)uri, NULL };
 	int status = g_application_run(G_APPLICATION(app), 2, argv);
+	if (desktop.browser_storage_flush != 0) {
+		g_source_remove(desktop.browser_storage_flush);
+		hydra_flush_browser_storage(&desktop);
+	}
 	g_object_unref(app);
 	g_object_unref(desktop.network_session);
+	g_key_file_unref(desktop.browser_storage);
+	g_free(desktop.browser_storage_path);
 	g_uri_unref(desktop.origin);
 	return status;
 }
@@ -548,20 +624,16 @@ func run(rawURL string) error {
 	defer C.free(unsafe.Pointer(applicationID))
 	uri := C.CString(rawURL)
 	defer C.free(unsafe.Pointer(uri))
-	dataDirectory, cacheDirectory, err := webProfileDirectories()
+	profileDirectory, err := webProfileDirectory()
 	if err != nil {
 		return errtrace.Wrap(fmt.Errorf("resolve desktop webview profile: %w", err))
 	}
-	for _, directory := range []string{dataDirectory, cacheDirectory} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			return errtrace.Wrap(fmt.Errorf("create desktop webview profile directory %s: %w", filepath.Base(directory), err))
-		}
+	if err := os.MkdirAll(profileDirectory, 0o700); err != nil {
+		return errtrace.Wrap(fmt.Errorf("create desktop webview profile directory %s: %w", filepath.Base(profileDirectory), err))
 	}
-	dataPath := C.CString(dataDirectory)
-	defer C.free(unsafe.Pointer(dataPath))
-	cachePath := C.CString(cacheDirectory)
-	defer C.free(unsafe.Pointer(cachePath))
-	if status := C.hydra_desktop_run(applicationID, uri, dataPath, cachePath); status != 0 {
+	profilePath := C.CString(profileDirectory)
+	defer C.free(unsafe.Pointer(profilePath))
+	if status := C.hydra_desktop_run(applicationID, uri, profilePath); status != 0 {
 		return errtrace.Wrap(fmt.Errorf("native application exited with status %d", int(status)))
 	}
 	if C.hydra_desktop_keep_running() == 0 && daemon.IsDesktopManaged("") {

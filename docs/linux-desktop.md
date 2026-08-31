@@ -367,10 +367,15 @@ and backend build identity. Linux refuses to attach when the protocol is absent
 or different, so compatibility is checked for reused daemons as well as newly
 launched ones.
 The GTK shell also supports repeated application activation and Ctrl+N as
-native multi-window actions against the same application/backend. Its WebKit
-profile is persistent under the selected Hydra state root, so browser-local
-preferences such as the last project and model survive an app restart while
-checkout-local development runs remain isolated from the installed app. WebKit
+native multi-window actions against the same application/backend. Each desktop
+launch uses a fresh WebKit network session because the backend has a new random
+loopback origin and a reused port must not expose an earlier launch's storage.
+The shell mirrors Hydra's local-storage keys into a stable file under the
+selected Hydra state root and restores them before the page loads. Updates are
+batched through WebKit's in-process script-message channel, with no network
+request. Browser-local state such as the last project, model, view preferences
+and drafts therefore survives an app restart, while checkout-local development
+runs remain isolated from the installed app. WebKit
 policy keeps same-origin Hydra navigation embedded, opens clicked external
 HTTP(S) links with the system handler, and blocks cross-origin redirects and
 non-web schemes. Window-manager lifecycle still needs native Wayland/X11
