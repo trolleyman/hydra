@@ -3008,7 +3008,6 @@ function OutputSpanText({ cls, text, ws }: { cls: string; text: string; ws: Whit
     : <span className={cls}>{text}</span>
 }
 
-// eslint-disable-next-line react-refresh/only-export-components -- exported for focused gutter rendering tests
 export function ScriptOutputPanel({ sections, gutterDigits }: { sections: ScriptSection[]; gutterDigits?: number }) {
   const rows = useMemo(() => scriptOutputRows(sections), [sections])
   const ws = useWhitespaceMarks()
