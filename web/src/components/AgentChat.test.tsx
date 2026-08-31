@@ -1350,10 +1350,10 @@ describe('a message sent after a commit lands under it', () => {
     expect(subject.parentElement).toHaveClass('items-baseline')
     expect(subject.closest('[role="button"]')).not.toHaveAttribute('title')
 
-    const lines = subject.closest('.rounded-b-md')?.querySelectorAll('[data-commit-graph-line]')
-    expect(lines).toHaveLength(2)
-    expect(lines?.[0]).toHaveClass('top-1/2', '-bottom-0.5')
-    expect(lines?.[1]).toHaveClass('-top-0.5', 'bottom-1/2')
+    const list = subject.closest('.rounded-b-md')
+    expect(list?.parentElement).toHaveClass('-mt-px')
+    expect(list?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0')
+    expect(list?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(2)
 
     fireEvent.mouseEnter(subject.closest('[role="button"]')?.parentElement as HTMLElement)
     expect(await screen.findByText('Merged Author', {}, { timeout: 1200 })).toBeInTheDocument()

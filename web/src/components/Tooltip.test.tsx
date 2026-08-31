@@ -33,6 +33,7 @@ describe('Tooltip', () => {
       // ...and visible once it does.
       act(() => void vi.advanceTimersByTime(1))
       expect(screen.getByText('Refresh')).toBeInTheDocument()
+      expect(screen.getByRole('tooltip')).toHaveClass('dark:bg-neutral-800', 'dark:border-neutral-700')
 
       // Leaving gives the pointer time to enter the selectable tooltip.
       fireEvent.mouseLeave(span)
