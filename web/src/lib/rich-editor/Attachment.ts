@@ -16,6 +16,7 @@ export interface ComposerAttachment {
 
 export interface AttachmentOptions {
   registry?: AttachmentRegistry
+  onOpen?: (id: string, origin: Element) => void
 }
 
 export const Attachment = Node.create<AttachmentOptions>({
@@ -27,7 +28,7 @@ export const Attachment = Node.create<AttachmentOptions>({
   draggable: true,
 
   addOptions() {
-    return { registry: undefined }
+    return { registry: undefined, onOpen: undefined }
   },
 
   addAttributes() {
@@ -65,6 +66,7 @@ export const Attachment = Node.create<AttachmentOptions>({
   addNodeView() {
     const registry = this.options.registry
     if (!registry) return null
+    const onOpen = this.options.onOpen
     return ({ node, view, getPos }) => {
       const dom = document.createElement('span')
       dom.dataset.composerAttachment = ''
@@ -114,6 +116,16 @@ export const Attachment = Node.create<AttachmentOptions>({
       })
       dom.append(remove)
 
+      const open = (event: MouseEvent) => {
+        if (!onOpen
+          || event.button !== 0
+          || (event.target instanceof Element && event.target.closest('button'))) return
+        event.preventDefault()
+        event.stopPropagation()
+        onOpen(String(node.attrs.id), dom)
+      }
+      dom.addEventListener('mousedown', open)
+
       const render = () => {
         const state = registry.get(String(node.attrs.id))
         const stateName = state?.status ?? 'idle'
@@ -124,7 +136,13 @@ export const Attachment = Node.create<AttachmentOptions>({
       }
       const unsubscribe = registry.subscribe(render)
       render()
-      return { dom, destroy: unsubscribe }
+      return {
+        dom,
+        destroy() {
+          dom.removeEventListener('mousedown', open)
+          unsubscribe()
+        },
+      }
     }
   },
 })

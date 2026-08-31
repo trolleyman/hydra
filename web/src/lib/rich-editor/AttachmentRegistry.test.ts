@@ -14,10 +14,10 @@ describe('attachment upload lifecycle', () => {
   const editors: ReturnType<typeof createRichEditor>[] = []
   afterEach(() => editors.splice(0).forEach((editor) => editor.destroy()))
 
-  function editorWith(registry: AttachmentRegistry) {
+  function editorWith(registry: AttachmentRegistry, onOpenAttachment?: (id: string, origin: Element) => void) {
     const element = document.createElement('div')
     document.body.append(element)
-    const editor = createRichEditor({ element, attachmentRegistry: registry })
+    const editor = createRichEditor({ element, attachmentRegistry: registry, onOpenAttachment })
     editors.push(editor)
     return editor
   }
@@ -87,5 +87,18 @@ describe('attachment upload lifecycle', () => {
     expect(chip.querySelector('[aria-label="Remove cat.png"]')).not.toBeNull()
     chip.querySelector<HTMLButtonElement>('[aria-label="Remove cat.png"]')!.click()
     expect(editor.getJSON()).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] })
+  })
+
+  it('opens an editable image chip without selecting inside the atom', () => {
+    const registry = new AttachmentRegistry(() => new Promise(() => {}))
+    const onOpen = vi.fn()
+    const editor = editorWith(registry, onOpen)
+    registry.add(editor, { ...attachment, display: 'thumbnail' }, new File(['image'], 'cat.png'), 'blob:cat')
+
+    const chip = editor.view.dom.querySelector<HTMLElement>('[data-composer-attachment]')!
+    chip.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    expect(onOpen).toHaveBeenCalledWith('image-1', chip)
+    expect(editor.state.selection.empty).toBe(true)
+    expect(editor.state.selection.$from.parent.type.name).toBe('paragraph')
   })
 })

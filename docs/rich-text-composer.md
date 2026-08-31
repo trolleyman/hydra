@@ -47,10 +47,10 @@ Completed 2026-08-29:
   parser/serializer. Task item checked state has explicit round-trip coverage.
 - `THIRD_PARTY_NOTICES.md` carries the Tiptap, ProseMirror and Marked MIT
   notices required by the production bundle.
-- Refined inline-code presentation from a whole-capsule active outline to a
-  quiet edge-caret indicator. Empty capsules now occupy only a compact typing
-  slot, and the regular E2E runner explicitly excludes the fixture that requires
-  the dedicated rich-editor server.
+- Refined inline-code presentation to use the browser's spatial caret without
+  a second active-state indicator. Empty capsules reserve a compact, real
+  typing slot, and the regular E2E runner explicitly excludes the fixture that
+  requires the dedicated rich-editor server.
 - Made a third consecutive backtick upgrade the empty inline capsule into a
   fenced code block. The block's language selector keeps language choice in the
   structured document and Markdown.
@@ -93,9 +93,10 @@ Completed 2026-08-29:
   assertions guard both heights so tokenization cannot make surrounding prose
   jump vertically.
 - Added code-block language selection without adding a formatting header. Each
-  fenced block owns a compact selector in its top-right corner; changing it
-  updates the Markdown info string and live Prism decorations in the editable
-  code. The shared highlighter keeps editable and rendered token colours aligned.
+  fenced block owns a compact searchable picker in its top-right corner. It
+  offers known languages, accepts an arbitrary Markdown info string and updates
+  live Prism decorations in the editable code. The shared highlighter keeps
+  editable and rendered token colours aligned.
 - Added the composer-to-message handoff. Immediate and queued sends capture the
   composer's screen position and animate the optimistic user bubble from it;
   reduced-motion users get an instant handoff. The daemon echo settles the same
@@ -105,9 +106,9 @@ Completed 2026-08-29:
   combined prompt/attachment history, resizing and submit shortcuts while
   gaining the same marks, inline code, blocks and tables as production chat.
 - Fixed the follow-up production polish: outer document margins no longer move
-  the first composer line, an empty code capsule has a visible overlaid minimum size
-  without reserving layout width, and provider-assigned echo ids reconcile with
-  the existing optimistic user bubble by text fallback.
+  the first composer line, an empty code capsule reserves a visible typing slot,
+  and provider-assigned echo ids reconcile with the existing optimistic user
+  bubble by text fallback.
 - Added `| ` at the start of an otherwise empty paragraph as a two-column table
   shortcut. It creates a header row plus one body row and places the selection
   in the first header cell; pipes elsewhere remain literal.
@@ -127,10 +128,11 @@ The spike found two browser facts now captured in the design. Chrome does not
 natively walk through a content-bearing inline node, so the plugin owns every
 Left/Right grapheme step. It also maps the inside-start DOM caret to the node's
 left outer edge (and the outside-after caret to its right inner edge) even though
-ProseMirror's logical positions remain distinct. An edge-only decoration makes
-inside/outside visible without inserting zero-width sentinel characters. Pair
-insertion also needs an explicit history boundary so undo clears typed content
-before removing the empty capsule.
+ProseMirror's logical positions remain distinct. Hydra preserves those logical
+positions through keyboard behavior while relying on the native caret's spatial
+placement, without synthetic edge decorations or zero-width sentinel characters.
+Pair insertion also needs an explicit history boundary so undo clears typed
+content before removing the empty capsule.
 
 ## Why change it
 
@@ -284,6 +286,11 @@ do. The model and tests must not collapse them.
 | Entire code node selected | Backspace/Delete | Remove content and node |
 | Code command on code | Cmd/Ctrl+backtick | Toggle it back to plain text |
 
+Hydra owns Space, Backspace and Delete while the caret is inside inline code.
+This keeps spaces as literal U+0020 characters and deletes one grapheme per
+press; Chromium's temporary contenteditable NBSP cannot duplicate a space or
+create a two-state Backspace loop.
+
 Unwrapping is one history transaction. A second deletion performs the ordinary
 neighbouring-character deletion. One key press never both removes formatting and
 deletes prose. Arrow movement and deletion operate on grapheme clusters, not
@@ -354,10 +361,12 @@ the existing separation between prompt text and attachment paths.
 | Uploading | chip + progress | Cancel action |
 | Failed | error chip | Retry and Remove actions |
 
-Attachments are atomic inline nodes. Left/Right moves before or after; clicking
-selects one as a unit; Backspace/Delete removes it. Dragging moves the same node
-without re-uploading. A block image preview is a presentation toggle on the same
-id, not a new attachment.
+Attachments are atomic inline nodes. Left/Right moves only before or after them;
+Backspace/Delete removes them. Clicking an image chip opens the shared lightbox
+without moving the document caret into the node. Their neutral, thumbnail-led
+surface matches sent-message attachment chips and does not create a trailing
+blank line. Dragging moves the same node without re-uploading. A block image
+preview is a presentation toggle on the same id, not a new attachment.
 
 ### Paste/drop and undo
 
@@ -402,14 +411,18 @@ token seeds its language. Code blocks:
 - Disable spellcheck, smart quotes and Markdown inline rules.
 - Indent/outdent with Tab/Shift+Tab.
 - Preserve literal newlines and whitespace.
+- Insert a literal newline on Shift+Enter even when the host uses Enter to send.
 - Copy raw code when the selection is wholly inside one block.
 - Copy fenced Markdown as part of a broader selection.
 - Leave on ArrowDown from the final visual line after one boundary step.
 - Unwrap when empty and Backspace is pressed at its start.
 - Offer "Attach as file" for a paste over the large-paste threshold.
 
-The language picker, live syntax highlighting, indentation and explicit
-exit/unwrap handling are built in production composers.
+The compact language picker searches known languages and accepts arbitrary
+Markdown info strings without reserving a toolbar row. Live syntax highlighting,
+code-font ligatures, indentation and explicit exit/unwrap handling are built in
+production composers. Clicking unused composer or code-block space places the
+caret at the corresponding document edge.
 
 ## Links and later extensions
 

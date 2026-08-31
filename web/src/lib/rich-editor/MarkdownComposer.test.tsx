@@ -137,11 +137,40 @@ describe('MarkdownComposer', () => {
     const view = render(<MarkdownComposer ref={ref} value={'```\nconst answer = 1\n```'} onChange={() => {}} />)
     await waitFor(() => expect(ref.current?.editor).not.toBeNull())
 
+    fireEvent.click(view.getByRole('button', { name: 'Code block language: Plain text' }))
     fireEvent.change(view.getByRole('combobox', { name: 'Code block language' }), {
       target: { value: 'typescript' },
     })
+    fireEvent.click(view.getByRole('option', { name: 'TypeScript' }))
     await waitFor(() => expect(view.container.querySelector('.rich-code-block .token.keyword')).toHaveTextContent('const'))
     expect(ref.current!.editor!.getAttributes('codeBlock').language).toBe('typescript')
+  })
+
+  it('accepts an arbitrary fenced-code language without reserving a toolbar row', async () => {
+    const ref = createRef<MarkdownComposerHandle>()
+    const view = render(<MarkdownComposer ref={ref} value={'```\nvalue\n```'} onChange={() => {}} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+
+    fireEvent.click(view.getByRole('button', { name: 'Code block language: Plain text' }))
+    const input = view.getByRole('combobox', { name: 'Code block language' })
+    fireEvent.change(input, { target: { value: 'cue' } })
+    fireEvent.click(view.getByRole('button', { name: 'Use “cue”' }))
+    expect(ref.current!.editor!.getAttributes('codeBlock').language).toBe('cue')
+    expect(view.container.querySelector('.rich-code-block > select')).toBeNull()
+  })
+
+  it('keeps Shift+Enter inside a code block even when the host owns Enter', async () => {
+    const ref = createRef<MarkdownComposerHandle>()
+    const onKeyDown = vi.fn(() => true)
+    const view = render(<MarkdownComposer ref={ref} value={'```text\na\n```'} onChange={() => {}} onKeyDown={onKeyDown} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+    const editor = ref.current!.editor!
+    editor.commands.setTextSelection(2)
+
+    fireEvent.keyDown(view.getByRole('textbox'), { key: 'Enter', shiftKey: true })
+    expect(onKeyDown).not.toHaveBeenCalled()
+    expect(editor.state.selection.$from.parent.type.name).toBe('codeBlock')
+    expect(editor.state.selection.$from.parent.textContent).toBe('a\n')
   })
 
   it('offers cell-local table actions without a global toolbar', async () => {

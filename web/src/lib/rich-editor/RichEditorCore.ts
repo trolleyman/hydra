@@ -20,7 +20,11 @@ const ConservativeItalic = Italic.extend({
   },
 })
 
-export function createRichEditorExtensions(attachmentRegistry?: AttachmentRegistry, interactiveNodeViews = false) {
+export function createRichEditorExtensions(
+  attachmentRegistry?: AttachmentRegistry,
+  interactiveNodeViews = false,
+  onOpenAttachment?: (id: string, origin: Element) => void,
+) {
   return [
   StarterKit.configure({
     code: false,
@@ -42,7 +46,7 @@ export function createRichEditorExtensions(attachmentRegistry?: AttachmentRegist
     tabSize: 2,
   }),
   TableShortcut,
-  Attachment.configure({ registry: attachmentRegistry }),
+  Attachment.configure({ registry: attachmentRegistry, onOpen: onOpenAttachment }),
   HydraReference,
   InlineCode,
   InlineCodeEditing,
@@ -69,13 +73,14 @@ export interface RichEditorOptions {
   editable?: boolean
   attributes?: Record<string, string>
   attachmentRegistry?: AttachmentRegistry
+  onOpenAttachment?: (id: string, origin: Element) => void
   interactiveNodeViews?: boolean
 }
 
 export function createRichEditor(options: RichEditorOptions = {}): Editor {
   const editor = new Editor({
     element: options.element,
-    extensions: createRichEditorExtensions(options.attachmentRegistry, options.interactiveNodeViews),
+    extensions: createRichEditorExtensions(options.attachmentRegistry, options.interactiveNodeViews, options.onOpenAttachment),
     content: options.content ?? parseRichMarkdown(options.markdown ?? ''),
     contentType: 'json',
     editable: options.editable ?? true,

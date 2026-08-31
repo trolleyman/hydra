@@ -1,6 +1,7 @@
 import type { Editor, JSONContent } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
+import { TextSelection } from '@tiptap/pm/state'
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { createRichEditorExtensions, parseRichMarkdown, serializeRichMarkdown } from './RichEditorCore'
 import type { AttachmentRegistry } from './AttachmentRegistry'
@@ -37,6 +38,7 @@ export interface MarkdownComposerProps {
   spellCheck?: boolean
   className?: string
   attachmentRegistry?: AttachmentRegistry
+  onOpenAttachment?: (id: string, origin: Element) => void
   references?: ComposerReference[]
   onRequestFiles?: () => void
 }
@@ -146,6 +148,7 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
   spellCheck = false,
   className = '',
   attachmentRegistry,
+  onOpenAttachment,
   references = [],
   onRequestFiles,
 }, ref) {
@@ -154,6 +157,7 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
   const onKeyDownRef = useRef(onKeyDown)
   const onPasteRef = useRef(onPaste)
   const onDropRef = useRef(onDrop)
+  const onOpenAttachmentRef = useRef(onOpenAttachment)
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onDocumentChangeRef = useRef(onDocumentChange)
   const literalPasteRef = useRef(false)
@@ -179,6 +183,7 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
   onKeyDownRef.current = onKeyDown
   onPasteRef.current = onPaste
   onDropRef.current = onDrop
+  onOpenAttachmentRef.current = onOpenAttachment
   onSelectionChangeRef.current = onSelectionChange
   onDocumentChangeRef.current = onDocumentChange
 
@@ -187,7 +192,11 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
     : undefined
 
   const editor: Editor | null = useEditor({
-    extensions: createRichEditorExtensions(attachmentRegistry, true),
+    extensions: createRichEditorExtensions(
+      attachmentRegistry,
+      true,
+      (id, origin) => onOpenAttachmentRef.current?.(id, origin),
+    ),
     content: restoredDocument ?? parseRichMarkdown(value),
     contentType: 'json',
     immediatelyRender: false,
@@ -235,6 +244,14 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
           setLinkOpen(true)
           return true
         }
+        if (editor
+          && event.key === 'Enter'
+          && event.shiftKey
+          && editor.state.selection.$from.parent.type.name === 'codeBlock') {
+          event.preventDefault()
+          editor.commands.insertContent('\n')
+          return true
+        }
         if (editor && isTableSelection(editor)) {
           // A host that owns bare Enter (chat sends, for example) keeps it.
           // Shift+Enter always performs table navigation; otherwise the table
@@ -263,6 +280,16 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
         return onPasteRef.current?.(event, editor) === true
       },
       handleDOMEvents: {
+        // A composer is normally taller than its last text line. Clicking that
+        // blank area should focus the document at its end, not leave the caret
+        // wherever it happened to be before.
+        mousedown: (view, event): boolean => {
+          if (event.target !== view.dom || event.button !== 0) return false
+          view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).scrollIntoView())
+          view.focus()
+          event.preventDefault()
+          return true
+        },
         // File drops must be intercepted before ProseMirror's built-in drop
         // handler asks the document for a text insertion coordinate. WebKitGTK
         // file drags can otherwise insert their local URI as prose, and jsdom

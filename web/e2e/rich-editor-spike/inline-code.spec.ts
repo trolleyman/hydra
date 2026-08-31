@@ -43,6 +43,8 @@ declare global {
       reset: (content: Record<string, unknown>) => void
       select: (from: number, to?: number) => void
       setCodeLanguage: (language: string) => void
+      addImage: () => string
+      openedAttachment: () => string
       snapshot: () => SpikeSnapshot
     }
     interactiveRichEditor: Editor | null
@@ -66,6 +68,25 @@ test('inline code and attachments do not change the surrounding line height', as
   // full layout pixel to the surrounding line.
   expect(Math.abs(withCode - plain)).toBeLessThan(0.75)
   expect(Math.abs(withAttachment - plain)).toBeLessThan(0.75)
+})
+
+test('an inline image has only outer caret positions, no phantom line, opens, and deletes', async ({ page }) => {
+  await reset(page, paragraph(text('before ')))
+  await select(page, 8)
+  const id = await page.evaluate(() => window.richEditorSpike.addImage())
+  const chip = page.locator(`[data-attachment-id="${id}"]`)
+  await expect(chip).toBeVisible()
+  const trailingBreak = chip.locator('+ br.ProseMirror-trailingBreak')
+  if (await trailingBreak.count()) await expect(trailingBreak).toHaveCSS('display', 'none')
+
+  await chip.click()
+  expect(await page.evaluate(() => window.richEditorSpike.openedAttachment())).toBe(id)
+  expect((await snapshot(page)).parent).toBe('paragraph')
+
+  await select(page, 9)
+  expect((await snapshot(page)).parent).toBe('paragraph')
+  await page.keyboard.press('Backspace')
+  expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('before ')), parent: 'paragraph' })
 })
 
 test('rendered commit and file chips do not change chat line height', async ({ page }) => {
@@ -97,7 +118,9 @@ test('Right traverses outside, inside characters, then outside', async ({ page }
   // DOM before the code and outside-after maps to its DOM end. ProseMirror state
   // remains distinct, and the active decoration makes that state visible.
   expect(domInside).toEqual([false, false, true, true, true, true])
-  expect(activeCode).toEqual([0, 1, 1, 1, 1, 0])
+  // The native caret is the only position indicator; entering a code span does
+  // not paint a second synthetic edge caret on the capsule.
+  expect(activeCode).toEqual([0, 0, 0, 0, 0, 0])
 })
 
 test('Left traverses the same positions in reverse', async ({ page }) => {
@@ -123,10 +146,14 @@ test('backtick inserts, accepts text, and exits an inline code node', async ({ p
   })
   await page.keyboard.type('`')
   expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('before '), code()), from: 9, parent: 'inlineCode' })
-  const emptyCodeX = await page.locator('code[data-inline-code]').evaluate((element) => element.getBoundingClientRect().left)
-  // DOM text-range edges differ slightly by engine, but opening the zero-width
-  // node must not reserve a visible character-width capsule.
-  expect(Math.abs(emptyCodeX - beforeX)).toBeLessThan(2)
+  const emptyCode = await page.locator('code[data-inline-code]').evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    return { left: rect.left, width: rect.width }
+  })
+  expect(Math.abs(emptyCode.left - beforeX)).toBeLessThan(2)
+  // An empty capsule reserves a real typing slot, so following prose cannot sit
+  // behind a zero-width pseudo-element.
+  expect(emptyCode.width).toBeGreaterThan(8)
 
   await page.keyboard.type('foo')
   expect(await snapshot(page)).toMatchObject({ doc: paragraph(text('before '), code('foo')), from: 12, parent: 'inlineCode' })
@@ -159,6 +186,75 @@ test('a code block highlights its selected language', async ({ page }) => {
   expect(((await snapshot(page)).doc.content as Record<string, unknown>[])[0]).toMatchObject({
     type: 'codeBlock', attrs: { language: 'typescript' },
   })
+})
+
+test('the custom language picker accepts arbitrary values without a toolbar row', async ({ page }) => {
+  const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
+  await page.evaluate((doc) => window.interactiveRichEditor?.commands.setContent(doc), codeBlock('echo 123'))
+  const block = interactive.locator('.rich-code-block')
+  const content = block.locator('.rich-code-block-content')
+  const geometry = await Promise.all([block.boundingBox(), content.boundingBox()])
+  expect(geometry[0]).not.toBeNull()
+  expect(geometry[1]).not.toBeNull()
+  expect(geometry[1]!.y - geometry[0]!.y).toBeLessThan(16)
+
+  await page.getByRole('button', { name: 'Code block language: Plain text' }).click()
+  await page.getByRole('combobox', { name: 'Code block language' }).fill('cue')
+  await page.getByRole('button', { name: 'Use “cue”' }).click()
+  expect(await page.evaluate(() => window.interactiveRichEditor?.getAttributes('codeBlock').language)).toBe('cue')
+  await expect(interactive.locator('select')).toHaveCount(0)
+  await expect(block.locator('.rich-code-language')).toHaveCSS('user-select', 'none')
+})
+
+test('Shift+Enter inserts a newline in fenced code under a send-on-Enter host', async ({ page }) => {
+  const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
+  await page.evaluate((doc) => {
+    window.interactiveRichEditor?.commands.setContent(doc)
+    window.interactiveRichEditor?.commands.setTextSelection(2)
+  }, codeBlock('a'))
+  await interactive.focus()
+  await page.keyboard.press('Shift+Enter')
+  expect(await page.evaluate(() => ({
+    text: window.interactiveRichEditor?.state.selection.$from.parent.textContent,
+    parent: window.interactiveRichEditor?.state.selection.$from.parent.type.name,
+  }))).toEqual({ text: 'a\n', parent: 'codeBlock' })
+})
+
+test('clicking blank composer space places the caret at the document end', async ({ page }) => {
+  const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
+  await page.evaluate((doc) => window.interactiveRichEditor?.commands.setContent(doc), paragraph(text('start')))
+  const box = await interactive.boundingBox()
+  if (!box) throw new Error('Missing interactive composer geometry')
+  await page.mouse.click(box.x + 20, box.y + box.height - 8)
+  await page.keyboard.type(' end')
+  expect(await page.evaluate(() => window.interactiveRichEditor?.getText())).toBe('start end')
+})
+
+test('the controlled composer preserves spaces and monotonic inline-code deletion', async ({ page }) => {
+  const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
+  await page.evaluate(() => window.interactiveRichEditor?.commands.clearContent())
+  await interactive.click()
+  // Keep the printable run together: Chromium can otherwise expose a trailing
+  // contenteditable space as NBSP before the following key is reconciled.
+  await page.keyboard.type('`a b')
+  expect(await page.evaluate(() => window.interactiveRichEditor?.getJSON())).toEqual(paragraph(code('a b')))
+  await page.keyboard.press('Backspace')
+  expect(await page.evaluate(() => window.interactiveRichEditor?.getJSON())).toEqual(paragraph(code('a ')))
+  await page.keyboard.press('Backspace')
+  expect(await page.evaluate(() => window.interactiveRichEditor?.getJSON())).toEqual(paragraph(code('a')))
+})
+
+test('controlled Backspace unwraps at the outside edge once, then deletes prose', async ({ page }) => {
+  const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
+  await page.evaluate(() => window.interactiveRichEditor?.commands.clearContent())
+  await interactive.click()
+  await page.keyboard.type('`hello there my a n`')
+  await page.keyboard.press('Backspace')
+  expect(await page.evaluate(() => window.interactiveRichEditor?.getJSON()))
+    .toEqual(paragraph(text('hello there my a n')))
+  await page.keyboard.press('Backspace')
+  expect(await page.evaluate(() => window.interactiveRichEditor?.getJSON()))
+    .toEqual(paragraph(text('hello there my a ')))
 })
 
 test('Tab and Shift+Tab indent code without moving browser focus', async ({ page }) => {
@@ -267,6 +363,27 @@ test('Right exits a code capsule at the end of the paragraph', async ({ page }) 
   expect(await snapshot(page)).toMatchObject({ doc: paragraph(code('a'), text('X')) })
 })
 
+test('inline code keeps single spaces and repeated Backspace makes forward progress', async ({ page }) => {
+  await reset(page, paragraph())
+  await select(page, 1)
+  await page.keyboard.type('`a')
+  await page.keyboard.press('Space')
+  await page.keyboard.type('b')
+  expect(await snapshot(page)).toMatchObject({ doc: paragraph(code('a b')) })
+
+  await page.keyboard.press('Backspace')
+  expect(await snapshot(page)).toMatchObject({ doc: paragraph(code('a ')) })
+  await page.keyboard.press('Backspace')
+  expect(await snapshot(page)).toMatchObject({ doc: paragraph(code('a')) })
+})
+
+test('a backtick at the visual end of inline code closes it without creating another span', async ({ page }) => {
+  await reset(page, paragraph(code('9f24c10')))
+  await select(page, 10)
+  await page.keyboard.type('`')
+  expect(await snapshot(page)).toMatchObject({ doc: paragraph(code('9f24c10')), from: 10, parent: 'paragraph' })
+})
+
 test('backtick wraps a selected run without visible delimiters', async ({ page }) => {
   await reset(page, paragraph(text('abc')))
   await select(page, 1, 4)
@@ -363,10 +480,10 @@ test('clicking code padding places the caret inside the corresponding edge', asy
   if (!box) return
 
   await page.mouse.click(box.x + 2, box.y + box.height / 2)
-  expect(await snapshot(page)).toMatchObject({ from: 4, parent: 'inlineCode', activeCode: 1 })
+  expect(await snapshot(page)).toMatchObject({ from: 4, parent: 'inlineCode', activeCode: 0 })
 
   await page.mouse.click(box.x + box.width - 2, box.y + box.height / 2)
-  expect(await snapshot(page)).toMatchObject({ from: 7, parent: 'inlineCode', activeCode: 1 })
+  expect(await snapshot(page)).toMatchObject({ from: 7, parent: 'inlineCode', activeCode: 0 })
 })
 
 test('partial and whole-node selections delete only what they cover', async ({ page }) => {

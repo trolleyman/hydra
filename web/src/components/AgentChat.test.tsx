@@ -590,13 +590,15 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     editor.commands.setContent('```javascript\nconst x = 1\n```', { contentType: 'markdown' })
     editor.commands.setTextSelection(2)
 
-    const language = await screen.findByRole('combobox', { name: 'Code block language' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Code block language: JavaScript' }))
+    const language = screen.getByRole('combobox', { name: 'Code block language' })
     expect(language).toHaveValue('javascript')
     fireEvent.change(language, { target: { value: 'typescript' } })
+    fireEvent.click(screen.getByRole('option', { name: 'TypeScript' }))
     expect(editor.getAttributes('codeBlock').language).toBe('typescript')
 
     editor.commands.setContent('ordinary text', { contentType: 'markdown' })
-    await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Code block language' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Code block language:/ })).toBeNull())
   })
 })
 

@@ -2,7 +2,6 @@ import { Extension, Node, type Editor, type Range } from '@tiptap/core'
 import { closeHistory } from '@tiptap/pm/history'
 import { Plugin, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state'
 import type { ResolvedPos } from '@tiptap/pm/model'
-import { Decoration, DecorationSet } from '@tiptap/pm/view'
 
 export const INLINE_CODE_NAME = 'inlineCode'
 
@@ -129,6 +128,12 @@ function backtick(editor: Editor): boolean {
   // capsule keeps ordinary inline-code semantics.
   const { $from } = selection
   const before = $from.nodeBefore
+  // Chrome can map the inside-end DOM caret to the paragraph position directly
+  // after the inline node. A backtick at that visual edge closes the existing
+  // span; it must not open a second empty one beside it.
+  if (selection.empty
+    && before?.type.name === INLINE_CODE_NAME
+    && before.content.size > 0) return true
   if (selection.empty
     && before?.type.name === INLINE_CODE_NAME
     && before.content.size === 0
@@ -197,9 +202,17 @@ function backspace(editor: Editor): boolean {
   const depth = inlineCodeDepth(state)
   if (depth >= 0) {
     const { $from } = state.selection
-    if ($from.parentOffset !== 0) return false
     const from = $from.before(depth)
-    return unwrapInlineCode(editor, from, $from.after(depth), from)
+    if ($from.parentOffset === 0) return unwrapInlineCode(editor, from, $from.after(depth), from)
+    // Native contenteditable Backspace can turn the final code-space into an
+    // NBSP placeholder instead of deleting the preceding grapheme. Delete from
+    // the document model so every press makes monotonic progress.
+    const previous = previousGrapheme($from.parent.textContent, $from.parentOffset)
+    editor.view.dispatch(setCaret(
+      state.tr.delete($from.start(depth) + previous, state.selection.from),
+      $from.start(depth) + previous,
+    ))
+    return true
   }
   const before = state.selection.$from.nodeBefore
   if (before?.type.name !== INLINE_CODE_NAME) return false
@@ -213,9 +226,16 @@ function deleteForward(editor: Editor): boolean {
   const depth = inlineCodeDepth(state)
   if (depth >= 0) {
     const { $from } = state.selection
-    if ($from.parentOffset !== $from.parent.content.size) return false
     const from = $from.before(depth)
-    return unwrapInlineCode(editor, from, $from.after(depth), from + $from.parent.content.size)
+    if ($from.parentOffset === $from.parent.content.size) {
+      return unwrapInlineCode(editor, from, $from.after(depth), from + $from.parent.content.size)
+    }
+    const next = nextGrapheme($from.parent.textContent, $from.parentOffset)
+    editor.view.dispatch(setCaret(
+      state.tr.delete(state.selection.from, $from.start(depth) + next),
+      state.selection.from,
+    ))
+    return true
   }
   const after = state.selection.$from.nodeAfter
   if (after?.type.name !== INLINE_CODE_NAME) return false
@@ -281,6 +301,20 @@ export const InlineCodeEditing = Extension.create({
             if (event.isComposing) return false
             if (event.key === '`' && !event.altKey) return backtick(editor)
             const depth = inlineCodeDepth(editor.state)
+            if (event.key === ' '
+              && !event.metaKey && !event.ctrlKey && !event.altKey
+              && depth >= 0) {
+              // Chromium represents a trailing contenteditable space as NBSP.
+              // If the next printable key arrives before its DOM observer has
+              // reconciled that placeholder, both the placeholder and a normal
+              // space can enter the document. Own Space at the key boundary so
+              // inline code always stores one literal U+0020 character.
+              const { selection } = editor.state
+              editor.view.dispatch(editor.state.tr
+                .insertText(' ', selection.from, selection.to)
+                .scrollIntoView())
+              return true
+            }
             if (event.key.length === 1
               && !event.metaKey && !event.ctrlKey && !event.altKey
               && depth >= 0
@@ -332,23 +366,6 @@ export const InlineCodeEditing = Extension.create({
               event.preventDefault()
               return true
             },
-          },
-          decorations(state) {
-            const depth = inlineCodeDepth(state)
-            if (depth < 0) return DecorationSet.empty
-            const { $from } = state.selection
-            const offset = $from.parentOffset
-            const edge = offset === 0
-              ? 'start'
-              : offset === $from.parent.content.size
-                ? 'end'
-                : undefined
-            return DecorationSet.create(state.doc, [
-              Decoration.node($from.before(depth), $from.after(depth), {
-                'data-inline-code-active': 'true',
-                ...(edge ? { 'data-inline-code-caret': edge } : {}),
-              }),
-            ])
           },
         },
       }),

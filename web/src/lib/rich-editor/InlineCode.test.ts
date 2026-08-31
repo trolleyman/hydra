@@ -95,6 +95,14 @@ describe('inline-code insertion and exit', () => {
     expect(editor.state.selection.from).toBe(6)
   })
 
+  it('treats a backtick at the mapped outside-after edge as the same exit', () => {
+    const editor = make(paragraph(code('foo')))
+    select(editor, 6)
+    expect(inlineCodeCommands.backtick(editor)).toBe(true)
+    expect(editor.getJSON()).toEqual(paragraph(code('foo')))
+    expect(editor.state.selection.from).toBe(6)
+  })
+
   it('upgrades three backticks in an empty paragraph to a code block', () => {
     const editor = make(paragraph())
     select(editor, 1)
@@ -143,13 +151,17 @@ describe('inline-code deletion', () => {
     }
   })
 
-  it('leaves partial selections and interior deletion to native editing', () => {
+  it('leaves partial selections alone and deletes interior graphemes explicitly', () => {
     const editor = make(paragraph(code('foo')))
     select(editor, 3, 4)
     expect(inlineCodeCommands.backspace(editor)).toBe(false)
     expect(inlineCodeCommands.deleteForward(editor)).toBe(false)
-    select(editor, 3)
-    expect(inlineCodeCommands.backspace(editor)).toBe(false)
-    expect(inlineCodeCommands.deleteForward(editor)).toBe(false)
+    select(editor, 4)
+    expect(inlineCodeCommands.backspace(editor)).toBe(true)
+    expect(editor.getJSON()).toEqual(paragraph(code('fo')))
+    expect(editor.state.selection.from).toBe(3)
+    expect(inlineCodeCommands.deleteForward(editor)).toBe(true)
+    expect(editor.getJSON()).toEqual(paragraph(code('f')))
+    expect(editor.state.selection.from).toBe(3)
   })
 })

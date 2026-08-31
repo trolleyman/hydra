@@ -1,8 +1,9 @@
 import { TextSelection } from '@tiptap/pm/state'
-import { createElement } from 'react'
+import { createElement, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createRichEditor } from '../../src/lib/rich-editor/RichEditorCore'
 import { MarkdownComposer } from '../../src/lib/rich-editor/MarkdownComposer'
+import { AttachmentRegistry } from '../../src/lib/rich-editor/AttachmentRegistry'
 import '../../src/index.css'
 
 const host = document.querySelector('#editor')
@@ -20,9 +21,14 @@ const initial = {
   }],
 }
 
+const attachmentRegistry = new AttachmentRegistry(async (_file, id) => ({ path: `/uploads/${id}.png` }))
+let openedAttachment = ''
+let attachmentCounter = 0
 const editor = createRichEditor({
   element: host,
   content: initial,
+  attachmentRegistry,
+  onOpenAttachment: (id) => { openedAttachment = id },
   attributes: {
     'aria-label': 'Rich editor behavior fixture',
     'data-rich-editor-spike': '',
@@ -42,6 +48,17 @@ const api = {
   setCodeLanguage(language: string) {
     editor.commands.updateAttributes('codeBlock', { language: language || null })
   },
+  addImage() {
+    const id = `image-${++attachmentCounter}`
+    attachmentRegistry.add(editor, {
+      id,
+      name: `${id}.png`,
+      kind: 'image',
+      display: 'thumbnail',
+    }, new File(['image'], `${id}.png`, { type: 'image/png' }), 'data:image/png;base64,iVBORw0KGgo=')
+    return id
+  },
+  openedAttachment: () => openedAttachment,
   snapshot() {
     const selection = window.getSelection()
     const anchor = selection?.anchorNode
@@ -68,17 +85,32 @@ window.richEditorSpike = api
 
 const interactiveHost = document.querySelector('#interactive-editor')
 if (!interactiveHost) throw new Error('Missing interactive editor host')
-createRoot(interactiveHost).render(createElement(MarkdownComposer, {
-  value: '| A | B |\n| --- | --- |\n| 1 | 2 |',
-  onChange: () => {},
-  references: [
-    { kind: 'branch', value: 'hydra/rich-text' },
-    { kind: 'agent', value: 'reviewer' },
-  ],
-  ariaLabel: 'Interactive rich editor fixture',
-  className: 'fixture-interactive-editor',
-  onEditor: (interactiveEditor) => { window.interactiveRichEditor = interactiveEditor },
-}))
+function InteractiveFixture() {
+  const [value, setValue] = useState('| A | B |\n| --- | --- |\n| 1 | 2 |')
+  const [interactiveEditor, setInteractiveEditor] = useState<ReturnType<typeof createRichEditor> | null>(null)
+  useEffect(() => {
+    window.interactiveRichEditor = interactiveEditor
+    return () => {
+      if (window.interactiveRichEditor === interactiveEditor) window.interactiveRichEditor = null
+    }
+  }, [interactiveEditor])
+  return createElement(MarkdownComposer, {
+    value,
+    onChange: setValue,
+    // Reproduce chat's send-on-Enter host contract. The composer itself must
+    // still retain Shift+Enter when the selection is inside fenced code.
+    onKeyDown: (event) => event.key === 'Enter',
+    references: [
+      { kind: 'branch', value: 'hydra/rich-text' },
+      { kind: 'agent', value: 'reviewer' },
+    ],
+    ariaLabel: 'Interactive rich editor fixture',
+    className: 'fixture-interactive-editor',
+    onEditor: setInteractiveEditor,
+  })
+}
+
+createRoot(interactiveHost).render(createElement(InteractiveFixture))
 
 declare global {
   interface Window {

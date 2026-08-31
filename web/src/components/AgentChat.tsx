@@ -11517,6 +11517,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       if (editor) syncAttachmentsIntoDocument(editor)
                     }}
                     attachmentRegistry={attachmentRegistry}
+                    onOpenAttachment={(id, origin) => {
+                      const numericId = Number(id)
+                      const index = openable.findIndex((attachment) => attachment.id === numericId)
+                      if (index < 0) return
+                      setLightboxOrigin(origin)
+                      setLightboxIndex(index)
+                    }}
                     references={composerReferences}
                     onRequestFiles={() => fileInputRef.current?.click()}
                     onChange={handleRichInputChange}
