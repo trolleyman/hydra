@@ -3591,7 +3591,7 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
     >
       {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
       <Tooltip
-        content={<FilePathLabel path={file.path} nativeTitle={false} />}
+        content={<FilePathLabel path={file.path} nativeTitle={false} wrap className="max-w-full" />}
         align="left"
         className="min-w-0 flex-1"
       >

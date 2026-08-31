@@ -82,6 +82,7 @@ describe('diff sidebar path tooltips', () => {
     const tooltip = screen.getByRole('tooltip')
     expect(within(tooltip).getByText('docs/guide/')).toHaveClass('text-stone-400')
     expect(within(tooltip).getByText('README.md')).toHaveClass('text-stone-700')
+    expect(within(tooltip).getByText('README.md').parentElement).toHaveClass('whitespace-normal', 'break-words')
     expect(tooltip.querySelector('svg')).not.toBeNull()
     expect(container.querySelector('[title]')).toBeNull()
   })
