@@ -143,15 +143,15 @@ describe('chat repository links', () => {
     expect(chatRepositoryRef('hydra/feature')).toBe('hydra/feature')
   })
 
-  it('uses the project checkout for a branchless focused head', () => {
+  it('uses the project checkout for a project-directory Head', () => {
     expect(chatRepositoryRef(null)).toBe('HEAD')
   })
 })
 
 describe('Bash card summary comments', () => {
   it('uses Codex\'s leading shell comment as the concise summary', () => {
-    expect(leadingBashComment('# Verify the focused-head invariant and roadmap update\nrg -n "Branch == nil" docs/roadmap.md'))
-      .toBe('Verify the focused-head invariant and roadmap update')
+    expect(leadingBashComment('# Verify the workspace-kind invariant and roadmap update\nrg -n "Branch == nil" docs/roadmap.md'))
+      .toBe('Verify the workspace-kind invariant and roadmap update')
   })
 
   it('does not promote shebangs or later script comments', () => {
@@ -169,9 +169,9 @@ describe('sectioned search output', () => {
   it('does not leak Markdown bold across omitted source lines', () => {
     const rows = scriptOutputRows([{
       kind: 'matches',
-      command: 'rg -n focused docs/a.md',
+      command: 'rg -n project-directory docs/a.md',
       match: { paths: ['docs/a.md'], numbered: true },
-      lines: ['3:**Status: shared focused-session', '18:ordinary later match'],
+      lines: ['3:**Status: shared project-directory session', '18:ordinary later match'],
     }])
 
     expect(rows).toHaveLength(2)

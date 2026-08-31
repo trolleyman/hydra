@@ -365,9 +365,9 @@ incoming-branch hint and remain ordinary one-commit rows.
 
 ## Project-directory Changes inspector
 
-A project-directory chat has the same Changes inspector as a managed worktree
-chat. It opens with the inspector hidden; **Show diff** reveals it when needed.
-When the Head is created, Hydra resolves the checkout's current `HEAD` and
+A Head with `workspace_kind = project_directory` has the same Changes inspector
+as a `worktree` Head. It opens with the inspector hidden; **Show diff** reveals
+it when needed. When the Head is created, Hydra resolves the checkout's current `HEAD` and
 persists it as `workspace_base_ref`. The default selector range is **Chat start**
 to **Project directory**: the starting commit is the left side, and the shared
 project root - committed, staged, unstaged and untracked state together - is the
@@ -383,7 +383,7 @@ not rewrite the baseline; the inspector continues to show the literal tree
 difference from the chat's starting commit.
 
 Tests and previews resolve the selected right side. Diff artifacts resolve both
-selected sides, so their before/after matches the code comparison. The focused
+selected sides, so their before/after matches the code comparison. The project-directory
 Head remains branchless throughout: commit inventory walks from
 `workspace_base_ref` to the shared checkout's `HEAD`, and uncommitted reads use
 the project root rather than synthesizing a Hydra worktree.

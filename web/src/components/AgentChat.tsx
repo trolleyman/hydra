@@ -7091,13 +7091,13 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // owns Enter (which sends), so the fence-body step is its call to make.
   const autoPair = useAutoPairStore((s) => s.enabled)
   // The checkout the head works in, for trimming absolute paths in tool cards
-  // and recognising the shell's default directory. A focused head works in the
+  // and recognising the shell's default directory. A project-directory Head works in the
   // project root and deliberately has no Hydra worktree of its own.
   const worktreePath = useAgentStore(
     (s) => {
       const agent = selectAgent(s, agentId)
       if (!agent || review) return agent?.worktree_path ?? null
-      return agent.focused ? agent.project_path : agent.worktree_path ?? null
+      return agent.workspace_kind === 'project_directory' ? agent.project_path : agent.worktree_path ?? null
     },
   )
   const repositoryRef = useAgentStore((s) => chatRepositoryRef(

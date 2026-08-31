@@ -143,7 +143,7 @@ func (s *Server) resolvePreviews(ctx context.Context, projectID, agentID string,
 		srcRef = sha
 		pv = preview.Version{HeadID: head.ID, SHA: sha, Branch: *head.Branch}
 	default:
-		// A focused head follows the shared checkout's current HEAD. It has no
+		// A project-directory head follows the shared checkout's current HEAD. It has no
 		// branch identity of its own, so this is a pinned version; the inspector's
 		// normal diff-refresh signal re-resolves it after a commit.
 		sha, err := git.ResolveRef(projectRoot, "HEAD")

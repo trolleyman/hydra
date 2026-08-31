@@ -598,7 +598,7 @@ func (s *Server) HandleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}()
 		statusLogPath := paths.GetStatusLogFromProjectRoot(projectRoot, agentID)
 
-		// Checkout path captured at attach time. Focused heads watch the shared
+		// Checkout path captured at attach time. Project-directory heads watch the shared
 		// project directory; ordinary heads watch their linked worktree.
 		worktree := head.WorkingDir()
 

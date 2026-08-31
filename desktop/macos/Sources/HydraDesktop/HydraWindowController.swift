@@ -3,7 +3,7 @@ import WebKit
 
 enum HydraWindowKind {
     case full
-    case focused
+    case projectDirectory
 }
 
 protocol HydraWindowControllerDelegate: AnyObject {
@@ -53,13 +53,13 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
         webView.allowsMagnification = true
 
         let path: String
-        if kind == .focused, let defaultProjectID {
+        if kind == .projectDirectory, let defaultProjectID {
             let project = defaultProjectID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? defaultProjectID
             if let defaultAgentID {
                 let agent = defaultAgentID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? defaultAgentID
                 path = "/project/\(project)/agent/\(agent)"
             } else {
-                path = "/focused/\(project)"
+                path = "/project-directory/\(project)"
             }
         } else {
             path = "/"
@@ -91,8 +91,8 @@ final class HydraWindowController: NSWindowController, WKNavigationDelegate, WKS
         switch type {
         case "show-main-window", "new-full-window":
             desktopDelegate?.desktopWindowRequested(.full, projectID: nil, agentID: nil)
-        case "new-chat-window", "new-focused-window":
-            desktopDelegate?.desktopWindowRequested(.focused, projectID: projectID, agentID: body["agentId"] as? String)
+        case "new-chat-window", "new-project-directory-window":
+            desktopDelegate?.desktopWindowRequested(.projectDirectory, projectID: projectID, agentID: body["agentId"] as? String)
         case "active-project":
             if let projectID { desktopDelegate?.desktopWindowActivatedProject(projectID) }
         case "window-state":

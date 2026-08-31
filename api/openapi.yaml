@@ -4157,20 +4157,22 @@ components:
             Drive the head via its structured protocol and render a chat view
             instead of a terminal (Claude and Codex only; rejected for other
             agent types). The prompt is delivered as the first chat turn.
-        focused:
-          type: boolean
+        workspace_kind:
+          $ref: '#/components/schemas/WorkspaceKind'
           description: >-
-            Run directly in the registered project's real root instead of
-            creating a Hydra branch and linked worktree. Focused heads require
-            structured chat mode and remain branchless for their whole life.
+            Select where the Head works. `worktree` creates an isolated Hydra
+            branch and linked worktree (the default); `project_directory` runs
+            directly in the registered project's root, requires structured chat
+            mode, and remains branchless for its whole life.
         filesystem_mode:
-          $ref: '#/components/schemas/FocusedFilesystemMode'
+          $ref: '#/components/schemas/ProjectDirectoryFilesystemMode'
         allow_commits:
           type: boolean
           description: >-
-            Initially authorize Hydra's guarded commit operation for a focused
-            head. Defaults to true for editable focused heads, must be false in
-            read-only mode, and is ignored for ordinary worktree heads.
+            Initially authorize Hydra's guarded commit operation for a
+            project-directory Head. Defaults to true for editable
+            project-directory Heads, must be false in read-only mode, and is
+            ignored for worktree Heads.
         ephemeral:
           type: boolean
           description: If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
@@ -4217,7 +4219,7 @@ components:
           type: string
           description: >-
             Switch the shared project checkout to this existing local branch.
-            Valid only for a focused/project-checkout head. This performs a
+            Valid only for a project-directory Head. This performs a
             normal non-forced Git checkout, so local changes are preserved when
             possible and a conflicting switch fails rather than discarding work.
         chat_mode:
@@ -4227,13 +4229,13 @@ components:
             only; rejected for other agent types). When the value changes, a
             live process is relaunched and its provider conversation is resumed.
         filesystem_mode:
-          $ref: '#/components/schemas/FocusedFilesystemMode'
+          $ref: '#/components/schemas/ProjectDirectoryFilesystemMode'
         allow_commits:
           type: boolean
           description: >-
-            Enable or disable guarded commits for a focused head immediately.
-            Must be false in read-only mode. Rejected for ordinary worktree
-            heads.
+            Enable or disable guarded commits for a project-directory Head
+            immediately. Must be false in read-only mode. Rejected for worktree
+            Heads.
 
     AgentStatus:
       type: string
@@ -4256,12 +4258,21 @@ components:
         - errored
       description: "The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit \"the agent is blocked on you\" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer \"gone quiet\" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event."
 
-    FocusedFilesystemMode:
+    WorkspaceKind:
+      type: string
+      enum: [worktree, project_directory]
+      x-enum-varnames: [WorkspaceKindWorktree, WorkspaceKindProjectDirectory]
+      description: >-
+        Checkout topology used by a Head. Worktree Heads own an isolated branch
+        and linked worktree; project-directory Heads use the registered project
+        root and remain branchless.
+
+    ProjectDirectoryFilesystemMode:
       type: string
       enum: [edit, readonly]
-      x-enum-varnames: [FocusedFilesystemEdit, FocusedFilesystemReadonly]
+      x-enum-varnames: [ProjectDirectoryFilesystemEdit, ProjectDirectoryFilesystemReadonly]
       description: >-
-        Filesystem posture for a focused branchless head. Edit writes directly
+        Filesystem posture for a project-directory Head. Edit writes directly
         into the registered project root; readonly makes that root read-only.
 
     AgentStatusInfo:
@@ -4294,7 +4305,7 @@ components:
 
     AgentResponse:
       type: object
-      required: [id, project_path, session_pid, session_status, agent_type, pre_prompt, prompt, base_branch]
+      required: [id, project_path, session_pid, session_status, agent_type, pre_prompt, prompt, base_branch, workspace_kind]
       properties:
         id:
           type: string
@@ -4313,25 +4324,27 @@ components:
         worktree_path:
           type: string
           nullable: true
-        focused:
-          type: boolean
+        workspace_kind:
+          $ref: '#/components/schemas/WorkspaceKind'
           description: >-
-            True for a branchless head that runs directly in project_path.
-            Derived from branch_name being null; persisted without a separate
-            kind field.
+            Derived checkout topology. A `project_directory` Head is branchless
+            and runs directly in project_path; `worktree` owns a Hydra branch
+            and linked worktree. The kind is derived from branch_name and is not
+            persisted separately.
         workspace_base_ref:
           type: string
           description: >-
             Immutable checkout commit captured when a project-directory Head
             starts. It is the default left side of that chat's Changes inspector;
-            empty for ordinary worktree Heads and legacy focused Heads.
+            empty for worktree Heads and legacy project-directory Heads created
+            before this baseline was recorded.
         filesystem_mode:
-          $ref: '#/components/schemas/FocusedFilesystemMode'
+          $ref: '#/components/schemas/ProjectDirectoryFilesystemMode'
         allow_commits:
           type: boolean
           description: >-
-            Whether a focused head may request Hydra's guarded commit operation.
-            Independent of filesystem_mode; false for ordinary heads.
+            Whether a project-directory Head may request Hydra's guarded commit
+            operation. Independent of filesystem_mode; false for worktree Heads.
         project_path:
           type: string
         session_pid:

@@ -4,7 +4,7 @@ import { api } from '../stores/apiClient'
 import { loadAgentViewPrefs, patchAgentViewPrefs } from '../lib/agentViewPrefs'
 import { formatError, apiErrorBody } from '../api/format_error'
 import { runWithToast } from '../lib/apiAction'
-import { FocusedFilesystemMode, type AgentResponse, type RepositoryBranch } from '../api'
+import { ProjectDirectoryFilesystemMode, WorkspaceKind, type AgentResponse, type RepositoryBranch } from '../api'
 import { MRStateChip, DownstreamBranchEditor, CreateMRDialog, ProviderIcon } from './ReviewControls'
 import { AgentTerminal } from './AgentTerminal'
 import { BranchSelector } from './BranchSelector'
@@ -23,7 +23,7 @@ import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
 import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, FolderGit2, ExternalLink } from 'lucide-react'
-import { openChatWindow } from '../lib/desktopBridge'
+import { hasWebKitDesktopBridge, openChatWindow } from '../lib/desktopBridge'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
 import { usePaneCollapseStore, useMediaQuery, SPLIT_QUERY, loadSplitRatio, saveSplitRatio, SPLIT_RATIO_MIN, SPLIT_RATIO_MAX } from '../lib/layout'
@@ -50,6 +50,10 @@ import { SegmentedControl } from './SegmentedControl'
 
 // Shared style for the split layout's divider-flanking pane-collapse toggles.
 const PANE_TOGGLE_CLS = 'flex items-center justify-center w-7 h-7 rounded-md border text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors cursor-pointer shrink-0'
+
+function usesProjectDirectory(agent: Pick<AgentResponse, 'workspace_kind'>): boolean {
+  return agent.workspace_kind === WorkspaceKind.WorkspaceKindProjectDirectory
+}
 
 // memo: AgentDetail re-renders on every live tick of its agent, but the prompt
 // never changes after spawn - no need to re-parse/re-render its markdown.
@@ -463,13 +467,13 @@ function NetworkEnforcementBadge({ mode }: { mode?: string }) {
 // GitIsolationBadge sits just right of the network badge and marks a head whose
 // .git is locked down. Only shown for readonly (off is the default and needs no
 // signal), mirroring the network badge's icon-only chip + card tooltip.
-function GitIsolationBadge({ mode, projectCheckout = false }: { mode?: string; projectCheckout?: boolean }) {
+function GitIsolationBadge({ mode, projectDirectory = false }: { mode?: string; projectDirectory?: boolean }) {
   if (mode !== 'readonly') return null
   return (
     <Tooltip
       title="Git access - .git read-only"
-      content={projectCheckout
-        ? "The project checkout's .git stays read-only. Allow commits grants Hydra's commit tool for deliberate commits without giving the agent unrestricted .git writes."
+      content={projectDirectory
+        ? "The project directory's .git stays read-only. Allow commits grants Hydra's commit tool for deliberate commits without giving the agent unrestricted .git writes."
         : "This head's .git is bound read-only in the sandbox, so the agent cannot write it - no in-sandbox commit, add, stash, or object destruction, and it cannot damage the main repo or a sibling head. Commits are staged and made host-side (the git_commit tool) onto the head's own branch."}
       className="shrink-0"
     >
@@ -483,7 +487,7 @@ function GitIsolationBadge({ mode, projectCheckout = false }: { mode?: string; p
 }
 
 // Workspace is independent of the agent's run mode and of which browser/native
-// window presents it. Worktree heads get a branch chip; project-checkout heads
+// window presents it. Worktree Heads get a branch chip; project-directory Heads
 // get a folder chip. Live permissions sit immediately after that chip in the
 // identity row, so workspace kind and workspace controls read as one cluster.
 function WorkspaceBadge({
@@ -491,7 +495,7 @@ function WorkspaceBadge({
 }: {
   agent: AgentResponse
 }) {
-  if (!agent.focused) {
+  if (!usesProjectDirectory(agent)) {
     if (!agent.branch_name) return null
     return (
       <Tooltip
@@ -524,31 +528,31 @@ function WorkspaceBadge({
   )
 }
 
-function ProjectCheckoutPermissions({
+function ProjectDirectoryPermissions({
   agent,
   saving,
   onUpdate,
 }: {
   agent: AgentResponse
   saving: boolean
-  onUpdate: (patch: { filesystem_mode?: FocusedFilesystemMode; allow_commits?: boolean }) => void
+  onUpdate: (patch: { filesystem_mode?: ProjectDirectoryFilesystemMode; allow_commits?: boolean }) => void
 }) {
-  if (!agent.focused || agent.archived) return null
-  const readOnly = agent.filesystem_mode === FocusedFilesystemMode.FocusedFilesystemReadonly
+  if (!usesProjectDirectory(agent) || agent.archived) return null
+  const readOnly = agent.filesystem_mode === ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemReadonly
   return (
     <>
       <SegmentedControl
         label="Project files"
         className="shrink-0"
-        value={agent.filesystem_mode ?? FocusedFilesystemMode.FocusedFilesystemEdit}
+        value={agent.filesystem_mode ?? ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemEdit}
         disabled={saving}
         onChange={(filesystemMode) => onUpdate({
           filesystem_mode: filesystemMode,
-          ...(filesystemMode === FocusedFilesystemMode.FocusedFilesystemReadonly ? { allow_commits: false } : {}),
+          ...(filesystemMode === ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemReadonly ? { allow_commits: false } : {}),
         })}
         options={[
-          { value: FocusedFilesystemMode.FocusedFilesystemEdit, label: 'Editable' },
-          { value: FocusedFilesystemMode.FocusedFilesystemReadonly, label: 'Read-only' },
+          { value: ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemEdit, label: 'Editable' },
+          { value: ProjectDirectoryFilesystemMode.ProjectDirectoryFilesystemReadonly, label: 'Read-only' },
         ]}
       />
       <label className={`flex h-7 shrink-0 items-center gap-2 rounded-lg border px-2.5 text-xs ${readOnly ? 'cursor-not-allowed border-gray-200 text-gray-400 dark:border-gray-700 dark:text-gray-500' : 'cursor-pointer border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}>
@@ -599,7 +603,7 @@ function metaRowSignature(a: AgentResponse) {
     network_enforcement: a.network_enforcement,
     git_isolation: a.git_isolation,
     branch_name: a.branch_name,
-    focused: a.focused,
+    workspace_kind: a.workspace_kind,
     filesystem_mode: a.filesystem_mode,
     allow_commits: a.allow_commits,
     project_path: a.project_path,
@@ -636,7 +640,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
   savingChatMode,
   savingDownstream,
   publishing,
-  savingFocusedPermissions,
+  savingProjectDirectoryPermissions,
   onSaveBase,
   onCheckoutBranch,
   onRefreshBranches,
@@ -644,7 +648,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
   onSaveDownstream,
   onPushToMR,
   onPullFromMR,
-  onUpdateFocusedPermissions,
+  onUpdateProjectDirectoryPermissions,
 }: {
   agent: AgentResponse
   projectId: string | null
@@ -655,7 +659,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
   savingChatMode: boolean
   savingDownstream: boolean
   publishing: boolean
-  savingFocusedPermissions: boolean
+  savingProjectDirectoryPermissions: boolean
   onSaveBase: (name: string) => void
   onCheckoutBranch: (name: string) => void
   onRefreshBranches: () => void
@@ -663,7 +667,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
   onSaveDownstream: (n: string) => void
   onPushToMR: () => void
   onPullFromMR: () => void
-  onUpdateFocusedPermissions: (patch: { filesystem_mode?: FocusedFilesystemMode; allow_commits?: boolean }) => void
+  onUpdateProjectDirectoryPermissions: (patch: { filesystem_mode?: ProjectDirectoryFilesystemMode; allow_commits?: boolean }) => void
 }) {
   // Confirm before flipping the terminal/chat mode - switching restarts the
   // Claude process, so an accidental tap on the pill shouldn't do it silently.
@@ -707,7 +711,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
       </Tooltip>
       {agent.agent_status && <AgentStatusChip status={agent.agent_status.status} />}
       <WorkspaceBadge agent={agent} />
-      <ProjectCheckoutPermissions agent={agent} saving={savingFocusedPermissions} onUpdate={onUpdateFocusedPermissions} />
+      <ProjectDirectoryPermissions agent={agent} saving={savingProjectDirectoryPermissions} onUpdate={onUpdateProjectDirectoryPermissions} />
       {agent.created_at !== 0 && agent.created_at !== undefined && (
         // ml-auto: pinned to the right edge of the row, whatever is on the left.
         <span className="ml-auto shrink-0 text-xs text-gray-400 dark:text-gray-500">
@@ -732,14 +736,14 @@ const AgentMetaRow = memo(function AgentMetaRow({
         </span>
       )}
       {agent.network_enforcement && <NetworkEnforcementBadge mode={agent.network_enforcement} />}
-      <GitIsolationBadge mode={agent.focused ? 'readonly' : agent.git_isolation} projectCheckout={agent.focused === true} />
+      <GitIsolationBadge mode={usesProjectDirectory(agent) ? 'readonly' : agent.git_isolation} projectDirectory={usesProjectDirectory(agent)} />
       {/* The base branch this head merges into / diffs against. The head's own
           branch lives on the identity line above, so there's no arrow pairing
           the two here. Editing the base is metadata-only: it changes what
           update-from-base merges in and what the diff compares against, but
           does not rebase commits. */}
       <span className="shrink-0 text-xs font-mono text-gray-500 dark:text-gray-400 flex items-center gap-1">
-        {agent.focused ? !savingCheckoutBranch ? (
+        {usesProjectDirectory(agent) ? !savingCheckoutBranch ? (
           <BranchSelector
             branches={branches}
             activeRef={checkoutBranch}
@@ -776,7 +780,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
           </span>
         )}
       </span>
-      {projectId && agent.branch_name && !agent.focused && !agent.archived && (
+      {projectId && agent.branch_name && !usesProjectDirectory(agent) && !agent.archived && (
         <span className="shrink-0"><TrackBranchButton projectId={projectId} agentId={agent.id} /></span>
       )}
       {/* Downstream branch (the name this head is pushed AS) - editable
@@ -785,14 +789,14 @@ const AgentMetaRow = memo(function AgentMetaRow({
           head with no downstream branch / no linked MR, and a zero-width span
           still eats the row's gap on either side of it - 16px that pushed the
           terminal/chat toggle onto a line of its own. */}
-      {!agent.focused && <span className="shrink-0 inline-flex items-center empty:hidden">
+      {!usesProjectDirectory(agent) && <span className="shrink-0 inline-flex items-center empty:hidden">
         <DownstreamBranchEditor agent={agent} onSave={(n) => onSaveDownstream(n)} saving={savingDownstream} />
       </span>}
       {/* Linked-MR state chip (state/CI/approvals/discussions/ahead-behind). The
           ahead/behind chips are the click target for Push/Pull to MR, so a commit
           made after the MR opened is both visible and actionable here rather than
           only inside the View MR dropdown. */}
-      {!agent.focused && <span className="shrink-0 inline-flex items-center gap-1.5 empty:hidden">
+      {!usesProjectDirectory(agent) && <span className="shrink-0 inline-flex items-center gap-1.5 empty:hidden">
         <MRStateChip agent={agent} onPush={onPushToMR} onPull={onPullFromMR} busy={publishing} />
       </span>}
       {/* Terminal/chat mode toggle for agents with structured chat transports.
@@ -834,7 +838,7 @@ const AgentMetaRow = memo(function AgentMetaRow({
   prev.savingCheckoutBranch === next.savingCheckoutBranch &&
   prev.savingChatMode === next.savingChatMode &&
   prev.savingDownstream === next.savingDownstream &&
-  prev.savingFocusedPermissions === next.savingFocusedPermissions &&
+  prev.savingProjectDirectoryPermissions === next.savingProjectDirectoryPermissions &&
   prev.publishing === next.publishing &&
   prev.onSaveBase === next.onSaveBase &&
   prev.onCheckoutBranch === next.onCheckoutBranch &&
@@ -918,7 +922,7 @@ export function AgentDetail({
   const [savingBase, setSavingBase] = useState(false)
   const [savingCheckoutBranch, setSavingCheckoutBranch] = useState(false)
   const [savingChatMode, setSavingChatMode] = useState(false)
-  const [savingFocusedPermissions, setSavingFocusedPermissions] = useState(false)
+  const [savingProjectDirectoryPermissions, setSavingProjectDirectoryPermissions] = useState(false)
   // Seeded from the shared cache so a revisit renders a populated dropdown with
   // no network wait at all; null only on a cold first load of the project.
   const [branches, setBranches] = useState<RepositoryBranch[] | null>(
@@ -953,15 +957,15 @@ export function AgentDetail({
   const toggleWorking = usePaneCollapseStore((s) => s.toggleWorking)
   // Project-directory chats open on the chat alone: their inspector describes
   // shared checkout state and is useful on demand, but should not take half of
-  // the page by default. Keep this entry default local to the focused chat so
+  // the page by default. Keep this entry default local to the project-directory chat so
   // visiting it does not overwrite the user's persisted worktree-pane choice.
   useLayoutEffect(() => {
-    if (!agent.focused) return
+    if (agent.workspace_kind !== WorkspaceKind.WorkspaceKindProjectDirectory) return
     const store = usePaneCollapseStore.getState()
     const previous = store.collapse
     if (previous !== 'inspector') store.setCollapse('inspector')
     return () => usePaneCollapseStore.getState().setCollapse(previous)
-  }, [agent.id, agent.focused])
+  }, [agent.id, agent.workspace_kind])
   // Is the diff currently on screen? Wide: the inspector pane isn't collapsed.
   // Narrow: the single pane is showing the full-screen diff (working collapsed).
   const diffShown = isWide ? paneCollapse !== 'inspector' : paneCollapse === 'working'
@@ -1754,13 +1758,13 @@ export function AgentDetail({
     setSavingBase(false)
   }
 
-  // A project-checkout head shares the repository's real checkout, so its branch
+  // A project-directory Head shares the repository's real checkout, so its branch
   // selector changes HEAD rather than editing base-branch metadata. Git performs
   // a normal, non-forced checkout: local changes are preserved when possible and
   // a conflicting switch fails visibly instead of discarding work.
   async function saveCheckoutBranch(next: string) {
     const current = branches?.find((branch) => branch.is_current)?.name ?? ''
-    if (!agent.focused || !next || next === current || savingCheckoutBranch) return
+    if (!usesProjectDirectory(agent) || !next || next === current || savingCheckoutBranch) return
     setSavingCheckoutBranch(true)
     const res = await runWithToast(
       () => api.default.updateAgent(projectId ?? '', agent.id, { checkout_branch: next }),
@@ -2116,9 +2120,9 @@ export function AgentDetail({
   // the View-MR button, still first.
   const mrFirst = true
 
-  const updateFocusedPermissions = async (patch: { filesystem_mode?: FocusedFilesystemMode; allow_commits?: boolean }) => {
-    if (!projectId || savingFocusedPermissions) return
-    setSavingFocusedPermissions(true)
+  const updateProjectDirectoryPermissions = async (patch: { filesystem_mode?: ProjectDirectoryFilesystemMode; allow_commits?: boolean }) => {
+    if (!projectId || savingProjectDirectoryPermissions) return
+    setSavingProjectDirectoryPermissions(true)
     try {
       const res = await runWithToast(
         () => api.default.updateAgent(projectId, agent.id, patch),
@@ -2130,7 +2134,7 @@ export function AgentDetail({
         if (patch.filesystem_mode) setRestartSignal((n) => n + 1)
       }
     } finally {
-      setSavingFocusedPermissions(false)
+      setSavingProjectDirectoryPermissions(false)
     }
   }
 
@@ -2157,7 +2161,7 @@ export function AgentDetail({
           onGenerate: generateTitle,
         }}
         actions={[
-          ...(agent.focused ? [] : mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
+          ...(usesProjectDirectory(agent) ? [] : mrFirst ? [publishAction, mergeAction] : [mergeAction, publishAction]),
           { label: unreadAppearance.label, icon: unreadAppearance.icon, onClick: handleMarkUnread, variant: 'segment', shortcut: SHORTCUT_MARK_UNREAD },
           { label: renameAppearance.label, icon: renameAppearance.icon, onClick: startEditingTitle, variant: 'segment', shortcut: SHORTCUT_RENAME },
           { label: restartAppearance.label, tooltip: restartAppearance.tooltip, icon: restartAppearance.icon, onClick: handleRestart, variant: 'segment', disabled: restartAppearance.disabled },
@@ -2246,7 +2250,7 @@ export function AgentDetail({
                     savingCheckoutBranch={savingCheckoutBranch}
                     savingChatMode={savingChatMode}
                     savingDownstream={savingDownstream}
-                    savingFocusedPermissions={savingFocusedPermissions}
+                    savingProjectDirectoryPermissions={savingProjectDirectoryPermissions}
                     publishing={publishing}
                     onSaveBase={onSaveBase}
                     onCheckoutBranch={onCheckoutBranch}
@@ -2255,7 +2259,7 @@ export function AgentDetail({
                     onSaveDownstream={onSaveDownstream}
                     onPushToMR={onPushToMR}
                     onPullFromMR={onPullFromMR}
-                    onUpdateFocusedPermissions={updateFocusedPermissions}
+                    onUpdateProjectDirectoryPermissions={updateProjectDirectoryPermissions}
                   />
                 </div>
                 {/* self-start pins the toggle to the toolbar's first line even
@@ -2351,7 +2355,7 @@ export function AgentDetail({
                     savingCheckoutBranch={savingCheckoutBranch}
                     savingChatMode={savingChatMode}
                     savingDownstream={savingDownstream}
-                    savingFocusedPermissions={savingFocusedPermissions}
+                    savingProjectDirectoryPermissions={savingProjectDirectoryPermissions}
                     publishing={publishing}
                     onSaveBase={onSaveBase}
                     onCheckoutBranch={onCheckoutBranch}
@@ -2360,7 +2364,7 @@ export function AgentDetail({
                     onSaveDownstream={onSaveDownstream}
                     onPushToMR={onPushToMR}
                     onPullFromMR={onPullFromMR}
-                    onUpdateFocusedPermissions={updateFocusedPermissions}
+                    onUpdateProjectDirectoryPermissions={updateProjectDirectoryPermissions}
                   />
                 </div>
                 <Tooltip content="Show diff" shortcut={{ keys: SHORTCUT_DIFF_SIDEBAR.split('+') }}>

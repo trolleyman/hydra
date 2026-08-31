@@ -49,13 +49,14 @@ type Head struct {
 	PrePrompt     string
 	Prompt        string
 	BaseBranch    string
-	// WorkspaceBaseRef is the immutable checkout commit captured when a focused
+	// WorkspaceBaseRef is the immutable checkout commit captured when a
+	// project-directory
 	// head starts. Its inspector compares this ref with the live project directory.
 	WorkspaceBaseRef string
 	Ephemeral        bool
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	ChatMode bool
-	// FilesystemMode and AllowCommits apply to focused heads (Branch == nil).
+	// FilesystemMode and AllowCommits apply to project-directory Heads (Branch == nil).
 	// Ordinary heads retain their existing worktree and git-isolation policy.
 	FilesystemMode string
 	AllowCommits   bool
@@ -107,17 +108,28 @@ func (h Head) IsLinked() bool { return h.ReviewID != "" || h.ReviewURL != "" }
 // IsAdopted reports whether this head is working on a PR/MR Hydra did not create.
 func (h Head) IsAdopted() bool { return h.ReviewAdopted }
 
-// IsFocused reports whether this head runs directly in its registered project
-// directory rather than in a Hydra-created branch and linked worktree.
-// Branchlessness is the persisted focused-head discriminator. Worktree nil is
-// not: archived and degraded ordinary heads also have no live worktree.
-func (h Head) IsFocused() bool { return h.Branch == nil }
+// WorkspaceKind reports which checkout topology this Head uses. Branchlessness
+// is the persisted project-directory discriminator. Worktree nil is not:
+// archived and degraded worktree Heads also have no live worktree.
+func (h Head) WorkspaceKind() api.WorkspaceKind {
+	if h.Branch == nil {
+		return api.WorkspaceKindProjectDirectory
+	}
+	return api.WorkspaceKindWorktree
+}
 
-// WorkingDir returns the directory the provider should run in. A focused head
+// UsesProjectDirectory reports whether this Head runs directly in its
+// registered project directory rather than in a Hydra-created linked worktree.
+func (h Head) UsesProjectDirectory() bool {
+	return h.WorkspaceKind() == api.WorkspaceKindProjectDirectory
+}
+
+// WorkingDir returns the directory the provider should run in. A
+// project-directory Head
 // deliberately uses the real project root; an ordinary head requires its live
 // linked worktree. Empty means there is no runnable checkout.
 func (h Head) WorkingDir() string {
-	if h.IsFocused() {
+	if h.UsesProjectDirectory() {
 		return h.ProjectPath
 	}
 	if h.Worktree != nil {
@@ -420,10 +432,9 @@ type SpawnHeadOptions struct {
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	// The task prompt is delivered as the first stdin user message, not argv.
 	ChatMode bool
-	// Focused runs the structured provider directly in projectRoot without
-	// creating a branch or linked worktree. Branchlessness is persisted as the
-	// focused-head discriminator.
-	Focused        bool
+	// WorkspaceKind selects an isolated linked worktree or the registered project
+	// directory. Branchlessness persists the latter choice.
+	WorkspaceKind  api.WorkspaceKind
 	FilesystemMode string
 	AllowCommits   bool
 	// GitIsolation overrides the agent-type policy's git_isolation default for this
@@ -472,8 +483,8 @@ type AdoptSpec struct {
 }
 
 // SpawnHead creates a sandbox session for an agent. Ordinary heads receive a
-// new Git branch and linked worktree; focused heads run directly in projectRoot
-// and persist an empty branch name.
+// new Git branch and linked worktree; project-directory Heads run directly in
+// projectRoot and persist an empty branch name.
 func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, projectRoot string, opts SpawnHeadOptions) (*Head, error) {
 	norm, err := paths.NormalizePath(projectRoot)
 	if err == nil {
@@ -485,24 +496,31 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	if opts.AgentType == "" {
 		opts.AgentType = sandbox.AgentTypeClaude
 	}
-	if opts.Focused {
+	if opts.WorkspaceKind == "" {
+		opts.WorkspaceKind = api.WorkspaceKindWorktree
+	}
+	if opts.WorkspaceKind != api.WorkspaceKindWorktree && opts.WorkspaceKind != api.WorkspaceKindProjectDirectory {
+		return nil, errtrace.Wrap(fmt.Errorf("unknown workspace kind %q", opts.WorkspaceKind))
+	}
+	projectDirectory := opts.WorkspaceKind == api.WorkspaceKindProjectDirectory
+	if projectDirectory {
 		if !opts.ChatMode {
-			return nil, errtrace.Wrap(errors.New("focused heads require chat mode"))
+			return nil, errtrace.Wrap(errors.New("project-directory Heads require chat mode"))
 		}
 		if opts.AgentType != sandbox.AgentTypeClaude && opts.AgentType != sandbox.AgentTypeCodex {
-			return nil, errtrace.Wrap(errors.New("focused heads require a structured chat provider"))
+			return nil, errtrace.Wrap(errors.New("project-directory Heads require a structured chat provider"))
 		}
 		if opts.Adopt != nil {
-			return nil, errtrace.Wrap(errors.New("focused heads cannot adopt a merge request"))
+			return nil, errtrace.Wrap(errors.New("project-directory Heads cannot adopt a merge request"))
 		}
 		if opts.FilesystemMode == "" {
-			opts.FilesystemMode = string(api.FocusedFilesystemEdit)
+			opts.FilesystemMode = string(api.ProjectDirectoryFilesystemEdit)
 		}
-		if opts.FilesystemMode != string(api.FocusedFilesystemEdit) && opts.FilesystemMode != string(api.FocusedFilesystemReadonly) {
-			return nil, errtrace.Wrap(fmt.Errorf("unknown focused filesystem mode %q", opts.FilesystemMode))
+		if opts.FilesystemMode != string(api.ProjectDirectoryFilesystemEdit) && opts.FilesystemMode != string(api.ProjectDirectoryFilesystemReadonly) {
+			return nil, errtrace.Wrap(fmt.Errorf("unknown project-directory filesystem mode %q", opts.FilesystemMode))
 		}
-		if opts.FilesystemMode == string(api.FocusedFilesystemReadonly) && opts.AllowCommits {
-			return nil, errtrace.Wrap(errors.New("read-only focused heads cannot allow commits"))
+		if opts.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly) && opts.AllowCommits {
+			return nil, errtrace.Wrap(errors.New("read-only project-directory Heads cannot allow commits"))
 		}
 	}
 	// Resolve the head ID. Auto-generated IDs are derived from the prompt and
@@ -540,7 +558,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 			}
 			replacing = true
 		}
-		if !opts.Focused && !replacing && (git.BranchExists(projectRoot, git.BranchName(opts.ID)) || headWorktreeExists(projectRoot, opts.ID)) {
+		if !projectDirectory && !replacing && (git.BranchExists(projectRoot, git.BranchName(opts.ID)) || headWorktreeExists(projectRoot, opts.ID)) {
 			return nil, errtrace.Wrap(&HeadExistsError{ID: opts.ID})
 		}
 	}
@@ -559,10 +577,10 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		}
 	}
 	workspaceBaseRef := ""
-	if opts.Focused {
+	if projectDirectory {
 		workspaceBaseRef, err = git.ResolveRef(projectRoot, "HEAD")
 		if err != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("capture focused workspace baseline: %w", err))
+			return nil, errtrace.Wrap(fmt.Errorf("capture project-directory workspace baseline: %w", err))
 		}
 	}
 	// The worktree is normally created from the base branch; an adopted head is
@@ -578,7 +596,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// project root itself. The worktree/branch are torn down when the test closes.
 	branchName := ""
 	worktreePath := projectRoot
-	if !opts.Focused {
+	if !projectDirectory {
 		branchName = git.BranchName(opts.ID)
 		worktreePath = paths.GetWorktreeDirFromProjectRoot(projectRoot, opts.ID)
 	}
@@ -661,14 +679,14 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	// Resolve the git-isolation mode up front (drives the sandbox .git bind below).
 	cfg, _ := config.Load(projectRoot)
 	gitIso := resolveGitIsolation(cfg, string(opts.AgentType), opts.GitIsolation)
-	if opts.Focused {
+	if projectDirectory {
 		// The provider may edit working files but never writes the real checkout's
-		// Git metadata. Focused commits are separately authorized and mediated.
+		// Git metadata. Project-directory commits are separately authorized and mediated.
 		gitIso = sandbox.GitIsolationReadonly
 	}
 	// worktreeBase is baseBranch for a normal spawn, or the fetched PR-head ref for
 	// an adopted head (see opts.Adopt handling above).
-	if !opts.Focused {
+	if !projectDirectory {
 		if err := git.CreateWorktree(projectRoot, worktreePath, branchName, worktreeBase); err != nil {
 			if store != nil {
 				// Hard-delete: an aborted spawn never really existed, and a
@@ -761,7 +779,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 	sess, err := startAgentSession(reg, projectRoot, opts.ID, opts.AgentType, worktreePath, opts.Rows, opts.Cols, sandbox.Options{
 		AgentType:          opts.AgentType,
 		WorktreePath:       worktreePath,
-		WorkingDirReadOnly: opts.Focused && opts.FilesystemMode == string(api.FocusedFilesystemReadonly),
+		WorkingDirReadOnly: projectDirectory && opts.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
 		GitCommonDir:       commonDirForSandbox(projectRoot, gitIso),
 		GitIsolation:       gitIso,
 		Home:               home,
@@ -841,7 +859,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		AgentStatus:    initialStatus,
 		CreatedAt:      now.Unix(),
 	}
-	if !opts.Focused {
+	if !projectDirectory {
 		head.Branch = &branchName
 		head.Worktree = &worktreePath
 	}
@@ -850,7 +868,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 // spawnCleanup tears down a partially-created head after an early failure.
 func spawnCleanup(store *db.Store, projectRoot string, opts SpawnHeadOptions, worktreePath, branchName string) {
-	if !opts.Focused {
+	if opts.WorkspaceKind != api.WorkspaceKindProjectDirectory {
 		_ = git.RemoveWorktree(projectRoot, worktreePath)
 		_ = git.DeleteBranch(projectRoot, branchName)
 	}
@@ -1230,7 +1248,7 @@ func RestartHead(reg *session.Registry, store *db.Store, projectRoot string, hea
 // RestartHeadSandbox rebuilds the head's namespace host before resuming it.
 // Most restarts can keep that supervisor because only the agent child changes,
 // but mounts, masks and network rules are baked into the outer sandbox. A
-// focused filesystem-mode change therefore has to tear the supervisor down as
+// project-directory filesystem-mode change therefore has to tear the supervisor down as
 // well, or switching edit <-> readonly merely relaunches the agent inside the
 // old permissions. Any sibling shell sessions end with the old supervisor.
 func RestartHeadSandbox(reg *session.Registry, store *db.Store, projectRoot string, head Head, rows, cols uint16) error {
@@ -1350,7 +1368,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	// Re-apply the head's persisted git-isolation override (empty = policy default),
 	// so a resume after a daemon restart keeps the same .git lockdown.
 	gitIso := resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)
-	if head.IsFocused() {
+	if head.UsesProjectDirectory() {
 		gitIso = sandbox.GitIsolationReadonly
 	}
 	seed, err := seedHead(projectRoot, head.ID, head.AgentType, worktreePath, home, launchPrePrompt, resolveGatePolicy(cfg, string(head.AgentType)), gitIso)
@@ -1402,7 +1420,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	sess, err := startAgentSession(reg, projectRoot, head.ID, head.AgentType, worktreePath, rows, cols, sandbox.Options{
 		AgentType:          head.AgentType,
 		WorktreePath:       worktreePath,
-		WorkingDirReadOnly: head.IsFocused() && head.FilesystemMode == string(api.FocusedFilesystemReadonly),
+		WorkingDirReadOnly: head.UsesProjectDirectory() && head.FilesystemMode == string(api.ProjectDirectoryFilesystemReadonly),
 		GitCommonDir:       commonDirForSandbox(projectRoot, gitIso),
 		GitIsolation:       gitIso,
 		Home:               home,
@@ -1520,7 +1538,7 @@ func ResumeArchivedHead(ctx context.Context, reg *session.Registry, store *db.St
 	}
 	if a.BranchName == "" {
 		if err := store.UnarchiveAgent(id); err != nil {
-			return nil, errtrace.Wrap(fmt.Errorf("unarchive focused agent: %w", err))
+			return nil, errtrace.Wrap(fmt.Errorf("unarchive project-directory agent: %w", err))
 		}
 		head := archivedHead(a)
 		head.Archived = false

@@ -5,7 +5,7 @@ selection, diagnostics, and a local `.deb` target are present. Platform release
 validation remains.**
 This document adapts the desktop product defined in
 [macos-desktop-chat.md](macos-desktop-chat.md) to Linux. The shared backend, API,
-and React base is already the branch point for platform work: focused heads are
+and React base is already the branch point for platform work: project-directory heads are
 branchless, run in a registered project's real directory, support enforced
 Edit/Read-only mode and guarded commits, and render in a chat-only layout.
 
@@ -30,10 +30,10 @@ of the React interface.
 
 Ship one Hydra desktop application with one responsive React shell. Each window
 may display any canonical Hydra route. New chat windows begin on a
-project-checkout draft; existing conversations open their ordinary agent URL.
+project-directory draft; existing conversations open their ordinary agent URL.
 The available width determines the layout, rather than a dedicated window mode.
 
-A project-checkout chat is attached directly to one registered project's real
+A project-directory chat is attached directly to one registered project's real
 directory and omits the worktree inspector. Edit/Read-only and Allow commits sit
 beside its workspace chip; the normal configuration strip retains test, network,
 Git access, checked-out branch, and run mode.
@@ -72,7 +72,7 @@ product decisions despite that document's name. Linux work should not fork them.
   nesting it inside a restrictive desktop sandbox is a separate investigation.
 - Making a status icon the only way to reopen or quit Hydra. Some Linux desktops
   do not expose legacy trays or StatusNotifier items.
-- Adding arbitrary-directory focused chats, provider-history import, or other
+- Adding arbitrary-directory project-directory chats, provider-history import, or other
   features deliberately deferred by the shared desktop plan.
 
 ## Architecture
@@ -83,7 +83,7 @@ The desktop layer owns only:
 
 - application and multi-window lifecycle;
 - starting or discovering one compatible backend;
-- opening full and focused internal routes;
+- opening full and project-directory internal routes;
 - native menus, file/directory dialogs, notifications, and deep-link routing;
 - close and Quit coordination;
 - packaging and update handoff.
@@ -205,7 +205,7 @@ remain required and which Hydra helpers are bundled.
 ### Sandboxing remains Hydra's boundary
 
 The desktop wrapper must not weaken `internal/sandbox/linux.go`, network egress
-filtering, MCP governance, GUI hardening, or focused-session permissions.
+filtering, MCP governance, GUI hardening, or project-directory-session permissions.
 Running from a GUI changes process ancestry and environment, not the security
 model.
 
@@ -319,8 +319,8 @@ updater after that path is proven.
 ### Phase 0: inventory the shared base
 
 - Turn the built/unbuilt status in `macos-desktop-chat.md` into an executable
-  desktop checklist rather than reimplementing focused heads.
-- Confirm the focused API, permission restart, guarded commit, and chat-only
+  desktop checklist rather than reimplementing project-directory heads.
+- Confirm the project-directory API, permission restart, guarded commit, and chat-only
   layout work unchanged on Linux.
 - Inventory current daemon discovery, project-scoped state, auth, tool lookup,
   runtime files, and `systemd --user` deployment.
@@ -414,7 +414,7 @@ timeout.
 
 ### Phase 2: add desktop window routes and lifecycle
 
-- [x] Add the shared project-checkout draft flow and canonical agent navigation
+- [x] Add the shared project-directory draft flow and canonical agent navigation
   described by the macOS plan.
 - [x] Wire the shared lifecycle bridge into WebKitGTK for New Window, New Chat,
   and close requests. AppKit and WebView2 additionally consume
@@ -446,7 +446,7 @@ and no window action implicitly interrupts a head.
   installed-session test.
 - [x] Bridge GTK clipboard textures into the attachment-aware chat and spawn
   composers so Ctrl+V uploads copied images even when WebKitGTK omits them from
-  the web paste event. Text paste stays on WebKitGTK's native path. The focused
+  the web paste event. Text paste stays on WebKitGTK's native path. The project-directory
   textarea opts into the bridge, so a sidebar spawn form mounted beside chat
   cannot consume that chat's paste.
 - Keep desktop attachments on the normal local upload path. "Upload" here is a
@@ -472,14 +472,14 @@ and X11.
   filtering. `hydra-desktop --diagnostics` now reports GTK/WebKitGTK versions,
   display/session details, desktop-bus notification availability, and portal
   availability as JSON.
-- Run focused Read-only/Edit and ordinary worktree sessions through the packaged
+- Run read-only/editable project-directory and ordinary worktree sessions through the packaged
   app on every supported distribution.
 
 Exit criterion: the package makes the same security claims as a tested CLI
 installation, and refuses or clearly labels unavailable hard-mode features.
 
 Status: `/api/status` now reports the host OS plus native sandbox availability
-and its diagnostic reason. Focused desktop windows visibly warn when the
+and its diagnostic reason. Project-directory desktop windows visibly warn when the
 sandbox backend is unavailable. Fine-grained namespace, cgroup, portal,
 notification, and webview-runtime probes remain.
 
@@ -499,7 +499,7 @@ notification, and webview-runtime probes remain.
   in fresh VMs.
 - Publish the support matrix and external tool requirements.
 
-Exit criterion: a user can install, launch, run a focused edit safely, quit,
+Exit criterion: a user can install, launch, run a project-directory edit safely, quit,
 upgrade, and uninstall without a source checkout.
 
 ### Phase 6: production distribution
@@ -528,7 +528,7 @@ Test at least:
   stale runtime record, incompatible backend, and backend crash;
 - graphical login with a minimal `PATH` and no shell startup files;
 - unprivileged user namespaces enabled and disabled;
-- focused Read-only, focused Edit, guarded commit, and ordinary worktree heads;
+- read-only and editable project-directory modes, guarded commit, and worktree Heads;
 - no tray/StatusNotifier implementation;
 - notifications allowed, denied, and unavailable;
 - high-DPI fractional scaling, multiple monitors, IME input, and a screen reader;

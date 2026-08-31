@@ -4,12 +4,12 @@ import type { AgentResponse } from '../api'
 import { SpawnForm } from '../components/SpawnForm'
 import { useAgentStore } from '../stores/agentStore'
 
-export const Route = createFileRoute('/focused/$projectId')({
-  component: FocusedDraftPage,
+export const Route = createFileRoute('/project-directory/$projectId')({
+  component: ProjectDirectoryDraftPage,
 })
 
-function FocusedDraftPage() {
-  const { projectId } = useParams({ from: '/focused/$projectId' })
+function ProjectDirectoryDraftPage() {
+  const { projectId } = useParams({ from: '/project-directory/$projectId' })
   const addAgent = useAgentStore((state) => state.addAgent)
   const navigate = useNavigate()
 
@@ -23,7 +23,7 @@ function FocusedDraftPage() {
 
   return (
     <main className="h-full w-full overflow-auto bg-gray-50 dark:bg-gray-900">
-      <SpawnForm projectId={projectId} onSpawned={handleSpawned} focusedOnly />
+      <SpawnForm projectId={projectId} onSpawned={handleSpawned} projectDirectoryOnly />
     </main>
   )
 }

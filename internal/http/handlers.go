@@ -800,13 +800,13 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		netEnf = &m
 	}
 	gitIso := string(heads.EffectiveGitIsolation(h))
-	focused := h.IsFocused()
+	workspaceKind := h.WorkspaceKind()
 	resp := api.AgentResponse{
 		Id:                 h.ID,
 		Title:              &title,
 		BranchName:         h.Branch,
 		WorktreePath:       h.Worktree,
-		Focused:            &focused,
+		WorkspaceKind:      workspaceKind,
 		ProjectPath:        h.ProjectPath,
 		SessionPid:         h.SessionPID,
 		SessionStatus:      h.SessionStatus,
@@ -830,10 +830,10 @@ func agentResponse(h heads.Head) api.AgentResponse {
 		MergeWhenGreen:     &h.MergeWhenGreen,
 		AutoPush:           &h.AutoPush,
 	}
-	if focused {
-		mode := api.FocusedFilesystemMode(h.FilesystemMode)
+	if workspaceKind == api.WorkspaceKindProjectDirectory {
+		mode := api.ProjectDirectoryFilesystemMode(h.FilesystemMode)
 		if mode == "" {
-			mode = api.FocusedFilesystemEdit
+			mode = api.ProjectDirectoryFilesystemEdit
 		}
 		resp.FilesystemMode = &mode
 		resp.AllowCommits = &h.AllowCommits
@@ -1921,18 +1921,29 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 			Details: "chat_mode is only supported for claude and codex agents",
 		}, nil
 	}
-	focused := request.Body.Focused != nil && *request.Body.Focused
+	workspaceKind := api.WorkspaceKindWorktree
+	if request.Body.WorkspaceKind != nil {
+		workspaceKind = *request.Body.WorkspaceKind
+	}
+	if workspaceKind != api.WorkspaceKindWorktree && workspaceKind != api.WorkspaceKindProjectDirectory {
+		return api.SpawnAgent400JSONResponse{
+			Code:    400,
+			Error:   api.ErrorResponseErrorBadRequest,
+			Details: fmt.Sprintf("unknown workspace_kind %q", workspaceKind),
+		}, nil
+	}
+	projectDirectory := workspaceKind == api.WorkspaceKindProjectDirectory
 	filesystemMode := ""
 	allowCommits := false
-	if focused {
+	if projectDirectory {
 		if !chatMode {
 			return api.SpawnAgent400JSONResponse{
 				Code:    400,
 				Error:   api.ErrorResponseErrorBadRequest,
-				Details: "focused heads require chat_mode",
+				Details: "project-directory Heads require chat_mode",
 			}, nil
 		}
-		filesystemMode = string(api.FocusedFilesystemEdit)
+		filesystemMode = string(api.ProjectDirectoryFilesystemEdit)
 		allowCommits = true
 		if request.Body.FilesystemMode != nil {
 			filesystemMode = string(*request.Body.FilesystemMode)
@@ -1940,7 +1951,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		if request.Body.AllowCommits != nil {
 			allowCommits = *request.Body.AllowCommits
 		}
-		if filesystemMode == string(api.FocusedFilesystemReadonly) && allowCommits {
+		if filesystemMode == string(api.ProjectDirectoryFilesystemReadonly) && allowCommits {
 			return api.SpawnAgent400JSONResponse{
 				Code:    400,
 				Error:   api.ErrorResponseErrorBadRequest,
@@ -1958,11 +1969,11 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 	// the head pre-linked to the MR (docs/pr-adoption.md).
 	var adopt *heads.AdoptSpec
 	if request.Body.AdoptMr != nil {
-		if focused {
+		if projectDirectory {
 			return api.SpawnAgent400JSONResponse{
 				Code:    400,
 				Error:   api.ErrorResponseErrorBadRequest,
-				Details: "focused heads cannot adopt a merge request",
+				Details: "project-directory Heads cannot adopt a merge request",
 			}, nil
 		}
 		spec, detail := s.resolveAdoptSpec(ctx, projectRoot, *request.Body.AdoptMr)
@@ -2003,7 +2014,7 @@ func (s *Server) SpawnAgent(ctx context.Context, request api.SpawnAgentRequestOb
 		Adopt:          adopt,
 		Ephemeral:      ephemeral,
 		ChatMode:       chatMode,
-		Focused:        focused,
+		WorkspaceKind:  workspaceKind,
 		FilesystemMode: filesystemMode,
 		AllowCommits:   allowCommits,
 		GitIsolation:   gitIsolation,
@@ -2066,7 +2077,7 @@ func (s *Server) GetAgent(ctx context.Context, request api.GetAgentRequestObject
 
 // UpdateAgent patches an agent's mutable fields. Most are metadata or process
 // settings; checkout_branch is the explicit exception and moves the shared
-// project checkout for a focused head with Git's normal dirty-tree protection.
+// project checkout for a project-directory Head with Git's normal dirty-tree protection.
 //
 // base_branch updates only which branch the agent is considered based on (used
 // by update-from-base and the diff view); it does NOT move existing commits.
@@ -2139,11 +2150,11 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 		}, nil
 	}
 	if checkoutBranch != "" {
-		if !head.IsFocused() {
+		if !head.UsesProjectDirectory() {
 			return api.UpdateAgent400JSONResponse{
 				Code:    400,
 				Error:   api.ErrorResponseErrorBadRequest,
-				Details: "checkout_branch can only be changed for a project-checkout head",
+				Details: "checkout_branch can only be changed for a project-directory Head",
 			}, nil
 		}
 		if err := git.CheckoutBranch(projectRoot, checkoutBranch); err != nil {
@@ -2155,11 +2166,11 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 		}
 	}
 	if request.Body.FilesystemMode != nil || request.Body.AllowCommits != nil {
-		if !head.IsFocused() {
+		if !head.UsesProjectDirectory() {
 			return api.UpdateAgent400JSONResponse{
 				Code:    400,
 				Error:   api.ErrorResponseErrorBadRequest,
-				Details: "focused permissions can only be changed on a focused head",
+				Details: "project-directory permissions can only be changed on a project-directory Head",
 			}, nil
 		}
 		var mode *string
@@ -2175,14 +2186,14 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 		if request.Body.AllowCommits != nil {
 			effectiveAllowCommits = *request.Body.AllowCommits
 		}
-		if effectiveMode == string(api.FocusedFilesystemReadonly) && effectiveAllowCommits {
+		if effectiveMode == string(api.ProjectDirectoryFilesystemReadonly) && effectiveAllowCommits {
 			return api.UpdateAgent400JSONResponse{
 				Code:    400,
 				Error:   api.ErrorResponseErrorBadRequest,
 				Details: "read-only project directory agents cannot allow commits",
 			}, nil
 		}
-		if err := s.DB.UpdateFocusedPermissions(head.ID, mode, request.Body.AllowCommits); err != nil {
+		if err := s.DB.UpdateProjectDirectoryPermissions(head.ID, mode, request.Body.AllowCommits); err != nil {
 			return nil, errtrace.Wrap(err)
 		}
 		if mode != nil && *mode != head.FilesystemMode {
@@ -2192,10 +2203,10 @@ func (s *Server) UpdateAgent(ctx context.Context, request api.UpdateAgentRequest
 				// not just the agent child. Rebuild the supervisor synchronously so
 				// the successful response guarantees the requested permission is
 				// active; merely stopping the child would reuse the old mount mode.
-				log.Printf("api: focused filesystem mode toggled to %s for %s; rebuilding sandbox", *mode, head.ID)
+				log.Printf("api: project-directory filesystem mode toggled to %s for %s; rebuilding sandbox", *mode, head.ID)
 				rows, cols := heads.LoadResumeSize(s.DB, projectRoot, head.ID)
 				if err := heads.RestartHeadSandbox(s.Sessions, s.DB, projectRoot, *head, rows, cols); err != nil {
-					return nil, errtrace.Wrap(fmt.Errorf("restart focused head with %s filesystem: %w", *mode, err))
+					return nil, errtrace.Wrap(fmt.Errorf("restart project-directory Head with %s filesystem: %w", *mode, err))
 				}
 			}
 		}
@@ -2731,12 +2742,15 @@ func (s *Server) RestartAgent(ctx context.Context, request api.RestartAgentReque
 	}
 
 	newHead, err := heads.SpawnHead(ctx, s.Sessions, s.DB, projectRoot, heads.SpawnHeadOptions{
-		ID:         id,
-		PrePrompt:  prePrompt,
-		Prompt:     prompt,
-		AgentType:  agentType,
-		BaseBranch: baseBranch,
-		ChatMode:   head.ChatMode,
+		ID:             id,
+		PrePrompt:      prePrompt,
+		Prompt:         prompt,
+		AgentType:      agentType,
+		BaseBranch:     baseBranch,
+		ChatMode:       head.ChatMode,
+		WorkspaceKind:  head.WorkspaceKind(),
+		FilesystemMode: head.FilesystemMode,
+		AllowCommits:   head.AllowCommits,
 		// The kill above just archived this ID; Replace lets the respawn take
 		// the archived record back over instead of failing the ID-collision
 		// check.
@@ -3146,12 +3160,12 @@ func diffCost(files []git.DiffFile) int64 {
 	return n
 }
 
-// workspaceComparisonBase returns the immutable starting commit for a focused
+// workspaceComparisonBase returns the immutable starting commit for a project-directory
 // head. Legacy rows created before that field existed fall back to the current
 // HEAD: they can still inspect live uncommitted changes, without pretending an
 // older commit belonged to that chat.
 func workspaceComparisonBase(projectRoot string, head *heads.Head) string {
-	if !head.IsFocused() {
+	if !head.UsesProjectDirectory() {
 		return head.BaseBranch
 	}
 	if head.WorkspaceBaseRef != "" {
@@ -3182,7 +3196,7 @@ func (s *Server) GetAgentCommits(ctx context.Context, request api.GetAgentCommit
 
 	baseBranch := head.BaseBranch
 	headBranch := ""
-	if head.IsFocused() {
+	if head.UsesProjectDirectory() {
 		baseBranch = workspaceComparisonBase(projectRoot, head)
 		headBranch = "HEAD"
 	} else if head.Branch != nil {
@@ -3292,7 +3306,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	}
 
 	headBranch := ""
-	if head.IsFocused() {
+	if head.UsesProjectDirectory() {
 		headBranch = "HEAD"
 	} else if head.Branch != nil {
 		headBranch = *head.Branch
@@ -3304,7 +3318,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 
 	// Resolve base and head refs.
 	baseRef := head.BaseBranch
-	if head.IsFocused() {
+	if head.UsesProjectDirectory() {
 		baseRef = workspaceComparisonBase(projectRoot, head)
 	}
 	headRef := headBranch
@@ -3319,7 +3333,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 	// HEAD). The default agent comparison should use that worktree commit rather
 	// than exposing git's ambiguous-revision error in the Files panel. Explicit
 	// caller-supplied refs still fail normally so typos are not hidden.
-	if !head.IsFocused() && (request.Params.HeadRef == nil || *request.Params.HeadRef == "") {
+	if !head.UsesProjectDirectory() && (request.Params.HeadRef == nil || *request.Params.HeadRef == "") {
 		if resolved, ok := resolveDefaultAgentHead(projectRoot, head.Worktree, headRef); ok {
 			headRef = resolved
 		} else {
@@ -3360,7 +3374,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 
 	// Use triple-dot (merge-base) diff when using default branch refs (whole MR view).
 	// Use double-dot when specific commits are given (commit-to-commit view).
-	useTripleDot := !head.IsFocused() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
+	useTripleDot := !head.UsesProjectDirectory() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
 		(request.Params.HeadRef == nil || *request.Params.HeadRef == "") &&
 		!includeUncommitted
 
@@ -3371,7 +3385,7 @@ func (s *Server) GetAgentDiff(ctx context.Context, request api.GetAgentDiffReque
 		diffRoot = workingDir
 
 		// If using default refs (full diff), compare merge-base with worktree.
-		if !head.IsFocused() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
+		if !head.UsesProjectDirectory() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
 			(request.Params.HeadRef == nil || *request.Params.HeadRef == "") {
 			if mb, err := git.GetMergeBase(diffRoot, baseRef, "HEAD"); err == nil {
 				baseRef = mb
@@ -3551,7 +3565,7 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	}
 
 	headBranch := ""
-	if head.IsFocused() {
+	if head.UsesProjectDirectory() {
 		headBranch = "HEAD"
 	} else if head.Branch != nil {
 		headBranch = *head.Branch
@@ -3563,7 +3577,7 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 
 	// Resolve base and head refs.
 	baseRef := head.BaseBranch
-	if head.IsFocused() {
+	if head.UsesProjectDirectory() {
 		baseRef = workspaceComparisonBase(projectRoot, head)
 	}
 	headRef := headBranch
@@ -3579,7 +3593,7 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 		includeUncommitted = *request.Params.IncludeUncommitted
 	}
 
-	useTripleDot := !head.IsFocused() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
+	useTripleDot := !head.UsesProjectDirectory() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
 		(request.Params.HeadRef == nil || *request.Params.HeadRef == "") &&
 		!includeUncommitted
 
@@ -3587,7 +3601,7 @@ func (s *Server) GetAgentDiffFiles(ctx context.Context, request api.GetAgentDiff
 	workingDir := head.WorkingDir()
 	if includeUncommitted && workingDir != "" {
 		diffRoot = workingDir
-		if !head.IsFocused() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
+		if !head.UsesProjectDirectory() && (request.Params.BaseRef == nil || *request.Params.BaseRef == "") &&
 			(request.Params.HeadRef == nil || *request.Params.HeadRef == "") {
 			if mb, err := git.GetMergeBase(diffRoot, baseRef, "HEAD"); err == nil {
 				baseRef = mb

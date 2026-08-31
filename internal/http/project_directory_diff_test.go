@@ -16,7 +16,7 @@ import (
 	"github.com/trolleyman/hydra/internal/statepath"
 )
 
-func TestFocusedHeadDiffUsesStartingCommitAndProjectDirectory(t *testing.T) {
+func TestProjectDirectoryHeadDiffUsesStartingCommitAndProjectDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", home)
@@ -74,7 +74,7 @@ func TestFocusedHeadDiffUsesStartingCommitAndProjectDirectory(t *testing.T) {
 	}
 	t.Cleanup(func() { statepath.UnregisterProject(norm) })
 	if err := store.CreateAgent(&db.Agent{
-		ID: "focused", ProjectPath: norm, AgentType: "claude", ChatMode: true,
+		ID: "project-directory", ProjectPath: norm, AgentType: "claude", ChatMode: true,
 		BaseBranch: "main", WorkspaceBaseRef: startSHA, CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
@@ -82,20 +82,20 @@ func TestFocusedHeadDiffUsesStartingCommitAndProjectDirectory(t *testing.T) {
 
 	server := &Server{ProjectRoot: norm, ProjectsManager: manager, DB: store}
 	commitsResponse, err := server.GetAgentCommits(context.Background(), api.GetAgentCommitsRequestObject{
-		ProjectId: project.ID, AgentId: "focused",
+		ProjectId: project.ID, AgentId: "project-directory",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	commits, ok := commitsResponse.(api.GetAgentCommits200JSONResponse)
 	if !ok || len(commits) != 1 || commits[0].Subject == nil || *commits[0].Subject != "chat commit" {
-		t.Fatalf("focused commits = %#v, want the commit since chat start", commitsResponse)
+		t.Fatalf("project-directory commits = %#v, want the commit since chat start", commitsResponse)
 	}
 
 	includeUncommitted := true
 	diffResponse, err := server.GetAgentDiff(context.Background(), api.GetAgentDiffRequestObject{
 		ProjectId: project.ID,
-		AgentId:   "focused",
+		AgentId:   "project-directory",
 		Params:    api.GetAgentDiffParams{IncludeUncommitted: &includeUncommitted},
 	})
 	if err != nil {
@@ -103,19 +103,19 @@ func TestFocusedHeadDiffUsesStartingCommitAndProjectDirectory(t *testing.T) {
 	}
 	diff, ok := diffResponse.(api.GetAgentDiff200JSONResponse)
 	if !ok {
-		t.Fatalf("focused diff response = %T, want 200", diffResponse)
+		t.Fatalf("project-directory diff response = %T, want 200", diffResponse)
 	}
 	if diff.BaseRef != startSHA || diff.HeadRef != "" {
-		t.Fatalf("focused range = %q -> %q, want %q -> working directory", diff.BaseRef, diff.HeadRef, startSHA)
+		t.Fatalf("project-directory range = %q -> %q, want %q -> working directory", diff.BaseRef, diff.HeadRef, startSHA)
 	}
 	paths := make(map[string]bool, len(diff.Files))
 	for _, file := range diff.Files {
 		paths[file.Path] = true
 	}
 	if !paths["tracked.txt"] || !paths["untracked.txt"] {
-		t.Fatalf("focused diff files = %v, want committed/live tracked file and untracked file", paths)
+		t.Fatalf("project-directory diff files = %v, want committed/live tracked file and untracked file", paths)
 	}
 	if diff.UncommittedChanges == nil || !*diff.UncommittedChanges {
-		t.Fatalf("focused uncommitted flag = %#v, want true", diff.UncommittedChanges)
+		t.Fatalf("project-directory uncommitted flag = %#v, want true", diff.UncommittedChanges)
 	}
 }

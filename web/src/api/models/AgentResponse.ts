@@ -3,9 +3,10 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AgentStatusInfo } from './AgentStatusInfo';
-import type { FocusedFilesystemMode } from './FocusedFilesystemMode';
+import type { ProjectDirectoryFilesystemMode } from './ProjectDirectoryFilesystemMode';
 import type { ReviewLink } from './ReviewLink';
 import type { TestSummary } from './TestSummary';
+import type { WorkspaceKind } from './WorkspaceKind';
 export type AgentResponse = {
     id: string;
     /**
@@ -23,16 +24,16 @@ export type AgentResponse = {
     branch_name?: string | null;
     worktree_path?: string | null;
     /**
-     * True for a branchless head that runs directly in project_path. Derived from branch_name being null; persisted without a separate kind field.
+     * Derived checkout topology. A `project_directory` Head is branchless and runs directly in project_path; `worktree` owns a Hydra branch and linked worktree. The kind is derived from branch_name and is not persisted separately.
      */
-    focused?: boolean;
+    workspace_kind: WorkspaceKind;
     /**
-     * Immutable checkout commit captured when a project-directory Head starts. It is the default left side of that chat's Changes inspector; empty for ordinary worktree Heads and legacy focused Heads.
+     * Immutable checkout commit captured when a project-directory Head starts. It is the default left side of that chat's Changes inspector; empty for worktree Heads and legacy project-directory Heads created before this baseline was recorded.
      */
     workspace_base_ref?: string;
-    filesystem_mode?: FocusedFilesystemMode;
+    filesystem_mode?: ProjectDirectoryFilesystemMode;
     /**
-     * Whether a focused head may request Hydra's guarded commit operation. Independent of filesystem_mode; false for ordinary heads.
+     * Whether a project-directory Head may request Hydra's guarded commit operation. Independent of filesystem_mode; false for worktree Heads.
      */
     allow_commits?: boolean;
     project_path: string;

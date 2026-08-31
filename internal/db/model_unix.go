@@ -16,7 +16,7 @@ type Agent struct {
 	// Git
 	BranchName string
 	BaseBranch string
-	// WorkspaceBaseRef is the immutable HEAD commit captured when a focused head
+	// WorkspaceBaseRef is the immutable HEAD commit captured when a project-directory head
 	// starts. It is the left side of that chat's project-directory comparison.
 	// Ordinary worktree heads leave it empty.
 	WorkspaceBaseRef string
@@ -47,12 +47,12 @@ type Agent struct {
 	// ChatMode drives a Claude or Codex head via its structured chat protocol.
 	// Mutable; a change takes effect on the next session (re)launch.
 	ChatMode bool `gorm:"default:false"`
-	// FilesystemMode is meaningful only for a branchless focused head. "edit"
+	// FilesystemMode is meaningful only for a branchless project-directory head. "edit"
 	// grants direct writes to ProjectPath; "readonly" makes it read-only. Empty
 	// is retained for ordinary worktree heads.
 	FilesystemMode string
 	// AllowCommits independently authorizes Hydra's guarded commit operation for
-	// a focused head. The provider never receives direct write access to .git.
+	// a project-directory head. The provider never receives direct write access to .git.
 	AllowCommits bool `gorm:"default:false"`
 
 	// Session - updated by the liveness reconciler

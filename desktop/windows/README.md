@@ -39,12 +39,13 @@ For shell development without rebuilding the bundled Go executable, set
 - WebView2 redeems a one-minute, single-use bootstrap token for the persistent
   profile's HttpOnly session cookie.
 - Every window shares one backend and one persistent WebView2 user-data folder.
-- Ctrl+N opens a full window. Ctrl+Shift+N opens the focused project composer.
-- Focused windows expose project and live/loaded archived history controls plus
+- Ctrl+N opens a full window. Ctrl+Shift+N opens the project-directory chat composer.
+- Project-directory windows expose project and live/loaded archived history controls plus
   Stop Session and Close / Close and Keep Running / Cancel choices for an active
   turn. Stopping retains the head, worktree, branch and conversation.
 - Closing every window leaves the notification-area icon and app-owned backend
-  alive. Its menu can open a new full/focused window or exit Hydra.
+  alive. Its menu can open a new full window or project-directory chat window,
+  or exit Hydra.
 - Exit stops an app-owned backend after confirming when sessions are active. A
   compatible server which was already running is never stopped by the app.
 - Backend output is appended beneath `%LOCALAPPDATA%\Hydra\logs`.
@@ -56,7 +57,7 @@ Windows session backend and sandbox remain release gates in
 ## Required Windows validation
 
 - Restore and publish both target runtimes from a clean checkout.
-- Verify two full and two focused windows share storage, WebSockets, and live
+- Verify two full and two project-directory chat windows share storage, WebSockets, and live
   session state.
 - Verify the readiness file, bundled Git selection, logs, backend failure, and
   app-owned versus pre-existing server behavior.

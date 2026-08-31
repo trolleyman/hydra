@@ -30,6 +30,7 @@ import (
 func simAgentByID(id string) api.AgentResponse {
 	createdAt := simNow().Add(-1 * time.Hour).Unix()
 	return api.AgentResponse{
+		WorkspaceKind: api.WorkspaceKindWorktree,
 		Id:            id,
 		Title:         ptr("Simulated agent " + id),
 		AgentType:     "claude",
@@ -43,10 +44,10 @@ func simAgentByID(id string) api.AgentResponse {
 
 // SimulationServer implements api.ServerInterface with mock data.
 type SimulationServer struct {
-	Development           bool
-	focusedMu             sync.Mutex
-	focused               map[string]simFocusedPermissions
-	focusedCheckoutBranch string
+	Development                    bool
+	projectDirectoryMu             sync.Mutex
+	projectDirectory               map[string]simProjectDirectoryPermissions
+	projectDirectoryCheckoutBranch string
 
 	// updateMu and friends back the simulated self-update job (see UpdateServer),
 	// so the update panel - phases, streaming build log, the failure path - can
@@ -90,8 +91,8 @@ type SimulationServer struct {
 	askRunning atomic.Bool
 }
 
-type simFocusedPermissions struct {
-	mode         api.FocusedFilesystemMode
+type simProjectDirectoryPermissions struct {
+	mode         api.ProjectDirectoryFilesystemMode
 	allowCommits bool
 }
 
@@ -443,6 +444,7 @@ const simAgentCodexPrompt = "Exercise Codex chat tools, file edits, and a sub-ag
 func simAgentChat() api.AgentResponse {
 	createdAt := simNow().Add(-45 * time.Minute).Unix()
 	return api.AgentResponse{
+		WorkspaceKind: api.WorkspaceKindWorktree,
 		Id:            "agent-chat",
 		Title:         ptr("Add uploader retry with backoff"),
 		AgentType:     "claude",
@@ -472,7 +474,8 @@ func simAgentChat() api.AgentResponse {
 func simAgentCodex() api.AgentResponse {
 	createdAt := simNow().Add(-40 * time.Minute).Unix()
 	return api.AgentResponse{
-		Id: "agent-chat-codex", Title: ptr("Exercise Codex chat events"), AgentType: "codex",
+		WorkspaceKind: api.WorkspaceKindWorktree,
+		Id:            "agent-chat-codex", Title: ptr("Exercise Codex chat events"), AgentType: "codex",
 		BaseBranch: "main", BranchName: ptr("hydra/sim-codex-chat"), SessionPid: 1007,
 		SessionStatus: "running", CreatedAt: &createdAt, Prompt: simAgentCodexPrompt,
 		ChatMode: ptr(true), Model: ptr(""),
@@ -480,54 +483,53 @@ func simAgentCodex() api.AgentResponse {
 	}
 }
 
-// simFocusedAgents exercise the shared branchless chat surface without needing
+// simProjectDirectoryAgents exercise the shared branchless chat surface without needing
 // a real provider process or project checkout. Each reuses one of the existing
 // durable chat streams so the transcript remains as rich as the ordinary chat
-// fixtures while the surrounding layout and permissions are focused-specific.
-func simFocusedAgents() []api.AgentResponse {
+// fixtures while the surrounding layout and permissions are project-directory-specific.
+func simProjectDirectoryAgents() []api.AgentResponse {
 	chatMode := true
-	focused := true
 	allowCommits := true
 	disallowCommits := false
-	edit := api.FocusedFilesystemEdit
-	readonly := api.FocusedFilesystemReadonly
+	edit := api.ProjectDirectoryFilesystemEdit
+	readonly := api.ProjectDirectoryFilesystemReadonly
 	createdEdit := simNow().Add(-14 * time.Minute).Unix()
 	createdReadonly := simNow().Add(-38 * time.Minute).Unix()
 	createdWorking := simNow().Add(-3 * time.Minute).Unix()
 	return []api.AgentResponse{
 		{
-			Id: "focused-edit", Title: ptr("Tidy the release notes"), AgentType: "claude",
+			Id: "project-directory-edit", Title: ptr("Tidy the release notes"), AgentType: "claude",
 			BranchName: nil, SessionPid: 1010, SessionStatus: "running", CreatedAt: &createdEdit,
 			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentChatPrompt, ChatMode: &chatMode,
-			Focused: &focused, FilesystemMode: &edit, AllowCommits: &allowCommits, Model: ptr("claude-opus-4-8"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
-			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-edit"),
+			WorkspaceKind: api.WorkspaceKindProjectDirectory, FilesystemMode: &edit, AllowCommits: &allowCommits, Model: ptr("claude-opus-4-8"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
+			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("project-directory-edit"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Waiting, Timestamp: simNow().Format(time.RFC3339)},
 		},
 		{
-			Id: "focused-readonly", Title: ptr("Review the desktop architecture"), AgentType: "codex",
+			Id: "project-directory-readonly", Title: ptr("Review the desktop architecture"), AgentType: "codex",
 			BranchName: nil, SessionPid: 1011, SessionStatus: "running", CreatedAt: &createdReadonly,
 			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentCodexPrompt, ChatMode: &chatMode,
-			Focused: &focused, FilesystemMode: &readonly, AllowCommits: &disallowCommits, Model: ptr("gpt-5.6-sol"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
-			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-readonly"),
+			WorkspaceKind: api.WorkspaceKindProjectDirectory, FilesystemMode: &readonly, AllowCommits: &disallowCommits, Model: ptr("gpt-5.6-sol"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
+			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("project-directory-readonly"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Finished, Timestamp: simNow().Format(time.RFC3339)},
 		},
 		{
-			Id: "focused-working", Title: ptr("Trace preview port allocation"), AgentType: "claude",
+			Id: "project-directory-working", Title: ptr("Trace preview port allocation"), AgentType: "claude",
 			BranchName: nil, SessionPid: 1012, SessionStatus: "running", CreatedAt: &createdWorking,
 			ProjectPath: "/Users/callum/code/hydra", BaseBranch: "main", Prompt: simAgentWorkingPrompt, ChatMode: &chatMode,
-			Focused: &focused, FilesystemMode: &edit, AllowCommits: &disallowCommits, Model: ptr("claude-opus-4-8"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
-			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("focused-working"),
+			WorkspaceKind: api.WorkspaceKindProjectDirectory, FilesystemMode: &edit, AllowCommits: &disallowCommits, Model: ptr("claude-opus-4-8"), WorkspaceBaseRef: ptr("0123456789abcdef0123456789abcdef01234567"),
+			NetworkEnforcement: ptr("filtered-advisory"), GitIsolation: ptr("readonly"), Tests: simTestSummary("project-directory-working"),
 			AgentStatus: &api.AgentStatusInfo{Status: api.Running, Timestamp: simNow().Format(time.RFC3339), Activity: ptr("Reading `internal/preview/ports.go`")},
 		},
 	}
 }
 
-func (s *SimulationServer) focusedAgents() []api.AgentResponse {
-	agents := simFocusedAgents()
-	s.focusedMu.Lock()
-	defer s.focusedMu.Unlock()
+func (s *SimulationServer) projectDirectoryAgents() []api.AgentResponse {
+	agents := simProjectDirectoryAgents()
+	s.projectDirectoryMu.Lock()
+	defer s.projectDirectoryMu.Unlock()
 	for i := range agents {
-		if override, ok := s.focused[agents[i].Id]; ok {
+		if override, ok := s.projectDirectory[agents[i].Id]; ok {
 			agents[i].FilesystemMode = &override.mode
 			agents[i].AllowCommits = &override.allowCommits
 		}
@@ -535,8 +537,8 @@ func (s *SimulationServer) focusedAgents() []api.AgentResponse {
 	return agents
 }
 
-func (s *SimulationServer) focusedAgent(id string) (api.AgentResponse, bool) {
-	for _, agent := range s.focusedAgents() {
+func (s *SimulationServer) projectDirectoryAgent(id string) (api.AgentResponse, bool) {
+	for _, agent := range s.projectDirectoryAgents() {
 		if agent.Id == id {
 			return agent, true
 		}
@@ -557,6 +559,7 @@ func (s *SimulationServer) simAgentAsk() api.AgentResponse {
 	createdAt := simNow().Add(-20 * time.Minute).Unix()
 	if s.askRunning.Load() {
 		return api.AgentResponse{
+			WorkspaceKind: api.WorkspaceKindWorktree,
 			Id:            "agent-ask",
 			Title:         ptr("Per-environment config overrides"),
 			AgentType:     "claude",
@@ -576,6 +579,7 @@ func (s *SimulationServer) simAgentAsk() api.AgentResponse {
 		}
 	}
 	return api.AgentResponse{
+		WorkspaceKind: api.WorkspaceKindWorktree,
 		Id:            "agent-ask",
 		Title:         ptr("Per-environment config overrides"),
 		AgentType:     "claude",
@@ -609,6 +613,7 @@ const simAgentWorkingPrompt = "Trace how a preview server gets its port and writ
 func simAgentWorking() api.AgentResponse {
 	createdAt := simNow().Add(-6 * time.Minute).Unix()
 	return api.AgentResponse{
+		WorkspaceKind: api.WorkspaceKindWorktree,
 		Id:            "agent-working",
 		Title:         ptr("Document preview port allocation"),
 		AgentType:     "claude",
@@ -666,6 +671,7 @@ func (s *SimulationServer) simAgentApprovals() api.AgentResponse {
 		}
 	}
 	return api.AgentResponse{
+		WorkspaceKind: api.WorkspaceKindWorktree,
 		Id:            "agent-approvals",
 		Title:         ptr("Preview the approval cards"),
 		AgentType:     "claude",
@@ -864,10 +870,13 @@ func (s *SimulationServer) ListAgents(w http.ResponseWriter, r *http.Request, pr
 			},
 		},
 	}
-	resp = append(resp, s.focusedAgents()...)
+	resp = append(resp, s.projectDirectoryAgents()...)
 	// Attach test-verdict chips (PLAN #68) so the sidebar shows passing/failing/
 	// running states; agent-md and agent-queued are also shown with auto-merge armed.
 	for i := range resp {
+		if resp[i].WorkspaceKind == "" {
+			resp[i].WorkspaceKind = api.WorkspaceKindWorktree
+		}
 		resp[i].Tests = simTestSummary(resp[i].Id)
 		if resp[i].Id == "agent-md" || resp[i].Id == "agent-queued" {
 			resp[i].MergeWhenGreen = ptr(true)
@@ -914,6 +923,7 @@ func simArchivedAgents() []api.AgentResponse {
 		}
 		es := endState
 		return api.AgentResponse{
+			WorkspaceKind: api.WorkspaceKindWorktree,
 			Id:            id,
 			Title:         ptr(title),
 			AgentType:     agentType,
@@ -934,22 +944,22 @@ func simArchivedAgents() []api.AgentResponse {
 	// Listed newest-archived first, as the real ListArchivedAgents orders them.
 	createdAt := simNow().Add(-18 * time.Hour).Unix()
 	archivedAt := simNow().Add(-3 * time.Hour).Unix()
-	focused := true
 	chatMode := true
 	allowCommits := false
-	readonly := api.FocusedFilesystemReadonly
+	readonly := api.ProjectDirectoryFilesystemReadonly
 	endState := "killed"
-	archivedFocused := api.AgentResponse{
-		Id: "archived-focused", Title: ptr("Audit the release workflow"), AgentType: "claude",
+	archivedProjectDirectory := api.AgentResponse{
+		WorkspaceKind: api.WorkspaceKindProjectDirectory,
+		Id:            "archived-project-directory", Title: ptr("Audit the release workflow"), AgentType: "claude",
 		BranchName: nil, SessionStatus: "stopped", ProjectPath: "/Users/callum/code/hydra",
 		Prompt: "Review the release workflow and list the remaining manual steps.", CreatedAt: &createdAt,
 		Archived: &archived, ArchivedAt: &archivedAt, EndState: &endState, ChatMode: &chatMode,
-		Focused: &focused, FilesystemMode: &readonly, AllowCommits: &allowCommits,
+		FilesystemMode: &readonly, AllowCommits: &allowCommits,
 		AgentStatus: &api.AgentStatusInfo{Status: stopped, Timestamp: simNow().Format(time.RFC3339)},
 	}
 	return []api.AgentResponse{
 		mk("archived-1", "Add dark-mode toggle to settings", "claude", "hydra/feat-darkmode", "merged", "Add a dark-mode toggle to the settings page, persisted to localStorage and respecting the OS preference by default.", finished, 5, 2),
-		archivedFocused,
+		archivedProjectDirectory,
 		mk("archived-4", "Investigate sandbox netns isolation", "claude", "hydra/spike-netns", "killed", "Explore giving each agent its own network namespace with a rootless userspace NAT (pasta/slirp4netns) for per-agent port isolation.", stopped, 30, 4),
 		mk("archived-2", "Spike: WebSocket diff refresh", "gemini", "hydra/spike-ws", "killed", "Prototype pushing diff_refresh over the existing terminal WebSocket instead of the 20s poll, and measure the latency win.", stopped, 8, 7),
 		mk("archived-3", "Fix flaky terminal resize test", "claude", "hydra/fix-resize", "merged", "TestTerminalResize fails intermittently in CI. Track down the race and make it deterministic.", finished, 26, 25),
@@ -986,13 +996,14 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 			return
 		}
 	}
-	if agent, ok := s.focusedAgent(id); ok {
+	if agent, ok := s.projectDirectoryAgent(id); ok {
 		write(agent)
 		return
 	}
 	if id == "agent-1" {
 		createdAt := simNow().Add(-1 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			WorkspaceKind: api.WorkspaceKindWorktree,
 			Id:            "agent-1",
 			Title:         ptr("Add renameable agent titles"),
 			AgentType:     "claude",
@@ -1014,6 +1025,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	if id == "agent-md" {
 		createdAt := simNow().Add(-30 * time.Minute).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			WorkspaceKind: api.WorkspaceKindWorktree,
 			Id:            "agent-md",
 			Title:         ptr("Add inline markdown rendering"),
 			AgentType:     "claude",
@@ -1033,7 +1045,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		})
 		return
 	}
-	if id == "agent-chat" || id == "focused-edit" {
+	if id == "agent-chat" || id == "project-directory-edit" {
 		write(simAgentChat())
 		return
 	}
@@ -1060,6 +1072,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	if id == "agent-approval" {
 		createdAt := simNow().Add(-30 * time.Minute).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			WorkspaceKind:      api.WorkspaceKindWorktree,
 			Id:                 "agent-approval",
 			Title:              ptr("Wire up the GitHub MCP server"),
 			AgentType:          "claude",
@@ -1082,6 +1095,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	if id == "agent-queued" {
 		createdAt := simNow().Add(-30 * time.Minute).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			WorkspaceKind: api.WorkspaceKindWorktree,
 			Id:            "agent-queued",
 			Title:         ptr("Add a command palette"),
 			AgentType:     "claude",
@@ -1104,6 +1118,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 	if id == "agent-3" {
 		createdAt := simNow().Add(-3 * time.Hour).Unix()
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			WorkspaceKind:    api.WorkspaceKindWorktree,
 			Id:               "agent-3",
 			Title:            ptr("Refactor auth into nested packages"),
 			AgentType:        "claude",
@@ -1131,6 +1146,7 @@ func (s *SimulationServer) GetAgent(w http.ResponseWriter, r *http.Request, proj
 		createdAt := simNow().Add(-2 * time.Hour).Unix()
 		unread := true
 		api.WriteJSON(w, http.StatusOK, api.AgentResponse{
+			WorkspaceKind:    api.WorkspaceKindWorktree,
 			Id:               "agent-2",
 			Title:            ptr("Migrate auth providers to OAuth"),
 			AgentType:        "gemini",
@@ -1166,7 +1182,7 @@ func (s *SimulationServer) PurgeAgent(w http.ResponseWriter, r *http.Request, pr
 }
 
 func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
-	agent, ok := s.focusedAgent(id)
+	agent, ok := s.projectDirectoryAgent(id)
 	if !ok {
 		api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 		return
@@ -1184,7 +1200,7 @@ func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, p
 	if body.AllowCommits != nil {
 		allowCommits = *body.AllowCommits
 	}
-	if mode == api.FocusedFilesystemReadonly && allowCommits {
+	if mode == api.ProjectDirectoryFilesystemReadonly && allowCommits {
 		api.WriteError(w, http.StatusBadRequest, "Read-only project directory agents cannot allow commits")
 		return
 	}
@@ -1192,15 +1208,15 @@ func (s *SimulationServer) UpdateAgent(w http.ResponseWriter, r *http.Request, p
 		api.WriteError(w, http.StatusBadRequest, "Unknown simulated checkout branch")
 		return
 	}
-	s.focusedMu.Lock()
-	if s.focused == nil {
-		s.focused = make(map[string]simFocusedPermissions)
+	s.projectDirectoryMu.Lock()
+	if s.projectDirectory == nil {
+		s.projectDirectory = make(map[string]simProjectDirectoryPermissions)
 	}
-	s.focused[id] = simFocusedPermissions{mode: mode, allowCommits: allowCommits}
+	s.projectDirectory[id] = simProjectDirectoryPermissions{mode: mode, allowCommits: allowCommits}
 	if body.CheckoutBranch != nil {
-		s.focusedCheckoutBranch = *body.CheckoutBranch
+		s.projectDirectoryCheckoutBranch = *body.CheckoutBranch
 	}
-	s.focusedMu.Unlock()
+	s.projectDirectoryMu.Unlock()
 	agent.FilesystemMode = &mode
 	agent.AllowCommits = &allowCommits
 	api.WriteJSON(w, http.StatusOK, agent)
@@ -2001,11 +2017,11 @@ func simTestSummary(id string) *api.TestSummary {
 		// "stale" chip. Gives the sidebar coverage of the stale state (its chip
 		// height must match the other verdict/status chips in the row).
 		return &api.TestSummary{Status: api.TestStatusStale, Total: ptr(142), Passed: ptr(140), Skipped: ptr(2), DurationMs: ptr(int64(3900))}
-	case "focused-edit":
+	case "project-directory-edit":
 		return &api.TestSummary{Status: api.TestStatusPassing, Total: ptr(96), Passed: ptr(96), DurationMs: ptr(int64(2100))}
-	case "focused-readonly":
+	case "project-directory-readonly":
 		return &api.TestSummary{Status: api.TestStatusStale, Total: ptr(96), Passed: ptr(94), Skipped: ptr(2), DurationMs: ptr(int64(2050))}
-	case "focused-working":
+	case "project-directory-working":
 		return &api.TestSummary{Status: api.TestStatusRunning, Total: ptr(96), Passed: ptr(61), Progress: ptr("61/96")}
 	default:
 		return nil
@@ -4051,12 +4067,12 @@ func (s *SimulationServer) GetRepositoryDiff(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *SimulationServer) GetRepositoryBranches(w http.ResponseWriter, r *http.Request, projectId string) {
-	s.focusedMu.Lock()
-	current := s.focusedCheckoutBranch
+	s.projectDirectoryMu.Lock()
+	current := s.projectDirectoryCheckoutBranch
 	if current == "" {
 		current = "main"
 	}
-	s.focusedMu.Unlock()
+	s.projectDirectoryMu.Unlock()
 	api.WriteJSON(w, http.StatusOK, api.RepositoryBranchesResponse{
 		Current: current,
 		Default: "main",
@@ -5490,6 +5506,7 @@ const simAgentHistoryPrompt = "Port the storage layer from hand-written SQL to s
 func simAgentHistory() api.AgentResponse {
 	createdAt := simNow().Add(-6 * time.Hour).Unix()
 	return api.AgentResponse{
+		WorkspaceKind: api.WorkspaceKindWorktree,
 		Id:            "agent-history",
 		Title:         ptr("Port the storage layer to sqlc"),
 		AgentType:     "claude",
@@ -5757,15 +5774,15 @@ func (s *SimulationServer) HandleTerminalWS(w http.ResponseWriter, r *http.Reque
 
 	// The chat-mode demo agents speak the chat framing, not PTY bytes. Their
 	// bash tabs (shell=true) still get the plain simulated terminal below.
-	if (agentID == "agent-chat" || agentID == "focused-edit") && r.URL.Query().Get("shell") != "true" {
+	if (agentID == "agent-chat" || agentID == "project-directory-edit") && r.URL.Query().Get("shell") != "true" {
 		handleSimChatWS(conn)
 		return
 	}
-	if (agentID == "agent-chat-codex" || agentID == "focused-readonly") && r.URL.Query().Get("shell") != "true" {
+	if (agentID == "agent-chat-codex" || agentID == "project-directory-readonly") && r.URL.Query().Get("shell") != "true" {
 		handleSimCodexChatWS(conn)
 		return
 	}
-	if (agentID == "agent-working" || agentID == "focused-working") && r.URL.Query().Get("shell") != "true" {
+	if (agentID == "agent-working" || agentID == "project-directory-working") && r.URL.Query().Get("shell") != "true" {
 		handleSimWorkingWS(conn)
 		return
 	}

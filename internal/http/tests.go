@@ -140,7 +140,7 @@ func testVersion(head *heads.Head, headRef *string, includeUncommitted bool) hyd
 		return hydratests.Version{Ref: *headRef, TotalHintRefs: hints, Branch: branch}
 	case head.Branch != nil:
 		return hydratests.Version{Ref: *head.Branch, TotalHintRefs: hints, Branch: branch}
-	case head.IsFocused():
+	case head.UsesProjectDirectory():
 		return hydratests.Version{Ref: "HEAD", TotalHintRefs: hints}
 	default:
 		return hydratests.Version{}

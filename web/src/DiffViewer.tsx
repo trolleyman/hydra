@@ -3671,7 +3671,7 @@ export const DiffViewer = memo(DiffViewerImpl, (prev, next) =>
   prev.agent.id === next.agent.id &&
   prev.agent.branch_name === next.agent.branch_name &&
   prev.agent.base_branch === next.agent.base_branch &&
-  prev.agent.focused === next.agent.focused &&
+  prev.agent.workspace_kind === next.agent.workspace_kind &&
   prev.agent.workspace_base_ref === next.agent.workspace_base_ref &&
   prev.agent.worktree_path === next.agent.worktree_path &&
   prev.agent.review?.url === next.agent.review?.url &&
@@ -3697,7 +3697,7 @@ export function diffMetaKey(d: DiffResponse): string {
 // selectors, then tests, previews, artifacts, and the diff itself), just
 // without the top margin - the pane's own padding supplies it.
 function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArtifactRefresh, externalReviewRefresh, externalCommitSelect, inspector, changesLeading, leadingInline, focusComment, focusLine }: { agent: AgentResponse; projectId: string | null; externalRefreshTrigger?: number; externalArtifactRefresh?: number; externalReviewRefresh?: number; externalCommitSelect?: { sha: string; nonce: number } | null; inspector?: boolean; changesLeading?: ReactNode; leadingInline?: boolean; focusComment?: number; focusLine?: string }) {
-  const projectDirectory = agent.focused === true
+  const projectDirectory = agent.workspace_kind === 'project_directory'
   const defaultRightSel: RightSel = projectDirectory ? { type: 'uncommitted' } : { type: 'latest' }
   const fileSurfaceShadow = hasWebKitDesktopBridge() ? '' : ' shadow-sm'
   const [commits, setCommits] = useState<CommitInfo[]>([])

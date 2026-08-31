@@ -165,13 +165,13 @@ describe('Markdown', () => {
       }
     })
 
-    it('opens an absolute focused-checkout path at the project HEAD', () => {
+    it('opens an absolute project-directory path at the project HEAD', () => {
       const { container } = render(
         <Markdown
           text="[agent guide](/home/callum/code/hydra/docs/agent-guide.md)"
           linkCtx={{
             projectId: 'p1',
-            agentId: 'focused-1',
+            agentId: 'project-directory-1',
             refStr: 'HEAD',
             filePath: '',
             worktreePath: '/home/callum/code/hydra',

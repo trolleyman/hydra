@@ -35,9 +35,9 @@ from a terminal. Finder launches do not inherit shell environment variables.
   redeems it for the shared HttpOnly session cookie.
 - Every window shares one backend, `WKProcessPool`, cookie store, and local
   storage.
-- Cmd+N opens a full Hydra window. Cmd+Shift+N opens the dedicated focused draft
+- Cmd+N opens a full Hydra window. Cmd+Shift+N opens the dedicated project-directory chat draft
   route, which creates its branchless session on first submit.
-- Focused windows expose project and live/loaded archived history controls plus
+- Project-directory windows expose project and live/loaded archived history controls plus
   Stop Session and Close / Close and Keep Running / Cancel for an active turn.
   Stopping retains the head, worktree, branch and conversation.
 - Closing all windows leaves the app and app-owned backend running. Use the Dock
@@ -51,7 +51,7 @@ from a terminal. Finder launches do not inherit shell environment variables.
 
 Before treating this as a shippable app, verify on a real Mac:
 
-- two full and two focused windows share cookies, local storage, WebSockets, and
+- two full and two project-directory chat windows share cookies, local storage, WebSockets, and
   live session state;
 - the shared daemon's PID-bound endpoint record appears atomically, stale
   records are rejected, and a reused service-owned daemon survives app Quit;

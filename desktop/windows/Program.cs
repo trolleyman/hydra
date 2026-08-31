@@ -52,7 +52,7 @@ internal sealed class HydraApplicationContext : ApplicationContext
         this.webViewEnvironment = webViewEnvironment;
         var trayMenu = new ContextMenuStrip();
         trayMenu.Items.Add("New Hydra window", null, (_, _) => OpenWindow(HydraWindowKind.Full));
-        trayMenu.Items.Add("New project chat", null, (_, _) => OpenWindow(HydraWindowKind.Focused));
+        trayMenu.Items.Add("New project chat", null, (_, _) => OpenWindow(HydraWindowKind.ProjectDirectory));
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("Exit", null, async (_, _) => await ExitAsync());
         trayIcon = new NotifyIcon

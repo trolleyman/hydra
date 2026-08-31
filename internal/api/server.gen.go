@@ -250,12 +250,6 @@ const (
 	ErrorResponseErrorUnauthorized  ErrorResponseError = "unauthorized"
 )
 
-// Defines values for FocusedFilesystemMode.
-const (
-	FocusedFilesystemEdit     FocusedFilesystemMode = "edit"
-	FocusedFilesystemReadonly FocusedFilesystemMode = "readonly"
-)
-
 // Defines values for HeadChangedEventType.
 const (
 	HeadChanged HeadChangedEventType = "head_changed"
@@ -335,6 +329,12 @@ const (
 	PreviewRunning  PreviewState = "running"
 	PreviewStarting PreviewState = "starting"
 	PreviewStopped  PreviewState = "stopped"
+)
+
+// Defines values for ProjectDirectoryFilesystemMode.
+const (
+	ProjectDirectoryFilesystemEdit     ProjectDirectoryFilesystemMode = "edit"
+	ProjectDirectoryFilesystemReadonly ProjectDirectoryFilesystemMode = "readonly"
 )
 
 // Defines values for QueueMessageRemovedEventType.
@@ -578,6 +578,12 @@ const (
 	UserMessage UserMessageEventType = "user_message"
 )
 
+// Defines values for WorkspaceKind.
+const (
+	WorkspaceKindProjectDirectory WorkspaceKind = "project_directory"
+	WorkspaceKindWorktree         WorkspaceKind = "worktree"
+)
+
 // Defines values for GetAgentArtifactsParamsRefreshSide.
 const (
 	GetAgentArtifactsParamsRefreshSideLeft  GetAgentArtifactsParamsRefreshSide = "left"
@@ -646,7 +652,7 @@ type AgentResponse struct {
 	AgentStatus *AgentStatusInfo `json:"agent_status,omitempty"`
 	AgentType   string           `json:"agent_type"`
 
-	// AllowCommits Whether a focused head may request Hydra's guarded commit operation. Independent of filesystem_mode; false for ordinary heads.
+	// AllowCommits Whether a project-directory Head may request Hydra's guarded commit operation. Independent of filesystem_mode; false for worktree Heads.
 	AllowCommits *bool `json:"allow_commits,omitempty"`
 
 	// Archived True if the agent is a finished (killed/merged) head retained in the history list. Archived agents are read-only - they have no live session or worktree.
@@ -675,11 +681,8 @@ type AgentResponse struct {
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 
-	// FilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
-	FilesystemMode *FocusedFilesystemMode `json:"filesystem_mode,omitempty"`
-
-	// Focused True for a branchless head that runs directly in project_path. Derived from branch_name being null; persisted without a separate kind field.
-	Focused *bool `json:"focused,omitempty"`
+	// FilesystemMode Filesystem posture for a project-directory Head. Edit writes directly into the registered project root; readonly makes that root read-only.
+	FilesystemMode *ProjectDirectoryFilesystemMode `json:"filesystem_mode,omitempty"`
 
 	// GitIsolation Effective git-isolation mode for this head: "off" (the shared .git is writable in the sandbox) or "readonly" (the whole .git is bound read-only, so commits are host-mediated). See docs/git-isolation.md.
 	GitIsolation *string `json:"git_isolation,omitempty"`
@@ -724,9 +727,12 @@ type AgentResponse struct {
 	// UnreadComments How many review comments on this head the user has not seen (docs/review-agent.md). Deliberately its own count rather than folded into has_unread_changes: that flag means "the agent finished", and one indicator meaning both would be trustworthy for neither. Cleared only by explicitly arriving at a comment, never by opening the page.
 	UnreadComments *int `json:"unread_comments,omitempty"`
 
-	// WorkspaceBaseRef Immutable checkout commit captured when a project-directory Head starts. It is the default left side of that chat's Changes inspector; empty for ordinary worktree Heads and legacy focused Heads.
+	// WorkspaceBaseRef Immutable checkout commit captured when a project-directory Head starts. It is the default left side of that chat's Changes inspector; empty for worktree Heads and legacy project-directory Heads created before this baseline was recorded.
 	WorkspaceBaseRef *string `json:"workspace_base_ref,omitempty"`
-	WorktreePath     *string `json:"worktree_path"`
+
+	// WorkspaceKind Checkout topology used by a Head. Worktree Heads own an isolated branch and linked worktree; project-directory Heads use the registered project root and remain branchless.
+	WorkspaceKind WorkspaceKind `json:"workspace_kind"`
+	WorktreePath  *string       `json:"worktree_path"`
 }
 
 // AgentStatus The computed status of the agent (derived from container, agent, and head status). `needs_input` is the explicit "the agent is blocked on you" state (an AskUserQuestion elicitation, an ExitPlanMode plan approval, or a permission prompt) and is surfaced prominently; `waiting` is the softer "gone quiet" idle nudge. `errored` means the agent's turn failed mid-response (e.g. a Claude `API Error: ... The response above may be incomplete.`); the reply is incomplete and the head needs a nudge to continue - detected in chat mode from the CLI's `isApiErrorMessage` stream-json event.
@@ -2127,9 +2133,6 @@ type ErrorResponse struct {
 // ErrorResponseError Machine-readable error type (e.g. internal_error, not_found, unauthorized, docker_connect)
 type ErrorResponseError string
 
-// FocusedFilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
-type FocusedFilesystemMode string
-
 // FolderPickerAvailableResponse defines model for FolderPickerAvailableResponse.
 type FolderPickerAvailableResponse struct {
 	// Available True only when the request is local AND a native dialog tool exists. A remote browser never gets a "Browse..." button, since the dialog would open on the server's display.
@@ -2667,6 +2670,9 @@ type PreviewsResponse struct {
 	// Previews One entry per configured server script, for the requested version
 	Previews []PreviewStatus `json:"previews"`
 }
+
+// ProjectDirectoryFilesystemMode Filesystem posture for a project-directory Head. Edit writes directly into the registered project root; readonly makes that root read-only.
+type ProjectDirectoryFilesystemMode string
 
 // ProjectEventFrame One change signal. No `discriminator` here: the four bare refetch nudges share one schema, and a discriminator mapping several type values onto the same member is not expressible - openapi-typescript-codegen collapses the enum to whichever mapping it saw last. A plain oneOf narrows on `type` correctly because every member's is a literal or a closed enum.
 type ProjectEventFrame struct {
@@ -3648,7 +3654,7 @@ type SpawnAgentRequest struct {
 	// AgentType Agent type: claude, gemini, copilot, codex, or bash
 	AgentType *string `json:"agent_type,omitempty"`
 
-	// AllowCommits Initially authorize Hydra's guarded commit operation for a focused head. Defaults to true for editable focused heads, must be false in read-only mode, and is ignored for ordinary worktree heads.
+	// AllowCommits Initially authorize Hydra's guarded commit operation for a project-directory Head. Defaults to true for editable project-directory Heads, must be false in read-only mode, and is ignored for worktree Heads.
 	AllowCommits *bool `json:"allow_commits,omitempty"`
 
 	// BaseBranch Base branch to create the worktree from (defaults to the repository's stable default branch)
@@ -3663,11 +3669,8 @@ type SpawnAgentRequest struct {
 	// Ephemeral If true, the agent is a throwaway test agent whose worktree and branch are torn down when it stops.
 	Ephemeral *bool `json:"ephemeral,omitempty"`
 
-	// FilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
-	FilesystemMode *FocusedFilesystemMode `json:"filesystem_mode,omitempty"`
-
-	// Focused Run directly in the registered project's real root instead of creating a Hydra branch and linked worktree. Focused heads require structured chat mode and remain branchless for their whole life.
-	Focused *bool `json:"focused,omitempty"`
+	// FilesystemMode Filesystem posture for a project-directory Head. Edit writes directly into the registered project root; readonly makes that root read-only.
+	FilesystemMode *ProjectDirectoryFilesystemMode `json:"filesystem_mode,omitempty"`
 
 	// Force With an explicit id, take over an ARCHIVED head with the same ID in this project, overwriting its archived record (the `hydra spawn --force` path). Active heads and heads in other projects still conflict.
 	Force *bool `json:"force,omitempty"`
@@ -3686,6 +3689,9 @@ type SpawnAgentRequest struct {
 
 	// Rows Initial PTY height (rows). The browser sends its last terminal height, or the user's configured default height when it has none yet. When omitted the PTY uses its built-in 24-row default.
 	Rows *int `json:"rows,omitempty"`
+
+	// WorkspaceKind Checkout topology used by a Head. Worktree Heads own an isolated branch and linked worktree; project-directory Heads use the registered project root and remain branchless.
+	WorkspaceKind *WorkspaceKind `json:"workspace_kind,omitempty"`
 }
 
 // StatusResponse defines model for StatusResponse.
@@ -4490,7 +4496,7 @@ type UncommittedSummary struct {
 
 // UpdateAgentRequest Patch an agent's mutable fields. Provide any subset; at least one field is required. Omitted fields are left unchanged.
 type UpdateAgentRequest struct {
-	// AllowCommits Enable or disable guarded commits for a focused head immediately. Must be false in read-only mode. Rejected for ordinary worktree heads.
+	// AllowCommits Enable or disable guarded commits for a project-directory Head immediately. Must be false in read-only mode. Rejected for worktree Heads.
 	AllowCommits *bool `json:"allow_commits,omitempty"`
 
 	// BaseBranch New base branch for the agent. This is a metadata-only change: it updates which branch the agent is considered to be based on (used by update-from-base and the diff view) but does NOT move existing commits. Rebasing the agent's branch onto the new base, if desired, is left to the user. Must be an existing ref.
@@ -4499,11 +4505,11 @@ type UpdateAgentRequest struct {
 	// ChatMode Switch the head between terminal and chat mode (Claude and Codex only; rejected for other agent types). When the value changes, a live process is relaunched and its provider conversation is resumed.
 	ChatMode *bool `json:"chat_mode,omitempty"`
 
-	// CheckoutBranch Switch the shared project checkout to this existing local branch. Valid only for a focused/project-checkout head. This performs a normal non-forced Git checkout, so local changes are preserved when possible and a conflicting switch fails rather than discarding work.
+	// CheckoutBranch Switch the shared project checkout to this existing local branch. Valid only for a project-directory Head. This performs a normal non-forced Git checkout, so local changes are preserved when possible and a conflicting switch fails rather than discarding work.
 	CheckoutBranch *string `json:"checkout_branch,omitempty"`
 
-	// FilesystemMode Filesystem posture for a focused branchless head. Edit writes directly into the registered project root; readonly makes that root read-only.
-	FilesystemMode *FocusedFilesystemMode `json:"filesystem_mode,omitempty"`
+	// FilesystemMode Filesystem posture for a project-directory Head. Edit writes directly into the registered project root; readonly makes that root read-only.
+	FilesystemMode *ProjectDirectoryFilesystemMode `json:"filesystem_mode,omitempty"`
 
 	// Title New user-facing display name for the agent. Trimmed; must be non-empty if provided.
 	Title *string `json:"title,omitempty"`
@@ -4606,6 +4612,9 @@ type UserMessageEvent struct {
 
 // UserMessageEventType defines model for UserMessageEvent.Type.
 type UserMessageEventType string
+
+// WorkspaceKind Checkout topology used by a Head. Worktree Heads own an isolated branch and linked worktree; project-directory Heads use the registered project root and remain branchless.
+type WorkspaceKind string
 
 // PreviewConfigTomlParams defines parameters for PreviewConfigToml.
 type PreviewConfigTomlParams struct {

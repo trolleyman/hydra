@@ -8,7 +8,7 @@ namespace HydraDesktop;
 internal enum HydraWindowKind
 {
     Full,
-    Focused,
+    ProjectDirectory,
 }
 
 internal sealed class HydraForm : Form
@@ -41,7 +41,7 @@ internal sealed class HydraForm : Form
         var menu = new MenuStrip();
         var file = new ToolStripMenuItem("&File");
         file.DropDownItems.Add(new ToolStripMenuItem("New Hydra window", null, (_, _) => application.OpenWindow(HydraWindowKind.Full), Keys.Control | Keys.N));
-        file.DropDownItems.Add(new ToolStripMenuItem("New project chat", null, (_, _) => application.OpenWindow(HydraWindowKind.Focused), Keys.Control | Keys.Shift | Keys.N));
+        file.DropDownItems.Add(new ToolStripMenuItem("New project chat", null, (_, _) => application.OpenWindow(HydraWindowKind.ProjectDirectory), Keys.Control | Keys.Shift | Keys.N));
         file.DropDownItems.Add(new ToolStripSeparator());
         file.DropDownItems.Add(new ToolStripMenuItem("Exit", null, async (_, _) => await application.ExitAsync(), Keys.Alt | Keys.F4));
         menu.Items.Add(file);
@@ -101,9 +101,9 @@ internal sealed class HydraForm : Form
                             application.OpenWindow(HydraWindowKind.Full);
                             break;
                         case "new-chat-window":
-                        case "new-focused-window":
+                        case "new-project-directory-window":
                             var agentId = root.TryGetProperty("agentId", out var agentElement) ? agentElement.GetString() : null;
-                            application.OpenWindow(HydraWindowKind.Focused, projectId, agentId);
+                            application.OpenWindow(HydraWindowKind.ProjectDirectory, projectId, agentId);
                             break;
                         case "active-project" when projectId is not null:
                             application.SetActiveProject(projectId);
@@ -123,11 +123,11 @@ internal sealed class HydraForm : Form
                     // origin-restricted, so only Hydra content reaches this bridge.
                 }
             };
-            var focusedProject = requestedProjectId ?? backend.Status?.DefaultProjectId;
-            var path = kind == HydraWindowKind.Focused && focusedProject is { } project
+            var requestedProject = requestedProjectId ?? backend.Status?.DefaultProjectId;
+            var path = kind == HydraWindowKind.ProjectDirectory && requestedProject is { } project
                 ? requestedAgentId is { } agent
                     ? $"/project/{Uri.EscapeDataString(project)}/agent/{Uri.EscapeDataString(agent)}"
-                    : $"/focused/{Uri.EscapeDataString(project)}"
+                    : $"/project-directory/{Uri.EscapeDataString(project)}"
                 : "/";
             var target = new UriBuilder(new Uri(backend.BaseUrl!, path));
             if (backend.TakeBootstrapToken() is { } token)

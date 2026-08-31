@@ -68,8 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         openWindow(kind: .full)
     }
 
-    @objc private func newFocusedWindow() {
-        openWindow(kind: .focused)
+    @objc private func newProjectDirectoryWindow() {
+        openWindow(kind: .projectDirectory)
     }
 
     @objc private func backendExited(_ notification: Notification) {
@@ -165,9 +165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Hydr
         let fileMenu = NSMenu(title: "File")
         let full = fileMenu.addItem(withTitle: "New Hydra Window", action: #selector(newFullWindow), keyEquivalent: "n")
         full.target = self
-        let focused = fileMenu.addItem(withTitle: "New Project Chat", action: #selector(newFocusedWindow), keyEquivalent: "n")
-        focused.keyEquivalentModifierMask = [.command, .shift]
-        focused.target = self
+        let projectDirectory = fileMenu.addItem(withTitle: "New Project Chat", action: #selector(newProjectDirectoryWindow), keyEquivalent: "n")
+        projectDirectory.keyEquivalentModifierMask = [.command, .shift]
+        projectDirectory.target = self
         fileItem.submenu = fileMenu
 
         NSApp.mainMenu = mainMenu

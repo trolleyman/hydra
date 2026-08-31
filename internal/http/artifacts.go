@@ -117,7 +117,7 @@ func (s *Server) resolveArtifactPlan(projectRoot string, head *heads.Head, param
 	// regenerate the "before" artifact from newer state, producing spurious
 	// before/after differences (e.g. a screenshot's clock) unrelated to the work.
 	leftRef := head.BaseBranch
-	if head.IsFocused() {
+	if head.UsesProjectDirectory() {
 		leftRef = workspaceComparisonBase(projectRoot, head)
 	}
 	if params.BaseRef != nil && *params.BaseRef != "" {

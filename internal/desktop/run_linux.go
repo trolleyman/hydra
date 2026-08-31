@@ -279,7 +279,7 @@ static void hydra_script_message(WebKitUserContentManager *manager, JSCValue *va
 			char *escaped = g_uri_escape_string(project, NULL, FALSE);
 			char *escaped_agent = agent == NULL ? NULL : g_uri_escape_string(agent, NULL, FALSE);
 			char *path = escaped_agent == NULL
-				? g_strdup_printf("/focused/%s", escaped)
+				? g_strdup_printf("/project-directory/%s", escaped)
 				: g_strdup_printf("/project/%s/agent/%s", escaped, escaped_agent);
 			char *uri = hydra_origin_url(window->desktop, path);
 			hydra_open_window_at(window->desktop, uri, TRUE);
@@ -407,7 +407,7 @@ static void hydra_new_chat(GSimpleAction *action, GVariant *parameter, gpointer 
 	HydraWindow *window = g_object_get_data(G_OBJECT(active), "hydra-window");
 	if (window == NULL || window->project_id == NULL) return;
 	char *escaped = g_uri_escape_string(window->project_id, NULL, FALSE);
-	char *path = g_strdup_printf("/focused/%s", escaped);
+	char *path = g_strdup_printf("/project-directory/%s", escaped);
 	char *uri = hydra_origin_url(desktop, path);
 	hydra_open_window_at(desktop, uri, TRUE);
 	g_free(uri); g_free(path); g_free(escaped);

@@ -7,7 +7,7 @@ below remain explicit unsupported stubs. Companion to
 [macos-support.md](macos-support.md) - several work items are shared.
 
 Packaging that native runtime as a standalone Windows desktop application, with
-full Hydra and focused chat windows, is covered by
+full Hydra and project-directory chat windows, is covered by
 [windows-desktop-chat.md](windows-desktop-chat.md).
 
 ## Background

@@ -1,10 +1,10 @@
-# Hydra for Windows and project-checkout chats
+# Hydra for Windows and project-directory chats
 
-Status: **shared focused-session foundation and initial Windows shell built;
+Status: **shared project-directory-session foundation and initial Windows shell built;
 native validation and Windows agent runtime unbuilt.** This document adapts the
 product shape in
 [macos-desktop-chat.md](macos-desktop-chat.md) into a standalone Windows desktop
-application. It starts from the platform-neutral focused-session work already
+application. It starts from the platform-neutral project-directory-session work already
 merged into `main`; it does not propose a second session model or a Windows-only
 frontend.
 
@@ -18,10 +18,10 @@ depends on the Windows runtime phases below.
 
 Ship one standalone Hydra application for Windows with one responsive React
 shell. A window may open any normal Hydra route. The New chat window command
-opens a project-checkout draft and existing chats use their canonical agent
+opens a project-directory draft and existing chats use their canonical agent
 route; windowing is not a separate UI mode.
 
-Project-checkout chats run directly in one registered project's real directory.
+Project-directory chats run directly in one registered project's real directory.
 Edit/Read-only and Allow commits sit beside their workspace chip; test, network,
 Git access, checked-out branch, and run mode remain in the normal configuration
 strip. Their agent view omits worktree review chrome.
@@ -42,16 +42,16 @@ stay with Claude Code, Codex CLI, Gemini CLI, and Copilot CLI.
 
 The following base is already merged and must be reused unchanged:
 
-- focused heads are ordinary branchless heads (`Branch == nil`) and run in the
+- project-directory heads are ordinary branchless heads (`Branch == nil`) and run in the
   registered project root without a Hydra worktree;
 - branchless create/list/archive/restart/resume behavior and watcher exclusions;
-- the platform-neutral focused create and permission API;
+- the platform-neutral project-directory create and permission API;
 - Edit/Read-only switching through controlled stop and exact resume;
 - immediate authorization changes for the independent commit toggle;
 - guarded commits which revalidate the real checkout's branch and HEAD;
-- the focused option in the existing spawn composer;
+- the project-directory option in the existing spawn composer;
 - the reusable chat-only agent layout and inline workspace permission controls;
-- simulation fixtures for editable, read-only, working, and archived focused
+- simulation fixtures for editable, read-only, working, and archived project-directory
   sessions.
 
 Still shared and unbuilt are first-message draft creation, the concurrent-editor
@@ -62,7 +62,7 @@ should land once for every desktop shell, not in Windows UI code.
 
 ### One backend per Windows user
 
-- Every full and focused window connects to one user-scoped Hydra backend.
+- Every full and project-directory window connects to one user-scoped Hydra backend.
 - A second app process discovers and activates the existing instance instead of
   opening another database owner or choosing another arbitrary port.
 - The app also composes with a compatible Hydra CLI daemon already running as
@@ -88,7 +88,7 @@ cross-platform desktop framework is not a goal.
 
 The initial development shell is under `desktop/windows`. It launches or reuses
 one backend, shares a persistent WebView2 profile between windows, opens full and
-focused composer windows, owns notification-area lifecycle, and consumes the
+project-directory composer windows, owns notification-area lifecycle, and consumes the
 same atomic readiness protocol as `desktop/macos`. It is not yet validated on
 Windows hardware and is not an installer.
 
@@ -97,7 +97,7 @@ The shell technology is acceptable only if it proves:
 - multiple top-level windows sharing cookies, storage, and authentication;
 - WebSockets, uploads, downloads, clipboard, media, IME, accessibility, and the
   embedded terminal;
-- reliable new-window interception and routing to full/focused native windows;
+- reliable new-window interception and routing to full and project-directory native windows;
 - accelerator handling without stealing composer or terminal keystrokes;
 - native notification click activation when the app is closed to the tray;
 - a stable user-data directory across application updates;
@@ -195,7 +195,7 @@ release labels must be precise:
   sandbox-user/ACL backend, job-object teardown, and the selected network modes
   pass real-Windows validation.
 
-Focused Edit mode is the highest-risk path because it writes the user's real
+Editable project-directory mode is the highest-risk path because it writes the user's real
 checkout. It must not ship as secure until all of these hold:
 
 - the provider cannot write `.git` or effective Hydra policy directly;
@@ -207,7 +207,7 @@ checkout. It must not ship as secure until all of these hold:
 - hard/off network modes fail closed when the firewall setup is missing or
   damaged.
 
-Read-only focused mode is also enforced by the Windows sandbox, not by prompt
+Read-only project-directory mode is also enforced by the Windows sandbox, not by prompt
 text. WSL2 remains the supported full-fidelity fallback for machines where GPO,
 AV, or the absence of administrator approval prevents native sandbox setup, but
 it is not the runtime hidden inside the standalone app.
@@ -216,7 +216,7 @@ it is not the runtime hidden inside the standalone app.
 
 ### Phase 0: freeze the shared desktop contract
 
-- [x] Land the project-checkout draft route, canonical agent navigation, and
+- [x] Land the project-directory draft route, canonical agent navigation, and
   first-message creation flow.
 - Land backend capabilities and semantic notification events. Project and
   conversation navigation use the shared responsive shell.
@@ -305,9 +305,9 @@ setup helper after an ordinary Windows consent prompt, explain failures, and
 offer WSL2 documentation. The helper performs only setup/repair/removal; it does
 not run the Hydra UI or daemon elevated.
 
-### Phase 4: finish project-checkout chat lifecycle
+### Phase 4: finish project-directory chat lifecycle
 
-- Create an untitled project-checkout draft immediately and atomically create
+- Create an untitled project-directory draft immediately and atomically create
   its head on first submit.
 - Select the frontmost full window's project, falling back to persisted last
   project, and make the directory immutable after creation.
@@ -321,7 +321,7 @@ not run the Hydra UI or daemon elevated.
 Status: the shared bridge reports the selected head's live-turn state and the
 Windows and macOS shells now offer Stop and close, Close and keep running, and
 Cancel. Stop is issued by the authenticated web session and the native window
-closes only after it succeeds. Draft project/history controls cover live focused
+closes only after it succeeds. Draft project/history controls cover live project-directory
 heads plus loaded archived history; Stop-and-switch project changes remain.
 
 ### Phase 5: sign, install, and update
@@ -356,7 +356,7 @@ In priority order:
    pool, restricted tokens, ACL grants/denies and cleanup, job objects, private
    desktop, provider configuration, and fail-closed off/advisory/unrestricted/
    hard network modes. The ordinary app and backend must never run elevated.
-4. Finish focused lifecycle and native integration: Stop and switch / Keep
+4. Finish project-directory lifecycle and native integration: Stop and switch / Keep
    running / Cancel, frontmost-project tracking, concurrent-editor warning,
    notification routing/suppression, activation/deep links, setup diagnostics,
    download/upload handling, tray-only and fully-exited activation.
@@ -382,7 +382,7 @@ At minimum, acceptance covers:
 - Windows 11 x64 and arm64;
 - packaged and unpackaged development launch, clean install, update, repair,
   uninstall, reboot, and stale-lock recovery;
-- one through many full/focused windows sharing one backend without duplicate
+- one through many full and project-directory windows sharing one backend without duplicate
   provider processes or chat ingestion;
 - WebView profile persistence, cookies/auth bootstrap, WebSockets, attachments,
   clipboard, terminal input, IME, screen reader navigation, scaling, dark mode,
@@ -414,7 +414,7 @@ and the automation/manual boundary.
   proven compatible with its packaging constraints.
 - Arbitrary unregistered folders, conversation directory migration, and
   importing arbitrary provider history.
-- A worktree inspector inside a project-checkout agent view.
+- A worktree inspector inside a project-directory agent view.
 
 ## Open implementation questions
 

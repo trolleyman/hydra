@@ -89,7 +89,7 @@ export function openChatWindow(projectId?: string, agentId?: string): void {
   if (postDesktopMessage({ type: 'new-chat-window', projectId, agentId })) return
   const url = projectId && agentId
     ? `/project/${encodeURIComponent(projectId)}/agent/${encodeURIComponent(agentId)}`
-    : projectId ? `/focused/${encodeURIComponent(projectId)}` : '/'
+    : projectId ? `/project-directory/${encodeURIComponent(projectId)}` : '/'
   // Browsers decide how much window chrome they permit, but `popup` requests a
   // compact standalone window where supported. The route itself stays canonical
   // and responsive, so the same URL also works as an ordinary tab.

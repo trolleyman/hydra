@@ -11,19 +11,19 @@ addresses, filesystem paths, authentication credentials, or commands.
 | `hydra://settings` | Global settings |
 | `hydra://project/<project-id>` | A project |
 | `hydra://project/<project-id>/agent/<agent-id>` | An exact agent conversation |
-| `hydra://focused/<project-id>` | A new focused chat window for a project |
+| `hydra://project-directory/<project-id>` | A new project-directory chat window for a project |
 
 For example:
 
 ```text
 hydra://project/hydra
 hydra://project/hydra/agent/fix-linux-package
-hydra://focused/hydra
+hydra://project-directory/hydra
 hydra://settings
 ```
 
-`hydra://focused/_chat` opens the built-in chat project. This is also the New
-chat action in the Linux desktop entry.
+`hydra://project-directory/_chat` opens the built-in chat project. This is also
+the New chat action in the Linux desktop entry.
 
 Project and agent IDs may contain ASCII letters, digits, `.`, `_`, and `-`.
 They are stable Hydra IDs, not project display names or directory paths.
@@ -35,7 +35,7 @@ pass it to the application directly:
 
 ```bash
 xdg-open 'hydra://project/hydra/agent/fix-linux-package'
-hydra-desktop 'hydra://focused/hydra'
+hydra-desktop 'hydra://project-directory/hydra'
 ```
 
 The `.deb` registers `hydra-desktop` as the `x-scheme-handler/hydra` handler.
@@ -57,7 +57,7 @@ discovered. The corresponding web routes are:
 | `hydra://settings` | `/settings` |
 | `hydra://project/<project-id>` | `/project/<project-id>` |
 | `hydra://project/<project-id>/agent/<agent-id>` | `/project/<project-id>/agent/<agent-id>` |
-| `hydra://focused/<project-id>` | `/focused/<project-id>` |
+| `hydra://project-directory/<project-id>` | `/project-directory/<project-id>` |
 
 Callers should use `hydra://` only for native-app activation. Browser links
 should use Hydra's ordinary HTTP route on the server already in use.
