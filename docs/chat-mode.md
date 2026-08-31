@@ -356,12 +356,15 @@ remains as a fallback for changes outside those boundaries and calls the same
 reconciliation function; an externally detected commit has no causal tool id and
 is sequenced where it is observed.
 
-Non-fast-forward movement is handled explicitly: a fast-forward yields
-`commit_created` events, while a reset/rebase/checkout yields `head_changed`
-with old and new HEAD and makes the projection reconcile its visible commit set.
-Pretending every changed SHA was newly committed would leave stale or duplicate
-chips. The commits endpoint is still the source for the diff selector and the
-full branch inventory; it is not the source of chat chronology.
+Non-fast-forward movement is handled explicitly. A direct `git commit --amend`
+is identified from the HEAD reflog and yields a `commit_created` event for the
+replacement SHA, so it appears as a normal commit chip after the command that
+created it. A reset/rebase/checkout instead yields `head_changed` with old and
+new HEAD and makes the projection reconcile its visible commit set. Pretending
+every changed SHA was newly committed would leave stale or duplicate chips. The
+commits endpoint remains the source for the diff selector and the current branch
+inventory, so an amended commit appears there as its replacement SHA; obsolete
+pre-amend SHAs are transcript history, not selectable branch history.
 
 When a worktree fast-forwards onto its base, the incoming commits collapse into
 one expandable `Merged <base> - N commits` row. Its expanded list connects to

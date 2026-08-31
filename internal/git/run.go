@@ -30,6 +30,26 @@ func IsAncestor(projectRoot, ancestor, descendant string) (bool, error) {
 	return errtrace.Wrap2(gitIsAncestor(projectRoot, ancestor, descendant))
 }
 
+// IsDirectAmend reports whether oldHead was replaced directly by newHead via
+// `git commit --amend`. The topology alone cannot distinguish an amend from a
+// checkout/reset to a sibling commit with the same parent, so require Git's two
+// latest HEAD reflog entries to describe that exact transition.
+func IsDirectAmend(projectRoot, oldHead, newHead string) bool {
+	out, err := gitOutput(projectRoot, "reflog", "show", "-2", "--format=%H%x1f%gs", "HEAD")
+	if err != nil {
+		return false
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) < 2 {
+		return false
+	}
+	latest := strings.SplitN(lines[0], "\x1f", 2)
+	previous := strings.SplitN(lines[1], "\x1f", 2)
+	return len(latest) == 2 && len(previous) == 2 &&
+		latest[0] == newHead && previous[0] == oldHead &&
+		strings.HasPrefix(latest[1], "commit (amend):")
+}
+
 // gitIsAncestor returns true if ancestor is a reachable ancestor of descendant
 // (or if they are the same commit). Uses `git merge-base --is-ancestor`.
 func gitIsAncestor(dir, ancestor, descendant string) (bool, error) {
