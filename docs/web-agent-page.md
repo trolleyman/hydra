@@ -10,13 +10,18 @@ and `web/src/DiffViewer.tsx`):
   Layout changes must handle both.
 - A live Head whose API `workspace_kind` is `project_directory` uses the same
   inspector pane as an isolated `worktree` Head. It enters with the inspector
-  collapsed; **Show diff** reveals it without changing the persisted
+  collapsed, with that entry state resolved before the reused split-pane DOM is
+  painted so the inspector does not animate out after navigation. **Show diff**
+  reveals it without changing the persisted
   worktree-pane preference. Its default
   comparison is `Chat start -> Project directory`:
   the left ref is the immutable `workspace_base_ref` captured at spawn, and the
   right side is the shared checkout including uncommitted and untracked files.
   The inspector describes project state, not changes owned exclusively by that
   chat. Tests and previews use the selected right side; artifacts use both sides.
+- Agent-to-agent navigation applies the destination pane widths without a
+  transition. Width and screen-stack transitions are reserved for explicit pane
+  toggles within the currently selected agent.
 - The agent page has no in-page header bar: both paths portal their status dot,
   title (inline rename) and action toolbar into the **global top bar** in
   `__root.tsx` via `TopBarPortal` (`web/src/lib/topBarSlot.ts` holds the slot

@@ -952,13 +952,29 @@ export function AgentDetail({
   // flips between the working view and a full-screen diff. The pane-collapse
   // store holds the shared state (none / inspector-hidden / working-hidden).
   const isWide = useMediaQuery(SPLIT_QUERY)
-  const paneCollapse = usePaneCollapseStore((s) => s.collapse)
+  const storedPaneCollapse = usePaneCollapseStore((s) => s.collapse)
   const toggleInspector = usePaneCollapseStore((s) => s.toggleInspector)
   const toggleWorking = usePaneCollapseStore((s) => s.toggleWorking)
   // Project-directory chats open on the chat alone: their inspector describes
   // shared checkout state and is useful on demand, but should not take half of
   // the page by default. Keep this entry default local to the project-directory chat so
   // visiting it does not overwrite the user's persisted worktree-pane choice.
+  const [paneTransitionsReadyFor, setPaneTransitionsReadyFor] = useState<string | null>(null)
+  const agentNavigationSettling = paneTransitionsReadyFor !== agent.id
+  const enteringProjectDirectory =
+    agent.workspace_kind === WorkspaceKind.WorkspaceKindProjectDirectory &&
+    agentNavigationSettling
+  // AgentDetail is reused across route changes. Resolve the entry state during
+  // that new agent's first render, before the layout effect updates the shared
+  // preference, so the existing pane DOM never renders at its previous width.
+  const paneCollapse = enteringProjectDirectory ? 'inspector' : storedPaneCollapse
+  // Route changes reuse the same pane DOM too. Keep its transitions disabled
+  // through the first paint at the new agent's settled widths; only deliberate
+  // pane toggles within one agent should animate.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setPaneTransitionsReadyFor(agent.id))
+    return () => cancelAnimationFrame(frame)
+  }, [agent.id])
   useLayoutEffect(() => {
     if (agent.workspace_kind !== WorkspaceKind.WorkspaceKindProjectDirectory) return
     const store = usePaneCollapseStore.getState()
@@ -1079,7 +1095,9 @@ export function AgentDetail({
     const t = setTimeout(() => setWorkingRevealing(false), 300)
     return () => clearTimeout(t)
   }, [workingRevealing])
-  const paneTransition = splitResizing ? undefined : 'width 240ms ease'
+  // The first committed widths after navigation are final, so nothing from the
+  // previously selected agent animates into or out of view.
+  const paneTransition = splitResizing || agentNavigationSettling ? undefined : 'width 240ms ease'
   // Hand-rolled divider drag, mirroring handleSidebarResizeStart in __root.tsx.
   const handleSplitResizeStart = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
@@ -2335,7 +2353,7 @@ export function AgentDetail({
             className="flex h-full w-[200%]"
             style={{
               transform: diffShown ? 'translateX(-50%)' : 'translateX(0)',
-              transition: 'transform 300ms ease',
+              transition: agentNavigationSettling ? undefined : 'transform 300ms ease',
             }}
           >
             <div className="w-1/2 flex flex-col min-h-0 overflow-hidden">
