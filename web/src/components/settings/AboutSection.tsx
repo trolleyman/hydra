@@ -35,7 +35,10 @@ export function AboutSection() {
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
       <div className="border-b border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-50 px-6 py-8 text-center dark:border-gray-700 dark:from-blue-950/40 dark:to-indigo-950/30">
-        <img src="/icon.avif" alt="" className="mx-auto h-20 w-20 object-contain drop-shadow-lg" />
+        <picture>
+          <source srcSet="/icon.avif" type="image/avif" />
+          <img src="/icon.png" alt="" className="mx-auto h-20 w-20 object-contain drop-shadow-lg" />
+        </picture>
         <h1 className="mt-4 text-xl font-semibold text-gray-950 dark:text-white">Hydra</h1>
         <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-gray-600 dark:text-gray-300">
           An AI orchestration platform for running and reviewing autonomous coding agents in isolated worktrees.
@@ -49,9 +52,7 @@ export function AboutSection() {
           <Detail icon={<AppWindow className="h-4 w-4" />} label="Runtime" value={`${runtime} on ${platform}`} />
           <Detail icon={<Server className="h-4 w-4" />} label="Server status" value={status?.status || 'Connecting...'} />
           <Detail icon={<Server className="h-4 w-4" />} label="Backend ownership" value={backendOwnership} />
-          <div className="sm:col-span-2">
-            <Detail icon={<Database className="h-4 w-4" />} label="State directory" value={databaseDirectory} mono />
-          </div>
+          <Detail icon={<Database className="h-4 w-4" />} label="State directory" value={databaseDirectory} mono />
         </div>
       </div>
     </div>
