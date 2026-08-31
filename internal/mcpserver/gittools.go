@@ -135,7 +135,7 @@ func gitToolDefs() []map[string]any {
 		},
 		{
 			"name":        "git_merge_continue",
-			"description": "Conclude a merge that stopped on conflicts, after you have resolved them in your worktree. It stages the still-conflicted files and commits the merge; it refuses if any of them still contain conflict markers.",
+			"description": "Conclude a merge that stopped on conflicts, after you have resolved them in your worktree. It stages the still-conflicted files and commits the merge; it refuses if any of them still contain conflict markers. Other edited files are not included automatically: use git_add before this tool when a semantic resolution also changes a path Git did not mark conflicted.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		{

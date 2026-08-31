@@ -218,8 +218,10 @@ func GuardedMerge(worktree, expectedBranch, ref, message string, noFF bool) (ok 
 
 // GuardedMergeContinue concludes a merge left in progress by GuardedMerge, once
 // the conflicts have been resolved in the worktree. The still-unmerged paths are
-// staged first - git refuses to conclude a merge while any remain, and the agent
-// has no sanctioned way to stage them itself mid-merge.
+// staged first - git refuses to conclude a merge while any remain. Other edited
+// paths are deliberately left alone so unrelated dirty work is not swept into
+// the merge commit; callers can stage intentional semantic-resolution edits with
+// git_add before continuing.
 func GuardedMergeContinue(worktree, expectedBranch string) (ok bool, summary string) {
 	cur, ok, msg := ensureOwnBranch(worktree, expectedBranch)
 	if !ok {
@@ -250,7 +252,19 @@ func GuardedMergeContinue(worktree, expectedBranch string) (ok bool, summary str
 		return false, "Merge continue failed: " + firstNonEmpty(strings.TrimSpace(string(out)), err.Error())
 	}
 	hash, _ := gitOutput(worktree, "rev-parse", "--short", "HEAD")
-	return true, fmt.Sprintf("Merge concluded; %s is now at %s.", cur, hash)
+	summary = fmt.Sprintf("Merge concluded; %s is now at %s.", cur, hash)
+	if dirty, err := ListUncommittedFiles(worktree); err == nil && len(dirty) > 0 {
+		paths := make([]string, 0, min(len(dirty), 5))
+		for _, file := range dirty[:min(len(dirty), 5)] {
+			paths = append(paths, file.Path)
+		}
+		remaining := ""
+		if len(dirty) > len(paths) {
+			remaining = fmt.Sprintf(" (and %d more)", len(dirty)-len(paths))
+		}
+		summary += fmt.Sprintf(" Uncommitted changes remain outside the merge commit: %s%s. Commit them separately if intentional; for semantic merge-resolution edits, stage them with git_add before git_merge_continue.", strings.Join(paths, ", "), remaining)
+	}
+	return true, summary
 }
 
 // GuardedMergeAbort aborts an in-progress merge, restoring the head's branch.
