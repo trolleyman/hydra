@@ -166,7 +166,15 @@ interface ChatProps {
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
 // One commit dragged in by a merge, shown in the merge chip's expanded list.
-interface MergedCommit { sha: string; shortSha: string; subject: string; additions?: number; deletions?: number }
+interface MergedCommit {
+  sha: string
+  shortSha: string
+  subject: string
+  authorName?: string
+  timestamp?: string
+  additions?: number
+  deletions?: number
+}
 
 // mergeFieldsFromPayload pulls the merge annotation off a commit_created payload
 // (see chat.annotateMerge). Absent on ordinary commits and on merges recorded
@@ -184,6 +192,8 @@ function mergeFieldsFromPayload(payload: Record<string, unknown>): Pick<CommitCh
       sha,
       shortSha: typeof m.short_sha === 'string' ? m.short_sha : sha.slice(0, 7),
       subject: typeof m.subject === 'string' ? m.subject : '',
+      authorName: typeof m.author_name === 'string' ? m.author_name : undefined,
+      timestamp: typeof m.timestamp === 'string' ? m.timestamp : undefined,
       additions: typeof m.additions === 'number' ? m.additions : undefined,
       deletions: typeof m.deletions === 'number' ? m.deletions : undefined,
     })
@@ -213,7 +223,7 @@ export function mergeChipLabel(subject: string, count: number, mergedRef?: strin
 // baseline. That trim also takes the line box's spare ascender/descender out of the
 // pill's height (~4px), which left the text sitting tight against the border - so
 // the padding gives back what the trim removed rather than leaving the chip shorter.
-const COMMIT_PILL = 'flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-[3px] text-2xs text-stone-500 dark:text-stone-400 select-none'
+const COMMIT_PILL = 'flex items-center gap-1.5 border border-stone-200 dark:border-white/[0.08] bg-stone-100/60 dark:bg-white/[0.04] px-2.5 py-[3px] text-2xs text-stone-500 dark:text-stone-400 select-none'
 const COMMIT_HOVER = 'cursor-pointer hover:bg-stone-200/70 dark:hover:bg-white/[0.08] hover:text-stone-700 dark:hover:text-stone-200 transition-colors'
 
 // MergeCommitChip renders a merge as a single pill that expands to list the commits
@@ -226,12 +236,12 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
   const label = mergeChipLabel(item.subject, count, item.mergedRef)
   const shown = item.merged?.length ?? 0
   return (
-    <div className="flex max-w-full flex-col items-center gap-1">
+    <div className="flex max-w-full flex-col items-center">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-full`}
+        className={`${COMMIT_PILL} ${COMMIT_HOVER} max-w-full ${expanded && shown > 0 ? 'rounded-t-lg rounded-b-none' : 'rounded-full'}`}
         title={expanded ? 'Hide merged commits' : 'Show merged commits'}
       >
         {expanded ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
@@ -240,23 +250,32 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
       </button>
       <Expandable open={expanded && shown > 0} className="w-full">
-        <div className="flex w-full flex-col gap-0.5 rounded-md border border-stone-200 dark:border-white/[0.08] bg-stone-50/60 dark:bg-white/[0.02] px-2 py-1.5">
-          {item.merged!.map((m) => (
-            <div
+        <div className="flex w-full flex-col rounded-b-md border border-t-0 border-stone-200 bg-stone-50/60 px-2 py-1.5 dark:border-white/[0.08] dark:bg-white/[0.02]">
+          {item.merged!.map((m, index) => (
+            <Tooltip
               key={m.sha}
-              role={clickable ? 'button' : undefined}
-              tabIndex={clickable ? 0 : undefined}
-              onClick={clickable ? () => onSelectCommit?.(m.sha) : undefined}
-              onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectCommit?.(m.sha) } } : undefined}
-              className={`flex items-center gap-1.5 rounded px-1 py-0.5 text-2xs text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
-              title={clickable ? `Show ${m.shortSha} in the diff view` : m.shortSha}
+              className="w-full"
+              align="left"
+              content={<CommitCard commit={{ shortSha: m.shortSha, message: m.subject, authorName: m.authorName, timestamp: m.timestamp, additions: m.additions, deletions: m.deletions }} />}
             >
-              <GitCommitHorizontal className="w-3 h-3 shrink-0" />
-              {/* Same mono-sha-beside-sans-subject mix as the plain commit chip. */}
-              <span className="font-mono shrink-0 optical-center">{m.shortSha}</span>
-              <span className="min-w-0 flex-1 truncate optical-center">{m.subject}</span>
-              <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px" />
-            </div>
+              <div
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onClick={clickable ? () => onSelectCommit?.(m.sha) : undefined}
+                onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectCommit?.(m.sha) } } : undefined}
+                className={`flex items-center gap-1.5 rounded px-1 py-0.5 text-2xs text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
+              >
+                <span className="relative flex w-3 self-stretch shrink-0 items-center justify-center" aria-hidden="true">
+                  <span data-commit-graph-line className={`absolute left-1/2 w-px -translate-x-1/2 bg-stone-300 dark:bg-stone-600 ${index === 0 ? 'top-1/2' : '-top-0.5'} ${index === shown - 1 ? 'bottom-1/2' : '-bottom-0.5'}`} />
+                  <span className="relative h-1.5 w-1.5 rounded-full border border-stone-400 bg-stone-50 dark:border-stone-500 dark:bg-stone-800" />
+                </span>
+                <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                  <span className="shrink-0 font-mono">{m.shortSha}</span>
+                  <span className="min-w-0 flex-1 truncate">{m.subject}</span>
+                </span>
+                <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px" />
+              </div>
+            </Tooltip>
           ))}
           {shown < count && (
             <div className="px-1 py-0.5 text-2xs italic text-stone-400 dark:text-stone-500">
@@ -10644,7 +10663,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 tabIndex={clickable ? 0 : undefined}
                 onClick={clickable ? activate : undefined}
                 onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
-                className={`${COMMIT_PILL} max-w-full ${clickable ? COMMIT_HOVER : ''}`}
+                className={`${COMMIT_PILL} max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
               >
                 <GitCommitHorizontal className="w-3 h-3 shrink-0" />
                 {/* The sha is monospace and the subject is not, so their line boxes

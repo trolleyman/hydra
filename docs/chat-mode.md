@@ -364,12 +364,15 @@ chips. The commits endpoint is still the source for the diff selector and the
 full branch inventory; it is not the source of chat chronology.
 
 When a worktree fast-forwards onto its base, the incoming commits collapse into
-one expandable `Merged <base> - N commits` row. Hydra also observes every chat
-that owns a merge destination before merging another head into it, then labels
-the resulting fast-forward or merge commit with the incoming branch. This works
-for both managed worktree branches and a project-directory chat whose checkout
-is on the destination branch. Ordinary project-directory commits have no
-incoming-branch hint and remain ordinary one-commit rows.
+one expandable `Merged <base> - N commits` row. Its expanded list connects to
+the summary as one surface, draws the commits on a continuous vertical graph,
+and uses the shared commit card for each row's hover details. Hydra also
+observes every chat that owns a merge destination before merging another head
+into it, then labels the resulting fast-forward or merge commit with the
+incoming branch. This works for both managed worktree branches and a
+project-directory chat whose checkout is on the destination branch. Ordinary
+project-directory commits have no incoming-branch hint and remain ordinary
+one-commit rows.
 
 ## Project-directory Changes inspector
 
