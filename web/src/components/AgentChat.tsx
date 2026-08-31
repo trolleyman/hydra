@@ -3164,7 +3164,7 @@ function ScriptOutputHeader({ header, gutter }: {
       className={`${gutter ? 'col-span-2' : 'col-span-1'} sticky top-0 z-10 min-w-0 select-none bg-[#fdfcf9] dark:bg-[#1d1c1a]`}
     >
       <div className="mx-2.5 border-t border-stone-200 dark:border-white/[0.06]" />
-      <div className="flex min-h-5 min-w-0 items-center px-2.5 py-0.5">{label}</div>
+      <div className="flex min-h-5 min-w-0 items-center px-2.5 py-1">{label}</div>
       <div className="mx-2.5 border-b border-stone-200 dark:border-white/[0.06]" />
     </div>
   )

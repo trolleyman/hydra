@@ -258,6 +258,7 @@ describe('sectioned search output', () => {
     expect(headings).toHaveLength(3)
     for (const heading of headings) {
       expect(heading).toHaveClass('top-0', 'z-10', 'bg-[#fdfcf9]', 'dark:bg-[#1d1c1a]')
+      expect(heading.children[1]).toHaveClass('py-1')
     }
   })
 
