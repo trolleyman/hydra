@@ -1316,8 +1316,12 @@ export function AgentDetail({
       const body = apiErrorBody(err)
       if (body?.error === 'uncommitted_changes') {
         const files = body.conflicting_files ?? []
-        const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
-        useDialogStore.getState().show({ title: 'Uncommitted Changes in Target', message: `Can't merge: the merge target \`${agent.base_branch}\` has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.${fileList}`, type: 'warning' })
+        useDialogStore.getState().show({
+          title: 'Uncommitted Changes in Target',
+          message: `Can't merge: the merge target \`${agent.base_branch}\` has uncommitted changes that the merge would overwrite. Commit or stash them, then try again.`,
+          type: 'warning',
+          details: { filePaths: files },
+        })
       } else if (body?.error === 'tests_failing' || body?.error === 'tests_errored') {
         // The soft gate blocked it (the verdict moved since the button rendered).
         // Surface the same Force / Queue choice dialog the button opens proactively

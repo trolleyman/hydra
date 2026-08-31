@@ -3527,11 +3527,11 @@ function BehindBaseButton({ diff, agent, projectId, onUpdated }: {
             // The worktree has uncommitted changes the incoming base would overwrite
             // - not a content conflict. Name the files and ask the user to commit/stash.
             const files = body.conflicting_files ?? []
-            const fileList = files.length ? `\n\n${files.map((f) => `• ${f}`).join('\n')}` : ''
             useDialogStore.getState().show({
               title: 'Uncommitted Changes',
-              message: `Can't update: your worktree has uncommitted changes that merging "${baseBranch}" would overwrite. Commit or stash them, then try again.${fileList}`,
+              message: `Can't update: your worktree has uncommitted changes that merging "${baseBranch}" would overwrite. Commit or stash them, then try again.`,
               type: 'warning',
+              details: { filePaths: files },
             })
           } else if (body?.error === 'merge_conflict') {
             useDialogStore.getState().show({
