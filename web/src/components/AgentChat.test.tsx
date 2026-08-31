@@ -321,7 +321,7 @@ describe('composer status and actions', () => {
     expect(useAgentStore.getState().agents[0].agent_status?.status).toBe(AgentStatus.RUNNING)
   })
 
-  it('renders Send now like the idle Send message action', async () => {
+  it('renders Send now as a secondary action beside the primary Queue action', async () => {
     const agentId = `agent-${++agentSeq}`
     useAgentStore.setState({
       agents: [{ id: agentId, agent_status: { status: AgentStatus.FINISHED } } as AgentResponse],
@@ -333,11 +333,15 @@ describe('composer status and actions', () => {
     act(() => useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING))
     const sendNow = await screen.findByRole('button', { name: 'Send message now' })
     expect(sendNow.querySelector('svg')).toHaveClass('lucide-arrow-up')
-    expect(screen.getByRole('button', { name: 'Queue message' }).querySelector('svg')).toHaveClass('lucide-list-end')
+    expect(sendNow).toHaveClass('border-[#c96442]', 'bg-white', 'text-[#c96442]')
+    const queueMessage = screen.getByRole('button', { name: 'Queue message' })
+    expect(queueMessage).toHaveClass('bg-[#c96442]', 'text-white')
+    expect(queueMessage.querySelector('svg')).toHaveClass('lucide-list-end')
 
     act(() => useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.FINISHED))
     const sendMessage = await screen.findByRole('button', { name: 'Send message' })
-    expect(sendMessage.className).toBe(sendNow.className)
+    expect(sendMessage).toHaveClass('bg-[#c96442]', 'text-white')
+    expect(sendMessage).not.toHaveClass('border-[#c96442]')
     expect(sendMessage.querySelector('svg')).toHaveClass('lucide-arrow-up')
   })
 
