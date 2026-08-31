@@ -10,6 +10,7 @@ import { Markdown } from '../lib/MarkdownRenderer'
 import type { DialogDetails } from '../stores/dialogStore'
 import { ChangeStats } from './ChangeStats'
 import { useOverlayScrollbarSuppression } from '../lib/useOverlayScrollbarSuppression'
+import { FilePathLabel } from './FilePathLabel'
 
 export const Dialog: React.FC = () => {
   const { isOpen, title, message, type, variant, confirmLabel, secondaryLabel, details, showCancel, hide, onConfirm, onSecondary, onCancel } =
@@ -197,6 +198,15 @@ export const Dialog: React.FC = () => {
             <p className="text-sm text-gray-600 dark:text-[#8b94a6] whitespace-pre-wrap leading-relaxed">
               {withBranchPills(message)}
             </p>
+            {details?.filePaths?.length ? (
+              <ul className="mt-5 space-y-1.5 text-sm">
+                {details.filePaths.map((path) => (
+                  <li key={path}>
+                    <FilePathLabel path={path} className="max-w-full" />
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
 
           <div className="px-6 py-4 bg-gray-50 dark:bg-[#0f141d] flex justify-end gap-2.5 border-t border-gray-100 dark:border-[#232b3a]">
