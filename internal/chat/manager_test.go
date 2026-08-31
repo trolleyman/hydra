@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/trolleyman/hydra/internal/api"
+	"github.com/trolleyman/hydra/internal/git"
 )
 
 func TestManagerPreservesProviderOrderAndWatches(t *testing.T) {
@@ -332,6 +333,101 @@ func TestManagerSequencesCommitAfterToolCompletion(t *testing.T) {
 	}
 	if payload.IsMerge {
 		t.Fatalf("ordinary project-directory commit was presented as a merge: %+v", payload)
+	}
+}
+
+func TestManagerSequencesAmendedCommitAfterToolCompletion(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	write := func(text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, "file"), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run("init", "-q", "-b", "main")
+	write("base")
+	run("add", "file")
+	run("commit", "-qm", "base")
+	run("checkout", "-q", "-b", "head")
+
+	m := NewManager(func(id string) (HeadContext, bool) {
+		return HeadContext{ProjectRoot: repo, BaseBranch: "main"}, id == "head"
+	})
+	if _, err := m.Snapshot("head"); err != nil {
+		t.Fatal(err)
+	}
+
+	write("original")
+	run("commit", "-qam", "original commit")
+	m.ObserveProviderLine("head", "claude", []byte(`{"type":"user","uuid":"result-1","message":{"content":[{"type":"tool_result","tool_use_id":"bash1","content":"ok"}]}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+
+	oldHead, err := git.ResolveRef(repo, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write("amended")
+	run("commit", "-qam", "amended commit", "--amend")
+	newHead, err := git.ResolveRef(repo, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oldHead == newHead {
+		t.Fatal("amend did not replace HEAD")
+	}
+	m.ObserveProviderLine("head", "claude", []byte(`{"type":"user","uuid":"result-2","message":{"content":[{"type":"tool_result","tool_use_id":"bash2","content":"ok"}]}}`))
+	if err := m.Flush("head"); err != nil {
+		t.Fatal(err)
+	}
+
+	events, _, _, err := m.Before("head", "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commits []struct {
+		Sha          string `json:"sha"`
+		Subject      string `json:"subject"`
+		CausalItemID string `json:"causal_item_id"`
+	}
+	for _, event := range events {
+		if event.Type == "head_changed" {
+			t.Fatalf("amend emitted head_changed: %+v", events)
+		}
+		if event.Type == "commit_created" {
+			var payload struct {
+				Sha          string `json:"sha"`
+				Subject      string `json:"subject"`
+				CausalItemID string `json:"causal_item_id"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			commits = append(commits, payload)
+		}
+	}
+	if len(commits) != 2 || commits[1].Sha != newHead || commits[1].Subject != "amended commit" || commits[1].CausalItemID != "bash2" {
+		t.Fatalf("commit events = %+v", commits)
+	}
+
+	// The selector inventory follows current history: it includes the replacement
+	// commit and does not offer the obsolete pre-amend SHA.
+	current, err := git.ListFirstParentCommits(repo, "main", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(current) != 1 || current[0].SHA != newHead {
+		t.Fatalf("current commit list = %+v", current)
 	}
 }
 

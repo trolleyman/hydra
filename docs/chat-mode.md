@@ -356,20 +356,28 @@ remains as a fallback for changes outside those boundaries and calls the same
 reconciliation function; an externally detected commit has no causal tool id and
 is sequenced where it is observed.
 
-Non-fast-forward movement is handled explicitly: a fast-forward yields
-`commit_created` events, while a reset/rebase/checkout yields `head_changed`
-with old and new HEAD and makes the projection reconcile its visible commit set.
-Pretending every changed SHA was newly committed would leave stale or duplicate
-chips. The commits endpoint is still the source for the diff selector and the
-full branch inventory; it is not the source of chat chronology.
+Non-fast-forward movement is handled explicitly. A direct `git commit --amend`
+is identified from the HEAD reflog and yields a `commit_created` event for the
+replacement SHA, so it appears as a normal commit chip after the command that
+created it. A reset/rebase/checkout instead yields `head_changed` with old and
+new HEAD and makes the projection reconcile its visible commit set. Pretending
+every changed SHA was newly committed would leave stale or duplicate chips. The
+commits endpoint remains the source for the diff selector and the current branch
+inventory, so an amended commit appears there as its replacement SHA; obsolete
+pre-amend SHAs are transcript history, not selectable branch history.
 
 When a worktree fast-forwards onto its base, the incoming commits collapse into
-one expandable `Merged <base> - N commits` row. Hydra also observes every chat
-that owns a merge destination before merging another head into it, then labels
-the resulting fast-forward or merge commit with the incoming branch. This works
-for both managed worktree branches and a project-directory chat whose checkout
-is on the destination branch. Ordinary project-directory commits have no
-incoming-branch hint and remain ordinary one-commit rows.
+one expandable `Merged <base> - N commits` row. Its expanded list connects to
+the summary as one surface: the list's top border runs along the exposed
+shoulders and opens beneath the summary. It draws the commits on a continuous
+vertical graph bounded by the first and last hoverable rows, and uses the shared
+commit card for each row's hover details. Hydra also
+observes every chat that owns a merge destination before merging another head
+into it, then labels the resulting fast-forward or merge commit with the
+incoming branch. This works for both managed worktree branches and a
+project-directory chat whose checkout is on the destination branch. Ordinary
+project-directory commits have no incoming-branch hint and remain ordinary
+one-commit rows.
 
 ## Project-directory Changes inspector
 

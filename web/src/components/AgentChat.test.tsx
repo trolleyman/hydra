@@ -1368,7 +1368,7 @@ describe('a message sent after a commit lands under it', () => {
     }
   })
 
-  it('shows stats and the shared commit tooltip on expanded merge rows', async () => {
+  it('connects and aligns merged commit rows with commit-card tooltips', async () => {
     renderChat()
     await connectedComposer()
     const ws = sockets[0]
@@ -1382,35 +1382,45 @@ describe('a message sent after a commit lands under it', () => {
           timestamp: '2024-01-01T00:00:00.000Z',
           payload: {
             sha: 'merge123', short_sha: 'merge12', subject: "Merge branch 'main'",
-            additions: 10, deletions: 2, is_merge: true, merged_count: 1,
-            merged_commits: [{
-              sha: 'child123', short_sha: 'child12', subject: 'The merged change',
-              additions: 8, deletions: 1,
-            }],
+            additions: 10, deletions: 2, is_merge: true, merged_count: 2,
+            merged_commits: [
+              {
+                sha: 'child123', short_sha: 'child12', subject: 'The merged change',
+                author_name: 'Merged Author', timestamp: '2024-01-01T00:00:00.000Z',
+                additions: 8, deletions: 1,
+              },
+              {
+                sha: 'child456', short_sha: 'child45', subject: 'The earlier change',
+                additions: 2, deletions: 1,
+              },
+            ],
           },
         },
       }),
     )
 
-    const pill = await screen.findByRole('button', { name: /Merged main - 1 commit/ })
+    const pill = await screen.findByRole('button', { name: /Merged main - 2 commits/ })
     expect(screen.getByLabelText('10 lines added, 2 lines removed')).toHaveClass('top-px')
     fireEvent.click(pill)
     const subject = await screen.findByText('The merged change')
     expect(screen.getByLabelText('8 lines added, 1 lines removed')).toHaveClass('top-px')
+    expect(pill).toHaveClass('z-10', 'rounded-b-none', 'border-b-0')
+    expect(subject.parentElement).toHaveClass('items-baseline')
+    expect(subject.closest('[role="button"]')).not.toHaveAttribute('title')
 
-    vi.useFakeTimers()
-    try {
-      const row = subject.closest('[role="button"]')!
-      expect(row).not.toHaveAttribute('title')
-      fireEvent.mouseEnter(row.parentElement!)
-      act(() => void vi.advanceTimersByTime(600))
-      const tooltip = screen.getByRole('tooltip')
-      expect(tooltip).toHaveTextContent('child12')
-      expect(tooltip).toHaveTextContent('The merged change')
-      expect(tooltip.querySelector('[aria-label="8 lines added, 1 lines removed"]')).not.toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
+    const list = subject.closest('.rounded-b-md')
+    expect(list?.parentElement).toHaveClass('-mt-px')
+    expect(list).not.toHaveClass('border-t-0')
+    expect(list?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[10px]')
+    expect(list?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(2)
+
+    const row = subject.closest('[role="button"]')!
+    fireEvent.mouseEnter(row.parentElement!)
+    expect(await screen.findByText('Merged Author', {}, { timeout: 1200 })).toBeInTheDocument()
+    const tooltip = screen.getByRole('tooltip')
+    expect(tooltip).toHaveTextContent('child12')
+    expect(tooltip).toHaveTextContent('The merged change')
+    expect(tooltip.querySelector('[aria-label="8 lines added, 1 lines removed"]')).not.toBeNull()
   })
 })
 

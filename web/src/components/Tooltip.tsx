@@ -338,7 +338,7 @@ export function Tooltip({
   // the old hint was black in both, which made it look like a different widget
   // from the card it sits next to.
   const surface =
-    'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+    'bg-white dark:bg-neutral-800 border-gray-200 dark:border-neutral-700'
 
   // The arrow is a rotated square rather than a CSS-triangle: a triangle has no
   // border, so it punched a borderless wedge through the box's outline. Two of
@@ -349,7 +349,7 @@ export function Tooltip({
   // rotate-45 puts a corner at each compass point: the top-left corner points up
   // and the bottom-right one points down, so the two edges meeting at that
   // corner are the ones that need the border. Declared as `border-b border-r`
-  // rather than `border` plus transparent overrides - `dark:border-gray-700`
+  // rather than `border` plus transparent overrides - `dark:border-neutral-700`
   // sets border-color for all four sides and cascades after the per-side
   // utilities, which silently re-coloured the hidden edges in dark mode.
   const arrow = (placement: Placement) => (
@@ -408,7 +408,7 @@ export function Tooltip({
             scheduleHide()
           }}
         >
-          {title && <p className="mb-1.5 shrink-0 border-b border-gray-200 pb-1 font-bold dark:border-gray-700">{title}</p>}
+          {title && <p className="mb-1.5 shrink-0 border-b border-gray-200 pb-1 font-bold dark:border-neutral-700">{title}</p>}
           <div className={`min-h-0 overflow-y-auto text-gray-600 [&_code]:text-blue-700 dark:text-gray-300 dark:[&_code]:text-blue-300 ${shortcut ? `flex items-center gap-2 ${textAlign === 'center' ? 'justify-center' : 'justify-start'}` : ''}`}>
             <div className="space-y-2">{content}</div>
             {shortcut && (
