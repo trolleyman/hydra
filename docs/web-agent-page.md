@@ -216,8 +216,9 @@ and `web/src/DiffViewer.tsx`):
   worktree is deleted.
 - The shared confirmation dialog is opaque as soon as it mounts. While a modal
   dialog or fullscreen file lightbox is open, underlying native scrollbar chrome
-  becomes transparent without removing its gutter; this prevents WebKitGTK from
-  compositing scroll thumbs through the overlay without shifting the page. The
+  - including theme-painted borders and shadows - becomes transparent without
+  removing its gutter; this prevents WebKitGTK from compositing scrollbars
+  through the overlay without shifting the page. The
   lightbox's transparency backing shrink-wraps the displayed media, so viewport
   height clamping cannot expose checkerboard beside an opaque image. Hydra's thin
   app-wide scrollbar treatment is a separate default-off browser feature flag;

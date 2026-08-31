@@ -680,14 +680,22 @@ body {
 /* WebKitGTK may promote native scrollbars into a compositor layer above fixed
    content, ignoring the overlay's z-index. Preserve their gutter (so opening a
    dialog or lightbox causes no layout shift) but hide the chrome while any modal
-   overlay is open. */
+   overlay is open. Linux themes can paint borders and shadows separately from
+   the track/thumb fill, so clear every painted layer without changing metrics. */
 .hydra-overlay-open * {
   scrollbar-color: transparent transparent;
 }
+.hydra-overlay-open *::-webkit-scrollbar,
+.hydra-overlay-open *::-webkit-scrollbar-button,
+.hydra-overlay-open *::-webkit-scrollbar-track,
+.hydra-overlay-open *::-webkit-scrollbar-track-piece,
+.hydra-overlay-open *::-webkit-scrollbar-corner,
 .hydra-overlay-open *::-webkit-scrollbar-thumb,
 .hydra-overlay-open *::-webkit-scrollbar-thumb:hover,
 .hydra-overlay-open *::-webkit-scrollbar-thumb:active {
-  background-color: transparent;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 /* The terminal font's OpenType features (Settings -> Browser -> Fonts). xterm
