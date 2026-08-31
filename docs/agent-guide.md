@@ -60,6 +60,19 @@ duplicating synchronized array-and-map state. Keep `.find` for predicate searche
 such as "the current branch" or "the first non-empty line", where there is no
 stable lookup key.
 
+### Composer textarea layers
+
+`HighlightedTextarea` places a transparent native textarea over a visible
+markdown backdrop. Their box metrics and scroll offsets stay identical: any
+caret-editing path that changes the textarea scroll position also synchronizes
+the backdrop immediately. Otherwise a visible word can sit over different
+source text, so clicking or double-clicking it edits the wrong range.
+
+Generic clipboard images use `image1`, `image2`, and so on within the current
+attachment list. Upload queues reserve each filename synchronously, before a
+React render, because desktop clipboard events can arrive back-to-back in one
+batched turn.
+
 ## Conventions
 
 ### ASCII punctuation only

@@ -634,6 +634,10 @@ export const SpawnForm = memo(function SpawnForm({
     const objectUrl = URL.createObjectURL(file)
     objectUrlsRef.current.add(objectUrl)
     const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, url: objectUrl, previewUrl: isImageFile(file) ? objectUrl : undefined, size: file.size, uploading: true }
+    // Native desktop paste events can be delivered back-to-back in one React
+    // turn. Reserve the chip synchronously so the next event sees image1 and
+    // allocates image2 instead of reusing the stale rendered list.
+    attachmentsRef.current = [...attachmentsRef.current, chip]
     // Adding a chip is its own undo step.
     commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
     // The upload resolving isn't a user action, so patch this chip across the
@@ -660,7 +664,7 @@ export const SpawnForm = memo(function SpawnForm({
   // renamed image<N>.ext, N = max(current) + 1 (running within the batch).
   // Returns the final (possibly renamed) filenames, for the paste markers.
   function addFiles(rawFiles: File[]): string[] {
-    let nextN = nextGenericImageNumber(attachments)
+    let nextN = nextGenericImageNumber(attachmentsRef.current)
     const names: string[] = []
     for (const raw of rawFiles) {
       let file = raw
@@ -712,6 +716,7 @@ export const SpawnForm = memo(function SpawnForm({
   const removeAttachment = useCallback((id: number) => {
     // Don't revoke the preview URL here - an undo can bring this chip back. URLs
     // are freed in bulk once a spawn consumes the prompt (see objectUrlsRef).
+    attachmentsRef.current = attachmentsRef.current.filter((a) => a.id !== id)
     commit(
       (prev) => makeSnapshot(prev.prompt, prev.attachments.filter((a) => a.id !== id), prev.selStart, prev.selEnd),
       false,
