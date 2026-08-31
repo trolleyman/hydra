@@ -639,7 +639,18 @@ export const SpawnForm = memo(function SpawnForm({
     // The upload resolving isn't a user action, so patch this chip across the
     // whole timeline (reconcile) instead of pushing a new undo step - undoing to
     // an earlier snapshot still sees the settled path, not a stale "uploading...".
-    uploadFile(projectId, file)
+    // A native image-paste listener lives for the form's whole mount. During
+    // boot the compact form can mount before the selected project is restored,
+    // so an event callback created in that render may still see a null prop even
+    // though the project store and visible picker have since selected one. Read
+    // the store at event time as the fallback; never send the placeholder `_`
+    // project id, which can only produce a misleading 404.
+    const uploadProjectId = projectId ?? useProjectStore.getState().selectedProjectId
+    if (!uploadProjectId) {
+      reconcile(id, { uploading: false, error: 'Select a project before attaching files' })
+      return id
+    }
+    uploadFile(uploadProjectId, file)
       .then((res) => reconcile(id, { path: res.path, uploading: false }))
       .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
     return id
@@ -795,6 +806,10 @@ export const SpawnForm = memo(function SpawnForm({
   // remain mounted alongside an agent's chat composer.
   const handleDesktopImagePaste = useEffectEvent((file: File) => {
     if (document.activeElement !== textareaRef.current) return
+    // Native paste is dispatched on window rather than by the disabled
+    // textarea, so the browser cannot enforce the form's no-project guard for
+    // us. Ignore it when there is genuinely no selected project.
+    if (!projectId && !useProjectStore.getState().selectedProjectId) return
     const names = addFiles([file])
     if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
   })

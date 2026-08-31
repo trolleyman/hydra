@@ -15,10 +15,10 @@ import { OpenAPI } from './core/OpenAPI'
 // absolute host path (readable by the agent), `filename` the sanitized on-disk name.
 export type UploadResult = UploadResponse
 
-export async function uploadFile(projectId: string | null, file: File): Promise<UploadResult> {
+export async function uploadFile(projectId: string, file: File): Promise<UploadResult> {
   const form = new FormData()
   form.append('file', file, file.name || 'paste')
-  const pid = projectId ? encodeURIComponent(projectId) : '_'
+  const pid = encodeURIComponent(projectId)
   // Keep raw multipart uploads on the same configured API origin as generated
   // client calls. A relative URL works only when the SPA and API share an
   // origin; desktop/reverse-proxy deployments can give the UI a different one,
