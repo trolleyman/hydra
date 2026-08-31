@@ -22,7 +22,7 @@ import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentL
 import { parseUploadAttachments } from '../lib/uploadAttachments'
 import { agentStatusBadge, agentStatusHelp, archivedEndStateBadge, agentDotClass, agentDotAnimate, agentTypePill, agentTypeLabel } from '../lib/agentDisplay'
 import { agentTransitionToast } from '../lib/agentToast'
-import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, FolderGit2, ExternalLink } from 'lucide-react'
+import { LoaderCircle, GitPullRequestArrow, Trash2, RotateCcw, TerminalSquare, ShieldAlert, ShieldCheck, ShieldOff, Lock, TriangleAlert, Clock, FileDiff, Upload, Download, MessageSquare, ChevronRight, ChevronLeft, PanelRightOpen, PanelRightClose, PanelLeftOpen, PanelLeftClose, GitBranch, Folder, FolderGit2, ExternalLink } from 'lucide-react'
 import { hasWebKitDesktopBridge, openChatWindow } from '../lib/desktopBridge'
 import { InspectorPane } from './InspectorPane'
 import { ResizeGrip } from './ResizeGrip'
@@ -490,7 +490,7 @@ function GitIsolationBadge({ mode, projectDirectory = false }: { mode?: string; 
 // window presents it. Worktree Heads get a branch chip; project-directory Heads
 // get a folder chip. Live permissions sit immediately after that chip in the
 // identity row, so workspace kind and workspace controls read as one cluster.
-function WorkspaceBadge({
+export function WorkspaceBadge({
   agent,
 }: {
   agent: AgentResponse
@@ -516,12 +516,17 @@ function WorkspaceBadge({
       content={(
         <div className="space-y-3">
           <p>This chat works directly in the shared project directory. Changes are project changes, not an isolated agent worktree.</p>
-          {agent.project_path && <p className="break-all text-xs text-gray-500 dark:text-gray-400">{agent.project_path}</p>}
+          {agent.project_path && (
+            <p className="flex items-start gap-1.5 text-xs text-stone-700 dark:text-stone-200">
+              <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
+              <span className="min-w-0 break-all">{agent.project_path}</span>
+            </p>
+          )}
         </div>
       )}
       className="shrink-0"
     >
-      <button type="button" aria-label="Project directory workspace" className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/50">
+      <button type="button" aria-label="Project directory workspace" className="inline-flex cursor-default rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/50">
         <Badge className="bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300" containerClassName="min-h-5" icon={<FolderGit2 className="w-3 h-3 shrink-0" />}>{null}</Badge>
       </button>
     </Tooltip>
@@ -569,7 +574,7 @@ function ProjectDirectoryPermissions({
 // wants from you. An unmapped status has no prose, so it stays
 // a bare chip rather than opening an empty box. No heading: it would be the
 // status word, which the chip an inch above the tooltip already says.
-function AgentStatusChip({ status }: { status: string }) {
+export function AgentStatusChip({ status }: { status: string }) {
   const badge = agentStatusBadge(status)
   const help = agentStatusHelp(status)
   const chip = <Badge className={badge.className} containerClassName="shrink-0">{badge.label}</Badge>
@@ -578,7 +583,7 @@ function AgentStatusChip({ status }: { status: string }) {
     <Tooltip content={help} className="shrink-0">
       {/* The chip is a plain span, so the tooltip needs a focusable trigger of
           its own for keyboard parity. */}
-      <button type="button" aria-label={`What "${badge.label}" means`} className="inline-flex cursor-help rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
+      <button type="button" aria-label={`What "${badge.label}" means`} className="inline-flex cursor-default rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50">
         {chip}
       </button>
     </Tooltip>
