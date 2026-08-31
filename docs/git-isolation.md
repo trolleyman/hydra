@@ -302,6 +302,13 @@ collision.)
   idempotently configures the local `hydra-agents` remote, so the shown command
   stays short.
 
+Guarded commits run their staging and commit writes with
+`core.fsync=committed`, so Git flushes the objects and ref update before Hydra
+answers the tool call. Hydra then walks the new commit's own object closure with
+`rev-list --missing=error` before reporting success. This makes a desktop/backend
+shutdown immediately after tool completion safe and turns an incomplete object
+write into an error at the commit boundary rather than a later `git gc` failure.
+
 ## Open questions / not yet built
 
 - **Decision gate for codex/gemini (low priority):** the git_* tools are seeded for

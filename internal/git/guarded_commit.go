@@ -53,11 +53,11 @@ func GuardedCommit(worktree, expectedBranch, message string, paths []string, ame
 			return false, "Nothing is staged, so `staged` has nothing to commit. Stage with git_add first, or drop `staged` to commit all your changes."
 		}
 	case len(paths) > 0:
-		if out, err := gitCombined(worktree, append([]string{"add", "--"}, paths...)...); err != nil {
+		if out, err := gitCombinedDurable(worktree, append([]string{"add", "--"}, paths...)...); err != nil {
 			return false, "git add failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
 		}
 	default:
-		if out, err := gitCombined(worktree, "add", "-A"); err != nil {
+		if out, err := gitCombinedDurable(worktree, "add", "-A"); err != nil {
 			return false, "git add failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
 		}
 	}
@@ -66,12 +66,34 @@ func GuardedCommit(worktree, expectedBranch, message string, paths []string, ame
 	if amend {
 		commitArgs = []string{"commit", "--amend", "-m", message}
 	}
-	if out, err := gitCombined(worktree, commitArgs...); err != nil {
+	if out, err := gitCombinedDurable(worktree, commitArgs...); err != nil {
 		return false, "Commit failed: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
+	}
+	fullHash, err := gitOutput(worktree, "rev-parse", "HEAD")
+	if err != nil || fullHash == "" {
+		return false, "The commit command completed, but Hydra could not resolve the new commit. Do not retry or run git gc; ask the user to inspect the repository."
+	}
+	// A successful process exit only proves that Git could read its freshly
+	// written objects from the page cache. Walk the new commit's own object set
+	// before reporting success, so a missing/truncated loose object is surfaced
+	// immediately rather than first appearing during a later gc. ^! excludes
+	// the already-established parent history and keeps this check proportional
+	// to the commit itself.
+	if out, err := gitCombined(worktree, "rev-list", "--objects", "--missing=error", fullHash+"^!"); err != nil {
+		return false, "The commit was created, but its objects failed verification. Do not retry or run git gc; ask the user to inspect the repository: " + firstNonEmpty(strings.TrimSpace(out), err.Error())
 	}
 	hash, _ := gitOutput(worktree, "rev-parse", "--short", "HEAD")
 	subject, _ := gitOutput(worktree, "log", "-1", "--pretty=%s")
 	return true, fmt.Sprintf("Committed %s on %s: %s", hash, cur, subject)
+}
+
+// gitCombinedDurable asks Git to flush the objects and ref updates that make a
+// commit durable before returning. This matters for desktop-managed daemons:
+// the process can be stopped immediately after an agent sees tool success.
+func gitCombinedDurable(dir string, args ...string) (string, error) {
+	gitArgs := []string{"-c", "core.fsync=committed", "-C", dir}
+	out, err := exec.Command("git", append(gitArgs, args...)...).CombinedOutput()
+	return string(out), errtrace.Wrap(err)
 }
 
 // gitCombined runs `git -C dir <args>` and returns combined stdout+stderr, so a

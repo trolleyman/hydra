@@ -44,6 +44,29 @@ func write(t *testing.T, dir, name, content string) {
 	}
 }
 
+func TestGuardedCommitFlushesAndVerifiesNewObjects(t *testing.T) {
+	dir, _ := opRepo(t)
+	write(t, dir, "durable.txt", "durable\n")
+	trace := filepath.Join(t.TempDir(), "git-trace.json")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+
+	ok, msg := GuardedCommit(dir, "hydra/test", "durable commit", nil, false, false)
+	if !ok {
+		t.Fatalf("commit failed: %s", msg)
+	}
+	data, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Count(got, "core.fsync=committed") < 2 {
+		t.Errorf("git add and commit should both request durable writes; trace:\n%s", got)
+	}
+	if !strings.Contains(got, "--missing=error") {
+		t.Errorf("commit should verify its new object closure; trace:\n%s", got)
+	}
+}
+
 func TestGuardedResetSoftUncommit(t *testing.T) {
 	dir, run := opRepo(t)
 	write(t, dir, "a.txt", "a\n")
