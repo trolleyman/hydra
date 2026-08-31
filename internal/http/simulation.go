@@ -5244,7 +5244,7 @@ func simApprovalsEvents(questionToolID, requestID string) []simNorm {
 			"command": simApprovalsHostRun,
 			"why":     simApprovalsHostRunWhy,
 		}),
-		simSay("msg_approvals_2", "Pick a card below and I'll raise it. It behaves like the real thing: the toast appears bottom-right, a matching tool card grows its own Allow / Deny row, and either one answers it."),
+		simSay("msg_approvals_2", "Pick a card below and I'll raise it. It behaves like the real thing: a matching tool card grows its own Allow / Deny row, and if you navigate elsewhere the global approval toast keeps the request within reach."),
 		simTool(questionToolID, "AskUserQuestion", simRaw(simApprovalsQuestion())),
 		{typ: "interaction_requested", payload: map[string]any{
 			"provider": "claude", "request_id": requestID,

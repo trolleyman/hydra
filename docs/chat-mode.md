@@ -315,6 +315,14 @@ Command, file-change, MCP, web-search and other item variants map to generic
 tool cards, and an unknown item type keeps a compact fallback card so protocol
 additions do not break the chat.
 
+A host-run card keeps the agent's `why` explanation in its expanded body as a
+durable part of the transcript, including after the request is allowed, denied,
+or withdrawn. While that agent page is open, the matching global host-run
+approval toast is hidden because the transcript card already carries the full
+request and decision controls. The toast remains live and appears if the user
+navigates away before answering. Approvals without an exact transcript surface,
+such as a proxy egress hold, remain visible as global cards.
+
 Codex runs with bypassed approvals because the process is already inside Hydra's
 sandbox, and app-server turns are configured equivalently. Server-request
 handling is still defensive: Hydra replies automatically only to the classes it
