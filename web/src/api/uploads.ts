@@ -15,7 +15,8 @@ import { OpenAPI } from './core/OpenAPI'
 // absolute host path (readable by the agent), `filename` the sanitized on-disk name.
 export type UploadResult = UploadResponse
 
-export async function uploadFile(projectId: string, file: File): Promise<UploadResult> {
+export async function uploadFile(projectId: string | null, file: File): Promise<UploadResult> {
+  if (!projectId) throw new Error('Select a project before attaching files')
   const form = new FormData()
   form.append('file', file, file.name || 'paste')
   const pid = encodeURIComponent(projectId)

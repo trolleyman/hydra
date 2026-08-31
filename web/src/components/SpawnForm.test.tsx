@@ -8,7 +8,7 @@ vi.mock('../api/uploads', async (importActual) => {
   const actual = await importActual<typeof import('../api/uploads')>()
   return {
     ...actual,
-    uploadFile: vi.fn(async (_projectId: string, file: File) => ({
+    uploadFile: vi.fn(async (_projectId: string | null, file: File) => ({
       path: `/abs/${file.name}`,
       filename: file.name,
     })),
