@@ -87,6 +87,19 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
       bd.scrollLeft = ta.scrollLeft
     }
 
+    // A caret move can scroll the textarea without producing a scroll event in
+    // desktop WebKit. Keep the backdrop in step explicitly: once the two layers
+    // differ by even one line, a click on the visible word selects different
+    // source text in the transparent textarea above it.
+    function keepCaretVisible(ta: HTMLTextAreaElement) {
+      ensureCaretVisible(ta)
+      syncScroll()
+    }
+
+    function keepCaretVisibleNextFrame(ta: HTMLTextAreaElement) {
+      requestAnimationFrame(() => keepCaretVisible(ta))
+    }
+
     // Auto-pairing (lib/autoPair), when the preference is on: a typed opener
     // brings its closer along, a typed closer steps over the one already there,
     // Backspace between an empty pair clears both, a mark typed over a selection
@@ -108,7 +121,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
       if (!edit) return false
       e.preventDefault()
       applyEdit(ta, edit)
-      requestAnimationFrame(() => ensureCaretVisible(ta))
+      keepCaretVisibleNextFrame(ta)
       return true
     }
 
@@ -122,7 +135,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
         if (edit) {
           e.preventDefault()
           applyEdit(ta, edit)
-          requestAnimationFrame(() => ensureCaretVisible(ta))
+          keepCaretVisibleNextFrame(ta)
         }
         return
       }
@@ -132,7 +145,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
         if (to != null) {
           e.preventDefault()
           moveCaret(ta, to, e.shiftKey)
-          ensureCaretVisible(ta)
+          keepCaretVisible(ta)
         }
       }
     }
@@ -193,7 +206,7 @@ export const HighlightedTextarea = forwardRef<HTMLTextAreaElement, HighlightedTe
           onInput={(e) => {
             onInput?.(e)
             const ta = e.currentTarget
-            requestAnimationFrame(() => ensureCaretVisible(ta))
+            keepCaretVisibleNextFrame(ta)
           }}
           // The browser's own spellchecker, off unless the Browser setting turns
           // it on (see lib/composerPrefs). Before {...rest} so a caller that has

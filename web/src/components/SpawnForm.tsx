@@ -334,6 +334,7 @@ export const SpawnForm = memo(function SpawnForm({
   // handleKeyDown) so the paste it triggers inserts literally instead of being
   // attached. Read-and-cleared by the next handlePaste; a timer clears it too in
   // case no paste follows (e.g. an empty clipboard), so it can't go stale.
+  const literalPasteRef = useRef(false)
   // Whether pasting an attachment also inserts its "[filename]" marker (a
   // Browser preference, default on).
   const pasteMarkers = usePasteMarkersStore((s) => s.enabled)
@@ -708,6 +709,10 @@ export const SpawnForm = memo(function SpawnForm({
     const objectUrl = URL.createObjectURL(file)
     objectUrlsRef.current.add(objectUrl)
     const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, url: objectUrl, previewUrl: isImageFile(file) ? objectUrl : undefined, size: file.size, uploading: true }
+    // Native desktop paste events can be delivered back-to-back in one React
+    // turn. Reserve the chip synchronously so the next event sees image1 and
+    // allocates image2 instead of reusing the stale rendered list.
+    attachmentsRef.current = [...attachmentsRef.current, chip]
     // Adding a chip is its own undo step.
     commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
     // The upload resolving isn't a user action, so patch this chip across the
@@ -737,7 +742,7 @@ export const SpawnForm = memo(function SpawnForm({
   // renamed image<N>.ext, N = max(current) + 1 (running within the batch).
   // Returns the final (possibly renamed) filenames, for the paste markers.
   function addFiles(rawFiles: File[]): string[] {
-    let nextN = nextGenericImageNumber(attachments)
+    let nextN = nextGenericImageNumber(attachmentsRef.current)
     const names: string[] = []
     for (const raw of rawFiles) {
       let file = raw
@@ -784,6 +789,10 @@ export const SpawnForm = memo(function SpawnForm({
   }
 
   function handlePaste(e: { clipboardData: DataTransfer | null; preventDefault(): void }) {
+    // Consume the "paste literally" flag a Ctrl/Cmd+Shift+V keystroke set, so
+    // it never lingers for a later paste.
+    const literal = literalPasteRef.current
+    literalPasteRef.current = false
     // Pasted files (screenshots, copied files) keep their upload behavior -
     // plus, with the preference on, "[filename]" markers at the caret so the
     // prompt references them explicitly.
@@ -794,6 +803,10 @@ export const SpawnForm = memo(function SpawnForm({
       if (!richComposerRef.current?.editor && pasteMarkers && names.length > 0) insertPasteMarkers(names)
       return
     }
+
+    // A Shift-held paste means "paste for real" - let the editor insert the
+    // text as-is, never attaching it.
+    if (literal) return
 
     // Small pastes go straight into the box like normal.
     const text = getClipboardText(e.clipboardData)
@@ -1178,6 +1191,14 @@ export const SpawnForm = memo(function SpawnForm({
         requestAnimationFrame(() => richComposerRef.current?.focus(snapshot.selStart + 1))
         return true
       }
+    }
+    // Ctrl/Cmd+Shift+V ("paste as plain text") should paste for real, not
+    // attach. The paste event carries no modifier state, so flag it here on the
+    // keystroke that triggers it; a timer prevents a stale flag when no paste
+    // follows (for example, when the clipboard is empty).
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'v') {
+      literalPasteRef.current = true
+      setTimeout(() => { literalPasteRef.current = false }, 1000)
     }
     return false
   }

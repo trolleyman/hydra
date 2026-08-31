@@ -13,7 +13,7 @@ import {
   Eye,
   FilePen,
   FileText,
-  GitCommitHorizontal,
+  Folder,
   GitMerge,
   Globe,
   History,
@@ -145,6 +145,7 @@ import { CommentLink } from './CommentLink'
 import { CommentIdentityContext } from './commentIdentity'
 import { BranchPill } from './BranchPill'
 import { FilePathLabel } from './FilePathLabel'
+import { DirectoryTooltip } from './DirectoryTooltip'
 import { onDesktopImagePaste } from '../lib/desktopBridge'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { ResumeDivider } from './ResumeDivider'
@@ -282,9 +283,9 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         </button>
       </Tooltip>
       <Expandable open={expanded && shown > 0} className="-mt-px w-full">
-        <div className="flex w-full flex-col rounded-b-md border border-stone-200 bg-stone-50/60 px-2 py-1.5 dark:border-white/[0.08] dark:bg-white/[0.02]">
+        <div className="relative flex w-full flex-col rounded-b-md border border-stone-200 bg-stone-50/60 px-2 py-1.5 dark:border-white/[0.08] dark:bg-white/[0.02]">
+          <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[18px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
           <div className="relative flex w-full flex-col">
-            <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[10px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
             {item.merged!.map((m) => (
               <Tooltip
                 key={m.sha}
@@ -297,7 +298,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
                   tabIndex={clickable ? 0 : undefined}
                   onClick={clickable ? () => onSelectCommit?.(m.sha) : undefined}
                   onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectCommit?.(m.sha) } } : undefined}
-                  className={`flex items-center gap-1.5 rounded px-1 py-0.5 text-2xs text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
+                  className={`flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-2xs text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
                 >
                   <span className="relative flex w-3 self-stretch shrink-0 items-center justify-center" aria-hidden="true">
                     <span data-commit-graph-dot className="relative h-1.5 w-1.5 rounded-full border border-stone-400 bg-stone-50 dark:border-stone-500 dark:bg-stone-800" />
@@ -306,7 +307,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
                     <span className="shrink-0 font-mono">{m.shortSha}</span>
                    <span className="min-w-0 flex-1 truncate">{m.subject}</span>
                   </span>
-                  <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px" />
+                  <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px ml-auto shrink-0" />
                 </div>
               </Tooltip>
             ))}
@@ -2800,6 +2801,21 @@ export interface ScriptOutputRow {
   // 'code' is a line of some file, 'marker' a separator the script echoed, and
   // 'plain' output nothing could be said about.
   tone: 'code' | 'marker' | 'plain'
+  // A structural heading generated from a typed constant marker, a legacy
+  // `--- text ---` marker, or file provenance already present in the output.
+  // It occupies the whole grid width; the ordinary row fields stay empty.
+  header?: { kind: 'text' | 'file' | 'dir'; label: string }
+  // A source discontinuity inside one file, most often two sparse rg matches.
+  // The inset rule says omitted lines sit here without adding copyable text.
+  divider?: true
+}
+
+function scriptHeader(kind: 'text' | 'file' | 'dir', label: string): ScriptOutputRow {
+  return { num: '', html: '', tone: 'plain', header: { kind, label } }
+}
+
+function scriptDivider(): ScriptOutputRow {
+  return { num: '', html: '', tone: 'plain', divider: true }
 }
 
 // scriptMatchRows renders a search's output: the file line numbers grep printed
@@ -2819,11 +2835,17 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
   let run: MatchLine[] = []
   let runLang = ''
   let previous: MatchLine | null = null
+  let headerPath = ''
   // The file every line of the section came from, when the search named exactly
   // one - a line's own `path:` prefix says it otherwise, and is shown.
   const onlyPath = section.match.paths.length === 1 ? section.match.paths[0] : ''
   const flush = () => {
     if (run.length === 0) return
+    const path = run[0].path || onlyPath
+    if (path && path !== headerPath) {
+      rows.push(scriptHeader('file', path))
+      headerPath = path
+    }
     const html = highlightLines(run.map((l) => l.text).join('\n'), runLang || 'plaintext')
     run.forEach((l, i) => rows.push({
       num: l.num,
@@ -2841,7 +2863,13 @@ function scriptMatchRows(section: Extract<ScriptSection, { kind: 'matches' }>): 
       continue
     }
     const lang = line.path ? langFromPath(line.path) : only
-    if (lang !== runLang || (previous && !consecutiveMatchLines(previous, line))) flush()
+    const discontinuous = previous && !consecutiveMatchLines(previous, line)
+    if (lang !== runLang || discontinuous) {
+      flush()
+      const previousPath = previous?.path || onlyPath
+      const nextPath = line.path || onlyPath
+      if (discontinuous && previousPath && previousPath === nextPath) rows.push(scriptDivider())
+    }
     runLang = lang
     run.push(line)
     previous = line
@@ -2911,7 +2939,7 @@ function scriptBannerRows(section: Extract<ScriptSection, { kind: 'banners' }>):
     if (!banner) { run.push(line); continue }
     flush()
     path = banner[1]
-    rows.push({ num: '', html: `<span class="token string">${escapeText(line)}</span>`, tone: 'marker' })
+    rows.push(scriptHeader('file', path))
   }
   flush()
   return rows
@@ -2925,9 +2953,20 @@ function scriptBannerRows(section: Extract<ScriptSection, { kind: 'banners' }>):
 // eslint-disable-next-line react-refresh/only-export-components -- exported for focused rendering tests
 export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
   const rows: ScriptOutputRow[] = []
+  const add = (next: ScriptOutputRow[]) => {
+    for (const row of next) {
+      const previous = rows[rows.length - 1]?.header
+      if (row.header && previous?.kind === row.header.kind && previous.label === row.header.label) continue
+      rows.push(row)
+    }
+  }
   for (const section of sections) {
+    if (section.kind === 'section') {
+      add([scriptHeader(section.section.kind, section.section.label)])
+      continue
+    }
     if (section.kind === 'matches') {
-      rows.push(...scriptMatchRows(section))
+      add(scriptMatchRows(section))
       continue
     }
     if (section.kind === 'git') {
@@ -2941,11 +2980,11 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       continue
     }
     if (section.kind === 'blame') {
-      rows.push(...scriptBlameRows(section))
+      add([scriptHeader('file', section.path), ...scriptBlameRows(section)])
       continue
     }
     if (section.kind === 'banners') {
-      rows.push(...scriptBannerRows(section))
+      add(scriptBannerRows(section))
       continue
     }
     if (section.kind === 'disk') {
@@ -3002,6 +3041,11 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
       continue
     }
     if (section.kind === 'marker') {
+      const heading = section.lines.length === 1 ? /^--- (.+) ---$/.exec(section.lines[0]) : null
+      if (heading) {
+        add([scriptHeader('text', heading[1])])
+        continue
+      }
       // A separator is the string the script printed, so it takes the string
       // colour whatever the terminal did with it.
       highlightLines(section.lines.join('\n'), 'plaintext').forEach((line) => rows.push({
@@ -3013,6 +3057,7 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
     }
     const view = section.view
     const file = view.languageOnly ? undefined : view.path
+    if (file) add([scriptHeader('file', file)])
     // A `cat -n` brought its own numbers; a range knows where it started; a
     // plain `tail` counts back from an end nothing here knows, so it gets the
     // highlighting without the gutter.
@@ -3028,7 +3073,7 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
     const counted = view.numbered ? [] : viewLineNumbers(view, code.length)
     const nums = code.map((_, i) => own[i] || counted[i] || '')
     const html = highlightLines(code.join('\n'), langFromPath(view.path) || 'plaintext')
-    nums.forEach((num, i) => rows.push({ num, html: html[i] ?? '', file, tone: 'code' }))
+    add(nums.map((num, i) => ({ num, html: html[i] ?? '', file, tone: 'code' })))
   }
   return rows
 }
@@ -3075,8 +3120,9 @@ export function ScriptOutputPanel({ rows, gutterDigits }: { rows: ScriptOutputRo
   // prefix are metadata, so - like the line-number column - they stay unmarked.
   const marked = useMemo(() => rows.map((r) => (r.html ? markWhitespace(r.html, ws) : r.html)), [rows, ws])
   const gutter = rows.some((r) => r.num !== '')
+  const headers = rows.some((r) => r.header)
   return (
-    <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto py-1.5`}>
+    <div className={`${PANEL_CLASS} max-h-64 overflow-y-auto ${headers ? '' : 'py-1.5'}`}>
       {/* data-copy-code / data-copy-line: the rows are grid cells, not block
           elements, so without them a copy hands over every line run together
           (see lib/copyMarkdown). */}
@@ -3089,6 +3135,11 @@ export function ScriptOutputPanel({ rows, gutterDigits }: { rows: ScriptOutputRo
       >
         {rows.map((row, i) => (
           <Fragment key={i}>
+            {row.header ? (
+              <ScriptOutputHeader header={row.header} gutter={gutter} />
+            ) : row.divider ? (
+              <ScriptOutputDivider gutter={gutter} />
+            ) : <>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
             {gutter && (row.file ? (
               <Tooltip
@@ -3117,10 +3168,52 @@ export function ScriptOutputPanel({ rows, gutterDigits }: { rows: ScriptOutputRo
                 ? row.spans.map((s, j) => <OutputSpanText key={j} cls={s.cls} text={s.text} ws={ws} />)
                 : <span dangerouslySetInnerHTML={{ __html: marked[i] }} />}
             </span>
+            </>}
           </Fragment>
         ))}
       </div>
     </div>
+  )
+}
+
+function ScriptOutputHeader({ header, gutter }: {
+  header: NonNullable<ScriptOutputRow['header']>
+  gutter: boolean
+}) {
+  const label = header.kind === 'file'
+    ? (
+        <Tooltip content={<FilePathLabel path={header.label} nativeTitle={false} />} align="left">
+          <FilePathLabel path={header.label} nativeTitle={false} className="font-sans" />
+        </Tooltip>
+      )
+    : header.kind === 'dir'
+      ? (
+          <DirectoryTooltip path={header.label}>
+            <span className="inline-flex min-w-0 items-center gap-1.5 font-sans text-stone-700 dark:text-stone-200">
+              <Folder className="h-3.5 w-3.5 shrink-0 text-blue-500" aria-hidden="true" />
+              <span className="truncate">{header.label}</span>
+            </span>
+          </DirectoryTooltip>
+        )
+      : <span className="text-stone-600 dark:text-stone-300">{header.label}</span>
+  return (
+    <div
+      data-copy-skip
+      className={`${gutter ? 'col-span-2' : 'col-span-1'} min-w-0 select-none`}
+    >
+      <div className="mx-2.5 border-t border-stone-200 dark:border-white/[0.06]" />
+      <div className="flex min-h-5 min-w-0 items-center px-2.5 py-0.5">{label}</div>
+      <div className="mx-2.5 border-b border-stone-200 dark:border-white/[0.06]" />
+    </div>
+  )
+}
+
+function ScriptOutputDivider({ gutter }: { gutter: boolean }) {
+  return (
+    <div
+      data-copy-skip
+      className={`${gutter ? 'col-span-2' : 'col-span-1'} mx-2.5 border-t border-stone-200 dark:border-white/[0.06]`}
+    />
   )
 }
 
@@ -10052,6 +10145,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const objectUrl = URL.createObjectURL(file)
       objectUrlsRef.current.add(objectUrl)
       const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, url: objectUrl, previewUrl: isImageFile(file) ? objectUrl : undefined, size: file.size, uploading: true }
+      // A second desktop paste can arrive before React commits this one. Make
+      // the reservation visible immediately so it receives image2, not another
+      // image1 calculated from the previous render.
+      attachmentsRef.current = [...attachmentsRef.current, chip]
       const editor = richComposerRef.current?.editor
       // The registry inserts fresh rich attachments itself. Mark them before
       // committing the legacy upload manifest so the migration effect cannot
@@ -10073,6 +10170,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Removing a chip is its own undo step. Don't revoke the preview URL here - an
   // undo can bring the chip back; URLs are freed in bulk on send (objectUrlsRef).
   function removeAttachment(id: number) {
+    attachmentsRef.current = attachmentsRef.current.filter((a) => a.id !== id)
     commit(
       (prev) => makeSnapshot(prev.prompt, prev.attachments.filter((a) => a.id !== id), prev.selStart, prev.selEnd),
       false,
@@ -10866,6 +10964,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
         return (
           <div className="flex justify-center">
             <Tooltip
+              align="left"
               content={
                 <CommitCard commit={{ shortSha: item.shortSha, message: item.subject, authorName: item.authorName, timestamp: item.commitTimestamp, additions: item.additions, deletions: item.deletions }} />
               }
@@ -10875,9 +10974,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 tabIndex={clickable ? 0 : undefined}
                 onClick={clickable ? activate : undefined}
                 onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
-                className={`${COMMIT_PILL} max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
+                className={`${COMMIT_PILL} relative max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
               >
-                <GitCommitHorizontal className="w-3 h-3 shrink-0" />
+                <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[16px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
+                <span className="relative flex w-3 shrink-0 items-center justify-center" aria-hidden="true">
+                  <span data-commit-graph-dot className="h-1.5 w-1.5 rounded-full border border-stone-400 bg-stone-100 dark:border-stone-500 dark:bg-stone-800" />
+                </span>
                 {/* The sha is monospace and the subject is not, so their line boxes
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>
@@ -11685,10 +11787,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                       onClick={() => send(false)}
                       disabled={!canSend}
                       aria-label="Send message now"
-                      className={`p-1.5 rounded-full transition-colors ${
+                      className={`rounded-full border p-[5px] transition-colors ${
                         canSend
-                          ? `${ACCENT_BG} text-white cursor-pointer`
-                          : 'bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
+                          ? 'border-[#c96442] bg-white text-[#c96442] hover:bg-[#c96442]/10 dark:bg-[#30302e] dark:hover:bg-[#c96442]/15 cursor-pointer'
+                          : 'border-transparent bg-stone-200 text-stone-400 dark:bg-white/10 dark:text-stone-500 cursor-default'
                       }`}
                     >
                       <ArrowUp className="w-4 h-4" />

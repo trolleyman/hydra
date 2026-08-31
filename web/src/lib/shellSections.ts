@@ -56,6 +56,13 @@ export interface MatchesView {
   numbered: boolean
 }
 
+export type OutputSectionKind = 'text' | 'file' | 'dir'
+
+export interface OutputSection {
+  kind: OutputSectionKind
+  label: string
+}
+
 // `cap` is the most lines a step's own script says it can print, whatever the
 // step turns out to BE: a trailing `| tail -2` bounds a `mage build` this module
 // can say nothing else about, and a `git log --oneline -3` bounds itself. It
@@ -68,7 +75,7 @@ export interface MatchesView {
 // stepLimit takes the tighter of this and whatever the kind's own shape says.
 export type ScriptStep = { cap?: number } & (
   // A constant line-printer: prints a known string, so it anchors the output.
-  | { kind: 'marker'; text: string }
+  | { kind: 'marker'; text: string; section?: OutputSection }
   // A constant line-printer whose text is too short to search the output for -
   // most often the bare `echo` agents put between their greps to space the
   // output out. It anchors nothing, but it still prints a known number of known
@@ -112,6 +119,7 @@ interface SectionLines {
 
 export type ScriptSection =
   | ({ kind: 'marker' } & SectionLines)
+  | ({ kind: 'section'; section: OutputSection } & SectionLines)
   // What the shell or one of its tools said about ITSELF: the `sed: can't read
   // f: No such file or directory` half of a failed command's output, and the
   // harness's `Exit code 2` above it. Not one line of any file (see
@@ -1048,7 +1056,11 @@ function classifyKind(p: Pipeline): ScriptStep {
 
   const echo = parseConstantLine(cmd.words)
   if (echo !== null && !trimmedFrom && !filtered && !sliced) {
-    return echo.trim().length >= MIN_MARKER_LEN ? { kind: 'marker', text: echo } : { kind: 'echo', text: echo }
+    if (echo.trim().length < MIN_MARKER_LEN) return { kind: 'echo', text: echo }
+    const typed = /^--- \[(text|file|dir)\] (.+) ---$/.exec(echo)
+    return typed
+      ? { kind: 'marker', text: echo, section: { kind: typed[1] as OutputSectionKind, label: typed[2] } }
+      : { kind: 'marker', text: echo }
   }
 
   const matches = parseMatches(cmd.words)
@@ -1830,16 +1842,33 @@ export function splitScriptOutput(steps: ScriptStep[], output: string): ScriptSe
       return sum == null || limit == null ? null : sum + limit
     }, 0)
     let at = total != null && matchesAt(lines, pos + total, expected) ? pos + total : -1
-    for (let j = pos; at < 0 && j + expected.length <= lines.length; j++) {
+    if (at < 0 && step.section) {
+      // A typed marker is structural only when it has one possible origin. If
+      // file content contains the same canonical line, keep the whole stretch
+      // literal instead of guessing which occurrence printf printed.
+      const candidates: number[] = []
+      for (let j = pos; j + expected.length <= lines.length; j++) {
+        if (matchesAt(lines, j, expected)) candidates.push(j)
+      }
+      if (candidates.length === 1) at = candidates[0]
+    }
+    for (let j = pos; at < 0 && !step.section && j + expected.length <= lines.length; j++) {
       if (matchesAt(lines, j, expected)) at = j
     }
     if (at < 0) continue // this one never printed
     flush(at)
-    sections.push({
-      kind: 'marker',
-      lines: lines.slice(at, at + expected.length),
-      raw: rawSlice(at, at + expected.length),
-    })
+    sections.push(step.section
+      ? {
+          kind: 'section',
+          section: step.section,
+          lines: lines.slice(at, at + expected.length),
+          raw: rawSlice(at, at + expected.length),
+        }
+      : {
+          kind: 'marker',
+          lines: lines.slice(at, at + expected.length),
+          raw: rawSlice(at, at + expected.length),
+        })
     pos = at + expected.length
   }
   flush(lines.length)

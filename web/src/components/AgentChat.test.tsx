@@ -201,7 +201,7 @@ describe('sectioned search output', () => {
     }])
     const { container } = render(<ScriptOutputPanel rows={rows} />)
 
-    const gutters = container.querySelectorAll('[data-copy-skip]')
+    const gutters = container.querySelectorAll('[data-copy-skip].min-h-4')
     expect(gutters).toHaveLength(2)
     for (const gutter of gutters) {
       expect(gutter).toHaveClass('w-full')
@@ -217,8 +217,9 @@ describe('sectioned search output', () => {
       lines: ['3:**Status: shared project-directory session', '18:ordinary later match'],
     }])
 
-    expect(rows).toHaveLength(2)
-    expect(rows[1].html).not.toContain('token bold')
+    const code = rows.filter((row) => !row.header && !row.divider)
+    expect(code).toHaveLength(2)
+    expect(code[1].html).not.toContain('token bold')
   })
 
   it('keeps each source path with its line number in the gutter model', () => {
@@ -229,8 +230,55 @@ describe('sectioned search output', () => {
       lines: ['internal/chat/manager.go:560:func (w *worker) reconcileCommits() {'],
     }])
 
-    expect(rows[0]).toMatchObject({ file: 'internal/chat/manager.go', num: '560' })
-    expect(rows[0].html).toContain('token keyword')
+    expect(rows[0]).toMatchObject({ header: { kind: 'file', label: 'internal/chat/manager.go' } })
+    expect(rows[1]).toMatchObject({ file: 'internal/chat/manager.go', num: '560' })
+    expect(rows[1].html).toContain('token keyword')
+  })
+
+  it('groups search matches under exact file headings', () => {
+    const rows = scriptOutputRows([{
+      kind: 'matches',
+      command: "rg -n 'abc|def' *.txt",
+      match: { paths: [], numbered: true },
+      lines: [
+        'fileabc.txt:41:line 41 awad',
+        'fileabc.txt:101:line 101 rawr',
+        'a/b/filebcd.txt:1:line 1 awdaa',
+      ],
+    }])
+
+    expect(rows.map((row) => row.header?.label ?? (row.divider ? 'divider' : row.num))).toEqual([
+      'fileabc.txt', '41', 'divider', '101', 'a/b/filebcd.txt', '1',
+    ])
+  })
+
+  it('renders typed headings between inset rules without changing case', () => {
+    const rows = scriptOutputRows([
+      { kind: 'section', section: { kind: 'text', label: 'lowercase diagnostics' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'file', label: 'a/b/file.txt' }, lines: ['marker'] },
+      { kind: 'section', section: { kind: 'dir', label: 'web/src/' }, lines: ['marker'] },
+    ])
+    const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    expect(screen.getByText('lowercase diagnostics')).toBeInTheDocument()
+    expect(container.textContent).toContain('a/b/file.txt')
+    expect(screen.getAllByText('web/src/')).not.toHaveLength(0)
+    expect(container.querySelectorAll('.border-t')).toHaveLength(3)
+    expect(container.querySelectorAll('.border-b')).toHaveLength(3)
+  })
+
+  it('renders one inset rule between nonconsecutive matches in the same file', () => {
+    const rows = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n value a.ts',
+      match: { paths: ['a.ts'], numbered: true },
+      lines: ['4:first', '5:second', '19:later'],
+    }])
+    const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    expect(rows.filter((row) => row.divider)).toHaveLength(1)
+    const divider = container.querySelector('[data-copy-skip].border-t')
+    expect(divider).toHaveClass('mx-2.5')
   })
 })
 
@@ -295,7 +343,7 @@ describe('composer status and actions', () => {
     expect(useAgentStore.getState().agents[0].agent_status?.status).toBe(AgentStatus.RUNNING)
   })
 
-  it('renders Send now like the idle Send message action', async () => {
+  it('renders Send now as a secondary action beside the primary Queue action', async () => {
     const agentId = `agent-${++agentSeq}`
     useAgentStore.setState({
       agents: [{ id: agentId, agent_status: { status: AgentStatus.FINISHED } } as AgentResponse],
@@ -307,11 +355,15 @@ describe('composer status and actions', () => {
     act(() => useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.RUNNING))
     const sendNow = await screen.findByRole('button', { name: 'Send message now' })
     expect(sendNow.querySelector('svg')).toHaveClass('lucide-arrow-up')
-    expect(screen.getByRole('button', { name: 'Queue message' }).querySelector('svg')).toHaveClass('lucide-list-end')
+    expect(sendNow).toHaveClass('border-[#c96442]', 'bg-white', 'text-[#c96442]')
+    const queueMessage = screen.getByRole('button', { name: 'Queue message' })
+    expect(queueMessage).toHaveClass('bg-[#c96442]', 'text-white')
+    expect(queueMessage.querySelector('svg')).toHaveClass('lucide-list-end')
 
     act(() => useAgentStore.getState().setOptimisticStatus(agentId, AgentStatus.FINISHED))
     const sendMessage = await screen.findByRole('button', { name: 'Send message' })
-    expect(sendMessage.className).toBe(sendNow.className)
+    expect(sendMessage).toHaveClass('bg-[#c96442]', 'text-white')
+    expect(sendMessage).not.toHaveClass('border-[#c96442]')
     expect(sendMessage.querySelector('svg')).toHaveClass('lucide-arrow-up')
   })
 
@@ -530,6 +582,24 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     await screen.findByLabelText('Remove image1.png')
     expect(composerValue(ta)).toBe('[image1.png]')
     expect(ta).toHaveAttribute('data-desktop-image-paste')
+  })
+
+  it('numbers back-to-back desktop images before React commits the first one', async () => {
+    renderChat()
+    const ta = await connectedComposer()
+    ta.focus()
+
+    act(() => {
+      for (let i = 0; i < 3; i++) {
+        window.dispatchEvent(new CustomEvent('hydra-desktop-image-paste', {
+          detail: { base64: 'AQID', mediaType: 'image/png', name: 'image.png' },
+        }))
+      }
+    })
+
+    await screen.findByLabelText('Remove image1.png')
+    expect(screen.getByLabelText('Remove image2.png')).toBeInTheDocument()
+    expect(screen.getByLabelText('Remove image3.png')).toBeInTheDocument()
   })
 
   it('attaches WebKit file drops instead of inserting their URI text', async () => {
@@ -1335,7 +1405,12 @@ describe('a message sent after a commit lands under it', () => {
       }),
     )
     const chip = await screen.findByText('Teach the loader about overlays')
+    const row = chip.closest('[role="button"]')
     expect(screen.getByLabelText('36 lines added, 5 lines removed')).toHaveClass('top-px')
+    expect(row?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[16px]')
+    expect(row?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(1)
+    fireEvent.mouseEnter(row?.parentElement as HTMLElement)
+    expect(await screen.findByRole('tooltip', {}, { timeout: 1200 })).toHaveClass('text-left')
 
     setComposerValue(ta, 'ship it')
     fireEvent.keyDown(ta, { key: 'Enter' })
@@ -1411,13 +1486,16 @@ describe('a message sent after a commit lands under it', () => {
     const list = subject.closest('.rounded-b-md')
     expect(list?.parentElement).toHaveClass('-mt-px')
     expect(list).not.toHaveClass('border-t-0')
-    expect(list?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[10px]')
+    expect(list?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[18px]')
     expect(list?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(2)
+    expect(subject.closest('[role="button"]')).toHaveClass('w-full')
+    expect(screen.getByLabelText('8 lines added, 1 lines removed')).toHaveClass('ml-auto')
 
     const row = subject.closest('[role="button"]')!
     fireEvent.mouseEnter(row.parentElement!)
     expect(await screen.findByText('Merged Author', {}, { timeout: 1200 })).toBeInTheDocument()
     const tooltip = screen.getByRole('tooltip')
+    expect(tooltip).toHaveClass('text-left')
     expect(tooltip).toHaveTextContent('child12')
     expect(tooltip).toHaveTextContent('The merged change')
     expect(tooltip.querySelector('[aria-label="8 lines added, 1 lines removed"]')).not.toBeNull()

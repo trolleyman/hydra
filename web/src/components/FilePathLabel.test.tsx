@@ -17,4 +17,11 @@ describe('FilePathLabel', () => {
     expect(container.querySelector('[title]')).toBeNull()
     expect(screen.getByText('/home/callum/')).toHaveClass('text-stone-400')
   })
+
+  it('can wrap instead of truncating when revealing a complete path', () => {
+    const { container } = render(<FilePathLabel path="deep/delivery_retry_scheduler_with_exponential_backoff.go" wrap />)
+    const path = container.querySelector('span > span')
+    expect(path).toHaveClass('whitespace-normal', 'break-words')
+    expect(path).not.toHaveClass('truncate')
+  })
 })

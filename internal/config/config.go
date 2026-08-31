@@ -102,6 +102,11 @@ const claudeShellCwdPrompt = "## The Bash shell's working directory\n" +
 const codexBashDescriptionPrompt = "## Bash tool descriptions\n" +
 	"- Start each non-trivial shell command with a concise comment describing its purpose, on its own first line: `# Inspect the usage handlers`. Hydra shows that comment as the Bash tool card description.\n"
 
+const shellSectionPrompt = "## Bash output sections\n" +
+	"- Hydra renders a constant `printf '%s\\n' '--- [text] <text> ---'`, `printf '%s\\n' '--- [file] <path> ---'`, or `printf '%s\\n' '--- [dir] <path> ---'` as a compact ruled heading. Use one between adjacent output sections when their boundary would otherwise be ambiguous. A constant `echo` with the same marker is accepted, but `printf` is the predictable spelling across shells.\n" +
+	"- The value after the type is rendered exactly as written. `file` and `dir` select file-path and directory-path presentation; `text` is an ordinary heading. Keep it static, quoted, and on one line.\n" +
+	"- Do not print a marker around output whose command already identifies its file or whose rows identify their own file and line, such as one `sed` read or `rg -n`.\n"
+
 // DefaultResumePrompt is the message Hydra types into an agent that was
 // actively working when the daemon restarted, so it resumes its task rather
 // than idling after its conversation is restored. Agents that were waiting on
@@ -1267,7 +1272,7 @@ func LoadInternalDefaults() Config {
 // The <network-info> placeholder is resolved here (it needs cfg + agentType); the
 // <branch> and <base-branch> placeholders are substituted later by the caller.
 func BuildFinalPrePrompt(cfg Config, agentType string) string {
-	parts := []string{DefaultPrePrompt}
+	parts := []string{DefaultPrePrompt, shellSectionPrompt}
 	if agentType == string(sandbox.AgentTypeCodex) {
 		parts = append(parts, codexBashDescriptionPrompt)
 	}

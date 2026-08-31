@@ -175,9 +175,17 @@ and `web/src/DiffViewer.tsx`):
   explicit.
 - Bash inspection output is sectioned by `web/src/lib/shellSections.ts`. Plain
   file reads such as `sed -n '40,80p'` render with syntax highlighting and the
-  file's real line numbers. Adjacent bounded reads keep their requested starts
-  when their exact range lengths account for all returned lines. In a script
-  where a numbered search immediately
+  file's real line numbers beneath a ruled, tooltip-bearing file header. Numbered
+  searches group consecutive results under the sans-serif path each row names;
+  an inset rule marks each nonconsecutive jump within that file. Adjacent
+  bounded reads keep their requested starts when their exact range lengths
+  account for all returned lines. When a boundary may fall at EOF, agents print
+  a static typed marker such as
+  `printf '%s\n' '--- [file] web/src/App.tsx ---'`; `[text]` preserves an ordinary
+  heading exactly and `[dir]` selects the shared directory treatment. A constant
+  `echo` is accepted, while `printf` is the canonical cross-shell spelling. The
+  parser only consumes a typed marker when it can correlate it unambiguously with
+  the constant-printing command. In a script where a numbered search immediately
   precedes a read of the same file, repeated search rows can pin the read's start
   even when an open-ended command ran before both: the search text and number
   must agree with the corresponding line in the read before the gutter is shown.
@@ -213,8 +221,9 @@ and `web/src/DiffViewer.tsx`):
   worktree is deleted.
 - The shared confirmation dialog is opaque as soon as it mounts. While a modal
   dialog or fullscreen file lightbox is open, underlying native scrollbar chrome
-  becomes transparent without removing its gutter; this prevents WebKitGTK from
-  compositing scroll thumbs through the overlay without shifting the page. The
+  - including theme-painted borders and shadows - becomes transparent without
+  removing its gutter; this prevents WebKitGTK from compositing scrollbars
+  through the overlay without shifting the page. The
   lightbox's transparency backing shrink-wraps the displayed media, so viewport
   height clamping cannot expose checkerboard beside an opaque image. Hydra's thin
   app-wide scrollbar treatment is a separate default-off browser feature flag;

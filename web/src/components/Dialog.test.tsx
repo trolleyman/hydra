@@ -27,6 +27,34 @@ describe('Dialog: modal opacity', () => {
   })
 })
 
+describe('Dialog: generic file paths', () => {
+  afterEach(() => {
+    useDialogStore.getState().hide()
+  })
+
+  it('renders files with the shared icon and lowlit-directory treatment', () => {
+    useDialogStore.getState().show({
+      title: 'Uncommitted Changes in Target',
+      message: 'Commit or stash the conflicting files, then try again.',
+      type: 'warning',
+      details: {
+        filePaths: [
+          'web/src/components/AgentChat.test.tsx',
+          'web/src/components/AgentChat.tsx',
+        ],
+      },
+    })
+    const { container } = render(<Dialog />)
+
+    const rows = Array.from(container.querySelectorAll('li'))
+    expect(rows).toHaveLength(2)
+    expect(rows[0].querySelector('svg')).not.toBeNull()
+    expect(rows[0].querySelector('.text-stone-400')?.textContent).toBe('web/src/components/')
+    expect(rows[0].querySelector('.text-stone-700')?.textContent).toBe('AgentChat.test.tsx')
+    expect(rows[1].textContent).toBe('web/src/components/AgentChat.tsx')
+  })
+})
+
 describe('Dialog: externalLink', () => {
   beforeAll(async () => {
     await loadPublicSuffixList()

@@ -42,6 +42,9 @@ export interface DialogDetails {
   // full strength - the question being asked is where this actually goes, and a
   // clipped URL is precisely how a lookalike host would get past you.
   url?: string
+  // generic: repository file paths shown below the message with the shared file
+  // icon and lowlit-directory treatment.
+  filePaths?: string[]
   // mergeGate: when the merge is gated because the AGENT itself hasn't finished
   // (still working, or blocked asking you a question) rather than by a test
   // verdict, this says which - the panel renders that reason instead of a test

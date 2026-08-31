@@ -61,6 +61,19 @@ duplicating synchronized array-and-map state. Keep `.find` for predicate searche
 such as "the current branch" or "the first non-empty line", where there is no
 stable lookup key.
 
+### Composer textarea layers
+
+`HighlightedTextarea` places a transparent native textarea over a visible
+markdown backdrop. Their box metrics and scroll offsets stay identical: any
+caret-editing path that changes the textarea scroll position also synchronizes
+the backdrop immediately. Otherwise a visible word can sit over different
+source text, so clicking or double-clicking it edits the wrong range.
+
+Generic clipboard images use `image1`, `image2`, and so on within the current
+attachment list. Upload queues reserve each filename synchronously, before a
+React render, because desktop clipboard events can arrive back-to-back in one
+batched turn.
+
 ## Conventions
 
 ### ASCII punctuation only
@@ -86,6 +99,23 @@ gutter in the card. Source output often carries real file lines with more digits
 than the command's own 1..N numbers; both dividing rules still form one vertical
 line. When the code-line-number preference hides the command gutter, output keeps
 its own intrinsic width.
+
+Source-aware output groups each file beneath its shared, sans-serif file-path
+label. A header
+has an inset rule immediately above and below it, with no outer vertical margin;
+file and directory labels use the shared path tooltip treatments. Search results
+are grouped by each path their output names. A nonconsecutive jump between
+matches in the same file gets one inset rule at the omitted-line boundary. The
+structural header and its rules
+carry `data-copy-skip`, leaving copied source free of presentation chrome.
+
+Agents introduce a boundary the command cannot otherwise prove by printing one
+static marker: `printf '%s\n' '--- [text] <text> ---'`, `--- [file] <path> ---`,
+or `--- [dir] <path> ---`. The value is displayed exactly as written. A constant
+`echo` is accepted, but `printf` is the canonical cross-shell spelling. The
+parser correlates the marker with that constant-printing command; a marker-shaped
+line read from a file is source, and an ambiguous duplicate typed marker is left
+as ordinary output rather than guessed.
 
 ### Test status wording: three layers, three vocabularies
 
@@ -123,7 +153,9 @@ take on a blue cast. Compact hints are centered by default, and shortcut
 keycaps share the label's row. Longer explainers can provide a
 `title`, which also selects prose-style left alignment; untitled path or list
 content uses `align="left"`. `InfoTooltip` is the preset for the `i` trigger next
-to a section heading.
+to a section heading. Diff file-list entries show their full paths with the
+shared `FilePathLabel` treatment, while directory entries use
+`DirectoryTooltip`.
 
 Every tooltip can be entered: the short grace period between leaving the trigger
 and entering the box keeps it open so text can be selected and links clicked.
