@@ -230,6 +230,18 @@
     Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
 }
 
+/* HighlightedTextarea's backdrop is a real scroll container so its native
+   scrollbar column has exactly the same width as the textarea layered over it.
+   Only the textarea's scrollbar should be visible; keeping the backing one
+   transparent preserves its layout without drawing a second thumb underneath. */
+.highlighted-textarea-backdrop {
+  scrollbar-color: transparent transparent;
+}
+.highlighted-textarea-backdrop::-webkit-scrollbar-track,
+.highlighted-textarea-backdrop::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
 /* Optically centre a label sitting beside an icon in a flex row.
    `align-items: center` centres the label's LINE BOX, which reserves room for
    ascenders and descenders the word may not use - so a word like "Rename" (no
