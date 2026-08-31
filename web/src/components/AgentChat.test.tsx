@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
+import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, ScriptOutputPanel, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
@@ -166,6 +166,38 @@ describe('Bash card summary comments', () => {
 })
 
 describe('sectioned search output', () => {
+  it('shares the widest gutter between a multiline command and numbered output', () => {
+    const sections = [{
+      kind: 'matches' as const,
+      command: 'rg -n x a.cs',
+      match: { paths: ['a.cs'], numbered: true },
+      lines: ['9:first', '10:last'],
+    }]
+    const rows = scriptOutputRows(sections)
+
+    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', rows, true)).toBe(2)
+    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', scriptOutputRows([{ ...sections[0], lines: ['99:first', '100:last'] }]), true)).toBe(3)
+    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', rows, false)).toBeUndefined()
+    expect(sharedScriptGutterDigits('rg -n x a.cs', rows, true)).toBeUndefined()
+  })
+
+  it('stretches tooltip-wrapped source numbers across the gutter track', () => {
+    const rows = scriptOutputRows([{
+      kind: 'matches',
+      command: 'rg -n x a.cs',
+      match: { paths: ['a.cs'], numbered: true },
+      lines: ['9:first', '10:last'],
+    }])
+    const { container } = render(<ScriptOutputPanel rows={rows} />)
+
+    const gutters = container.querySelectorAll('[data-copy-skip]')
+    expect(gutters).toHaveLength(2)
+    for (const gutter of gutters) {
+      expect(gutter).toHaveClass('w-full')
+      expect(gutter.parentElement).toHaveClass('w-full')
+    }
+  })
+
   it('does not leak Markdown bold across omitted source lines', () => {
     const rows = scriptOutputRows([{
       kind: 'matches',
