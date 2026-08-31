@@ -78,6 +78,14 @@ Write them in normal sentence/title case (e.g. "Review controls", not "REVIEW
 CONTROLS"). This covers both capitalised string literals *and* CSS - do not reach
 for `text-transform: uppercase` to get the uppercase look either.
 
+### Chat code gutters
+
+A multiline Bash command and its source-aware output share the widest line-number
+gutter in the card. Source output often carries real file lines with more digits
+than the command's own 1..N numbers; both dividing rules still form one vertical
+line. When the code-line-number preference hides the command gutter, output keeps
+its own intrinsic width.
+
 ### Test status wording: three layers, three vocabularies
 
 A test status is shown at three different scopes, and each one has its own words.

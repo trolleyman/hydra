@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
+import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
@@ -166,6 +166,20 @@ describe('Bash card summary comments', () => {
 })
 
 describe('sectioned search output', () => {
+  it('shares the widest gutter between a multiline command and numbered output', () => {
+    const sections = [{
+      kind: 'matches' as const,
+      command: 'rg -n x a.cs',
+      match: { paths: ['a.cs'], numbered: true },
+      lines: ['9:first', '10:last'],
+    }]
+
+    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', sections, true)).toBe(2)
+    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', [{ ...sections[0], lines: ['99:first', '100:last'] }], true)).toBe(3)
+    expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', sections, false)).toBeUndefined()
+    expect(sharedScriptGutterDigits('rg -n x a.cs', sections, true)).toBeUndefined()
+  })
+
   it('does not leak Markdown bold across omitted source lines', () => {
     const rows = scriptOutputRows([{
       kind: 'matches',

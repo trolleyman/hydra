@@ -1,4 +1,4 @@
-import { Fragment, createContext, memo, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type ReactNode } from 'react'
+import { Fragment, createContext, memo, useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -2083,7 +2083,7 @@ function Expandable({ open, children, className }: { open: boolean; children: Re
 // preference, on by default): these panels wrap rather than scroll sideways, so
 // without numbers a long shell line that wraps looks exactly like the next step
 // of the script. A single line has nothing to disambiguate, so it stays bare.
-function CodePanel({ code, lang }: { code: string; lang: string }) {
+function CodePanel({ code, lang, gutterDigits }: { code: string; lang: string; gutterDigits?: number }) {
   const lineNumbers = useChatCodeLinesStore((s) => s.lineNumbers)
   const ws = useWhitespaceMarks()
   const html = useMemo(() => highlightHtml(code, lang), [code, lang])
@@ -2094,7 +2094,7 @@ function CodePanel({ code, lang }: { code: string; lang: string }) {
     () => (html == null || ws === 'off' ? html : splitHighlightedLines(html).map((l) => markWhitespace(l, ws)).join('\n')),
     [html, ws],
   )
-  if (lineNumbers && code.trimEnd().includes('\n')) return <NumberedCodePanel code={code} lang={lang} />
+  if (lineNumbers && code.trimEnd().includes('\n')) return <NumberedCodePanel code={code} lang={lang} gutterDigits={gutterDigits} />
 
   const cls = `${PANEL_CLASS} whitespace-pre-wrap break-words font-mono text-2xs leading-4 max-h-64 overflow-y-auto px-2.5 py-1.5 text-stone-800 dark:text-stone-200`
   if (marked != null) {
@@ -2655,7 +2655,7 @@ function UnifiedDiffPanel({ diff, lang, kind }: { diff: string; lang: string; ki
 // the whole block sideways. Highlighting runs over the whole body (multi-line
 // constructs colourise correctly) and is split back into per-line HTML
 // (highlightLines, which falls back to escaped plain lines for an unknown lang).
-function GutterCodePanel({ nums, code, lang }: { nums: string[]; code: string[]; lang: string }) {
+function GutterCodePanel({ nums, code, lang, gutterDigits }: { nums: string[]; code: string[]; lang: string; gutterDigits?: number }) {
   const ws = useWhitespaceMarks()
   const lines = useMemo(
     () => highlightLines(code.join('\n'), lang || 'plaintext').map((l) => markWhitespace(l, ws)),
@@ -2667,7 +2667,11 @@ function GutterCodePanel({ nums, code, lang }: { nums: string[]; code: string[];
           elements, so nothing in this panel tells a copy where the lines end -
           the chat's copy-as-markdown handler would hand over the whole script
           on one line. See lib/copyMarkdown. */}
-      <div data-copy-code className="grid grid-cols-[auto_1fr] text-2xs leading-4 font-mono">
+      <div
+        data-copy-code
+        className="grid grid-cols-[auto_1fr] text-2xs leading-4 font-mono"
+        style={gutterDigits == null ? undefined : { gridTemplateColumns: `calc(${gutterDigits}ch + 1rem + 1px) minmax(0, 1fr)` }}
+      >
         {nums.map((n, i) => (
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
@@ -2682,13 +2686,13 @@ function GutterCodePanel({ nums, code, lang }: { nums: string[]; code: string[];
 
 // NumberedCodePanel renders code with a 1..N line-number gutter and syntax
 // highlighting - the shape a Read shows - used for a Write tool's file content.
-function NumberedCodePanel({ code, lang }: { code: string; lang: string }) {
+function NumberedCodePanel({ code, lang, gutterDigits }: { code: string; lang: string; gutterDigits?: number }) {
   const body = code.replace(/\n$/, '')
   const parts = useMemo(() => {
     const lines = body.split('\n')
     return { nums: lines.map((_, i) => String(i + 1)), code: lines }
   }, [body])
-  return <GutterCodePanel nums={parts.nums} code={parts.code} lang={lang} />
+  return <GutterCodePanel nums={parts.nums} code={parts.code} lang={lang} gutterDigits={gutterDigits} />
 }
 
 // ReadOutputPanel renders a Read's `cat -n` output (each line prefixed with its
@@ -2970,6 +2974,20 @@ export function scriptOutputRows(sections: ScriptSection[]): ScriptOutputRow[] {
   return rows
 }
 
+// A Bash card's command and source-aware output are two separate panels, so an
+// auto-sized grid would give each one a different gutter whenever their widest
+// line numbers have different digit counts. Return one digit width for both.
+// The command only participates when its line-number preference is enabled and
+// it is actually multiline; otherwise there is no upper gutter to align.
+// eslint-disable-next-line react-refresh/only-export-components -- exported for the focused layout-model test
+export function sharedScriptGutterDigits(command: string, sections: ScriptSection[], commandLineNumbers: boolean): number | undefined {
+  if (!commandLineNumbers || !command.trimEnd().includes('\n')) return undefined
+  const outputDigits = scriptOutputRows(sections).reduce((max, row) => Math.max(max, row.num.length), 0)
+  if (outputDigits === 0) return undefined
+  const commandLines = command.replace(/\n$/, '').split('\n').length
+  return Math.max(String(commandLines).length, outputDigits)
+}
+
 // ScriptOutputPanel renders a Bash step's output as the sections its own script
 // produced (see lib/shellSections) instead of as one anonymous wall of terminal
 // text: each stretch highlighted as the file it came from, numbered by that
@@ -2990,7 +3008,7 @@ function OutputSpanText({ cls, text, ws }: { cls: string; text: string; ws: Whit
     : <span className={cls}>{text}</span>
 }
 
-function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
+function ScriptOutputPanel({ sections, gutterDigits }: { sections: ScriptSection[]; gutterDigits?: number }) {
   const rows = useMemo(() => scriptOutputRows(sections), [sections])
   const ws = useWhitespaceMarks()
   // The whitespace-mark overlay over each row's already-highlighted code. The
@@ -3004,7 +3022,13 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
       {/* data-copy-code / data-copy-line: the rows are grid cells, not block
           elements, so without them a copy hands over every line run together
           (see lib/copyMarkdown). */}
-      <div data-copy-code className={`grid ${gutter ? 'grid-cols-[auto_1fr]' : 'grid-cols-[1fr]'} text-2xs leading-4 font-mono`}>
+      <div
+        data-copy-code
+        className={`grid ${gutter ? 'grid-cols-[auto_1fr]' : 'grid-cols-[1fr]'} text-2xs leading-4 font-mono`}
+        style={gutter && gutterDigits != null
+          ? { gridTemplateColumns: `calc(${gutterDigits}ch + 1rem + 1px) minmax(0, 1fr)` } as CSSProperties
+          : undefined}
+      >
         {rows.map((row, i) => (
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
@@ -3771,6 +3795,10 @@ const ToolCard = memo(function ToolCard({
     scriptSteps && renderedResult !== undefined
       ? splitScriptOutput(scriptSteps, renderedResult)
       : null
+  const codeLineNumbers = useChatCodeLinesStore((s) => s.lineNumbers)
+  const sharedGutterDigits = scriptSections
+    ? sharedScriptGutterDigits(visibleCommand, scriptSections, codeLineNumbers)
+    : undefined
   // What the script's own `echo`s printed, for the output that gets NO sections:
   // a build log carrying ANSI, a script of steps too opaque to attribute. The
   // separators in it are still the strings the script says they are, so they are
@@ -4050,7 +4078,7 @@ const ToolCard = memo(function ToolCard({
                       Command to run on the host
                     </div>
                   )}
-                  <CodePanel code={trimWorktreePaths(visibleCommand, worktree)} lang="bash" />
+                  <CodePanel code={trimWorktreePaths(visibleCommand, worktree)} lang="bash" gutterDigits={sharedGutterDigits} />
                 </div>
               ) : isWebSearch && typeof input?.query === 'string' && input.query.trim() ? (
                 <div className={`${PANEL_CLASS} px-2.5 py-1.5 text-stone-700 dark:text-stone-200`}>{input.query}</div>
@@ -4159,7 +4187,7 @@ const ToolCard = memo(function ToolCard({
                           // than as another block of tool output.
                           ? <div className="px-0.5 break-words chat-font text-3xs text-stone-400 dark:text-stone-500"><CommentRefText text={renderedResult} /></div>
                         : scriptSections
-                          ? <ScriptOutputPanel sections={scriptSections} />
+                          ? <ScriptOutputPanel sections={scriptSections} gutterDigits={sharedGutterDigits} />
                         : isRead && !item.isError
 								? <ReadOutputPanel text={renderedResult} lang={outputLang} />
 								: <OutputPanel text={renderedResult} lang={outputLang} isError={item.isError} markers={scriptMarkers} />
