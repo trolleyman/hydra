@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
+import { ChatPane, compareCommitChips, mergeChipLabel, toProviderEvents, planStepRows, reduceHistoryEvents, scriptOutputRows, ScriptOutputPanel, sharedScriptGutterDigits, stepSummary, summarizeToolSearchQuery, toolRawJson, visibleToolInput } from './AgentChat'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { newToolResultLink } from '../lib/toolResultLink'
 import { AgentStatus, type AgentResponse } from '../api'
@@ -178,6 +178,22 @@ describe('sectioned search output', () => {
     expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', [{ ...sections[0], lines: ['99:first', '100:last'] }], true)).toBe(3)
     expect(sharedScriptGutterDigits('rg -n x a.cs\nsed -n 1,3p a.cs', sections, false)).toBeUndefined()
     expect(sharedScriptGutterDigits('rg -n x a.cs', sections, true)).toBeUndefined()
+  })
+
+  it('stretches tooltip-wrapped source numbers across the gutter track', () => {
+    const { container } = render(<ScriptOutputPanel sections={[{
+      kind: 'matches',
+      command: 'rg -n x a.cs',
+      match: { paths: ['a.cs'], numbered: true },
+      lines: ['9:first', '10:last'],
+    }]} />)
+
+    const gutters = container.querySelectorAll('[data-copy-skip]')
+    expect(gutters).toHaveLength(2)
+    for (const gutter of gutters) {
+      expect(gutter).toHaveClass('w-full')
+      expect(gutter.parentElement).toHaveClass('w-full')
+    }
   })
 
   it('does not leak Markdown bold across omitted source lines', () => {

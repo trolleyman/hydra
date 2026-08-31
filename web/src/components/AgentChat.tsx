@@ -3008,7 +3008,8 @@ function OutputSpanText({ cls, text, ws }: { cls: string; text: string; ws: Whit
     : <span className={cls}>{text}</span>
 }
 
-function ScriptOutputPanel({ sections, gutterDigits }: { sections: ScriptSection[]; gutterDigits?: number }) {
+// eslint-disable-next-line react-refresh/only-export-components -- exported for focused gutter rendering tests
+export function ScriptOutputPanel({ sections, gutterDigits }: { sections: ScriptSection[]; gutterDigits?: number }) {
   const rows = useMemo(() => scriptOutputRows(sections), [sections])
   const ws = useWhitespaceMarks()
   // The whitespace-mark overlay over each row's already-highlighted code. The
@@ -3036,11 +3037,11 @@ function ScriptOutputPanel({ sections, gutterDigits }: { sections: ScriptSection
               <Tooltip
                 content={<FilePathLabel path={row.file} nativeTitle={false} />}
                 align="left"
-                className="min-h-4"
+                className="min-h-4 w-full"
               >
                 <span
                   data-copy-skip
-                  className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
+                  className="min-h-4 w-full select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
                 >{row.num}</span>
               </Tooltip>
             ) : (
