@@ -23,6 +23,55 @@ function agentRow(page: import('@playwright/test').Page, title: string) {
   return page.locator('aside').getByRole('link', { name: new RegExp(title) })
 }
 
+test('Home keeps the prompt highlight aligned so word deletion preserves newlines', async ({ page }) => {
+  await page.goto(PROJECT)
+
+  const textarea = page.getByPlaceholder('Describe a task...')
+  const value = 'with output like this:\n```\nadawd line 1\nline 2\nawdawdline 3\ngeeq s line 4\n```'
+  await textarea.fill(value)
+
+  // Reproduce the desktop WebKit state from the report: a caret-driven native
+  // textarea scroll has moved the transparent input without notifying its
+  // visible markdown backdrop.
+  await textarea.evaluate((el: HTMLTextAreaElement, source) => {
+    const lineEnd = source.indexOf('line 2') + 'line 2'.length
+    el.setSelectionRange(lineEnd, lineEnd)
+    el.scrollTop = el.scrollHeight
+    const backdrop = el.previousElementSibling as HTMLElement
+    backdrop.scrollTop = 0
+  }, value)
+
+  await textarea.press('Home')
+  const afterHome = await textarea.evaluate((el: HTMLTextAreaElement) => ({
+    caret: el.selectionStart,
+    textareaScroll: el.scrollTop,
+    backdropScroll: (el.previousElementSibling as HTMLElement).scrollTop,
+  }))
+  expect(afterHome.caret).toBe(value.indexOf('line 2'))
+  expect(afterHome.backdropScroll).toBe(afterHome.textareaScroll)
+
+  // Double-click the visible third-line word. With the layers aligned, Delete
+  // removes only that word; neither surrounding newline is part of the range.
+  const point = await textarea.evaluate((el: HTMLTextAreaElement, word) => {
+    const style = getComputedStyle(el)
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')!
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    const rect = el.getBoundingClientRect()
+    const lineIndex = el.value.slice(0, el.value.indexOf(word)).split('\n').length - 1
+    return {
+      x: rect.left + parseFloat(style.paddingLeft) + context.measureText('awda').width,
+      y: rect.top + parseFloat(style.paddingTop) + lineIndex * parseFloat(style.lineHeight) - el.scrollTop
+        + parseFloat(style.lineHeight) / 2,
+    }
+  }, 'awdawdline')
+  await page.mouse.dblclick(point.x, point.y)
+  await expect.poll(() => textarea.evaluate((el: HTMLTextAreaElement) => el.value.slice(el.selectionStart, el.selectionEnd)))
+    .toBe('awdawdline')
+  await textarea.press('Delete')
+  await expect(textarea).toHaveValue('with output like this:\n```\nadawd line 1\nline 2\n 3\ngeeq s line 4\n```')
+})
+
 test('opening an agent from the sidebar navigates to its detail view', async ({ page }) => {
   await page.goto(PROJECT)
 

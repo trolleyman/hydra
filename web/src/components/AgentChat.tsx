@@ -9927,6 +9927,10 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
       const objectUrl = URL.createObjectURL(file)
       objectUrlsRef.current.add(objectUrl)
       const chip: Attachment = { id, filename: file.name || 'pasted-image', path: null, url: objectUrl, previewUrl: isImageFile(file) ? objectUrl : undefined, size: file.size, uploading: true }
+      // A second desktop paste can arrive before React commits this one. Make
+      // the reservation visible immediately so it receives image2, not another
+      // image1 calculated from the previous render.
+      attachmentsRef.current = [...attachmentsRef.current, chip]
       commit((prev) => makeSnapshot(prev.prompt, [...prev.attachments, chip], prev.selStart, prev.selEnd), false)
       uploadFile(projectId, file)
         .then((res) => reconcile(id, { path: res.path, uploading: false }))
@@ -9939,6 +9943,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // Removing a chip is its own undo step. Don't revoke the preview URL here - an
   // undo can bring the chip back; URLs are freed in bulk on send (objectUrlsRef).
   function removeAttachment(id: number) {
+    attachmentsRef.current = attachmentsRef.current.filter((a) => a.id !== id)
     commit(
       (prev) => makeSnapshot(prev.prompt, prev.attachments.filter((a) => a.id !== id), prev.selStart, prev.selEnd),
       false,

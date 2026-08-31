@@ -514,6 +514,24 @@ describe('ChatPane composer undo (Ctrl+Z) for pasted images', () => {
     expect(ta).toHaveAttribute('data-desktop-image-paste')
   })
 
+  it('numbers back-to-back desktop images before React commits the first one', async () => {
+    renderChat()
+    const ta = await connectedComposer()
+    ta.focus()
+
+    act(() => {
+      for (let i = 0; i < 3; i++) {
+        window.dispatchEvent(new CustomEvent('hydra-desktop-image-paste', {
+          detail: { base64: 'AQID', mediaType: 'image/png', name: 'image.png' },
+        }))
+      }
+    })
+
+    await screen.findByLabelText('Remove image1.png')
+    expect(screen.getByLabelText('Remove image2.png')).toBeInTheDocument()
+    expect(screen.getByLabelText('Remove image3.png')).toBeInTheDocument()
+  })
+
   it('attaches WebKit file drops instead of inserting their URI text', async () => {
     renderChat()
     const ta = await connectedComposer()

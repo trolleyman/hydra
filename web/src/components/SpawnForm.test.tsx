@@ -63,6 +63,24 @@ describe('SpawnForm desktop attachments', () => {
     expect(uploadFile).toHaveBeenCalledWith('proj', expect.objectContaining({ name: 'image1.png' }))
   })
 
+  it('numbers back-to-back desktop images before React commits the first one', async () => {
+    render(<SpawnForm projectId="proj-rapid" />)
+    const textarea = await screen.findByPlaceholderText('Describe what you need...') as HTMLTextAreaElement
+    textarea.focus()
+
+    act(() => {
+      for (let i = 0; i < 3; i++) {
+        window.dispatchEvent(new CustomEvent('hydra-desktop-image-paste', {
+          detail: { base64: 'AQID', mediaType: 'image/png', name: 'image.png' },
+        }))
+      }
+    })
+
+    await screen.findByLabelText('Remove image1.png')
+    expect(screen.getByLabelText('Remove image2.png')).toBeInTheDocument()
+    expect(screen.getByLabelText('Remove image3.png')).toBeInTheDocument()
+  })
+
   it('ignores native image paste while no project is selected', async () => {
     useProjectStore.setState({ selectedProjectId: null })
     render(<SpawnForm projectId={null} />)

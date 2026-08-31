@@ -96,6 +96,10 @@ export function useAttachmentUploads(
           size: file.size,
           uploading: true,
         }
+        // Keep same-turn addFiles calls on a current numbering snapshot. React
+        // may batch their state commits, but filenames must be reserved as soon
+        // as the file enters the queue.
+        ref.current = [...ref.current, chip]
         setAttachments((prev) => [...prev, chip])
         void uploadFile(projectId, file)
           .then((res) => patch(id, { path: res.path, uploading: false }))
@@ -106,11 +110,13 @@ export function useAttachmentUploads(
   )
 
   const removeAttachment = useCallback((id: number) => {
+    ref.current = ref.current.filter((a) => a.id !== id)
     setAttachments((prev) => prev.filter((a) => a.id !== id))
   }, [])
 
   const reset = useCallback(() => {
     revokeAll()
+    ref.current = []
     setAttachments([])
   }, [revokeAll])
 
