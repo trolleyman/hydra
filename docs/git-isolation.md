@@ -142,6 +142,9 @@ own own-branch guard, so they're safe on codex/gemini without it.
   and **`git_merge_continue`** / **`git_merge_abort`** finish it. `continue` stages the
   still-unmerged paths itself (git won't conclude a merge while any remain) but refuses
   if any of them still contain `<<<<<<<` markers, so a conflict can't be committed raw.
+  Other edited paths stay outside the merge commit; stage them with **`git_add`** before
+  continuing when resolving the merge requires a semantic change to a file Git did not
+  mark conflicted. The completion summary reports any changes that remain afterward.
 - **`git_stash`** (`op`: push / pop / apply / list / drop) - park uncommitted work and
   bring it back; the way out of "your local changes would be overwritten by merge"
   without discarding them or committing something half-done. **Entries are per-head.**
