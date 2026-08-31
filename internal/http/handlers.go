@@ -2802,6 +2802,43 @@ func (s *Server) RestartAgentSession(ctx context.Context, request api.RestartAge
 	return api.RestartAgentSession204Response{}, nil
 }
 
+// StopAgentSession stops only the provider CLI process and retains the live
+// head. In particular, it does not call KillHead: the branch, worktree, DB row
+// and transcript remain available, and the terminal/chat attach path resumes
+// the conversation automatically when the head is opened again.
+func (s *Server) StopAgentSession(ctx context.Context, request api.StopAgentSessionRequestObject) (api.StopAgentSessionResponseObject, error) {
+	projectRoot, err := s.resolveProjectRoot(request.ProjectId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	log.Printf("api: stop agent session request: id=%q, project=%q", request.AgentId, projectRoot)
+	head, err := heads.GetHeadByID(ctx, s.Sessions, s.DB, projectRoot, request.AgentId)
+	if err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	if head == nil {
+		return api.StopAgentSession404JSONResponse{
+			Code:    404,
+			Error:   api.ErrorResponseErrorNotFound,
+			Details: "agent not found",
+		}, nil
+	}
+	if head.Archived {
+		return api.StopAgentSession409JSONResponse{
+			Code:    409,
+			Error:   api.ErrorResponseErrorConflict,
+			Details: "archived agent has no live session to stop",
+		}, nil
+	}
+
+	heads.StopSessionAndWait(s.Sessions, head.ID, 10*time.Second)
+	if err := s.DB.UpdateSessionInfo(head.ID, 0, "stopped"); err != nil {
+		return nil, errtrace.Wrap(err)
+	}
+	s.notifyAgentsChanged(projectRoot, false)
+	return api.StopAgentSession204Response{}, nil
+}
+
 // ResumeAgent revives an archived (killed/merged) agent: it recreates the
 // worktree+branch off the current base, un-archives the record, and relaunches
 // the agent so it continues from its saved conversation transcript. Unlike

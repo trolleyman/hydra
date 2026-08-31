@@ -7,9 +7,11 @@ import { routeTree } from './routeTree.gen'
 import { AuthGate } from './components/AuthGate'
 import { LightboxHost } from './components/LightboxHost'
 import { installToastHarness } from './lib/toastHarness'
+import { applyFeatureFlagClasses } from './lib/featureFlags'
 
 // Screenshot/test harness hook (dormant unless its localStorage flag is set).
 installToastHarness()
+applyFeatureFlagClasses()
 
 const router = createRouter({ routeTree })
 

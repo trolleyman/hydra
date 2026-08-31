@@ -14,16 +14,18 @@ import { useUnsavedChangesGuard } from '../lib/unsavedChanges'
 import { BrowserSections } from '../components/settings/BrowserSections'
 import { ScopeTabs, SettingsSaveAction } from '../components/settings/shared'
 import { AboutSection } from '../components/settings/AboutSection'
+import { FeatureFlagsSections } from '../components/settings/FeatureFlagsSections'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
 })
 
-type GlobalSettingsTab = 'user' | 'browser' | 'about'
+type GlobalSettingsTab = 'user' | 'browser' | 'features' | 'about'
 
 const TAB_DESCRIPTIONS: Record<GlobalSettingsTab, string> = {
   user: 'Every project on this machine - stored in ~/.config/hydra/config.toml. Open a project\'s settings to configure that project itself.',
   browser: 'This browser only - stored locally, applied immediately, never written to a config file.',
+  features: 'Experimental behavior for this browser only. Flags are stored locally, apply immediately, and default off.',
   about: '',
 }
 
@@ -122,6 +124,7 @@ function SettingsPage() {
             tabs={[
               { id: 'user' as GlobalSettingsTab, label: 'User' },
               { id: 'browser' as GlobalSettingsTab, label: 'Browser' },
+              { id: 'features' as GlobalSettingsTab, label: 'Feature flags' },
               { id: 'about' as GlobalSettingsTab, label: 'About' },
             ]}
             active={tab}
@@ -130,6 +133,8 @@ function SettingsPage() {
           />
           {tab === 'about' ? (
             <AboutSection />
+          ) : tab === 'features' ? (
+            <FeatureFlagsSections />
           ) : tab === 'browser' ? (
             <BrowserSections />
           ) : !effectiveProjectId ? (

@@ -1216,6 +1216,12 @@ func (s *SimulationServer) RestartAgentSession(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// StopAgentSession succeeds so native desktop close can be exercised without
+// deleting the simulated head from the page.
+func (s *SimulationServer) StopAgentSession(w http.ResponseWriter, r *http.Request, projectId string, id string) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *SimulationServer) ResumeAgent(w http.ResponseWriter, r *http.Request, projectId string, id string) {
 	api.WriteError(w, http.StatusNotImplemented, "Not implemented in simulation mode")
 }

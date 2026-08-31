@@ -111,6 +111,12 @@ and `web/src/DiffViewer.tsx`):
   carry the chosen size rather than a literal `text-xs` - see
   `CODE_TEXT`/`CODE_LEADING` in `diffMetrics` and the size note in
   `web/src/lib/fonts.ts`.
+- In the native WebKit desktop view, the Files section uses borders and
+  backgrounds for separation without box shadows on its sticky header, file
+  list, pager or diff cards. WebKit repaints those shadows across the
+  changing/scrolling diff at a much higher cost than Chromium; even a small
+  visible file can otherwise make the desktop inspector scroll at roughly half
+  frame rate. Browsers and the Chromium desktop bridge retain the shadows.
 - **When a prediction is wrong anyway, the correction must not be visible.** The
   prediction is exact for a plain file body but not for everything in one -
   `bodyShape` does not model inline review-comment rows, so a file carrying a
@@ -185,7 +191,8 @@ and `web/src/DiffViewer.tsx`):
   a streaming update. History loading fires once per arrival in the top zone;
   an anchored prepend re-arms it after moving the preserved content clear, so a
   thumb held at the top deliberately continues paging. Reaching the bottom
-  explicitly reacquires the pin.
+  explicitly reacquires the pin. The optional coarse-wheel easing layer is a
+  default-off browser feature flag, independent from bottom following.
 - Keyboard hints use the shared `Kbd` / `ShortcutHint` components. Their fixed
   cap box optically lowers the glyph within the font line box, keeping fonts
   with asymmetric ascent/descent metrics vertically centred.
@@ -196,14 +203,9 @@ and `web/src/DiffViewer.tsx`):
 - The shared confirmation dialog is opaque as soon as it mounts. While it is
   open, underlying native scrollbar chrome becomes transparent without removing
   its gutter; this prevents WebKitGTK from compositing scroll thumbs through the
-  modal without shifting the page.
-- A visible, loaded Files diff pauses decorative infinite animations in the
-  WebKit desktop shells. WebKitGTK and WKWebView otherwise repaint the Files
-  surface for tiny status, progress and chat animations after the diff has fully
-  settled. An empty Changes inspector leaves animation running. `AgentDetail`
-  owns the `hydra-webkit-diff-open` root class; the file-card condition lives in
-  `index.css`. Closing the diff restores motion, and browsers plus Windows
-  WebView2 are unaffected.
+  modal without shifting the page. Hydra's thin app-wide scrollbar treatment is
+  a separate default-off browser feature flag; otherwise scrollbars use native
+  browser and operating-system chrome.
 - The primary Merge action preflights the existing per-runner tests endpoint
   before opening its confirmation when the compact verdict is not already gated.
   This distinguishes no configured runners from an unknown verdict and catches a
