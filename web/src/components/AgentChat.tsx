@@ -13,7 +13,6 @@ import {
   Eye,
   FilePen,
   FileText,
-  GitCommitHorizontal,
   GitMerge,
   Globe,
   History,
@@ -250,9 +249,9 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
         <ChangeStats additions={item.additions} deletions={item.deletions} className="relative top-px" />
       </button>
       <Expandable open={expanded && shown > 0} className="-mt-px w-full">
-        <div className="flex w-full flex-col rounded-b-md border border-stone-200 bg-stone-50/60 px-2 py-1.5 dark:border-white/[0.08] dark:bg-white/[0.02]">
+        <div className="relative flex w-full flex-col rounded-b-md border border-stone-200 bg-stone-50/60 px-2 py-1.5 dark:border-white/[0.08] dark:bg-white/[0.02]">
+          <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[18px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
           <div className="relative flex w-full flex-col">
-            <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[10px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
             {item.merged!.map((m) => (
               <Tooltip
                 key={m.sha}
@@ -265,7 +264,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
                   tabIndex={clickable ? 0 : undefined}
                   onClick={clickable ? () => onSelectCommit?.(m.sha) : undefined}
                   onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectCommit?.(m.sha) } } : undefined}
-                  className={`flex items-center gap-1.5 rounded px-1 py-0.5 text-2xs text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
+                  className={`flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-2xs text-stone-500 dark:text-stone-400 ${clickable ? COMMIT_HOVER : ''}`}
                 >
                   <span className="relative flex w-3 self-stretch shrink-0 items-center justify-center" aria-hidden="true">
                     <span data-commit-graph-dot className="relative h-1.5 w-1.5 rounded-full border border-stone-400 bg-stone-50 dark:border-stone-500 dark:bg-stone-800" />
@@ -274,7 +273,7 @@ function MergeCommitChip({ item, onSelectCommit }: { item: CommitChipItem; onSel
                     <span className="shrink-0 font-mono">{m.shortSha}</span>
                     <span className="min-w-0 flex-1 truncate">{m.subject}</span>
                   </span>
-                  <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px" />
+                  <ChangeStats additions={m.additions} deletions={m.deletions} className="relative top-px ml-auto shrink-0" />
                 </div>
               </Tooltip>
             ))}
@@ -10665,9 +10664,12 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
                 tabIndex={clickable ? 0 : undefined}
                 onClick={clickable ? activate : undefined}
                 onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } } : undefined}
-                className={`${COMMIT_PILL} max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
+                className={`${COMMIT_PILL} relative max-w-full rounded-full ${clickable ? COMMIT_HOVER : ''}`}
               >
-                <GitCommitHorizontal className="w-3 h-3 shrink-0" />
+                <span data-commit-graph-line className="pointer-events-none absolute inset-y-0 left-[16px] w-px bg-stone-300 dark:bg-stone-600" aria-hidden="true" />
+                <span className="relative flex w-3 shrink-0 items-center justify-center" aria-hidden="true">
+                  <span data-commit-graph-dot className="h-1.5 w-1.5 rounded-full border border-stone-400 bg-stone-100 dark:border-stone-500 dark:bg-stone-800" />
+                </span>
                 {/* The sha is monospace and the subject is not, so their line boxes
                     differ and `items-center` would centre each one separately. */}
                 <span className="font-mono shrink-0 optical-center">{item.shortSha}</span>

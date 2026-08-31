@@ -1301,7 +1301,10 @@ describe('a message sent after a commit lands under it', () => {
       }),
     )
     const chip = await screen.findByText('Teach the loader about overlays')
+    const row = chip.closest('[role="button"]')
     expect(screen.getByLabelText('36 lines added, 5 lines removed')).toHaveClass('top-px')
+    expect(row?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[16px]')
+    expect(row?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(1)
 
     fireEvent.change(ta, { target: { value: 'ship it' } })
     fireEvent.keyDown(ta, { key: 'Enter' })
@@ -1353,8 +1356,10 @@ describe('a message sent after a commit lands under it', () => {
     const list = subject.closest('.rounded-b-md')
     expect(list?.parentElement).toHaveClass('-mt-px')
     expect(list).not.toHaveClass('border-t-0')
-    expect(list?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[10px]')
+    expect(list?.querySelector('[data-commit-graph-line]')).toHaveClass('inset-y-0', 'left-[18px]')
     expect(list?.querySelectorAll('[data-commit-graph-dot]')).toHaveLength(2)
+    expect(subject.closest('[role="button"]')).toHaveClass('w-full')
+    expect(screen.getByLabelText('8 lines added, 1 lines removed')).toHaveClass('ml-auto')
 
     fireEvent.mouseEnter(subject.closest('[role="button"]')?.parentElement as HTMLElement)
     expect(await screen.findByText('Merged Author', {}, { timeout: 1200 })).toBeInTheDocument()
