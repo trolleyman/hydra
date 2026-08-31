@@ -9,6 +9,7 @@ import { UrlText } from './HostName'
 import { Markdown } from '../lib/MarkdownRenderer'
 import type { DialogDetails } from '../stores/dialogStore'
 import { ChangeStats } from './ChangeStats'
+import { useOverlayScrollbarSuppression } from '../lib/useOverlayScrollbarSuppression'
 
 export const Dialog: React.FC = () => {
   const { isOpen, title, message, type, variant, confirmLabel, secondaryLabel, details, showCancel, hide, onConfirm, onSecondary, onCancel } =
@@ -46,15 +47,10 @@ export const Dialog: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, handleCancel, handleConfirm])
 
-  // WebKitGTK can composite a native scrollbar above a fixed modal layer even
-  // when the layer has the higher z-index. Keep the scrollbar gutter stable but
-  // make its chrome transparent while this dialog is mounted, so it cannot draw
-  // a vertical stripe through an otherwise opaque panel.
-  useEffect(() => {
-    if (!isOpen) return
-    document.documentElement.classList.add('hydra-dialog-open')
-    return () => document.documentElement.classList.remove('hydra-dialog-open')
-  }, [isOpen])
+  // Keep native scrollbar chrome below this modal. The shared hook also covers
+  // a file lightbox beneath the dialog without either overlay releasing the
+  // suppression while the other remains open.
+  useOverlayScrollbarSuppression(isOpen)
 
   if (!isOpen) return null
 

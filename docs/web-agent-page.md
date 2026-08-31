@@ -211,12 +211,14 @@ and `web/src/DiffViewer.tsx`):
   the operational detail: review creation names the PR/MR forge, merge names the
   target branch, restart says which state is preserved, and kill says that the
   worktree is deleted.
-- The shared confirmation dialog is opaque as soon as it mounts. While it is
-  open, underlying native scrollbar chrome becomes transparent without removing
-  its gutter; this prevents WebKitGTK from compositing scroll thumbs through the
-  modal without shifting the page. Hydra's thin app-wide scrollbar treatment is
-  a separate default-off browser feature flag; otherwise scrollbars use native
-  browser and operating-system chrome.
+- The shared confirmation dialog is opaque as soon as it mounts. While a modal
+  dialog or fullscreen file lightbox is open, underlying native scrollbar chrome
+  becomes transparent without removing its gutter; this prevents WebKitGTK from
+  compositing scroll thumbs through the overlay without shifting the page. The
+  lightbox's transparency backing shrink-wraps the displayed media, so viewport
+  height clamping cannot expose checkerboard beside an opaque image. Hydra's thin
+  app-wide scrollbar treatment is a separate default-off browser feature flag;
+  otherwise scrollbars use native browser and operating-system chrome.
 - The primary Merge action preflights the existing per-runner tests endpoint
   before opening its confirmation when the compact verdict is not already gated.
   This distinguishes no configured runners from an unknown verdict and catches a

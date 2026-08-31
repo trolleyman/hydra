@@ -21,9 +21,9 @@ describe('Dialog: modal opacity', () => {
     const layer = screen.getByRole('dialog').parentElement
     expect(layer).not.toHaveClass('fade-in')
     expect(layer).not.toHaveClass('animate-in')
-    expect(document.documentElement).toHaveClass('hydra-dialog-open')
+    expect(document.documentElement).toHaveClass('hydra-overlay-open')
     unmount()
-    expect(document.documentElement).not.toHaveClass('hydra-dialog-open')
+    expect(document.documentElement).not.toHaveClass('hydra-overlay-open')
   })
 })
 
