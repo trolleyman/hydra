@@ -122,7 +122,9 @@ take on a blue cast. Compact hints are centered by default, and shortcut
 keycaps share the label's row. Longer explainers can provide a
 `title`, which also selects prose-style left alignment; untitled path or list
 content uses `align="left"`. `InfoTooltip` is the preset for the `i` trigger next
-to a section heading.
+to a section heading. Diff file-list entries show their full paths with the
+shared `FilePathLabel` treatment, while directory entries use
+`DirectoryTooltip`.
 
 Every tooltip can be entered: the short grace period between leaving the trigger
 and entering the box keeps it open so text can be selected and links clicked.

@@ -39,6 +39,8 @@ import { buildWordRangeMaps, renderWordDiffHtml, WORD_ADD_CLASS, WORD_DEL_CLASS,
 import { markWhitespace, markWhitespaceText, type WhitespaceMarks } from './lib/whitespaceMarks'
 import { useWhitespaceMarks } from './lib/whitespacePrefs'
 import { Tooltip } from './components/Tooltip'
+import { DirectoryTooltip } from './components/DirectoryTooltip'
+import { FilePathLabel } from './components/FilePathLabel'
 import { CollapseSlide } from './components/CollapseSlide'
 import { ResizeGrip } from './components/ResizeGrip'
 import { pinCardToTop, scrollCardToTop, scrollToDiffLine } from './lib/diffScroll'
@@ -3588,11 +3590,15 @@ export function FileRow({ file, isActive, onClick, indent = 0 }: {
       style={{ paddingLeft: `${10 + indent}px`, paddingRight: '10px' }}
     >
       {(() => { const { Icon, className } = getFileIcon(file.path.split('/').pop() ?? file.path); return <Icon className={`w-3.5 h-3.5 shrink-0 ${className}`} /> })()}
-      {/* <Tooltip content={file.path} className="min-w-0"> */}
+      <Tooltip
+        content={<FilePathLabel path={file.path} nativeTitle={false} />}
+        align="left"
+        className="min-w-0 flex-1"
+      >
         <span className="text-xs truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">
           {file.path.split('/').pop()}
         </span>
-      {/* </Tooltip> */}
+      </Tooltip>
       <ChangeTypeIcon type={file.change_type} className="w-3 h-3 shrink-0" />
       <ChangeStats additions={file.additions} deletions={file.deletions} className="ml-auto text-3xs" />
     </button>
@@ -3617,7 +3623,9 @@ export function TreeNodeView({ node, depth, collapsedFolders, toggleFolder, onFi
             ? <FolderOpen className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
             : <Folder className="w-3.5 h-3.5 text-blue-400 dark:text-blue-500 shrink-0" />
           }
-          <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate optical-center">{node.name}</span>
+          <DirectoryTooltip path={node.path} className="min-w-0 flex-1">
+            <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-0 truncate optical-center">{node.name}</span>
+          </DirectoryTooltip>
           <ChevronDown className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} />
         </button>
         {/* The shared glide. keepMounted: a diff's file tree is a few dozen rows
@@ -5136,7 +5144,9 @@ function DiffViewerImpl({ agent, projectId, externalRefreshTrigger, externalArti
           {folder && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 dark:bg-gray-700/50 border-y border-gray-100 dark:border-gray-700/50 group">
               <Folder className="w-3 h-3 text-blue-400 dark:text-blue-500 shrink-0" />
-              <span className="font-mono text-4xs text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
+              <DirectoryTooltip path={folder} className="min-w-0 flex-1">
+                <span className="font-mono text-4xs text-gray-500 dark:text-gray-400 truncate flex-1 min-w-0">{folder}</span>
+              </DirectoryTooltip>
             </div>
           )}
           {groupFiles.map((f) => {

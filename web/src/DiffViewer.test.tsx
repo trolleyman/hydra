@@ -1,6 +1,6 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { render, cleanup } from '@testing-library/react'
-import { FileDiff, diffMetaKey } from './DiffViewer'
+import { describe, it, expect, afterEach, vi } from 'vitest'
+import { act, render, cleanup, fireEvent, screen, within } from '@testing-library/react'
+import { FileDiff, FileRow, TreeNodeView, diffMetaKey } from './DiffViewer'
 import { commitParentSelection, reconcileRightSelection } from './lib/commitRange'
 import { bodyShape, buildSegments, regionKey, type RevealMap } from './lib/diffBody'
 import { DiffFile, DiffHunk, DiffLine, type DiffResponse } from './api'
@@ -17,7 +17,10 @@ import { EXPANDER_ROW, UNIFIED_CODE_CLASS, SBS_CODE, type BodyShape } from './li
 // nothing here measures pixels; it counts rows and expanders. (It also has no
 // IntersectionObserver, so FileDiff renders its body immediately rather than
 // waiting to be scrolled near.)
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 const commits = [
   { sha: 'new', short_sha: 'new', message: 'new', author_name: 'A', author_email: 'a@example.com', timestamp: '', additions: 1, deletions: 0, parent_sha: 'middle' },
@@ -61,6 +64,49 @@ function file(over: Partial<DiffFile>): DiffFile {
     additions: 1, deletions: 1, binary: false, hunks: [], ...over,
   }
 }
+
+describe('diff sidebar path tooltips', () => {
+  it('shows the shared file-path treatment for a file row', () => {
+    vi.useFakeTimers()
+    const { container } = render(
+      <FileRow
+        file={file({ path: 'docs/guide/README.md' })}
+        isActive={false}
+        onClick={() => {}}
+      />,
+    )
+
+    fireEvent.mouseEnter(screen.getByText('README.md'))
+    act(() => void vi.advanceTimersByTime(600))
+
+    const tooltip = screen.getByRole('tooltip')
+    expect(within(tooltip).getByText('docs/guide/')).toHaveClass('text-stone-400')
+    expect(within(tooltip).getByText('README.md')).toHaveClass('text-stone-700')
+    expect(tooltip.querySelector('svg')).not.toBeNull()
+    expect(container.querySelector('[title]')).toBeNull()
+  })
+
+  it('shows the full directory path for a tree folder', () => {
+    vi.useFakeTimers()
+    render(
+      <TreeNodeView
+        node={{ name: 'components', path: 'web/src/components', type: 'dir', children: [] }}
+        depth={0}
+        collapsedFolders={new Set()}
+        toggleFolder={() => {}}
+        onFileClick={() => {}}
+        activeFilePath={null}
+      />,
+    )
+
+    fireEvent.mouseEnter(screen.getByText('components'))
+    act(() => void vi.advanceTimersByTime(600))
+
+    const tooltip = screen.getByRole('tooltip')
+    expect(within(tooltip).getByText('web/src/components')).toHaveClass('text-stone-700')
+    expect(tooltip.querySelector('svg')).not.toBeNull()
+  })
+})
 
 // A whole-file (expanded) diff: 40 unchanged lines, a change, 40 more. The
 // reveal model shows CTX lines either side of the change and collapses the rest
