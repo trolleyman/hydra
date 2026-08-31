@@ -131,6 +131,40 @@ describe('readLocal / writeLocal round-trip', () => {
   })
 })
 
+describe('desktop storage persistence', () => {
+  const postMessage = vi.fn()
+
+  beforeEach(() => {
+    localStorage.clear()
+    postMessage.mockClear()
+    vi.useFakeTimers()
+    Object.defineProperty(window, 'webkit', {
+      configurable: true,
+      value: { messageHandlers: { hydra: { postMessage } } },
+    })
+  })
+
+  afterEach(() => {
+    vi.runAllTimers()
+    vi.useRealTimers()
+    Reflect.deleteProperty(window, 'webkit')
+  })
+
+  it('batches the latest value for each changed key into the native bridge', () => {
+    writeLocal('hydra-project-id', 'one')
+    writeLocal('hydra-project-id', 'two')
+    writeLocal('hydra-default-model', null)
+
+    expect(postMessage).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(150)
+
+    expect(postMessage.mock.calls.map(([message]) => message)).toEqual([
+      { type: 'browser-storage', key: 'hydra-project-id', value: 'two' },
+      { type: 'browser-storage', key: 'hydra-default-model', value: null },
+    ])
+  })
+})
+
 describe('readLocal / writeLocal swallow throws', () => {
   it('readLocal returns null when getItem throws', () => {
     const orig = localStorage.getItem

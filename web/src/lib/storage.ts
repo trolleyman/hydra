@@ -5,6 +5,28 @@
 // place. Every key shares the `hydra-` prefix; keys with dynamic segments are
 // exposed as builder functions so their prefix lives in exactly one spot.
 
+import { hasDesktopBridge, postDesktopMessage } from './desktopBridge'
+
+const pendingDesktopWrites = new Map<string, string | null>()
+let desktopWriteTimer: number | undefined
+
+function flushDesktopWrites(): void {
+  if (desktopWriteTimer !== undefined) window.clearTimeout(desktopWriteTimer)
+  desktopWriteTimer = undefined
+  for (const [key, value] of pendingDesktopWrites) {
+    postDesktopMessage({ type: 'browser-storage', key, value })
+  }
+  pendingDesktopWrites.clear()
+}
+
+function persistDesktopWrite(key: string, value: string | null): void {
+  if (!hasDesktopBridge()) return
+  pendingDesktopWrites.set(key, value)
+  if (desktopWriteTimer === undefined) desktopWriteTimer = window.setTimeout(flushDesktopWrites, 150)
+}
+
+if (typeof window !== 'undefined') window.addEventListener('pagehide', flushDesktopWrites)
+
 // ── Static keys ──────────────────────────────────────────────────────────────
 
 export const StorageKeys = {
@@ -347,6 +369,7 @@ export function writeLocal(key: string, value: string | null): void {
   try {
     if (value == null) localStorage.removeItem(key)
     else localStorage.setItem(key, value)
+    persistDesktopWrite(key, value)
   } catch { /* ignore */ }
 }
 
@@ -436,7 +459,7 @@ export function createShardedStore<T extends object>(
           const s = parse(k)
           if (!s || !fresh(s)) stale.push(k)
         }
-        for (const k of stale) localStorage.removeItem(k)
+        for (const k of stale) writeLocal(k, null)
       } catch { /* ignore */ }
     },
   }

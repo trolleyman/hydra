@@ -5,18 +5,15 @@ import (
 	"testing"
 )
 
-func TestWebProfileDirectoriesFollowSelectedStateRoot(t *testing.T) {
+func TestWebProfileDirectoryFollowsSelectedStateRoot(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HYDRA_STATE_DIR", root)
 
-	data, cache, err := webProfileDirectories()
+	profile, err := webProfileDirectory()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(root, "webview", "data"); data != want {
-		t.Errorf("data directory = %q, want %q", data, want)
-	}
-	if want := filepath.Join(root, "webview", "cache"); cache != want {
-		t.Errorf("cache directory = %q, want %q", cache, want)
+	if want := filepath.Join(root, "webview"); profile != want {
+		t.Errorf("profile directory = %q, want %q", profile, want)
 	}
 }

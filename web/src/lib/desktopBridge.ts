@@ -16,6 +16,7 @@ export type DesktopMessage =
   | { type: 'dismiss-notification'; tag: string }
   | { type: 'pick-folder'; requestId: string }
   | { type: 'keep-running'; enabled: boolean }
+  | { type: 'browser-storage'; key: string; value: string | null }
 
 export type DesktopCommand = { type: 'stop-and-close' }
 
