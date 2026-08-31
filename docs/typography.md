@@ -39,6 +39,11 @@ a separate plain-Iosevka option: its grid-unsafe symbols are the only meaningful
 difference, while using a size-adjusted fallback for its Nerd glyphs makes marks
 such as Starship's branch icon visibly too small.
 
+Iosevka keeps its standard code ligatures, including equality ligatures. The
+equality variant retains the centre notch so `==` and `===` still communicate
+their source character count; the unnotched variant reads like a single `=` at
+composer sizes.
+
 Every other bundled monospace also uses its Nerd Font Mono build, under the
 ordinary family name shown in Settings. This keeps prompt icons at the patched
 font's intended visual size. `System mono` is the sole exception: its actual

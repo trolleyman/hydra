@@ -95,8 +95,10 @@ Completed 2026-08-29:
 - Added code-block language selection without adding a formatting header. Each
   fenced block owns a compact searchable picker in its top-right corner. It
   offers known languages, accepts an arbitrary Markdown info string and updates
-  live Prism decorations in the editable code. The shared highlighter keeps
-  editable and rendered token colours aligned.
+  live Prism decorations in the editable code. Known display labels such as
+  `Python` canonicalize to Prism's language id. The picker portals outside
+  clipped composer cards and flips above its trigger near the viewport bottom.
+  The shared highlighter keeps editable and rendered token colours aligned.
 - Added the composer-to-message handoff. Immediate and queued sends capture the
   composer's screen position and animate the optimistic user bubble from it;
   reduced-motion users get an instant handoff. The daemon echo settles the same
@@ -105,6 +107,11 @@ Completed 2026-08-29:
   Markdown request boundary, per-project drafts, large-paste/file workflow,
   combined prompt/attachment history, resizing and submit shortcuts while
   gaining the same marks, inline code, blocks and tables as production chat.
+- Spawn attachments use the same document node and upload registry as chat.
+  Images and files stay at their insertion point, render once inside the prompt,
+  open in the shared lightbox and undo/redo as document transactions. The whole
+  visible Spawn editor height is a focus target, including blank space below the
+  first line.
 - Fixed the follow-up production polish: outer document margins no longer move
   the first composer line, an empty code capsule reserves a visible typing slot,
   and provider-assigned echo ids reconcile with the existing optimistic user
@@ -296,6 +303,10 @@ neighbouring-character deletion. One key press never both removes formatting and
 deletes prose. Arrow movement and deletion operate on grapheme clusters, not
 UTF-16 code units. During IME composition no input rule, wrapping rule or
 boundary override runs.
+
+Home and End leave an inline-code node at its outside edges. In particular, End
+from the final character of a paragraph-ending code span lands after the span,
+so subsequent typing is ordinary prose rather than remaining trapped in code.
 
 ### Spike alternatives and gate
 

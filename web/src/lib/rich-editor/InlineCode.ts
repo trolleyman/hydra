@@ -187,6 +187,18 @@ function arrowLeft(editor: Editor): boolean {
   return true
 }
 
+function codeEdge(editor: Editor, direction: -1 | 1, extend = false): boolean {
+  const { state } = editor
+  const depth = inlineCodeDepth(state)
+  if (depth < 0) return false
+  const target = direction < 0 ? state.selection.$from.before(depth) : state.selection.$from.after(depth)
+  const selection = extend
+    ? TextSelection.create(state.doc, state.selection.anchor, target)
+    : TextSelection.create(state.doc, target)
+  editor.view.dispatch(state.tr.setSelection(selection).scrollIntoView())
+  return true
+}
+
 function extendSelection(editor: Editor, direction: -1 | 1): boolean {
   const { state } = editor
   const target = codeArrowTarget(state, state.selection.head, direction)
@@ -252,6 +264,8 @@ export const inlineCodeCommands = {
   backtick,
   arrowRight,
   arrowLeft,
+  home: (editor: Editor) => codeEdge(editor, -1),
+  end: (editor: Editor) => codeEdge(editor, 1),
   backspace,
   deleteForward,
 }
@@ -340,6 +354,12 @@ export const InlineCodeEditing = Extension.create({
             }
             if (event.key === 'ArrowLeft' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
               return extendSelection(editor, -1)
+            }
+            if (event.key === 'Home' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+              return codeEdge(editor, -1, event.shiftKey)
+            }
+            if (event.key === 'End' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+              return codeEdge(editor, 1, event.shiftKey)
             }
             if (event.key === 'Backspace' && !event.metaKey && !event.ctrlKey && !event.altKey) {
               return backspace(editor)

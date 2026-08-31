@@ -65,7 +65,7 @@ describe('font catalogue', () => {
     const withFeatures = FONT_OPTIONS.filter((f) => f.features).map((f) => f.id)
     expect(withFeatures).toEqual(['iosevka'])
     for (const id of withFeatures) {
-      expect(FONT_BY_ID.get(id)!.features).toBe("'calt' 1, 'VLAC' 2, 'VSAB' 3, 'cv10' 6")
+      expect(FONT_BY_ID.get(id)!.features).toBe("'calt' 1, 'VLAC' 1, 'VSAB' 3, 'cv10' 6")
     }
   })
 

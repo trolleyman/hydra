@@ -133,6 +133,15 @@ test('Left traverses the same positions in reverse', async ({ page }) => {
   expect(positions).toEqual([8, 7, 6, 5, 4, 3])
 })
 
+test('Home and End leave an inline code node at its outer boundaries', async ({ page }) => {
+  await select(page, 5)
+  await page.keyboard.press('End')
+  expect(await snapshot(page)).toMatchObject({ from: 8, parent: 'paragraph' })
+  await select(page, 5)
+  await page.keyboard.press('Home')
+  expect(await snapshot(page)).toMatchObject({ from: 3, parent: 'paragraph' })
+})
+
 test('backtick inserts, accepts text, and exits an inline code node', async ({ page }) => {
   await reset(page, paragraph(text('before ')))
   await select(page, 8)
@@ -188,6 +197,35 @@ test('a code block highlights its selected language', async ({ page }) => {
   })
 })
 
+test('Python labels canonicalize, highlight, and preserve equality source text', async ({ page }) => {
+  const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
+  await page.evaluate((doc) => window.interactiveRichEditor?.commands.setContent(doc), codeBlock("if __name__ == '__main__':"))
+  await page.getByRole('button', { name: 'Code block language: Plain text' }).click()
+  await page.getByRole('combobox', { name: 'Code block language' }).fill('Python')
+  await page.getByRole('button', { name: 'Use "Python"' }).click()
+  await expect(interactive.locator('.token.keyword')).toHaveText('if')
+  await expect(interactive.locator('.rich-code-block-content')).toHaveText("if __name__ == '__main__':")
+  expect(await page.evaluate(() => window.interactiveRichEditor?.getAttributes('codeBlock').language)).toBe('python')
+})
+
+test('the language picker portals beyond the composer and flips above near the viewport bottom', async ({ page }) => {
+  await page.evaluate((doc) => window.interactiveRichEditor?.commands.setContent(doc), codeBlock('value'))
+  await page.locator('#interactive-editor').evaluate((element) => {
+    element.setAttribute('style', 'position: fixed; right: 8px; bottom: 0; width: 320px; height: 90px; overflow: hidden')
+  })
+  await page.getByRole('button', { name: 'Code block language: Plain text' }).click()
+  const popover = page.locator('body > .rich-code-language-popover')
+  await expect(popover).toBeVisible()
+  await expect(popover).toHaveAttribute('data-side', 'top')
+  const [hostBox, popoverBox] = await Promise.all([
+    page.locator('#interactive-editor').boundingBox(),
+    popover.boundingBox(),
+  ])
+  expect(hostBox).not.toBeNull()
+  expect(popoverBox).not.toBeNull()
+  expect(popoverBox!.y).toBeLessThan(hostBox!.y)
+})
+
 test('the custom language picker accepts arbitrary values without a toolbar row', async ({ page }) => {
   const interactive = page.getByRole('textbox', { name: 'Interactive rich editor fixture' })
   await page.evaluate((doc) => window.interactiveRichEditor?.commands.setContent(doc), codeBlock('echo 123'))
@@ -200,7 +238,7 @@ test('the custom language picker accepts arbitrary values without a toolbar row'
 
   await page.getByRole('button', { name: 'Code block language: Plain text' }).click()
   await page.getByRole('combobox', { name: 'Code block language' }).fill('cue')
-  await page.getByRole('button', { name: 'Use “cue”' }).click()
+  await page.getByRole('button', { name: 'Use "cue"' }).click()
   expect(await page.evaluate(() => window.interactiveRichEditor?.getAttributes('codeBlock').language)).toBe('cue')
   await expect(interactive.locator('select')).toHaveCount(0)
   await expect(block.locator('.rich-code-language')).toHaveCSS('user-select', 'none')

@@ -146,6 +146,21 @@ describe('MarkdownComposer', () => {
     expect(ref.current!.editor!.getAttributes('codeBlock').language).toBe('typescript')
   })
 
+  it('canonicalizes a known language label before applying live highlighting', async () => {
+    const ref = createRef<MarkdownComposerHandle>()
+    const view = render(<MarkdownComposer ref={ref} value={"```\nif __name__ == '__main__':\n```"} onChange={() => {}} />)
+    await waitFor(() => expect(ref.current?.editor).not.toBeNull())
+
+    fireEvent.click(view.getByRole('button', { name: 'Code block language: Plain text' }))
+    fireEvent.change(view.getByRole('combobox', { name: 'Code block language' }), {
+      target: { value: 'Python' },
+    })
+    fireEvent.click(view.getByRole('button', { name: 'Use "Python"' }))
+    await waitFor(() => expect(view.container.querySelector('.rich-code-block .token.keyword')).toHaveTextContent('if'))
+    expect(ref.current!.editor!.getAttributes('codeBlock').language).toBe('python')
+    expect(ref.current!.editor!.getText()).toContain("if __name__ == '__main__':")
+  })
+
   it('accepts an arbitrary fenced-code language without reserving a toolbar row', async () => {
     const ref = createRef<MarkdownComposerHandle>()
     const view = render(<MarkdownComposer ref={ref} value={'```\nvalue\n```'} onChange={() => {}} />)
@@ -154,7 +169,7 @@ describe('MarkdownComposer', () => {
     fireEvent.click(view.getByRole('button', { name: 'Code block language: Plain text' }))
     const input = view.getByRole('combobox', { name: 'Code block language' })
     fireEvent.change(input, { target: { value: 'cue' } })
-    fireEvent.click(view.getByRole('button', { name: 'Use “cue”' }))
+    fireEvent.click(view.getByRole('button', { name: 'Use "cue"' }))
     expect(ref.current!.editor!.getAttributes('codeBlock').language).toBe('cue')
     expect(view.container.querySelector('.rich-code-block > select')).toBeNull()
   })

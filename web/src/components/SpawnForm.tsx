@@ -12,14 +12,15 @@ import { AGENT_ACCENT } from '../lib/agentTypeMeta'
 import { Tooltip } from './Tooltip'
 import { Kbd } from './Kbd'
 import { Lightbox } from './Lightbox'
-import { AttachmentChips } from './AttachmentChips'
 import { StorageKeys, promptDraftKey, promptScrollKey, readLocal, writeLocal } from '../lib/storage'
 import type { MarkdownComposerHandle } from '../lib/rich-editor/MarkdownComposer'
 import type { ComposerReference } from '../lib/rich-editor/Reference'
+import { AttachmentRegistry } from '../lib/rich-editor/AttachmentRegistry'
+import { restoreAttachment, type ComposerAttachment } from '../lib/rich-editor/Attachment'
 import { spawnGeometry } from '../lib/terminalGeometry'
 import { type Attachment, spawnDraftKey, loadAttachments, saveAttachments, isGenericImageName, nextGenericImageNumber } from '../lib/spawnDrafts'
 import { nextAttachmentId } from '../lib/draftAttachments'
-import { attachmentLightboxItems, openableAttachments } from '../lib/attachmentLightbox'
+import { attachmentLightboxItems } from '../lib/attachmentLightbox'
 import { appendToComposer, formatAnnotation } from '../lib/pinNote'
 import { useImageCommentStore } from '../stores/imageCommentStore'
 import { getClipboardText, isLargePaste, detectCodeLanguage, fenceCode, pastedTextExtension, extensionMime, pasteMarkerText, stripPasteMarker } from '../lib/pastedText'
@@ -41,6 +42,25 @@ import { onDesktopImagePaste } from '../lib/desktopBridge'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
 const MarkdownComposer = lazy(() => import('../lib/rich-editor/MarkdownComposer').then((module) => ({ default: module.MarkdownComposer })))
+
+function composerAttachment(attachment: Attachment): ComposerAttachment {
+  const lower = attachment.filename.toLowerCase()
+  const kind: ComposerAttachment['kind'] = attachment.previewUrl
+    ? 'image'
+    : lower.endsWith('.pdf')
+      ? 'pdf'
+      : /\.(txt|md|log|csv|json|ya?ml)$/.test(lower)
+        ? 'text'
+        : /\.(zip|tar|tgz|gz|bz2|xz|7z)$/.test(lower)
+          ? 'archive'
+          : 'file'
+  return {
+    id: String(attachment.id),
+    name: attachment.filename,
+    kind,
+    display: attachment.previewUrl ? 'thumbnail' : 'chip',
+  }
+}
 
 // Native desktop project-directory windows can ask an ordinary project composer
 // to start in project-directory mode.
@@ -411,6 +431,18 @@ export const SpawnForm = memo(function SpawnForm({
   }, [refreshBranches])
 
   const richComposerRef = useRef<MarkdownComposerHandle>(null)
+  const [promptEditor, setPromptEditor] = useState<Editor | null>(null)
+  const [richAttachmentIds, setRichAttachmentIds] = useState<Set<string>>(new Set())
+  const restoredAttachmentIdsRef = useRef(new Set<string>())
+  const uploadProjectIdRef = useRef(projectId)
+  uploadProjectIdRef.current = projectId
+  const attachmentRegistry = useMemo(() => new AttachmentRegistry(async (file, id, signal) => {
+    const uploadProjectId = uploadProjectIdRef.current ?? useProjectStore.getState().selectedProjectId
+    if (!uploadProjectId) throw new Error('Select a project before attaching files')
+    const uploaded = await uploadFile(uploadProjectId, file, signal)
+    reconcile(Number(id), { path: uploaded.path, uploading: false, error: undefined })
+    return { path: uploaded.path }
+  }), [reconcile])
   const composerReferences = useMemo<ComposerReference[]>(
     () => (branches ?? []).map((branch) => ({ kind: 'branch', value: branch.name })),
     [branches],
@@ -527,6 +559,7 @@ export const SpawnForm = memo(function SpawnForm({
     promptScrollCleanupRef.current?.()
     promptScrollCleanupRef.current = null
     promptElementRef.current = editor?.view.dom ?? null
+    setPromptEditor(editor)
     if (!editor) return
     const element = editor.view.dom
     const onScroll = (event: Event) => {
@@ -536,6 +569,15 @@ export const SpawnForm = memo(function SpawnForm({
     promptScrollCleanupRef.current = () => element.removeEventListener('scroll', onScroll)
     if (!compact) editor.commands.focus()
   }, [compact, scrollKey])
+
+  useEffect(() => attachmentRegistry.subscribe(() => {
+    for (const attachment of attachmentsRef.current) {
+      const state = attachmentRegistry.get(String(attachment.id))
+      if (state?.status === 'failed') {
+        reconcile(attachment.id, { uploading: false, error: formatError(state.error) })
+      }
+    }
+  }), [attachmentRegistry, reconcile])
 
   // Restore the project's saved scroll position on mount / project change. The
   // draft text itself is loaded alongside the attachments (and the history
@@ -600,10 +642,26 @@ export const SpawnForm = memo(function SpawnForm({
     // undo history doesn't carry across a project switch.
     lastPasteRef.current = null
     pastedTextCounterRef.current = 0
+    restoredAttachmentIdsRef.current.clear()
+    setRichAttachmentIds(new Set())
     const loadedPrompt = draftKey ? (readLocal(draftKey) ?? '') : ''
     resetHistory(makeSnapshot(loadedPrompt, projectId ? loadAttachments(projectId, compact) : [], 0, 0))
     prevStoreRef.current = storeKey && projectId ? { key: storeKey, projectId, compact } : null
   }, [storeKey, draftKey, projectId, compact, resetHistory])
+
+  useEffect(() => {
+    if (!promptEditor) return
+    for (const attachment of attachments) {
+      const metadata = composerAttachment(attachment)
+      if (attachment.path) {
+        attachmentRegistry.registerUploaded(metadata, { path: attachment.path }, attachment.previewUrl)
+      }
+      if (!restoredAttachmentIdsRef.current.has(metadata.id)) {
+        restoreAttachment(promptEditor, metadata)
+        restoredAttachmentIdsRef.current.add(metadata.id)
+      }
+    }
+  }, [attachmentRegistry, attachments, promptEditor])
 
   // Mirror the attachments to the caches on every change, not only when the box
   // goes away: a page RELOAD runs no unmount, so a save deferred to teardown is
@@ -655,20 +713,23 @@ export const SpawnForm = memo(function SpawnForm({
     // The upload resolving isn't a user action, so patch this chip across the
     // whole timeline (reconcile) instead of pushing a new undo step - undoing to
     // an earlier snapshot still sees the settled path, not a stale "uploading...".
-    // A native image-paste listener lives for the form's whole mount. During
-    // boot the compact form can mount before the selected project is restored,
-    // so an event callback created in that render may still see a null prop even
-    // though the project store and visible picker have since selected one. Read
-    // the store at event time as the fallback; never send the placeholder `_`
-    // project id, which can only produce a misleading 404.
-    const uploadProjectId = projectId ?? useProjectStore.getState().selectedProjectId
-    if (!uploadProjectId) {
-      reconcile(id, { uploading: false, error: 'Select a project before attaching files' })
-      return id
+    const editor = richComposerRef.current?.editor
+    if (editor) {
+      restoredAttachmentIdsRef.current.add(String(id))
+      attachmentRegistry.add(editor, composerAttachment(chip), file, chip.previewUrl)
+    } else {
+      // The lazy editor normally exists before any attachment control can be
+      // used. Retain the direct path for a native paste arriving during that
+      // brief mount window; the restore effect turns it into a node afterward.
+      const uploadProjectId = projectId ?? useProjectStore.getState().selectedProjectId
+      if (!uploadProjectId) {
+        reconcile(id, { uploading: false, error: 'Select a project before attaching files' })
+        return id
+      }
+      uploadFile(uploadProjectId, file)
+        .then((res) => reconcile(id, { path: res.path, uploading: false }))
+        .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
     }
-    uploadFile(uploadProjectId, file)
-      .then((res) => reconcile(id, { path: res.path, uploading: false }))
-      .catch((err) => reconcile(id, { uploading: false, error: formatError(err) }))
     return id
   }
 
@@ -722,24 +783,6 @@ export const SpawnForm = memo(function SpawnForm({
     })
   }
 
-  // Stable (memo'd AttachmentChips takes it as a prop): `commit` never changes.
-  const removeAttachment = useCallback((id: number) => {
-    // Don't revoke the preview URL here - an undo can bring this chip back. URLs
-    // are freed in bulk once a spawn consumes the prompt (see objectUrlsRef).
-    commit(
-      (prev) => makeSnapshot(prev.prompt, prev.attachments.filter((a) => a.id !== id), prev.selStart, prev.selEnd),
-      false,
-    )
-  }, [commit])
-
-  // Stable lightbox opener: resolves the clicked chip to its index in the
-  // openable list at click time (via the attachments mirror ref), so the
-  // callback identity survives every attachment/typing change.
-  const openLightbox = useCallback((id: number, origin: Element) => {
-    setLightboxOrigin(origin)
-    setLightboxIndex(openableAttachments(attachmentsRef.current).findIndex((a) => a.id === id))
-  }, [])
-
   function handlePaste(e: { clipboardData: DataTransfer | null; preventDefault(): void }) {
     // Pasted files (screenshots, copied files) keep their upload behavior -
     // plus, with the preference on, "[filename]" markers at the caret so the
@@ -748,7 +791,7 @@ export const SpawnForm = memo(function SpawnForm({
     if (files.length > 0) {
       e.preventDefault()
       const names = addFiles(files)
-      if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+      if (!richComposerRef.current?.editor && pasteMarkers && names.length > 0) insertPasteMarkers(names)
       return
     }
 
@@ -799,7 +842,7 @@ export const SpawnForm = memo(function SpawnForm({
     // First paste of a large block: attach it instead of dumping it in the box.
     e.preventDefault()
     const { id, filename } = attachPastedText(text, e.clipboardData)
-    if (pasteMarkers) insertPasteMarkers([filename])
+    if (!richComposerRef.current?.editor && pasteMarkers) insertPasteMarkers([filename])
     lastPasteRef.current = { text, attachmentId: id, filename, lang: detectCodeLanguage(e.clipboardData) }
   }
 
@@ -816,7 +859,7 @@ export const SpawnForm = memo(function SpawnForm({
     // us. Ignore it when there is genuinely no selected project.
     if (!projectId && !useProjectStore.getState().selectedProjectId) return
     const names = addFiles([file])
-    if (pasteMarkers && names.length > 0) insertPasteMarkers(names)
+    if (!richComposerRef.current?.editor && pasteMarkers && names.length > 0) insertPasteMarkers(names)
   })
   useEffect(() => onDesktopImagePaste(handleDesktopImagePaste), [])
 
@@ -833,11 +876,12 @@ export const SpawnForm = memo(function SpawnForm({
     e.target.value = ''
   }
 
-  const uploading = attachments.some((a) => a.uploading)
-  const readyAttachments = attachments.filter((a) => a.path && !a.error)
+  const documentAttachments = attachments.filter((attachment) => richAttachmentIds.has(String(attachment.id)))
+  const uploading = documentAttachments.some((a) => a.uploading)
+  const readyAttachments = documentAttachments.filter((a) => a.path && !a.error)
   // Every attachment that has bytes behind it, in chip order - the lightbox
   // navigates this list, and each chip opens its own index here.
-  const lightboxItems = attachmentLightboxItems(attachments)
+  const lightboxItems = attachmentLightboxItems(documentAttachments)
   const canSubmit = (!!prompt.trim() || readyAttachments.length > 0) && !uploading
 
   async function handleSubmit(e: React.FormEvent) {
@@ -891,6 +935,8 @@ export const SpawnForm = memo(function SpawnForm({
       objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
       objectUrlsRef.current.clear()
       resetHistory(makeSnapshot('', [], 0, 0))
+      setRichAttachmentIds(new Set())
+      restoredAttachmentIdsRef.current.clear()
       if (projectId) saveAttachments(projectId, compact, [])
       setLightboxIndex(null)
       pastedTextCounterRef.current = 0
@@ -906,20 +952,6 @@ export const SpawnForm = memo(function SpawnForm({
     } finally {
       setLoading(false)
     }
-  }
-
-  // Renders the attachment chips row (shared by both layout variants). Clicking
-  // an image chip opens the lightbox at that image's index.
-  function renderAttachments(size: 'sm' | 'md') {
-    return (
-      <AttachmentChips
-        attachments={attachments}
-        size={size}
-        className={`mx-3 ${size === 'sm' ? 'mb-1.5' : 'mb-2'}`}
-        onRemove={removeAttachment}
-        onOpen={openLightbox}
-      />
-    )
   }
 
   // The "work on an existing PR" control, rendered as the first section of the
@@ -1132,6 +1164,13 @@ export const SpawnForm = memo(function SpawnForm({
     }
     if (mod && !e.altKey) {
       const key = e.key.toLowerCase()
+      const editor = richComposerRef.current?.editor
+      if (editor && (key === 'z' || (key === 'y' && !e.shiftKey))) {
+        e.preventDefault()
+        if (key === 'z' && !e.shiftKey) editor.commands.undo()
+        else editor.commands.redo()
+        return true
+      }
       const snapshot = key === 'z' ? (e.shiftKey ? redo() : undo()) : key === 'y' && !e.shiftKey ? redo() : null
       if (snapshot) {
         e.preventDefault()
@@ -1177,6 +1216,20 @@ export const SpawnForm = memo(function SpawnForm({
                   value={prompt}
                   onChange={handlePromptChange}
                   onEditor={bindPromptEditor}
+                  onDocumentChange={(document) => {
+                    const ids = new Set<string>()
+                    const visit = (node: typeof document) => {
+                      if (node.type === 'attachment' && typeof node.attrs?.id === 'string') ids.add(node.attrs.id)
+                      node.content?.forEach(visit)
+                    }
+                    visit(document)
+                    setRichAttachmentIds(ids)
+                  }}
+                  attachmentRegistry={attachmentRegistry}
+                  onOpenAttachment={(id, origin) => {
+                    setLightboxOrigin(origin)
+                    setLightboxIndex(documentAttachments.findIndex((attachment) => String(attachment.id) === id))
+                  }}
                   onKeyDown={handleRichKeyDown}
                   onPaste={(event) => { handlePaste(event); return event.defaultPrevented }}
                   onDrop={(event) => {
@@ -1198,7 +1251,6 @@ export const SpawnForm = memo(function SpawnForm({
                 />
               </Suspense>
             </div>
-            {renderAttachments('sm')}
             <div className="flex items-center justify-between px-2 pb-2 gap-2 shrink-0">
               <div className="flex items-center gap-1 min-w-0 flex-1">
                 <Tooltip content="Attach files" side="top">
@@ -1267,6 +1319,20 @@ export const SpawnForm = memo(function SpawnForm({
                     value={prompt}
                     onChange={handlePromptChange}
                     onEditor={bindPromptEditor}
+                    onDocumentChange={(document) => {
+                      const ids = new Set<string>()
+                      const visit = (node: typeof document) => {
+                        if (node.type === 'attachment' && typeof node.attrs?.id === 'string') ids.add(node.attrs.id)
+                        node.content?.forEach(visit)
+                      }
+                      visit(document)
+                      setRichAttachmentIds(ids)
+                    }}
+                    attachmentRegistry={attachmentRegistry}
+                    onOpenAttachment={(id, origin) => {
+                      setLightboxOrigin(origin)
+                      setLightboxIndex(documentAttachments.findIndex((attachment) => String(attachment.id) === id))
+                    }}
                     onKeyDown={handleRichKeyDown}
                     onPaste={(event) => { handlePaste(event); return event.defaultPrevented }}
                     onDrop={(event) => {
@@ -1289,7 +1355,6 @@ export const SpawnForm = memo(function SpawnForm({
                 </Suspense>
               </div>
 
-              {renderAttachments('md')}
 
               {/* Footer bar - stacks the controls above the Spawn button on
                   narrow screens instead of overflowing the card */}

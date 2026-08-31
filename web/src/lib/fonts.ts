@@ -52,13 +52,14 @@ export const SYSTEM_MONO =
 //
 //   calt 1   the standard ligature set (=> -> != ... ), on by default anyway,
 //            listed so the intent is explicit rather than inherited
-//   VLAC 2   equality ligations (== ===) drawn without the notch in the middle
+//   VLAC 1   equality ligations (== ===) retain a centre notch, so the source
+//            character count remains visible while the ligature stays enabled
 //   VSAB 3   the arrow/slash ligation variant
 //   cv10 6   zero with a centre dot instead of a slash
 //
 // The tag numbers are Iosevka's own (doc/character-variants.md). CSS syntax
 // differs from fontconfig's: comma-separated pairs, each tag quoted.
-const IOSEVKA_FEATURES = "'calt' 1, 'VLAC' 2, 'VSAB' 3, 'cv10' 6"
+const IOSEVKA_FEATURES = "'calt' 1, 'VLAC' 1, 'VSAB' 3, 'cv10' 6"
 
 // 'Hydra Arrows' is a unicode-range-scoped arrows face (see the long note in
 // index.css): webfont latin subsets ship no arrows, so every ← → an agent writes

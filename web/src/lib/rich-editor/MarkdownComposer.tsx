@@ -392,7 +392,7 @@ export const MarkdownComposer = forwardRef<MarkdownComposerHandle, MarkdownCompo
 
   return (
     <div className="relative h-full min-h-0">
-      <EditorContent editor={editor} />
+      <EditorContent editor={editor} className="h-full min-h-0" />
       {editor && editable && (
         <BubbleMenu
           editor={editor}

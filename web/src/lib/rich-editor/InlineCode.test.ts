@@ -67,6 +67,19 @@ describe('inline-code logical positions', () => {
     expect(inlineCodeCommands.arrowRight(editor)).toBe(true)
     expect(editor.state.selection.from).toBe(5)
   })
+
+  it('uses Home and End to leave the whole inline-code node', () => {
+    const editor = mixed()
+    select(editor, 5)
+    expect(inlineCodeCommands.home(editor)).toBe(true)
+    expect(editor.state.selection.from).toBe(3)
+    expect(editor.state.selection.$from.parent.type.name).toBe('paragraph')
+
+    select(editor, 5)
+    expect(inlineCodeCommands.end(editor)).toBe(true)
+    expect(editor.state.selection.from).toBe(8)
+    expect(editor.state.selection.$from.parent.type.name).toBe('paragraph')
+  })
 })
 
 describe('inline-code insertion and exit', () => {
