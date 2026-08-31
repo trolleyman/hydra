@@ -31,6 +31,7 @@ struct HydraDesktop {
 	GtkWindow *primary_window;
 	const char *uri;
 	GUri *origin;
+	WebKitNetworkSession *network_session;
 	gboolean keep_running;
 };
 
@@ -333,12 +334,16 @@ static gboolean hydra_decide_policy(WebKitWebView *web_view, WebKitPolicyDecisio
 	return TRUE;
 }
 
-static void hydra_window_destroy(GtkWidget *widget, gpointer data) {
+static void hydra_window_free(gpointer data) {
 	HydraWindow *window = data;
-	if (window->desktop->primary_window == GTK_WINDOW(widget)) window->desktop->primary_window = NULL;
 	g_free(window->project_id);
 	g_free(window->agent_id);
 	g_free(window);
+}
+
+static void hydra_window_destroy(GtkWidget *widget, gpointer data) {
+	HydraWindow *window = data;
+	if (window->desktop->primary_window == GTK_WINDOW(widget)) window->desktop->primary_window = NULL;
 }
 
 static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolean compact_chat) {
@@ -363,14 +368,17 @@ static void hydra_open_window_at(HydraDesktop *desktop, const char *uri, gboolea
 	webkit_user_content_manager_add_script(manager, capabilities);
 	webkit_user_script_unref(capabilities);
 	WebKitWebView *web_view = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
-		"user-content-manager", manager, NULL));
+		"network-session", desktop->network_session, "user-content-manager", manager, NULL));
 	g_object_unref(manager);
 
 	HydraWindow *state = g_new0(HydraWindow, 1);
 	state->desktop = desktop;
 	state->window = window;
 	state->web_view = web_view;
-	g_object_set_data(G_OBJECT(window), "hydra-window", state);
+	// Keep native callback state until the GtkWindow is finalized. The destroy
+	// signal fires while child WebKit objects are still unwinding, so freeing it
+	// there leaves their signal callbacks with a stale pointer.
+	g_object_set_data_full(G_OBJECT(window), "hydra-window", state, hydra_window_free);
 	webkit_user_content_manager_register_script_message_handler(
 		webkit_web_view_get_user_content_manager(web_view), "hydra", NULL);
 	g_signal_connect(webkit_web_view_get_user_content_manager(web_view),
@@ -493,16 +501,18 @@ static void hydra_startup(GApplication *application, gpointer data) {
 	g_object_unref(menu);
 }
 
-static int hydra_desktop_run(const char *uri) {
+static int hydra_desktop_run(const char *application_id, const char *uri, const char *data_directory, const char *cache_directory) {
 	HydraDesktop desktop = { .uri = uri, .origin = g_uri_parse(uri, G_URI_FLAGS_NONE, NULL), .keep_running = TRUE };
 	if (desktop.origin == NULL) return 2;
-	GtkApplication *app = gtk_application_new("dev.hydra.Hydra", G_APPLICATION_HANDLES_COMMAND_LINE);
+	desktop.network_session = webkit_network_session_new(data_directory, cache_directory);
+	GtkApplication *app = gtk_application_new(application_id, G_APPLICATION_HANDLES_COMMAND_LINE);
 	g_signal_connect(app, "startup", G_CALLBACK(hydra_startup), &desktop);
 	g_signal_connect(app, "activate", G_CALLBACK(hydra_activate), &desktop);
 	g_signal_connect(app, "command-line", G_CALLBACK(hydra_command_line), &desktop);
 	char *argv[] = { "hydra-desktop", (char *)uri, NULL };
 	int status = g_application_run(G_APPLICATION(app), 2, argv);
 	g_object_unref(app);
+	g_object_unref(desktop.network_session);
 	g_uri_unref(desktop.origin);
 	return status;
 }
@@ -521,6 +531,8 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 	"unsafe"
@@ -532,9 +544,24 @@ import (
 func run(rawURL string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	applicationID := C.CString(linuxApplicationID)
+	defer C.free(unsafe.Pointer(applicationID))
 	uri := C.CString(rawURL)
 	defer C.free(unsafe.Pointer(uri))
-	if status := C.hydra_desktop_run(uri); status != 0 {
+	dataDirectory, cacheDirectory, err := webProfileDirectories()
+	if err != nil {
+		return errtrace.Wrap(fmt.Errorf("resolve desktop webview profile: %w", err))
+	}
+	for _, directory := range []string{dataDirectory, cacheDirectory} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return errtrace.Wrap(fmt.Errorf("create desktop webview profile directory %s: %w", filepath.Base(directory), err))
+		}
+	}
+	dataPath := C.CString(dataDirectory)
+	defer C.free(unsafe.Pointer(dataPath))
+	cachePath := C.CString(cacheDirectory)
+	defer C.free(unsafe.Pointer(cachePath))
+	if status := C.hydra_desktop_run(applicationID, uri, dataPath, cachePath); status != 0 {
 		return errtrace.Wrap(fmt.Errorf("native application exited with status %d", int(status)))
 	}
 	if C.hydra_desktop_keep_running() == 0 && daemon.IsDesktopManaged("") {

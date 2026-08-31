@@ -42,7 +42,13 @@ import { ClaudeUsageIndicator } from '../components/ClaudeUsageIndicator'
 import { readDefaultAgentType, type AgentTypeOption } from '../lib/spawnDefaults'
 import { TrustProjectModal } from '../components/TrustProjectModal'
 import { KeyboardShortcutsModal } from '../components/KeyboardShortcutsModal'
-import { hasDesktopBridge, isCompactChatWindow, onDesktopCommand, postDesktopMessage, setDesktopKeepRunning } from '../lib/desktopBridge'
+import {
+  hasDesktopBridge,
+  isCompactChatWindow,
+  onDesktopCommand,
+  postDesktopMessage,
+  setDesktopKeepRunning,
+} from '../lib/desktopBridge'
 import { agentHasActiveTurn, desktopRunningAgentCount } from '../lib/desktopCloseState'
 import type { AgentCommand } from '../lib/agentCommands'
 
@@ -954,7 +960,6 @@ function RootLayout() {
         }))
     })
   }, [desktopWindow, currentProjectId, selectedAgentId])
-
   return (
     <div className="h-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col overflow-hidden">
       {/* Global top bar: sidebar toggle (while hidden), project icon + selector,

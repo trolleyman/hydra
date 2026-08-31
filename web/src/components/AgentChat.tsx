@@ -123,6 +123,7 @@ import { onDesktopImagePaste } from '../lib/desktopBridge'
 import { chatRepositoryRef } from '../lib/chatRepositoryRef'
 import { ResumeDivider } from './ResumeDivider'
 import { historyThresholdTransition, isVerticalScrollbarPointer } from '../lib/chatScroll'
+import { useFeatureFlagsStore } from '../lib/featureFlags'
 
 // ChatPane renders a chat-mode head: it speaks the chat framing on the same
 // terminal WebSocket - {"type":"state_snapshot"|"chat_history"|"chat_event"}
@@ -2731,9 +2732,7 @@ interface ScriptOutputRow {
   // The file this line's NUMBER counts in, when the script named one. A
   // sectioned script's gutter is several files' numbering stacked in one column
   // - the numbers restart, and nothing on the row says at which file - so the
-  // gutter cell carries it as a tooltip. (A native title, deliberately: this is
-  // one element per output line, which is exactly the long-list case the
-  // tooltip convention in CLAUDE.md keeps native.)
+  // gutter cell carries it in a tooltip.
   file?: string
   // 'code' is a line of some file, 'marker' a separator the script echoed, and
   // 'plain' output nothing could be said about.
@@ -3009,15 +3008,23 @@ function ScriptOutputPanel({ sections }: { sections: ScriptSection[] }) {
         {rows.map((row, i) => (
           <Fragment key={i}>
             {/* min-h keeps an empty line (blank code, blank gutter) one row tall. */}
-            {gutter && (
+            {gutter && (row.file ? (
+              <Tooltip
+                content={<FilePathLabel path={row.file} nativeTitle={false} />}
+                align="left"
+                className="min-h-4"
+              >
+                <span
+                  data-copy-skip
+                  className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
+                >{row.num}</span>
+              </Tooltip>
+            ) : (
               <span
                 data-copy-skip
-                // Plain non-interactive text in a long list: native title is the
-                // right tool here (see the tooltip conventions in CLAUDE.md).
-                title={row.file ? (row.num ? `${row.file}:${row.num}` : row.file) : undefined}
                 className="min-h-4 select-none text-right px-2 text-stone-400 dark:text-stone-600 border-r border-stone-200 dark:border-white/[0.06]"
-              >{row.file && row.num ? `${row.file}:${row.num}` : row.num}</span>
-            )}
+              >{row.num}</span>
+            ))}
             <span
               data-copy-line
               className={`min-w-0 min-h-4 whitespace-pre-wrap break-words px-2.5 ${row.tone === 'plain' ? 'text-stone-600 dark:text-stone-300' : 'text-stone-800 dark:text-stone-200'}`}
@@ -7150,6 +7157,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // per-frame flush via a ref so a mid-stream toggle takes effect on the next
   // frame without re-running the reducer effect.
   const smoothStream = useChatStreamStore((s) => s.smooth)
+  const smoothChatWheel = useFeatureFlagsStore((s) => s.smoothChatWheel)
 
   const onStatusUpdateRef = useRef<(status: string) => void>(() => {})
   const onDiffRefreshRef = useRef(onDiffRefresh)
@@ -9236,6 +9244,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
   // scroll-behavior only affects programmatic scrolling, not wheel input, so
   // this small rAF glide is needed for the Linux mouse-wheel case.
   useEffect(() => {
+    if (!smoothChatWheel) return
     const el = scrollRef.current
     if (!el) return
 
@@ -9310,7 +9319,7 @@ export function ChatPane({ agentId, agentType, projectId, active, reconnectAttem
     }
     // The handler deliberately reads live refs; rebinding it on every chat
     // render would interrupt a glide while streamed tokens arrive.
-  }, [])
+  }, [smoothChatWheel])
 
   // followBottom keeps a pinned view at the bottom as content arrives. This
   // used to be a bare `scrollTop = scrollHeight`, so every new message, thought
