@@ -74,16 +74,15 @@ export const Attachment = Node.create<AttachmentOptions>({
       dom.contentEditable = 'false'
       dom.setAttribute('role', 'group')
 
-      if (node.attrs.kind === 'image' && node.attrs.display === 'thumbnail') {
-        const previewUrl = registry.previewUrl(String(node.attrs.id))
-        if (previewUrl) {
-          const preview = document.createElement('img')
-          preview.className = 'composer-attachment-preview'
-          preview.src = previewUrl
-          preview.alt = ''
-          preview.draggable = false
-          dom.append(preview)
-        }
+      const preview = node.attrs.kind === 'image' && node.attrs.display === 'thumbnail'
+        ? document.createElement('img')
+        : null
+      if (preview) {
+        preview.className = 'composer-attachment-preview'
+        preview.alt = ''
+        preview.draggable = false
+        preview.hidden = true
+        dom.append(preview)
       }
 
       const name = document.createElement('span')
@@ -129,6 +128,16 @@ export const Attachment = Node.create<AttachmentOptions>({
       const render = () => {
         const state = registry.get(String(node.attrs.id))
         const stateName = state?.status ?? 'idle'
+        const previewUrl = registry.previewUrl(String(node.attrs.id))
+        if (preview) {
+          if (previewUrl) {
+            if (preview.src !== previewUrl) preview.src = previewUrl
+            preview.hidden = false
+          } else {
+            preview.removeAttribute('src')
+            preview.hidden = true
+          }
+        }
         dom.dataset.uploadState = stateName
         status.textContent = stateName === 'uploading' ? 'Uploading...' : stateName === 'failed' ? 'Failed' : ''
         retry.hidden = stateName !== 'failed'

@@ -168,20 +168,25 @@
 .rich-text-surface code[data-inline-code]:empty { min-height: 1em; }
 .rich-text-surface a { color: var(--color-blue-600); text-decoration: underline; }
 .dark .rich-text-surface a { color: var(--color-blue-400); }
-.rich-text-surface span[data-composer-attachment] { display: inline-flex; max-width: 18em; cursor: pointer; align-items: center; gap: 0.3em; margin: 0 0.15em; border: 1px solid var(--color-stone-200); border-radius: 0.375rem; background: var(--color-stone-50); padding: 0.1em 0.4em; overflow: hidden; color: var(--color-stone-600); font-size: 0.9em; line-height: 1; vertical-align: baseline; white-space: nowrap; }
-.rich-text-surface .composer-attachment-preview { width: 1.35em; height: 1.35em; flex: none; border-radius: 0.2rem; object-fit: cover; }
+.rich-text-surface span[data-composer-attachment] { display: inline-flex; max-width: 18em; cursor: pointer; align-items: center; gap: 0.3em; margin: 0 0.1em; border: 1px solid var(--color-stone-200); border-radius: 0.375rem; background: var(--color-stone-50); padding: 0.12em 0.28em 0.12em 0.2em; overflow: hidden; color: var(--color-stone-600); font-size: 0.88em; line-height: 1.15; vertical-align: middle; white-space: nowrap; }
+.rich-text-surface .composer-attachment-preview { width: 1.5em; height: 1.5em; flex: none; border: 1px solid var(--color-stone-200); border-radius: 0.25rem; background: var(--color-stone-100); object-fit: cover; }
+.rich-text-surface .composer-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dark .rich-text-surface span[data-composer-attachment] { border-color: var(--color-stone-600); background: rgb(255 255 255 / 0.06); color: var(--color-stone-300); }
+.dark .rich-text-surface .composer-attachment-preview { border-color: var(--color-stone-600); background: var(--color-stone-700); }
 .rich-text-surface span[data-composer-attachment] + br.ProseMirror-trailingBreak { display: inline-block; width: 0; height: 1em; line-height: 0; vertical-align: baseline; }
 .composer-static-attachment { display: inline-flex; max-width: 18em; cursor: pointer; align-items: center; gap: 0.3em; margin: 0 0.15em; border: 1px solid var(--color-stone-200); border-radius: 0.375rem; background: var(--color-stone-50); padding: 0.1em 0.4em; color: var(--color-stone-600); font-family: var(--font-mono); font-size: 0.9em; line-height: 1; vertical-align: baseline; }
 .composer-static-attachment:disabled { cursor: default; }
 .dark .composer-static-attachment { border-color: var(--color-stone-600); background: rgb(255 255 255 / 0.06); color: var(--color-stone-300); }
 .rich-text-surface span[data-composer-attachment][data-upload-state="failed"] { border-color: var(--color-red-300); background: var(--color-red-50); color: var(--color-red-700); }
 .dark .rich-text-surface span[data-composer-attachment][data-upload-state="failed"] { border-color: var(--color-red-800); background: rgb(127 29 29 / 0.2); color: var(--color-red-300); }
-.rich-text-surface .composer-attachment-status { margin-left: 0.35em; opacity: 0.7; }
-.rich-text-surface .composer-attachment-action { margin-left: 0.35em; cursor: pointer; border-radius: 0.2rem; padding: 0 0.15em; }
+.rich-text-surface .composer-attachment-status { flex: none; opacity: 0.7; }
+.rich-text-surface .composer-attachment-status:empty { display: none; }
+.rich-text-surface .composer-attachment-action { display: inline-grid; width: 1.3em; height: 1.3em; flex: none; cursor: pointer; place-items: center; border-radius: 0.2rem; padding: 0; line-height: 1; }
 .rich-text-surface .composer-attachment-action:hover { background: rgb(0 0 0 / 0.08); }
 .dark .rich-text-surface .composer-attachment-action:hover { background: rgb(255 255 255 / 0.1); }
-.rich-text-surface .composer-attachment-remove { font-family: var(--font-mono); }
+.rich-text-surface .composer-attachment-remove { color: var(--color-stone-400); font-family: var(--font-sans); font-size: 0.9em; }
+.rich-text-surface .composer-attachment-remove:hover { color: var(--color-stone-700); }
+.dark .rich-text-surface .composer-attachment-remove:hover { color: var(--color-stone-100); }
 .composer-reference { display: inline-flex; align-items: center; gap: 0.25em; max-width: 18em; margin: 0 0.1em; border: 1px solid var(--color-violet-200); border-radius: 999px; background: var(--color-violet-50); padding: 0.08em 0.45em; overflow: hidden; color: var(--color-violet-700); font-family: var(--font-mono); font-size: 0.9em; line-height: 1; text-overflow: ellipsis; vertical-align: baseline; white-space: nowrap; }
 .dark .composer-reference { border-color: rgb(167 139 250 / 0.35); background: rgb(139 92 246 / 0.12); color: var(--color-violet-300); }
 

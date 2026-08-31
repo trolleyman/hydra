@@ -96,9 +96,22 @@ describe('attachment upload lifecycle', () => {
     registry.add(editor, { ...attachment, display: 'thumbnail' }, new File(['image'], 'cat.png'), 'blob:cat')
 
     const chip = editor.view.dom.querySelector<HTMLElement>('[data-composer-attachment]')!
+    expect(chip.querySelector<HTMLImageElement>('.composer-attachment-preview')?.src).toBe('blob:cat')
     chip.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
     expect(onOpen).toHaveBeenCalledWith('image-1', chip)
     expect(editor.state.selection.empty).toBe(true)
     expect(editor.state.selection.$from.parent.type.name).toBe('paragraph')
+  })
+
+  it('shows a thumbnail when its preview URL arrives after the node view mounts', () => {
+    const registry = new AttachmentRegistry(() => new Promise(() => {}))
+    const editor = editorWith(registry)
+    registry.add(editor, { ...attachment, display: 'thumbnail' }, new File(['image'], 'cat.png'))
+
+    const preview = editor.view.dom.querySelector<HTMLImageElement>('.composer-attachment-preview')!
+    expect(preview.hidden).toBe(true)
+    registry.registerUploaded({ ...attachment, display: 'thumbnail' }, { path: '/uploads/cat.png' }, 'blob:cat')
+    expect(preview.hidden).toBe(false)
+    expect(preview.src).toBe('blob:cat')
   })
 })

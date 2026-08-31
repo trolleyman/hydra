@@ -376,8 +376,10 @@ Attachments are atomic inline nodes. Left/Right moves only before or after them;
 Backspace/Delete removes them. Clicking an image chip opens the shared lightbox
 without moving the document caret into the node. Their neutral, thumbnail-led
 surface matches sent-message attachment chips and does not create a trailing
-blank line. Dragging moves the same node without re-uploading. A block image
-preview is a presentation toggle on the same id, not a new attachment.
+blank line. The node view follows registry updates, so a local or restored image
+preview appears even when its URL becomes available after the node mounts.
+Dragging moves the same node without re-uploading. A block image preview is a
+presentation toggle on the same id, not a new attachment.
 
 ### Paste/drop and undo
 
