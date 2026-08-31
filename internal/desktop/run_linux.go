@@ -538,6 +538,7 @@ static int hydra_command_line(GApplication *application, GApplicationCommandLine
 static void hydra_startup(GApplication *application, gpointer data) {
 	HydraDesktop *desktop = data;
 	desktop->app = GTK_APPLICATION(application);
+	gtk_window_set_default_icon_name(g_application_get_application_id(application));
 	const GActionEntry actions[] = {
 		{ "new-window", hydra_new_window, NULL, NULL, NULL },
 		{ "new-chat", hydra_new_chat, NULL, NULL, NULL },
@@ -620,7 +621,7 @@ import (
 func run(rawURL string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	applicationID := C.CString(linuxApplicationID)
+	applicationID := C.CString(LinuxApplicationID())
 	defer C.free(unsafe.Pointer(applicationID))
 	uri := C.CString(rawURL)
 	defer C.free(unsafe.Pointer(uri))

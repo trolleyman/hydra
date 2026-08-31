@@ -245,7 +245,11 @@ What remains, because each does a genuinely different job:
   command-owned backend, and starts the service again when the command exits.
   This prevents a development shell from silently attaching to an older
   installed backend. Ctrl+C force-closes the development window, stops its
-  backend, and performs that service restoration.
+  backend, and performs that service restoration. Both Linux development
+  runners register the hidden user-local application identity
+  `org.trolleyman.hydra.Devel` so the desktop environment can resolve the Hydra
+  window icon. This registration neither replaces nor removes an installed
+  `org.trolleyman.hydra` application, icon, or deep-link handler.
   `runDesktopLocal` uses the same checkout-local development database and
   worktree-specific daemon runtime namespace as `mage run` (socket, lock, PID,
   ownership metadata, listener record, and log). It can therefore run beside an
