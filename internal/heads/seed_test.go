@@ -50,14 +50,17 @@ func TestSeedHeadClaudeConfigIsPerHead(t *testing.T) {
 	projectRoot, home := t.TempDir(), t.TempDir()
 	target := path.Join(home, ".claude.json")
 
-	first := bindSource(t, seedClaudeHead(t, projectRoot, home, "head-one", gate.Policy{}), target)
-	second := bindSource(t, seedClaudeHead(t, projectRoot, home, "head-two", gate.Policy{}), target)
+	firstSeed := seedClaudeHead(t, projectRoot, home, "head-one", gate.Policy{})
+	secondSeed := seedClaudeHead(t, projectRoot, home, "head-two", gate.Policy{})
+	first := bindSource(t, firstSeed, target)
+	second := bindSource(t, secondSeed, target)
 	if first == second {
 		t.Errorf("both heads seeded the same config file %q; it must be per-head", first)
 	}
-	for _, p := range []string{first, second} {
-		if srv := readMCPServer(t, p, gate.HydraControlServer); srv["command"] != SandboxHydraBinPath {
-			t.Errorf("%s: control server = %+v, want command %q", p, srv, SandboxHydraBinPath)
+	for i, p := range []string{first, second} {
+		want := []*seedResult{firstSeed, secondSeed}[i].HydraBinPath
+		if srv := readMCPServer(t, p, gate.HydraControlServer); srv["command"] != want {
+			t.Errorf("%s: control server = %+v, want command %q", p, srv, want)
 		}
 	}
 }
@@ -112,8 +115,8 @@ func TestSeedHeadStrictMCPConfig(t *testing.T) {
 	if want := filepath.Join(paths.GetCacheDirFromProjectRoot(projectRoot), "strict-head-mcp-config.json"); bind.Source != want {
 		t.Errorf("bind source = %q, want the per-head %q", bind.Source, want)
 	}
-	if srv := readMCPServer(t, bind.Source, gate.HydraControlServer); srv["command"] != SandboxHydraBinPath {
-		t.Errorf("control server = %+v, want command %q", srv, SandboxHydraBinPath)
+	if srv := readMCPServer(t, bind.Source, gate.HydraControlServer); srv["command"] != res.HydraBinPath {
+		t.Errorf("control server = %+v, want command %q", srv, res.HydraBinPath)
 	}
 }
 

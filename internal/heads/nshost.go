@@ -137,7 +137,11 @@ func launchNamespaceHost(projectRoot, id string, base sandbox.Options) (*nsHost,
 		// path directly and receives the narrow write grant it needs.
 		hostOpts.WritablePaths = append(append([]string(nil), base.WritablePaths...), sockDir)
 	}
-	hostOpts.Argv = []string{SandboxHydraBinPath, "__sandbox-init", "--socket", sandboxSockPath}
+	hydraBin := hostOpts.HydraBinPath
+	if hydraBin == "" {
+		hydraBin = SandboxHydraBinPath
+	}
+	hostOpts.Argv = []string{hydraBin, "__sandbox-init", "--socket", sandboxSockPath}
 	hostOpts.PreSpawnScript = "" // the supervisor itself runs no pre-spawn hook
 
 	spec, err := sandbox.BuildSpec(hostOpts)

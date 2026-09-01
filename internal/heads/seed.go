@@ -45,6 +45,11 @@ type seedResult struct {
 	// Binds are host->sandbox file binds for agent config (Linux only; macOS
 	// sandbox-exec has no bind mounts).
 	Binds []sandbox.Bind
+	// ImmutablePaths are real paths the Darwin Seatbelt profile makes readable
+	// but not writable. Linux uses read-only binds instead.
+	ImmutablePaths []string
+	// HydraBinPath is the executable path visible inside this head's sandbox.
+	HydraBinPath string
 	// WritablePaths are extra paths made writable inside the sandbox (the
 	// per-head status files, kept at their real host paths so the daemon's
 	// poller reads the agent's writes directly). Works on both platforms.
@@ -185,19 +190,19 @@ func seedHead(projectRoot, id string, agentType sandbox.AgentType, worktreePath,
 		res.Env = append(res.Env, "HYDRA_GITOPS_DIR="+gitopsDirHost)
 	}
 
-	// The hydra binary's real path, so hooks can invoke it. Visible read-only
-	// inside the sandbox via the root bind.
-	hydraBin, err := os.Executable()
+	// Materialize the Hydra executable for this platform. Linux retains its
+	// read-only /tmp/hydra-internal bind; Darwin stages one immutable copy per
+	// executable build and uses that real path everywhere.
+	runtimeBin, err := hydraRuntimeForSandbox()
 	if err != nil {
-		return nil, errtrace.Wrap(fmt.Errorf("resolve hydra binary: %w", err))
+		return nil, errtrace.Wrap(fmt.Errorf("materialize hydra runtime: %w", err))
 	}
-	// Bind the hydra binary to a well-known path inside the sandbox.
-	stableHydraBin := SandboxHydraBinPath
-	res.Binds = append(res.Binds, sandbox.Bind{
-		Source:   hydraBin,
-		Target:   stableHydraBin,
-		ReadOnly: true,
-	})
+	stableHydraBin := runtimeBin.VisiblePath
+	res.HydraBinPath = stableHydraBin
+	if runtimeBin.Bind != nil {
+		res.Binds = append(res.Binds, *runtimeBin.Bind)
+	}
+	res.ImmutablePaths = append(res.ImmutablePaths, runtimeBin.ImmutablePaths...)
 
 	switch agentType {
 	case sandbox.AgentTypeClaude:

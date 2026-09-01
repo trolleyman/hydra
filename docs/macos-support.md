@@ -1,10 +1,11 @@
 # macOS support: current state and implementation plan
 
-Status: **partially implemented**. The core Seatbelt backend described under
-"What works" is present. Sandboxed heads do not currently launch on macOS: the
-supervisor still expects the Linux-only `/tmp/hydra-internal` bind. The phases
-below track the remaining runtime-delivery, provider-config, temporary-storage,
-hard-network, hardening, and real-hardware validation work.
+Status: **partially implemented**. The core Seatbelt backend and shared
+build-addressed Hydra runtime described under "What works" are present. The
+supervisor no longer depends on the Linux-only `/tmp/hydra-internal` bind, but
+provider configuration still uses ignored bind/overlay delivery, so macOS heads
+are not supported yet. The phases below track the remaining provider-config,
+temporary-storage, hard-network, hardening, and real-hardware validation work.
 
 ## Background
 
@@ -36,6 +37,11 @@ What works:
   implement the core FS policy: `writable_paths` / `masked_paths` /
   `restore_ro`, the git common-dir write grant, coarse network on/off,
   `NoSandbox`, and read-only `cow_paths` via APFS clonefile (`cp -c`).
+- The running Hydra executable is content-addressed and staged once beneath
+  `<hydra-state>/runtime/<sha256>/hydra-internal`. Supervisors, generated hooks,
+  and MCP entries use that real path on Darwin; an explicit immutable-path
+  Seatbelt rule denies writes. Linux retains its read-only bind at
+  `/tmp/hydra-internal`.
 - Daemon, PTY sessions, unix sockets, autostart, and socket paths are all
   portable (`creack/pty`, `//go:build !windows`). The one `/proc` dependency
   (`pidIsHydraDaemon` in `internal/daemon/upgrade.go`) has a documented safe
@@ -46,11 +52,10 @@ What works:
 
 What is broken or missing:
 
-- **Config seeding is a silent no-op (the critical gap).**
+- **Provider config seeding is a silent no-op (the critical gap).**
   `internal/heads/seed.go` delivers per-head agent config via `Options.Binds`
-  and `Options.ROOverlays` - the hydra binary at `/tmp/hydra-internal`, the
-  gate policy JSON, the MCP catalog, merged `~/.claude.json`, Gemini / Copilot
-  / Codex config files, and Claude's tamper-proof
+  and `Options.ROOverlays` - the gate policy JSON, the MCP catalog, merged
+  `~/.claude.json`, Gemini / Copilot / Codex config files, and Claude's tamper-proof
   `/etc/claude-code/managed-settings.json` (hooks + gate wiring). `darwin.go`
   never reads `Binds`, `ROOverlays`, `TmpfsDirs`, `EgressWrap`, `TmpDir`, or
   `HardenGUI`, and returns no error. On a Mac a sandboxed head therefore runs
@@ -153,6 +158,11 @@ silent downgrade.
           exposed separately according to the CLI's supported path controls.
         - Copilot: use its supported config/instruction redirect, or fail the
           spawn explicitly until one is available.
+- [x] Stage the running Hydra executable once per content hash under the runtime
+      state directory; pass its materialized path through supervisor options,
+      generated hooks, and MCP configs; protect it with a Darwin immutable-path
+      rule. Canonicalize `/tmp` and `/var` aliases before emitting Seatbelt path
+      rules so the kernel-visible `/private/...` path is actually matched.
 - [ ] Managed settings substitute. The macOS managed-settings location is a
       root-owned system path, so per-head files there are impossible. Instead:
       seed the identical hooks/gate config as ordinary user settings inside

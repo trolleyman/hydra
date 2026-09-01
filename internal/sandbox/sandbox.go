@@ -310,6 +310,10 @@ type Options struct {
 
 	// Binds are extra host->sandbox mounts (per-head config seeding).
 	Binds []Bind
+	// ImmutablePaths are real host paths exposed read-only to the sandbox. Darwin
+	// uses these for staged runtime and seed inputs because Seatbelt has no bind
+	// mounts; Linux normally enforces the same property through read-only Binds.
+	ImmutablePaths []string
 	// TmpfsDirs are directories overlaid with a fresh writable tmpfs inside the
 	// sandbox (applied before Binds), so per-head files can be bind-mounted into
 	// otherwise read-only locations like $HOME/.hydra.
@@ -326,6 +330,10 @@ type Options struct {
 	Env []string
 	// Argv is the command to run inside the sandbox (e.g. claude --resume).
 	Argv []string
+	// HydraBinPath is the executable path visible to this sandbox. Linux uses the
+	// fixed bind target HydraBinPath; Darwin uses a staged, build-addressed host
+	// path protected by ImmutablePaths.
+	HydraBinPath string
 	// StdioPipes runs the process on plain stdin/stdout pipes instead of a PTY
 	// (stderr folds into the daemon log). Used by chat-mode heads, whose stdout
 	// is a JSONL protocol stream that must not pass through a

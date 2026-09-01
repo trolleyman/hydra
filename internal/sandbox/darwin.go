@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"braces.dev/errtrace"
@@ -41,7 +42,8 @@ func BuildSpec(opts Options) (*Spec, error) {
 		return nil, errtrace.Wrap(fmt.Errorf("sandbox-exec not found: %w", err))
 	}
 
-	home := opts.Home
+	home := canonicalSBPath(opts.Home)
+	worktree := canonicalSBPath(opts.WorktreePath)
 	var b strings.Builder
 	b.WriteString(sandboxProfileTemplate)
 	b.WriteString("\n;; --- Hydra config-driven rules (appended; last match wins) ---\n")
@@ -73,6 +75,13 @@ func BuildSpec(opts Options) (*Spec, error) {
 	// Restore read-only.
 	for _, p := range expandAll(opts.RestoreRO, home) {
 		fmt.Fprintf(&b, "(allow file-read* %s)\n", sbPathRule(p))
+	}
+	// Immutable runtime and generated policy inputs live at real host paths on
+	// macOS. Grant reads and carve writes back out after every broader writable
+	// rule; Seatbelt's last-match-wins evaluation makes this tamper-resistant.
+	for _, p := range expandAll(opts.ImmutablePaths, home) {
+		fmt.Fprintf(&b, "(allow file-read* %s)\n", sbPathRule(p))
+		fmt.Fprintf(&b, "(deny file-write* %s)\n", sbPathRule(p))
 	}
 	// The base profile grants writes under WORK_DIR. A project-directory read-only session
 	// runs in the real project root, so carve that grant back out after every
@@ -113,7 +122,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 	args := []string{
 		sandboxExec,
 		"-f", profilePath,
-		"-D", "WORK_DIR=" + opts.WorktreePath,
+		"-D", "WORK_DIR=" + worktree,
 		"-D", "HOME_DIR=" + home,
 	}
 	// Optionally run the configured pre-spawn script first; it execs into Argv
@@ -165,9 +174,32 @@ func cowClone(m CowMount) error {
 // (literal "..") for files. Falls back to subpath when the path can't be
 // stat'd (e.g. not yet created).
 func sbPathRule(p string) string {
+	p = canonicalSBPath(p)
 	quoted := strings.ReplaceAll(p, `"`, `\"`)
 	if info, err := os.Stat(p); err == nil && !info.IsDir() {
 		return `(literal "` + quoted + `")`
 	}
 	return `(subpath "` + quoted + `")`
+}
+
+// canonicalSBPath resolves macOS's visible compatibility symlinks (notably
+// /tmp -> /private/tmp and /var -> /private/var). Seatbelt compares the kernel's
+// canonical path, so a literal rule using the visible alias does not match.
+func canonicalSBPath(p string) string {
+	if p == "" {
+		return p
+	}
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	// The leaf may not exist yet. Resolve the closest existing parent and append
+	// the unresolved suffix so rules for create targets still use canonical roots.
+	parent := filepath.Dir(p)
+	if parent == p {
+		return filepath.Clean(p)
+	}
+	if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+		return filepath.Join(resolved, filepath.Base(p))
+	}
+	return filepath.Clean(p)
 }
