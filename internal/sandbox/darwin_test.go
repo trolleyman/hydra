@@ -43,7 +43,7 @@ func TestBuildSpecDarwinImmutablePathOverridesWritableParent(t *testing.T) {
 	cmd.Env = spec.Env
 	cmd.Dir = spec.Dir
 	output, runErr := cmd.CombinedOutput()
-	if strings.Contains(string(output), "sandbox_apply: Operation not permitted") {
+	if nestedSandboxDenied(output) {
 		t.Skip("sandbox-exec cannot nest inside the test runner's existing sandbox")
 	}
 	if runErr == nil {
@@ -65,6 +65,9 @@ func TestCanonicalSBPathResolvesMacOSCompatibilityAliases(t *testing.T) {
 		"/var": "/private/var",
 	} {
 		if got := canonicalSBPath(input); got != want {
+			if _, err := filepath.EvalSymlinks(input); os.IsPermission(err) {
+				t.Skip("the test runner sandbox hides macOS compatibility aliases")
+			}
 			t.Errorf("canonicalSBPath(%q) = %q, want %q", input, got, want)
 		}
 	}
@@ -112,16 +115,69 @@ func TestBuildSpecDarwinPrivateTempPolicyAndEnvironment(t *testing.T) {
 	}
 	profile := string(profileData)
 	tempDeny := `(deny file-read* file-write* ` + sbPathRule(os.TempDir()) + `)`
+	parentMetadata := `(allow file-read-metadata ` + sbLiteralPathRule(filepath.Dir(tmpDir)) + `)`
 	ownAllow := `(allow file-read* file-write* ` + sbPathRule(tmpDir) + `)`
 	controlAllow := `(allow file-read* file-write* ` + sbPathRule(controlDir) + `)`
 	denyAt := strings.Index(profile, tempDeny)
+	metadataAt := strings.Index(profile, parentMetadata)
 	ownAt := strings.Index(profile, ownAllow)
 	controlAt := strings.Index(profile, controlAllow)
-	if denyAt < 0 || ownAt < 0 || controlAt < 0 {
+	if denyAt < 0 || metadataAt < 0 || ownAt < 0 || controlAt < 0 {
 		t.Fatalf("private temp profile rules missing:\n%s", profile)
 	}
-	if !(denyAt < ownAt && denyAt < controlAt) {
+	if !(denyAt < metadataAt && metadataAt < ownAt && denyAt < controlAt) {
 		t.Fatalf("narrow temp/control grants must follow shared-temp denial:\n%s", profile)
+	}
+}
+
+func TestBuildSpecDarwinPrivateTempSupportsCanonicalizingToolsWithoutExposingSiblings(t *testing.T) {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is unavailable")
+	}
+	root := t.TempDir()
+	worktree := filepath.Join(root, "worktree")
+	home := filepath.Join(root, "home")
+	tmpRoot := filepath.Join(root, "state", "tmp")
+	tmpDir := filepath.Join(tmpRoot, "head-one")
+	siblingDir := filepath.Join(tmpRoot, "head-two")
+	for _, dir := range []string{worktree, home, tmpDir, siblingDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	siblingSecret := filepath.Join(siblingDir, "secret")
+	if err := os.WriteFile(siblingSecret, []byte("sibling"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	spec, err := BuildSpec(Options{
+		WorktreePath: worktree,
+		Home:         home,
+		TmpDir:       tmpDir,
+		Env:          []string{"PATH=/usr/bin:/bin"},
+		Argv: []string{
+			"/bin/sh", "-c",
+			`"$1" init -q "$TMPDIR/repo" || exit 41
+if /bin/ls -A "$2" >/dev/null 2>&1; then exit 42; fi
+if /bin/cat "$3" >/dev/null 2>&1; then exit 43; fi`,
+			"sh", gitPath, tmpRoot, siblingSecret,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+
+	cmd := exec.Command(spec.Path, spec.Args[1:]...)
+	cmd.Env = spec.Env
+	cmd.Dir = spec.Dir
+	output, runErr := cmd.CombinedOutput()
+	if nestedSandboxDenied(output) {
+		t.Skip("sandbox-exec cannot nest inside the test runner's existing sandbox")
+	}
+	if runErr != nil {
+		t.Fatalf("private temp compatibility/isolation probe failed: %v\n%s", runErr, output)
 	}
 }
 
@@ -260,7 +316,7 @@ func TestBuildSpecDarwinHardEgressEnforcesLoopbackPort(t *testing.T) {
 	cmd.Env = spec.Env
 	cmd.Dir = spec.Dir
 	output, runErr := cmd.CombinedOutput()
-	if strings.Contains(string(output), "sandbox_apply: Operation not permitted") {
+	if nestedSandboxDenied(output) {
 		t.Skip("sandbox-exec cannot nest inside the test runner's existing sandbox")
 	}
 	if runErr != nil {
@@ -364,4 +420,10 @@ func containsExact(entries []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func nestedSandboxDenied(output []byte) bool {
+	text := string(output)
+	return strings.Contains(text, "sandbox_apply: Operation not permitted") ||
+		(strings.Contains(text, "sandbox-exec:") && strings.Contains(text, "Operation not permitted"))
 }
