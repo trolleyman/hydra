@@ -442,7 +442,9 @@ area; do not re-derive it by reading source. Skip them otherwise.
   `internal/egress`, MCP stripping, the `--dangerously-skip-permissions` posture)
   -> [docs/security-audit.md](security-audit.md) (the original sandbox audit;
   its three main recommendations - gate, MCP allow-list, filtering egress proxy -
-  are now BUILT for Claude)
+  are now BUILT for Claude). Changes to which daemon environment variables a
+  head receives are covered by
+  [docs/head-environment-isolation.md](head-environment-isolation.md).
 - **User-checkoutable head branches** (the `hydra/<id>` vs `hydra-wt/<id>`
   branch-split + ff-only mirror design) ->
   [docs/user-branch-mirror.md](user-branch-mirror.md) (proposed, unbuilt

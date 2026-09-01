@@ -20,6 +20,7 @@ import (
 	"github.com/trolleyman/hydra/internal/claudestream"
 	"github.com/trolleyman/hydra/internal/heads"
 	"github.com/trolleyman/hydra/internal/paths"
+	"github.com/trolleyman/hydra/internal/sandbox"
 	"github.com/trolleyman/hydra/internal/session"
 )
 
@@ -215,7 +216,13 @@ func (s *Server) runChatShellCommand(conn *safeConn, projectRoot, worktree, sess
 	onChunk := func(chunk string) {
 		writeFrame(conn, api.ChatShellOutputFrame{Type: api.ShellOutput, Id: msgID, Chunk: chunk})
 	}
-	res, err := heads.RunShellCommand(ctx, projectRoot, worktree, command, onChunk)
+	agentType := sandbox.AgentTypeBash
+	if s.Sessions != nil {
+		if sess, ok := s.Sessions.Get(sessionID); ok {
+			agentType = sess.AgentType
+		}
+	}
+	res, err := heads.RunShellCommand(ctx, projectRoot, worktree, sessionID, agentType, command, onChunk)
 	if err != nil {
 		// A launch/spec failure (e.g. no worktree): surface it in the card's output
 		// so the user isn't left with a silently-hung "running" card.

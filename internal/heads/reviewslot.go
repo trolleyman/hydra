@@ -269,11 +269,11 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 	}
 	home := currentUser.HomeDir
 	tmpDir := ensureHeadTmpDir(projectRoot, id)
-	env := agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
+	cfg, _ := config.Load(projectRoot)
+	env := agentEnv(agentType, cfg.ResolveInheritedEnv(string(agentType)), home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, agentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 
-	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(agentType))
 
 	// Read-only git, with no host-mediated way around it. resolveGitIsolation is

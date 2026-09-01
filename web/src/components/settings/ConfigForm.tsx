@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
 import type { AgentConfig, McpServer, NetworkConfig, PolicyConfig, ProjectInfo, SandboxConfig } from '../../api'
-import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, TriangleAlert, Lock } from 'lucide-react'
+import { X, Plus, Globe, FolderOpen, EyeOff, Eye, Layers, Terminal, Maximize2, Puzzle, TriangleAlert, Lock, KeyRound } from 'lucide-react'
 import { InfoTooltip } from '../InfoTooltip'
 import { ShellEditor } from '../ShellEditor'
 import { Markdown } from '../../lib/MarkdownRenderer'
@@ -334,6 +334,7 @@ export function ConfigForm({
       !next.masked_paths?.length &&
       !next.restore_ro?.length &&
       !next.cow_paths?.length &&
+      !next.inherit_env?.length &&
       !next.pre_spawn_script &&
       !next.network
     onChange({ ...value, sandbox: empty ? null : next })
@@ -620,6 +621,24 @@ export function ConfigForm({
           inheritedPaths={inheritedSandbox?.cow_paths ?? undefined}
           onChange={(cow_paths) => updateSandbox({ cow_paths })}
           placeholder="e.g. pipeline/out or ~/.gradle"
+        />
+
+        <SandboxPathSection
+          icon={<KeyRound className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />}
+          label="Inherited environment"
+          tooltipTitle="Inherited environment"
+          tooltip={
+            <>
+              <p>Names of additional variables copied from the Hydra daemon into this agent. Values are resolved when the head launches and are never stored in config or logs.</p>
+              <p className="mt-1.5">Heads otherwise receive only a fixed baseline and authentication variables for their selected provider. Use this for deliberate project requirements such as <code className="text-blue-300">ANDROID_HOME</code>, <code className="text-blue-300">SSH_AUTH_SOCK</code>, or a private registry credential.</p>
+              <p className="mt-1.5 text-gray-400 italic">Hydra-owned names, including every <code className="text-blue-300">HYDRA_*</code> variable, cannot be inherited.</p>
+            </>
+          }
+          paths={sandbox.inherit_env ?? []}
+          inheritedPaths={inheritedSandbox?.inherit_env ?? undefined}
+          onChange={(inherit_env) => updateSandbox({ inherit_env })}
+          placeholder="e.g. ANDROID_HOME"
+          addLabel="Add variable"
         />
 
         {/* Pre-spawn script */}
