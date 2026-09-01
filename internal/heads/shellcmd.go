@@ -57,7 +57,7 @@ const shellCommandMaxOutput = 64 * 1024
 // arrives (for live streaming to the UI). Because Stdout and Stderr point at the
 // same writer, os/exec funnels both through one copy goroutine, so onChunk is
 // invoked serially and in order - no interleaving races.
-func RunShellCommand(ctx context.Context, projectRoot, worktree, command string, onChunk func(string)) (ShellCommandResult, error) {
+func RunShellCommand(ctx context.Context, projectRoot, worktree, sessionID string, agentType sandbox.AgentType, command string, onChunk func(string)) (ShellCommandResult, error) {
 	res := ShellCommandResult{Command: command, ExitCode: -1}
 	if strings.TrimSpace(command) == "" {
 		return res, errtrace.Errorf("empty command")
@@ -69,7 +69,7 @@ func RunShellCommand(ctx context.Context, projectRoot, worktree, command string,
 	runCtx, cancel := context.WithTimeout(ctx, ShellCommandTimeout)
 	defer cancel()
 
-	launch, cleanup, err := buildShellCommandSpec(projectRoot, worktree, command)
+	launch, cleanup, err := buildShellCommandSpec(projectRoot, worktree, sessionID, agentType, command)
 	if err != nil {
 		return res, errtrace.Wrap(err)
 	}
@@ -156,21 +156,12 @@ func (c *capBuffer) String() string { return c.buf.String() }
 // Returns the spec plus a cleanup closure (bwrap tmp + egress session + cow
 // layer) the caller must defer. Mirrors tests.buildCommandSpec / the artifacts
 // runner, minus their per-feature env contract.
-func buildShellCommandSpec(projectRoot, worktree, command string) (*sandbox.Spec, func(), error) {
+func buildShellCommandSpec(projectRoot, worktree, sessionID string, agentType sandbox.AgentType, command string) (*sandbox.Spec, func(), error) {
 	home, _ := os.UserHomeDir()
-
-	env := make([]string, 0, len(os.Environ())+4)
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		if key != "TMPDIR" && key != "TMP" && key != "TEMP" {
-			env = append(env, entry)
-		}
-	}
-	if home != "" {
-		env = append(env, "HOME="+home)
-	}
-	env = append(env, "TMPDIR=/tmp", "TMP=/tmp", "TEMP=/tmp")
+	cfg, _ := config.Load(projectRoot)
+	env := agentEnv(agentType, cfg.ResolveInheritedEnv(string(agentType)), home, "", readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktree)...)
+	env = append(env, readPreSpawnEnv(sandbox.HostPreSpawnEnvFile(ensureHeadTmpDir(projectRoot, sessionID)))...)
 
 	opts := sandbox.Options{
 		AgentType:    sandbox.AgentTypeBash,
@@ -180,7 +171,6 @@ func buildShellCommandSpec(projectRoot, worktree, command string) (*sandbox.Spec
 		Argv:         []string{"bash", "-c", command},
 	}
 
-	cfg, _ := config.Load(projectRoot)
 	writable, masked, restore, cow, netPol, _ := cfg.ResolveSandboxOptions("")
 	if gcd, err := git.GetCommonDir(projectRoot); err == nil {
 		opts.GitCommonDir = gcd

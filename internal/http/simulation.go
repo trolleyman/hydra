@@ -4447,6 +4447,7 @@ func (s *SimulationServer) GetConfig(w http.ResponseWriter, r *http.Request, pro
 	// shadowed by a redundant "Inherited:" echo of its own value.
 	if params.Scope == nil || *params.Scope != api.GetConfigParamsScopeUser {
 		resp.Defaults.Sandbox = &api.SandboxConfig{
+			InheritEnv:     ptr([]string{"ANDROID_HOME", "SSH_AUTH_SOCK"}),
 			PreSpawnScript: ptr("#!/bin/bash\nset -euo pipefail\ncp -r \"$HYDRA_PROJECT_ROOT/pipeline/out\" \"$HYDRA_WORKTREE/pipeline/out\"\n"),
 			PreExitScript:  ptr("source \"$HYDRA_WORKTREE/.hydra/emu.env\" 2>/dev/null && scripts/emu-claim-slot.sh release\n"),
 			// Hard egress mode with extra allow-listed hosts + a blocked host -

@@ -60,6 +60,7 @@ const DefaultPrePrompt = "You are a head (AI agent) of Hydra, an AI orchestratio
 	"- `masked_paths` - extra paths hidden inside the sandbox: home/absolute entries (`~/.ssh`) or project-relative globs (`.env*`, `secrets/`). A `.hydraignore` file at the project root is the .gitignore-style spelling of the same.\n" +
 	"- `restore_ro` - paths re-exposed read-only after a parent was masked.\n" +
 	"- `cow_paths` - paths mounted copy-on-write (you can read and overwrite them; writes stay per-head and never touch the real files). A worktree-relative entry (`pipeline/out`) is mirrored from the project root into your worktree; a home/absolute entry (`~/.gradle`, `/opt/cache`) is overlaid in place, so you share the real dir read-only but keep your writes and lock files private.\n" +
+	"- `inherit_env` - names of additional daemon environment variables passed into the head. The default environment is allow-listed; values stay out of config and logs. Hydra-owned names, including all `HYDRA_*`, cannot be inherited.\n" +
 	"- `network.mode` (off/unrestricted/advisory/hard) plus `network.allowed_hosts` / `network.blocked_hosts` - the egress posture and the host allow-list (added to a built-in default list) / block-list (overrides both). This same list also gates the WebFetch tool: with filtering off (unrestricted/off) WebFetch reaches any host, otherwise it may reach only allow-listed hosts and a new one pauses for user approval. The legacy `network.enabled` / `network.filter_enabled` toggles still work when `mode` is unset. `network.allowed_loopback_ports` (e.g. `[5037]` for adb) lists host-loopback TCP ports that stay reachable at 127.0.0.1 under hard mode, whose network namespace otherwise cuts off host-local daemons.\n" +
 	"- `policy.mcp_allowed` / `policy.mcp_tools_allowed` - MCP servers you may use (whole-server), and individual MCP tools (`server__tool`) allowed on an otherwise-restricted server; `policy.mcp_blocked` / `policy.mcp_tools_blocked` deny a server or tool outright (block overrides allow). A security gate can deny a tool call or pause it for user approval (even with permissions skipped) when it falls outside these, so don't retry a blocked call in a loop - ask the user to widen the list. You also have Hydra control tools (`mcp__hydra__list_available_mcp_servers`, `mcp__hydra__request_mcp_server`) to discover host-configured MCP servers and request access to one at runtime (the user approves it; it becomes usable after you resume). `policy.strict_mcp` (on by default) decides how that allow-list is applied: on, the allow-listed servers are the ONLY ones you get, and the user's claude.ai connectors (Gmail/Calendar/Drive) are unavailable to you - if you need one, ask the user to set `strict_mcp = false` for this agent.\n" +
 	"- `pre_spawn_script` - a bash script run inside the sandbox before every agent launch (both spawn and resume, so it must be idempotent), e.g. `mise trust`. It can set env vars for the agent by appending `KEY=value` lines to the file at `$HYDRA_ENV`.\n" +
@@ -315,6 +316,11 @@ type SandboxConfig struct {
 	// inputs/outputs or shared tool caches too big to copy. See sandbox.CowMount;
 	// on Linux this needs an overlay-capable bwrap.
 	CowPaths []string `toml:"cow_paths"`
+	// InheritEnv names additional variables copied from the Hydra daemon's
+	// environment into this agent. The head otherwise receives only Hydra's
+	// baseline and the selected provider's authentication variables. Names union
+	// across config layers; values are resolved only at launch and never stored.
+	InheritEnv []string `toml:"inherit_env"`
 	// Network is the network policy.
 	Network *NetworkConfig `toml:"network"`
 	// PreSpawnScript is an optional shell script run inside the sandbox
@@ -339,6 +345,70 @@ type SandboxConfig struct {
 	// resources (the host adb server, /dev/kvm); those belong to a host-side
 	// [[services]] pool. nil/empty = no script.
 	PreExitScript *string `toml:"pre_exit_script"`
+}
+
+// inheritedEnvReserved contains variables whose values Hydra constructs or
+// controls for each launch. Letting config copy the daemon's value first would
+// make their meaning depend on launch mode and could bypass the egress proxy.
+var inheritedEnvReserved = map[string]bool{
+	"HOME": true, "USER": true, "LOGNAME": true, "PATH": true, "SHELL": true,
+	"LANG": true, "LC_ALL": true, "TERM": true, "COLORTERM": true,
+	"TMPDIR": true, "TMP": true, "TEMP": true,
+	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true,
+	"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true,
+	"CLAUDE_CONFIG_DIR": true, "CODEX_HOME": true,
+	"GEMINI_SYSTEM_MD": true, "GEMINI_WRITE_SYSTEM_MD": true,
+	"CLAUDE_CODE_NO_FLICKER": true, "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": true,
+	"MISE_TRUSTED_CONFIG_PATHS": true,
+	"HTTP_PROXY":                true, "HTTPS_PROXY": true, "ALL_PROXY": true, "NO_PROXY": true,
+}
+
+// ValidateInheritedEnvName checks one sandbox.inherit_env entry. It is exported
+// so the launch-side environment builder can defend against programmatically
+// constructed Config values as well as decoded files.
+func ValidateInheritedEnvName(name string) error {
+	if name == "" {
+		return errtrace.Errorf("environment variable name is empty")
+	}
+	for i, r := range name {
+		valid := r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || i > 0 && r >= '0' && r <= '9'
+		if !valid {
+			return errtrace.Errorf("invalid environment variable name %q", name)
+		}
+	}
+	upperName := strings.ToUpper(name)
+	if strings.HasPrefix(upperName, "HYDRA_") || inheritedEnvReserved[upperName] {
+		return errtrace.Errorf("environment variable %q is managed by Hydra and cannot be inherited", name)
+	}
+	return nil
+}
+
+func (c Config) validateInheritedEnv() error {
+	validate := func(scope string, a AgentConfig) error {
+		if a.Sandbox == nil {
+			return nil
+		}
+		for _, name := range a.Sandbox.InheritEnv {
+			if err := ValidateInheritedEnvName(name); err != nil {
+				return errtrace.Wrap(fmt.Errorf("%s.sandbox.inherit_env: %w", scope, err))
+			}
+		}
+		return nil
+	}
+	if err := validate("defaults", c.Defaults); err != nil {
+		return errtrace.Wrap(err)
+	}
+	names := make([]string, 0, len(c.Agents))
+	for name := range c.Agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := validate(name, c.Agents[name]); err != nil {
+			return errtrace.Wrap(err)
+		}
+	}
+	return nil
 }
 
 // ServiceScript describes a per-project long-running command Hydra supervises
@@ -1463,6 +1533,9 @@ func decodeConfig(data []byte) (Config, error) {
 		}
 		cfg.Agents[name] = ac
 	}
+	if err := cfg.validateInheritedEnv(); err != nil {
+		return cfg, errtrace.Wrap(err)
+	}
 
 	return cfg, nil
 }
@@ -1750,6 +1823,9 @@ func (s *SandboxConfig) Merge(other SandboxConfig) {
 	}
 	if other.CowPaths != nil {
 		s.CowPaths = unionStrings(s.CowPaths, other.CowPaths)
+	}
+	if other.InheritEnv != nil {
+		s.InheritEnv = unionStrings(s.InheritEnv, other.InheritEnv)
 	}
 	if other.Network != nil {
 		if s.Network == nil {
@@ -2166,6 +2242,17 @@ func (c Config) ResolveSandboxOptions(agentType string) (writable, masked, resto
 	return writable, masked, restore, cow, net, preSpawn
 }
 
+// ResolveInheritedEnv returns the daemon environment-variable names explicitly
+// opted into a head, merged from the defaults and per-agent sandbox config.
+// Built-in baseline and provider-auth variables are added by heads.agentEnv.
+func (c Config) ResolveInheritedEnv(agentType string) []string {
+	resolved := c.GetResolvedConfig(agentType)
+	if resolved.Sandbox == nil {
+		return nil
+	}
+	return append([]string(nil), resolved.Sandbox.InheritEnv...)
+}
+
 // resolveNetworkPolicy turns the (possibly nil) config into the effective
 // sandbox.NetworkPolicy. The explicit `mode` is authoritative when set; otherwise
 // it falls back to the legacy enabled/filter_enabled booleans, and when NOTHING is
@@ -2262,6 +2349,9 @@ func Save(projectRoot string, cfg Config) error {
 // unmanaged content (e.g. [[artifacts]] blocks) survive the round-trip and a
 // legacy-format file is migrated to the new flattened layout.
 func SaveToFile(path string, cfg Config) error {
+	if err := cfg.validateInheritedEnv(); err != nil {
+		return errtrace.Wrap(err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return errtrace.Wrap(fmt.Errorf("create config parent: %s: %w", path, err))
 	}
@@ -2511,6 +2601,12 @@ func defaultsSpec() []specEntry {
 			doc: "paths mounted copy-on-write (read source, writes kept per-head): worktree-relative (mirrored from project root) or home/absolute like ~/.gradle (overlaid in place, supersedes its writable bind).",
 			def: func() string { return "[]" },
 			get: sandboxSlice(func(s *SandboxConfig) []string { return s.CowPaths }),
+		},
+		{
+			table: "sandbox", key: "inherit_env",
+			doc: "additional daemon environment variable names passed into heads (added across config layers). Heads otherwise receive only a fixed baseline plus authentication variables for their selected provider. Values are resolved at launch and never written to config or logs. Hydra-owned names, including every HYDRA_* variable, cannot be inherited.",
+			def: func() string { return "[]" },
+			get: sandboxSlice(func(s *SandboxConfig) []string { return s.InheritEnv }),
 		},
 		{
 			table: "sandbox", key: "pre_spawn_script",
@@ -4327,6 +4423,7 @@ func emitAgentSandbox(out *[]string, name string, sb *SandboxConfig, keyComments
 	emitSetField(out, name+".sandbox", "masked_paths", tomlStringArray(sb.MaskedPaths), len(sb.MaskedPaths) > 0, keyComments)
 	emitSetField(out, name+".sandbox", "restore_ro", tomlStringArray(sb.RestoreRO), len(sb.RestoreRO) > 0, keyComments)
 	emitSetField(out, name+".sandbox", "cow_paths", tomlStringArray(sb.CowPaths), len(sb.CowPaths) > 0, keyComments)
+	emitSetField(out, name+".sandbox", "inherit_env", tomlStringArray(sb.InheritEnv), len(sb.InheritEnv) > 0, keyComments)
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {
 		emitSetField(out, name+".sandbox", "pre_spawn_script", tomlStringValue(*sb.PreSpawnScript), true, keyComments)
 	}
@@ -4424,7 +4521,7 @@ func sandboxHasContent(sb *SandboxConfig) bool {
 	if sb == nil {
 		return false
 	}
-	if len(sb.WritablePaths) > 0 || len(sb.MaskedPaths) > 0 || len(sb.RestoreRO) > 0 || len(sb.CowPaths) > 0 {
+	if len(sb.WritablePaths) > 0 || len(sb.MaskedPaths) > 0 || len(sb.RestoreRO) > 0 || len(sb.CowPaths) > 0 || len(sb.InheritEnv) > 0 {
 		return true
 	}
 	if sb.PreSpawnScript != nil && *sb.PreSpawnScript != "" {

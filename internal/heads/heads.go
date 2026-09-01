@@ -765,7 +765,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		return nil, errtrace.Wrap(err)
 	}
 
-	env := append(agentEnv(home, username, gitAuthorName, gitAuthorEmail), seed.Env...)
+	env := append(agentEnv(opts.AgentType, cfg.ResolveInheritedEnv(string(opts.AgentType)), home, username, gitAuthorName, gitAuthorEmail), seed.Env...)
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(opts.ID, opts.AgentType, projectRoot, worktreePath, branchName, baseBranch)...)
 	// Chat mode has no TUI to render; force the classic (non-fullscreen)
@@ -1114,11 +1114,22 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		return "", errtrace.Wrap(fmt.Errorf("get current user: %w", err))
 	}
 	home := currentUser.HomeDir
-	env := agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
-	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
-	// The shell shares the head's worktree; report it as a bash session since
-	// the pre-spawn config it runs is the bash agent's.
-	env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
+	cfg, _ := config.Load(projectRoot)
+	var env []string
+	if sandboxed {
+		env = agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
+		env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+		// The shell shares the head's worktree; report it as a bash session since
+		// the pre-spawn config it runs is the bash agent's.
+		env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
+	} else {
+		// A Regular shell is explicitly outside Hydra's sandbox and keeps the
+		// daemon's host environment. Environment isolation is part of the sandboxed
+		// head boundary, not a change to this user-opted-in escape hatch.
+		env = append([]string(nil), os.Environ()...)
+		env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
+		env = append(env, headContextEnv(head.ID, sandbox.AgentTypeBash, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
+	}
 	// Env vars the head's pre_spawn_script set for the agent (via $HYDRA_ENV, see
 	// nshost.startAgentSession) - injected here so a sandboxed shell sharing the
 	// head's worktree sees the same environment the agent works in, WITHOUT
@@ -1165,7 +1176,6 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 
 	var sb sandbox.Options
 	if sandboxed {
-		cfg, _ := config.Load(projectRoot)
 		// The pre-spawn script is intentionally NOT re-run for bash shells: it is a
 		// once-per-head agent-spawn hook, and these interactive shells open
 		// repeatedly over a head's life. Running it here also made a failing
@@ -1408,7 +1418,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		return errtrace.Wrap(err)
 	}
 
-	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...)
+	env := append(agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email")), seed.Env...)
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, head.AgentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
 	// Chat mode has no TUI to render; force the classic renderer env (see SpawnHead).
@@ -1871,7 +1881,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 
 	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
 	tmpDir := ensureHeadTmpDir(head.ProjectPath, head.ID)
-	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseTrustEnv(head.ProjectPath, worktree)...)
+	env := append(agentEnv(head.AgentType, cfg.ResolveInheritedEnv(string(head.AgentType)), home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseTrustEnv(head.ProjectPath, worktree)...)
 	env = sandbox.RuntimeEnv(env, tmpDir)
 	env = append(env, headContextEnv(head.ID, head.AgentType, head.ProjectPath, worktree, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, "HYDRA_END_STATE="+endState)

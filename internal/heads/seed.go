@@ -662,34 +662,6 @@ func readHostFile(p string) []byte {
 	return data
 }
 
-// envKeysHydraOwns are environment variables Hydra controls per-head and must
-// not inherit from the daemon's own environment, or they leak into every agent.
-// In particular GEMINI_SYSTEM_MD / GEMINI_WRITE_SYSTEM_MD drive where the Gemini
-// CLI reads/writes its system prompt: an inherited GEMINI_WRITE_SYSTEM_MD makes
-// Gemini try to write into the read-only `.hydra/local/cache` inside the sandbox and
-// crash with EROFS. seedGeminiPrePrompt sets the ones it wants explicitly.
-var envKeysHydraOwns = map[string]bool{
-	"CLAUDE_CONFIG_DIR":      true,
-	"CODEX_HOME":             true,
-	"GEMINI_SYSTEM_MD":       true,
-	"GEMINI_WRITE_SYSTEM_MD": true,
-	// HYDRA_* head-context variables (see headContextEnv): set per-head, so
-	// never inherit a stale value from the daemon's own environment.
-	"HYDRA_HEAD_ID":      true,
-	"HYDRA_AGENT_TYPE":   true,
-	"HYDRA_PROJECT_ROOT": true,
-	"HYDRA_WORKTREE":     true,
-	"HYDRA_BRANCH":       true,
-	"HYDRA_BASE_BRANCH":  true,
-	// A daemon may itself be launched with a project-local TMPDIR (notably an
-	// isolated test server). That host path is not the head's temp directory and
-	// is normally read-only in its sandbox. Every Linux head instead gets a
-	// private directory bound at /tmp, so always give child tools that path.
-	"TMPDIR": true,
-	"TMP":    true,
-	"TEMP":   true,
-}
-
 // headContextEnv returns the HYDRA_* environment variables describing the head
 // being launched. They are exposed to the pre-spawn script (and, since they
 // share the same environment, the agent/shell process) so per-spawn setup can
@@ -697,9 +669,9 @@ var envKeysHydraOwns = map[string]bool{
 // for a given agent, or copying files into the worktree. The pre-spawn script is
 // additionally given $HYDRA_ENV (a file it appends KEY=value lines to, exported
 // into the agent - see sandbox.preSpawnEnvSetup); that one is set by the wrapper,
-// not here, so it is not listed below or in envKeysHydraOwns.
+// not here, so it is not listed below.
 //
-// Keep this set, envKeysHydraOwns above, and the Pre-Spawn Script tooltip in
+// Keep this set and the Pre-Spawn Script tooltip in
 // web/src/components/settings/ConfigForm.tsx in sync.
 // derefStr returns the pointed-to string, or "" when the pointer is nil.
 func derefStr(s *string) string {
@@ -763,40 +735,6 @@ func claudeRenderingEnv(agentType sandbox.AgentType, fullscreen bool) []string {
 		return []string{"CLAUDE_CODE_NO_FLICKER=1"}
 	}
 	return []string{"CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1"}
-}
-
-// agentEnv builds the environment for the sandboxed agent process.
-func agentEnv(home, username string, gitAuthorName, gitAuthorEmail string) []string {
-	env := make([]string, 0, len(os.Environ()))
-	for _, kv := range os.Environ() {
-		if k, _, ok := strings.Cut(kv, "="); ok && envKeysHydraOwns[k] {
-			continue
-		}
-		env = append(env, kv)
-	}
-	env = append(env,
-		"HOME="+home,
-		"USER="+username,
-		"LANG=C.UTF-8",
-		"TERM=xterm-256color",
-		"COLORTERM=truecolor",
-		"TMPDIR=/tmp",
-		"TMP=/tmp",
-		"TEMP=/tmp",
-	)
-	if gitAuthorName != "" {
-		env = append(env,
-			"GIT_AUTHOR_NAME="+gitAuthorName,
-			"GIT_COMMITTER_NAME="+gitAuthorName,
-		)
-	}
-	if gitAuthorEmail != "" {
-		env = append(env,
-			"GIT_AUTHOR_EMAIL="+gitAuthorEmail,
-			"GIT_COMMITTER_EMAIL="+gitAuthorEmail,
-		)
-	}
-	return env
 }
 
 // readGitConfigVal reads a single git config value from the project.
