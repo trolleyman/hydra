@@ -1115,7 +1115,14 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 		return "", errtrace.Wrap(fmt.Errorf("get current user: %w", err))
 	}
 	home := currentUser.HomeDir
-	env := agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
+	gitAuthorName := readGitConfigVal(projectRoot, "user.name")
+	gitAuthorEmail := readGitConfigVal(projectRoot, "user.email")
+	var env []string
+	if sandboxed {
+		env = agentEnv(home, currentUser.Username, gitAuthorName, gitAuthorEmail)
+	} else {
+		env = regularShellEnv(home, currentUser.Username, gitAuthorName, gitAuthorEmail)
+	}
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	// The shell shares the head's worktree; report it as a bash session since
 	// the pre-spawn config it runs is the bash agent's.

@@ -667,6 +667,51 @@ var envKeysHydraOwns = map[string]bool{
 	"TEMP":   true,
 }
 
+// inheritedSecretEnvWords are credential-shaped components that must never
+// flow from the Hydra daemon's environment into an agent by accident. Agent
+// launches still inherit ordinary toolchain and terminal configuration; users
+// who deliberately need a credential can opt in through the trusted
+// pre_spawn_script + $HYDRA_ENV channel.
+var inheritedSecretEnvWords = map[string]bool{
+	"ASKPASS":     true,
+	"AUTH":        true,
+	"COOKIE":      true,
+	"CREDENTIAL":  true,
+	"CREDENTIALS": true,
+	"JWT":         true,
+	"PASSWD":      true,
+	"PASSWORD":    true,
+	"SECRET":      true,
+	"TOKEN":       true,
+}
+
+// sensitiveInheritedEnvKey reports whether a daemon environment key is likely
+// to carry a reusable credential or access to a credential broker. This is
+// intentionally name-based: values are never inspected or logged. Matching
+// whole underscore-delimited words avoids false positives such as
+// MAX_THINKING_TOKENS, while the suffix check catches conventional compact
+// spellings such as PGPASSWORD.
+func sensitiveInheritedEnvKey(key string) bool {
+	upper := strings.ToUpper(key)
+	for _, word := range strings.FieldsFunc(upper, func(r rune) bool {
+		return r < 'A' || r > 'Z'
+	}) {
+		if inheritedSecretEnvWords[word] {
+			return true
+		}
+	}
+	if strings.HasSuffix(upper, "PASSWORD") || strings.HasSuffix(upper, "PASSWD") || strings.HasSuffix(upper, "_PWD") {
+		return true
+	}
+	padded := "_" + upper + "_"
+	for _, marker := range []string{"_API_KEY_", "_ACCESS_KEY_", "_PRIVATE_KEY_", "_SIGNING_KEY_", "_ENCRYPTION_KEY_"} {
+		if strings.Contains(padded, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // headContextEnv returns the HYDRA_* environment variables describing the head
 // being launched. They are exposed to the pre-spawn script (and, since they
 // share the same environment, the agent/shell process) so per-spawn setup can
@@ -742,12 +787,30 @@ func claudeRenderingEnv(agentType sandbox.AgentType, fullscreen bool) []string {
 	return []string{"CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1"}
 }
 
-// agentEnv builds the environment for the sandboxed agent process.
+// agentEnv builds the environment for the sandboxed agent process. It inherits
+// ordinary host configuration needed by developer tools, but drops
+// credential-shaped variables. Filesystem masking cannot protect a secret that
+// is already present in a process environment, and allowed provider/git hosts
+// would remain an exfiltration route even under hard egress filtering.
 func agentEnv(home, username string, gitAuthorName, gitAuthorEmail string) []string {
+	return buildAgentEnv(home, username, gitAuthorName, gitAuthorEmail, true)
+}
+
+// regularShellEnv preserves the daemon's full environment for the explicitly
+// unsandboxed "Regular shell" terminal. That shell is a user-selected host
+// process, not an agent security boundary; silently removing its credentials
+// would break the host workflows it exists to provide.
+func regularShellEnv(home, username string, gitAuthorName, gitAuthorEmail string) []string {
+	return buildAgentEnv(home, username, gitAuthorName, gitAuthorEmail, false)
+}
+
+func buildAgentEnv(home, username string, gitAuthorName, gitAuthorEmail string, scrubSecrets bool) []string {
 	env := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
-		if k, _, ok := strings.Cut(kv, "="); ok && envKeysHydraOwns[k] {
-			continue
+		if k, _, ok := strings.Cut(kv, "="); ok {
+			if envKeysHydraOwns[k] || (scrubSecrets && sensitiveInheritedEnvKey(k)) {
+				continue
+			}
 		}
 		env = append(env, kv)
 	}

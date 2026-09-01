@@ -99,6 +99,60 @@ func TestAgentEnvReplacesInheritedTempPaths(t *testing.T) {
 	}
 }
 
+func TestAgentEnvScrubsInheritedCredentials(t *testing.T) {
+	secretKeys := []string{
+		"MISE_GITHUB_TOKEN",
+		"SERVICE_API_KEY",
+		"AWS_ACCESS_KEY_ID",
+		"PGPASSWORD",
+		"GOOGLE_APPLICATION_CREDENTIALS",
+		"VSCODE_GIT_ASKPASS_MAIN",
+		"SSH_AUTH_SOCK",
+	}
+	for _, key := range secretKeys {
+		t.Setenv(key, "must-not-reach-agent")
+	}
+	// These contain credential-adjacent substrings but are ordinary runtime
+	// metadata. Whole-word matching keeps them available to tools.
+	t.Setenv("MAX_THINKING_TOKENS", "32000")
+	t.Setenv("STARSHIP_SESSION_KEY", "session-id")
+	t.Setenv("PWD", "/ordinary/working/directory")
+
+	got := agentEnv("/home/test", "test", "", "")
+	values := map[string]string{}
+	for _, entry := range got {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	for _, key := range secretKeys {
+		if _, exists := values[key]; exists {
+			t.Errorf("credential-shaped host variable %s reached agent environment", key)
+		}
+	}
+	for key, want := range map[string]string{
+		"MAX_THINKING_TOKENS":  "32000",
+		"STARSHIP_SESSION_KEY": "session-id",
+		"PWD":                  "/ordinary/working/directory",
+	} {
+		if values[key] != want {
+			t.Errorf("ordinary variable %s = %q, want %q", key, values[key], want)
+		}
+	}
+}
+
+func TestRegularShellEnvPreservesInheritedCredentials(t *testing.T) {
+	t.Setenv("MISE_GITHUB_TOKEN", "available-to-host-shell")
+	got := regularShellEnv("/home/test", "test", "", "")
+	for _, entry := range got {
+		if entry == "MISE_GITHUB_TOKEN=available-to-host-shell" {
+			return
+		}
+	}
+	t.Fatal("regular host shell lost inherited credential")
+}
+
 func TestReadPreSpawnEnv(t *testing.T) {
 	// Empty path (no persisted file / no TmpDir): nil, no read.
 	if got := readPreSpawnEnv(""); got != nil {
