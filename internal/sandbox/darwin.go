@@ -30,8 +30,7 @@ func Available() (bool, string) {
 
 // BuildSpec assembles a sandbox-exec command line. It materializes the embedded
 // Seatbelt profile to a temp file, appends config-driven allow/deny rules, and
-// invokes sandbox-exec with WORK_DIR/HOME_DIR params, mirroring
-// sandbox-demo/macos/sandbox.sb.
+// invokes sandbox-exec with WORK_DIR/HOME_DIR params.
 func BuildSpec(opts Options) (*Spec, error) {
 	if opts.NoSandbox {
 		return errtrace.Wrap2(rawSpec(opts))
@@ -47,6 +46,16 @@ func BuildSpec(opts Options) (*Spec, error) {
 	var b strings.Builder
 	b.WriteString(sandboxProfileTemplate)
 	b.WriteString("\n;; --- Hydra config-driven rules (appended; last match wins) ---\n")
+
+	// macOS cannot mount a private directory over /tmp. Deny the shared OS temp
+	// roots and every sibling head's scratch directory first. Later, narrower
+	// grants expose this head's own scratch directory and Hydra control socket.
+	if opts.TmpDir != "" {
+		for _, p := range []string{"/tmp", "/private/tmp", os.TempDir(), filepath.Dir(opts.TmpDir)} {
+			fmt.Fprintf(&b, "(deny file-read* file-write* %s)\n", sbPathRule(p))
+		}
+		fmt.Fprintf(&b, "(allow file-read* file-write* %s)\n", sbPathRule(opts.TmpDir))
+	}
 
 	// The worktree's git metadata lives in the main repo's common dir. How much is
 	// writable depends on the git-isolation mode (see docs/git-isolation.md); reads are
@@ -66,7 +75,7 @@ func BuildSpec(opts Options) (*Spec, error) {
 		// freshly-configured cache/store (e.g. ~/.local/share/aube) can actually
 		// be written under - a file-write rule can't create a missing parent.
 		ensureWritableDir(p, home)
-		fmt.Fprintf(&b, "(allow file-write* %s)\n", sbPathRule(p))
+		fmt.Fprintf(&b, "(allow file-read* file-write* %s)\n", sbPathRule(p))
 	}
 	// Masked paths: deny both read and write.
 	for _, p := range expandAll(opts.MaskedPaths, home) {
@@ -126,16 +135,15 @@ func BuildSpec(opts Options) (*Spec, error) {
 		"-D", "HOME_DIR=" + home,
 	}
 	// Optionally run the configured pre-spawn script first; it execs into Argv
-	// when it falls through.
-	// Ephemeral $HYDRA_ENV (no persist path): the agent still gets its vars
-	// in-shell, but sharing them with sibling bash shells rides on the Linux
-	// namespace host and its /tmp-mapped per-head TmpDir, which darwin lacks.
-	args = append(args, withPreSpawn(opts.PreSpawnScript, "", opts.Argv)...)
+	// when it falls through. The resolved $HYDRA_ENV is persisted in this head's
+	// private temp directory so sibling sandboxed shells can reuse it.
+	env := RuntimeEnv(opts.Env, opts.TmpDir)
+	args = append(args, withPreSpawn(opts.PreSpawnScript, SandboxPreSpawnEnvFile(opts.TmpDir), opts.Argv)...)
 
 	return &Spec{
 		Path:    sandboxExec,
 		Args:    args,
-		Env:     opts.Env,
+		Env:     env,
 		Dir:     opts.WorktreePath,
 		Cleanup: func() { _ = os.Remove(profilePath) },
 	}, nil

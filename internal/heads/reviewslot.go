@@ -214,6 +214,7 @@ func KillReviewSession(reg *session.Registry, projectRoot, headID string) {
 	reg.Remove(id)
 	stopEgressProxy(id)
 	removeNamespaceHost(id)
+	removeHeadTmpDir(projectRoot, id)
 	// After the supervisor is gone: it has the tree bind-mounted, and pulling a
 	// worktree out from under a live bwrap is how you get a half-removed tree that
 	// `worktree add` then refuses to reclaim.
@@ -266,6 +267,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		return "", errtrace.Wrap(fmt.Errorf("get current user: %w", err))
 	}
 	home := currentUser.HomeDir
+	tmpDir := ensureHeadTmpDir(projectRoot, id)
 	env := agentEnv(home, currentUser.Username, readGitConfigVal(projectRoot, "user.name"), readGitConfigVal(projectRoot, "user.email"))
 	env = append(env, sandbox.MiseTrustEnv(projectRoot, worktreePath)...)
 	env = append(env, headContextEnv(head.ID, agentType, projectRoot, worktreePath, derefStr(head.Branch), head.BaseBranch)...)
@@ -280,14 +282,15 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 	policy := resolveGatePolicy(cfg, string(agentType))
 	policy.MCPToolsBlocked = append(append([]string(nil), policy.MCPToolsBlocked...), reviewBlockedTools...)
 
-	seed, err := seedHead(projectRoot, id, agentType, worktreePath, home, reviewSystemPrompt, policy, sandbox.GitIsolationReadonly)
+	reviewPrompt := withPrivateTempPrompt(reviewSystemPrompt, tmpDir)
+	seed, err := seedHead(projectRoot, id, agentType, worktreePath, home, reviewPrompt, policy, sandbox.GitIsolationReadonly)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
 
 	conversationID := reviewConversationID(projectRoot, id, worktreePath, home, agentType)
 	resuming := conversationID != ""
-	argv, err := sandbox.AgentArgv(agentType, resuming, reviewSystemPrompt, "", "", true, conversationID, seed.MCPConfigPath)
+	argv, err := sandbox.AgentArgv(agentType, resuming, reviewPrompt, "", "", true, conversationID, seed.MCPConfigPath)
 	if err != nil {
 		return "", errtrace.Wrap(err)
 	}
@@ -303,7 +306,7 @@ func StartReviewSession(reg *session.Registry, projectRoot string, head Head, ro
 		GitCommonDir:   commonDirForSandbox(projectRoot, sandbox.GitIsolationReadonly),
 		GitIsolation:   sandbox.GitIsolationReadonly,
 		Home:           home,
-		TmpDir:         ensureHeadTmpDir(projectRoot, head.ID),
+		TmpDir:         tmpDir,
 		WritablePaths:  append(writable, seed.WritablePaths...),
 		MaskedPaths:    sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
 		RestoreRO:      restore,

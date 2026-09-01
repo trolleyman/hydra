@@ -291,13 +291,14 @@ type Options struct {
 	// Home is the HOME directory the agent should see.
 	Home string
 
-	// TmpDir is a host-backed scratch directory bound over /tmp inside the
-	// sandbox (Linux only). When set, the agent's temp files - Claude's
+	// TmpDir is a host-backed, per-head scratch directory. Linux binds it over
+	// /tmp; Darwin exposes its real path through TMPDIR/TMP/TEMP and denies shared
+	// host temp roots. When set, the agent's temp files - Claude's
 	// scratchpad, test-framework extractions, build junk - are isolated per
 	// head and reclaimed when the head is torn down, instead of accumulating on
 	// the host's shared /tmp. Empty leaves /tmp as the fresh tmpfs from the base
-	// args (used by tests and one-off sandboxes). Ignored on macOS, where /tmp
-	// stays host-shared via the static profile.
+	// Linux args or preserves the platform default (used by tests and one-off
+	// sandboxes).
 	TmpDir string
 
 	// WritablePaths, MaskedPaths and RestoreRO come from config + baked-in
@@ -434,22 +435,23 @@ func interpIsBash(interp []string) bool {
 const preSpawnExitTrap = `trap 'hydra_ec=$?; printf "\n[hydra] pre_spawn_script failed (exit %s) - agent not started; fix or clear pre_spawn_script, then relaunch\n" "$hydra_ec" >&2' EXIT`
 
 // PreSpawnEnvFileName is the basename of the file the pre-spawn wrapper persists
-// the resolved $HYDRA_ENV to, inside the per-head /tmp (Options.TmpDir, mounted at
-// /tmp in the sandbox). When a launch persists it, the daemon reads it back from
-// the host side of that same dir to inject the identical vars into the head's
-// sibling sandboxed bash shells - so a "+"-tab shell sees the same environment the
-// pre_spawn_script set up for the agent, without re-running the script.
+// the resolved $HYDRA_ENV to, inside Options.TmpDir at the platform-visible temp
+// path. When a launch persists it, the daemon reads it back from the host side of
+// that same dir to inject the identical vars into the head's sibling sandboxed
+// bash shells - so a "+"-tab shell sees the same environment the pre_spawn_script
+// set up for the agent, without re-running the script.
 const PreSpawnEnvFileName = "hydra-pre-spawn.env"
 
 // SandboxPreSpawnEnvFile returns the sandbox-visible path the pre-spawn wrapper
-// persists resolved env vars to (the per-head TmpDir is bind-mounted at /tmp), or
-// "" when there is no host-backed TmpDir to persist into - in which case the
-// wrapper falls back to an ephemeral temp file and nothing is shared with shells.
+// persists resolved env vars to, or "" when there is no host-backed TmpDir to
+// persist into - in which case the wrapper falls back to an ephemeral temp file
+// and nothing is shared with shells.
 func SandboxPreSpawnEnvFile(tmpDir string) string {
+	tmpDir = SandboxTempDir(tmpDir)
 	if tmpDir == "" {
 		return ""
 	}
-	return "/tmp/" + PreSpawnEnvFileName
+	return filepath.Join(tmpDir, PreSpawnEnvFileName)
 }
 
 // HostPreSpawnEnvFile returns the host path of that same persisted file, for the
@@ -459,6 +461,26 @@ func HostPreSpawnEnvFile(tmpDir string) string {
 		return ""
 	}
 	return filepath.Join(tmpDir, PreSpawnEnvFileName)
+}
+
+// RuntimeEnv returns env with the platform-visible private temporary directory
+// selected consistently for standard temp APIs and pre-spawn scripts.
+func RuntimeEnv(env []string, hostTmpDir string) []string {
+	tmpDir := SandboxTempDir(hostTmpDir)
+	if tmpDir == "" {
+		return env
+	}
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		prefix := key + "="
+		filtered := make([]string, 0, len(env)+1)
+		for _, entry := range env {
+			if !strings.HasPrefix(entry, prefix) {
+				filtered = append(filtered, entry)
+			}
+		}
+		env = append(filtered, prefix+tmpDir)
+	}
+	return env
 }
 
 // preSpawnEnvSetup points $HYDRA_ENV at a writable file before the user's script

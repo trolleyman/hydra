@@ -70,6 +70,36 @@ func TestExpandPath(t *testing.T) {
 	}
 }
 
+func TestRuntimeEnvUsesSandboxVisibleTempDir(t *testing.T) {
+	hostTmp := filepath.Join(t.TempDir(), "head-tmp")
+	got := RuntimeEnv([]string{
+		"PATH=/usr/bin",
+		"TMPDIR=/shared/one",
+		"TMP=/shared/two",
+		"TEMP=/shared/three",
+		"TMPDIR=/duplicate",
+	}, hostTmp)
+	wantTmp := SandboxTempDir(hostTmp)
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		prefix := key + "="
+		matches := make([]string, 0, 1)
+		for _, entry := range got {
+			if strings.HasPrefix(entry, prefix) {
+				matches = append(matches, entry)
+			}
+		}
+		if len(matches) != 1 || matches[0] != prefix+wantTmp {
+			t.Errorf("%s entries = %v, want [%s]", key, matches, prefix+wantTmp)
+		}
+	}
+	if !slices.Contains(got, "PATH=/usr/bin") {
+		t.Errorf("RuntimeEnv dropped unrelated environment: %v", got)
+	}
+	if got := SandboxPreSpawnEnvFile(hostTmp); got != filepath.Join(wantTmp, PreSpawnEnvFileName) {
+		t.Errorf("SandboxPreSpawnEnvFile() = %q, want %q", got, filepath.Join(wantTmp, PreSpawnEnvFileName))
+	}
+}
+
 // claudeArgv is the fixed head of every Claude argv - the skip-permissions flag
 // plus the inline --mcp-config that carries the Hydra control server - followed
 // by whatever the case under test adds. The MCP flag is built rather than

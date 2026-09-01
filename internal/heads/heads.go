@@ -750,7 +750,9 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 
 	// Resolve <run-mode> from the live chat/terminal mode at launch (the stored
 	// PrePrompt keeps the placeholder so a mode toggle is re-resolved on resume).
+	tmpDir := ensureHeadTmpDir(projectRoot, opts.ID)
 	launchPrePrompt := strings.ReplaceAll(opts.PrePrompt, "<run-mode>", config.RunModeLine(opts.ChatMode))
+	launchPrePrompt = withPrivateTempPrompt(launchPrePrompt, tmpDir)
 
 	seed, err := seedHead(projectRoot, opts.ID, opts.AgentType, worktreePath, home, launchPrePrompt, resolveGatePolicy(cfg, string(opts.AgentType)), gitIso)
 	if err != nil {
@@ -783,7 +785,7 @@ func SpawnHead(ctx context.Context, reg *session.Registry, store *db.Store, proj
 		GitCommonDir:       commonDirForSandbox(projectRoot, gitIso),
 		GitIsolation:       gitIso,
 		Home:               home,
-		TmpDir:             ensureHeadTmpDir(projectRoot, opts.ID),
+		TmpDir:             tmpDir,
 		WritablePaths:      append(writable, seed.WritablePaths...),
 		MaskedPaths:        sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
 		RestoreRO:          restore,
@@ -1141,8 +1143,10 @@ func StartShellSession(reg *session.Registry, projectRoot string, head Head, row
 			// and never reaches the proxy (so no approval prompt fires). Inject the
 			// same HTTP_PROXY the agent got. The supervisor is live here, so its proxy
 			// is running; nil in unrestricted/off modes, where the shell needs none.
+			tmpDir := ensureHeadTmpDir(projectRoot, head.ID)
 			shellEnv := append(append([]string(nil), env...), preSpawnEnv...)
 			shellEnv = append(shellEnv, EgressProxyEnvFor(head.ID)...)
+			shellEnv = sandbox.RuntimeEnv(shellEnv, tmpDir)
 			sp, err := host.client.Spawn(nshost.SpawnRequest{
 				Argv: []string{"/bin/bash"},
 				Env:  shellEnv,
@@ -1368,7 +1372,9 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 	}
 	// Resolve <run-mode> from the head's current mode: a chat<->terminal toggle
 	// made while the session was down takes effect on this relaunch.
+	tmpDir := ensureHeadTmpDir(projectRoot, head.ID)
 	launchPrePrompt := strings.ReplaceAll(head.PrePrompt, "<run-mode>", config.RunModeLine(head.ChatMode))
+	launchPrePrompt = withPrivateTempPrompt(launchPrePrompt, tmpDir)
 	// Re-apply the head's persisted git-isolation override (empty = policy default),
 	// so a resume after a daemon restart keeps the same .git lockdown.
 	gitIso := resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)
@@ -1428,7 +1434,7 @@ func ResumeHead(reg *session.Registry, store *db.Store, projectRoot string, head
 		GitCommonDir:       commonDirForSandbox(projectRoot, gitIso),
 		GitIsolation:       gitIso,
 		Home:               home,
-		TmpDir:             ensureHeadTmpDir(projectRoot, head.ID),
+		TmpDir:             tmpDir,
 		WritablePaths:      append(writable, seed.WritablePaths...),
 		MaskedPaths:        sandbox.ResolveMaskedPaths(projectRoot, worktreePath, masked),
 		RestoreRO:          restore,
@@ -1864,7 +1870,9 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 	defer cancel()
 
 	writable, masked, restore, _, net, _ := cfg.ResolveSandboxOptions(string(head.AgentType))
+	tmpDir := ensureHeadTmpDir(head.ProjectPath, head.ID)
 	env := append(agentEnv(home, currentUser.Username, readGitConfigVal(head.ProjectPath, "user.name"), readGitConfigVal(head.ProjectPath, "user.email")), sandbox.MiseTrustEnv(head.ProjectPath, worktree)...)
+	env = sandbox.RuntimeEnv(env, tmpDir)
 	env = append(env, headContextEnv(head.ID, head.AgentType, head.ProjectPath, worktree, derefStr(head.Branch), head.BaseBranch)...)
 	env = append(env, "HYDRA_END_STATE="+endState)
 
@@ -1888,7 +1896,7 @@ func runPreExitScript(ctx context.Context, head Head, endState string) {
 		WorktreePath:  worktree,
 		GitCommonDir:  commonDirForSandbox(head.ProjectPath, resolveGitIsolation(cfg, string(head.AgentType), head.GitIsolation)),
 		Home:          home,
-		TmpDir:        ensureHeadTmpDir(head.ProjectPath, head.ID),
+		TmpDir:        tmpDir,
 		WritablePaths: writable,
 		MaskedPaths:   sandbox.ResolveMaskedPaths(head.ProjectPath, worktree, masked),
 		RestoreRO:     restore,
@@ -1958,6 +1966,8 @@ func PurgeHead(ctx context.Context, reg *session.Registry, store *db.Store, head
 	if head.ProjectPath != "" {
 		RemoveAgentStatusFiles(head.ProjectPath, head.ID)
 		removeCowDir(head.ProjectPath, head.ID)
+		removeHeadTmpDir(head.ProjectPath, head.ID)
+		removeHeadTmpDir(head.ProjectPath, ReviewSessionID(head.ID))
 		removeClaudeSessionDir(head)
 		// The review slot's checkout, its own transcript dir (keyed by that
 		// checkout's path, so removeClaudeSessionDir above does not reach it) and

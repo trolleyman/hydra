@@ -63,3 +63,67 @@ func TestCanonicalSBPathResolvesMacOSCompatibilityAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildSpecDarwinPrivateTempPolicyAndEnvironment(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, "worktree")
+	home := filepath.Join(root, "home")
+	tmpDir := filepath.Join(root, "state", "tmp", "head-one")
+	controlDir := filepath.Join(root, "runtime", "head-control", "random-key")
+	for _, dir := range []string{worktree, home, tmpDir, controlDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	spec, err := BuildSpec(Options{
+		WorktreePath:   worktree,
+		Home:           home,
+		TmpDir:         tmpDir,
+		WritablePaths:  []string{controlDir},
+		Env:            []string{"PATH=/usr/bin", "TMPDIR=/shared", "TMP=/shared", "TEMP=/shared"},
+		PreSpawnScript: `printf 'FROM_HOOK=1\n' >> "$HYDRA_ENV"`,
+		Argv:           []string{"/bin/sh"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		want := key + "=" + tmpDir
+		if !containsExact(spec.Env, want) {
+			t.Errorf("spec.Env lacks %q: %v", want, spec.Env)
+		}
+	}
+	if !strings.Contains(strings.Join(spec.Args, "\n"), filepath.Join(tmpDir, PreSpawnEnvFileName)) {
+		t.Fatalf("pre-spawn wrapper does not persist under private temp: %v", spec.Args)
+	}
+
+	profileData, err := os.ReadFile(spec.Args[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := string(profileData)
+	tempDeny := `(deny file-read* file-write* ` + sbPathRule(os.TempDir()) + `)`
+	ownAllow := `(allow file-read* file-write* ` + sbPathRule(tmpDir) + `)`
+	controlAllow := `(allow file-read* file-write* ` + sbPathRule(controlDir) + `)`
+	denyAt := strings.Index(profile, tempDeny)
+	ownAt := strings.Index(profile, ownAllow)
+	controlAt := strings.Index(profile, controlAllow)
+	if denyAt < 0 || ownAt < 0 || controlAt < 0 {
+		t.Fatalf("private temp profile rules missing:\n%s", profile)
+	}
+	if !(denyAt < ownAt && denyAt < controlAt) {
+		t.Fatalf("narrow temp/control grants must follow shared-temp denial:\n%s", profile)
+	}
+}
+
+func containsExact(entries []string, want string) bool {
+	for _, entry := range entries {
+		if entry == want {
+			return true
+		}
+	}
+	return false
+}

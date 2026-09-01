@@ -4,8 +4,10 @@ Status: **partially implemented**. The core Seatbelt backend and shared
 build-addressed Hydra runtime described under "What works" are present. The
 supervisor no longer depends on the Linux-only `/tmp/hydra-internal` bind, but
 provider configuration still uses ignored bind/overlay delivery, so macOS heads
-are not supported yet. The phases below track the remaining provider-config,
-temporary-storage, hard-network, hardening, and real-hardware validation work.
+are not supported yet. Per-head temporary storage is implemented for programs
+that honor the standard temp environment. The phases below track the remaining
+provider-config, hard-network, hardening, hardcoded-`/tmp` compatibility, and
+real-hardware validation work.
 
 ## Background
 
@@ -28,7 +30,7 @@ Nothing in this plan needs root, kernel extensions, or system extensions.
 Apple's own daemons run on; there is no realistic alternative and it is
 de-facto stable through current macOS.
 
-## Current state (audited 2026-07)
+## Current state (audited 2026-09)
 
 What works:
 
@@ -42,6 +44,11 @@ What works:
   and MCP entries use that real path on Darwin; an explicit immutable-path
   Seatbelt rule denies writes. Linux retains its read-only bind at
   `/tmp/hydra-internal`.
+- Each head has private temporary storage. Darwin points `TMPDIR`, `TMP`, and
+  `TEMP` at the head's real scratch path, tells the agent that path in its
+  pre-prompt, persists the pre-spawn environment there for sibling shells, and
+  denies the shared `/tmp` and user temp roots. A narrow later rule exposes the
+  head's own scratch directory and its random Hydra supervisor socket directory.
 - Daemon, PTY sessions, unix sockets, autostart, and socket paths are all
   portable (`creack/pty`, `//go:build !windows`). The one `/proc` dependency
   (`pidIsHydraDaemon` in `internal/daemon/upgrade.go`) has a documented safe
@@ -57,12 +64,12 @@ What is broken or missing:
   and `Options.ROOverlays` - the gate policy JSON, the MCP catalog, merged
   `~/.claude.json`, Gemini / Copilot / Codex config files, and Claude's tamper-proof
   `/etc/claude-code/managed-settings.json` (hooks + gate wiring). `darwin.go`
-  never reads `Binds`, `ROOverlays`, `TmpfsDirs`, `EgressWrap`, `TmpDir`, or
-  `HardenGUI`, and returns no error. On a Mac a sandboxed head therefore runs
+  never reads `Binds`, `ROOverlays`, `TmpfsDirs`, `EgressWrap`, or `HardenGUI`,
+  and returns no error. On a Mac a sandboxed head therefore runs
   with no decision gate, no status hooks, no MCP control server, and the
   user's real `~/.claude.json`.
-- No per-head private `/tmp` (`Options.TmpDir` ignored; heads share host
-  `/tmp`, the scratch-leak problem Linux fixed).
+- Programs that open the literal `/tmp` instead of honoring `TMPDIR` cannot use
+  the private scratch path; shared `/tmp` is deliberately inaccessible.
 - No hard-mode network filtering (only global on/off; advisory mode works).
 - No seccomp equivalent, no `HardenGUI`, writable CoW clones skipped.
 - Latent nit: `paths.ComparePaths` is case-sensitive on darwin but APFS is
@@ -78,7 +85,7 @@ What is broken or missing:
 | FS sandbox (writable/masked/restore_ro) | done | Seatbelt allow/deny |
 | Config seeding (Binds/ROOverlays) | feasible, biggest job | copy + env redirection |
 | Hard network egress | feasible, simpler than Linux | Seatbelt loopback-only + existing CONNECT proxy |
-| Per-head /tmp | ~90% | `TMPDIR` + optional Seatbelt deny on `/tmp` |
+| Per-head temporary storage | done for standard temp APIs | `TMPDIR` + Seatbelt deny on shared temp roots |
 | Seccomp | not needed | threats are Linux-specific or Seatbelt-covered |
 | HardenGUI | feasible, stronger than Linux | mach-service + signal rules |
 | cow_paths | half done | clonefile; in-place overlays impossible |
@@ -171,7 +178,7 @@ silent downgrade.
       refuses the write), delivered at a different settings-precedence layer.
       Copilot / Codex configs seed the same way (copy into redirected or real
       dot-dirs, Seatbelt-deny writes where tampering matters).
-- [ ] Delete the stale `sandbox-demo/` comment references while in there.
+- [x] Delete the stale `sandbox-demo/` comment references.
 
 ### Phase 2: hard network egress
 
@@ -197,15 +204,17 @@ network-off.
 
 ### Phase 3: /tmp, hardening, CoW
 
-- [ ] Per-head temporary storage: honor `Options.TmpDir` by setting `TMPDIR`,
+- [x] Per-head temporary storage: honor `Options.TmpDir` by setting `TMPDIR`,
       `TMP`, and `TEMP` to the real per-head directory. Deny both reads and
       writes to shared `/tmp`, `/private/tmp`, and unrelated user temporary
       storage, then grant the head directory read/write. Persist `$HYDRA_ENV`
-      there so sibling sandboxed shells receive the pre-spawn environment.
-      Add the resolved path to the generated pre-prompt. Programs that hardcode
-      `/tmp` need a targeted redirect or an explicit unsupported diagnostic;
-      unprivileged macOS has no mechanism that can give them a private mount at
-      that literal path.
+      there so sibling sandboxed shells receive the pre-spawn environment. Add
+      the resolved path to the generated pre-prompt. Hydra's random supervisor
+      socket directory is the only narrow exception beneath the denied host
+      temp root.
+- [ ] Programs that hardcode `/tmp` need a targeted redirect or an explicit
+      unsupported diagnostic; unprivileged macOS has no mechanism that can give
+      them a private mount at that literal path.
 - [ ] `HardenGUI`: same env unsets as Linux; instead of hiding socket paths,
       deny mach-lookup on WindowServer / pasteboard services (how macOS GUI
       access actually flows).
