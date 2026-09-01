@@ -68,13 +68,21 @@ describe('Codex bash display', () => {
     ["/bin/bash -c 'echo hi'", 'echo hi'],
     ['/usr/bin/bash -c "echo hi"', 'echo hi'],
     ['/usr/bin/bash -lc echo hi', 'echo hi'],
+    ["zsh -lc 'echo hi'", 'echo hi'],
+    ["/bin/zsh -c 'echo hi'", 'echo hi'],
+    ['/usr/bin/zsh -lc "echo hi"', 'echo hi'],
   ])('unwraps %s', (command, expected) => {
     expect(unwrapBashLoginCommand(command)).toBe(expected)
   })
 
-  it('leaves non-bash launchers untouched', () => {
+  it('leaves unsupported shell launchers untouched', () => {
     expect(unwrapBashLoginCommand("sh -lc 'echo hi'")).toBe("sh -lc 'echo hi'")
-    expect(unwrapBashLoginCommand("zsh -c 'echo hi'")).toBe("zsh -c 'echo hi'")
+  })
+
+  it('formats a macOS zsh wrapper as the script Codex ran', () => {
+    expect(formatBashForDisplay('/bin/zsh -lc "# Read files\\nsed -n \'1,3p\' a.go\\nprintf \'%s\\\\n\' \'--- [file] a.go ---\'"')).toBe(
+      "# Read files\\nsed -n '1,3p' a.go\\nprintf '%s\\n' '--- [file] a.go ---'",
+    )
   })
 
   it('drops line-continuation backslashes but keeps the line breaks', () => {

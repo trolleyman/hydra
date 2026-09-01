@@ -234,6 +234,7 @@ func TestCodexCommandDescription(t *testing.T) {
 		"# Inspect usage\nrg -n usage internal":                                                         "Inspect usage",
 		`/usr/bin/bash -lc "# Run focused tests` + "\n" + `go test ./..."`:                              "Run focused tests",
 		`/usr/bin/bash -lc "# Verify the merge` + "\n" + `git status` + "\n" + `printf '%s\\n' \\"'$?'`: "Verify the merge",
+		`/bin/zsh -lc "# Read the macOS implementation` + "\n" + `sed -n '1,80p' internal/sandbox/darwin.go"`: "Read the macOS implementation",
 		"#!/usr/bin/env bash\n# Build\nmage build":                                                      "",
 		"echo ok\n# This is too late":                                                                   "",
 	}

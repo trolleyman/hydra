@@ -509,8 +509,12 @@ function parseOneShellWord(source: string): string | null {
   return quote || escaped || !started ? null : out
 }
 
-function unwrapOneBashCommand(command: string): string {
-  const match = command.match(/^(?:\/usr\/bin\/|\/bin\/)?bash\s+-(?:l)?c\s+([\s\S]+)$/)
+function unwrapOneShellCommand(command: string): string {
+  // Codex uses the user's login shell on macOS, so the wrapper is commonly
+  // /bin/zsh -lc rather than /bin/bash -lc. Both carry the same one-string
+  // script shape for the renderer; other shells stay untouched until their
+  // quoting behavior is explicitly supported here.
+  const match = command.match(/^(?:\/usr\/bin\/|\/bin\/)?(?:bash|zsh)\s+-(?:l)?c\s+([\s\S]+)$/)
   if (!match) return command
   const arg = match[1].trim()
   if (!arg) return command
@@ -520,7 +524,7 @@ function unwrapOneBashCommand(command: string): string {
 export function unwrapBashLoginCommand(command: string): string {
   let current = command
   for (let depth = 0; depth < 3; depth++) {
-    const next = unwrapOneBashCommand(current)
+    const next = unwrapOneShellCommand(current)
     if (next === current) break
     current = next
   }
